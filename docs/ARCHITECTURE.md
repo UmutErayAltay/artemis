@@ -1,4 +1,4 @@
-# Jarvis: F0 ve F1 mimarisi
+# Jarvis: F0–F2 mimarisi
 
 Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. İlk teslimat yalnızca CLI,
@@ -87,3 +87,11 @@ işlem yalıtımı ve iptal desteği ele alınmalıdır.
 Ortak veri modelleri ve imzalar `docs/CONTRACTS.md` içindedir. Mekanik seçimler:
 async httpx, UTF-8 JSONL, UTC günlük bütçe, YAML şema doğrulama, UUID tur kimliği,
 platform adaptörleri ve sahte sağlayıcı bağımlılık enjeksiyonu.
+
+## F2 sağlamlık sınırı
+
+F2 aktif tur iptalini, masaüstü işçisinin süreç yalıtımını, sağlayıcı denemesi
+başına süre sınırını ve kalıcı silme günlüğünü ekler. Ayrıntılar
+[ADR 0006](adr/0006-cancellation.md), [ADR 0007](adr/0007-undo-journal.md) ve
+[F2 sözleşmeleri](F2_CONTRACTS.md) içindedir. OS'ye ulaşmış eylemin iptalle geri
+alındığı iddia edilmez; sonuç belirsizse denetime ve kullanıcıya açıkça yansır.
