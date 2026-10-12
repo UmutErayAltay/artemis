@@ -1,7 +1,7 @@
 # Jarvis
 
-Windows 11 için Türkçe kişisel masaüstü asistanı. F0/F1 kapsamı: CLI sohbeti,
-sağlayıcıdan bağımsız ajan döngüsü, tek güvenlik kapısı, 15 temel araç ve izole kabul
+Windows 11 için Türkçe kişisel masaüstü asistanı. F0–F2 kapsamı: CLI sohbeti,
+sağlayıcıdan bağımsız ajan döngüsü, tek güvenlik kapısı, 16 araç ve izole kabul
 senaryoları. Ses, masaüstü paneli, hafıza, Telegram ve arka plan ajanları bu sürüme
 dahil değildir.
 
@@ -10,6 +10,7 @@ bağlamı sonraki tura taşınmaz. Kalıcı hafıza sonraki fazın kapsamındad�
 
 Mimari [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), kararların gerekçeleri
 [docs/adr/](docs/adr/), geliştirme kuralları [CLAUDE.md](CLAUDE.md) içindedir.
+Son sağlamlık doğrulaması [F2 raporunda](docs/F2_REPORT.md) bulunur.
 
 ## Kurulum
 
@@ -81,6 +82,10 @@ python -m jarvis chat --config config/config.yaml
 
 Çıkmak için `/çık`, `/cik` veya `/exit` yazın.
 
+İşlem sürerken Ctrl+C aktif turu iptal eder; sohbet sonraki komut için açık kalır.
+Onay sorusundaki Ctrl+C hem onayı reddeder hem turu iptal eder. Önceki görevin
+temizliği tamamlanmadıysa yeni komut yürütülmez; bu durum açıkça bildirilir.
+
 Örnek komutlar: “Masaüstündeki dosyaları listele”, “Saat kaç?” ve
 “not.txt dosyasının ilk satırını söyle”. Ajan sonuçları görüp sonraki araca karar
 verir. Eksik hedef içeren isteklerde açıklama istemesi beklenir.
@@ -95,7 +100,7 @@ okunduktan sonra o turdaki her yan etki de onay ister. Bu durumda onayda
 `allow_cloud_file_content` ve `allow_cloud_clipboard` varsayılan olarak kapalıdır.
 Kapalıyken bu araçların içeriği bulut sağlayıcısına maskelenerek gönderilir; bu
 durumda bulut modelinden gerçek dosya/pano özeti beklenmez. Yerel sağlayıcı bu
-içeriği işleyebilir. Ekran görüntüsü F1 kapsamında değildir.
+içeriği işleyebilir. Ekran görüntüsü bu sürümün kapsamında değildir.
 
 Komutunuzun metni, araç şemaları ve izin verilen sonuçlar seçilen sağlayıcıya
 gider. Buluta gönderim kararları denetlenir. `audit_path` UTF-8 JSONL denetim
@@ -109,6 +114,11 @@ maliyet ayrılır; gerçekleşen kullanım ile hesap kapatılır. Bu temkinli s�
 kalan bütçe gerçek kısa çağrıya yetse bile isteği reddedebilir. Fiyatlar config'den
 gelir; sağlayıcı tarifeleri değiştiğinde güncellemek gerekir.
 
+`provider_timeout_seconds` her sağlayıcı denemesini sınırlar (varsayılan 15 sn).
+Bulut yanıt vermezse toplam tur süresinin kalan kısmında yerel yedek denenir.
+Kullanıcı iptali, kimlik doğrulama hatası ve bütçe reddi yedeği tetiklemez.
+Bozuk/kilitli bütçe kaydı çağrıyı engeller; belirsiz tüketim rezervasyonu korunur.
+
 ## Araçlar ve platform sınırları
 
 | Alan | Araçlar |
@@ -118,6 +128,7 @@ gelir; sağlayıcı tarifeleri değiştiğinde güncellemek gerekir.
 | Web | `web_search`, `open_url` |
 | Pano | `read_clipboard`, `write_clipboard` |
 | Sistem | `system_info`, `current_time` |
+| Geri alma kaydı | `list_undo_records` |
 
 Dosya yolları çalışma kökü içinde kalmalıdır. Mutlak yollar, `..`, `.` ve kökün
 dışına çıkan sembolik bağlantılar reddedilir. Kökü listelemek için `list_files`
@@ -131,13 +142,19 @@ ve pano işlevleri Linux'ta desteklenmediğini bildirir. Linux üzerinde çekird
 dosyalar ve sahte platform
 adaptörleri test edilir. Uygulama/tarayıcı başlatma isteğinin gönderilmesi, ekranda
 açıldığının kanıtı sayılmaz. Windows'ta elle doğrulama ayrı bir teslimat kontrolüdür.
-Süre sınırında döngü yeni adımları çalıştırmaz; ancak `asyncio.to_thread` ile
-başlatılmış sistem işlemi arka planda sürebilir ve tamamlandığı doğrulanamayabilir.
-Bu F1 sınırı F2'de süreç yalıtımı ve iptal desteğiyle ele alınacaktır.
+Varsayılan masaüstü işlemleri ayrı Python işçisinde çalışır. İptal ve zaman aşımı
+işçiyi sonlandırıp çıkışını bekler; stdin/stdout iletişimi boyutla sınırlandırılır.
+OS'ye daha önce gönderilmiş bir isteğin geri alındığı iddia edilmez. Enjekte edilen
+senkron adaptörler ve kısa dosya işlemleri kesilemeyen bölgelerdir.
+
+Silmeden önce `state_dir/undo.sqlite3` günlüğüne kayıt yazılır; kayıt yazılamıyorsa
+silme başlamaz. `list_undo_records` hazırlık, tamamlandı, başarısız ve belirsiz
+durumları gösterir. Geri yükleme OS Geri Dönüşüm Kutusu üzerinden elle yapılır.
+Kayıt, dosyanın kutuda hâlâ bulunduğunun garantisi değildir; içerik yedeği tutulmaz.
 
 Web araması DuckDuckGo'nun HTML sonuçlarından başlık ve URL okur. Bu resmi bir
 arama API'si değildir; sayfa biçimi değişirse veya erişim engellenirse araç hata
-verir. F1 sonuç sayfalarının içeriğini ayrıca açıp indiren bir araç içermez.
+verir. Bu sürüm sonuç sayfalarının içeriğini ayrıca açıp indiren bir araç içermez.
 Arama sorgusu dış servise gönderildiğinden araç yan etkili sayılır: temiz turda
 onaysız çalışır, dış içerik okunduktan sonraki turda kullanıcı onayı ister.
 

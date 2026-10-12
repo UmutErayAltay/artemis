@@ -78,9 +78,10 @@ Taint, onay ve başarı doğrulaması geçici mutasyonlarla test edilir.
 
 Python içindeki gate aynı süreçte düşmanca Python koduna karşı sandbox değildir.
 safe_join yerel kullanıcıyla eşzamanlı symlink değiştirme saldırısını tamamen
-çözmez. Zaman aşımı döngünün yeni adımları başlatmasını engeller; `asyncio.to_thread`
-ile başlatılmış sistem işlemini sonlandıramaz ve işlem arka planda sürebilir. F2'de
-işlem yalıtımı ve iptal desteği ele alınmalıdır.
+çözmez. F2'de varsayılan masaüstü çağrısı ayrı işçidedir; iptal işçinin çıkışını
+bekler. OS'ye zaten ulaşmış eylem geri alınmış sayılmaz. Enjekte senkron adaptör
+ve dosya işlemleri kesilemeyen bölgelerdir. Temizliği sürmekte olan bir görev
+aynı bağlamı kullanırken yeni turlar yürütülmez; iptal sinyali korunur.
 
 ## İlk sözleşme
 

@@ -1,7 +1,7 @@
 # Jarvis geliştirme sözleşmesi
 
 Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çekirdeği Linux
-üzerinde de çalışır. F0/F1 kapsamını ses, UI, hafıza veya Telegram ile büyütmeyin.
+üzerinde de çalışır. F0–F2 kapsamını ses, UI, hafıza veya Telegram ile büyütmeyin.
 Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Türkçe olur ve
 özellikle kararın nedenini açıklar. Önce [mimariyi](docs/ARCHITECTURE.md) ve
 [ADR'leri](docs/adr/) okuyun. Temel mimariyi değiştiriyorsanız kısa ADR yazın.
@@ -53,6 +53,13 @@ içine girmez. Testlerde gerçek sır kullanılmaz. Alt süreçlere ortamın tam
 aktarılmaz. Ücretli model çağrısı açık kullanıcı izni olmadan yapılmaz; model
 kimlikleri ve fiyatlar koda gömülmez, güncel resmi kaynaktan doğrulanıp config'e
 yazılır. Windows modülleri platform kontrolünden sonra lazy import edilir.
+
+İptal edilen görev temizlenmeden yeni tur başlatılmaz; önceki turun iptal sinyali
+ve bağlamı temizleme bitene kadar korunur. Masaüstü işçisi sabit eylem listesi ve
+sınırlı JSON iletişimi kullanır. OS'ye gönderilmiş işlemin geri alındığı söylenmez.
+Silmeden önce SQLite günlüğüne `prepared` kaydı yazılır; sonuç doğrulanarak
+`completed`, `failed` veya `uncertain` olur. Günlük içerik yedeği değildir ve
+otomatik geri yükleme yapmaz.
 
 ## Yeni araç eklemek
 
