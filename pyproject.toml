@@ -1,0 +1,52 @@
+[build-system]
+requires = ["hatchling==1.27.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jarvis-tr"
+version = "0.1.0"
+description = "Türkçe, güvenlik kapılı kişisel masaüstü asistanı"
+requires-python = ">=3.12"
+dependencies = [
+  "pydantic==2.12.3",
+  "httpx==0.28.1",
+  "PyYAML==6.0.3",
+  "Send2Trash==1.8.3",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest==8.4.2",
+  "pytest-asyncio==1.2.0",
+  "ruff==0.14.3",
+  "mypy==1.18.2",
+  "types-PyYAML==6.0.12.20250915",
+]
+
+[project.scripts]
+jarvis = "jarvis.channels.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["jarvis", "bench"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-m 'not disruptive'"
+asyncio_mode = "auto"
+markers = ["disruptive: Gerçek makinede görünür yan etki; varsayılan çalıştırılmaz"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+files = ["jarvis", "bench"]
+
+[[tool.mypy.overrides]]
+module = ["send2trash.*"]
+ignore_missing_imports = true

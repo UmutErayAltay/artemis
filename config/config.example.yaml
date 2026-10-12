@@ -1,0 +1,23 @@
+# Yollar bu dosyanın bulunduğu dizine göre çözülür.
+workspace: ../desktop
+state_dir: ../.jarvis
+audit_path: ../.jarvis/audit.jsonl
+max_steps: 8
+max_seconds: 60
+max_output_tokens: 1024
+daily_budget_usd: '1.00'
+allow_paid: false
+allow_cloud_file_content: false
+allow_cloud_clipboard: false
+fallback_seconds: 60
+
+# Resmi katalogdan model adını ve güncel milyon-token fiyatlarını doğrulayıp ekleyin.
+# API anahtarlarını buraya YAZMAYIN. README ortam değişkenlerini açıklar.
+primary_model: ''
+fallback_model: null
+models: {}
+applications: {}
+
+openrouter_base_url: https://openrouter.ai/api/v1
+anthropic_base_url: https://api.anthropic.com/v1
+ollama_base_url: http://127.0.0.1:11434

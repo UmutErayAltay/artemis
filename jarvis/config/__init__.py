@@ -1,0 +1,1 @@
+"""Sır taşımayan yapılandırma sınırı."""
