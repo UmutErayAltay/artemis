@@ -3,6 +3,8 @@
 import argparse
 import asyncio
 import json
+import signal
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -20,15 +22,26 @@ from jarvis.tools.base import ToolContext
 from jarvis.tools.registry import discover_tools
 
 
-def request_approval(tool_name: str, arguments: dict[str, Any], notice: str = "") -> bool:
+def request_approval(
+    tool_name: str,
+    arguments: dict[str, Any],
+    notice: str = "",
+    *,
+    on_interrupt: Callable[[], Any] | None = None,
+) -> bool:
     if notice:
         print(notice)
     print(f"Onay isteniyor: {tool_name}")
     print(json.dumps(arguments, ensure_ascii=False, indent=2))
     try:
         answer = input("Onaylıyor musunuz? [evet/Hayır]: ")
-    except (EOFError, KeyboardInterrupt):
+    except EOFError:
         print("\nOnay verilmedi.")
+        return False
+    except KeyboardInterrupt:
+        print("\nOnay verilmedi; tur iptal ediliyor.")
+        if on_interrupt is not None:
+            on_interrupt()
         return False
     return answer.strip().casefold() == "evet"
 
@@ -43,20 +56,52 @@ async def chat(config_path: Path) -> None:
     gate = SafetyGate(discover_tools())
     context = ToolContext(workspace=settings.workspace, settings=settings, audit=audit)
 
+    approval_active = False
+    runner: CommandRunner
+
     def approve(name: str, arguments: dict[str, Any]) -> bool:
-        return request_approval(name, arguments, gate.pending_notice)
+        nonlocal approval_active
+        approval_active = True
+        try:
+            return request_approval(
+                name,
+                arguments,
+                gate.pending_notice,
+                on_interrupt=runner.cancel_current,
+            )
+        finally:
+            approval_active = False
 
     runner = CommandRunner(AgentLoop(build_provider(settings, audit), gate, context, approve))
-    print("Jarvis hazır. Çıkmak için /çık yazın. Onaylarda varsayılan Hayır.")
-    while True:
-        try:
-            text = input("Siz: ")
-        except EOFError:
-            break
-        if text.strip().casefold() in {"/çık", "/cik", "/exit"}:
-            break
-        result = await runner.run(text)
-        print(f"Jarvis: {result.text}")
+    loop = asyncio.get_running_loop()
+    # Runner'ın SIGINT sayacı ikinci Ctrl+C'de loop'u kapatır. Kendi handler'ımız
+    # aktif turu iptal işaretler; onay input'unda KeyboardInterrupt ret yolunu kullanır.
+    previous_sigint = signal.getsignal(signal.SIGINT)
+
+    def handle_sigint(_signum: int, _frame: Any) -> None:
+        if approval_active:
+            raise KeyboardInterrupt
+        if runner.cancel_current():
+            # Sinyal işleyicisi ana thread'de olsa da self-pipe ile selector uyandırılır.
+            loop.call_soon_threadsafe(context.cancelled.set)
+            return
+        raise KeyboardInterrupt
+
+    signal.signal(signal.SIGINT, handle_sigint)
+    try:
+        print("Jarvis hazır. Çıkmak için /çık yazın. Onaylarda varsayılan Hayır.")
+        while True:
+            try:
+                text = input("Siz: ")
+            except EOFError:
+                break
+            if text.strip().casefold() in {"/çık", "/cik", "/exit"}:
+                break
+            turn_task = asyncio.create_task(runner.run(text))
+            result = await asyncio.shield(turn_task)
+            print(f"Jarvis: {result.text}")
+    finally:
+        signal.signal(signal.SIGINT, previous_sigint)
 
 
 def main() -> None:

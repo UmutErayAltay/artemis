@@ -185,6 +185,54 @@ async def test_fallback_receives_remaining_time(tmp_path: Path) -> None:
     assert local.timeouts == [6]
 
 
+async def test_provider_timeout_uses_remaining_time_for_fallback(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path).model_copy(update={"provider_timeout_seconds": 0.02})
+
+    class SlowCloud:
+        async def complete(
+            self, messages: list[Message], tools: list[ToolDefinition], *, timeout: float
+        ) -> Completion:
+            await asyncio.sleep(1)
+            return Completion(content="Gecikmiş yanıt")
+
+    local = Responses(Completion(content="Yedek"))
+    router = ProviderRouter(
+        settings,
+        AuditLog(settings.audit_path),
+        providers={"cloud": SlowCloud(), "local": local},
+    )
+
+    result = await router.complete([], [], timeout=2)
+
+    assert result.local_fallback and result.content == "Yedek"
+    assert local.timeouts == [pytest.approx(0.02)]
+    assert router._fallback_until > 0
+
+
+async def test_external_cancellation_does_not_start_fallback(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+
+    class WaitingCloud:
+        async def complete(
+            self, messages: list[Message], tools: list[ToolDefinition], *, timeout: float
+        ) -> Completion:
+            await asyncio.Event().wait()
+            return Completion()
+
+    local = Responses(Completion())
+    router = ProviderRouter(
+        settings,
+        AuditLog(settings.audit_path),
+        providers={"cloud": WaitingCloud(), "local": local},
+    )
+    task = asyncio.create_task(router.complete([], [], timeout=10))
+    await asyncio.sleep(0)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert local.timeouts == []
+
+
 async def test_cloud_privacy_decision_is_audited(tmp_path: Path) -> None:
     settings = settings_for(tmp_path)
     router = ProviderRouter(
@@ -196,6 +244,26 @@ async def test_cloud_privacy_decision_is_audited(tmp_path: Path) -> None:
     assert transfer["masked_messages"] == 1
     assert transfer["allow_cloud_file_content"] is False
     assert "Özel not" not in settings.audit_path.read_text()
+
+
+async def test_cloud_transfer_audit_failure_releases_unsent_reservation(
+    tmp_path: Path,
+) -> None:
+    settings = settings_for(tmp_path, paid=True)
+    provider = Responses(Completion())
+    audit = AuditLog(settings.audit_path)
+    router = ProviderRouter(settings, audit, providers={"cloud": provider})
+
+    def fail_transfer(event: str, **fields: object) -> None:
+        if event == "cloud_transfer":
+            raise OSError("synthetic disk error")
+
+    audit.emit = fail_transfer  # type: ignore[method-assign]
+    with pytest.raises(ProviderError, match="denetim kaydı"):
+        await router.complete([], [], timeout=5)
+
+    assert provider.timeouts == []
+    assert router.ledger.totals() == (Decimal(0), Decimal(0))
 
 
 async def test_cancellation_retains_budget_and_audits(tmp_path: Path) -> None:

@@ -8,8 +8,9 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from jarvis.tools.base import BaseTool, ContentKind, Risk, ToolContext, ToolResult
 from jarvis.tools.platform import UnsupportedPlatformError, desktop_service
+from jarvis.tools.processes import DesktopProcessResult, run_desktop_action
 from jarvis.tools.registry import register_tool
 
 
@@ -39,6 +40,33 @@ def desktop_error(error: Exception) -> ToolResult:
     return ToolResult(status="error", message=message)
 
 
+async def run_default_action(
+    action: str, arguments: dict[str, object], context: ToolContext
+) -> DesktopProcessResult:
+    return await run_desktop_action(
+        action,
+        arguments,
+        cancelled=context.cancelled,
+        deadline=context.deadline,
+    )
+
+
+def process_result(
+    result: DesktopProcessResult,
+    *,
+    external: bool = False,
+    content_kind: ContentKind = "text",
+) -> ToolResult:
+    return ToolResult(
+        success=result.status == "ok",
+        status=result.status,
+        message=result.message,
+        data=result.data,
+        external=external,
+        content_kind=content_kind,
+    )
+
+
 @register_tool
 class OpenApplication(BaseTool):
     name = "open_application"
@@ -52,7 +80,16 @@ class OpenApplication(BaseTool):
         if executable is None:
             return ToolResult(status="error", message="Uygulama izin listesinde yok.")
         try:
-            await asyncio.to_thread(desktop_service(context.services).open_application, executable)
+            if "desktop" in context.services:
+                await asyncio.to_thread(
+                    desktop_service(context.services).open_application, executable
+                )
+            else:
+                return process_result(
+                    await run_default_action(
+                        "open_application", {"executable": executable}, context
+                    )
+                )
             return ToolResult(
                 status="sent", message="Uygulama açma komutu gönderildi; açıldığı doğrulanmadı."
             )
@@ -75,9 +112,16 @@ class CloseApplication(BaseTool):
         if executable is None:
             return ToolResult(status="error", message="Uygulama izin listesinde yok.")
         try:
-            closed = await asyncio.to_thread(
-                desktop_service(context.services).close_application, executable
-            )
+            if "desktop" in context.services:
+                closed = await asyncio.to_thread(
+                    desktop_service(context.services).close_application, executable
+                )
+            else:
+                return process_result(
+                    await run_default_action(
+                        "close_application", {"executable": executable}, context
+                    )
+                )
             if not closed:
                 return ToolResult(status="error", message="Uygulamanın kapandığı doğrulanamadı.")
             return ToolResult(
@@ -100,7 +144,14 @@ class ReadClipboard(BaseTool):
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         try:
-            value = await asyncio.to_thread(desktop_service(context.services).read_clipboard)
+            if "desktop" in context.services:
+                value = await asyncio.to_thread(desktop_service(context.services).read_clipboard)
+            else:
+                return process_result(
+                    await run_default_action("read_clipboard", {}, context),
+                    external=True,
+                    content_kind="clipboard",
+                )
             return ToolResult(
                 success=True,
                 status="ok",
@@ -123,9 +174,14 @@ class WriteClipboard(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(ClipboardArguments, arguments)
         try:
-            written = await asyncio.to_thread(
-                desktop_service(context.services).write_clipboard, args.text
-            )
+            if "desktop" in context.services:
+                written = await asyncio.to_thread(
+                    desktop_service(context.services).write_clipboard, args.text
+                )
+            else:
+                return process_result(
+                    await run_default_action("write_clipboard", {"text": args.text}, context)
+                )
             if not written:
                 return ToolResult(status="error", message="Panoya yazma doğrulanamadı.")
             return ToolResult(success=True, status="ok", message="Pano metni yazıldı.")
@@ -150,7 +206,14 @@ class OpenURL(BaseTool):
                 raise ValueError("URL kimlik bilgisi veya kontrol karakteri içeremez.")
             opener = context.services.get("url_opener")
             if opener is None:
-                await asyncio.to_thread(desktop_service(context.services).open_browser, args.url)
+                if "desktop" in context.services:
+                    await asyncio.to_thread(
+                        desktop_service(context.services).open_browser, args.url
+                    )
+                else:
+                    return process_result(
+                        await run_default_action("open_browser", {"url": args.url}, context)
+                    )
             else:
                 submitted = await asyncio.to_thread(opener, args.url)
                 if not submitted:

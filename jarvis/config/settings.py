@@ -30,6 +30,7 @@ class Settings(BaseModel):
     fallback_model: str | None = None
     max_steps: int = Field(default=8, ge=1, le=100)
     max_seconds: float = Field(default=60.0, gt=0, le=3600)
+    provider_timeout_seconds: float = Field(default=15.0, gt=0, le=3600)
     max_output_tokens: int = Field(default=1024, ge=1)
     daily_budget_usd: Decimal = Field(default=Decimal("1"), ge=0)
     allow_paid: bool = False

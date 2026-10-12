@@ -60,6 +60,12 @@ class ProviderRouter:
                 else:
                     self._providers[alias] = OllamaProvider(settings, model)
 
+    def _emit_audit(self, event: str, **fields: object) -> None:
+        try:
+            self.audit.emit(event, **fields)
+        except OSError:
+            raise ProviderError("Sağlayıcı denetim kaydı güvenli biçimde yazılamadı.") from None
+
     async def _call(
         self,
         alias: str,
@@ -82,7 +88,7 @@ class ProviderRouter:
         try:
             reservation = self.ledger.reserve(amount)
         except BudgetExceeded:
-            self.audit.emit(
+            self._emit_audit(
                 "provider_budget_denied",
                 provider=model.provider,
                 model=model.model,
@@ -91,21 +97,29 @@ class ProviderRouter:
             raise
         started = self._clock()
         if model.provider != "ollama":
-            self.audit.emit(
-                "cloud_transfer",
-                provider=model.provider,
-                model=model.model,
-                message_count=len(messages),
-                masked_messages=sum(message.private for message in messages),
-                allow_cloud_file_content=self.settings.allow_cloud_file_content,
-                allow_cloud_clipboard=self.settings.allow_cloud_clipboard,
-            )
+            try:
+                self._emit_audit(
+                    "cloud_transfer",
+                    provider=model.provider,
+                    model=model.model,
+                    message_count=len(messages),
+                    masked_messages=sum(message.private for message in messages),
+                    allow_cloud_file_content=self.settings.allow_cloud_file_content,
+                    allow_cloud_clipboard=self.settings.allow_cloud_clipboard,
+                )
+            except ProviderError:
+                # Kaydın yazılamadığı sırada istek henüz gönderilmedi; bu
+                # rezervasyon güvenle kaldırılabilir.
+                self.ledger.release(reservation)
+                raise
         try:
-            completion = await self._providers[alias].complete(messages, tools, timeout=timeout)
-        except (ProviderError, asyncio.CancelledError) as error:
-            # Sunucu isteği işlemiş olabilir. Bilinmeyen harcamayı sıfır saymak
-            # tekrar denemelerin günlük tavanı aşmasına yol açar.
-            self.audit.emit(
+            async with asyncio.timeout(timeout):
+                completion = await self._providers[alias].complete(
+                    messages, tools, timeout=timeout
+                )
+        except TimeoutError:
+            error = RetryableProviderError("Sağlayıcı denemesi zaman aşımına uğradı.")
+            self._emit_audit(
                 "provider_call",
                 provider=model.provider,
                 model=model.model,
@@ -117,19 +131,48 @@ class ProviderRouter:
                 cost_usd=None,
                 retained_reservation_usd=str(amount),
             )
+            raise error from None
+        except (ProviderError, asyncio.CancelledError) as error:
+            # Sunucu isteği işlemiş olabilir. Bilinmeyen harcamayı sıfır saymak
+            # tekrar denemelerin günlük tavanı aşmasına yol açar.
+            try:
+                self._emit_audit(
+                    "provider_call",
+                    provider=model.provider,
+                    model=model.model,
+                    success=False,
+                    error_type=type(error).__name__,
+                    elapsed_seconds=self._clock() - started,
+                    input_tokens=None,
+                    output_tokens=None,
+                    cost_usd=None,
+                    retained_reservation_usd=str(amount),
+                )
+            except ProviderError:
+                if isinstance(error, asyncio.CancelledError):
+                    error.add_note("Denetim kaydı yazılamadı (OSError).")
+                    raise error from None
+                raise
             raise
-        self.audit.emit(
-            "provider_call",
-            provider=model.provider,
-            model=model.model,
-            success=True,
-            elapsed_seconds=self._clock() - started,
-            input_tokens=completion.usage.input_tokens,
-            output_tokens=completion.usage.output_tokens,
-            cost_usd=str(completion.usage.cost_usd),
-            local_fallback=local_fallback,
-        )
-        self.ledger.settle(reservation, completion.usage.cost_usd)
+        # Tamamlanan çağrının maliyeti kayıt yazılamasa bile rezervasyondan çıkarılır.
+        try:
+            self.ledger.settle(reservation, completion.usage.cost_usd)
+        except ProviderError:
+            raise
+        try:
+            self._emit_audit(
+                "provider_call",
+                provider=model.provider,
+                model=model.model,
+                success=True,
+                elapsed_seconds=self._clock() - started,
+                input_tokens=completion.usage.input_tokens,
+                output_tokens=completion.usage.output_tokens,
+                cost_usd=str(completion.usage.cost_usd),
+                local_fallback=local_fallback,
+            )
+        except OSError:
+            raise ProviderError("Sağlayıcı tamamlandı ancak denetim kaydı yazılamadı.") from None
         return completion.model_copy(update={"local_fallback": local_fallback})
 
     async def complete(
@@ -141,24 +184,33 @@ class ProviderRouter:
     ) -> Completion:
         started = self._clock()
         fallback = self.settings.fallback_model
+        attempt_timeout = min(timeout, self.settings.provider_timeout_seconds)
         if fallback and started < self._fallback_until:
-            return await self._call(fallback, messages, tools, timeout=timeout, local_fallback=True)
+            return await self._call(
+                fallback, messages, tools, timeout=attempt_timeout, local_fallback=True
+            )
         try:
             return await self._call(
-                self.settings.primary_model, messages, tools, timeout=timeout, local_fallback=False
+                self.settings.primary_model,
+                messages,
+                tools,
+                timeout=attempt_timeout,
+                local_fallback=False,
             )
         except RetryableProviderError:
             if fallback is None or fallback == self.settings.primary_model:
                 raise
             self._fallback_until = self._clock() + self.settings.fallback_seconds
-            self.audit.emit(
+            self._emit_audit(
                 "provider_fallback",
                 primary=self.settings.primary_model,
                 fallback=fallback,
                 seconds=self.settings.fallback_seconds,
                 reason="connection_timeout_or_server_error",
             )
-            remaining = timeout - (self._clock() - started)
+            remaining = min(
+                timeout - (self._clock() - started), self.settings.provider_timeout_seconds
+            )
             return await self._call(
                 fallback, messages, tools, timeout=remaining, local_fallback=True
             )

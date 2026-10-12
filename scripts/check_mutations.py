@@ -44,7 +44,7 @@ MUTATIONS = (
     Mutation(
         name="tool_failure_reported_as_success",
         source="jarvis/tools/plugins/filesystem.py",
-        test="tests/test_tools.py::test_noop_trash_is_not_reported_as_success",
+        test="tests/test_tools.py::test_trash_error_does_not_destroy_file",
         before='return ToolResult(status="error", message=f"Dosya işlemi başarısız: {detail}")',
         after='return ToolResult(success=True, status="ok", message="Dosya işlemi başarılı.")',
     ),

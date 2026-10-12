@@ -4,6 +4,7 @@ state_dir: ../.jarvis
 audit_path: ../.jarvis/audit.jsonl
 max_steps: 8
 max_seconds: 60
+provider_timeout_seconds: 15
 max_output_tokens: 1024
 daily_budget_usd: '1.00'
 allow_paid: false

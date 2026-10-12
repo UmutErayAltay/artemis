@@ -268,6 +268,9 @@ async def test_linux_returns_honest_unsupported(
     arguments: dict[str, str],
 ) -> None:
     monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Linux")
+    # Varsayılan yol işçi sürecinde çalışır; testte gerçek GUI etkisini önlemek için
+    # platform kontrolünü aynı süreçte uygulayan adaptörü kullan.
+    tool_context.services["desktop"] = WindowsDesktop()
     result = await invoke(tool_context, tool, **arguments)
     assert not result.success and "yalnız Windows" in result.message
 
@@ -299,35 +302,23 @@ async def test_browser_result_is_never_claimed_as_opened(tool_context: ToolConte
     assert (await invoke(tool_context, "open_url", url="https://example.org")).status == "error"
 
 
-@pytest.mark.parametrize(
-    ("system", "expected_prefix"),
-    [
-        ("Windows", [r"C:\Windows\System32\rundll32.exe", "url.dll,FileProtocolHandler"]),
-        ("Linux", ["xdg-open"]),
-    ],
-)
-async def test_default_browser_launcher_uses_restricted_environment(
-    tool_context: ToolContext,
-    monkeypatch: pytest.MonkeyPatch,
-    system: str,
-    expected_prefix: list[str],
+async def test_default_browser_launcher_uses_fixed_worker_action(
+    tool_context: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: system)
-    monkeypatch.setenv("SYSTEMROOT", r"C:\Windows")
-    monkeypatch.setenv("OPENROUTER_API_KEY", "synthetic-secret")
-    calls: list[tuple[list[str], dict[str, Any]]] = []
+    calls: list[tuple[str, dict[str, object]]] = []
 
-    def fake_popen(command: list[str], **kwargs: Any) -> None:
-        calls.append((command, kwargs))
+    async def fake_action(
+        action: str, arguments: dict[str, object], context: ToolContext
+    ) -> Any:
+        calls.append((action, arguments))
+        from jarvis.tools.processes import DesktopProcessResult
 
-    monkeypatch.setattr("jarvis.tools.platform.subprocess.Popen", fake_popen)
+        return DesktopProcessResult("sent", "Tarayıcı isteği gönderildi.")
+
+    monkeypatch.setattr("jarvis.tools.plugins.desktop.run_default_action", fake_action)
     result = await invoke(tool_context, "open_url", url="https://example.org/path")
     assert result.status == "sent" and not result.success
-    command, kwargs = calls[0]
-    assert command[:-1] == expected_prefix
-    assert command[-1] == "https://example.org/path"
-    assert kwargs["shell"] is False
-    assert "OPENROUTER_API_KEY" not in kwargs["env"]
+    assert calls == [("open_browser", {"url": "https://example.org/path"})]
 
 
 async def test_information_and_injected_search(tool_context: ToolContext) -> None:

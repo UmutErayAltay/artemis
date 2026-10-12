@@ -73,6 +73,8 @@ class ToolContext:
     settings: Settings
     audit: AuditLog
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
+    turn_id: str = ""
+    deadline: float | None = None
     services: dict[str, Any] = field(default_factory=dict, repr=False)
 
 

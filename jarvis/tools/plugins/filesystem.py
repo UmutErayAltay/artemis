@@ -1,11 +1,12 @@
 """Çalışma köküyle sınırlı dosya işlemleri, sonuçları diskten doğrular."""
 
 from pathlib import Path
-from typing import cast
+from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from jarvis.safety.paths import safe_join
+from jarvis.safety.undo import UndoJournal
 from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from jarvis.tools.registry import register_tool
 
@@ -206,18 +207,76 @@ class DeleteFile(BaseTool):
             path = safe_join(context.workspace, args.path, allow_symlinks=False)
             if not path.is_file():
                 raise ValueError("Silinecek hedef normal bir dosya olmalı.")
+            root = context.workspace.resolve()
+            journal = context.services.get("undo_journal")
+            if journal is None:
+                journal = UndoJournal(context.settings.state_dir)
+            record = journal.prepare(
+                turn_id=context.turn_id,
+                root=root,
+                relative_path=path.relative_to(root).as_posix(),
+                size=path.stat().st_size,
+            )
             trash = context.services.get("trash")
-            if trash is None:
-                # Test adaptörü varsa OS çöp kutusu bağımlılığı yüklenmez.
-                from send2trash import send2trash
+            try:
+                if trash is None:
+                    # Test adaptörü varsa OS çöp kutusu bağımlılığı yüklenmez.
+                    from send2trash import send2trash
 
-                send2trash(str(path))
-            else:
-                trash(path)
+                    send2trash(str(path))
+                else:
+                    trash(path)
+            except (OSError, ValueError):
+                try:
+                    removed = not path.exists()
+                    terminal_status: Literal["uncertain", "failed"] = (
+                        "uncertain" if removed else "failed"
+                    )
+                    journal.set_status(record.record_id, terminal_status)
+                except (OSError, ValueError):
+                    return ToolResult(
+                        status="error",
+                        message="Dosya işlemi sonuçlandı; günlük kaydı hazırlanmış durumda kaldı.",
+                        data={"undo_record_id": record.record_id, "undo_status": "prepared"},
+                    )
+                if removed:
+                    return ToolResult(
+                        status="error",
+                        message="Dosya taşınmış olabilir; işlem sonucu belirsiz.",
+                        data={"undo_record_id": record.record_id, "undo_status": "uncertain"},
+                    )
+                result = failure(OSError("Dosya geri dönüşüm kutusuna taşınamadı."))
+                result.data.update(
+                    {"undo_record_id": record.record_id, "undo_status": "failed"}
+                )
+                return result
             if path.exists():
-                raise OSError("Geri dönüşüm kutusuna taşıma doğrulanamadı.")
+                try:
+                    journal.set_status(record.record_id, "failed")
+                except (OSError, ValueError):
+                    return ToolResult(
+                        status="error",
+                        message="Dosya taşınmadı; geri alma kaydı hazırlanmış durumda kaldı.",
+                        data={"undo_record_id": record.record_id, "undo_status": "prepared"},
+                    )
+                return ToolResult(
+                    status="error",
+                    message="Dosya geri dönüşüm kutusuna taşınmadı.",
+                    data={"undo_record_id": record.record_id, "undo_status": "failed"},
+                )
+            try:
+                journal.set_status(record.record_id, "completed")
+            except (OSError, ValueError):
+                return ToolResult(
+                    status="error",
+                    message="Dosya taşındı; günlük kaydı hazırlanmış durumda kaldı.",
+                    data={"undo_record_id": record.record_id, "undo_status": "prepared"},
+                )
             return ToolResult(
-                success=True, status="ok", message="Dosya geri dönüşüm kutusuna taşındı."
+                success=True,
+                status="ok",
+                message="Dosya geri dönüşüm kutusuna taşındı.",
+                data={"undo_record_id": record.record_id, "undo_status": "completed"},
             )
         except (OSError, ValueError) as error:
             return failure(error)

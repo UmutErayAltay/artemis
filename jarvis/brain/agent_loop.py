@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import time
 from collections.abc import Callable
 from typing import Any
@@ -28,6 +29,101 @@ TIMEOUT_MESSAGE = (
     "Süre sınırı doldu; yeni adım çalıştırılmayacak. "
     "Başlamış sistem işlemlerinin tamamlandığı doğrulanamadı."
 )
+CANCELLED_MESSAGE = (
+    "İşlem iptal edildi; başlayan sistem işlemleri tamamlanmış olabilir ve geri alınmadı."
+)
+
+
+def _cancelled_message() -> str:
+    return CANCELLED_MESSAGE
+
+
+_CLEANUP_GRACE_SECONDS = 0.25
+_logger = logging.getLogger(__name__)
+
+
+class _TurnCancelled(Exception):
+    """İptal işaretiyle sonlandırılan sağlayıcı veya kapı beklemesi."""
+
+    def __init__(self, cleanup_pending: bool = False) -> None:
+        super().__init__()
+        self.cleanup_pending = cleanup_pending
+
+
+class _OuterTaskCancelled(asyncio.CancelledError):
+    """Dış task iptalinden sonra temizlenmeyen alt görevi raporlar."""
+
+    def __init__(self, cleanup_pending: bool = False) -> None:
+        super().__init__()
+        self.cleanup_pending = cleanup_pending
+
+
+def _consume_task_result(
+    task: asyncio.Task[Any], pending_tasks: set[asyncio.Task[Any]] | None = None
+) -> None:
+    if pending_tasks is not None:
+        pending_tasks.discard(task)
+    if task.cancelled():
+        return
+    error = task.exception()
+    if error is not None:
+        _logger.warning("İptal edilen alt görev hata ile sonlandı (%s).", type(error).__name__)
+
+
+async def _cancel_and_wait(
+    task: asyncio.Task[Any], pending_tasks: set[asyncio.Task[Any]] | None = None
+) -> bool:
+    already_tracked = pending_tasks is not None and task in pending_tasks
+    if not task.done() and not already_tracked:
+        task.cancel()
+    if not task.done():
+        done, _pending = await asyncio.wait((task,), timeout=_CLEANUP_GRACE_SECONDS)
+        if not done:
+            if pending_tasks is not None and not already_tracked:
+                pending_tasks.add(task)
+                task.add_done_callback(
+                    lambda finished: _consume_task_result(finished, pending_tasks)
+                )
+            return False
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    except Exception as error:
+        _logger.warning("İptal edilen alt görev hata ile sonlandı (%s).", type(error).__name__)
+    return True
+
+
+async def _wait_for_turn(
+    awaitable: Any,
+    cancelled: asyncio.Event,
+    timeout: float,
+    pending_tasks: set[asyncio.Task[Any]],
+) -> Any:
+    """İşlemi iptal/süre sinyalleriyle yarıştırıp iptal edilen işi temizler."""
+    operation = asyncio.create_task(awaitable)
+    cancellation = asyncio.create_task(cancelled.wait())
+    try:
+        done, _pending = await asyncio.wait(
+            (operation, cancellation),
+            timeout=max(0.0, timeout),
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        if operation in done:
+            return await operation
+        if cancelled.is_set():
+            cleaned = await _cancel_and_wait(operation, pending_tasks)
+            raise _TurnCancelled(cleanup_pending=not cleaned)
+        await _cancel_and_wait(operation, pending_tasks)
+        raise TimeoutError
+    except asyncio.CancelledError as error:
+        cleaned = await _cancel_and_wait(operation, pending_tasks)
+        await _cancel_and_wait(cancellation, pending_tasks)
+        raise _OuterTaskCancelled(cleanup_pending=not cleaned) from error
+    finally:
+        if not operation.done():
+            await _cancel_and_wait(operation, pending_tasks)
+        await _cancel_and_wait(cancellation, pending_tasks)
 
 
 class RunResult(BaseModel):
@@ -71,6 +167,11 @@ class AgentLoop:
         self.gate = gate
         self.context = context
         self.approve = approve
+        self._pending_cleanup: set[asyncio.Task[Any]] = set()
+
+    @property
+    def cleanup_pending(self) -> bool:
+        return bool(self._pending_cleanup)
 
     async def run(self, text: str) -> RunResult:
         state = TurnState()
@@ -89,7 +190,10 @@ class AgentLoop:
         audit = self.context.audit
         audit.emit("turn_start", turn_id=state.turn_id, input=text)
 
+        finished = False
+
         def finish(reason: str, answer: str) -> RunResult:
+            nonlocal finished
             result = RunResult(
                 text=answer,
                 stop_reason=reason,
@@ -99,7 +203,9 @@ class AgentLoop:
                 elapsed_seconds=time.monotonic() - start,
                 turn_id=state.turn_id,
             )
-            audit.emit("turn_end", **result.model_dump(mode="json"))
+            if not finished:
+                audit.emit("turn_end", **result.model_dump(mode="json"))
+                finished = True
             return result
 
         def remaining() -> float:
@@ -107,6 +213,14 @@ class AgentLoop:
 
         if not text.strip():
             return finish("completed", "Bir komut yazabilirsiniz.")
+        if self._pending_cleanup:
+            return finish(
+                "cleanup_pending",
+                "Önceki turun iptal edilen görevi hâlâ temizleniyor; "
+                "bu turda yeni işlem yapılmadı.",
+            )
+        self.context.turn_id = state.turn_id
+        self.context.deadline = state.deadline
         try:
             for _ in range(settings.max_steps):
                 if self.context.cancelled.is_set():
@@ -114,12 +228,16 @@ class AgentLoop:
                 if remaining() <= 0:
                     return finish("timeout", TIMEOUT_MESSAGE)
                 steps += 1
-                completion = await asyncio.wait_for(
+                completion = await _wait_for_turn(
                     self.provider.complete(
                         messages, self.gate.registry.definitions(), timeout=remaining()
                     ),
-                    timeout=remaining(),
+                    self.context.cancelled,
+                    remaining(),
+                    self._pending_cleanup,
                 )
+                if self.context.cancelled.is_set():
+                    return finish("cancelled", _cancelled_message())
                 usage.input_tokens += completion.usage.input_tokens
                 usage.output_tokens += completion.usage.output_tokens
                 usage.cost_usd += completion.usage.cost_usd
@@ -176,10 +294,14 @@ class AgentLoop:
                     calls += 1
                     if completion.local_fallback:
                         local_calls += 1
-                    result = await asyncio.wait_for(
+                    result = await _wait_for_turn(
                         self.gate.dispatch(normalized_call, self.context, state, self.approve),
-                        timeout=remaining(),
+                        self.context.cancelled,
+                        remaining(),
+                        self._pending_cleanup,
                     )
+                    if self.context.cancelled.is_set():
+                        return finish("cancelled", _cancelled_message())
                     if remaining() <= 0:
                         return finish("timeout", TIMEOUT_MESSAGE)
                     if result.status == "denied":
@@ -207,11 +329,29 @@ class AgentLoop:
         except TimeoutError:
             audit.emit("turn_timeout", turn_id=state.turn_id)
             return finish("timeout", TIMEOUT_MESSAGE)
+        except _TurnCancelled as cancellation:
+            answer = _cancelled_message()
+            if cancellation.cleanup_pending:
+                answer += " İptal edilen görev temizleme süresi içinde sonlanmadı."
+            return finish("cancelled", answer)
         except BudgetExceeded:
             return finish("budget", "Günlük maliyet tavanı yeni model çağrısını engelledi.")
         except ProviderError as error:
             audit.emit("provider_error", turn_id=state.turn_id, error_type=type(error).__name__)
             return finish("provider_error", "Model sağlayıcısı yanıt veremedi; işlem durduruldu.")
+        except _OuterTaskCancelled as cancellation:
+            self.context.cancelled.set()
+            audit.emit(
+                "turn_cancelled",
+                turn_id=state.turn_id,
+                cleanup_pending=cancellation.cleanup_pending,
+            )
+            answer = _cancelled_message()
+            if cancellation.cleanup_pending:
+                answer += " İptal edilen görev temizleme süresi içinde sonlanmadı."
+            finish("cancelled", answer)
+            raise
         except asyncio.CancelledError:
-            audit.emit("turn_cancelled", turn_id=state.turn_id)
+            audit.emit("turn_cancelled", turn_id=state.turn_id, cleanup_pending=False)
+            finish("cancelled", _cancelled_message())
             raise

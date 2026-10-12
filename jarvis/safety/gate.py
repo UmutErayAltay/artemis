@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
@@ -41,6 +42,8 @@ class SafetyGate:
         approve: ApprovalCallback,
     ) -> ToolResult:
         started = monotonic()
+        context.turn_id = state.turn_id
+        context.deadline = state.deadline
         self.pending_notice = ""
         context.audit.emit(
             "tool_requested", turn_id=state.turn_id, tool=call.name, arguments=call.arguments
@@ -130,6 +133,22 @@ class SafetyGate:
         )
         try:
             result = await tool.execute(arguments, context)
+        except asyncio.CancelledError:
+            context.audit.emit(
+                "tool_interrupted",
+                turn_id=state.turn_id,
+                tool=call.name,
+                completion="unknown",
+                reason="Araç görevi iptal edildi; alt işlemin tamamlanması doğrulanamadı.",
+            )
+            self._finish(
+                ToolResult(message="Araç iptal edildi; işlemin tamamlanması doğrulanamadı."),
+                call,
+                context,
+                state,
+                started,
+            )
+            raise
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             context.audit.emit(
                 "tool_exception",

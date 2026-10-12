@@ -1,14 +1,19 @@
 """Günlük tavanı süreçler arasında atomik rezervasyonlarla korur."""
 
 import sqlite3
+import sys
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from datetime import UTC, datetime
-from decimal import Decimal, localcontext
+from decimal import Decimal, InvalidOperation, localcontext
 from pathlib import Path
 from uuid import uuid4
 
-from jarvis.brain.errors import BudgetExceeded
+from jarvis.brain.errors import BudgetExceeded, ProviderError
+
+# SQLite beklemesi senkron çalışır. Kilit beklemesini sağlayıcı denemesinin olağan
+# süresinden kısa tutarak olay döngüsünün varsayılan zaman aşımı boyunca durmasını önler.
+_SQLITE_BUSY_TIMEOUT_SECONDS = 0.1
 
 
 def _utc_now() -> datetime:
@@ -51,7 +56,10 @@ class BudgetLedger:
         self.path = path
         self.daily_limit = daily_limit
         self._clock = clock or _utc_now
-        path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+        except OSError:
+            raise ProviderError("Günlük bütçe kaydı güvenli biçimde kullanılamıyor.") from None
         with self._transaction() as connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS budget_reservations (
@@ -69,14 +77,36 @@ class BudgetLedger:
 
     @contextmanager
     def _transaction(self) -> Iterator[sqlite3.Connection]:
-        connection = sqlite3.connect(self.path, timeout=30, isolation_level=None)
+        connection: sqlite3.Connection | None = None
         try:
+            connection = sqlite3.connect(
+                self.path,
+                timeout=_SQLITE_BUSY_TIMEOUT_SECONDS,
+                isolation_level=None,
+            )
             with connection:
                 # Okuma ve yazma arasına başka rezervasyon girmemelidir.
                 connection.execute("BEGIN IMMEDIATE")
                 yield connection
+        except (OSError, sqlite3.Error):
+            # Disk, kilit ve bozuk veritabanı hataları ağ çağrısını durdurmalıdır.
+            raise ProviderError("Günlük bütçe kaydı güvenli biçimde kullanılamıyor.") from None
         finally:
-            connection.close()
+            if connection is not None:
+                try:
+                    connection.close()
+                except sqlite3.Error as error:
+                    # Kapatma hatası da görünür olsun. Mevcut iptal veya asıl
+                    # hatayı koru; eklenen metin yalnızca hata türünü açıklar.
+                    active_error = sys.exception()
+                    if active_error is not None:
+                        active_error.add_note(
+                            f"Bütçe SQLite bağlantısı kapatılamadı ({type(error).__name__})."
+                        )
+                    else:
+                        raise ProviderError(
+                            "Günlük bütçe kaydı güvenli biçimde kullanılamıyor."
+                        ) from None
 
     def _day(self) -> str:
         current = self._clock()
@@ -94,9 +124,20 @@ class BudgetLedger:
         reserved: list[Decimal] = []
         # SQLite REAL toplamı kuruş altı değerlerde sınırı gevşetebilir.
         for actual_value, reserved_value in rows:
-            spent.append(Decimal(actual_value))
-            reserved.append(Decimal(reserved_value))
+            spent.append(BudgetLedger._stored_amount(actual_value))
+            reserved.append(BudgetLedger._stored_amount(reserved_value))
         return _sum_exact(spent), _sum_exact(reserved)
+
+    @staticmethod
+    def _stored_amount(value: object) -> Decimal:
+        try:
+            amount = Decimal(str(value))
+            _validate_amount(amount)
+        except (InvalidOperation, TypeError, ValueError):
+            raise ProviderError(
+                "Günlük bütçe kaydı güvenli biçimde kullanılamıyor."
+            ) from None
+        return amount
 
     def totals(self) -> tuple[Decimal, Decimal]:
         """Bugünkü gerçekleşen maliyet ve henüz kapanmamış rezervasyonu döndürür."""
@@ -139,7 +180,7 @@ class BudgetLedger:
             if row is None:
                 raise KeyError("Bütçe rezervasyonu bulunamadı.")
             day, status, prior_actual = row
-            if status == "settled" and Decimal(prior_actual) == actual:
+            if status == "settled" and self._stored_amount(prior_actual) == actual:
                 return
             if status != "reserved":
                 raise ValueError("Kapanmış bütçe rezervasyonu değiştirilemez.")
