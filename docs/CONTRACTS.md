@@ -39,7 +39,9 @@ context_window: int=32768)`. `Settings`: `workspace: Path`, `state_dir: Path`,
 `async dispatch(call: ToolCall, context: ToolContext, state: TurnState,
 approve: Callable[[str,dict[str,Any]],bool]) -> ToolResult`.
 Reddedilen çağrı sonucu status=denied; tur tekrar denetimi AgentLoop'tadır.
-`jarvis.safety.paths.safe_join(base: Path,target: str) -> Path`.
+`jarvis.safety.paths.safe_join(base: Path,target: str, *, allow_symlinks: bool=True) -> Path`.
+Okuma/listeleme iç kök symlink'lerini çözümleyebilir; dosya değiştiren araçlar
+`allow_symlinks=False` geçirerek yolun hiçbir bileşeninde symlink varsa reddeder.
 `jarvis.safety.audit.AuditLog(path: Path)`, `.emit(event: str, **fields: Any) -> None`.
 Sır temizleme AuditLog içinde; secret değerleri ortamdan okunur ve repr edilmez.
 

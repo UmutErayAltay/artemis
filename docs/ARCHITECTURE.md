@@ -78,7 +78,9 @@ Taint, onay ve başarı doğrulaması geçici mutasyonlarla test edilir.
 
 Python içindeki gate aynı süreçte düşmanca Python koduna karşı sandbox değildir.
 safe_join yerel kullanıcıyla eşzamanlı symlink değiştirme saldırısını tamamen
-çözmez; OS sandbox ve işlem başına kilitleme ileriki sertleştirme konusudur.
+çözmez. Zaman aşımı döngünün yeni adımları başlatmasını engeller; `asyncio.to_thread`
+ile başlatılmış sistem işlemini sonlandıramaz ve işlem arka planda sürebilir. F2'de
+işlem yalıtımı ve iptal desteği ele alınmalıdır.
 
 ## İlk sözleşme
 
