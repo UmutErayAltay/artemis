@@ -1,0 +1,190 @@
+# Jarvis
+
+Windows 11 için Türkçe kişisel masaüstü asistanı. F0/F1 kapsamı: CLI sohbeti,
+sağlayıcıdan bağımsız ajan döngüsü, tek güvenlik kapısı, 15 temel araç ve izole kabul
+senaryoları. Ses, masaüstü paneli, hafıza, Telegram ve arka plan ajanları bu sürüme
+dahil değildir.
+
+CLI'de her kullanıcı komutu ayrı ve durumsuz bir turdur; önceki komutların konuşma
+bağlamı sonraki tura taşınmaz. Kalıcı hafıza sonraki fazın kapsamındadır.
+
+Mimari [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), kararların gerekçeleri
+[docs/adr/](docs/adr/), geliştirme kuralları [CLAUDE.md](CLAUDE.md) içindedir.
+
+## Kurulum
+
+Python 3.12 kullanın. Windows PowerShell:
+
+```powershell
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+Copy-Item config/config.example.yaml config/config.yaml
+New-Item -ItemType Directory -Force desktop
+```
+
+Linux:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
+cp config/config.example.yaml config/config.yaml
+mkdir -p desktop
+```
+
+YAML içindeki göreli yollar config dosyasının dizinine göre çözülür. Örnek
+`workspace: ../desktop` değerini dosya araçlarının erişebileceği köke ayarlayın.
+Gerçek Windows Masaüstü klasörü kendiliğinden seçilmez.
+
+## Sağlayıcı ve sırlar
+
+Örnek config bilerek model içermez: model kimlikleri ve fiyatlar değişir.
+[Resmi kaynaklardan](docs/PROVIDERS.md) güncel kimlik, araç desteği, bağlam sınırı ve
+girdi/çıktı fiyatını doğrulayın. `models` içine bir takma ad altında şu alanları
+ekleyip `primary_model` değerini bu takma ada ayarlayın:
+
+| Alan | Değer |
+| --- | --- |
+| `provider` | `openrouter`, `anthropic` veya `ollama` |
+| `model` | Sağlayıcının güncel model kimliği |
+| `input_per_million` | Milyon girdi token'ı başına USD; ondalık YAML metni |
+| `output_per_million` | Milyon çıktı token'ı başına USD; ondalık YAML metni |
+| `context_window` | Modelin doğrulanmış bağlam sınırı |
+
+Ücretsizliği doğrulanan modelin iki fiyat alanı `'0'` olabilir; bilinmeyen fiyatı
+sıfır yazarak geçmeyin. `allow_paid: false` varsayılanını koruyun. Ücretli model
+kullanımı ayrıca açık kullanıcı izni ve `allow_paid: true` gerektirir.
+
+| Ortam değişkeni | Ne zaman gerekli? |
+| --- | --- |
+| `OPENROUTER_API_KEY` | OpenRouter çağrısı |
+| `ANTHROPIC_API_KEY` | Anthropic çağrısı |
+
+Anahtarları yalnız çalıştırma ortamından sağlayın. YAML, komut satırı argümanları,
+test fixture'ları veya depoya anahtar yazmayın. Proje `.env` dosyasını otomatik
+yüklemez. Sağlayıcı anahtarları log ve nesne gösterimlerinden temizlenir; uygulama
+alt süreçlerine ortamın yalnız izin verilen kısmı aktarılır.
+
+Yerel yedek için Ollama'yı ayrıca kurup araç çağırmayı destekleyen bir modeli
+indirin. `models` içinde `provider: ollama` kaydı oluşturup `fallback_model` alanına
+bu kaydın takma adını yazın. Varsayılan adres `http://127.0.0.1:11434`'tür. Bulut
+bağlantısı veya sunucusu başarısız olduğunda yönlendirici `fallback_seconds` boyunca
+yerele geçer ve olayı kaydeder. Yerel yedek basit, en fazla bir araçlı işler içindir.
+Kimlik doğrulama ve geçersiz istek hataları bağlantı kesintisi diye gizlenmez.
+
+## İlk çalıştırma
+
+```bash
+python -m jarvis chat --config config/config.yaml
+```
+
+Çıkmak için `/çık`, `/cik` veya `/exit` yazın.
+
+Örnek komutlar: “Masaüstündeki dosyaları listele”, “Saat kaç?” ve
+“not.txt dosyasının ilk satırını söyle”. Ajan sonuçları görüp sonraki araca karar
+verir. Eksik hedef içeren isteklerde açıklama istemesi beklenir.
+
+Onay sorusu araç adını ve doğrulanmış argümanları gösterir; boş cevap hayırdır.
+Silme ve uygulama kapatma onay ister. Dosya, web veya pano gibi dış içerik
+okunduktan sonra o turdaki her yan etki de onay ister. Bu durumda onayda
+“Bu adım dış bir içerik okunduktan sonra istendi” uyarısı gösterilir.
+
+## Gizlilik ve bütçe
+
+`allow_cloud_file_content` ve `allow_cloud_clipboard` varsayılan olarak kapalıdır.
+Kapalıyken bu araçların içeriği bulut sağlayıcısına maskelenerek gönderilir; bu
+durumda bulut modelinden gerçek dosya/pano özeti beklenmez. Yerel sağlayıcı bu
+içeriği işleyebilir. Ekran görüntüsü F1 kapsamında değildir.
+
+Komutunuzun metni, araç şemaları ve izin verilen sonuçlar seçilen sağlayıcıya
+gider. Buluta gönderim kararları denetlenir. `audit_path` UTF-8 JSONL denetim
+kaydını, `state_dir` günlük bütçe durumunu belirler. Denetim logu sırlar
+temizlense de kişisel komutlar ve yerel içerik barındırabilir; yerelde tutun.
+Bu yollar ve yerel config `.gitignore` kapsamındadır.
+
+Her model çağrısında token ve USD maliyeti kaydedilir. `daily_budget_usd` UTC gününe
+göre SQLite'ta tutulur. Çağrıdan önce bağlam ve çıktı sınırları üzerinden üst
+maliyet ayrılır; gerçekleşen kullanım ile hesap kapatılır. Bu temkinli sınır,
+kalan bütçe gerçek kısa çağrıya yetse bile isteği reddedebilir. Fiyatlar config'den
+gelir; sağlayıcı tarifeleri değiştiğinde güncellemek gerekir.
+
+## Araçlar ve platform sınırları
+
+| Alan | Araçlar |
+| --- | --- |
+| Dosyalar | `list_files`, `read_file`, `create_file`, `move_file`, `rename_file`, `delete_file`, `create_directory` |
+| Uygulamalar | `open_application`, `close_application` |
+| Web | `web_search`, `open_url` |
+| Pano | `read_clipboard`, `write_clipboard` |
+| Sistem | `system_info`, `current_time` |
+
+Dosya yolları çalışma kökü içinde kalmalıdır. Mutlak yollar, `..`, `.` ve kökün
+dışına çıkan sembolik bağlantılar reddedilir. Kökü listelemek için `list_files`
+argümansız çağrılır. Silme geri dönüşüm kutusunu kullanır; geri dönüşüm desteği
+başarısızsa kalıcı silmeye geçilmez. Var olan dosyanın üstüne sessizce yazılmaz.
+
+Uygulamalar `applications` içindeki izinli takma adlarla açılır/kapatılır; serbest
+shell komutu aracı yoktur. Kapatma, izinli `.exe` adına uyan bütün süreçlere normal
+kapatma isteği gönderir; kaydedilmemiş işler kaybolabilir. Windows'a bağlı uygulama
+ve pano işlevleri Linux'ta desteklenmediğini bildirir. Linux üzerinde çekirdek,
+dosyalar ve sahte platform
+adaptörleri test edilir. Uygulama/tarayıcı başlatma isteğinin gönderilmesi, ekranda
+açıldığının kanıtı sayılmaz. Windows'ta elle doğrulama ayrı bir teslimat kontrolüdür.
+Süre sınırında döngü yeni adımları çalıştırmaz; ancak `asyncio.to_thread` ile
+başlatılmış sistem işlemi arka planda sürebilir ve tamamlandığı doğrulanamayabilir.
+Bu F1 sınırı F2'de süreç yalıtımı ve iptal desteğiyle ele alınacaktır.
+
+Web araması DuckDuckGo'nun HTML sonuçlarından başlık ve URL okur. Bu resmi bir
+arama API'si değildir; sayfa biçimi değişirse veya erişim engellenirse araç hata
+verir. F1 sonuç sayfalarının içeriğini ayrıca açıp indiren bir araç içermez.
+Arama sorgusu dış servise gönderildiğinden araç yan etkili sayılır: temiz turda
+onaysız çalışır, dış içerik okunduktan sonraki turda kullanıcı onayı ister.
+
+## Doğrulama ve ölçüm
+
+```bash
+pytest -q
+ruff check .
+mypy
+python -m bench.run --sahte
+```
+
+Testler ağ servisi kullanmaz; sağlayıcı protokolleri yalnız loopback üzerindeki
+sahte HTTP sunucusuyla denenir. Dosya testleri geçici masaüstünde gerçek dosya
+işlemleri yapar. `disruptive` işaretli testler varsayılan olarak atlanır; bunları
+yalnız elle hazırlanmış bir makinede `pytest -m disruptive` ile seçin.
+
+Kabul senaryoları [bench/senaryolar.yaml](bench/senaryolar.yaml) içinde; senaryo
+başına bitiş durumu, onaylar, tehlikeli hatalar, adım, süre, token ve maliyet ölçülür.
+Sahte kip güvenlik ve orkestrasyon sözleşmesini ölçer. Sahte cevaplarla alınan skor
+gerçek modelin Türkçe anlama veya planlama başarısına kanıt değildir.
+
+Canlı ölçüm, ortam anahtarı sağlandıktan sonra yalnız güncel katalogda ücretsiz
+olduğu doğrulanan OpenRouter modeliyle elle çalıştırılır:
+
+```bash
+python -m bench.run --canli --model MODEL_KIMLIGI
+```
+
+`--tekrar 3` her senaryoyu üç kez ölçer; medyan/p90 için tek örnekten daha anlamlıdır.
+`--rapor reports/sonuc.json` JSON raporunu dosyaya yazar. `--senaryolar DOSYA` özel
+senaryo seti seçer. Canlı kipte `--config config/config.yaml --model TAKMA_AD`
+yazılabilir; takma adın OpenRouter kimliği yine güncel katalogla doğrulanır.
+
+Canlı senaryolar da geçici masaüstü ve sahte platform servisleri kullanır; gerçek
+model senaryolardaki sentetik içeriği görür. Aynı senaryo setini en az iki modelle
+çalıştırın; yalnız toplam başarıya göre seçim yapmayın, tehlikeli hata sayısını
+ayrı değerlendirin. API kotası ve ücretsiz model erişilebilirliği değişebilir.
+
+GitHub Actions Ubuntu ve Windows üzerinde test → ruff → mypy ve sahte kabul
+koşucusunu çalıştıracak biçimde tanımlıdır. Yerel Linux sonucu, Windows CI sonucu
+yerine geçmez. Bu oturumda push yapılmadığından uzak CI çalıştırıldığı iddia edilmez.
+
+## Geliştirme
+
+Yeni araç tek bir `jarvis/tools/plugins/` dosyasına argüman modeli ve
+`@register_tool` sınıfı ekleyerek keşfedilir. Şema ve sağlayıcı biçimleri otomatik
+üretilir. Onay mantığını araca eklemeyin; örnek ve kurallar
+[CLAUDE.md](CLAUDE.md) içindedir. Yeni davranış için izole test ve kabul senaryosu
+ekleyin.
