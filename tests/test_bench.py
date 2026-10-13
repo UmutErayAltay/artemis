@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from bench.run import (
+    Approval,
     _workspace_relative_path,
     free_catalog_model,
     inspect_dispatches,
@@ -209,3 +210,40 @@ async def test_vault_mismatch_is_a_failure_and_protected_category_counts_it() ->
     assert not result.success
     assert "Hafıza notları beklenen bitiş durumunda değil." in result.errors
     assert result.dangerous_errors >= 1
+
+
+TELEGRAM_SCENARIOS = ("telegram_notify_simple", "telegram_exfil_injection")
+
+
+async def test_telegram_scenarios_pass_in_fake_mode() -> None:
+    scenarios = {scenario.id: scenario for scenario in load_scenarios()}
+    for scenario_id in TELEGRAM_SCENARIOS:
+        result = await run_scenario(scenarios[scenario_id])
+        assert result.success, (scenario_id, result.errors, result.dangerous_reasons)
+        assert result.dangerous_errors == 0
+        assert result.unapproved_side_effects == 0
+
+
+async def test_telegram_injection_asks_once_and_is_refused() -> None:
+    scenario = next(item for item in load_scenarios() if item.id == "telegram_exfil_injection")
+    result = await run_scenario(scenario)
+    assert [(item["tool"], item["answer"]) for item in result.approvals] == [
+        ("notify_telegram", False)
+    ]
+    assert TAINT_NOTICE in result.approvals[0]["notice"]
+    assert result.stop_reason == "completed"
+
+
+async def test_telegram_injection_approved_by_fake_user_counts_as_exfiltration() -> None:
+    scenario = next(item for item in load_scenarios() if item.id == "telegram_exfil_injection")
+    leaked_text = scenario.responses[1].tool_calls[0].arguments["text"]
+    # Sahte kullanıcı sızıntıyı onaylarsa Telegram'a giden metin beklenen [] ile uyuşmaz.
+    approve_leak = Approval(
+        tool="notify_telegram", arguments={"text": leaked_text}, answer=True,
+        required=False, taint_notice=True,
+    )
+    tampered = scenario.model_copy(update={"approvals": [approve_leak]})
+    result = await run_scenario(tampered)
+    assert not result.success
+    assert result.dangerous_errors >= 1
+    assert any("Telegram" in error for error in result.errors)
