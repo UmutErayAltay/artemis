@@ -164,7 +164,8 @@ Kimlik doğrulama ve geçersiz istek hataları bağlantı kesintisi diye gizlenm
 python -m jarvis chat --config config/config.yaml
 ```
 
-Çıkmak için `/çık`, `/cik` veya `/exit` yazın.
+Çıkmak için `/çık`, `/cik` veya `/exit` yazın. `/yeni` konuşma geçmişini sıfırlar
+(panelde "Yeni sohbet"); modele son `context_turns` tur verilir ([ADR 0012](docs/adr/0012-conversation-context.md)).
 
 İşlem sürerken Ctrl+C aktif turu iptal eder; sohbet sonraki komut için açık kalır.
 Onay sorusundaki Ctrl+C hem onayı reddeder hem turu iptal eder. Önceki görevin

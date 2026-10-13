@@ -399,3 +399,34 @@ def test_large_audit_summary_preserves_routing_and_tool_result_metadata(tmp_path
     finally:
         bridge.shutdown()
         assert bridge._stopped.wait(2)
+
+
+def test_reset_conversation_refused_while_active_and_announced_when_idle(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BlockingProvider:
+        async def complete(self, *_args: Any, **_kwargs: Any) -> Completion:
+            entered.set()
+            await asyncio.to_thread(release.wait, 2)
+            return Completion(content="bitti")
+
+    bridge = _fixture(tmp_path, [], provider_override=BlockingProvider())
+    try:
+        request_id = bridge.submit("bekle")
+        assert request_id is not None
+        assert entered.wait(2)
+        assert bridge.reset_conversation() is False
+        release.set()
+        # Bitiş "ready" durumuyla duyurulur; sıfırlama yalnız boşta kabul edilir.
+        state = _wait_for(bridge, State, timeout=2)
+        while not (state.state == "ready" and state.request_id == request_id):
+            state = _wait_for(bridge, State, timeout=2)
+        assert bridge.reset_conversation() is True
+        state = _wait_for(bridge, State, timeout=2)
+        while state.state != "context_reset":
+            state = _wait_for(bridge, State, timeout=2)
+    finally:
+        release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)

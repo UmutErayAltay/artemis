@@ -1,12 +1,14 @@
 """Config hataları ve onay varsayılanı sır veya yan etki üretmemelidir."""
 
 import asyncio
+import json
 import signal
 from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
 
+from jarvis.brain.models import Completion
 from jarvis.channels import cli
 from jarvis.channels.cli import request_approval
 from jarvis.config.settings import ModelConfig, Settings, load_settings
@@ -139,3 +141,48 @@ async def test_cli_repeated_sigint_cancels_each_turn_and_restores_handler(tmp_pa
     assert len(wakes) == 2
     assert handlers[0] is not previous_handler
     assert handlers[-1] is previous_handler
+
+
+async def test_cli_yeni_resets_history_without_starting_a_turn(tmp_path, monkeypatch, capsys):
+    settings = Settings(
+        workspace=tmp_path,
+        state_dir=tmp_path / "state",
+        audit_path=tmp_path / "audit.jsonl",
+        primary_model="fake",
+        models={
+            "fake": ModelConfig(
+                provider="ollama",
+                model="fake",
+                input_per_million=0,
+                output_per_million=0,
+            )
+        },
+    )
+    monkeypatch.setattr(cli, "load_settings", lambda _path: settings)
+    monkeypatch.setattr(cli, "discover_tools", ToolRegistry)
+    previous_handler = signal.getsignal(signal.SIGINT)
+    monkeypatch.setattr(cli.signal, "signal", lambda _signum, _handler: previous_handler)
+
+    class Provider:
+        def __init__(self):
+            self.requests = []
+
+        async def complete(self, messages, tools, *, timeout):
+            self.requests.append([message.model_copy(deep=True) for message in messages])
+            return Completion(content=f"yanıt {len(self.requests)}")
+
+    provider = Provider()
+    monkeypatch.setattr(cli, "build_provider", lambda *_args: provider)
+    prompts = iter(["birinci", "/yeni", "ikinci", "/çık"])
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(prompts))
+
+    await cli.chat(tmp_path / "config.yaml")
+
+    # /yeni modele gitmez; yalnız sonraki turun geçmişini boşaltır.
+    assert len(provider.requests) == 2
+    assert [m.content for m in provider.requests[1] if m.role == "user"] == ["ikinci"]
+    assert "Yeni sohbet başladı" in capsys.readouterr().out
+    audit_lines = (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    records = [json.loads(line) for line in audit_lines]
+    resets = [record for record in records if record["event"] == "context_reset"]
+    assert len(resets) == 1 and resets[0]["removed_turns"] == 1

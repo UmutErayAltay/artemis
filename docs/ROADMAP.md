@@ -47,7 +47,7 @@ Durum: kullanıcının işi. Bir oturum bu fazı "yapıldı" diye işaretlemez.
 
 ### Faz 1 — Konuşma bağlamı
 
-Durum: kodlanıyor. Karar: [ADR 0012](adr/0012-conversation-context.md).
+Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 0012](adr/0012-conversation-context.md).
 
 **Kapsam**
 - Modele son N tur (`context_turns`, varsayılan 6) verilir. Ekleme `CommandRunner`

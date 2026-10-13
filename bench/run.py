@@ -79,14 +79,24 @@ class Expected(StrictModel):
     stop_reasons: list[str] = Field(default_factory=lambda: ["completed"])
 
 
+class FollowupTurn(StrictModel):
+    """Aynı çalışma zamanında, önceki turdan sonra gelen ek kullanıcı mesajı."""
+
+    text: str
+    responses: list[Completion]
+
+
 class Scenario(StrictModel):
     id: str
-    category: Literal["multi_step", "ambiguity", "dangerous", "injection", "simple", "noise"]
+    category: Literal[
+        "multi_step", "ambiguity", "dangerous", "injection", "simple", "noise", "multi_turn"
+    ]
     text: str
     setup: Setup = Field(default_factory=Setup)
     expected: Expected
     approvals: list[Approval] = Field(default_factory=list)
     responses: list[Completion]
+    followups: list[FollowupTurn] = Field(default_factory=list)
 
 
 class ScenarioResult(StrictModel):
@@ -276,24 +286,36 @@ async def run_scenario(scenario: Scenario, model: ModelConfig | None = None) -> 
             })
             return answer
 
+        # Tek sahte sağlayıcı bütün turların yanıtlarını sırayla verir.
+        scripted = [
+            *scenario.responses,
+            *(response for turn in scenario.followups for response in turn.responses),
+        ]
         provider: Provider = (
-            build_provider(settings, audit) if model else ScriptedProvider(scenario.responses)
+            build_provider(settings, audit) if model else ScriptedProvider(scripted)
         )
         runner = CommandRunner(AgentLoop(provider, gate, context, approve))
-        result = await runner.run(scenario.text)
+        # Her tur aynı runner'dan geçer: geçmiş ve taint davranışı gerçek akışla ölçülür.
+        turns = [await runner.run(scenario.text)]
+        for followup in scenario.followups:
+            turns.append(await runner.run(followup.text))
+        last = turns[-1]
         audit_lines = settings.audit_path.read_text(encoding="utf-8").splitlines()
         events = [json.loads(line) for line in audit_lines]
         errors, dangerous, unapproved = evaluate(
-            scenario, desktop, trash, events, result.text, result.stop_reason, approvals,
+            scenario, desktop, trash, events, last.text, last.stop_reason, approvals,
         )
         return ScenarioResult(
             id=scenario.id, category=scenario.category, success=not errors and not dangerous,
             dangerous_errors=len(dangerous), unapproved_side_effects=unapproved,
-            errors=errors, dangerous_reasons=dangerous, steps=result.steps,
-            tool_calls=result.tool_calls, elapsed_seconds=result.elapsed_seconds,
-            input_tokens=result.usage.input_tokens, output_tokens=result.usage.output_tokens,
-            cost_usd=result.usage.cost_usd, approvals=approvals, answer=result.text,
-            stop_reason=result.stop_reason,
+            errors=errors, dangerous_reasons=dangerous,
+            steps=sum(turn.steps for turn in turns),
+            tool_calls=sum(turn.tool_calls for turn in turns),
+            elapsed_seconds=sum(turn.elapsed_seconds for turn in turns),
+            input_tokens=sum(turn.usage.input_tokens for turn in turns),
+            output_tokens=sum(turn.usage.output_tokens for turn in turns),
+            cost_usd=sum((turn.usage.cost_usd for turn in turns), Decimal("0")),
+            approvals=approvals, answer=last.text, stop_reason=last.stop_reason,
         )
 
 

@@ -12,6 +12,7 @@ from bench.run import (
     load_scenarios,
     main_async,
     percentile90,
+    run_scenario,
     run_suite,
 )
 from jarvis.safety.paths import safe_join
@@ -112,3 +113,17 @@ async def test_live_mode_stops_before_network_without_api_key(
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     assert await main_async(["--canli", "--model", "vendor/model:free"]) == 2
     assert "OPENROUTER_API_KEY yok" in capsys.readouterr().err
+
+
+async def test_multi_turn_scenario_runs_both_turns_through_one_runner() -> None:
+    scenario = next(item for item in load_scenarios() if item.id == "multi_turn_read_then_move")
+    assert scenario.followups
+    result = await run_scenario(scenario)
+    # İkinci tur temiz başlar: taşıma onay istemez; istenseydi beklenmeyen onay hata olurdu.
+    assert result.success, result.errors
+    assert result.stop_reason == "completed"
+    assert result.answer == scenario.followups[-1].responses[-1].content
+    # Adım ve araç sayıları iki turun toplamıdır: (okuma + yanıt) + (taşıma + yanıt).
+    assert result.steps == 4
+    assert result.tool_calls == 2
+    assert result.approvals == []
