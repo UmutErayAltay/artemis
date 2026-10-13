@@ -31,14 +31,14 @@ segmentleme davranışı uygulamada açıkça tanımlanıp ölçülmelidir. Edge
 verisini parça parça sağlaması, oynatıcı gerçekten erken başlamıyorsa düşük
 gecikme kanıtı sayılmaz.
 
-## Kullanıcı yanıtı beklenen mimari kararlar
+## Seçilen başlangıç profili
 
-1. “Jarvis” uyandırması: yerel STT anahtar sözcük algılama veya ayrı uyandırma modeli.
-2. Ses onayı: tam argümanlarla terminal onayı veya ayrı sesli onay oturumu.
-3. Windows işlemci/RAM/GPU bilgisi: STT aygıtı ve başlangıç model boyutu seçimi.
+1. Kullanıcının sözcüğü “artemis”; yerel STT anahtar sözcük algılama seçildi.
+2. Ayrı tercih verilmediği için tam argümanlarla mevcut terminal onayı korunur.
+3. 32 GB RAM ve RTX 4050 için CUDA/float16 başlangıç profili; CPU modeli ayrıca
+   ayarlanabilir. İşlemci bilgisi ve gerçek gecikme henüz ölçülmedi.
 
-Bu kararlar kesinleşmeden ilgili uygulama kodu yazılmaz. Kararlar kısa ADR'ye
-işlenir; model kimlikleri ve eşikler yapılandırmadan gelir.
+Kararlar ADR 0008/0009'a işlendi; model kimlikleri ve eşikler yapılandırmadan gelir.
 
 ## Ölçüm ve bitiş şartı
 

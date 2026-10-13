@@ -1,4 +1,4 @@
-# Jarvis: F0–F2 mimarisi
+# Jarvis: F0–F3 mimarisi
 
 Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. İlk teslimat yalnızca CLI,
@@ -96,3 +96,18 @@ başına süre sınırını ve kalıcı silme günlüğünü ekler. Ayrıntılar
 [ADR 0006](adr/0006-cancellation.md), [ADR 0007](adr/0007-undo-journal.md) ve
 [F2 sözleşmeleri](F2_CONTRACTS.md) içindedir. OS'ye ulaşmış eylemin iptalle geri
 alındığı iddia edilmez; sonuç belirsizse denetime ve kullanıcıya açıkça yansır.
+
+## F3 ses sınırı
+
+Yerel mikrofon/VAD/STT → “artemis” uyandırması veya takip penceresi →
+CommandRunner → metin sonucu → akışlı TTS/PCM oynatıcı. Ses algılama ve oynatma
+araç çalıştırmaz. Terminal onayı mevcut tek kapının sunumudur; ses tanıma onay
+vermez. Kısmi STT yalnız gözlem içindir, kesin komut yürütme içindir.
+
+Yerel Piper varsayılandır. Edge TTS yanıt metnini dış servise gönderdiğinden ayrı
+ayar ve denetim gerektirir. Ses modeli ve TTS dosyaları önceden hazırlanır;
+mikrofon kendiliğinden açılmaz, ham kayıt saklanmaz. Söz kesme oynatıcıyı durdurur
+ve aktif turu iptal eder; temizlenmeyen görev varken yeni komut başlamaz.
+Kararlar [ADR 0008](adr/0008-voice-channel.md),
+[ADR 0009](adr/0009-streaming-speech.md), kabul planı [F3_PLAN.md](F3_PLAN.md)
+içindedir. Gerçek Windows ses gecikmesi sahte test sonucuyla eşitlenmez.
