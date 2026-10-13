@@ -6,7 +6,7 @@ import asyncio
 import json
 import queue
 import threading
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from concurrent.futures import Future, TimeoutError
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -15,6 +15,7 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
+from jarvis.brain.agent_loop import RunResult
 from jarvis.channels.runtime import (
     Approval as ApprovalCallback,
 )
@@ -23,8 +24,21 @@ from jarvis.channels.runtime import (
     Runtime,
     create_runtime,
 )
+from jarvis.channels.voice.core import VoiceController
+from jarvis.channels.voice.factory import build_voice_controller
 
 RuntimeFactory = Callable[[Path, ApprovalCallback, AuditObserver], Runtime]
+# İşçi döngüsünde çalışır: runtime, köprünün istek modelinden geçen komut çalıştırıcısı
+# ve durum bildirimi alır. Testler gerçek mikrofon yerine sahte denetleyici verir.
+VoiceFactory = Callable[
+    [Runtime, Callable[[str], Awaitable[RunResult]], Callable[[str], None]],
+    Awaitable[VoiceController],
+]
+
+_BUSY_TEXT = "Şu an başka bir işlem sürüyor; komut çalıştırılmadı."
+_VOICE_ERROR_TEXT = (
+    "Ses açılamadı; ses paketini, model dosyalarını ve mikrofonu kontrol edin."
+)
 
 
 @dataclass(frozen=True)
@@ -59,6 +73,14 @@ class Approval:
 
 
 @dataclass(frozen=True)
+class VoiceCommand:
+    """Sesten çıkan komut; yazılı istekle aynı request_id modelinden geçer."""
+
+    request_id: str
+    text: str
+
+
+@dataclass(frozen=True)
 class Activity:
     request_id: str | None
     turn_id: str | None
@@ -72,7 +94,7 @@ class ActivityGap:
     dropped_count: int
 
 
-BridgeEvent = State | Finished | Failed | Approval | Activity | ActivityGap
+BridgeEvent = State | Finished | Failed | Approval | VoiceCommand | Activity | ActivityGap
 
 
 @dataclass
@@ -174,9 +196,13 @@ class DesktopBridge:
         self,
         config_path: Path,
         runtime_factory: RuntimeFactory | None = None,
+        voice_factory: VoiceFactory | None = None,
     ) -> None:
         self._config_path = config_path
         self._runtime_factory = runtime_factory
+        self._voice_factory: VoiceFactory = (
+            voice_factory if voice_factory is not None else build_voice_controller
+        )
         self._events: queue.SimpleQueue[BridgeEvent] = queue.SimpleQueue()
         self._audit_queue: queue.Queue[Activity] = queue.Queue(maxsize=256)
         self._audit_lock = threading.Lock()
@@ -191,6 +217,11 @@ class DesktopBridge:
         self._active_task: asyncio.Task[Any] | None = None
         self._cleanup_pending = False
         self._shutdown = False
+        # Ses durumu _lock altında okunur/yazılır; mikrofon yalnız start_voice ile açılır.
+        self._voice_starting = False
+        self._voice_stop_requested = False
+        self._voice_controller: VoiceController | None = None
+        self._voice_task: asyncio.Task[None] | None = None
         self._ready = threading.Event()
         self._stopped = threading.Event()
         self._thread = threading.Thread(
@@ -201,6 +232,51 @@ class DesktopBridge:
     @property
     def stopped(self) -> bool:
         return self._stopped.is_set()
+
+    @property
+    def voice_active(self) -> bool:
+        with self._lock:
+            return self._voice_starting or self._voice_task is not None
+
+    def start_voice(self) -> bool:
+        """Sesi açar (GUI thread'i); mikrofonu yalnız kullanıcının bu çağrısı açar."""
+        with self._lock:
+            if (
+                not self._ready.is_set()
+                or self._stopped.is_set()
+                or self._shutdown
+                or self._voice_starting
+                or self._voice_task is not None
+            ):
+                return False
+            self._voice_starting = True
+            self._voice_stop_requested = False
+        loop = self._loop
+        try:
+            if loop is None:
+                raise RuntimeError("İşçi döngüsü yok.")
+            asyncio.run_coroutine_threadsafe(self._start_voice_on_worker(), loop)
+        except RuntimeError:
+            # Döngü kapanmışsa ses başlamaz; bayrak takılı kalıp yeni denemeyi engellemesin.
+            with self._lock:
+                self._voice_starting = False
+            return False
+        return True
+
+    def stop_voice(self) -> bool:
+        """Sesi kapatır; "off" olayını denetleyicinin kendi kapanışı yayımlar."""
+        with self._lock:
+            if not (self._voice_starting or self._voice_task is not None):
+                return False
+            self._voice_stop_requested = True
+        loop = self._loop
+        if loop is None:
+            return False
+        try:
+            loop.call_soon_threadsafe(self._stop_voice_on_worker)
+        except RuntimeError:
+            return False
+        return True
 
     def submit(self, text: str) -> str | None:
         request_id = str(uuid4())
@@ -346,10 +422,10 @@ class DesktopBridge:
             factory = self._runtime_factory
             if factory is None:
                 self._runtime = create_runtime(
-                    self._config_path, self._broker.approve, on_record=self._on_record
+                    self._config_path, self._approve, on_record=self._on_record
                 )
             else:
-                self._runtime = factory(self._config_path, self._broker.approve, self._on_record)
+                self._runtime = factory(self._config_path, self._approve, self._on_record)
         except Exception as error:  # İşçi sınırında traceback/sır sızdırmadan arızayı GUI'ye taşır.
             self._events.put(
                 Failed(
@@ -387,22 +463,30 @@ class DesktopBridge:
         self._active_task = asyncio.create_task(self._run_turn(request_id, text))
 
     async def _run_turn(self, request_id: str, text: str) -> None:
+        # Yazılı yolda iptal, görev bitişi sayılır; ses yolu ise iptali yukarı taşır.
+        with suppress(asyncio.CancelledError):
+            await self._execute_request(request_id, text)
+
+    async def _execute_request(self, request_id: str, text: str) -> RunResult | None:
+        """Yazılı ve sesli isteğin ortak turu: aynı olaylar, aynı temizlik, aynı bitiş."""
         runtime = self._runtime
         if runtime is None:
-            return
+            return None
         if self._broker.is_cancelled():
             self._events.put(State("cancelled", "İstek başlamadan iptal edildi.", request_id))
             self._finish_request(request_id)
-            return
+            return None
+        result: RunResult | None = None
         try:
             result = await runtime.runner.run(text)
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id
             self._events.put(Finished(request_id, result))
-        except Exception as error:
+        except Exception as error:  # İşçi sınırı: sır/traceback sızdırmadan GUI'ye bildirilir.
             self._events.put(Failed(request_id, type(error).__name__, "İstek tamamlanamadı."))
         except asyncio.CancelledError as error:
             self._events.put(Failed(request_id, type(error).__name__, "İstek tamamlanamadı."))
+            raise
         finally:
             if runtime.agent.cleanup_pending:
                 with self._lock:
@@ -411,6 +495,25 @@ class DesktopBridge:
                 asyncio.create_task(self._finish_cleanup(request_id))
             else:
                 self._finish_request(request_id)
+        return result
+
+    async def _run_voice_command(self, text: str) -> RunResult:
+        """Sesli komut, yazılı istekle aynı anda yürümez; meşgulse runner'a hiç gitmez."""
+        with self._lock:
+            if self._active_request is not None or self._cleanup_pending or self._shutdown:
+                return RunResult(text=_BUSY_TEXT, stop_reason="busy", turn_id="")
+            request_id = str(uuid4())
+            self._active_request = request_id
+            self._broker.begin_request(request_id)
+        self._events.put(VoiceCommand(request_id, text))
+        self._events.put(State("running", "Sesli istek çalışıyor.", request_id))
+        # Söz kesme bu görevi iptal eder; CancelledError temizlikten sonra yukarı çıkar.
+        result = await self._execute_request(request_id, text)
+        if result is not None:
+            return result
+        if self._broker.is_cancelled():
+            return RunResult(text="", stop_reason="cancelled", turn_id="")
+        return RunResult(text="İstek tamamlanamadı.", stop_reason="error", turn_id="")
 
     async def _finish_cleanup(self, request_id: str) -> None:
         runtime = self._runtime
@@ -451,7 +554,83 @@ class DesktopBridge:
         else:
             self._events.put(State("context_reset", "Yeni sohbet başladı."))
 
+    def _approve(self, tool_name: str, arguments: dict[str, Any]) -> bool:
+        """Onay yalnız ekrandaki penceredir; ses açıksa onay boyunca mikrofon duraklar.
+
+        İmza `(tool_name, arguments) -> bool` kalır. Duraklatma, onay bekleyen kullanıcının
+        konuşması veya hoparlör sesi sonradan komut/"evet" olarak işlenmesin diye
+        biriken sesi atar; sesli bir cevap hiçbir yoldan onay üretemez.
+        """
+        controller = self._voice_controller
+        if controller is not None:
+            controller.pause_for_approval()
+        try:
+            return self._broker.approve(tool_name, arguments)
+        finally:
+            if controller is not None:
+                controller.resume_after_approval()
+
+    def _emit_voice_state(self, state: str) -> None:
+        self._events.put(State("voice", state))
+
+    def _on_voice_state(self, state: str) -> None:
+        # "off" burada iletilmez: kapanışı _run_voice sonlandırır, böylece hata iletisi
+        # her zaman "off"tan önce gelir ve referanslar temizlendikten sonra görünür.
+        if state != "off":
+            self._emit_voice_state(state)
+
+    def _voice_failed(self) -> None:
+        self._events.put(State("voice_error", _VOICE_ERROR_TEXT))
+
+    async def _start_voice_on_worker(self) -> None:
+        runtime = self._runtime
+        if runtime is None or self._shutdown:
+            with self._lock:
+                self._voice_starting = False
+            return
+        self._emit_voice_state("preparing")
+        try:
+            controller = await self._voice_factory(
+                runtime, self._run_voice_command, self._on_voice_state
+            )
+        except (OSError, RuntimeError, ValueError, ImportError):
+            with self._lock:
+                self._voice_starting = False
+            self._voice_failed()
+            self._emit_voice_state("off")
+            return
+        with self._lock:
+            abandoned = self._voice_stop_requested or self._shutdown
+            if not abandoned:
+                self._voice_controller = controller
+                self._voice_task = asyncio.create_task(self._run_voice(controller))
+                self._voice_starting = False
+        if abandoned:
+            # Hazırlık sürerken kapatıldı: mikrofon hiç açılmadan kaynaklar bırakılır.
+            await controller.close()
+            with self._lock:
+                self._voice_starting = False
+            self._emit_voice_state("off")
+
+    async def _run_voice(self, controller: VoiceController) -> None:
+        try:
+            await controller.run()
+        except (OSError, RuntimeError, ValueError, ImportError):
+            self._voice_failed()
+        finally:
+            with self._lock:
+                self._voice_task = None
+                self._voice_controller = None
+                self._voice_stop_requested = False
+            self._emit_voice_state("off")
+
+    def _stop_voice_on_worker(self) -> None:
+        controller = self._voice_controller
+        if controller is not None:
+            controller.request_stop()
+
     def _shutdown_on_worker(self, request_id: str | None) -> None:
+        self._stop_voice_on_worker()
         if request_id is not None:
             self._cancel_on_worker(request_id)
         else:
@@ -461,8 +640,9 @@ class DesktopBridge:
         runtime = self._runtime
         with self._lock:
             active_request = self._active_request
+            voice_busy = self._voice_starting or self._voice_task is not None
         if runtime is not None and (
-            runtime.agent.cleanup_pending or active_request is not None
+            runtime.agent.cleanup_pending or active_request is not None or voice_busy
         ):
             asyncio.get_running_loop().call_later(0.05, self._stop_loop_when_clean)
             return

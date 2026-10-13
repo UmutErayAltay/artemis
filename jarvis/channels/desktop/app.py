@@ -47,6 +47,7 @@ from jarvis.channels.desktop.bridge import (
     Failed,
     Finished,
     State,
+    VoiceCommand,
 )
 from jarvis.channels.runtime import Runtime, create_runtime
 
@@ -106,6 +107,22 @@ QDialog { background: #111C2D; }
 QPushButton#primary:disabled { color: #718096; background: #23313F; border-color: #334354; }
 QPushButton#danger:disabled { color: #887574; background: #29272C; border-color: #454047; }
 """
+
+
+# Köprü ses durumunu makine okunur taşır; Türkçe metne ekran çevirir.
+_VOICE_LABELS = {
+    "off": "Ses kapalı",
+    "preparing": "Ses hazırlanıyor…",
+    "listening": "Dinliyor",
+    "thinking": "Düşünüyor",
+    "speaking": "Konuşuyor",
+    "error": "Ses hatası",
+}
+
+
+def _is_user_speaker(speaker: str) -> bool:
+    """"Siz" ve "Siz (ses)" aynı kullanıcı balonudur."""
+    return speaker.startswith("Siz")
 
 
 class PromptEdit(QPlainTextEdit):
@@ -203,7 +220,9 @@ class ChatTranscript(QWidget):
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         bubble = QFrame()
-        bubble.setObjectName("messageUser" if speaker == "Siz" else "messageAssistant")
+        bubble.setObjectName(
+            "messageUser" if _is_user_speaker(speaker) else "messageAssistant"
+        )
         bubble_layout = QVBoxLayout(bubble)
         bubble_layout.setContentsMargins(14, 10, 14, 11)
         bubble_layout.setSpacing(5)
@@ -218,7 +237,7 @@ class ChatTranscript(QWidget):
         bubble_layout.addWidget(body)
         self._bubbles.append((bubble, speaker, text))
         self._resize_bubble(bubble, speaker, text)
-        if speaker == "Siz":
+        if _is_user_speaker(speaker):
             row_layout.addStretch(1)
             row_layout.addWidget(bubble)
         else:
@@ -255,7 +274,7 @@ class ChatTranscript(QWidget):
         max_width = min(520, available)
         longest_line = max(text.splitlines(), key=len, default="")
         natural = QFontMetrics(bubble.font()).horizontalAdvance(longest_line) + 48
-        min_width = min(320 if speaker != "Siz" else 180, max_width)
+        min_width = min(180 if _is_user_speaker(speaker) else 320, max_width)
         bubble.setFixedWidth(min(max_width, max(min_width, natural)))
 
 
@@ -367,9 +386,13 @@ class QuickOverlay(QWidget):
         panel_button.clicked.connect(on_show_panel)
         self.status = QLabel("Ana panelle aynı oturum")
         self.status.setObjectName("muted")
+        self.voice_state = QLabel(_VOICE_LABELS["off"])
+        self.voice_state.setObjectName("muted")
+        self.voice_state.setAccessibleName("Ses durumu")
         top.addWidget(title)
         top.addStretch(1)
         top.addWidget(panel_button)
+        top.addWidget(self.voice_state)
         top.addWidget(self.status)
         layout.addLayout(top)
         self.input = PromptEdit(on_send, self)
@@ -401,6 +424,7 @@ class DesktopWindow(QMainWindow):
         config_path: Path,
         *,
         demo: bool = False,
+        voice: bool = False,
         app: QApplication | None = None,
     ) -> None:
         super().__init__()
@@ -409,6 +433,8 @@ class DesktopWindow(QMainWindow):
             raise RuntimeError("Önce QApplication oluşturulmalı.")
         self._app = app_instance
         self._demo = demo
+        # Demo hiçbir koşulda mikrofon açmaz; --ses bayrağı da demoda yok sayılır.
+        self._voice_on_ready = voice and not demo
         self._temporary: tempfile.TemporaryDirectory[str] | None = None
         if demo:
             self._temporary = tempfile.TemporaryDirectory(prefix="jarvis-demo-")
@@ -497,6 +523,19 @@ class DesktopWindow(QMainWindow):
         model_stack.addWidget(model_caption, 0, Qt.AlignmentFlag.AlignRight)
         model_stack.addWidget(self.model_value, 0, Qt.AlignmentFlag.AlignRight)
         header_layout.addLayout(model_stack)
+        self.voice_state = QLabel(_VOICE_LABELS["off"])
+        self.voice_state.setObjectName("muted")
+        self.voice_state.setAccessibleName("Ses durumu")
+        self.voice_button = QPushButton("Ses: kapalı")
+        self.voice_button.setCheckable(True)
+        self.voice_button.setAccessibleName("Sesi aç veya kapat")
+        if self._demo:
+            self.voice_button.setToolTip("Demo modunda ses yok")
+        else:
+            self.voice_button.setToolTip("Mikrofonu yalnız siz açarsınız; onaylar ekrandadır")
+        self.voice_button.clicked.connect(self._toggle_voice)
+        header_layout.addWidget(self.voice_state, 0, Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(self.voice_button)
         self.status_label = QLabel("Başlatılıyor…")
         self.status_label.setObjectName("status")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -583,9 +622,6 @@ class DesktopWindow(QMainWindow):
         self.splitter.setSizes([740, 390])
         main.addWidget(self.splitter, 1)
 
-        footer = QLabel("Ses bu masaüstü sürümünde bağlı değil. Ses kanalı için: jarvis voice")
-        footer.setObjectName("muted")
-        main.addWidget(footer)
         self.setCentralWidget(root)
         self.setStyleSheet(_STYLE)
         self._set_controls()
@@ -698,8 +734,26 @@ class DesktopWindow(QMainWindow):
         if self._approval_dialog is not None:
             self._approval_dialog.reject()
 
+    def _toggle_voice(self, checked: bool) -> None:
+        if checked:
+            if not self.bridge.start_voice():
+                self.voice_button.setChecked(False)
+        elif not self.bridge.stop_voice():
+            self.voice_button.setChecked(False)
+
+    def _show_voice_state(self, state: str) -> None:
+        text = _VOICE_LABELS.get(state, _VOICE_LABELS["off"])
+        self.voice_state.setText(text)
+        self.overlay.voice_state.setText(text)
+        on = state in {"preparing", "listening", "thinking", "speaking"}
+        self.voice_button.setChecked(on)
+        self.voice_button.setText("Ses: açık" if on else "Ses: kapalı")
+
     def _set_controls(self) -> None:
         enabled = self._worker_ready and not self._busy and not self._exiting
+        self.voice_button.setEnabled(
+            self._worker_ready and not self._exiting and not self._demo
+        )
         self.prompt.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
         self.new_chat_button.setEnabled(enabled)
@@ -732,6 +786,9 @@ class DesktopWindow(QMainWindow):
                     self._active_request = None
                     self._set_controls()
                     self.overlay.set_busy(False, "Hazır")
+                if self._voice_on_ready and self._worker_ready:
+                    self._voice_on_ready = False
+                    self.bridge.start_voice()
                 if event.request_id is not None:
                     self._dismiss_approval_for(event.request_id)
             elif event.state == "running":
@@ -744,6 +801,11 @@ class DesktopWindow(QMainWindow):
                 self.status_label.setText("Önceki işlem temizleniyor…")
                 self.overlay.set_busy(True, "Temizleniyor…")
                 self._set_controls()
+            elif event.state == "voice":
+                self._show_voice_state(event.message)
+            elif event.state == "voice_error":
+                self._append_chat("Jarvis", event.message)
+                self._show_voice_state("off")
             elif event.state == "context_reset":
                 self.chat.clear()
                 self._append_chat("Sistem", "Yeni sohbet başladı.")
@@ -758,6 +820,14 @@ class DesktopWindow(QMainWindow):
                 self._finish_exit()
             elif event.state == "cancelled":
                 self.status_label.setText("İptal edildi")
+            return
+        if isinstance(event, VoiceCommand):
+            self._active_request = event.request_id
+            self._busy = True
+            self._append_chat("Siz (ses)", event.text)
+            self.status_label.setText("Çalışıyor…")
+            self._set_controls()
+            self.overlay.set_busy(True)
             return
         if isinstance(event, Approval):
             self._show_approval(event)
@@ -916,18 +986,19 @@ def build_window(
     config_path: Path,
     *,
     demo: bool = False,
+    voice: bool = False,
     app: QApplication | None = None,
 ) -> DesktopWindow:
     """GUI factory; offscreen kabul testleri aynı gerçek pencereyi kullanır."""
-    return DesktopWindow(config_path, demo=demo, app=app)
+    return DesktopWindow(config_path, demo=demo, voice=voice, app=app)
 
 
-def run_desktop(config_path: Path, *, demo: bool = False) -> int:
+def run_desktop(config_path: Path, *, demo: bool = False, voice: bool = False) -> int:
     current = QApplication.instance()
     app = current if isinstance(current, QApplication) else QApplication([])
     app.setApplicationName("Jarvis")
     app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(_STYLE)
-    window = build_window(config_path, demo=demo, app=app)
+    window = build_window(config_path, demo=demo, voice=voice, app=app)
     window.show()
     return app.exec()

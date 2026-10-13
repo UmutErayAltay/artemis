@@ -40,8 +40,16 @@ kapatma önce bekleyen onayı reddeder, ardından worker cleanup'ını bekler.
 Arayüz sohbet ve işlem olaylarını yalnız düz metin olarak gösterir. Onay penceresi
 doğrulanmış tam araç argümanlarını ve varsa dış içerik uyarısını sunar; kapatma,
 Escape ve Enter onayı reddeder. Tepsi simgesi varsa pencere gizlenebilir; tepsi yoksa
-kapatma worker temizliğinden sonra uygulamadan çıkar. Ses için ayrı CLI kanalı
-kullanılır; masaüstünde mikrofon düğmesi yoktur.
+kapatma worker temizliğinden sonra uygulamadan çıkar.
+
+Ses de bu worker'ın asyncio döngüsünde çalışır (ADR 0014): ikinci runtime veya süreç
+yoktur. Başlıktaki "Ses" düğmesi (ya da `jarvis desktop --ses` / `jarvis voice`)
+mikrofonu açan tek yoldur; varsayılan kapalıdır ve durum (kapalı, hazırlanıyor,
+dinliyor, düşünüyor, konuşuyor) ekranda görünür. Sesli komut köprünün istek
+modelinden geçer: her komut bir `request_id` alır, yazılı istekle aynı anda yürümez
+(meşgulse komut çalıştırılmaz) ve sohbette "Siz (ses)" balonu olarak görünür. Onay
+ekrandaki pencereden gelir; bu sırada mikrofon duraklar ve biriken ses atılır.
+Demo modunda ses yoktur.
 
 `--demo`, config yüklemeyen, plugin keşfetmeyen ve ağ/gerçek araç kullanmayan izole
 bir akıştır. Fake provider ve özel demo kayıt defteri geçici kök altında çalışır;
@@ -139,8 +147,11 @@ alındığı iddia edilmez; sonuç belirsizse denetime ve kullanıcıya açıkç
 
 Yerel mikrofon/VAD/STT → “artemis” uyandırması veya takip penceresi →
 CommandRunner → metin sonucu → akışlı TTS/PCM oynatıcı. Ses algılama ve oynatma
-araç çalıştırmaz. Terminal onayı mevcut tek kapının sunumudur; ses tanıma onay
-vermez. Kısmi STT yalnız gözlem içindir, kesin komut yürütme içindir.
+araç çalıştırmaz. `VoiceController` masaüstü worker'ında çalışır; onay mevcut tek
+kapının sunumu olarak ekrandaki pencerede tam argümanlarla alınır
+([ADR 0014](adr/0014-voice-in-desktop.md)). Ses tanıma onay vermez; sesli cevap
+onay üretebilen hiçbir yola bağlı değildir. Kısmi STT yalnız gözlem içindir, kesin
+komut yürütme içindir.
 
 Yerel Piper varsayılandır. Edge TTS yanıt metnini dış servise gönderdiğinden ayrı
 ayar ve denetim gerektirir. Ses modeli ve TTS dosyaları önceden hazırlanır;

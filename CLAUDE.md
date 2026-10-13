@@ -66,9 +66,10 @@ otomatik geri yükleme yapmaz.
 
 Ses kanalı da aynı CommandRunner/SafetyGate'i kullanır. Kısmi STT komut çalıştırmaz;
 uyandırma sözcüğü yapılandırılır (kullanıcının tercihi “artemis”). Sesli “evet”
-onay değildir; terminal onayı tam argümanları gösterir. Onay sırasındaki ve eski
+onay değildir; onay ekrandaki pencerede tam argümanlarla alınır (ADR 0014). Onay sırasındaki ve eski
 üretime ait ses parçaları sonradan komut veya oynatma olarak kullanılmaz.
-Mikrofon açık ses modu dışında açılmaz, ham ses saklanmaz. Edge TTS metin aktarımı
+Mikrofon yalnız kullanıcı sesi açınca (panelde “Ses” düğmesi veya `--ses`) açılır;
+ses masaüstü worker'ında çalışır. Ham ses saklanmaz. Edge TTS metin aktarımı
 ayrı gizlilik ayarı ve denetim gerektirir. Sentez başlaması ilk ses ölçümü değildir;
 ilk PCM oynatıcı olayı ölçülür. Windows kabulü sahte testle geçilmiş sayılmaz.
 

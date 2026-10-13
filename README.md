@@ -60,8 +60,9 @@ python -m jarvis desktop --config config/config.yaml
 ```
 
 Tepsi varsa pencereyi kapatmak paneli gizler; tepsi menüsünden **Çıkış** tüm
-uygulamayı kapatır. Tepsi yoksa pencere kapanışı temiz çıkış başlatır. Ses bu
-panel sürümüne bağlı değildir; `python -m jarvis voice` ile ayrı çalışır.
+uygulamayı kapatır. Tepsi yoksa pencere kapanışı temiz çıkış başlatır. Ses panelin
+içindedir: başlıktaki **Ses** düğmesi mikrofonu açar, `--ses` ile panel ses açık
+başlar (aşağıdaki ses modu bölümü).
 Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.
 Testler ve bilinçli sınırlar [masaüstü raporunda](docs/F5_REPORT.md) bulunur.
 
@@ -73,14 +74,17 @@ hazırlanır. RTX 4050 için CUDA/float16 başlangıç profili ve CPU alternatif
 [Windows ses rehberinde](docs/VOICE_SETUP.md) açıklanır.
 
 ```powershell
-python -m pip install -e ".[dev,voice]"
-python -m jarvis voice --config config/config.yaml
+python -m pip install -e ".[dev,desktop,voice]"
+python -m jarvis desktop --ses --config config/config.yaml
+# kısayol: python -m jarvis voice --config config/config.yaml (aynı komut)
 ```
 
 Önce model dosyalarını, beyin modelini ve ses aygıtını rehbere göre hazırlayın.
 Ham mikrofon kaydı tutulmaz. Edge TTS yalnız ayrı gizlilik ayarıyla açılır;
-varsayılan yerel sestir. Onaylar tam tool/argümanlarla terminalden alınır;
-sesli “evet” onay sayılmaz. İlk Windows denemesini kulaklıkla yapın.
+varsayılan yerel sestir. Ses masaüstü uygulamasının içinde çalışır; mikrofonu
+yalnız **Ses** düğmesi ya da `--ses` açar. Onaylar tam tool/argümanlarla ekrandaki
+pencereden alınır ([ADR 0014](docs/adr/0014-voice-in-desktop.md)); sesli “evet”
+onay sayılmaz. İlk Windows denemesini kulaklıkla yapın.
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
 Tanıma hedefi farklı kullanıcıların günlük Türkçe–İngilizce karışık konuşmasıdır;

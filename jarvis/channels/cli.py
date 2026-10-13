@@ -14,16 +14,6 @@ from pydantic import ValidationError
 from jarvis.brain.errors import ProviderError
 from jarvis.brain.providers import build_provider
 from jarvis.channels.runtime import Runtime, create_runtime
-from jarvis.channels.voice.adapters import (
-    EdgeTTSynthesizer,
-    FallbackSynthesizer,
-    FasterWhisperRecognizer,
-    PiperSynthesizer,
-    SoundDeviceMicrophone,
-    SoundDeviceSink,
-    WebRTCVAD,
-)
-from jarvis.channels.voice.core import SpeechSynthesizer, VoiceController
 from jarvis.config.settings import load_settings
 from jarvis.tools.registry import discover_tools
 
@@ -123,112 +113,41 @@ async def chat(config_path: Path) -> None:
         signal.signal(signal.SIGINT, previous_sigint)
 
 
-async def voice(config_path: Path) -> None:
-    """Açık voice komutuyla mikrofonu başlatıp ortak runner'ı kullanır."""
-    settings = load_settings(config_path)
-    if not settings.primary_model:
-        print("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.")
-        return
-    approval_active = False
-    controller: VoiceController | None = None
-    runtime_ref: list[Runtime] = []
-
-    def approve(name: str, arguments: dict[str, Any]) -> bool:
-        nonlocal approval_active
-        approval_active = True
-        if controller is not None:
-            controller.pause_for_approval()
-        try:
-            return request_approval(
-                name,
-                arguments,
-                runtime_ref[0].gate.pending_notice,
-                on_interrupt=runtime_ref[0].runner.cancel_current,
-            )
-        finally:
-            approval_active = False
-            if controller is not None:
-                controller.resume_after_approval()
-
-    runtime = create_runtime(
-        config_path,
-        approve,
-        settings=settings,
-        provider_builder=build_provider,
-        registry_builder=discover_tools,
-    )
-    runtime_ref.append(runtime)
-    runner, context, settings, audit = (
-        runtime.runner,
-        runtime.context,
-        runtime.settings,
-        runtime.audit,
-    )
-    microphone = SoundDeviceMicrophone(settings.voice)
-    sink = SoundDeviceSink()
-    local_tts = PiperSynthesizer(settings.voice)
-    recognizer = FasterWhisperRecognizer(settings.voice)
-    await asyncio.to_thread(recognizer.prepare)
-    await asyncio.to_thread(local_tts.prepare)
-    synthesizer: SpeechSynthesizer
-    if settings.voice.tts_backend == "edge":
-        primary_tts = EdgeTTSynthesizer(settings.voice, audit)
-        synthesizer = FallbackSynthesizer(primary_tts, local_tts)
-    else:
-        synthesizer = local_tts
-    controller = VoiceController(
-        runner,
-        settings.voice,
-        microphone,
-        WebRTCVAD(settings.voice),
-        recognizer,
-        synthesizer,
-        sink,
-    )
-    loop = asyncio.get_running_loop()
-    previous_sigint = signal.getsignal(signal.SIGINT)
-
-    def handle_sigint(_signum: int, _frame: Any) -> None:
-        if approval_active:
-            raise KeyboardInterrupt
-        if runner.cancel_current():
-            loop.call_soon_threadsafe(context.cancelled.set)
-        loop.call_soon_threadsafe(controller.request_stop)
-
-    signal.signal(signal.SIGINT, handle_sigint)
-    try:
-        print("Jarvis ses kanalı hazır. Uyandırma sözcüğü: " + settings.voice.wake_word)
-        await controller.run()
-    finally:
-        signal.signal(signal.SIGINT, previous_sigint)
-
-
 def main() -> None:
     parser = argparse.ArgumentParser(description="Türkçe güvenli masaüstü asistanı")
     commands = parser.add_subparsers(dest="command", required=True)
     chat_parser = commands.add_parser("chat", help="CLI sohbetini başlat")
     chat_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
-    voice_parser = commands.add_parser("voice", help="Yerel mikrofonla ses kanalını başlat")
+    voice_parser = commands.add_parser(
+        "voice", help="Masaüstünü ses açık başlatır (`desktop --ses` ile aynı)"
+    )
     voice_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     desktop_parser = commands.add_parser("desktop", help="Masaüstü panelini başlat")
     desktop_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     desktop_parser.add_argument(
         "--demo", action="store_true", help="Gerçek araç kullanmayan çevrimdışı demoyu aç"
     )
+    desktop_parser.add_argument(
+        "--ses",
+        action="store_true",
+        help="Panel açılınca sesi de aç (mikrofon yalnız bu bayrakla veya Ses düğmesiyle açılır)",
+    )
     args = parser.parse_args()
     try:
-        if args.command == "voice":
-            asyncio.run(voice(args.config))
-        elif args.command == "desktop":
+        if args.command in {"voice", "desktop"}:
             try:
                 from jarvis.channels.desktop.app import run_desktop
             except ImportError:
                 print(
                     "Masaüstü bileşeni kurulu değil. `pip install 'jarvis-tr[desktop]'` "
-                    "komutuyla isteğe bağlı GUI paketini kurun."
+                    "komutuyla isteğe bağlı GUI paketini kurun. Ses de masaüstü içinde çalışır."
                 )
                 raise SystemExit(2) from None
-            raise SystemExit(run_desktop(args.config, demo=args.demo))
+            # Ses artık ayrı terminal döngüsü değil; onay yalnız ekrandaki pencereden gelir
+            # (ADR 0014). `jarvis voice`, `jarvis desktop --ses` ile aynı yoldur.
+            use_voice = args.command == "voice" or args.ses
+            demo = args.command == "desktop" and args.demo
+            raise SystemExit(run_desktop(args.config, demo=demo, voice=use_voice))
         else:
             asyncio.run(chat(args.config))
     except (OSError, ValueError, ValidationError, yaml.YAMLError, ProviderError) as error:

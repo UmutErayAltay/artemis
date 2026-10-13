@@ -6,12 +6,13 @@ import asyncio
 import logging
 import re
 from collections import deque
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import suppress
 from dataclasses import dataclass, field
 from time import monotonic
 from typing import Protocol
 
+from jarvis.brain.agent_loop import RunResult
 from jarvis.channels.runner import CommandRunner
 from jarvis.config.settings import VoiceConfig
 
@@ -164,6 +165,8 @@ class VoiceController:
         clock: Callable[[], float] = monotonic,
         on_first_pcm: Callable[[], None] | None = None,
         on_timing: Callable[[str, float], None] | None = None,
+        run_command: Callable[[str], Awaitable[RunResult]] | None = None,
+        on_state: Callable[[str], None] | None = None,
     ) -> None:
         self.runner = runner
         self.config = config
@@ -175,6 +178,12 @@ class VoiceController:
         self.clock = clock
         self.on_first_pcm = on_first_pcm or (lambda: None)
         self.on_timing = on_timing or (lambda _stage, _time: None)
+        # Masaüstü köprüsü komutu kendi istek modelinden (request_id, tek aktif istek)
+        # geçirir; varsayılan runner.run CLI/bench davranışını değiştirmez.
+        self.run_command = run_command if run_command is not None else runner.run
+        # on_state yalnız durum bildirir; arbitrary callback'in hatasını burada
+        # yakalamak kör except olurdu, bu yüzden çağıran fırlatmamalıdır.
+        self.on_state = on_state or (lambda _state: None)
         self._followup_until = 0.0
         self._active: asyncio.Task[None] | None = None
         self._barge_cancelled = False
@@ -187,6 +196,7 @@ class VoiceController:
         """Mikrofon yalnız bu açıkça çağrılan döngü süresince tüketilir."""
         try:
             frames = self.microphone.frames().__aiter__()
+            self._emit_state("listening")
             while not self._closed:
 
                 async def next_audio_frame() -> AudioFrame:
@@ -227,6 +237,10 @@ class VoiceController:
 
     def request_stop(self) -> None:
         self._stop.set()
+
+    def _emit_state(self, state: str) -> None:
+        """Yalnız listening/thinking/speaking/off; ekran durumu buradan okur."""
+        self.on_state(state)
 
     async def _handle_utterance(self, segment: AudioSegment) -> None:
         # VAD yalnız aday söz kesmesini gösterir; transcript kesinleşmeden komut yoktur.
@@ -297,7 +311,8 @@ class VoiceController:
     async def _run_and_speak(self, command: str) -> None:
         generation = asyncio.Event()
         try:
-            result = await self.runner.run(command)
+            self._emit_state("thinking")
+            result = await self.run_command(command)
             self.on_timing("model_complete", self.clock())
             if result.text.strip() and not generation.is_set():
 
@@ -305,6 +320,7 @@ class VoiceController:
                     self.on_timing("first_pcm", self.clock())
                     self.on_first_pcm()
 
+                self._emit_state("speaking")
                 await self.sink.play(
                     self.synthesizer.stream(result.text, generation),
                     generation,
@@ -317,6 +333,11 @@ class VoiceController:
             raise
         except (OSError, RuntimeError, ValueError) as error:
             logger.warning("Ses yanıtı başarısız (%s).", type(error).__name__)
+        finally:
+            # Komut bitti, hata aldı ya da söz kesmeyle iptal edildi: denetleyici
+            # hâlâ açıksa mikrofon dinlemeye döner. close() sırasında "off" tek başına yazılır.
+            if not self._closed:
+                self._emit_state("listening")
 
     async def _settle_active(self) -> None:
         active = self._active
@@ -361,3 +382,5 @@ class VoiceController:
                 await closer()
             except (OSError, RuntimeError, ValueError) as error:
                 logger.warning("%s kapatılamadı (%s).", label, type(error).__name__)
+        # Mikrofon gerçekten kapandıktan sonra bildirilir; ekran "açık" demeye devam etmez.
+        self._emit_state("off")

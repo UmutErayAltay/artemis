@@ -73,10 +73,13 @@ voice:
 ```
 
 Mevcut beyin modeli kurulumu ayrıca gerekir; README'deki `primary_model` ve
-sağlayıcı ortam değişkenlerini tamamlayın. Ses modu:
+sağlayıcı ortam değişkenlerini tamamlayın. Ses, masaüstü uygulamasının içinde
+çalışır (`.[desktop,voice]` birlikte kurulur); mikrofonu panelde **Ses** düğmesi
+ya da şu komut açar:
 
 ```powershell
-python -m jarvis voice --config config/config.yaml
+python -m jarvis desktop --ses --config config/config.yaml
+# `python -m jarvis voice --config ...` aynı komutun kısayoludur
 ```
 
 Yerel modeller, aygıt ve sürücü hazır değilse bu komutun çalıştığını varsaymayın.
@@ -92,9 +95,10 @@ ses komutu açıkken kullanılır; kendiliğinden başlangıçta açılmaz. STT 
 metinleri komut yürütmez. Kesinleşen komutlar normal denetim kaydına girebilir;
 bu log kişisel veri içerdiğinden yerelde tutulur.
 
-Onay gerektiren adımda terminal tool adını, tüm doğrulanmış argümanları ve taint
-uyarısını gösterir. Yalnız klavyeden açık “evet” onaydır. Sesli “evet” onay
-vermez. Onay beklerken mikrofon verisi sonraki komuta taşınmaz.
+Onay gerektiren adımda ekrandaki pencere tool adını, tüm doğrulanmış argümanları ve
+taint uyarısını gösterir. Yalnız o pencerede tıklanan açık onay geçerlidir
+(varsayılan Hayır). Sesli “evet” onay vermez. Onay beklerken mikrofon duraklar ve
+biriken ses sonraki komuta taşınmaz.
 
 Edge TTS yalnız açık gizlilik ayarıyla kullanılabilir. Yanıt metni Edge servisine
 gider; aktarım denetlenir. Bu yol ayrıca yerel FFmpeg gerektirir. FFmpeg yolu
@@ -139,8 +143,8 @@ adı etiketleri, sessizlikte metin ve süreler niyet veya araç başarısı değ
    kontrol edin. Yanlış ve kaçırılmış uyanmaları ayrı kaydedin.
 4. Yanıt konuşulurken söze girin; eski sesin durduğunu ve eski turun yeni adım
    başlatmadığını doğrulayın. Model beklerken de iptali deneyin.
-5. Geçici çalışma alanında silme isteyin; terminalde argümanları kontrol edip
-   hayır deyin. Ardından sesle “evet” söyleyin; silme gerçekleşmemeli.
+5. Geçici çalışma alanında silme isteyin; onay penceresinde argümanları kontrol edip
+   Hayır deyin. Ardından sesle “evet” söyleyin; silme gerçekleşmemeli.
 6. Mikrofon/oynatıcı hatası, eksik model, CUDA hatası ve Edge bağlantı hatasında
    dürüst hata/fallback kaydını kontrol edin. Sırlar veya ham kayıt bulunmamalı.
 7. Aynı ücretsiz model, ses aygıtı ve STT/TTS profiliyle en az 20 yanıt ölçün.
