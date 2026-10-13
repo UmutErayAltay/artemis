@@ -1,18 +1,62 @@
 # Jarvis
 
-Windows 11 için Türkçe kişisel masaüstü asistanı. F0–F2: CLI sohbeti,
-sağlayıcıdan bağımsız ajan döngüsü, tek güvenlik kapısı, 16 araç ve izole kabul
-senaryoları. F3 ses kanalı kod ve izole testleri hazırdır; Windows ses ölçümü bekler.
-Masaüstü paneli, hafıza, Telegram ve arka plan ajanları bu sürüme dahil değildir.
+Windows 11 için Türkçe kişisel masaüstü asistanı. CLI ve isteğe bağlı masaüstü
+paneli, sağlayıcıdan bağımsız ajan döngüsünü, tek güvenlik kapısını ve araçları
+paylaşır. F3 ses kanalı kodu hazırdır; gerçek Windows ses ölçümü bekler.
+Hafıza, Telegram ve arka plan ajanları bu sürüme dahil değildir.
 
-CLI'de her kullanıcı komutu ayrı ve durumsuz bir turdur; önceki komutların konuşma
-bağlamı sonraki tura taşınmaz. Kalıcı hafıza sonraki fazın kapsamındadır.
+CLI ve masaüstünde her komut ayrı bir turdur; panelde görünen oturum geçmişi
+modelin konuşma bağlamına taşınmaz. Kalıcı hafıza sonraki fazın kapsamındadır.
 
 Mimari [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), kararların gerekçeleri
 [docs/adr/](docs/adr/), geliştirme kuralları [CLAUDE.md](CLAUDE.md) içindedir.
 Son sağlamlık doğrulaması [F2 raporunda](docs/F2_REPORT.md) bulunur.
 Ses katmanı doğrulaması ve bekleyen Windows kabulü [F3 raporunda](docs/F3_REPORT.md)
 açıklanır.
+
+## Masaüstü arayüzleri
+
+Tek uygulamada sohbet paneli, işlem adımları, hızlı komut penceresi ve sistem
+tepsisi bulunur. Onay penceresi araç adını, tam doğrulanmış argümanları ve dış
+içerik uyarısını gösterir; varsayılan seçim **Hayır**'dır.
+
+Görüntüler Linux'ta gerçek Qt pencerelerinden **demo modunda** alınmıştır.
+Demo, sahte sağlayıcı ve geçici bellek verisi kullanır; ağ çağrısı yapmaz,
+kullanıcının dosyalarına veya uygulamalarına erişmez.
+
+### Sohbet ve işlem adımları
+
+![Jarvis sohbet paneli ve gerçek demo işlem adımları](docs/assets/desktop/panel.png)
+
+[Karşılama ekranını da görüntüleyin.](docs/assets/desktop/welcome.png)
+
+### İşlem onayı
+
+![Araç adı, argümanlar ve dış içerik uyarısıyla işlem onayı](docs/assets/desktop/approval.png)
+
+### Hızlı komut penceresi
+
+![Ana panelle aynı çalışma katmanını kullanan hızlı komut penceresi](docs/assets/desktop/overlay.png)
+
+Python 3.12 ortamında arayüzü kurup ücretsiz, ağsız demoyu açın:
+
+```powershell
+python -m pip install -e ".[desktop]"
+python -m jarvis desktop --demo
+```
+
+Demoda `örnek akış` yazıp Gönder'e basınca onay sürecini deneyebilirsiniz.
+Gerçek kullanım için aşağıdaki kurulum ve sağlayıcı ayarlarını tamamlayın:
+
+```powershell
+python -m jarvis desktop --config config/config.yaml
+```
+
+Tepsi varsa pencereyi kapatmak paneli gizler; tepsi menüsünden **Çıkış** tüm
+uygulamayı kapatır. Tepsi yoksa pencere kapanışı temiz çıkış başlatır. Ses bu
+panel sürümüne bağlı değildir; `python -m jarvis voice` ile ayrı çalışır.
+Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.
+Testler ve bilinçli sınırlar [masaüstü raporunda](docs/F5_REPORT.md) bulunur.
 
 ## Artemis ses modu
 
