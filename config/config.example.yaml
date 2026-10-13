@@ -19,6 +19,30 @@ fallback_model: null
 models: {}
 applications: {}
 
+# Ses modelleri önceden ayrıca kurulmalıdır; Jarvis çalışma anında indirme yapmaz.
+# faster-whisper CUDA/float16 başlangıç profili; CPU için stt_device: cpu,
+# stt_compute_type: int8 seçin.
+voice:
+  wake_word: artemis
+  followup_seconds: 8
+  sample_rate: 16000
+  frame_ms: 20
+  vad_aggressiveness: 2
+  end_silence_ms: 600
+  pre_roll_ms: 300
+  max_utterance_seconds: 15
+  queue_frames: 32
+  stt_model: ../models/whisper-small
+  stt_device: cuda
+  stt_compute_type: float16
+  tts_backend: piper
+  piper_model: ../models/tr_TR-dfki-medium.onnx
+  piper_config: ../models/tr_TR-dfki-medium.onnx.json
+  piper_voice: tr_TR-dfki-medium
+  edge_voice: ''
+  allow_cloud_tts_text: false
+  ffmpeg: ffmpeg
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

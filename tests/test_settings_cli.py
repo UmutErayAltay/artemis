@@ -38,6 +38,12 @@ def test_provider_timeout_is_bounded(timeout):
         Settings(provider_timeout_seconds=timeout)
 
 
+@pytest.mark.parametrize("wake_word", ["", "   ", "artemis\n", "a\x00b"])
+def test_voice_wake_word_rejects_empty_and_control_text(wake_word):
+    with pytest.raises(ValidationError):
+        Settings.model_validate({"voice": {"wake_word": wake_word}})
+
+
 @pytest.mark.parametrize("address", ["ftp://host", "http://public.example", "https://a:b@host"])
 def test_invalid_provider_endpoints(address):
     with pytest.raises(ValidationError):
@@ -72,9 +78,7 @@ def test_cli_approval_interrupt_signals_active_turn(monkeypatch, capsys):
     assert "tur iptal ediliyor" in capsys.readouterr().out
 
 
-async def test_cli_repeated_sigint_cancels_each_turn_and_restores_handler(
-    tmp_path, monkeypatch
-):
+async def test_cli_repeated_sigint_cancels_each_turn_and_restores_handler(tmp_path, monkeypatch):
     settings = Settings(
         workspace=tmp_path,
         state_dir=tmp_path / "state",

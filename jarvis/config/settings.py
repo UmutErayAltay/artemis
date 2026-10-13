@@ -19,6 +19,39 @@ class ModelConfig(BaseModel):
     context_window: int = Field(default=32768, ge=1024)
 
 
+class VoiceConfig(BaseModel):
+    """Önceden kurulmuş yerel ses modellerinin ve ses akışının ayarları."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    wake_word: str = Field(default="artemis", min_length=1, max_length=64)
+    followup_seconds: float = Field(default=8.0, ge=0, le=120)
+    sample_rate: Literal[16000] = 16000
+    frame_ms: Literal[20, 30] = 20
+    vad_aggressiveness: int = Field(default=2, ge=0, le=3)
+    end_silence_ms: int = Field(default=600, ge=100, le=3000)
+    pre_roll_ms: int = Field(default=300, ge=0, le=1000)
+    max_utterance_seconds: float = Field(default=15.0, gt=0, le=120)
+    queue_frames: int = Field(default=32, ge=2, le=256)
+    stt_model: Path | None = None
+    stt_device: Literal["cuda", "cpu"] = "cuda"
+    stt_compute_type: str = "float16"
+    tts_backend: Literal["piper", "edge"] = "piper"
+    piper_model: Path | None = None
+    piper_config: Path | None = None
+    piper_voice: str = ""
+    edge_voice: str = ""
+    allow_cloud_tts_text: bool = False
+    ffmpeg: str = "ffmpeg"
+
+    @field_validator("wake_word")
+    @classmethod
+    def validate_wake_word(cls, value: str) -> str:
+        if not value.strip() or any(ord(char) < 32 or ord(char) == 127 for char in value):
+            raise ValueError("Wake word boşluk veya kontrol karakteri içeremez")
+        return value.strip()
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -38,6 +71,7 @@ class Settings(BaseModel):
     allow_cloud_clipboard: bool = False
     fallback_seconds: float = Field(default=60.0, ge=0)
     applications: dict[str, str] = Field(default_factory=dict)
+    voice: VoiceConfig = Field(default_factory=VoiceConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -73,8 +107,18 @@ def load_settings(path: Path) -> Settings:
         raise ValueError("Config bir YAML eşlemesi olmalı")
     settings = Settings.model_validate(raw)
     base = path.resolve().parent
-    updates: dict[str, Path] = {}
+    updates: dict[str, object] = {}
     for field in ("workspace", "state_dir", "audit_path"):
         value = getattr(settings, field)
         updates[field] = value if value.is_absolute() else (base / value).resolve()
+    voice_updates: dict[str, Path] = {}
+    for field in ("stt_model", "piper_model", "piper_config"):
+        value = getattr(settings.voice, field)
+        if value is not None:
+            path_value = value
+            voice_updates[field] = (
+                path_value if path_value.is_absolute() else (base / path_value).resolve()
+            )
+    if voice_updates:
+        updates["voice"] = settings.voice.model_copy(update=voice_updates)
     return settings.model_copy(update=updates)

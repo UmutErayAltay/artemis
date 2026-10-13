@@ -22,6 +22,13 @@ dev = [
   "mypy==1.18.2",
   "types-PyYAML==6.0.12.20250915",
 ]
+voice = [
+  "faster-whisper==1.2.1",
+  "sounddevice==0.5.6",
+  "edge-tts==7.2.8",
+  "piper-tts==1.8.0",
+  "webrtcvad-wheels==2.0.14.post1",
+]
 
 [project.scripts]
 jarvis = "jarvis.channels.cli:main"
