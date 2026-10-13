@@ -58,6 +58,18 @@ def create_runtime(
         loaded = loaded.model_copy(update={
             "applications": {**installed_applications(), **loaded.applications}
         })
+    agent_config = loaded.code_agent
+    if agent_config.github_owner and agent_config.repos_dir:
+        # Yerel keşif (ağ yok); açık yazılan projeler kazanır. Kullanıcının bilinçli
+        # seçimi: kendi GitHub repoları kod ajanının erişimine girer (ADR 0023).
+        from jarvis.tools.github_repos import discover_projects
+
+        found = discover_projects(agent_config.github_owner, agent_config.repos_dir)
+        loaded = loaded.model_copy(update={
+            "code_agent": agent_config.model_copy(
+                update={"projects": {**found, **agent_config.projects}}
+            )
+        })
     if not loaded.primary_model and provider is None:
         raise ValueError("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.")
     loaded.workspace.mkdir(parents=True, exist_ok=True)

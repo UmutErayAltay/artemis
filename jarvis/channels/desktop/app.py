@@ -802,6 +802,7 @@ class DesktopWindow(QMainWindow):
         self.tabs.addTab(self.splitter, "Sohbet")
         self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
         self.settings_panel.apply_requested.connect(self._apply_settings)
+        self.settings_panel.github_synced.connect(self._github_synced)
         self.settings_scroll = QScrollArea()
         self.settings_scroll.setWidgetResizable(True)
         self.settings_scroll.setWidget(self.settings_panel)
@@ -814,6 +815,19 @@ class DesktopWindow(QMainWindow):
         self.activity_panel.hide()
         self.steps_toggle.hide()
         QTimer.singleShot(0, self.prompt.setFocus)
+        # Açılışta bir kez, arka plan thread'inde; CLI'da eşitleme yoktur.
+        QTimer.singleShot(0, self.settings_panel.start_auto_sync)
+
+    def _github_synced(self, report: Any, auto: bool) -> None:
+        if not (auto and report.cloned):
+            return
+        text = (
+            f"{len(report.cloned)} yeni GitHub reposu çekildi; "
+            "Ayarlar'da Uygula ile kullanıma girer."
+        )
+        self.pet.say(text, "job")
+        if self._tray is not None:
+            self._tray.showMessage("Jarvis", text, QSystemTrayIcon.MessageIcon.Information, 6000)
 
     def _build_overlay(self) -> None:
         self.overlay = QuickOverlay(
@@ -832,6 +846,7 @@ class DesktopWindow(QMainWindow):
                 self._config_path, model_id, device,
                 applications=self.settings_panel.applications,
                 allow_all_applications=self.settings_panel.all_applications.isChecked(),
+                code_agent=self.settings_panel.github_values(),
             )
         except (OSError, ValueError, KeyError, TypeError):
             self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")

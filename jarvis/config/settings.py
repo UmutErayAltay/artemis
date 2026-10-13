@@ -9,6 +9,8 @@ from urllib.parse import urlparse
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+GITHUB_OWNER_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
+
 
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -146,6 +148,18 @@ class CodeAgentConfig(BaseModel):
     command: str = Field(default="claude", min_length=1)
     max_minutes: float = Field(default=20.0, ge=1, le=120)
     model: str | None = None
+    # Kendi GitHub repoları (ADR 0023): sahip + klasör verilirse klasördeki repolar
+    # çalışma anında projeler listesine eklenir. Kimlik doğrulamayı `gh` yönetir.
+    github_owner: str | None = None
+    repos_dir: Path | None = None
+    auto_sync: bool = True
+
+    @field_validator("github_owner")
+    @classmethod
+    def validate_github_owner(cls, value: str | None) -> str | None:
+        if value is not None and not GITHUB_OWNER_RE.fullmatch(value):
+            raise ValueError("GitHub kullanıcı adı harf, rakam veya - içermeli (en çok 39)")
+        return value
 
     @field_validator("projects")
     @classmethod
@@ -243,10 +257,16 @@ def load_settings(path: Path) -> Settings:
             memory_updates[field] = value if value.is_absolute() else (base / value).resolve()
     if memory_updates:
         updates["memory"] = settings.memory.model_copy(update=memory_updates)
-    if settings.code_agent.projects:
-        projects = {
+    agent = settings.code_agent
+    agent_updates: dict[str, object] = {}
+    if agent.repos_dir is not None:
+        repos = agent.repos_dir
+        agent_updates["repos_dir"] = repos if repos.is_absolute() else (base / repos).resolve()
+    if agent.projects:
+        agent_updates["projects"] = {
             alias: value if value.is_absolute() else (base / value).resolve()
-            for alias, value in settings.code_agent.projects.items()
+            for alias, value in agent.projects.items()
         }
-        updates["code_agent"] = settings.code_agent.model_copy(update={"projects": projects})
+    if agent_updates:
+        updates["code_agent"] = agent.model_copy(update=agent_updates)
     return settings.model_copy(update=updates)

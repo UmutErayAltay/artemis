@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib
 import os
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QListWidget,
     QProgressBar,
     QPushButton,
@@ -26,13 +28,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from jarvis.config.settings import Settings, load_settings
+from jarvis.config.settings import GITHUB_OWNER_RE, Settings, load_settings
+from jarvis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
 
 def save_choices(
     path: Path, model_id: str, device: int | str | None,
     *, applications: dict[str, str] | None = None,
     allow_all_applications: bool | None = None,
+    code_agent: dict[str, Any] | None = None,
 ) -> None:
     """Diğer alanları korur; doğrulamadan sonra aynı dizinde atomik değiştirir."""
     settings = load_settings(path)
@@ -60,6 +64,15 @@ def save_choices(
         ]
     if allow_all_applications is not None:
         raw["allow_all_applications"] = allow_all_applications
+    if code_agent is not None:
+        # None değer alanı siler (örn. GitHub bağını kaldırmak); diğer code_agent alanları korunur.
+        section = raw.get("code_agent") or {}
+        for key, value in code_agent.items():
+            if value is None:
+                section.pop(key, None)
+            else:
+                section[key] = value
+        raw["code_agent"] = section
     Settings.model_validate(raw)
     descriptor, temporary = tempfile.mkstemp(prefix=".settings-", suffix=".yaml", dir=path.parent)
     try:
@@ -151,13 +164,54 @@ class ModelInventory(QThread):
             self.failed.emit("API model listesi alınamadı; kayıtlı modeller kullanılabilir.")
 
 
+GitHubSyncFunction = Callable[[str, Path, Runner, Callable[[], bool]], SyncReport]
+
+
+class GitHubSync(QThread):
+    """gh/git alt süreçlerini GUI dışında koşar (ModelInventory ile aynı kalıp)."""
+
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(
+        self, owner: str, repos_dir: Path, sync: GitHubSyncFunction, parent: QWidget
+    ) -> None:
+        super().__init__(parent)
+        self.owner = owner
+        self.repos_dir = repos_dir
+        self._sync = sync
+
+    def run(self) -> None:
+        try:
+            self.done.emit(
+                self._sync(self.owner, self.repos_dir, run_command, self.isInterruptionRequested)
+            )
+        except GitHubError as error:
+            self.failed.emit(str(error))
+
+
+def default_repos_dir() -> str:
+    return str(Path(os.environ.get("USERPROFILE") or Path.home()) / "Desktop" / "Projeler")
+
+
 class SettingsPanel(QWidget):
     apply_requested = Signal(str, object)
+    # (SyncReport, otomatik_mi): otomatik eşitleme sonucu pencere tarafından baloncukla duyurulur.
+    github_synced = Signal(object, bool)
 
-    def __init__(self, config_path: Path, *, demo: bool = False) -> None:
+    def __init__(
+        self,
+        config_path: Path,
+        *,
+        demo: bool = False,
+        github_sync: GitHubSyncFunction = sync_repos,
+    ) -> None:
         super().__init__()
         self.config_path = config_path
         self.inventory: ModelInventory | None = None
+        self.github: GitHubSync | None = None
+        self._github_sync = github_sync
+        self._github_auto = False
         self.applications: dict[str, str] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
@@ -209,6 +263,40 @@ class SettingsPanel(QWidget):
         )
         self.application_hint.setWordWrap(True)
         layout.addWidget(self.application_hint)
+        github_title = QLabel("GitHub")
+        layout.addWidget(github_title)
+        github_form = QFormLayout()
+        self.github_owner = QLineEdit()
+        self.github_owner.setAccessibleName("GitHub kullanıcı adı")
+        self.github_owner.setPlaceholderText("kullanıcı-adı")
+        self.repos_dir = QLineEdit()
+        self.repos_dir.setAccessibleName("Repo klasörü")
+        self.repos_dir.setPlaceholderText(default_repos_dir())
+        self.repos_browse = QPushButton("Klasör seç")
+        self.repos_browse.clicked.connect(self._browse_repos_dir)
+        folder_row = QHBoxLayout()
+        folder_row.addWidget(self.repos_dir, 1)
+        folder_row.addWidget(self.repos_browse)
+        github_form.addRow("Kullanıcı adı", self.github_owner)
+        github_form.addRow("Repo klasörü", folder_row)
+        layout.addLayout(github_form)
+        self.github_auto = QCheckBox("Otomatik eşitle")
+        self.github_auto.setChecked(True)
+        layout.addWidget(self.github_auto)
+        self.github_button = QPushButton("Bağla ve repoları çek")
+        self.github_button.clicked.connect(self._bind_github)
+        layout.addWidget(self.github_button)
+        self.github_status = QLabel(
+            "Kendi repoların (fork ve arşivlenmişler hariç) kod ajanının erişimine girer. "
+            "Kimlik doğrulamayı gh yapar; Jarvis token görmez."
+        )
+        self.github_status.setWordWrap(True)
+        self.github_status.setTextFormat(Qt.TextFormat.PlainText)
+        layout.addWidget(self.github_status)
+        self.github_list = QListWidget()
+        self.github_list.setMaximumHeight(120)
+        self.github_list.setAccessibleName("GitHub eşitleme sonuçları")
+        layout.addWidget(self.github_list)
         self.refresh_button = QPushButton("Model ve mikrofon listesini yenile")
         self.refresh_button.clicked.connect(self.refresh)
         layout.addWidget(self.refresh_button)
@@ -231,6 +319,9 @@ class SettingsPanel(QWidget):
             self.remove_application_button.setEnabled(False)
             self.advanced_devices.setEnabled(False)
             self.all_applications.setEnabled(False)
+            for widget in (self.github_owner, self.repos_dir, self.repos_browse,
+                           self.github_auto, self.github_button):
+                widget.setEnabled(False)
         else:
             self.refresh()
 
@@ -247,6 +338,10 @@ class SettingsPanel(QWidget):
             self._refresh_applications()
             self.all_applications.setChecked(settings.allow_all_applications)
             self._sync_application_access()
+            agent = settings.code_agent
+            self.github_owner.setText(agent.github_owner or "")
+            self.repos_dir.setText(str(agent.repos_dir) if agent.repos_dir else "")
+            self.github_auto.setChecked(agent.auto_sync)
         except (OSError, ValueError, KeyError):
             self.notice.setText("Ayarlar okunamadı.")
             return
@@ -358,6 +453,83 @@ class SettingsPanel(QWidget):
                 self.model_combo.currentData(), self.device_combo.currentData()
             )
 
+    def github_values(self) -> dict[str, Any]:
+        """save_choices(code_agent=...) için; boş alan None olur ve kaydı siler."""
+        owner = self.github_owner.text().strip()
+        folder = self.repos_dir.text().strip()
+        return {
+            "github_owner": owner or None,
+            "repos_dir": folder or None,
+            "auto_sync": self.github_auto.isChecked(),
+        }
+
+    def _browse_repos_dir(self) -> None:
+        start = self.repos_dir.text().strip() or default_repos_dir()
+        chosen = QFileDialog.getExistingDirectory(self, "Repo klasörü seç", start)
+        if chosen:
+            self.repos_dir.setText(chosen)
+
+    def _bind_github(self) -> None:
+        owner = self.github_owner.text().strip()
+        if not GITHUB_OWNER_RE.fullmatch(owner):
+            self.github_status.setText("Geçerli bir GitHub kullanıcı adı yaz.")
+            return
+        if not self.repos_dir.text().strip():
+            self.repos_dir.setText(default_repos_dir())
+        self.run_github_sync(auto=False)
+
+    def start_auto_sync(self) -> None:
+        """Masaüstü açılışında bir kez; ayarlar eksik veya kapalıysa hiçbir şey yapmaz."""
+        if self._demo:
+            return
+        try:
+            agent = load_settings(self.config_path).code_agent
+        except (OSError, ValueError):
+            return
+        if agent.github_owner and agent.repos_dir and agent.auto_sync:
+            self.run_github_sync(auto=True)
+
+    def run_github_sync(self, *, auto: bool) -> None:
+        if self.github is not None and self.github.isRunning():
+            return
+        owner = self.github_owner.text().strip()
+        folder = self.repos_dir.text().strip()
+        if not owner or not folder:
+            return
+        self._github_auto = auto
+        thread = GitHubSync(owner, Path(folder), self._github_sync, self)
+        thread.done.connect(self._github_done)
+        thread.failed.connect(self._github_failed)
+        thread.finished.connect(lambda: self.github_button.setEnabled(not self._demo))
+        self.github = thread
+        self.github_button.setEnabled(False)
+        self.github_list.clear()
+        self.github_status.setText(f"{owner} repoları eşitleniyor…")
+        thread.start()
+
+    def _github_failed(self, message: str) -> None:
+        self.github_status.setText(f"Eşitleme başarısız: {message}")
+
+    def _github_done(self, report: SyncReport) -> None:
+        self.github_list.clear()
+        for label, names in (("klonlandı", report.cloned), ("güncellendi", report.fetched)):
+            for name in names:
+                self.github_list.addItem(f"{label}: {name}")
+        for label, pairs in (("atlandı", report.skipped), ("başarısız", report.failed)):
+            for name, reason in pairs:
+                self.github_list.addItem(f"{label}: {name} — {reason}")
+        self.github_status.setText(
+            f"{len(report.cloned)} klonlandı, {len(report.fetched)} güncellendi, "
+            f"{len(report.skipped)} atlandı, {len(report.failed)} başarısız."
+        )
+        self.github_synced.emit(report, self._github_auto)
+        if not self._github_auto:
+            # Kayıt + yeniden başlatma mevcut Uygula yolundan geçer (meşgulken reddedilir).
+            self._apply()
+
     def finish_inventory(self) -> None:
+        if self.github is not None and self.github.isRunning():
+            self.github.requestInterruption()
+            self.github.wait(6000)
         if self.inventory is not None:
             self.inventory.wait(6000)

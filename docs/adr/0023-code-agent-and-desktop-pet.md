@@ -45,3 +45,16 @@ izolasyondur (container/VM) ve bilinçli olarak ertelendi; bu yüzden listeye ya
 güvenilen kendi projeler eklenir. Panel kapanırken çalışan ajan süreçleri öldürülür.
 Tamamlanma sesle okunmaz, bildirim ve balonla gösterilir. Gerçek Windows ve gerçek
 `claude` kabulü sahte süreç testinden ayrıdır.
+
+**Ek — GitHub bölümü (2026-10-14):** Ayarlar'da GitHub kullanıcı adı, repo klasörü ve
+"Otomatik eşitle" seçilir. Kimlik doğrulamayı `gh` yönetir (keyring); Jarvis token okumaz,
+saklamaz, yalnız `gh`/`git` çalıştırır (`child_environment()`, shell yok, zaman aşımı).
+Yalnız kullanıcının kendi repoları listelenir: fork'lar (başkasının kodu) ve arşivlenmişler
+hariçtir; repo adları klasör adı olacağından sıkı doğrulanır. Eksik repo klonlanır, mevcut
+repoya yalnız `git fetch --prune` yapılır (pull/merge/reset yok, çalışma ağacına dokunulmaz);
+origin'i o repo olmayan klasör atlanır. Eşitleme QThread'de koşar; açılışta (otomatikse) bir
+kez çalışır, CLI'da yoktur. Klasördeki, origin'i `github.com/<sahip>/` olan git depoları
+`create_runtime` içinde yerel keşifle `projects` listesine eklenir (açık yazılanlar kazanır).
+Sonuç: kullanıcının bilinçli tercihiyle bütün kendi repoları kod ajanının erişimine girer
+(yukarıdaki "yalnız güvenilen projeler" sınırı bu repolar için kullanıcı sorumluluğundadır).
+Açılışta çekilen yeni repolar Uygula/yeniden başlatmayla projeler listesine girer.
