@@ -236,6 +236,23 @@ class DesktopBridge:
         loop.call_soon_threadsafe(self._cancel_on_worker, request_id)
         return True
 
+    def reset_conversation(self) -> bool:
+        """Yeni sohbeti başlatır; runner'a yalnız işçi loop'u dokunur (GUI thread'i değil)."""
+        with self._lock:
+            if (
+                not self._ready.is_set()
+                or self._stopped.is_set()
+                or self._shutdown
+                or self._active_request is not None
+                or self._cleanup_pending
+            ):
+                return False
+        loop = self._loop
+        if loop is None:
+            return False
+        loop.call_soon_threadsafe(self._reset_on_worker)
+        return True
+
     def decide(
         self, request_id: str, turn_id: str, approval_id: str, approved: bool
     ) -> bool:
@@ -426,6 +443,13 @@ class DesktopBridge:
                 request_id,
             )
         )
+
+    def _reset_on_worker(self) -> None:
+        runtime = self._runtime
+        if runtime is None or not runtime.runner.reset_context():
+            self._events.put(State("ready", "Aktif işlem sürerken sohbet sıfırlanamaz."))
+        else:
+            self._events.put(State("context_reset", "Yeni sohbet başladı."))
 
     def _shutdown_on_worker(self, request_id: str | None) -> None:
         if request_id is not None:

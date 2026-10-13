@@ -66,7 +66,14 @@ class DemoProvider:
 
     async def complete(self, messages: list[Message], _tools: Any, *, timeout: float) -> Completion:
         del timeout
-        tool_messages = [message for message in messages if message.role == "tool"]
+        # Önceki turlardan gelen araç mesajları bu turun yanıtını belirlememeli.
+        last_user = max(
+            (index for index, message in enumerate(messages) if message.role == "user"),
+            default=-1,
+        )
+        tool_messages = [
+            message for message in messages[last_user + 1 :] if message.role == "tool"
+        ]
         if tool_messages:
             joined = "\n".join(message.content for message in tool_messages)
             if '"status":"denied"' in joined or "onaylamadı" in joined:

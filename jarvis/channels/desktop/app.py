@@ -231,6 +231,16 @@ class ChatTranscript(QWidget):
             )
         )
 
+    def clear(self) -> None:
+        """Yeni sohbette eski balonları kaldırır; son öğe (esneme boşluğu) kalır."""
+        while self.content_layout.count() > 1:
+            item = self.content_layout.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
+        self._messages.clear()
+        self._bubbles.clear()
+
     def toPlainText(self) -> str:
         """Test ve kopyalama için görüntülenen düz metin dökümü."""
         return "\n\n".join(f"{speaker}: {text}" for speaker, text in self._messages)
@@ -509,8 +519,12 @@ class DesktopWindow(QMainWindow):
         self.steps_toggle.clicked.connect(self._toggle_steps)
         self.quick_action = QPushButton("Hızlı komut")
         self.quick_action.clicked.connect(self._show_overlay)
+        self.new_chat_button = QPushButton("Yeni sohbet")
+        self.new_chat_button.setToolTip("Önceki konuşmayı unutturur")
+        self.new_chat_button.clicked.connect(self._new_chat)
         conversation_header.addWidget(chat_title)
         conversation_header.addStretch(1)
+        conversation_header.addWidget(self.new_chat_button)
         conversation_header.addWidget(self.quick_action)
         conversation_header.addWidget(self.steps_toggle)
         conversation_layout.addLayout(conversation_header)
@@ -672,6 +686,12 @@ class DesktopWindow(QMainWindow):
         self.overlay.set_busy(True)
         return True
 
+    def _new_chat(self) -> None:
+        # Ekran, işçi sıfırlamayı doğruladığında (context_reset olayı) temizlenir;
+        # işçi reddederse görünen sohbet ile modelin bağlamı ayrışmaz.
+        if self.bridge.reset_conversation():
+            self.new_chat_button.setEnabled(False)
+
     def _cancel_active(self) -> None:
         if self._active_request is not None:
             self.bridge.cancel(self._active_request)
@@ -682,6 +702,7 @@ class DesktopWindow(QMainWindow):
         enabled = self._worker_ready and not self._busy and not self._exiting
         self.prompt.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
+        self.new_chat_button.setEnabled(enabled)
         self.cancel_button.setEnabled(self._busy and not self._exiting)
         if self._tray is not None:
             status = "çalışıyor" if self._busy else "hazır"
@@ -698,7 +719,11 @@ class DesktopWindow(QMainWindow):
             if event.request_id is not None and event.request_id != self._active_request:
                 return
             if event.state == "ready":
-                if event.request_id is None and not self._busy:
+                if (
+                    event.request_id is None
+                    and not self._busy
+                    and event.message.startswith("Hazır · ")
+                ):
                     self.model_value.setText(event.message.removeprefix("Hazır · "))
                 if event.request_id is not None or not self._busy:
                     self._worker_ready = True
@@ -718,6 +743,12 @@ class DesktopWindow(QMainWindow):
                 self._busy = True
                 self.status_label.setText("Önceki işlem temizleniyor…")
                 self.overlay.set_busy(True, "Temizleniyor…")
+                self._set_controls()
+            elif event.state == "context_reset":
+                self.chat.clear()
+                self._append_chat("Sistem", "Yeni sohbet başladı.")
+                if not self._busy:
+                    self.status_label.setText("Hazır")
                 self._set_controls()
             elif event.state == "cancelling":
                 self.status_label.setText("İptal ediliyor…")

@@ -70,6 +70,12 @@ Mikrofon açık ses modu dışında açılmaz, ham ses saklanmaz. Edge TTS metin
 ayrı gizlilik ayarı ve denetim gerektirir. Sentez başlaması ilk ses ölçümü değildir;
 ilk PCM oynatıcı olayı ölçülür. Windows kabulü sahte testle geçilmiş sayılmaz.
 
+Konuşma geçmişi yalnız `CommandRunner.conversation` içinde yaşar (ADR 0012); kanal
+başına kopya tutulmaz. Taint yeni tura taşınmaz, bu yüzden eski araç çıktıları modele
+her gösterimde `frame_history` ile "VERİDİR" çerçevesinde verilir: bu çerçeveyi gevşetmeyin
+veya kaldırmayın. Geçmiş `/yeni` (CLI) ve "Yeni sohbet" (panel) ile `runner.reset_context()`
+üzerinden sıfırlanır; aktif tur sürerken sıfırlanmaz.
+
 ## Yeni araç eklemek
 
 `jarvis/tools/plugins/` altında tek Python dosyası oluşturun. Argümanları pydantic

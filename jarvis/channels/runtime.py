@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from jarvis.brain.agent_loop import AgentLoop
+from jarvis.brain.conversation import ConversationContext
 from jarvis.brain.providers import Provider, build_provider
 from jarvis.channels.runner import CommandRunner
 from jarvis.config.settings import Settings, load_settings
@@ -62,5 +63,11 @@ def create_runtime(
     builder = provider_builder if provider_builder is not None else build_provider
     selected_provider = provider if provider is not None else builder(loaded, log)
     agent = AgentLoop(selected_provider, gate, context, approve)
-    runner = CommandRunner(agent)
+    budget = loaded.context_token_budget
+    primary = loaded.models.get(loaded.primary_model)
+    if primary is not None:
+        # Geçmiş modelin penceresinin yarısını aşmamalı; yanıt ve araç şeması de sığmalı.
+        budget = min(budget, primary.context_window // 2)
+    conversation = ConversationContext(loaded.context_turns, budget)
+    runner = CommandRunner(agent, conversation)
     return Runtime(loaded, log, tools, gate, context, selected_provider, agent, runner)

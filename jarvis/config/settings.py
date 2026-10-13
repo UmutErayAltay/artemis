@@ -83,6 +83,10 @@ class Settings(BaseModel):
     max_seconds: float = Field(default=60.0, gt=0, le=3600)
     provider_timeout_seconds: float = Field(default=15.0, gt=0, le=3600)
     max_output_tokens: int = Field(default=1024, ge=1)
+    # Konuşma bağlamı (ADR 0012): 0 tur bağlamı kapatır; bütçe model penceresinin
+    # yarısıyla runtime'da ayrıca sınırlanır.
+    context_turns: int = Field(default=6, ge=0, le=50)
+    context_token_budget: int = Field(default=6000, ge=256, le=200_000)
     daily_budget_usd: Decimal = Field(default=Decimal("1"), ge=0)
     allow_paid: bool = False
     allow_cloud_file_content: bool = False

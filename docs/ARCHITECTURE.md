@@ -51,6 +51,16 @@ durduktan sonra silinir.
 Karar [ADR 0011](adr/0011-desktop-ui.md) ve uygulama ayrıntıları
 [masaüstü planında](DESKTOP_PLAN.md) bulunur.
 
+## Konuşma bağlamı
+
+Oturum geçmişinin tek sahibi `CommandRunner`'ın `ConversationContext`'idir; CLI, panel
+ve ses aynı geçmişi görür. Kayıt birimi turdur (kullanıcı metni, sonucu alınmış araç
+çağrıları, yanıt); iptal edilen, temizliği süren ve boş turlar kaydedilmez. Modele en
+fazla `context_turns` tur verilir, token bütçesi aşılırsa önce eski araç çıktıları
+kısaltılır, sonra en eski turlar düşer. Eski araç çıktıları her gösterimde yeniden veri
+çerçevesine alınır; taint yeni tura taşınmaz, gizlilik işareti taşınır. Sıfırlama CLI'da
+`/yeni`, panelde "Yeni sohbet"tir. Karar [ADR 0012](adr/0012-conversation-context.md).
+
 ## Güvenlik sınırları
 
 Araç riskleri READ_ONLY, SIDE_EFFECT ve CONFIRM_REQUIRED'dır. Bildirilmeyen risk

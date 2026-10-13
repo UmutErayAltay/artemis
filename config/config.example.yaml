@@ -6,6 +6,9 @@ max_steps: 8
 max_seconds: 60
 provider_timeout_seconds: 15
 max_output_tokens: 1024
+# Konuşma bağlamı (ADR 0012): modele verilen önceki tur sayısı; 0 kapatır.
+context_turns: 6
+context_token_budget: 6000
 daily_budget_usd: '1.00'
 allow_paid: false
 allow_cloud_file_content: false

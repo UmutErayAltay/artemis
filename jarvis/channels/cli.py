@@ -98,7 +98,10 @@ async def chat(config_path: Path) -> None:
 
     signal.signal(signal.SIGINT, handle_sigint)
     try:
-        print("Jarvis hazır. Çıkmak için /çık yazın. Onaylarda varsayılan Hayır.")
+        print(
+            "Jarvis hazır. Çıkmak için /çık, yeni sohbet için /yeni yazın. "
+            "Onaylarda varsayılan Hayır."
+        )
         while True:
             try:
                 text = input("Siz: ")
@@ -106,6 +109,13 @@ async def chat(config_path: Path) -> None:
                 break
             if text.strip().casefold() in {"/çık", "/cik", "/exit"}:
                 break
+            if text.strip().casefold() == "/yeni":
+                # Komut tur çalıştırmaz ve modele gitmez; yalnız geçmişi unutturur.
+                if runner.reset_context():
+                    print("Yeni sohbet başladı; önceki konuşma unutuldu.")
+                else:
+                    print("Aktif işlem sürerken sohbet sıfırlanamaz.")
+                continue
             turn_task = asyncio.create_task(runner.run(text))
             result = await asyncio.shield(turn_task)
             print(f"Jarvis: {result.text}")
