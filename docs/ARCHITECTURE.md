@@ -111,3 +111,9 @@ ve aktif turu iptal eder; temizlenmeyen görev varken yeni komut başlamaz.
 Kararlar [ADR 0008](adr/0008-voice-channel.md),
 [ADR 0009](adr/0009-streaming-speech.md), kabul planı [F3_PLAN.md](F3_PLAN.md)
 içindedir. Gerçek Windows ses gecikmesi sahte test sonucuyla eşitlenmez.
+
+Günlük Türkçe ve İngilizce uygulama adları için kesin/kısmi STT çözümleme
+ayarları ayrıdır; özel kelimeler yalnız yerel tanımaya ipucu verir. Transcript'e
+yaklaşık eşleştirme ile uygulama adı yazılmaz. Gerçek WAV kayıtları üzerindeki
+WER/CER ve uygulama adı hataları, sahte orkestrasyon ve niyet testlerinden ayrı
+raporlanır; [ADR 0010](adr/0010-speech-accuracy.md) bu ayrımı açıklar.

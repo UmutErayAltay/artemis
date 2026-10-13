@@ -6,9 +6,11 @@ from types import ModuleType
 
 import pytest
 
+import jarvis.channels.voice.adapters as voice_adapters
 from jarvis.channels.voice.adapters import (
     EdgeTTSynthesizer,
     FallbackSynthesizer,
+    FasterWhisperRecognizer,
     PiperSynthesizer,
     SoundDeviceMicrophone,
     SoundDeviceSink,
@@ -16,6 +18,61 @@ from jarvis.channels.voice.adapters import (
 from jarvis.channels.voice.core import AudioFrame, PCMChunk
 from jarvis.config.settings import VoiceConfig
 from jarvis.safety.audit import AuditLog
+
+
+async def test_faster_whisper_uses_configured_final_and_partial_profiles(monkeypatch, tmp_path):
+    class Samples:
+        def astype(self, _dtype):
+            return self
+
+        def __truediv__(self, _value):
+            return self
+
+    class Numpy:
+        int16 = object()
+        float32 = object()
+
+        @staticmethod
+        def frombuffer(_pcm, dtype):
+            assert dtype is Numpy.int16
+            return Samples()
+
+    options = []
+
+    class Model:
+        def transcribe(self, _samples, **kwargs):
+            options.append(kwargs)
+            return ([type("Segment", (), {"text": " test "})()], None)
+
+    class WhisperModule:
+        @staticmethod
+        def WhisperModel(*_args, **_kwargs):
+            return Model()
+
+    original_import = voice_adapters.importlib.import_module
+
+    def fake_import(name):
+        if name == "numpy":
+            return Numpy
+        if name == "faster_whisper":
+            return WhisperModule
+        return original_import(name)
+
+    monkeypatch.setattr("jarvis.channels.voice.adapters.importlib.import_module", fake_import)
+    config = VoiceConfig(
+        stt_model=tmp_path,
+        stt_language="auto",
+        stt_beam_size=6,
+        stt_partial_beam_size=2,
+        stt_hotwords=("artemis", "Visual Studio Code"),
+    )
+    recognizer = FasterWhisperRecognizer(config)
+    assert await recognizer.transcribe(b"\x00\x00") == "test"
+    assert await recognizer.transcribe_partial(b"\x00\x00") == "test"
+    assert [call["beam_size"] for call in options] == [6, 2]
+    assert all(call["language"] is None for call in options)
+    assert all(call["task"] == "transcribe" and call["temperature"] == 0 for call in options)
+    assert all(call["hotwords"] == "artemis Visual Studio Code" for call in options)
 
 
 def test_microphone_queue_is_bounded_and_pause_discards_frames():

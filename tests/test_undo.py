@@ -1,5 +1,6 @@
 """Geri alma günlüğü gerçek geçici dosya ve SQLite veritabanıyla sınanır."""
 
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any, Literal
@@ -207,6 +208,7 @@ def test_terminal_status_is_idempotent_and_cannot_be_rewritten(
         journal.set_status(record.record_id, "failed")
 
 
+@pytest.mark.skipif(os.name == "nt", reason="Windows chmod dosya izinlerini değiştirmez")
 async def test_chmod_failure_aborts_delete(
     context: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:

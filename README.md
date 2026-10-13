@@ -32,6 +32,13 @@ varsayılan yerel sestir. Onaylar tam tool/argümanlarla terminalden alınır;
 sesli “evet” onay sayılmaz. İlk Windows denemesini kulaklıkla yapın.
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
+Tanıma hedefi farklı kullanıcıların günlük Türkçe–İngilizce karışık konuşmasıdır;
+birkaç uygulama adına bağlı komut kalıpları kullanılmaz. Özel kelimeler isteğe
+bağlı ipucudur. Gerçek ses kaydıyla kelime/karakter ve uygulama adı hatalarını
+ölçme adımları [ses rehberinde](docs/VOICE_SETUP.md) bulunur. Konuşmayı doğru
+yazıya çevirmek, niyeti ve doğru araç hedefini anlamakla aynı ölçüm değildir.
+Genel konuşma doğruluğu gerçek, farklı konuşmacı kayıtlarıyla henüz doğrulanmadı.
+
 ## Kurulum
 
 Python 3.12 kullanın. Windows PowerShell:

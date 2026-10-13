@@ -52,6 +52,10 @@ voice:
   stt_model: ../models/whisper-small
   stt_device: cuda
   stt_compute_type: float16
+  stt_language: tr
+  stt_beam_size: 5
+  stt_partial_beam_size: 1
+  stt_hotwords: []
   tts_backend: piper
   piper_model: ../models/tr_TR-dfki-medium.onnx
   piper_config: ../models/tr_TR-dfki-medium.onnx.json
@@ -88,10 +92,35 @@ yapılandırılır, shell komutu olarak çalıştırılmaz; tüm yanıtı birikt
 MP3 akışı PCM'e çevrilir. İptal sırasında yerel yedeğe geçilip konuşmaya devam
 edilmez. Varsayılan ağsız Piper yoludur.
 
+Kesin STT varsayılanı beam 5, kısmi gözlem beam 1 kullanır; `stt_language: auto`
+otomatik dil seçimini dener, fakat Türkçe ve İngilizceyi cümle içinde doğru
+değiştirmeyi garanti etmez. `stt_hotwords` isteğe bağlı, sınırlı yerel kelime
+ipuçlarıdır; boş liste genel kullanım başlangıcıdır. Bu ipuçları her kullanıcıya
+veya modelin bilmediği özel adlara yönelik doğruluğu kanıtlamaz. STT'ye prompt
+verilmez ve tanınan metne sonradan yaklaşık uygulama adı eklenmez.
+
 İlk doğrulamayı kulaklıkla yapın. Akustik yankı giderme bu sürümde yoktur;
 hoparlör sesi VAD tarafından yeni konuşma sayılıp yanlış söz kesme üretebilir.
 
 ## Windows elle kabul kontrolü
+
+Gerçek WAV kayıtlarıyla doğruluk ölçüm şeması, konuşmacı ayrımı ve yorumlama için
+[genel konuşma kabul planına](SPEECH_ACCURACY_PLAN.md) bakın. Repo içindeki örnek
+manifest yalnız kayıt planıdır ve WAV dosyaları içermez; gerçek WAV olmadan
+doğruluk sonucu üretilmez. Kayıtlar 16 kHz mono PCM16 WAV olmalı ve manifestteki
+yollar manifest dizininin altında bulunmalıdır. Benchmark ham ses veya transcript
+çıktıya yazmaz; yalnız yerel STT çalıştırır, LLM'e veya araca gitmez:
+
+```powershell
+python -m bench.speech_accuracy --sahte --corpus bench/speech_accuracy_corpus.yaml
+python -m bench.speech_accuracy --canli --config config/config.yaml --corpus bench/speech_accuracy_corpus.yaml
+```
+
+Sahte kip ölçüm hattını sınar, tanıma doğruluğunu ölçmez. Canlı kip WAV ve önceden
+kurulmuş yerel modeli okur. `expected_apps` yalnız transcript'te uygulama adının
+geçip geçmediğini etiketler; açma niyetini belirtmez. Uygulama adı bulma sonucu
+kelime sınırı ve sınırlı Türkçe ek kuralıyla yaklaşık ölçülür. WER/CER, uygulama
+adı etiketleri, sessizlikte metin ve süreler niyet veya araç başarısı değildir.
 
 1. “artemis saat kaç” ve “artemis” ardından ayrı komutla uyanma akışını deneyin.
 2. Takip penceresinde tekrar uyandırmadan soru sorun; pencere dolduktan sonra

@@ -5,6 +5,8 @@
 Kullanıcı günlük Türkçe konuşmada İngilizce uygulama adlarını ve ifadeleri birlikte
 kullanıyor. Tek ışınlı çözümleme hız için seçilmişti; gerçek ses doğruluğu henüz
 ölçülmedi. Metin tabanlı sahte testler akustik doğruluğu kanıtlamaz.
+Hedef belirli bir kullanıcının birkaç uygulamasına uyarlama değil, farklı
+kullanıcıların genel günlük konuşmasıdır.
 
 ## Karar
 
@@ -14,11 +16,16 @@ kalır. Otomatik dil seçimi kelime bazında dil değişimini garanti etmez.
 Sınırlı, yapılandırılmış özel kelime listesi yalnız yerel STT'ye ipucu olur;
 metne sonradan yaklaşık eşleştirme ile uygulama adı yazılmaz. Uygulama izin listesi
 ve tek SafetyGate değişmez. Daha büyük model seçimi gerçek kayıtlarla karşılaştırılır.
+Özel kelimeler varsayılan boş ve isteğe bağlıdır; temel doğruluk bunlara
+dayandırılmaz. Değerlendirme kelimeleri tanıyıcıya otomatik ipucu olarak verilmez.
 
 Kullanıcının önceden hazırladığı yerel WAV ve referans metinlerle çalışan ayrı
 benchmark WER, CER, uygulama adı doğruluğu ve yanlış uygulama adı üretimini raporlar.
 Ses buluta gönderilmez; benchmark araç çalıştırmaz. Sessizlik örnekleri ayrıca
 ölçülür. Sahte kip yalnız ölçüm kodunu sınar; gerçek tanıma başarısı sayılmaz.
+Kayıt seti farklı konuşmacı/aksan, gündelik ifadeler, Türkçe–İngilizce geçişleri,
+görülmemiş özel adlar, düzeltmeler ve olumsuz komutlar içermelidir. Konuşmacı ve
+kategori bilgisi korunur; tek toplam skorla zayıf gruplar gizlenmez.
 
 ## Sonuçlar
 

@@ -25,7 +25,12 @@ async def test_fake_suite_meets_f0_f1_acceptance_thresholds() -> None:
     assert counts["noise"] >= 2
 
     report = await run_suite(scenarios)
-    assert report["totals"]["failed"] == 0
+    failed = [
+        {"id": item["id"], "samples": item["samples"]}
+        for item in report["scenarios"]
+        if not item["success"]
+    ]
+    assert report["totals"]["failed"] == 0, failed
     assert report["totals"]["dangerous_errors"] == 0
     assert report["totals"]["unapproved_side_effects"] == 0
     rows = {row["id"]: row for row in report["scenarios"]}

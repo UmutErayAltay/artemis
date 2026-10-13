@@ -1,0 +1,108 @@
+# Yerel kayıt yer tutucuları: gerçek WAV kayıtları kullanıcı tarafından eklenir.
+# WAV dosyası ve metin olmadan ASR doğruluğu ölçülmüş sayılmaz.
+apps:
+  - Discord
+  - Chrome
+  - Spotify
+  - Visual Studio Code
+  - Steam
+  - WhatsApp
+  - NebulaEdit
+items:
+  - id: daily_weather
+    category: daily_tr
+    speaker_id: speaker_1
+    split: dev
+    audio: audio/daily_weather.wav
+    transcript: Yarın sabah hava nasıl olacak
+  - id: daily_reminder
+    category: daily_tr
+    speaker_id: speaker_1
+    split: dev
+    audio: audio/daily_reminder.wav
+    transcript: Akşam sekizde bana su içmeyi hatırlat
+  - id: informal_correction
+    category: corrections
+    speaker_id: speaker_2
+    split: dev
+    audio: audio/informal_correction.wav
+    transcript: Yok onu değil, önceki dosyayı aç
+  - id: negated_action
+    category: negation
+    speaker_id: speaker_2
+    split: dev
+    audio: audio/negated_action.wav
+    transcript: Mesaj gönderme, sadece taslak hazırla
+  - id: app_discord
+    category: mixed_apps
+    speaker_id: speaker_1
+    split: dev
+    audio: audio/app_discord.wav
+    transcript: Discord'u açar mısın
+    expected_apps: [Discord]
+  - id: app_chrome
+    category: mixed_apps
+    speaker_id: speaker_2
+    split: dev
+    audio: audio/app_chrome.wav
+    transcript: Chrome'da yeni bir tab aç
+    expected_apps: [Chrome]
+  - id: app_spotify
+    category: mixed_apps
+    speaker_id: speaker_3
+    split: heldout
+    audio: audio/app_spotify.wav
+    transcript: Spotify'da biraz sakin müzik çal
+    expected_apps: [Spotify]
+  - id: app_vscode
+    category: mixed_apps
+    speaker_id: speaker_4
+    split: heldout
+    audio: audio/app_vscode.wav
+    transcript: Visual Studio Code projesini aç
+    expected_apps: [Visual Studio Code]
+  - id: app_steam
+    category: mixed_apps
+    speaker_id: speaker_3
+    split: heldout
+    audio: audio/app_steam.wav
+    transcript: Steam'i açma, toplantım var
+    expected_apps: [Steam]
+  - id: app_whatsapp
+    category: mixed_apps
+    speaker_id: speaker_3
+    split: heldout
+    audio: audio/app_whatsapp.wav
+    transcript: WhatsApp'ı açmadan önce bekle
+    expected_apps: [WhatsApp]
+  - id: app_unseen_name
+    category: mixed_apps
+    speaker_id: speaker_4
+    split: heldout
+    audio: audio/app_unseen_name.wav
+    transcript: NebulaEdit'te son değişiklikleri göster
+    expected_apps: [NebulaEdit]
+  - id: english_fragment
+    category: english_fragment
+    speaker_id: speaker_3
+    split: heldout
+    audio: audio/english_fragment.wav
+    transcript: Can you check the latest update first
+  - id: unrelated_question
+    category: unrelated_question
+    speaker_id: speaker_4
+    split: heldout
+    audio: audio/unrelated_question.wav
+    transcript: Sence bu tarifte limon yerine portakal olur mu
+  - id: silence
+    category: silence
+    speaker_id: speaker_1
+    split: dev
+    audio: audio/silence.wav
+    transcript: ''
+  - id: background_noise
+    category: noise
+    speaker_id: speaker_2
+    split: heldout
+    audio: audio/background_noise.wav
+    transcript: ''

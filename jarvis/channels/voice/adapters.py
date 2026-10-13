@@ -205,14 +205,17 @@ class FasterWhisperRecognizer:
         self._load()
 
     async def transcribe(self, pcm: bytes) -> str:
-        return await self._decode(pcm)
+        return await self._decode(pcm, partial=False)
 
     async def transcribe_partial(self, pcm: bytes) -> str:
         """Artan geçici pencereyi çözer; VoiceController sonucu asla dispatch etmez."""
-        return await self._decode(pcm)
+        return await self._decode(pcm, partial=True)
 
-    async def _decode(self, pcm: bytes) -> str:
-        import numpy
+    async def _decode(self, pcm: bytes, *, partial: bool) -> str:
+        try:
+            numpy = importlib.import_module("numpy")
+        except ImportError as error:
+            raise RuntimeError("Ses için `pip install .[voice]` kurulumu gerekli.") from error
 
         samples = numpy.frombuffer(pcm, dtype=numpy.int16).astype(numpy.float32) / 32768.0
 
@@ -221,8 +224,15 @@ class FasterWhisperRecognizer:
             with self._inference_lock:
                 segments, _info = self._load().transcribe(
                     samples,
-                    language="tr",
-                    beam_size=1,
+                    language=None if self.config.stt_language == "auto" else "tr",
+                    task="transcribe",
+                    beam_size=(
+                        self.config.stt_partial_beam_size
+                        if partial
+                        else self.config.stt_beam_size
+                    ),
+                    temperature=0,
+                    hotwords=" ".join(self.config.stt_hotwords) or None,
                     vad_filter=False,
                     condition_on_previous_text=False,
                 )

@@ -36,6 +36,10 @@ class VoiceConfig(BaseModel):
     stt_model: Path | None = None
     stt_device: Literal["cuda", "cpu"] = "cuda"
     stt_compute_type: str = "float16"
+    stt_language: Literal["tr", "auto"] = "tr"
+    stt_beam_size: int = Field(default=5, ge=1, le=10)
+    stt_partial_beam_size: int = Field(default=1, ge=1, le=10)
+    stt_hotwords: tuple[str, ...] = Field(default=(), max_length=100)
     tts_backend: Literal["piper", "edge"] = "piper"
     piper_model: Path | None = None
     piper_config: Path | None = None
@@ -43,6 +47,20 @@ class VoiceConfig(BaseModel):
     edge_voice: str = ""
     allow_cloud_tts_text: bool = False
     ffmpeg: str = "ffmpeg"
+
+    @field_validator("stt_hotwords")
+    @classmethod
+    def validate_stt_hotwords(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        total_chars = 0
+        for word in values:
+            if not word.strip() or len(word) > 64:
+                raise ValueError("STT hotword boş olamaz ve 64 karakteri aşamaz")
+            if any(ord(char) < 32 or ord(char) == 127 for char in word):
+                raise ValueError("STT hotword kontrol karakteri içeremez")
+            total_chars += len(word)
+        if total_chars > 2048:
+            raise ValueError("STT hotword toplam uzunluğu 2048 karakteri aşamaz")
+        return values
 
     @field_validator("wake_word")
     @classmethod

@@ -231,7 +231,10 @@ async def run_scenario(scenario: Scenario, model: ModelConfig | None = None) -> 
         for relative, content in scenario.setup.files.items():
             path = safe_join(desktop, relative)
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            # Windows metin modu LF'yi CRLF'ye çevirebilir ve dosya boyutu
+            # senaryolarını platforma göre farklılaştırır. Fixture baytlarını sabitle.
+            with path.open("w", encoding="utf-8", newline="") as stream:
+                stream.write(content)
         settings = Settings(
             workspace=desktop, state_dir=root / "state", audit_path=root / "audit.jsonl",
             models={"benchmark": model} if model else {},

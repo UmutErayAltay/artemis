@@ -35,6 +35,10 @@ voice:
   stt_model: ../models/whisper-small
   stt_device: cuda
   stt_compute_type: float16
+  stt_language: tr # auto otomatik dil seçer; cümle içi dil değişimini garanti etmez.
+  stt_beam_size: 5 # Kesin sonuç; daha yüksek değer daha yavaş olabilir.
+  stt_partial_beam_size: 1
+  stt_hotwords: [] # İsteğe bağlı yerel ipuçları; prompt veya transcript düzeltmesi değildir.
   tts_backend: piper
   piper_model: ../models/tr_TR-dfki-medium.onnx
   piper_config: ../models/tr_TR-dfki-medium.onnx.json

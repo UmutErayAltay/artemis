@@ -132,6 +132,6 @@ geçici kaldırınca, ya da başarısız işlemi başarı diye döndürünce ilg
 kırıldığını doğrulayın ve mutasyonu geri alın. Bunu geçici kopyada yapmak paralel
 geliştirmeyi etkilemez.
 
-Anlamlı adımlarda commit atılabilir. Kullanıcının bu oturumdaki talebi gereği
-şimdilik hiçbir yere push yapılmaz. Windows veya canlı model doğrulaması
+Anlamlı adımlarda commit atılabilir. Kullanıcı daha sonra private
+`UmutErayAltay/jarvis` deposuna push için izin verdi. Windows veya canlı model doğrulaması
 yapılmadıysa tamamlandı demeyin; anahtar yoksa sonuç uydurmayın.
