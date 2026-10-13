@@ -72,7 +72,8 @@ class WindowsDesktop:
         """Windows ctypes bağını yalnız platform kontrolünden sonra edinir."""
         import ctypes
 
-        win_dll: Any = ctypes.WinDLL  # type: ignore[attr-defined]
+        loader_name = "WinDLL"
+        win_dll: Any = getattr(ctypes, loader_name)
         return win_dll(name, use_last_error=True)
 
     def open_application(self, executable: str) -> None:

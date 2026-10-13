@@ -52,6 +52,11 @@ güvenli reddedilmesi de testte beklenen sonuç olarak ele alındı. Test en az
 bir rezervasyonun başarılı olmasını, kaydedilen toplamın başarılı çağrılarla
 eşleşmesini ve sonradan seri çağrılarda da bütçenin aşılmamasını doğrular.
 Hedefli bütçe testlerinin sonucu `13 passed in 0.05s`; Ruff geçti.
+Windows koşusunda testler, kabul ölçümleri ve Ruff geçti. ctypes DLL
+yükleyicisinin platforma bağlı tip yorumu dinamik öznitelik erişimiyle
+değiştirildi; Linux ve win32 Mypy ayrı çalıştırıldığında ikisi de
+`Success: no issues found in 42 source files` üretti. İlgili platform
+testleri `80 passed in 0.36s` sonucunu verdi.
 
 Sıradaki adım [kabul planındaki](SPEECH_ACCURACY_PLAN.md) farklı konuşmacı
 kayıtlarıyla aynı ayar/model seçeneklerini karşılaştırmaktır. Genel anlama
