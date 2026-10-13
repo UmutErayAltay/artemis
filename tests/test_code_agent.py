@@ -174,7 +174,7 @@ async def test_start_tool_sent_not_success_and_argv(
         assert time.monotonic() < deadline
         time.sleep(0.02)
     argv, kwargs = factory.calls[0]
-    assert "Bash(git push:*)" in argv and "Bash(git remote:*)" in argv
+    assert "Bash(git push:*)" in argv
     assert argv[argv.index("--model") + 1] == "m-1"
     assert kwargs["cwd"] == repo and "OPENROUTER_API_KEY" not in kwargs["env"]
     assert factory.procs[0].kwargs["stdin"] == subprocess.PIPE

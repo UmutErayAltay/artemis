@@ -113,7 +113,7 @@ class CodeAgentJobs:
         argv = [
             exe, "-p", "--output-format", "json", "--permission-mode", "acceptEdits",
             "--allowedTools", "Read", "Edit", "Write", "Glob", "Grep", "Bash",
-            "--disallowedTools", "Bash(git push:*)", "Bash(git remote:*)", "WebFetch",
+            "--disallowedTools", "Bash(git push:*)", "WebFetch",
             "WebSearch", "--append-system-prompt", RULES,
         ]  # fmt: skip
         if model:

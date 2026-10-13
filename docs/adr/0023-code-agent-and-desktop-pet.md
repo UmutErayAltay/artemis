@@ -20,7 +20,8 @@ içeriğinden üretilir, Jarvis için dış veridir.
   koşar; asyncio döngüsüne bağlı değildir, CLI ve masaüstünde aynı çalışır. Araç
   `status="sent"`, `success=False` döner: görev gönderildi ama sonucu henüz bilinmiyor.
 - Alt süreç: `child_environment()` (sağlayıcı/bot sırları aktarılmaz), istem stdin'den,
-  `--permission-mode acceptEdits`, `git push`/`git remote`/web araçları yasak, ek sistem
+  `--permission-mode acceptEdits`, `git push` ve web araçları yasak (`git remote` yasağı denendi: zararsız `git remote -v`
+  içeren birleşik komutları da reddedip ajanı durdurduğu için kullanıcı kararıyla kaldırıldı), ek sistem
   istemiyle "yalnız yerel commit, push yok". Süre sınırı aşılırsa süreç öldürülür.
 - Sonuç doğrulanır: çıkış kodu, JSON `is_error`, taban..HEAD arası gerçek commit listesi ve
   kalan değişiklikler git'ten okunur. Ajanın "yaptım" demesi başarı sayılmaz.
