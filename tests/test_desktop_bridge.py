@@ -139,7 +139,13 @@ def _collect_until(bridge: DesktopBridge, done: Any, timeout: float = 3.0) -> li
     cached.clear()
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        collected.extend(bridge.poll_events())
+        for event in bridge.poll_events():
+            if done(collected):
+                # Koşul sağlandıktan sonra aynı okumada gelen olaylar (ör. hemen ardından
+                # gelen Approval) kaybolmasın; sonraki _wait_for önbellekten bulur.
+                cached.append(event)
+            else:
+                collected.append(event)
         if done(collected):
             return collected
         time.sleep(0.005)

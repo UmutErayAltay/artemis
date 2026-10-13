@@ -343,7 +343,10 @@ def test_step_block_shows_verified_lines_and_hides_internal_until_details(
         bubble, speaker, _text = window.chat._bubbles[-1]
         assert speaker == "Jarvis"
         bubble_row = bubble.parentWidget()
-        column = block.parentWidget().layout()
+        block_parent = block.parentWidget()
+        assert bubble_row is not None and block_parent is not None
+        column = block_parent.layout()
+        assert column is not None
         assert column.indexOf(block) < column.indexOf(bubble_row)
 
         block._toggle.click()
