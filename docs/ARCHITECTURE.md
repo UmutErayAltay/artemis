@@ -92,6 +92,12 @@ bu yüzden SIDE_EFFECT ve `outbound` bildirir; temiz turda onaysız, dış içer
 onayla çalışır. `notify_desktop` yerel bir Windows toast'ıdır: sabit PowerShell betiği, metin
 yalnız ortam değişkeniyle gider ve ağa çıkmaz.
 
+Kod ajanı ([ADR 0023](adr/0023-code-agent-and-desktop-pet.md)): `code_agent_start`
+(CONFIRM_REQUIRED, takma adla izinli proje), `code_agent_status` (READ_ONLY, `external`) ve
+`code_agent_cancel` (SIDE_EFFECT). İş turdan bağımsız thread'de `claude -p` olarak koşar
+(`jarvis/tools/code_agent_jobs.py`), yerel commit atabilir, push edemez; sonuç git'ten
+doğrulanır ve `code_agent_started`/`code_agent_done` denetim olaylarıyla bildirilir.
+
 `jarvis telegram` ayrı bir süreçtir; geçmişi masaüstü ve CLI'dan ayrıdır. Bir mesaj yalnız
 özel sohbetten (`chat.id == from.id == telegram.chat_id`), iletilmemiş, düz metin ve
 `max_message_age_seconds` içinde gelirse çalıştırılır. Başlangıçtaki eski güncellemeler atılır.

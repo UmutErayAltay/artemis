@@ -30,3 +30,14 @@ def isolated_credentials(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+
+
+@pytest.fixture(autouse=True, scope="session")
+def isolated_qsettings(tmp_path_factory):
+    # Pet konumu/görünürlüğü gerçek kullanıcı ayarlarına yazılmasın (kural 8).
+    try:
+        from PySide6.QtCore import QSettings
+    except ImportError:
+        return
+    path = str(tmp_path_factory.mktemp("qsettings"))
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, path)

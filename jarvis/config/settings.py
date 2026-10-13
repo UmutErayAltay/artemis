@@ -137,6 +137,24 @@ class TelegramConfig(BaseModel):
         return Settings.validate_endpoint(value)
 
 
+class CodeAgentConfig(BaseModel):
+    """Kod ajanı (ADR 0023): izinli proje takma adları; liste boşsa özellik kapalıdır."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    projects: dict[str, Path] = Field(default_factory=dict)
+    command: str = Field(default="claude", min_length=1)
+    max_minutes: float = Field(default=20.0, ge=1, le=120)
+    model: str | None = None
+
+    @field_validator("projects")
+    @classmethod
+    def validate_projects(cls, values: dict[str, Path]) -> dict[str, Path]:
+        if any(not re.fullmatch(r"[a-z0-9_-]{1,32}", alias) for alias in values):
+            raise ValueError("Proje takma adı 1-32 küçük harf, rakam, _ veya - olmalı")
+        return values
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -166,6 +184,7 @@ class Settings(BaseModel):
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
+    code_agent: CodeAgentConfig = Field(default_factory=CodeAgentConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -224,4 +243,10 @@ def load_settings(path: Path) -> Settings:
             memory_updates[field] = value if value.is_absolute() else (base / value).resolve()
     if memory_updates:
         updates["memory"] = settings.memory.model_copy(update=memory_updates)
+    if settings.code_agent.projects:
+        projects = {
+            alias: value if value.is_absolute() else (base / value).resolve()
+            for alias, value in settings.code_agent.projects.items()
+        }
+        updates["code_agent"] = settings.code_agent.model_copy(update={"projects": projects})
     return settings.model_copy(update=updates)

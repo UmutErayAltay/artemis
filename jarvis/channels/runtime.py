@@ -15,6 +15,7 @@ from jarvis.config.settings import Settings, load_settings
 from jarvis.safety.audit import AuditLog
 from jarvis.safety.gate import SafetyGate
 from jarvis.tools.base import ToolContext
+from jarvis.tools.code_agent_jobs import CodeAgentJobs
 from jarvis.tools.registry import ToolRegistry, discover_tools
 
 Approval = Callable[[str, dict[str, Any]], bool]
@@ -66,6 +67,8 @@ def create_runtime(
     )
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
+    # Kod ajanı işleri turdan uzun yaşar; servis runtime ömrünce tutulur (enjekte edilen korunur).
+    context.services.setdefault("code_agent_jobs", CodeAgentJobs(log))
     builder = provider_builder if provider_builder is not None else build_provider
     selected_provider = provider if provider is not None else builder(loaded, log)
     agent = AgentLoop(selected_provider, gate, context, approve)

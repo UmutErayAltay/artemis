@@ -95,6 +95,16 @@ voice:
 #   approval_timeout_seconds: 120
 #   max_message_age_seconds: 120
 
+# Kod ajanı (ADR 0023). KAPALI gelir: projects boşsa araçlar çalışmaz. Model yalnız
+# takma adı seçer; ajan headless `claude -p` olarak o projede çalışır, YEREL commit atabilir,
+# push edemez. Çalışma ağacı kirliyse görev başlamaz. Her başlatma onay ister.
+# code_agent:
+#   projects:
+#     jarvis: C:/Users/siz/Projects/jarvis   # göreli yol bu dosyaya göre çözülür
+#   command: claude
+#   max_minutes: 20
+#   model: null                              # doluysa --model olarak geçilir
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

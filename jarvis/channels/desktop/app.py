@@ -52,6 +52,7 @@ from jarvis.channels.desktop.bridge import (
     State,
     VoiceCommand,
 )
+from jarvis.channels.desktop.pet import PetWidget, level_from_message
 from jarvis.channels.desktop.settings_panel import SettingsPanel, save_choices
 from jarvis.channels.desktop.steps import StepLine, step_line
 from jarvis.channels.runtime import Runtime, create_runtime
@@ -615,13 +616,37 @@ class DesktopWindow(QMainWindow):
         self._turn_steps: dict[str, _TurnSteps] = {}
         self._activity_count = 0
         self._activity_empty = True
+        self._build_pet()
         self._build_ui()
         self._build_overlay()
         self._build_tray()
+        self.pet.start()
         self._timer = QTimer(self)
         self._timer.setInterval(60)
         self._timer.timeout.connect(self._drain_bridge)
         self._timer.start()
+
+    def _build_pet(self) -> None:
+        # Pet yalnız durum alır; komut ve onay yolları panelinkiyle aynıdır.
+        self.pet = PetWidget(
+            on_toggle_voice=self.voice_button_click,
+            on_show_panel=self._show_panel,
+            on_quick=self._show_overlay,
+            on_approval=self._focus_approval,
+        )
+
+    def voice_button_click(self) -> None:
+        """Pet tıkı: panelin "Ses" düğmesiyle aynı yol (_toggle_voice); düğme kapalıysa işlemez."""
+        self.voice_button.click()
+
+    def _focus_approval(self) -> None:
+        dialog = self._approval_dialog
+        if dialog is None:
+            self._show_panel()
+            return
+        self._show_panel()
+        dialog.raise_()
+        dialog.activateWindow()
 
     def _build_ui(self) -> None:
         root = QWidget()
@@ -827,10 +852,12 @@ class DesktopWindow(QMainWindow):
         menu = QMenu(self)
         open_action = menu.addAction("Paneli aç")
         quick_action = menu.addAction("Hızlı komut")
+        pet_action = menu.addAction("Peti göster/gizle")
         menu.addSeparator()
         exit_action = menu.addAction("Çıkış")
         open_action.triggered.connect(self._show_panel)
         quick_action.triggered.connect(self._show_overlay)
+        pet_action.triggered.connect(self.pet.toggle_pet)
         exit_action.triggered.connect(self._request_exit)
         self._tray.setContextMenu(menu)
         self._tray.activated.connect(self._tray_activated)
@@ -937,6 +964,7 @@ class DesktopWindow(QMainWindow):
         on = state in {"preparing", "listening", "awaiting_command", "thinking", "speaking"}
         self.voice_button.setChecked(on)
         self.voice_button.setText("Ses: açık" if on else "Ses: kapalı")
+        self.pet.set_voice(state)
         if state == "off":
             self.settings_panel.input_level.setValue(0)
 
@@ -950,6 +978,7 @@ class DesktopWindow(QMainWindow):
         self.send_button.setEnabled(enabled)
         self.new_chat_button.setEnabled(enabled)
         self.cancel_button.setEnabled(self._busy and not self._exiting)
+        self.pet.set_busy(self._busy and not self._exiting)
         if self._tray is not None:
             status = "çalışıyor" if self._busy else "hazır"
             self._tray.setToolTip(f"Jarvis · {status}")
@@ -966,6 +995,7 @@ class DesktopWindow(QMainWindow):
                 self.chat.clear()
                 self._append_chat("Sistem", "Ayarlar uygulandı; yeni sohbet başladı.")
                 self._show_voice_state("off")
+                self.pet.set_busy(False)
                 self.bridge = DesktopBridge(self._config_path)
                 self.settings_panel.refresh()
                 self.settings_panel.notice.setText(
@@ -1010,12 +1040,16 @@ class DesktopWindow(QMainWindow):
             elif event.state == "voice":
                 self._show_voice_state(event.message)
             elif event.state == "voice_level":
-                if event.message.isdigit():
-                    self.settings_panel.input_level.setValue(min(100, int(event.message)))
+                level = level_from_message(event.message)
+                if level is not None:
+                    self.settings_panel.input_level.setValue(round(level * 100))
+                    self.pet.set_level(level)
             elif event.state == "voice_heard":
                 self.settings_panel.last_heard.setText(event.message)
+                self.pet.heard(event.message)
             elif event.state == "voice_error":
                 self._append_chat("Jarvis", event.message)
+                self.pet.flash_error()
                 self._show_voice_state("off")
             elif event.state == "context_reset":
                 # Adım blokları eski balonlarla birlikte silinir; kayıt da sıfırlanır.
@@ -1051,6 +1085,7 @@ class DesktopWindow(QMainWindow):
                 self._append_chat(
                     "Jarvis", event.result.text, self._step_block_for(event.request_id)
                 )
+                self.pet.answer(event.result.text)
                 self.overlay.status.setText("Yanıt hazır")
             return
         if isinstance(event, Failed):
@@ -1064,13 +1099,20 @@ class DesktopWindow(QMainWindow):
                     f"İstek tamamlanamadı ({event.error_type}).",
                     self._step_block_for(event.request_id),
                 )
+                self.pet.flash_error()
             return
         if isinstance(event, ActivityGap):
             self._add_activity(f"{event.dropped_count} eski etkinlik görünümden düştü", "#FFD78C")
             return
         if isinstance(event, Activity):
+            self._pet_activity(event)
             self._render_activity(event)
             self._collect_step(event)
+
+    def _pet_activity(self, event: Activity) -> None:
+        text = self.pet.code_agent_event(event.event, event.fields)
+        if text is not None and self._tray is not None:
+            self._tray.showMessage("Jarvis", text, QSystemTrayIcon.MessageIcon.Information, 6000)
 
     def _show_approval(self, item: Approval) -> None:
         if item.request_id != self._active_request:
@@ -1084,6 +1126,7 @@ class DesktopWindow(QMainWindow):
         self._approval_dialog = dialog
         dialog.finished.connect(lambda _result, current=dialog: self._clear_approval(current))
         dialog.open()
+        self.pet.set_approval(True)
 
     def _decide_approval(self, item: Approval, approved: bool) -> bool:
         return self.bridge.decide(
@@ -1098,6 +1141,7 @@ class DesktopWindow(QMainWindow):
     def _clear_approval(self, dialog: ApprovalDialog) -> None:
         if self._approval_dialog is dialog:
             self._approval_dialog = None
+            self.pet.set_approval(False)
 
     def _render_activity(self, event: Activity) -> None:
         fields = event.fields
@@ -1217,6 +1261,7 @@ class DesktopWindow(QMainWindow):
         if self._tray is not None:
             self._tray.hide()
         self.overlay.close()
+        self.pet.close()
         if self._temporary is not None:
             self._temporary.cleanup()
             self._temporary = None

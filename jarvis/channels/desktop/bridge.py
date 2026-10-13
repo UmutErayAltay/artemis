@@ -666,6 +666,10 @@ class DesktopBridge:
 
     def _shutdown_on_worker(self, request_id: str | None) -> None:
         self._stop_voice_on_worker()
+        # Çalışan kod ajanı süreçleri panelle birlikte durur; yetim kalıp commit atmasın.
+        jobs = self._runtime.context.services.get("code_agent_jobs") if self._runtime else None
+        if jobs is not None:
+            jobs.shutdown()
         if request_id is not None:
             self._cancel_on_worker(request_id)
         else:
