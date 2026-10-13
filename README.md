@@ -3,8 +3,8 @@
 Windows 11 için Türkçe kişisel masaüstü asistanı. CLI ve isteğe bağlı masaüstü
 paneli, sağlayıcıdan bağımsız ajan döngüsünü, tek güvenlik kapısını ve araçları
 paylaşır. F3 ses kanalı kodu hazırdır; gerçek Windows ses ölçümü bekler.
-Vault hafızası isteğe bağlıdır ve varsayılan kapalıdır; Telegram ve arka plan ajanları
-bu sürüme dahil değildir.
+Vault hafızası ile Telegram ve bildirimler isteğe bağlıdır, varsayılan kapalıdır; arka plan
+ajanları bu sürüme dahil değildir.
 
 CLI ve masaüstünde konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012); kalıcı hafıza
 yalnız aşağıdaki isteğe bağlı vault araçlarıyla sağlanır.
@@ -264,6 +264,69 @@ Arama varsayılan olarak yerleşik sözcük aramasıdır. Anlamsal arama için
 aramada model indirilir, indeks vault dışında `state_dir/embedding` altında tutulur.
 Paket veya model yoksa sözcük aramasına dönülür ve sonuçta bu yazılır. Karar:
 [ADR 0015](docs/adr/0015-vault-memory.md).
+
+## Telegram ve bildirimler
+
+Varsayılan kapalıdır; config'te `telegram.chat_id` verilmedikçe hiçbir şey açılmaz.
+Gerekçe [ADR 0016](docs/adr/0016-telegram-and-notifications.md) içindedir.
+
+Kurulum:
+
+1. Telegram'da **@BotFather**'a `/newbot` yazın ve size verilen token'ı alın.
+2. Token'ı kullanıcı ortam değişkenine yazın, sonra terminali kapatıp yeniden açın (değer
+   yalnız yeni açılan terminallerde görünür). Token'ı komutun içine yazmayın: komut satırı
+   PowerShell geçmiş dosyasına kaydedilir. `Read-Host` ile sorulan değer kaydedilmez:
+
+   ```powershell
+   $t = Read-Host "Telegram bot token"
+   [Environment]::SetEnvironmentVariable("JARVIS_TELEGRAM_BOT_TOKEN", $t, "User")
+   Remove-Variable t
+   ```
+
+   Token'ı config dosyasına, komut satırına veya belgeye yazmayın. Ortam değişkeni adı
+   `telegram.token_env` ile değiştirilebilir, ama `_TOKEN` ile bitmek zorundadır.
+3. Bota kendi hesabınızdan bir mesaj yazın ve chat id'nizi öğrenin. En kolayı
+   **@userinfobot**'tur. `getUpdates` çıktısındaki `message.chat.id` de kullanılabilir; ancak
+   o adres token içerir, çıktıyı paylaşmayın ve tarayıcı geçmişinde bırakmayın.
+4. `config/config.yaml` dosyasına ekleyin (diğer alanların varsayılanları örnek dosyadadır):
+
+   ```yaml
+   telegram:
+     chat_id: 123456789
+   ```
+
+5. Kanalı başlatın:
+
+   ```powershell
+   python -m jarvis telegram --config config/config.yaml
+   ```
+
+   Açılınca bota "Jarvis Telegram kanalı açık" mesajı gider. Kanal kapalıyken birikmiş
+   mesajlar açılışta çalıştırılmaz. Durdurmak için Ctrl+C.
+
+Davranış:
+
+- Yalnız sizin özel sohbetinizden gelen düz metin mesajlar çalıştırılır; başkalarının
+  mesajları yanıtlanmaz. İletilmiş, metin dışı veya `max_message_age_seconds` (varsayılan 120
+  sn) değerinden eski mesajlar çalıştırılmaz; sohbetinizde kısa bir uyarı çıkar.
+- Yan etkili bir işlem onay ister. Telegram'da araç adı ve tüm argümanlar görünür; **Onayla**
+  veya **Reddet** düğmesine basın. Cevap verilmezse süre dolunca reddedilir ve mesaj kalan
+  süreyi yazar. Onay beklerken gelen yeni komutlar çalıştırılmaz.
+- Turda ya da konuşma geçmişinde dosya veya pano içeriği varsa onay Telegram'a gönderilmez;
+  işlemi masaüstünden onaylayın ya da `/yeni` ile yeni sohbet başlatın. Bu turların yanıtı da
+  Telegram'a gelmez.
+- `/yeni` konuşma geçmişini sıfırlar; `/yardım` kısa komut özetini gösterir.
+- Telegram geçmişi masaüstü ve CLI geçmişinden ayrıdır.
+
+Windows bildirimleri (`notify_desktop`):
+
+- Toast, Windows PowerShell 5.1 (`powershell.exe`) ile gösterilir; PowerShell 7 ile çalışmaz.
+- Ayarlar > Sistem > Bildirimler altında bildirimler açık olmalı ve "Windows PowerShell"e
+  bildirim izni verilmelidir. Kapalıysa araç bunu söyler ve başarılı saymaz.
+- Windows dışında araç "yalnız Windows'ta çalışır" hatası döner.
+
+Bu kanal Linux'ta test edildi; gerçek bot ve Windows toast'ı henüz denenmedi
+([yol haritası](docs/ROADMAP.md), Faz 4).
 
 ## Doğrulama ve ölçüm
 

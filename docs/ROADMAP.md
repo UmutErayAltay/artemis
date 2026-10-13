@@ -102,6 +102,8 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 001
 
 ### Faz 4 — Bildirim ve iki yönlü Telegram
 
+Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta ve gerçek botla denenmedi. Karar: [ADR 0016](adr/0016-telegram-and-notifications.md).
+
 **Kapsam**
 - Giden bildirim: Telegram ve Windows toast. Telegram token'ı yalnız ortam değişkeninden
   okunur; argv, log, config veya alt süreç ortamına girmez.

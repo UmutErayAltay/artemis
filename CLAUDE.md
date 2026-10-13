@@ -2,7 +2,7 @@
 
 Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çekirdeği Linux
 üzerinde de çalışır. PySide6 masaüstü UI aynı Qt'siz runtime ve SafetyGate'i kullanır;
-ses masaüstü worker'ında çalışır (ADR 0014). Hafıza (vault) Faz 3'te eklendi; Telegram sonraki fazdır.
+ses masaüstü worker'ında çalışır (ADR 0014). Hafıza (vault) Faz 3'te, Telegram ve bildirimler Faz 4'te eklendi.
 Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Türkçe olur ve
 özellikle kararın nedenini açıklar. Önce [mimariyi](docs/ARCHITECTURE.md) ve
 [ADR'leri](docs/adr/) okuyun. Temel mimariyi değiştiriyorsanız kısa ADR yazın.
@@ -79,6 +79,17 @@ kipindedir (`open("a")`/`open("x")`, `write_text` ve `"w"` YASAK), `allow_symlin
 kullanır, klasör oluşturmaz ve her seferinde onay ister. Not içeriği hiçbir tura kendiliğinden
 eklenmez; Core.md otomatik enjekte edilmez. Testler embedding modeli indirmez, sahte
 `embedder` enjekte eder.
+
+Telegram ve bildirimler (Faz 4, ADR 0016) aynı kapıdan geçer. Alıcı config'teki
+`telegram.chat_id`'dir ve sabittir; `notify_telegram` alıcı argümanı taşımaz, bu yüzden
+kendine bildirim 3. kuraldaki "dışarı mesaj" sayılmaz (SIDE_EFFECT + `outbound`). Başka bir
+kişiye mesaj atan araç CONFIRM_REQUIRED olur. Token yalnız `_TOKEN` ile biten ortam
+değişkeninden okunur; YAML, argv, log, `repr` ve alt süreç ortamına girmez. Telegram kanalı
+yalnız özel, iletilmemiş, düz metin ve taze mesajları çalıştırır; onaylar düğmeyle sorulur,
+varsayılan hayırdır ve süre tur süresiyle sınırlıdır. Turda ya da geçmişte gizli (dosya/pano)
+içerik varsa onay ve yanıt Telegram'a gönderilmez. Dışarı giden her Telegram çağrısı
+(`telegram_out`) ve her toast (`desktop_notification`) denetime yazılır. Kanal ikinci bir onay
+politikası taşımaz.
 
 Konuşma geçmişi yalnız `CommandRunner.conversation` içinde yaşar (ADR 0012); kanal
 başına kopya tutulmaz. Taint yeni tura taşınmaz (tek istisna ADR 0013: dışarı giden

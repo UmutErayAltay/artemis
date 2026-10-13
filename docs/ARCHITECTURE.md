@@ -1,9 +1,9 @@
-# Jarvis: F0–F3 mimarisi
+# Jarvis: F0–F4 mimarisi
 
 Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. CLI ve isteğe bağlı PySide6
 masaüstü arayüzü aynı runtime, ajan döngüsü, sağlayıcılar, güvenlik kapısı ve
-araçları kullanır. Kalıcı hafıza, Telegram ve arka plan ajanları sonraki fazlardadır.
+araçları kullanır. Telegram ve bildirimler F4'tür; arka plan ajanları sonraki fazlardadır.
 
 ## Akış ve sorumluluklar
 
@@ -83,6 +83,29 @@ ekleme kipinde yazar (`open("a")`; yeni nota `open("x")`); sonrasında eski bayt
 olduğu doğrulanır. Yollar `safe_join`'dan ve ayrıca çözülmüş yol üzerinden hariç tutma
 kurallarından geçer. Not içeriği hiçbir tura kendiliğinden eklenmez. Embedding indeksi
 vault'un dışında tutulur. Karar [ADR 0015](adr/0015-vault-memory.md).
+
+## Telegram ve bildirimler
+
+Karar [ADR 0016](adr/0016-telegram-and-notifications.md) içindedir. Alıcı sabittir: Telegram
+yalnız `telegram.chat_id` olan özel sohbete yazar, model alıcı seçemez. `notify_telegram`
+bu yüzden SIDE_EFFECT ve `outbound` bildirir; temiz turda onaysız, dış içerikle lekeli turda
+onayla çalışır. `notify_desktop` yerel bir Windows toast'ıdır: sabit PowerShell betiği, metin
+yalnız ortam değişkeniyle gider ve ağa çıkmaz.
+
+`jarvis telegram` ayrı bir süreçtir; geçmişi masaüstü ve CLI'dan ayrıdır. Bir mesaj yalnız
+özel sohbetten (`chat.id == from.id == telegram.chat_id`), iletilmemiş, düz metin ve
+`max_message_age_seconds` içinde gelirse çalıştırılır. Başlangıçtaki eski güncellemeler atılır.
+
+Onaylar düğmeyle sorulur; varsayılan cevap hayırdır. Mesaj araç adını ve doğrulanmış tüm
+argümanları düz metin olarak gösterir; sığmıyorsa işlem reddedilir. Onay süresi
+`approval_timeout_seconds` ile turun `max_seconds` kalanının küçüğüyle sınırlıdır ve mesajda
+kalan saniye yazılır. Turda ya da konuşma geçmişinde dosya/pano içeriği varsa onay Telegram'a
+gönderilmez, işlem masaüstünden onaylanır; bu turların yanıtı da gönderilmez.
+
+Token yalnız `telegram.token_env` ortam değişkeninden okunur. Adı `_TOKEN` ile biter; denetim
+temizleyicisi bu adın değerini gizler. Token URL'de taşındığı için httpx istek günlükleri
+kapalıdır; hata mesajları, `repr`, argv ve alt süreç ortamı tokeni içermez. Dışarı giden her
+Telegram çağrısı `telegram_out`, her toast `desktop_notification` denetim olayı yazar.
 
 ## Güvenlik sınırları
 
