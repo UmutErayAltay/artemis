@@ -28,6 +28,8 @@ class DemoReadArguments(BaseModel):
 
 class DemoReadTool(BaseTool):
     name = "demo_read_sample"
+    label = "Demo örnek okuma"
+    done_label = "Demo örneği okundu"
     description = "Sabit örnek veriyi demo belleğinden okur; gerçek dosya veya servis kullanmaz."
     args_model = DemoReadArguments
     risk = Risk.READ_ONLY
@@ -45,6 +47,8 @@ class DemoReadTool(BaseTool):
 
 class DemoWriteTool(BaseTool):
     name = "demo_write_memory"
+    label = "Demo belleğe yazma"
+    done_label = "Demo belleğe yazıldı"
     description = "Yalnız geçici demo belleğini günceller; gerçek dosya veya servis kullanmaz."
     args_model = DemoWriteArguments
     risk = Risk.SIDE_EFFECT

@@ -6,6 +6,7 @@ import asyncio
 import json
 import threading
 import time
+from collections import deque
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,7 @@ from jarvis.channels.desktop.bridge import (
     Failed,
     Finished,
     State,
+    VoiceCommand,
 )
 from jarvis.channels.runtime import AuditObserver, Runtime, create_runtime
 from jarvis.config.settings import ModelConfig, Settings
@@ -46,6 +48,8 @@ class ExternalRead(BaseTool):
     args_model = EmptyArgs
     risk = Risk.READ_ONLY
     external = True
+    label = "Harici veri okuma"
+    done_label = "Harici veri okundu"
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         return ToolResult(success=True, status="ok", message="Okundu.", data={"value": "örnek"})
@@ -56,6 +60,8 @@ class ConfirmWrite(BaseTool):
     description = "İzole test dosyasını yazar."
     args_model = WriteArgs
     risk = Risk.SIDE_EFFECT
+    label = "Dosya yazma"
+    done_label = "Dosya yazıldı"
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = WriteArgs.model_validate(arguments)
@@ -87,6 +93,7 @@ def _fixture(
     *,
     max_seconds: float = 1.0,
     provider_override: Any = None,
+    voice_factory: Any = None,
 ) -> DesktopBridge:
     settings = Settings(
         workspace=tmp_path,
@@ -120,9 +127,86 @@ def _fixture(
             audit=AuditLog(settings.audit_path, on_record),
         )
 
-    bridge = DesktopBridge(tmp_path / "unused.yaml", factory)
+    bridge = DesktopBridge(tmp_path / "unused.yaml", factory, voice_factory=voice_factory)
     assert _wait_for(bridge, State).state == "ready"
     return bridge
+
+
+def _collect_until(bridge: DesktopBridge, done: Any, timeout: float = 3.0) -> list[Any]:
+    """Olayları sırayla toplar; ``done(olaylar)`` doğru olunca döner."""
+    cached = _event_cache.setdefault(bridge, [])
+    collected = list(cached)
+    cached.clear()
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        collected.extend(bridge.poll_events())
+        if done(collected):
+            return collected
+        time.sleep(0.005)
+    raise AssertionError("beklenen olay zamanında gelmedi")
+
+
+def _has_state(events: list[Any], state: str, request_id: str | None = None) -> bool:
+    return any(
+        isinstance(event, State)
+        and event.state == state
+        and (request_id is None or event.request_id == request_id)
+        for event in events
+    )
+
+
+class FakeVoice:
+    """Mikrofonsuz sahte denetleyici; komutları köprünün run_command'ına yollar."""
+
+    def __init__(self, run_command: Any, on_state: Any, first_command: str | None) -> None:
+        self._run_command = run_command
+        self._on_state = on_state
+        self._first_command = first_command
+        self._pending: deque[str] = deque()
+        self._stopped = threading.Event()
+        self.results: list[Any] = []
+        # Köprünün duraklatma ve devam çağrılarının sırası; onay bu sırayı doğrular.
+        self.log: list[str] = []
+        self.closed = False
+
+    def send(self, text: str) -> None:
+        self._pending.append(text)
+
+    async def run(self) -> None:
+        self._on_state("listening")
+        if self._first_command is not None:
+            await self._handle(self._first_command)
+        while not self._stopped.is_set():
+            if self._pending:
+                await self._handle(self._pending.popleft())
+            else:
+                await asyncio.sleep(0.005)
+
+    async def _handle(self, text: str) -> None:
+        self._on_state("thinking")
+        self.results.append(await self._run_command(text))
+        self._on_state("listening")
+
+    def request_stop(self) -> None:
+        self._stopped.set()
+
+    def pause_for_approval(self) -> None:
+        self.log.append("pause")
+
+    def resume_after_approval(self) -> None:
+        self.log.append("resume")
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+def _voice_factory(created: list[FakeVoice], first_command: str | None = None) -> Any:
+    async def factory(runtime: Any, run_command: Any, on_state: Any) -> FakeVoice:
+        fake = FakeVoice(run_command, on_state, first_command)
+        created.append(fake)
+        return fake
+
+    return factory
 
 
 def _tool_scenario() -> list[Completion]:
@@ -428,5 +512,165 @@ def test_reset_conversation_refused_while_active_and_announced_when_idle(tmp_pat
             state = _wait_for(bridge, State, timeout=2)
     finally:
         release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_voice_turn_shares_request_id_and_forwards_states(tmp_path):
+    created: list[FakeVoice] = []
+    bridge = _fixture(
+        tmp_path,
+        [Completion(content="Dosyalar listelendi.")],
+        voice_factory=_voice_factory(created, first_command="dosyaları listele"),
+    )
+    try:
+        assert bridge.start_voice()
+        events = _collect_until(bridge, lambda items: _has_state(items, "ready") and any(
+            isinstance(item, Finished) for item in items
+        ))
+        voice_states = [
+            event.message for event in events if isinstance(event, State) and event.state == "voice"
+        ]
+        assert voice_states[:2] == ["preparing", "listening"]
+        command = next(event for event in events if isinstance(event, VoiceCommand))
+        assert command.text == "dosyaları listele"
+        finished = next(event for event in events if isinstance(event, Finished))
+        assert finished.request_id == command.request_id
+        assert finished.result.text == "Dosyalar listelendi."
+        assert created[0].results[0].text == "Dosyalar listelendi."
+        assert bridge.voice_active
+
+        assert bridge.stop_voice()
+        _collect_until(bridge, lambda items: _has_state_message(items, "voice", "off"))
+        assert not bridge.voice_active
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def _has_state_message(events: list[Any], state: str, message: str) -> bool:
+    return any(
+        isinstance(event, State) and event.state == state and event.message == message
+        for event in events
+    )
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_voice_approval_goes_through_broker_and_pauses_the_microphone(tmp_path, approved):
+    created: list[FakeVoice] = []
+    bridge = _fixture(
+        tmp_path,
+        _tool_scenario(),
+        voice_factory=_voice_factory(created, first_command="dosyayı yaz"),
+    )
+    try:
+        assert bridge.start_voice()
+        events = _collect_until(bridge, lambda items: any(
+            isinstance(item, VoiceCommand) for item in items
+        ))
+        command = next(event for event in events if isinstance(event, VoiceCommand))
+        fake = created[0]
+        prompt = _wait_for(bridge, Approval)
+        assert prompt.request_id == command.request_id
+        assert prompt.tool_name == "confirm_write"
+        # Onay penceresi açılmadan mikrofon duraklatılmış olmalı; karar gelene dek devam yok.
+        assert fake.log == ["pause"]
+        assert bridge.decide(prompt.request_id, prompt.turn_id, prompt.approval_id, approved)
+        finished = _wait_for(bridge, Finished).result
+        assert fake.log == ["pause", "resume"]
+        assert (tmp_path / "target.txt").exists() is approved
+        if not approved:
+            assert finished.stop_reason in {"completed", "denied_repeat"}
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_voice_command_while_typed_request_is_busy_and_skips_runner(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+    calls: list[str] = []
+
+    class BlockingProvider:
+        async def complete(self, *_args: Any, **_kwargs: Any) -> Completion:
+            calls.append("provider")
+            entered.set()
+            await asyncio.to_thread(release.wait, 2)
+            return Completion(content="bitti")
+
+    created: list[FakeVoice] = []
+    bridge = _fixture(
+        tmp_path, [], provider_override=BlockingProvider(), voice_factory=_voice_factory(created)
+    )
+    try:
+        assert bridge.start_voice()
+        _collect_until(bridge, lambda items: _has_state_message(items, "voice", "listening"))
+        typed_id = bridge.submit("yazılı istek")
+        assert typed_id is not None
+        assert entered.wait(2)
+        created[0].send("dosyaları listele")
+        deadline = time.monotonic() + 2
+        while not created[0].results and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert created[0].results[0].stop_reason == "busy"
+        # Meşgul sesli komut çalıştırıcıya hiç gitmez ve kendi isteğini açmaz.
+        assert calls == ["provider"]
+        seen = _collect_until(bridge, lambda items: _has_state(items, "ready", typed_id))
+        assert not any(isinstance(event, VoiceCommand) for event in seen)
+    finally:
+        release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_voice_factory_failure_reports_error_and_typed_requests_still_work(tmp_path):
+    async def broken(_runtime: Any, _run: Any, _on_state: Any) -> None:
+        raise OSError("synthetic-device-missing")
+
+    bridge = _fixture(
+        tmp_path, [Completion(content="Tamam.")], voice_factory=broken
+    )
+    try:
+        assert bridge.start_voice()
+        events = _collect_until(bridge, lambda items: _has_state_message(items, "voice", "off"))
+        errors = [
+            event for event in events if isinstance(event, State) and event.state == "voice_error"
+        ]
+        assert len(errors) == 1
+        assert "Ses açılamadı" in errors[0].message
+        assert "synthetic-device-missing" not in errors[0].message
+        # Hata iletisi "off"tan önce gelir; ekran kapanışı hatadan sonra görür.
+        assert events.index(errors[0]) < next(
+            index
+            for index, event in enumerate(events)
+            if isinstance(event, State) and event.state == "voice" and event.message == "off"
+        )
+        assert not bridge.voice_active
+        assert bridge.submit("merhaba") is not None
+        result = _wait_for(bridge, Finished, timeout=2).result
+        assert result.text == "Tamam."
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_approval_carries_tool_label_and_labels_are_a_copy(tmp_path):
+    bridge = _fixture(tmp_path, _tool_scenario())
+    try:
+        assert bridge.labels() == {
+            "external_read": ("Harici veri okuma", "Harici veri okundu"),
+            "confirm_write": ("Dosya yazma", "Dosya yazıldı"),
+        }
+        request_id = bridge.submit("oku ve yaz")
+        assert request_id is not None
+        prompt = _wait_for(bridge, Approval)
+        assert prompt.tool_label == "Dosya yazma"
+        assert prompt.tool_name == "confirm_write"
+        assert bridge.decide(prompt.request_id, prompt.turn_id, prompt.approval_id, False)
+        _wait_for(bridge, Finished)
+        copied = bridge.labels()
+        copied.clear()
+        assert bridge.labels()["confirm_write"] == ("Dosya yazma", "Dosya yazıldı")
+    finally:
         bridge.shutdown()
         assert bridge._stopped.wait(2)

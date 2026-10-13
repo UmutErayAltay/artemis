@@ -41,6 +41,20 @@ _VOICE_ERROR_TEXT = (
 )
 
 
+def _tool_labels(runtime: Runtime) -> dict[str, tuple[str, str]]:
+    """Araç sınıflarındaki okunur adları bir kez toplar; işçi kaydı değiştirilmez.
+
+    Kayıt listesi yerine ``definitions()`` ile ad alınır; böylece registry'nin iç
+    sözlüğüne dokunulmaz. Etiketi olmayan araç tabloya girmez ve ham adla görünür.
+    """
+    labels: dict[str, tuple[str, str]] = {}
+    for definition in runtime.registry.definitions():
+        tool = runtime.registry.get(definition.name)
+        if tool is not None and (tool.label or tool.done_label):
+            labels[definition.name] = (tool.label, tool.done_label)
+    return labels
+
+
 @dataclass(frozen=True)
 class State:
     state: str
@@ -70,6 +84,8 @@ class Approval:
     arguments: dict[str, Any] = field(repr=False)
     notice: str = ""
     deadline: float | None = None
+    # Yalnız gösterim: okunur Türkçe ad. Boşsa arayüz ham tool_name'i başlık yapar.
+    tool_label: str = ""
 
 
 @dataclass(frozen=True)
@@ -133,6 +149,8 @@ class _ApprovalBroker:
             self.pending = item
             notice = runtime.gate.pending_notice
             deadline = runtime.context.deadline
+            tool = runtime.registry.get(tool_name)
+            tool_label = tool.label if tool is not None else ""
             bridge._events.put(
                 Approval(
                     request_id,
@@ -142,6 +160,7 @@ class _ApprovalBroker:
                     arguments,
                     notice,
                     deadline,
+                    tool_label,
                 )
             )
         timeout = (
@@ -213,6 +232,8 @@ class DesktopBridge:
         self._broker = _ApprovalBroker(self)
         self._loop: asyncio.AbstractEventLoop | None = None
         self._runtime: Runtime | None = None
+        # Araç etiketleri runtime kurulunca bir kez dolar; GUI yalnız kopya okur.
+        self._labels: dict[str, tuple[str, str]] = {}
         self._active_request: str | None = None
         self._active_task: asyncio.Task[Any] | None = None
         self._cleanup_pending = False
@@ -232,6 +253,10 @@ class DesktopBridge:
     @property
     def stopped(self) -> bool:
         return self._stopped.is_set()
+
+    def labels(self) -> dict[str, tuple[str, str]]:
+        """Araç adından (onay başlığı, adım satırı) çiftine kopya; GUI bunu değiştiremez."""
+        return dict(self._labels)
 
     @property
     def voice_active(self) -> bool:
@@ -426,6 +451,7 @@ class DesktopBridge:
                 )
             else:
                 self._runtime = factory(self._config_path, self._approve, self._on_record)
+            self._labels = _tool_labels(self._runtime)
         except Exception as error:  # İşçi sınırında traceback/sır sızdırmadan arızayı GUI'ye taşır.
             self._events.put(
                 Failed(

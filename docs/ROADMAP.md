@@ -67,6 +67,8 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 001
 
 ### Faz 2 — Ses ve masaüstü birleşimi
 
+Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 0014](adr/0014-voice-in-desktop.md).
+
 **Kapsam**
 - Ses masaüstü uygulamasının içinde çalışır; durum göstergesi dinliyor, düşünüyor, konuşuyor
   gösterir. Sesli komutların onayı ekranda Evet/Hayır ile alınır; terminal `input()` kaldırılır.

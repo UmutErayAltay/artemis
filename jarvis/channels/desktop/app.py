@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import html
 import json
 import tempfile
 from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,7 @@ from jarvis.channels.desktop.bridge import (
     State,
     VoiceCommand,
 )
+from jarvis.channels.desktop.steps import StepLine, step_line
 from jarvis.channels.runtime import Runtime, create_runtime
 
 _STYLE = """
@@ -72,10 +75,19 @@ QFrame#messageAssistant {
 QLabel#eyebrow { color: #A9B8C9; font-size: 12px; font-weight: 600; }
 QLabel#title { color: #E6EDF5; font-size: 24px; font-weight: 700; }
 QLabel#muted { color: #A9B8C9; }
-QLabel#status {
-  background: #17263A; border: 1px solid #2A3B52;
-  border-radius: 10px; padding: 6px 10px;
+QLabel#status { background: transparent; border: none; padding: 0 2px; }
+QLabel#rawToolName {
+  color: #A9B8C9; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px;
 }
+QFrame#stepBlock {
+  background: #0E1828; border: 1px solid #26374D; border-radius: 11px;
+}
+QPushButton#stepDetailsToggle {
+  color: #A9B8C9; background: transparent; border: none;
+  padding: 2px 0px; min-height: 0px; font-size: 12px;
+}
+QPushButton#stepDetailsToggle:hover { color: #53D6C7; background: transparent; border: none; }
+QPlainTextEdit#mainPrompt { padding: 8px 12px; }
 QLabel#demo {
   color: #0B1220; background: #53D6C7; border-radius: 9px;
   padding: 6px 10px; font-weight: 800;
@@ -120,9 +132,52 @@ _VOICE_LABELS = {
 }
 
 
+# Durum ve ses noktaları ton renkleriyle okunur; metin kendisi düz kalır.
+_STATUS_TONES = {"ready": "#53D6C7", "running": "#FFD78C", "error": "#F0B2AA"}
+_VOICE_TONES = {
+    "off": "#718096",
+    "preparing": "#FFD78C",
+    "listening": "#53D6C7",
+    "thinking": "#FFD78C",
+    "speaking": "#53D6C7",
+    "error": "#F0B2AA",
+}
+_STEP_COLORS = {
+    "ok": "#53D6C7",
+    "sent": "#FFD78C",
+    "fail": "#F0B2AA",
+    "denied": "#F0B2AA",
+    "info": "#A9B8C9",
+}
+# Ayrıntı ipucu büyük denetim kayıtlarında da ekranı ve belleği şişirmez.
+_DETAIL_LIMIT = 4000
+# Adım blokları yalnız son birkaç isteğin canlı bağlantısını tutar.
+_STEP_TURNS_KEPT = 8
+_STEP_EVENTS_PER_TURN = 200
+
+
 def _is_user_speaker(speaker: str) -> bool:
     """"Siz" ve "Siz (ses)" aynı kullanıcı balonudur."""
     return speaker.startswith("Siz")
+
+
+def _dot_style(color: str) -> str:
+    """Durum noktasının rengi; metin ayrı etikette düz kalır."""
+    return f"QLabel {{ color: {color}; font-size: 15px; background: transparent; }}"
+
+
+def _detail_text(activity: Activity) -> str:
+    """Ham araç adı ve alanlar; yalnız ayrıntı ipucunda görünür, görünür satıra girmez."""
+    raw_tool = activity.fields.get("tool")
+    head = f"Ham araç adı: {raw_tool}" if isinstance(raw_tool, str) else f"Olay: {activity.event}"
+    payload = json.dumps(
+        activity.fields, ensure_ascii=False, indent=2, sort_keys=True, default=str
+    )
+    if len(payload) > _DETAIL_LIMIT:
+        payload = payload[:_DETAIL_LIMIT] + "\n…"
+    text = f"{head}\n{payload}"
+    # İpucu zengin metin sayılmasın diye kaçışlanır; JSON içindeki "<" işaretleri bozmaz.
+    return f"<pre>{html.escape(text)}</pre>"
 
 
 class PromptEdit(QPlainTextEdit):
@@ -143,6 +198,72 @@ class PromptEdit(QPlainTextEdit):
             event.accept()
             return
         super().keyPressEvent(event)
+
+
+class StepBlock(QFrame):
+    """Bir isteğin sade adım listesi (ADR 0014).
+
+    Görünür satır yoksa blok hiç görünmez. "Ayrıntılar" açılınca iç satırlar da
+    görünür ve her satırın ipucunda ham ad ile alanlar yer alır.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("stepBlock")
+        self.setMaximumWidth(520)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 9, 12, 8)
+        layout.setSpacing(4)
+        self._rows_layout = QVBoxLayout()
+        self._rows_layout.setSpacing(3)
+        layout.addLayout(self._rows_layout)
+        self._rows: list[tuple[QLabel, StepLine, Activity]] = []
+        self._details = False
+        self._toggle = QPushButton("Ayrıntılar")
+        self._toggle.setObjectName("stepDetailsToggle")
+        self._toggle.setCheckable(True)
+        self._toggle.setFlat(True)
+        self._toggle.setAccessibleName("Adım ayrıntılarını göster")
+        self._toggle.toggled.connect(self._set_details)
+        layout.addWidget(self._toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self._refresh()
+
+    def add_line(self, activity: Activity, line: StepLine) -> None:
+        label = QLabel(line.text)
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        label.setStyleSheet(f"QLabel {{ color: {_STEP_COLORS[line.kind]}; font-size: 12px; }}")
+        self._rows.append((label, line, activity))
+        self._rows_layout.addWidget(label)
+        label.setVisible(self._details or not line.internal)
+        if self._details:
+            label.setToolTip(_detail_text(activity))
+        self._refresh()
+
+    def _set_details(self, on: bool) -> None:
+        self._details = on
+        for label, line, activity in self._rows:
+            label.setVisible(on or not line.internal)
+            label.setToolTip(_detail_text(activity) if on else "")
+        self._refresh()
+
+    def _refresh(self) -> None:
+        visible = any(not line.internal for _label, line, _activity in self._rows)
+        self._toggle.setVisible(visible)
+        self.setVisible(visible)
+
+
+@dataclass
+class _TurnSteps:
+    """Bir isteğin denetim olayları; sonuç bildirimi olaylardan önce ya da sonra gelebilir.
+
+    Olaylar ayrı bir kuyruktan okunur, bu yüzden bitiş bildirimi işlendiğinde son
+    birkaç olay henüz gelmemiş olabilir. Blok bir kez kurulur, sonra gelen satırlar
+    aynı bloğa eklenir.
+    """
+
+    activities: list[Activity] = field(default_factory=list)
+    block: StepBlock | None = None
 
 
 class ChatTranscript(QWidget):
@@ -204,7 +325,7 @@ class ChatTranscript(QWidget):
         self._scroll_area.hide()
         outer.addWidget(self._scroll_area, 1)
 
-    def append(self, speaker: str, text: str) -> None:
+    def append(self, speaker: str, text: str, steps: QWidget | None = None) -> None:
         if len(self._messages) == self._messages.maxlen:
             item = self.content_layout.takeAt(0)
             widget = item.widget() if item is not None else None
@@ -217,7 +338,14 @@ class ChatTranscript(QWidget):
         self.welcome.hide()
         self._scroll_area.show()
         row = QWidget()
-        row_layout = QHBoxLayout(row)
+        column = QVBoxLayout(row)
+        column.setContentsMargins(0, 0, 0, 0)
+        column.setSpacing(6)
+        if steps is not None:
+            # Adım bloğu yanıt balonunun hemen üstüne gelir; konuşma kaydına girmez.
+            column.addWidget(steps, 0, Qt.AlignmentFlag.AlignLeft)
+        bubble_row = QWidget()
+        row_layout = QHBoxLayout(bubble_row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         bubble = QFrame()
         bubble.setObjectName(
@@ -243,6 +371,7 @@ class ChatTranscript(QWidget):
         else:
             row_layout.addWidget(bubble)
             row_layout.addStretch(1)
+        column.addWidget(bubble_row)
         self.content_layout.insertWidget(self.content_layout.count() - 1, row)
         QTimer.singleShot(
             0, lambda: self._scroll_area.verticalScrollBar().setValue(
@@ -293,9 +422,16 @@ class ApprovalDialog(QDialog):
         layout.setContentsMargins(22, 20, 22, 18)
         layout.setSpacing(12)
 
-        title = QLabel(f"Onay gerekiyor · {item.tool_name}")
+        # Okunur ad büyük başlıktır; ham ad altında küçük yazılır (ADR 0014).
+        title = QLabel(item.tool_label or item.tool_name)
         title.setObjectName("title")
+        title.setTextFormat(Qt.TextFormat.PlainText)
         layout.addWidget(title)
+        raw_name = QLabel(item.tool_name)
+        raw_name.setObjectName("rawToolName")
+        raw_name.setTextFormat(Qt.TextFormat.PlainText)
+        raw_name.setAccessibleName("Ham araç adı")
+        layout.addWidget(raw_name)
         notice = QLabel(item.notice or "Bu işlem onay gerektirir.")
         notice.setObjectName("amber")
         notice.setTextFormat(Qt.TextFormat.PlainText)
@@ -470,6 +606,7 @@ class DesktopWindow(QMainWindow):
         self._tray: QSystemTrayIcon | None = None
         self._approval_dialog: ApprovalDialog | None = None
         self._active_request: str | None = None
+        self._turn_steps: dict[str, _TurnSteps] = {}
         self._activity_count = 0
         self._activity_empty = True
         self._build_ui()
@@ -523,6 +660,9 @@ class DesktopWindow(QMainWindow):
         model_stack.addWidget(model_caption, 0, Qt.AlignmentFlag.AlignRight)
         model_stack.addWidget(self.model_value, 0, Qt.AlignmentFlag.AlignRight)
         header_layout.addLayout(model_stack)
+        self.voice_dot = QLabel("●")
+        self.voice_dot.setObjectName("voiceDot")
+        self.voice_dot.setStyleSheet(_dot_style(_VOICE_TONES["off"]))
         self.voice_state = QLabel(_VOICE_LABELS["off"])
         self.voice_state.setObjectName("muted")
         self.voice_state.setAccessibleName("Ses durumu")
@@ -534,14 +674,18 @@ class DesktopWindow(QMainWindow):
         else:
             self.voice_button.setToolTip("Mikrofonu yalnız siz açarsınız; onaylar ekrandadır")
         self.voice_button.clicked.connect(self._toggle_voice)
+        header_layout.addWidget(self.voice_dot, 0, Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self.voice_state, 0, Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self.voice_button)
-        self.status_label = QLabel("Başlatılıyor…")
+        self.status_dot = QLabel("●")
+        self.status_dot.setObjectName("statusDot")
+        self.status_label = QLabel("")
         self.status_label.setObjectName("status")
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setFixedHeight(34)
         self.status_label.setMinimumWidth(92)
-        header_layout.addWidget(self.status_label)
+        self._set_status("Başlatılıyor…", "running")
+        header_layout.addWidget(self.status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(self.status_label, 0, Qt.AlignmentFlag.AlignVCenter)
         main.addWidget(header)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -577,17 +721,20 @@ class DesktopWindow(QMainWindow):
         input_layout.setContentsMargins(12, 10, 12, 10)
         input_layout.setSpacing(8)
         self.prompt = PromptEdit(self._submit_main)
+        self.prompt.setObjectName("mainPrompt")
+        self.prompt.setMinimumHeight(38)
+        self.prompt.setMaximumHeight(56)
+        self.prompt.setPlaceholderText(
+            "Jarvis'e ne yapmak istediğinizi yazın…  (Enter gönderir · Shift+Enter yeni satır)"
+        )
         input_layout.addWidget(self.prompt)
         input_controls = QHBoxLayout()
-        hint = QLabel("Enter gönderir  ·  Shift+Enter yeni satır")
-        hint.setObjectName("muted")
         self.cancel_button = QPushButton("İptal et")
         self.cancel_button.setObjectName("danger")
         self.send_button = QPushButton("Gönder")
         self.send_button.setObjectName("primary")
         self.cancel_button.clicked.connect(self._cancel_active)
         self.send_button.clicked.connect(self._submit_main)
-        input_controls.addWidget(hint)
         input_controls.addStretch(1)
         input_controls.addWidget(self.cancel_button)
         input_controls.addWidget(self.send_button)
@@ -689,10 +836,9 @@ class DesktopWindow(QMainWindow):
     def resizeEvent(self, event: Any) -> None:
         narrow = self.width() < 900
         self.steps_toggle.setVisible(narrow)
-        if narrow and self.activity_panel.isVisible():
+        # Ham etkinlik paneli kendiliğinden açılmaz; adımlar sohbette gösterilir.
+        if not narrow or self.activity_panel.isVisible():
             self.activity_panel.hide()
-        elif not narrow:
-            self.activity_panel.show()
         super().resizeEvent(event)
 
     def _submit_main(self) -> None:
@@ -712,12 +858,12 @@ class DesktopWindow(QMainWindow):
     def _submit_text(self, text: str) -> bool:
         request_id = self.bridge.submit(text)
         if request_id is None:
-            self.status_label.setText("Hazır değil veya önceki işlem temizleniyor.")
+            self._set_status("Hazır değil veya önceki işlem temizleniyor.", "running")
             return False
         self._active_request = request_id
         self._busy = True
         self._append_chat("Siz", text)
-        self.status_label.setText("Çalışıyor…")
+        self._set_status("Çalışıyor…", "running")
         self._set_controls()
         self.overlay.set_busy(True)
         return True
@@ -741,8 +887,14 @@ class DesktopWindow(QMainWindow):
         elif not self.bridge.stop_voice():
             self.voice_button.setChecked(False)
 
+    def _set_status(self, text: str, tone: str) -> None:
+        # Durum düz metindir; ton yalnız yanındaki noktanın rengini belirler.
+        self.status_label.setText(text)
+        self.status_dot.setStyleSheet(_dot_style(_STATUS_TONES[tone]))
+
     def _show_voice_state(self, state: str) -> None:
         text = _VOICE_LABELS.get(state, _VOICE_LABELS["off"])
+        self.voice_dot.setStyleSheet(_dot_style(_VOICE_TONES.get(state, _VOICE_TONES["off"])))
         self.voice_state.setText(text)
         self.overlay.voice_state.setText(text)
         on = state in {"preparing", "listening", "thinking", "speaking"}
@@ -781,7 +933,7 @@ class DesktopWindow(QMainWindow):
                     self.model_value.setText(event.message.removeprefix("Hazır · "))
                 if event.request_id is not None or not self._busy:
                     self._worker_ready = True
-                    self.status_label.setText("Hazır")
+                    self._set_status("Hazır", "ready")
                     self._busy = False
                     self._active_request = None
                     self._set_controls()
@@ -793,12 +945,12 @@ class DesktopWindow(QMainWindow):
                     self._dismiss_approval_for(event.request_id)
             elif event.state == "running":
                 self._busy = True
-                self.status_label.setText("Çalışıyor…")
+                self._set_status("Çalışıyor…", "running")
                 self._set_controls()
                 self.overlay.set_busy(True)
             elif event.state == "cleanup_pending":
                 self._busy = True
-                self.status_label.setText("Önceki işlem temizleniyor…")
+                self._set_status("Önceki işlem temizleniyor…", "running")
                 self.overlay.set_busy(True, "Temizleniyor…")
                 self._set_controls()
             elif event.state == "voice":
@@ -807,25 +959,27 @@ class DesktopWindow(QMainWindow):
                 self._append_chat("Jarvis", event.message)
                 self._show_voice_state("off")
             elif event.state == "context_reset":
+                # Adım blokları eski balonlarla birlikte silinir; kayıt da sıfırlanır.
+                self._turn_steps.clear()
                 self.chat.clear()
                 self._append_chat("Sistem", "Yeni sohbet başladı.")
                 if not self._busy:
-                    self.status_label.setText("Hazır")
+                    self._set_status("Hazır", "ready")
                 self._set_controls()
             elif event.state == "cancelling":
-                self.status_label.setText("İptal ediliyor…")
+                self._set_status("İptal ediliyor…", "running")
             elif event.state == "stopping":
-                self.status_label.setText("Temizleniyor…")
+                self._set_status("Temizleniyor…", "running")
             elif event.state == "stopped":
                 self._finish_exit()
             elif event.state == "cancelled":
-                self.status_label.setText("İptal edildi")
+                self._set_status("İptal edildi", "ready")
             return
         if isinstance(event, VoiceCommand):
             self._active_request = event.request_id
             self._busy = True
             self._append_chat("Siz (ses)", event.text)
-            self.status_label.setText("Çalışıyor…")
+            self._set_status("Çalışıyor…", "running")
             self._set_controls()
             self.overlay.set_busy(True)
             return
@@ -835,22 +989,29 @@ class DesktopWindow(QMainWindow):
         if isinstance(event, Finished):
             if event.request_id == self._active_request:
                 self._dismiss_approval_for(event.request_id)
-                self._append_chat("Jarvis", event.result.text)
+                self._append_chat(
+                    "Jarvis", event.result.text, self._step_block_for(event.request_id)
+                )
                 self.overlay.status.setText("Yanıt hazır")
             return
         if isinstance(event, Failed):
             if not event.request_id:
-                self.status_label.setText(f"Başlatılamadı · {event.error_type}")
+                self._set_status(f"Başlatılamadı · {event.error_type}", "error")
                 self._append_chat("Jarvis", event.message)
             elif event.request_id == self._active_request:
                 self._dismiss_approval_for(event.request_id)
-                self._append_chat("Jarvis", f"İstek tamamlanamadı ({event.error_type}).")
+                self._append_chat(
+                    "Jarvis",
+                    f"İstek tamamlanamadı ({event.error_type}).",
+                    self._step_block_for(event.request_id),
+                )
             return
         if isinstance(event, ActivityGap):
             self._add_activity(f"{event.dropped_count} eski etkinlik görünümden düştü", "#FFD78C")
             return
         if isinstance(event, Activity):
             self._render_activity(event)
+            self._collect_step(event)
 
     def _show_approval(self, item: Approval) -> None:
         if item.request_id != self._active_request:
@@ -942,15 +1103,50 @@ class DesktopWindow(QMainWindow):
             self.activity.takeItem(0)
         self.activity.scrollToBottom()
 
-    def _append_chat(self, speaker: str, text: str) -> None:
-        self.chat.append(speaker, text)
+    def _append_chat(self, speaker: str, text: str, steps: StepBlock | None = None) -> None:
+        self.chat.append(speaker, text, steps)
+
+    def _turn_for(self, request_id: str) -> _TurnSteps:
+        turn = self._turn_steps.get(request_id)
+        if turn is None:
+            turn = _TurnSteps()
+            self._turn_steps[request_id] = turn
+            while len(self._turn_steps) > _STEP_TURNS_KEPT:
+                del self._turn_steps[next(iter(self._turn_steps))]
+        return turn
+
+    def _collect_step(self, event: Activity) -> None:
+        if event.request_id is None:
+            return
+        turn = self._turn_for(event.request_id)
+        if len(turn.activities) >= _STEP_EVENTS_PER_TURN:
+            return
+        turn.activities.append(event)
+        if turn.block is not None:
+            self._add_step(turn.block, event)
+
+    def _step_block_for(self, request_id: str) -> StepBlock:
+        """Yanıt balonunun üstündeki blok; bloğa henüz satır gelmediyse gizli kalır."""
+        turn = self._turn_for(request_id)
+        if turn.block is None:
+            block = StepBlock()
+            for activity in turn.activities:
+                self._add_step(block, activity)
+            turn.block = block
+        return turn.block
+
+    def _add_step(self, block: StepBlock, activity: Activity) -> None:
+        # Etiket tablosu işçi açılınca dolar; her satırda güncel kopya okunur.
+        line = step_line(activity.event, activity.fields, self.bridge.labels())
+        if line is not None:
+            block.add_line(activity, line)
 
     def _request_exit(self) -> None:
         self._exiting = True
         if self._approval_dialog is not None:
             self._approval_dialog.reject()
         self.bridge.shutdown()
-        self.status_label.setText("Temizleniyor…")
+        self._set_status("Temizleniyor…", "running")
         self._set_controls()
         self.overlay.set_busy(True, "Temizleniyor…")
 

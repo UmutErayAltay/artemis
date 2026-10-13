@@ -354,3 +354,53 @@ def test_live_benchmark_counts_invalid_backward_and_missing_audio_sessions():
 
     assert len(completed) == 1
     assert (aborted_count, no_audio, invalid) == (1, 1, 1)
+
+
+async def test_on_state_reports_one_command_as_listening_thinking_speaking_off():
+    # Durum sırası ekran için sözleşmedir: komut bitince dinlemeye dönülür, kapanışta "off".
+    states: list[str] = []
+    frames = [AudioFrame(b"a", float(i)) for i in range(7)]
+    controller = VoiceController(
+        FakeRunner(),
+        VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100),
+        FakeMic(frames),
+        FakeVAD([True, True, False, False, False, False, False]),
+        FakeRecognizer(["artemis saat kaç?"]),
+        FakeTTS(),
+        FakeSink(),
+        on_state=states.append,
+    )
+
+    await controller.run()
+
+    assert states == ["listening", "thinking", "speaking", "listening", "off"]
+
+
+async def test_run_command_kwarg_replaces_runner_and_default_is_runner_run():
+    runner = FakeRunner()
+    seen: list[str] = []
+
+    async def run_command(text):
+        seen.append(text)
+        return type("Result", (), {"text": ""})()
+
+    frames = [AudioFrame(b"a", float(i)) for i in range(7)]
+    controller = VoiceController(
+        runner,
+        VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100),
+        FakeMic(frames),
+        FakeVAD([True, True, False, False, False, False, False]),
+        FakeRecognizer(["artemis saat kaç?"]),
+        FakeTTS(),
+        FakeSink(),
+        run_command=run_command,
+    )
+
+    await controller.run()
+
+    assert seen == ["saat kaç?"]
+    assert runner.commands == []
+    default = VoiceController(
+        runner, VoiceConfig(), FakeMic(), FakeVAD([]), FakeRecognizer([]), FakeTTS(), FakeSink()
+    )
+    assert default.run_command == runner.run

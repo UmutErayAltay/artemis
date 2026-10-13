@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -14,10 +15,19 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel
 
-from jarvis.channels.desktop.app import ApprovalDialog, DesktopWindow, build_window
-from jarvis.channels.desktop.bridge import State
+import jarvis.channels.desktop.bridge as bridge_module
+from jarvis.brain.agent_loop import RunResult
+from jarvis.channels.desktop.app import (
+    _STYLE,
+    ApprovalDialog,
+    DesktopWindow,
+    StepBlock,
+    build_window,
+)
+from jarvis.channels.desktop.bridge import Activity, Finished, State, VoiceCommand
+from jarvis.channels.desktop.demo import DemoReadTool, DemoWriteTool
 from jarvis.channels.runtime import Runtime
 
 
@@ -240,3 +250,195 @@ def test_approval_timeout_closes_stale_dialog_without_waiting_for_user(
         timer.stop()
         _close_cleanly(app, window)
 
+
+@pytest.mark.parametrize(
+    ("label", "expected_title"),
+    [("Demo bellek yazma", "Demo bellek yazma"), ("", "demo_write_memory")],
+)
+def test_approval_title_is_readable_label_with_raw_name_below(
+    app: QApplication,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    label: str,
+    expected_title: str,
+) -> None:
+    # Etiketi olmayan araçta başlık ham ada düşer; ham ad her durumda altta görünür.
+    monkeypatch.setattr(DemoWriteTool, "label", label)
+    window = _window(app, tmp_path)
+    try:
+        assert window._submit_text("örnek akış")
+        _wait(app, lambda: isinstance(window._approval_dialog, ApprovalDialog))
+        dialog = window._approval_dialog
+        assert dialog is not None
+        title = dialog.findChild(QLabel, "title")
+        raw_name = dialog.findChild(QLabel, "rawToolName")
+        assert title is not None and title.text() == expected_title
+        assert raw_name is not None and raw_name.text() == "demo_write_memory"
+        assert dialog.no_button.isDefault()
+        QTest.keyClick(dialog, Qt.Key.Key_Escape)
+        _wait(app, lambda: not window._busy)
+        assert "Onay verilmedi" in window.chat.toPlainText()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_step_block_shows_verified_lines_and_hides_internal_until_details(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(DemoReadTool, "label", "Demo örnek okuma")
+    monkeypatch.setattr(DemoReadTool, "done_label", "Demo örneği okundu")
+    monkeypatch.setattr(DemoWriteTool, "label", "Demo bellek yazma")
+    window = _window(app, tmp_path)
+    try:
+        request = "gui-steps"
+        window._active_request = request
+        window._busy = True
+        events = [
+            Activity(request, "turn-1", 1, "turn_start", {"turn_id": "turn-1"}),
+            Activity(request, "turn-1", 2, "tool_requested", {"tool": "demo_read_sample"}),
+            Activity(
+                request,
+                "turn-1",
+                3,
+                "tool_result",
+                {"tool": "demo_read_sample", "result": {"status": "ok", "success": True}},
+            ),
+            Activity(
+                request,
+                "turn-1",
+                4,
+                "tool_result",
+                {"tool": "demo_write_memory", "result": {"status": "sent", "success": False}},
+            ),
+            # Tutarsız kayıt (ok ama success yok) başarı gibi sunulmaz.
+            Activity(
+                request,
+                "turn-1",
+                5,
+                "tool_result",
+                {"tool": "demo_ghost", "result": {"status": "ok", "success": False}},
+            ),
+            Activity(request, "turn-1", 6, "turn_end", {"stop_reason": "completed"}),
+        ]
+        for event in events:
+            window._handle_event(event)
+        result = RunResult(text="Demo tamam.", stop_reason="completed", turn_id="turn-1")
+        window._handle_event(Finished(request, result))
+
+        blocks = window.findChildren(StepBlock)
+        assert len(blocks) == 1
+        block = blocks[0]
+        assert not block.isHidden()
+        visible = [label.text() for label, _line, _activity in block._rows if not label.isHidden()]
+        assert visible == [
+            "Demo örneği okundu ✓",
+            "Demo bellek yazma: komut gönderildi, sonucu doğrulanamadı",
+            "demo_ghost başarısız ✗",
+        ]
+        assert [text for text in visible if "✓" in text] == ["Demo örneği okundu ✓"]
+        hidden = [label.text() for label, _line, _activity in block._rows if label.isHidden()]
+        assert "İstek alındı" in hidden and "Yanıt hazır" in hidden
+
+        # Adım bloğu yanıt balonunun hemen üstünde, aynı satırda durur.
+        bubble, speaker, _text = window.chat._bubbles[-1]
+        assert speaker == "Jarvis"
+        bubble_row = bubble.parentWidget()
+        column = block.parentWidget().layout()
+        assert column.indexOf(block) < column.indexOf(bubble_row)
+
+        block._toggle.click()
+        assert all(not label.isHidden() for label, _line, _activity in block._rows)
+        tool_rows = [
+            label for label, _line, activity in block._rows
+            if activity.fields.get("tool") == "demo_read_sample"
+        ]
+        assert "Ham araç adı: demo_read_sample" in tool_rows[0].toolTip()
+        assert "demo_read_sample" not in visible[0]
+        block._toggle.click()
+        assert all(
+            label.isHidden() == line.internal for label, line, _activity in block._rows
+        )
+    finally:
+        window._busy = False
+        window._active_request = None
+        _close_cleanly(app, window)
+
+
+def test_status_label_is_plain_text_without_button_rule(app: QApplication, tmp_path: Path) -> None:
+    window = _window(app, tmp_path)
+    try:
+        rule = re.search(r"QLabel#status\s*\{([^}]*)\}", _STYLE)
+        assert rule is not None
+        body = rule.group(1)
+        assert "border: none" in body
+        assert "background: transparent" in body
+        assert "border-radius" not in body
+        # Eski sabit 34 px hap görünümü kalkmıştır.
+        assert window.status_label.maximumHeight() > 34
+        assert window.status_label.text() == "Hazır"
+    finally:
+        _close_cleanly(app, window)
+
+
+@pytest.mark.parametrize(
+    ("state", "text", "dot_color"),
+    [
+        ("listening", "Dinliyor", "#53D6C7"),
+        ("thinking", "Düşünüyor", "#FFD78C"),
+        ("speaking", "Konuşuyor", "#53D6C7"),
+        ("off", "Ses kapalı", "#718096"),
+        ("bilinmeyen", "Ses kapalı", "#718096"),
+    ],
+)
+def test_voice_state_text_and_dot_follow_the_state(
+    app: QApplication, tmp_path: Path, state: str, text: str, dot_color: str
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        window._show_voice_state(state)
+        assert window.voice_state.text() == text
+        assert dot_color in window.voice_dot.styleSheet()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_voice_command_adds_user_voice_bubble_and_marks_busy(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        window._handle_event(VoiceCommand("voice-gui", "dosyaları listele"))
+        assert window._busy
+        assert window._active_request == "voice-gui"
+        assert window.chat._messages[-1] == ("Siz (ses)", "dosyaları listele")
+        assert not window.prompt.isEnabled()
+        window._handle_event(
+            Finished("voice-gui", RunResult(text="Tamam.", stop_reason="completed", turn_id="t"))
+        )
+        window._handle_event(State("ready", "Hazır.", "voice-gui"))
+        assert not window._busy
+    finally:
+        window._busy = False
+        window._active_request = None
+        _close_cleanly(app, window)
+
+
+def test_demo_mode_never_builds_or_starts_the_voice_controller(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[Any] = []
+
+    def forbidden(*args: Any, **_kwargs: Any) -> None:
+        calls.append(args)
+        raise AssertionError("Demo modu ses denetleyicisi kurmamalı")
+
+    monkeypatch.setattr(bridge_module, "build_voice_controller", forbidden)
+    window = build_window(tmp_path / "ignored.yaml", demo=True, voice=True, app=app)
+    window.show()
+    try:
+        _wait(app, lambda: window.status_label.text() == "Hazır")
+        assert calls == []
+        assert window._voice_on_ready is False
+        assert not window.voice_button.isEnabled()
+    finally:
+        _close_cleanly(app, window)
