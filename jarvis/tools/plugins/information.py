@@ -76,14 +76,16 @@ async def search_web(query: str) -> list[dict[str, str]]:
 @register_tool
 class WebSearch(BaseTool):
     name = "web_search"
+    label = "Web araması"
+    done_label = "Web'de arandı"
     description = (
         "Arama sorgusunu DuckDuckGo servisine gönderir; başlık ve URL sonuçları "
         "güvenilmeyen dış veridir."
     )
     args_model = SearchArguments
     risk = Risk.SIDE_EFFECT
-    outbound = True
     external = True
+    outbound = True
     content_kind = "web"
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
@@ -117,6 +119,8 @@ class WebSearch(BaseTool):
 @register_tool
 class SystemInfo(BaseTool):
     name = "system_info"
+    label = "Sistem bilgisi"
+    done_label = "Sistem bilgisi alındı"
     description = "İşletim sistemi, sürüm ve mimariyi ortam sırlarını okumadan döndürür."
     args_model = EmptyArguments
     risk = Risk.READ_ONLY
@@ -138,6 +142,8 @@ class SystemInfo(BaseTool):
 @register_tool
 class CurrentTime(BaseTool):
     name = "current_time"
+    label = "Saat sorgusu"
+    done_label = "Saat alındı"
     description = "Yerel saat dilimi bilgisiyle güncel tarih ve saati verir."
     args_model = EmptyArguments
     risk = Risk.READ_ONLY

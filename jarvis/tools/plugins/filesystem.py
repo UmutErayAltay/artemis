@@ -68,6 +68,8 @@ def move_verified(source: Path, destination: Path) -> ToolResult:
 @register_tool
 class ListFiles(BaseTool):
     name = "list_files"
+    label = "Dosyaları listeleme"
+    done_label = "Dosyalar listelendi"
     description = "Çalışma kökündeki veya göreli klasördeki dosyaları boyutlarıyla listeler."
     args_model = ListArguments
     risk = Risk.READ_ONLY
@@ -109,6 +111,8 @@ class ListFiles(BaseTool):
 @register_tool
 class ReadFile(BaseTool):
     name = "read_file"
+    label = "Dosya okuma"
+    done_label = "Dosya okundu"
     description = "Göreli UTF-8 metin dosyasını okur; büyük içerik sınırlandırılır."
     args_model = PathArguments
     risk = Risk.READ_ONLY
@@ -139,6 +143,8 @@ class ReadFile(BaseTool):
 @register_tool
 class CreateFile(BaseTool):
     name = "create_file"
+    label = "Dosya oluşturma"
+    done_label = "Dosya oluşturuldu"
     description = "Göreli konumda yeni UTF-8 dosya oluşturur; mevcut dosyaya yazmaz."
     args_model = CreateArguments
     risk = Risk.SIDE_EFFECT
@@ -159,6 +165,8 @@ class CreateFile(BaseTool):
 @register_tool
 class MoveFile(BaseTool):
     name = "move_file"
+    label = "Dosya taşıma"
+    done_label = "Dosya taşındı"
     description = "Dosyayı çalışma kökü içinde taşır; hedef zaten varsa reddeder."
     args_model = MoveArguments
     risk = Risk.SIDE_EFFECT
@@ -177,6 +185,8 @@ class MoveFile(BaseTool):
 @register_tool
 class RenameFile(BaseTool):
     name = "rename_file"
+    label = "Dosyayı yeniden adlandırma"
+    done_label = "Dosya yeniden adlandırıldı"
     description = "Dosyanın aynı klasördeki adını değiştirir; new_name yalnız dosya adıdır."
     args_model = RenameArguments
     risk = Risk.SIDE_EFFECT
@@ -197,6 +207,8 @@ class RenameFile(BaseTool):
 @register_tool
 class DeleteFile(BaseTool):
     name = "delete_file"
+    label = "Dosya silme"
+    done_label = "Dosya çöp kutusuna taşındı"
     description = "Dosyayı işletim sisteminin geri dönüşüm kutusuna taşır; kalıcı silmez."
     args_model = PathArguments
     risk = Risk.CONFIRM_REQUIRED
@@ -285,6 +297,8 @@ class DeleteFile(BaseTool):
 @register_tool
 class CreateDirectory(BaseTool):
     name = "create_directory"
+    label = "Klasör oluşturma"
+    done_label = "Klasör oluşturuldu"
     description = "Çalışma kökünde yeni bir klasör oluşturur; üst klasör mevcut olmalı."
     args_model = PathArguments
     risk = Risk.SIDE_EFFECT

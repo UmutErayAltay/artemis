@@ -70,6 +70,8 @@ def process_result(
 @register_tool
 class OpenApplication(BaseTool):
     name = "open_application"
+    label = "Uygulama açma"
+    done_label = "Uygulama açma komutu gönderildi"
     description = "Yalnız ayarlardaki izinli uygulama takma adını açmayı ister."
     args_model = ApplicationArguments
     risk = Risk.SIDE_EFFECT
@@ -100,6 +102,8 @@ class OpenApplication(BaseTool):
 @register_tool
 class CloseApplication(BaseTool):
     name = "close_application"
+    label = "Uygulama kapatma"
+    done_label = "Uygulama kapatıldı"
     description = (
         "Uygulamanın adıyla eşleşen tüm süreçlerini kapatır; kaydedilmemiş işler kaybolabilir."
     )
@@ -136,6 +140,8 @@ class CloseApplication(BaseTool):
 @register_tool
 class ReadClipboard(BaseTool):
     name = "read_clipboard"
+    label = "Panoyu okuma"
+    done_label = "Pano okundu"
     description = "Windows panosundaki metni okur; içerik dış veri olarak işaretlenir."
     args_model = EmptyArguments
     risk = Risk.READ_ONLY
@@ -167,6 +173,8 @@ class ReadClipboard(BaseTool):
 @register_tool
 class WriteClipboard(BaseTool):
     name = "write_clipboard"
+    label = "Panoya yazma"
+    done_label = "Panoya yazıldı"
     description = "Windows panosuna metin yazar ve geri okuyarak doğrular."
     args_model = ClipboardArguments
     risk = Risk.SIDE_EFFECT
@@ -192,6 +200,8 @@ class WriteClipboard(BaseTool):
 @register_tool
 class OpenURL(BaseTool):
     name = "open_url"
+    label = "Bağlantı açma"
+    done_label = "Bağlantı tarayıcıya gönderildi"
     description = "Yalnız http/https adresini tarayıcıya gönderir; sayfanın açıldığını iddia etmez."
     args_model = URLArguments
     risk = Risk.SIDE_EFFECT

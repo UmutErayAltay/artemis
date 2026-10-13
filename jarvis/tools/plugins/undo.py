@@ -19,6 +19,8 @@ class ListUndoArguments(BaseModel):
 @register_tool
 class ListUndoRecords(BaseTool):
     name = "list_undo_records"
+    label = "Silme günlüğü"
+    done_label = "Silme günlüğü okundu"
     description = "Çalışma alanındaki dosya geri dönüşüm kayıtlarını listeler."
     args_model = ListUndoArguments
     risk = Risk.READ_ONLY
