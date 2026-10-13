@@ -214,6 +214,9 @@ class AgentLoop:
 
     async def run(self, text: str, history: ContextWindow | None = None) -> RunResult:
         state = TurnState()
+        # Taint yeni tura taşınmaz (ADR 0012) ama bağlamda kalan dış içerik dışarı giden
+        # araçlar için onay nedenidir (ADR 0013).
+        state.history_external = history is not None and history.external
         start = time.monotonic()
         settings = self.context.settings
         state.deadline = start + settings.max_seconds
@@ -239,6 +242,7 @@ class AgentLoop:
             context_shortened_outputs=history.shortened_outputs if history is not None else 0,
             context_dropped_turns=history.dropped_turns if history is not None else 0,
             context_estimated_tokens=history.estimated_tokens if history is not None else 0,
+            context_external=state.history_external,
         )
 
         finished = False

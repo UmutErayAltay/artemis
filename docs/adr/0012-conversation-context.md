@@ -39,3 +39,5 @@ araçlar her turda onay ister. Bu turdaki savunma kapı değil çerçevedir; tes
 kırıldığını sınar, gerçek modelin çerçeveye uyup uymadığını yalnız
 `bench --canli` ölçer. Geçmiş yalnız bellektedir; süreç kapanınca kaybolur,
 kalıcı hafıza Faz 3'tür. Token tahmini sağlayıcı tokenizer'ı değildir.
+
+Değişiklik: dışarı giden araçlar için kalan risk ADR 0013 ile kapatıldı.

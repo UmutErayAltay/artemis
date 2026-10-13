@@ -20,12 +20,17 @@ if TYPE_CHECKING:
 
 ApprovalCallback = Callable[[str, dict[str, Any]], bool]
 TAINT_NOTICE = "Bu adım dış bir içerik okunduktan sonra istendi"
+# Taint bu turda değil, bağlamdaki önceki bir turdan geliyorsa kullanıcıya bu söylenir.
+HISTORY_TAINT_NOTICE = TAINT_NOTICE + " (önceki bir turda)"
 
 
 @dataclass
 class TurnState:
     turn_id: str = field(default_factory=lambda: str(uuid4()))
     tainted: bool = False
+    # Modele verilen geçmişte dış içerikli bir tur var (ADR 0013). `tainted` gibi tur
+    # içinde değişmez; yalnız `outbound` araçlar için onay nedenidir.
+    history_external: bool = False
     deadline: float | None = None
 
 
@@ -81,13 +86,21 @@ class SafetyGate:
                 started,
             )
         risk = normalize_risk(tool.risk)
-        requires_approval = risk is Risk.CONFIRM_REQUIRED or (
-            state.tainted and risk is not Risk.READ_ONLY
+        history_outbound = state.history_external and tool.outbound
+        requires_approval = (
+            risk is Risk.CONFIRM_REQUIRED
+            or (state.tainted and risk is not Risk.READ_ONLY)
+            or (history_outbound and risk is not Risk.READ_ONLY)
         )
         normalized = arguments.model_dump(mode="json")
         approved: bool | None = None
         if requires_approval:
-            notice = TAINT_NOTICE if state.tainted else "Bu işlem onay gerektirir."
+            if state.tainted:
+                notice = TAINT_NOTICE
+            elif history_outbound:
+                notice = HISTORY_TAINT_NOTICE
+            else:
+                notice = "Bu işlem onay gerektirir."
             # Onay ekranı tool açıklamasını da taşır; kullanıcı etkilenecek kapsamı
             # (ör. uygulamanın tüm süreçlerinin zorla kapatılmasını) görebilir.
             self.pending_notice = f"{notice}. {tool.description}"
@@ -130,6 +143,8 @@ class SafetyGate:
             confirmation_required=requires_approval,
             approved=approved,
             tainted=state.tainted,
+            outbound=tool.outbound,
+            history_external=state.history_external,
         )
         try:
             result = await tool.execute(arguments, context)

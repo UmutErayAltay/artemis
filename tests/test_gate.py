@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from jarvis.brain.models import ToolCall
 from jarvis.config.settings import Settings
 from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import TAINT_NOTICE, SafetyGate, TurnState
+from jarvis.safety.gate import HISTORY_TAINT_NOTICE, TAINT_NOTICE, SafetyGate, TurnState
 from jarvis.safety.paths import safe_join
 from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from jarvis.tools.registry import ToolRegistry
@@ -58,6 +58,25 @@ class ReadTool(BaseTool):
         )
 
 
+class OutboundTool(WriteTool):
+    """Yerel dosya yazan ama argümanlarını dışarı taşıyan sahte araç (ADR 0013)."""
+
+    name = "outbound_test"
+    description = "Dışarı giden sahte gönderimin onay nedenini sınar."
+    outbound: ClassVar[bool] = True
+
+
+class OutboundReadTool(BaseTool):
+    name = "outbound_read_test"
+    description = "Dışarı giden ama yalnız okuyan sahte aracı sınar."
+    args_model = FileArgs
+    risk: ClassVar[Risk] = Risk.READ_ONLY
+    outbound: ClassVar[bool] = True
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        return ToolResult(success=True, status="ok", message="Okundu.")
+
+
 @pytest.fixture
 def setup_gate(tmp_path: Path) -> tuple[SafetyGate, ToolContext, TurnState]:
     desktop = tmp_path / "desktop"
@@ -65,7 +84,7 @@ def setup_gate(tmp_path: Path) -> tuple[SafetyGate, ToolContext, TurnState]:
     settings = Settings(workspace=desktop)
     context = ToolContext(desktop, settings, AuditLog(tmp_path / "audit.jsonl"))
     registry = ToolRegistry()
-    for tool in (WriteTool, ConfirmTool, ReadTool):
+    for tool in (WriteTool, ConfirmTool, ReadTool, OutboundTool, OutboundReadTool):
         registry.register(tool)
     return SafetyGate(registry), context, TurnState()
 
@@ -256,3 +275,110 @@ async def test_dispatch_audit_proves_approval_for_actual_side_effect(
     assert dispatch["tainted"] is True
     assert dispatch["confirmation_required"] is True
     assert dispatch["approved"] is True
+
+
+def test_history_notice_is_turn_notice_with_previous_turn_suffix() -> None:
+    assert f"{TAINT_NOTICE} (önceki bir turda)" == HISTORY_TAINT_NOTICE
+
+
+async def test_outbound_tool_needs_approval_when_history_is_external(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState],
+) -> None:
+    gate, context, _state = setup_gate
+    state = TurnState(history_external=True)
+    notices: list[str] = []
+    arguments_seen: list[dict[str, Any]] = []
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        notices.append(gate.pending_notice)
+        arguments_seen.append(arguments)
+        return False
+
+    result = await gate.dispatch(call("outbound_test", path="sent.txt"), context, state, reject)
+    assert result.status == "denied"
+    assert notices == [f"{HISTORY_TAINT_NOTICE}. {OutboundTool.description}"]
+    assert arguments_seen == [{"path": "sent.txt", "metadata": {}}]
+    assert not (context.workspace / "sent.txt").exists()
+
+
+async def test_outbound_tool_without_external_history_runs_unprompted(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState],
+) -> None:
+    gate, context, state = setup_gate
+
+    def unexpected_approval(name: str, arguments: dict[str, Any]) -> bool:
+        pytest.fail("Dış içerik geçmişi yokken dışarı giden araç onay istememeli.")
+
+    result = await gate.dispatch(
+        call("outbound_test", path="clean.txt"), context, state, unexpected_approval
+    )
+    assert result.success
+    assert (context.workspace / "clean.txt").exists()
+
+
+async def test_approved_outbound_dispatch_is_audited_with_history_flags(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState],
+) -> None:
+    gate, context, _state = setup_gate
+    state = TurnState(history_external=True)
+    result = await gate.dispatch(
+        call("outbound_test", path="approved.txt"), context, state, lambda *_: True
+    )
+    assert result.success
+    records = [
+        json.loads(line)
+        for line in context.audit.path.read_text(encoding="utf-8").splitlines()
+    ]
+    dispatch = next(record for record in records if record["event"] == "tool_dispatch")
+    assert dispatch["outbound"] is True
+    assert dispatch["history_external"] is True
+    assert dispatch["approved"] is True
+    assert dispatch["confirmation_required"] is True
+
+
+async def test_read_only_outbound_tool_is_not_gated_by_history(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState],
+) -> None:
+    gate, context, _state = setup_gate
+    state = TurnState(history_external=True)
+
+    def unexpected_approval(name: str, arguments: dict[str, Any]) -> bool:
+        pytest.fail("Yalnız okuyan dışarı giden araç onay istememeli.")
+
+    result = await gate.dispatch(
+        call("outbound_read_test", path="x.txt"), context, state, unexpected_approval
+    )
+    assert result.success
+
+
+async def test_local_side_effect_is_not_gated_by_history(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState],
+) -> None:
+    gate, context, _state = setup_gate
+    state = TurnState(history_external=True)
+
+    def unexpected_approval(name: str, arguments: dict[str, Any]) -> bool:
+        pytest.fail("Dışarı giden olmayan yan etki geçmiş yüzünden onay istememeli.")
+
+    result = await gate.dispatch(
+        call("write_test", path="local.txt"), context, state, unexpected_approval
+    )
+    assert result.success
+    assert (context.workspace / "local.txt").exists()
+
+
+async def test_current_turn_taint_notice_wins_over_history_notice(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState],
+) -> None:
+    gate, context, _state = setup_gate
+    state = TurnState(tainted=True, history_external=True)
+    notices: list[str] = []
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        notices.append(gate.pending_notice)
+        return False
+
+    result = await gate.dispatch(call("outbound_test", path="sent.txt"), context, state, reject)
+    assert result.status == "denied"
+    assert notices == [f"{TAINT_NOTICE}. {OutboundTool.description}"]
+    assert HISTORY_TAINT_NOTICE not in notices[0]

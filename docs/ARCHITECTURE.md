@@ -60,6 +60,9 @@ fazla `context_turns` tur verilir, token bütçesi aşılırsa önce eski araç 
 kısaltılır, sonra en eski turlar düşer. Eski araç çıktıları her gösterimde yeniden veri
 çerçevesine alınır; taint yeni tura taşınmaz, gizlilik işareti taşınır. Sıfırlama CLI'da
 `/yeni`, panelde "Yeni sohbet"tir. Karar [ADR 0012](adr/0012-conversation-context.md).
+Tek istisna: bağlamda dış içerikli tur kaldığı sürece `outbound` bildiren araçlar
+(`open_url`, `web_search`) yeni turda da onay ister; karar
+[ADR 0013](adr/0013-outbound-after-history-taint.md).
 
 ## Güvenlik sınırları
 

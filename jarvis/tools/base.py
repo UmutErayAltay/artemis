@@ -85,6 +85,10 @@ class BaseTool(ABC):
     risk: ClassVar[Risk] = Risk.SIDE_EFFECT
     external: ClassVar[bool] = False
     content_kind: ClassVar[ContentKind] = "text"
+    # Araç argümanını makinenin dışına (ağ, tarayıcı) taşıyor. Geçmişte dış içerik
+    # kalmışsa kapı bu araçlara yeni turda da onay sorar (ADR 0013): injection metni
+    # URL veya sorgu üzerinden dışarı sızdırılamasın. Kapıda araç adı listesi tutulmaz.
+    outbound: ClassVar[bool] = False
 
     @abstractmethod
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:

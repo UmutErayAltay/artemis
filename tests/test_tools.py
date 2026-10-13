@@ -500,3 +500,15 @@ def test_open_uses_no_shell_and_an_environment_allowlist(monkeypatch: pytest.Mon
     assert args == ([r"C:\Windows\notepad.exe"],)
     assert kwargs["shell"] is False
     assert "OPENROUTER_API_KEY" not in kwargs["env"]
+
+
+def test_only_network_tools_declare_outbound() -> None:
+    # Dışarı giden tek araçlar ADR 0013 kuralını tetikler; yeni araç bilerek listeye eklenmeli.
+    registry = discover_tools()
+    outbound: set[str] = set()
+    for definition in registry.definitions():
+        tool = registry.get(definition.name)
+        assert tool is not None
+        if tool.outbound:
+            outbound.add(definition.name)
+    assert outbound == {"open_url", "web_search"}

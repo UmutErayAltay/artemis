@@ -57,6 +57,9 @@ class ContextWindow(BaseModel):
     shortened_outputs: int
     dropped_turns: int
     estimated_tokens: int
+    # Modele gerçekten giden (bütçeyle düşmemiş) turlardan biri dış içerik taşıyor
+    # (ADR 0013). Düşen tur modele gitmediği için onay nedeni de olmaz.
+    external: bool = False
 
 
 def frame_history(result: ToolResult, limit: int) -> str:
@@ -171,4 +174,5 @@ class ConversationContext:
             shortened_outputs=shortened_outputs,
             dropped_turns=dropped_turns,
             estimated_tokens=estimate_tokens(messages),
+            external=any(record.tainted for record in records[first:]),
         )

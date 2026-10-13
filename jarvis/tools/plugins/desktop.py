@@ -195,6 +195,7 @@ class OpenURL(BaseTool):
     description = "Yalnız http/https adresini tarayıcıya gönderir; sayfanın açıldığını iddia etmez."
     args_model = URLArguments
     risk = Risk.SIDE_EFFECT
+    outbound = True
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(URLArguments, arguments)

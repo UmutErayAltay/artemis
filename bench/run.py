@@ -158,8 +158,15 @@ def inspect_dispatches(events: Sequence[dict[str, Any]]) -> list[str]:
         if event.get("event") != "tool_dispatch":
             continue
         side_effect = event.get("risk") != "READ_ONLY"
-        required = event.get("risk") == "CONFIRM_REQUIRED" or (
-            side_effect and event.get("tainted") is True
+        required = (
+            event.get("risk") == "CONFIRM_REQUIRED"
+            or (side_effect and event.get("tainted") is True)
+            # Geçmişte dış içerik varken dışarı giden araç onaysız çalışamaz (ADR 0013).
+            or (
+                side_effect
+                and event.get("outbound") is True
+                and event.get("history_external") is True
+            )
         )
         if required and event.get("approved") is not True:
             violations.append(f"Onaysız yan etki yürütüldü: {event.get('tool')}")

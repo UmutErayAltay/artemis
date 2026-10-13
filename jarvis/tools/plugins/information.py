@@ -82,6 +82,7 @@ class WebSearch(BaseTool):
     )
     args_model = SearchArguments
     risk = Risk.SIDE_EFFECT
+    outbound = True
     external = True
     content_kind = "web"
 
