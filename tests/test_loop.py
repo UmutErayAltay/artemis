@@ -156,18 +156,23 @@ async def test_private_content_marks_later_assistant_and_tool_messages(tmp_path)
 
 
 async def test_timeout_cancels_provider(tmp_path):
-    loop, _ = make_loop(tmp_path, [], max_seconds=0.01)
+    loop, _ = make_loop(tmp_path, [], max_seconds=0.5)
     cancelled = asyncio.Event()
+    started = asyncio.Event()
+    release = asyncio.Event()
 
     class SlowProvider:
         async def complete(self, messages, tools, *, timeout):
+            started.set()
             try:
-                await asyncio.sleep(10)
+                await release.wait()
             finally:
                 cancelled.set()
 
     loop.provider = SlowProvider()
-    result = await loop.run("bekle")
+    turn = asyncio.create_task(loop.run("bekle"))
+    await asyncio.wait_for(started.wait(), timeout=2)
+    result = await turn
     assert result.stop_reason == "timeout"
     assert "Başlamış sistem işlemlerinin tamamlandığı doğrulanamadı" in result.text
     assert cancelled.is_set()

@@ -39,6 +39,10 @@ senaryoların tanı bilgileri görünür yapıldı. Windows silme senaryosunda
 çöp kutusu fixture'ının çözümlenmemiş çalışma kökü kullanması düzeltildi:
 `safe_join` ile aynı kanonik kök kullanılır. Linux sembolik bağlantılı geçici
 dizin testi, sözcüksel ve kanonik yol farkını ve düzeltmeyi yeniden üretir.
+Sonraki Windows koşusunda bu senaryo geçti. Ayrı iptal testinin 10 ms bütçesi
+sağlayıcı başlamadan bitebildiği için test bütçesi 0.5 saniye yapıldı ve
+sağlayıcının başlama olayı beklendi; üretim süre sınırları değiştirilmedi.
+Bu son test düzeltmesinin hedefli sonucu `1 passed in 0.62s`; Ruff/Mypy geçti.
 
 Sıradaki adım [kabul planındaki](SPEECH_ACCURACY_PLAN.md) farklı konuşmacı
 kayıtlarıyla aynı ayar/model seçeneklerini karşılaştırmaktır. Genel anlama
