@@ -43,7 +43,7 @@ masaüstü sürümünde bağlı değil.” olur. Marka Jarvis; artemis uyandırm
 | `channels/desktop/demo.py` | Açık demo için izole fake provider/araçlar |
 | `safety/audit.py` | İsteğe bağlı temizlenmiş kayıt gözlemcisi |
 
-Yollar `jarvis/` altındadır. `desktop` extra: `PySide6==6.12.0`; paket __init__
+Yollar `jarvis/` altındadır. `desktop` extra: `PySide6-Essentials==6.12.0`; paket __init__
 Qt import etmez. CLI yalnız desktop dalında Qt yükler; eksikse Türkçe kurulum
 mesajı verir. Chat/voice kurulum tekrarı ortak fabrikaya çıkarılır: settings,
 workspace, audit, registry, gate, context, build_provider, AgentLoop, runner.

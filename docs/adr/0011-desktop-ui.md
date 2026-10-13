@@ -34,3 +34,7 @@ deadline/ret yolu beklemeyi sonlandırır. Bu bilinçli sınıra ayrı iptal/ona
 yarış testleri gerekir. Gerçek Windows tepsi, DPI ve odak kabulü Linux offscreen
 testinden ayrıdır. Açık demo, fake provider ve yalnız bellek içi demo araçlarıyla
 ücretsiz görsel inceleme sağlar; üretim davranışını taklit ederek başarı iddia etmez.
+
+Paketleme ayrıntısı: QtCore/QtGui/QtWidgets için `PySide6-Essentials==6.12.0`
+yeterlidir; kullanılmayan WebEngine/Addons indirilmez. PySide6 teknolojisi ve
+sürümü değişmez. Essentials sürümü resmi PyPI kaynağından doğrulandı.
