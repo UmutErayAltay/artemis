@@ -1,10 +1,20 @@
 """Kabul ölçümünün kapsamını ve raporlamasını doğrular."""
 
+import os
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 
-from bench.run import free_catalog_model, load_scenarios, main_async, percentile90, run_suite
+from bench.run import (
+    _workspace_relative_path,
+    free_catalog_model,
+    load_scenarios,
+    main_async,
+    percentile90,
+    run_suite,
+)
+from jarvis.safety.paths import safe_join
 
 
 @pytest.mark.asyncio
@@ -26,7 +36,16 @@ async def test_fake_suite_meets_f0_f1_acceptance_thresholds() -> None:
 
     report = await run_suite(scenarios)
     failed = [
-        {"id": item["id"], "samples": item["samples"]}
+        {
+            "id": item["id"],
+            "samples": [
+                {
+                    "errors": sample["errors"],
+                    "dangerous_reasons": sample["dangerous_reasons"],
+                }
+                for sample in item["samples"]
+            ],
+        }
         for item in report["scenarios"]
         if not item["success"]
     ]
@@ -40,6 +59,26 @@ async def test_fake_suite_meets_f0_f1_acceptance_thresholds() -> None:
         for scenario in scenarios
         if scenario.category == "injection"
     )
+
+
+@pytest.mark.skipif(os.name == "nt", reason="symlink kök yolu regresyonu Linux içindir")
+def test_bench_trash_path_is_relative_to_resolved_workspace(tmp_path: Path) -> None:
+    real_parent = tmp_path / "real-parent"
+    real_workspace = real_parent / "desktop"
+    real_workspace.mkdir(parents=True)
+    (real_workspace / "old.txt").write_text("old", encoding="utf-8")
+    symlink_parent = tmp_path / "workspace-alias"
+    symlink_parent.symlink_to(real_parent, target_is_directory=True)
+    workspace = symlink_parent / "desktop"
+    trash = tmp_path / "trash"
+    trash.mkdir()
+
+    resolved_file = safe_join(workspace, "old.txt", allow_symlinks=False)
+    with pytest.raises(ValueError):
+        resolved_file.relative_to(workspace)
+    relative = _workspace_relative_path(resolved_file, workspace)
+    assert relative == "old.txt"
+    assert safe_join(trash, relative) == trash / "old.txt"
 
 
 def test_free_catalog_requires_zero_prices_and_tool_support() -> None:

@@ -38,6 +38,7 @@ bağlı ipucudur. Gerçek ses kaydıyla kelime/karakter ve uygulama adı hatalar
 ölçme adımları [ses rehberinde](docs/VOICE_SETUP.md) bulunur. Konuşmayı doğru
 yazıya çevirmek, niyeti ve doğru araç hedefini anlamakla aynı ölçüm değildir.
 Genel konuşma doğruluğu gerçek, farklı konuşmacı kayıtlarıyla henüz doğrulanmadı.
+Son değişiklik ve doğrulamalar [konuşma raporunda](docs/SPEECH_ACCURACY_REPORT.md).
 
 ## Kurulum
 

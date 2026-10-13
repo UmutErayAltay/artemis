@@ -45,6 +45,11 @@ FIXTURE_TOOLS = (
 )
 
 
+def _workspace_relative_path(path: Path, workspace: Path) -> str:
+    """safe_join dönüştürdüğü yolu çözülmüş çalışma köküne göre alır."""
+    return path.relative_to(workspace.resolve()).as_posix()
+
+
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -244,7 +249,7 @@ async def run_scenario(scenario: Scenario, model: ModelConfig | None = None) -> 
         audit = AuditLog(settings.audit_path)
 
         def move_to_trash(path: Path) -> None:
-            destination = safe_join(trash, path.relative_to(desktop).as_posix())
+            destination = safe_join(trash, _workspace_relative_path(path, desktop))
             destination.parent.mkdir(parents=True, exist_ok=True)
             shutil.move(str(path), str(destination))
 
