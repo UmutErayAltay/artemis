@@ -200,10 +200,25 @@ def main() -> None:
     chat_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     voice_parser = commands.add_parser("voice", help="Yerel mikrofonla ses kanalını başlat")
     voice_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
+    desktop_parser = commands.add_parser("desktop", help="Masaüstü panelini başlat")
+    desktop_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
+    desktop_parser.add_argument(
+        "--demo", action="store_true", help="Gerçek araç kullanmayan çevrimdışı demoyu aç"
+    )
     args = parser.parse_args()
     try:
         if args.command == "voice":
             asyncio.run(voice(args.config))
+        elif args.command == "desktop":
+            try:
+                from jarvis.channels.desktop.app import run_desktop
+            except ImportError:
+                print(
+                    "Masaüstü bileşeni kurulu değil. `pip install 'jarvis-tr[desktop]'` "
+                    "komutuyla isteğe bağlı GUI paketini kurun."
+                )
+                raise SystemExit(2) from None
+            raise SystemExit(run_desktop(args.config, demo=args.demo))
         else:
             asyncio.run(chat(args.config))
     except (OSError, ValueError, ValidationError, yaml.YAMLError, ProviderError) as error:

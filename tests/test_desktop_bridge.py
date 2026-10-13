@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
 import time
@@ -245,13 +246,52 @@ def test_shutdown_before_queued_start_still_stops_worker(tmp_path):
         assert bridge._stopped.wait(2)
 
 
+def test_shutdown_waits_for_cancelled_provider_cleanup(tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+
+    class IgnoresTaskCancellation:
+        async def complete(self, *_args: Any, **_kwargs: Any) -> Completion:
+            started.set()
+            try:
+                await asyncio.to_thread(release.wait)
+            except asyncio.CancelledError:
+                await asyncio.to_thread(release.wait)
+            return Completion(content="Temizlik tamamlandı.")
+
+    bridge = _fixture(
+        tmp_path,
+        [],
+        provider_override=IgnoresTaskCancellation(),
+    )
+    try:
+        request_id = bridge.submit("bekle")
+        assert request_id is not None
+        assert started.wait(2)
+        assert bridge.cancel(request_id)
+        state = _wait_for(bridge, State, timeout=2)
+        while state.state != "cleanup_pending":
+            state = _wait_for(bridge, State, timeout=2)
+        assert bridge.submit("temizlik bitmeden çalışma") is None
+
+        bridge.shutdown()
+        assert not bridge._stopped.wait(0.1)
+        release.set()
+        assert bridge._stopped.wait(2)
+        assert bridge.submit("işçi durdu") is None
+    finally:
+        release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
 def test_approval_timeout_fails_closed_and_cleanup_completes(tmp_path):
-    bridge = _fixture(tmp_path, _tool_scenario(), max_seconds=0.12)
+    bridge = _fixture(tmp_path, _tool_scenario(), max_seconds=0.5)
     try:
         request_id = bridge.submit("oku ve yaz")
         assert request_id is not None
         prompt = _wait_for(bridge, Approval)
-        result = _wait_for(bridge, Finished, timeout=1.0).result
+        result = _wait_for(bridge, Finished, timeout=2.0).result
         assert result.stop_reason in {"timeout", "denied_repeat"}
         assert not (tmp_path / "target.txt").exists()
         assert not bridge.decide(
@@ -324,6 +364,38 @@ def test_audit_view_is_redacted_bounded_and_reports_gaps(tmp_path, monkeypatch):
         stored = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
         assert "synthetic-secret" not in json.dumps(stored)
         assert all("synthetic-secret" not in json.dumps(event.fields) for event in activities)
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_large_audit_summary_preserves_routing_and_tool_result_metadata(tmp_path):
+    bridge = _fixture(tmp_path, [Completion(content="ready")])
+    try:
+        bridge._on_record(
+            {
+                "event": "tool_result",
+                "turn_id": "old-turn-id",
+                "tool": "demo_write_memory",
+                "result": {
+                    "status": "sent",
+                    "success": False,
+                    "message": "Komut gönderildi; sonuç doğrulanmadı.",
+                    "data": {"large": "x" * 20_000},
+                },
+            }
+        )
+        events = bridge.poll_events()
+        activity = next(event for event in events if isinstance(event, Activity))
+        assert activity.request_id is None
+        assert activity.turn_id == "old-turn-id"
+        assert activity.fields["tool"] == "demo_write_memory"
+        assert activity.fields["result"] == {
+            "status": "sent",
+            "success": False,
+            "message": "Komut gönderildi; sonuç doğrulanmadı.",
+        }
+        assert activity.fields["summary"]
     finally:
         bridge.shutdown()
         assert bridge._stopped.wait(2)

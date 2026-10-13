@@ -1,9 +1,9 @@
 # Jarvis: F0–F3 mimarisi
 
 Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
-Python 3.12 çekirdeği Linux üzerinde de test edilir. İlk teslimat yalnızca CLI,
-ajan döngüsü, sağlayıcılar, güvenlik ve temel araçları kapsar. Ses, masaüstü UI,
-kalıcı hafıza, Telegram ve arka plan ajanları sonraki fazlara aittir.
+Python 3.12 çekirdeği Linux üzerinde de test edilir. CLI ve isteğe bağlı PySide6
+masaüstü arayüzü aynı runtime, ajan döngüsü, sağlayıcılar, güvenlik kapısı ve
+araçları kullanır. Kalıcı hafıza, Telegram ve arka plan ajanları sonraki fazlardadır.
 
 ## Akış ve sorumluluklar
 
@@ -20,11 +20,36 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
   modül keşfi. Yeni araç tek plugin dosyasıyla kaydolur; ad çakışması hatadır.
 - `safety/`: tek dispatcher, risk, tur boyunca kalıcı taint, safe_join, sır temizleme,
   JSONL denetimi ve SQLite günlük harcama defteri.
-- `channels/`: ortak CommandRunner ve Türkçe CLI.
+- `channels/`: Qt'siz ortak runtime ve CommandRunner, Türkçe CLI, isteğe bağlı
+  desktop köprüsü ile PySide6 sunum katmanı.
 - `config/`: katı pydantic ayarları; YAML sır içermez, anahtarlar yalnız ortamdan okunur.
 - `memory/`, `perception/`, `proactive/`, `jobs/`, `mcp/`: sonraki fazların ayrılmış
   sınırları; F1'de sahte işlevler sunmaz.
 - `bench/`: aynı döngüyü kullanan, izole masaüstünde çalışan kabul senaryoları.
+
+## Masaüstü kanalı
+
+`jarvis desktop` komutu PySide6'yı yalnız masaüstü komutu seçildiğinde yükler;
+çekirdek ve CLI kurulumu Qt bağımlılığı gerektirmez. Worker thread kendi asyncio
+döngüsünü ve tek runtime'ı sahiplenir. Qt tarafı sınırlı, kayıpsız kontrol/istek
+kanalıyla gönderir, audit olaylarını sınırlı kuyruktan okur ve UI thread'inden
+hiçbir zaman asyncio primitive'ine dokunmaz. Onay callback'i istek, tur ve onay
+UUID'lerini eşler; dialog beklerken Qt event loop'u çalışmaya devam eder. İptal ve
+kapatma önce bekleyen onayı reddeder, ardından worker cleanup'ını bekler.
+
+Arayüz sohbet ve işlem olaylarını yalnız düz metin olarak gösterir. Onay penceresi
+doğrulanmış tam araç argümanlarını ve varsa dış içerik uyarısını sunar; kapatma,
+Escape ve Enter onayı reddeder. Tepsi simgesi varsa pencere gizlenebilir; tepsi yoksa
+kapatma worker temizliğinden sonra uygulamadan çıkar. Ses için ayrı CLI kanalı
+kullanılır; masaüstünde mikrofon düğmesi yoktur.
+
+`--demo`, config yüklemeyen, plugin keşfetmeyen ve ağ/gerçek araç kullanmayan izole
+bir akıştır. Fake provider ve özel demo kayıt defteri geçici kök altında çalışır;
+demo yan etkileri yalnız bellekte tutulur. Temporary directory ancak worker tamamen
+durduktan sonra silinir.
+
+Karar [ADR 0011](adr/0011-desktop-ui.md) ve uygulama ayrıntıları
+[masaüstü planında](DESKTOP_PLAN.md) bulunur.
 
 ## Güvenlik sınırları
 

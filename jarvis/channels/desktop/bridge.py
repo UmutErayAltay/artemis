@@ -272,26 +272,38 @@ class DesktopBridge:
         return result
 
     def _on_record(self, record: dict[str, Any]) -> None:
+        event_name = str(record.get("event", "unknown"))
         fields = {key: value for key, value in record.items() if key not in {"event", "timestamp"}}
         serialized = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
         if len(serialized.encode("utf-8")) > 16 * 1024:
-            fields = {
+            summary: dict[str, Any] = {
                 "summary": "Denetim olayı görünüm için kısaltıldı.",
                 "original_bytes": len(serialized.encode("utf-8")),
             }
+            for key in ("turn_id", "tool"):
+                if isinstance(fields.get(key), (str, int, float)):
+                    summary[key] = fields[key]
+            result = fields.get("result")
+            if event_name == "tool_result" and isinstance(result, dict):
+                summary["result"] = {
+                    key: result[key]
+                    for key in ("status", "success", "message")
+                    if key in result
+                }
+            fields = summary
         with self._audit_lock:
             self._audit_seq += 1
             seq = self._audit_seq
-            turn = fields.get("turn_id")
+            turn = record.get("turn_id")
             if record.get("event") == "turn_start" and turn is not None:
                 self._turn_requests[str(turn)] = self._broker.request_id or ""
                 if len(self._turn_requests) > 64:
                     self._turn_requests.pop(next(iter(self._turn_requests)))
         event = Activity(
-            request_id=self._request_for_turn(fields.get("turn_id")),
-            turn_id=str(fields["turn_id"]) if fields.get("turn_id") is not None else None,
+            request_id=self._request_for_turn(record.get("turn_id")),
+            turn_id=str(record["turn_id"]) if record.get("turn_id") is not None else None,
             seq=seq,
-            event=str(record.get("event", "unknown")),
+            event=event_name,
             fields=fields,
         )
         with self._audit_lock:
@@ -306,9 +318,7 @@ class DesktopBridge:
     def _request_for_turn(self, turn_id: object) -> str | None:
         with self._audit_lock:
             if turn_id is not None:
-                found = self._turn_requests.get(str(turn_id))
-                if found is not None:
-                    return found
+                return self._turn_requests.get(str(turn_id))
             return self._broker.request_id
 
     def _thread_main(self) -> None:

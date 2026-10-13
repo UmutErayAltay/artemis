@@ -29,6 +29,7 @@ voice = [
   "piper-tts==1.8.0",
   "webrtcvad-wheels==2.0.14.post1",
 ]
+desktop = ["PySide6-Essentials==6.12.0"]
 
 [project.scripts]
 jarvis = "jarvis.channels.cli:main"
@@ -57,3 +58,11 @@ files = ["jarvis", "bench"]
 [[tool.mypy.overrides]]
 module = ["send2trash.*"]
 ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["PySide6.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["jarvis.channels.desktop.app"]
+disable_error_code = ["misc", "no-any-return"]

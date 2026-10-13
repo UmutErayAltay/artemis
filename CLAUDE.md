@@ -1,8 +1,8 @@
 # Jarvis geliştirme sözleşmesi
 
 Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çekirdeği Linux
-üzerinde de çalışır. F3 yalnız ses katmanını ekler; UI, hafıza ve Telegram sonraki
-fazlardır. F3'ü bu alanlarla büyütmeyin.
+üzerinde de çalışır. PySide6 masaüstü UI aynı Qt'siz runtime ve SafetyGate'i kullanır;
+ses ayrı CLI kanalıdır. Hafıza ve Telegram sonraki fazlardır.
 Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Türkçe olur ve
 özellikle kararın nedenini açıklar. Önce [mimariyi](docs/ARCHITECTURE.md) ve
 [ADR'leri](docs/adr/) okuyun. Temel mimariyi değiştiriyorsanız kısa ADR yazın.
