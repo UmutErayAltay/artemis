@@ -1,9 +1,9 @@
 # Jarvis
 
-Windows 11 için Türkçe kişisel masaüstü asistanı. F0–F2 kapsamı: CLI sohbeti,
+Windows 11 için Türkçe kişisel masaüstü asistanı. F0–F2: CLI sohbeti,
 sağlayıcıdan bağımsız ajan döngüsü, tek güvenlik kapısı, 16 araç ve izole kabul
-senaryoları. Ses, masaüstü paneli, hafıza, Telegram ve arka plan ajanları bu sürüme
-dahil değildir.
+senaryoları. F3 ses kanalı kod ve izole testleri hazırdır; Windows ses ölçümü bekler.
+Masaüstü paneli, hafıza, Telegram ve arka plan ajanları bu sürüme dahil değildir.
 
 CLI'de her kullanıcı komutu ayrı ve durumsuz bir turdur; önceki komutların konuşma
 bağlamı sonraki tura taşınmaz. Kalıcı hafıza sonraki fazın kapsamındadır.
@@ -11,6 +11,26 @@ bağlamı sonraki tura taşınmaz. Kalıcı hafıza sonraki fazın kapsamındad�
 Mimari [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), kararların gerekçeleri
 [docs/adr/](docs/adr/), geliştirme kuralları [CLAUDE.md](CLAUDE.md) içindedir.
 Son sağlamlık doğrulaması [F2 raporunda](docs/F2_REPORT.md) bulunur.
+Ses katmanı doğrulaması ve bekleyen Windows kabulü [F3 raporunda](docs/F3_REPORT.md)
+açıklanır.
+
+## Artemis ses modu
+
+Uyandırma sözcüğü **artemis**. Ses kurulumu isteğe bağlıdır; varsayılan testler
+mikrofonu veya hoparlörü açmaz. Yerel Türkçe STT ve Piper modelleri önceden
+hazırlanır. RTX 4050 için CUDA/float16 başlangıç profili ve CPU alternatifi
+[Windows ses rehberinde](docs/VOICE_SETUP.md) açıklanır.
+
+```powershell
+python -m pip install -e ".[dev,voice]"
+python -m jarvis voice --config config/config.yaml
+```
+
+Önce model dosyalarını, beyin modelini ve ses aygıtını rehbere göre hazırlayın.
+Ham mikrofon kaydı tutulmaz. Edge TTS yalnız ayrı gizlilik ayarıyla açılır;
+varsayılan yerel sestir. Onaylar tam tool/argümanlarla terminalden alınır;
+sesli “evet” onay sayılmaz. İlk Windows denemesini kulaklıkla yapın.
+Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
 ## Kurulum
 

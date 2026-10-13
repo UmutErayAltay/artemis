@@ -20,4 +20,5 @@ config/config.yaml
 .jarvis/
 state/
 reports/
+models/
 .DS_Store

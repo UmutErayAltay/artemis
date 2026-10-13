@@ -1,0 +1,145 @@
+# Artemis — Windows ses kurulumu ve ölçüm rehberi
+
+## Donanım ve başlangıç tercihi
+
+Kullanıcının bilgisayarı 32 GB RAM ve RTX 4050 içeriyor. İlk profil yerel Türkçe
+STT için CUDA/float16'dır. Bu donanımın gerçek VRAM kapasitesi, sürücüsü ve ses
+gecikmesi bu ortamda ölçülmedi. Model boyutu ve ses eşikleri yapılandırmadan
+gelir; performans sonucu gibi sunulmaz.
+
+faster-whisper güncel CUDA yolunda CUDA 12 cuBLAS ve CUDA 12 için cuDNN 9 ister.
+Bu gereksinim ekran kartının varlığıyla otomatik sağlanmaz. Kurulumu resmi
+[faster-whisper rehberi](https://github.com/SYSTRAN/faster-whisper#gpu)'nden ve
+NVIDIA belgelerinden kontrol edin. CPU profili `device=cpu`, `compute_type=int8`
+olabilir; uygulama GPU hatasını sessizce CPU başarısı diye sunmaz.
+
+## İsteğe bağlı paketler ve modeller
+
+Ses paketi, CLI çekirdeğinden ayrı kurulur:
+
+```powershell
+python -m pip install -e ".[dev,voice]"
+New-Item -ItemType Directory -Force models
+```
+
+Model indirmeleri yalnız bu hazırlık aşamasında açıkça yapılır. Uygulama
+çalışırken model indirmez; model eksikse kurulum hatası verir. Anahtar gerekmez ve
+bu indirmeler bir model API çağrısı değildir.
+
+STT için resmi faster-whisper dönüştürülmüş modelini yerel dizine hazırlama
+örneği (kurulum ağ erişimi kullanır):
+
+```powershell
+python -c "from huggingface_hub import snapshot_download; snapshot_download(repo_id='Systran/faster-whisper-small', local_dir='models/whisper-small')"
+```
+
+Türkçe Piper sesi için model ve eşlik eden `.onnx.json` birlikte gerekir:
+
+```powershell
+python -m piper.download_voices tr_TR-dfki-medium --data-dir models
+```
+
+İndirdiğiniz sesin model kartını okuyun. Yerel Piper mikrofon sesini buluta
+göndermez; yanıt metnini yerelde PCM'e çevirir. Gerçek Türkçe telaffuz ve ilk ses
+gecikmesi bilgisayarda ayrıca ölçülmelidir.
+
+`config/config.yaml` içindeki ses bölümünü hazırladığınız dosyalara ayarlayın.
+Göreli yollar config dizinine göre çözülür:
+
+```yaml
+voice:
+  wake_word: artemis
+  stt_model: ../models/whisper-small
+  stt_device: cuda
+  stt_compute_type: float16
+  tts_backend: piper
+  piper_model: ../models/tr_TR-dfki-medium.onnx
+  piper_config: ../models/tr_TR-dfki-medium.onnx.json
+  allow_cloud_tts_text: false
+```
+
+Mevcut beyin modeli kurulumu ayrıca gerekir; README'deki `primary_model` ve
+sağlayıcı ortam değişkenlerini tamamlayın. Ses modu:
+
+```powershell
+python -m jarvis voice --config config/config.yaml
+```
+
+Yerel modeller, aygıt ve sürücü hazır değilse bu komutun çalıştığını varsaymayın.
+Edge denemesinde Türkçe ses kimliğini güncel `edge-tts --list-voices` çıktısından
+seçip `voice.edge_voice` alanına yazın; `voice.tts_backend: edge`, FFmpeg yolu ve
+`voice.allow_cloud_tts_text: true` gerekir. Bu ayar yanıt metninin dış servise
+gönderilmesine izin verir.
+
+## Gizlilik ve kullanım
+
+Uyandırma sözcüğü **artemis**. Ham mikrofon kaydı diske yazılmaz. Mikrofon yalnız
+ses komutu açıkken kullanılır; kendiliğinden başlangıçta açılmaz. STT kısmi
+metinleri komut yürütmez. Kesinleşen komutlar normal denetim kaydına girebilir;
+bu log kişisel veri içerdiğinden yerelde tutulur.
+
+Onay gerektiren adımda terminal tool adını, tüm doğrulanmış argümanları ve taint
+uyarısını gösterir. Yalnız klavyeden açık “evet” onaydır. Sesli “evet” onay
+vermez. Onay beklerken mikrofon verisi sonraki komuta taşınmaz.
+
+Edge TTS yalnız açık gizlilik ayarıyla kullanılabilir. Yanıt metni Edge servisine
+gider; aktarım denetlenir. Bu yol ayrıca yerel FFmpeg gerektirir. FFmpeg yolu
+yapılandırılır, shell komutu olarak çalıştırılmaz; tüm yanıtı biriktirmek yerine
+MP3 akışı PCM'e çevrilir. İptal sırasında yerel yedeğe geçilip konuşmaya devam
+edilmez. Varsayılan ağsız Piper yoludur.
+
+İlk doğrulamayı kulaklıkla yapın. Akustik yankı giderme bu sürümde yoktur;
+hoparlör sesi VAD tarafından yeni konuşma sayılıp yanlış söz kesme üretebilir.
+
+## Windows elle kabul kontrolü
+
+1. “artemis saat kaç” ve “artemis” ardından ayrı komutla uyanma akışını deneyin.
+2. Takip penceresinde tekrar uyandırmadan soru sorun; pencere dolduktan sonra
+   sözcüksüz konuşmanın tool çalıştırmadığını doğrulayın.
+3. Gürültü, boş ses ve “artemis” içeren daha uzun sözcüklerin komut üretmediğini
+   kontrol edin. Yanlış ve kaçırılmış uyanmaları ayrı kaydedin.
+4. Yanıt konuşulurken söze girin; eski sesin durduğunu ve eski turun yeni adım
+   başlatmadığını doğrulayın. Model beklerken de iptali deneyin.
+5. Geçici çalışma alanında silme isteyin; terminalde argümanları kontrol edip
+   hayır deyin. Ardından sesle “evet” söyleyin; silme gerçekleşmemeli.
+6. Mikrofon/oynatıcı hatası, eksik model, CUDA hatası ve Edge bağlantı hatasında
+   dürüst hata/fallback kaydını kontrol edin. Sırlar veya ham kayıt bulunmamalı.
+7. Aynı ücretsiz model, ses aygıtı ve STT/TTS profiliyle en az 20 yanıt ölçün.
+   Isınma turunu ayrıca işaretleyin; başarısız/iptal/sessiz turlar raporda kalmalı.
+
+Ölçüm komut konuşmasının bitişi ile ilk PCM oynatıcı olayı arasındadır;
+sentez başlaması ilk ses sayılmaz. Medyan/p90 ve örnek sayısıyla birlikte STT,
+model ve TTS sürelerini raporlayın. Fiziksel duyulabilirlik kulaklıkta elle
+doğrulanır. F3 hedefi medyan < 1.5 saniyedir; Linux sahte test bu hedefin
+sağlandığını kanıtlamaz.
+
+Sahte orkestrasyon ölçümü mikrofon açmaz:
+
+```powershell
+python -m bench.voice_latency --sahte --iterations 20
+```
+
+Kurulumu tamamlanmış Windows makinesinde canlı ölçüm mikrofonu ve hoparlörü
+açar; beyin sağlayıcısının normal token tüketimi olur. `allow_paid: false`
+korunmalıdır. Çalışma süresince kulaklıkla birden fazla komut söyleyin:
+
+```powershell
+python -m bench.voice_latency --canli --config config/config.yaml --duration 120
+```
+
+Isınma dahil profilini ve başarısız/iptal/sessiz turları raporla birlikte
+değerlendirin. Yanlış uyanma veya yanlış onay sayısı elle etiketlenmediyse
+ölçülmemiştir; boş değer sıfır başarı anlamına gelmez.
+
+## Resmi kaynaklar — 2026-10-13 kontrolü
+
+- [faster-whisper](https://github.com/SYSTRAN/faster-whisper)
+- [sounddevice](https://python-sounddevice.readthedocs.io/)
+- [Piper Python API](https://github.com/OHF-voice/piper1-gpl/blob/main/docs/API_PYTHON.md)
+- [Türkçe Piper model dosyaları](https://huggingface.co/rhasspy/piper-voices/tree/main/tr/tr_TR/dfki/medium)
+- [Edge TTS](https://github.com/rany2/edge-tts)
+- [WebRTC VAD wheels](https://github.com/daanzu/py-webrtcvad-wheels)
+
+PyPI sürümleri hazırlık sırasında doğrulandı: faster-whisper 1.2.1,
+sounddevice 0.5.6, edge-tts 7.2.8, piper-tts 1.8.0,
+webrtcvad-wheels 2.0.14.post1. Bunlar canlı ses ölçümü sonucu değildir.
