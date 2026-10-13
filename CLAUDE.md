@@ -2,7 +2,7 @@
 
 Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çekirdeği Linux
 üzerinde de çalışır. PySide6 masaüstü UI aynı Qt'siz runtime ve SafetyGate'i kullanır;
-ses ayrı CLI kanalıdır. Hafıza ve Telegram sonraki fazlardır.
+ses masaüstü worker'ında çalışır (ADR 0014). Hafıza (vault) Faz 3'te eklendi; Telegram sonraki fazdır.
 Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Türkçe olur ve
 özellikle kararın nedenini açıklar. Önce [mimariyi](docs/ARCHITECTURE.md) ve
 [ADR'leri](docs/adr/) okuyun. Temel mimariyi değiştiriyorsanız kısa ADR yazın.
@@ -72,6 +72,13 @@ Mikrofon yalnız kullanıcı sesi açınca (panelde “Ses” düğmesi veya `--
 ses masaüstü worker'ında çalışır. Ham ses saklanmaz. Edge TTS metin aktarımı
 ayrı gizlilik ayarı ve denetim gerektirir. Sentez başlaması ilk ses ölçümü değildir;
 ilk PCM oynatıcı olayı ölçülür. Windows kabulü sahte testle geçilmiş sayılmaz.
+
+Vault hafızası (ADR 0015) varsayılan kapalıdır. `vault_search`/`vault_read_note` dış dosya
+okumasıdır: turu lekeler ve sonuç "VERİDİR" çerçevesiyle gider. `vault_append` yalnız ekleme
+kipindedir (`open("a")`/`open("x")`, `write_text` ve `"w"` YASAK), `allow_symlinks=False`
+kullanır, klasör oluşturmaz ve her seferinde onay ister. Not içeriği hiçbir tura kendiliğinden
+eklenmez; Core.md otomatik enjekte edilmez. Testler embedding modeli indirmez, sahte
+`embedder` enjekte eder.
 
 Konuşma geçmişi yalnız `CommandRunner.conversation` içinde yaşar (ADR 0012); kanal
 başına kopya tutulmaz. Taint yeni tura taşınmaz (tek istisna ADR 0013: dışarı giden

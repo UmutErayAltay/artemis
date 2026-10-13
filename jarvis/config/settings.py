@@ -70,6 +70,27 @@ class VoiceConfig(BaseModel):
         return value.strip()
 
 
+class MemoryConfig(BaseModel):
+    """Obsidian vault hafızası (ADR 0015); `vault_path` verilmedikçe tamamen kapalıdır."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    vault_path: Path | None = None
+    # "/" ile biten girdi o klasör bölümünü yolun başında VEYA içinde eşler (companion
+    # klasörünün adı "🔮 850-Companion/" gibi önek taşıyabilir); diğerleri tam yoldur.
+    exclude: tuple[str, ...] = (
+        "daily/",
+        "receipts/",
+        "knowledge/index.md",
+        "knowledge/log.md",
+        "850-Companion/",
+    )
+    max_results: int = Field(default=5, ge=1, le=20)
+    max_note_chars: int = Field(default=20000, ge=1000, le=200000)
+    embedding_model: str | None = None
+    embedding_cache_dir: Path | None = None
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -94,6 +115,7 @@ class Settings(BaseModel):
     fallback_seconds: float = Field(default=60.0, ge=0)
     applications: dict[str, str] = Field(default_factory=dict)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
+    memory: MemoryConfig = Field(default_factory=MemoryConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -143,4 +165,11 @@ def load_settings(path: Path) -> Settings:
             )
     if voice_updates:
         updates["voice"] = settings.voice.model_copy(update=voice_updates)
+    memory_updates: dict[str, Path] = {}
+    for field in ("vault_path", "embedding_cache_dir"):
+        value = getattr(settings.memory, field)
+        if value is not None:
+            memory_updates[field] = value if value.is_absolute() else (base / value).resolve()
+    if memory_updates:
+        updates["memory"] = settings.memory.model_copy(update=memory_updates)
     return settings.model_copy(update=updates)

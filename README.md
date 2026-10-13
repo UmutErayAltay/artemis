@@ -3,10 +3,11 @@
 Windows 11 için Türkçe kişisel masaüstü asistanı. CLI ve isteğe bağlı masaüstü
 paneli, sağlayıcıdan bağımsız ajan döngüsünü, tek güvenlik kapısını ve araçları
 paylaşır. F3 ses kanalı kodu hazırdır; gerçek Windows ses ölçümü bekler.
-Hafıza, Telegram ve arka plan ajanları bu sürüme dahil değildir.
+Vault hafızası isteğe bağlıdır ve varsayılan kapalıdır; Telegram ve arka plan ajanları
+bu sürüme dahil değildir.
 
-CLI ve masaüstünde her komut ayrı bir turdur; panelde görünen oturum geçmişi
-modelin konuşma bağlamına taşınmaz. Kalıcı hafıza sonraki fazın kapsamındadır.
+CLI ve masaüstünde konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012); kalıcı hafıza
+yalnız aşağıdaki isteğe bağlı vault araçlarıyla sağlanır.
 
 Mimari [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), kararların gerekçeleri
 [docs/adr/](docs/adr/), geliştirme kuralları [CLAUDE.md](CLAUDE.md) içindedir.
@@ -246,6 +247,23 @@ arama API'si değildir; sayfa biçimi değişirse veya erişim engellenirse ara�
 verir. Bu sürüm sonuç sayfalarının içeriğini ayrıca açıp indiren bir araç içermez.
 Arama sorgusu dış servise gönderildiğinden araç yan etkili sayılır: temiz turda
 onaysız çalışır, dış içerik okunduktan sonraki turda kullanıcı onayı ister.
+
+## Hafıza (Obsidian vault)
+
+Kapalıdır. Açmak için config'e `memory.vault_path` ekleyin (örnek:
+[config.example.yaml](config/config.example.yaml)). Üç araç gelir: `vault_search` (arama),
+`vault_read_note` (okuma) ve `vault_append` (ekleme). Okuma araçları dosya içeriği
+sayılır: o tur dış içerikle lekelenir, sonraki yan etkiler onay ister ve içerik buluta
+yalnız `allow_cloud_file_content: true` ise gider. `vault_append` her seferinde onay
+ister, mevcut notu yeniden yazmaz (yalnız sonuna ekler), klasör oluşturmaz. `.git`,
+`.obsidian`, `daily/`, `receipts/` ve companion klasörü aranmaz, okunmaz, yazılmaz.
+Not içeriği turlara kendiliğinden eklenmez; model gerektiğinde aracı çağırır.
+
+Arama varsayılan olarak yerleşik sözcük aramasıdır. Anlamsal arama için
+`python -m pip install -e ".[memory]"` kurun ve `memory.embedding_model` verin; ilk
+aramada model indirilir, indeks vault dışında `state_dir/embedding` altında tutulur.
+Paket veya model yoksa sözcük aramasına dönülür ve sonuçta bu yazılır. Karar:
+[ADR 0015](docs/adr/0015-vault-memory.md).
 
 ## Doğrulama ve ölçüm
 

@@ -23,7 +23,9 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
 - `channels/`: Qt'siz ortak runtime ve CommandRunner, Türkçe CLI, isteğe bağlı
   desktop köprüsü ile PySide6 sunum katmanı.
 - `config/`: katı pydantic ayarları; YAML sır içermez, anahtarlar yalnız ortamdan okunur.
-- `memory/`, `perception/`, `proactive/`, `jobs/`, `mcp/`: sonraki fazların ayrılmış
+- `memory/`: Obsidian vault okuma yolları, sözcük ve isteğe bağlı embedding araması;
+  araçlar `tools/plugins/memory.py` içindedir (ADR 0015).
+- `perception/`, `proactive/`, `jobs/`, `mcp/`: sonraki fazların ayrılmış
   sınırları; F1'de sahte işlevler sunmaz.
 - `bench/`: aynı döngüyü kullanan, izole masaüstünde çalışan kabul senaryoları.
 
@@ -71,6 +73,16 @@ kısaltılır, sonra en eski turlar düşer. Eski araç çıktıları her göste
 Tek istisna: bağlamda dış içerikli tur kaldığı sürece `outbound` bildiren araçlar
 (`open_url`, `web_search`) yeni turda da onay ister; karar
 [ADR 0013](adr/0013-outbound-after-history-taint.md).
+
+## Hafıza
+
+Hafıza `memory.vault_path` verilmedikçe kapalıdır. `vault_search` ve `vault_read_note`
+READ_ONLY ama `external=True`, `content_kind="file"` bildirir: vault okuması turu lekeler
+ve içerik modele VERİDİR çerçevesiyle gider. `vault_append` CONFIRM_REQUIRED'dır ve yalnız
+ekleme kipinde yazar (`open("a")`; yeni nota `open("x")`); sonrasında eski baytların yerinde
+olduğu doğrulanır. Yollar `safe_join`'dan ve ayrıca çözülmüş yol üzerinden hariç tutma
+kurallarından geçer. Not içeriği hiçbir tura kendiliğinden eklenmez. Embedding indeksi
+vault'un dışında tutulur. Karar [ADR 0015](adr/0015-vault-memory.md).
 
 ## Güvenlik sınırları
 

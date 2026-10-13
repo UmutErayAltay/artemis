@@ -50,6 +50,21 @@ voice:
   allow_cloud_tts_text: false
   ffmpeg: ffmpeg
 
+# Obsidian vault hafızası (ADR 0015). KAPALI gelir: vault_path verilmedikçe araçlar
+# diske dokunmaz. Vault okuması "dosya içeriği" sayılır: turu lekeler ve buluta ancak
+# allow_cloud_file_content açıksa gider. Yazma yalnız ekleme kipindedir (mevcut not
+# yeniden yazılmaz) ve her seferinde onay ister. Gizli klasörler (.git, .obsidian)
+# ve exclude kalıpları aranmaz, okunmaz, yazılmaz.
+# memory:
+#   vault_path: C:/Users/siz/Vault   # göreli yol bu dosyaya göre çözülür
+#   exclude: [daily/, receipts/, knowledge/index.md, knowledge/log.md, 850-Companion/]
+#   max_results: 5
+#   max_note_chars: 20000
+#   # Anlamsal arama için: pip install 'jarvis-tr[memory]'; ilk aramada model iner.
+#   # Paket veya model yoksa sözcük aramasına dönülür ve sonuçta bu yazılır.
+#   embedding_model: null
+#   embedding_cache_dir: null        # varsayılan: state_dir/embedding (vault DIŞINDA)
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

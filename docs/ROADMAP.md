@@ -85,6 +85,8 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 001
 
 ### Faz 3 — Hafıza
 
+Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 0015](adr/0015-vault-memory.md).
+
 **Kapsam**
 - Artemis'in vault köprüsü ve isteğe bağlı (varsayılan kapalı) embedding araması taşınır.
   Model yoksa bunu kullanıcıya bildirir; sessizce başka kaynağa düşmez.
