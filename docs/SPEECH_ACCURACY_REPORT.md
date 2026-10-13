@@ -43,6 +43,10 @@ Sonraki Windows koşusunda bu senaryo geçti. Ayrı iptal testinin 10 ms bütçe
 sağlayıcı başlamadan bitebildiği için test bütçesi 0.5 saniye yapıldı ve
 sağlayıcının başlama olayı beklendi; üretim süre sınırları değiştirilmedi.
 Bu son test düzeltmesinin hedefli sonucu `1 passed in 0.62s`; Ruff/Mypy geçti.
+Windows testleri geçtikten sonra raporun yönlendirilmiş stdout çıktısında Türkçe
+karakter kodlaması hatası bulundu. CI ve Windows kurulum rehberi `PYTHONUTF8=1`
+kullanır. Bu ayarla yönlendirilmiş sahte ölçüm JSON'u tekrar okundu; 29 senaryoda
+başarısızlık 0 oldu. Bu sonuç ses tanıma doğruluğu değildir.
 
 Sıradaki adım [kabul planındaki](SPEECH_ACCURACY_PLAN.md) farklı konuşmacı
 kayıtlarıyla aynı ayar/model seçeneklerini karşılaştırmaktır. Genel anlama

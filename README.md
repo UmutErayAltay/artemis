@@ -45,12 +45,17 @@ Son değişiklik ve doğrulamalar [konuşma raporunda](docs/SPEECH_ACCURACY_REPO
 Python 3.12 kullanın. Windows PowerShell:
 
 ```powershell
+$env:PYTHONUTF8 = '1'
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 Copy-Item config/config.example.yaml config/config.yaml
 New-Item -ItemType Directory -Force desktop
 ```
+
+`PYTHONUTF8=1`, Windows'ın bölgesel kod sayfası yerine UTF-8 kullanır. Sahte
+kabul raporları Türkçe JSON yazdığından bu ayar, yönlendirilmiş çıktının Windows'ta
+UnicodeEncodeError ile yarıda kesilmesini önler.
 
 Linux:
 

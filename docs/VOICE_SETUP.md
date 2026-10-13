@@ -1,5 +1,15 @@
 # Artemis — Windows ses kurulumu ve ölçüm rehberi
 
+Windows PowerShell oturumunda önce UTF-8 çıktısını açın:
+
+```powershell
+$env:PYTHONUTF8 = '1'
+```
+
+Benchmark raporları Türkçe JSON içerir. Bu ayar, özellikle çıktıyı dosyaya
+yönlendirirken Windows yerel kod sayfasının UnicodeEncodeError vermesini önler;
+yeni PowerShell oturumunda yeniden ayarlanmalıdır.
+
 ## Donanım ve başlangıç tercihi
 
 Kullanıcının bilgisayarı 32 GB RAM ve RTX 4050 içeriyor. İlk profil yerel Türkçe
