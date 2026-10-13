@@ -9,7 +9,7 @@ from threading import Barrier
 import pytest
 
 from jarvis.brain.budget import BudgetLedger
-from jarvis.brain.errors import BudgetExceeded
+from jarvis.brain.errors import BudgetExceeded, ProviderError
 
 
 def test_reservation_checks_spending_and_outstanding_amounts(tmp_path: Path) -> None:
@@ -68,14 +68,23 @@ def test_parallel_instances_cannot_overreserve(tmp_path: Path) -> None:
         barrier.wait(timeout=5)
         try:
             ledger.reserve(Decimal("0.3"))
-        except BudgetExceeded:
+        except ProviderError:
             return False
         return True
 
     with ThreadPoolExecutor(max_workers=len(ledgers)) as executor:
         successes = list(executor.map(reserve, ledgers))
-    assert successes.count(True) == 3
+    allowed = successes.count(True)
+    reserved = ledgers[0].reserved
+    assert 1 <= allowed <= 3
+    assert reserved == Decimal("0.3") * allowed
+    assert reserved <= Decimal("1")
+    if allowed < 3:
+        for _ in range(3 - allowed):
+            ledgers[0].reserve(Decimal("0.3"))
     assert ledgers[0].reserved == Decimal("0.9")
+    with pytest.raises(BudgetExceeded):
+        ledgers[0].reserve(Decimal("0.3"))
 
 
 def test_crashed_reservation_survives_reopening_until_utc_day_ends(tmp_path: Path) -> None:

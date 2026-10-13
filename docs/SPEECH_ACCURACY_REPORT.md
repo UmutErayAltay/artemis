@@ -47,6 +47,11 @@ Windows testleri geçtikten sonra raporun yönlendirilmiş stdout çıktısında
 karakter kodlaması hatası bulundu. CI ve Windows kurulum rehberi `PYTHONUTF8=1`
 kullanır. Bu ayarla yönlendirilmiş sahte ölçüm JSON'u tekrar okundu; 29 senaryoda
 başarısızlık 0 oldu. Bu sonuç ses tanıma doğruluğu değildir.
+Windows yükünde eşzamanlı bütçe rezervasyonunun SQLite kilit zaman aşımıyla
+güvenli reddedilmesi de testte beklenen sonuç olarak ele alındı. Test en az
+bir rezervasyonun başarılı olmasını, kaydedilen toplamın başarılı çağrılarla
+eşleşmesini ve sonradan seri çağrılarda da bütçenin aşılmamasını doğrular.
+Hedefli bütçe testlerinin sonucu `13 passed in 0.05s`; Ruff geçti.
 
 Sıradaki adım [kabul planındaki](SPEECH_ACCURACY_PLAN.md) farklı konuşmacı
 kayıtlarıyla aynı ayar/model seçeneklerini karşılaştırmaktır. Genel anlama
