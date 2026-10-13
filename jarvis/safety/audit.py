@@ -6,6 +6,8 @@ import json
 import os
 import re
 import threading
+from collections.abc import Callable
+from copy import deepcopy
 from datetime import UTC, datetime
 from decimal import Decimal
 from enum import Enum
@@ -72,8 +74,11 @@ def redact(value: Any) -> Any:
 
 
 class AuditLog:
-    def __init__(self, path: Path) -> None:
+    def __init__(
+        self, path: Path, on_record: Callable[[dict[str, Any]], None] | None = None
+    ) -> None:
         self.path = path
+        self.on_record = on_record
         self._lock = threading.Lock()
 
     def emit(self, event: str, **fields: Any) -> None:
@@ -85,3 +90,5 @@ class AuditLog:
             descriptor = os.open(self.path, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
             with os.fdopen(descriptor, "a", encoding="utf-8") as stream:
                 stream.write(line)
+        if self.on_record is not None:
+            self.on_record(deepcopy(record))

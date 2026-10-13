@@ -11,10 +11,9 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
-from jarvis.brain.agent_loop import AgentLoop
 from jarvis.brain.errors import ProviderError
 from jarvis.brain.providers import build_provider
-from jarvis.channels.runner import CommandRunner
+from jarvis.channels.runtime import Runtime, create_runtime
 from jarvis.channels.voice.adapters import (
     EdgeTTSynthesizer,
     FallbackSynthesizer,
@@ -26,9 +25,6 @@ from jarvis.channels.voice.adapters import (
 )
 from jarvis.channels.voice.core import SpeechSynthesizer, VoiceController
 from jarvis.config.settings import load_settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate
-from jarvis.tools.base import ToolContext
 from jarvis.tools.registry import discover_tools
 
 
@@ -61,13 +57,8 @@ async def chat(config_path: Path) -> None:
     if not settings.primary_model:
         print("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.")
         return
-    settings.workspace.mkdir(parents=True, exist_ok=True)
-    audit = AuditLog(settings.audit_path)
-    gate = SafetyGate(discover_tools())
-    context = ToolContext(workspace=settings.workspace, settings=settings, audit=audit)
-
     approval_active = False
-    runner: CommandRunner
+    runtime_ref: list[Runtime] = []
 
     def approve(name: str, arguments: dict[str, Any]) -> bool:
         nonlocal approval_active
@@ -76,13 +67,21 @@ async def chat(config_path: Path) -> None:
             return request_approval(
                 name,
                 arguments,
-                gate.pending_notice,
-                on_interrupt=runner.cancel_current,
+                runtime_ref[0].gate.pending_notice,
+                on_interrupt=runtime_ref[0].runner.cancel_current,
             )
         finally:
             approval_active = False
 
-    runner = CommandRunner(AgentLoop(build_provider(settings, audit), gate, context, approve))
+    runtime = create_runtime(
+        config_path,
+        approve,
+        settings=settings,
+        provider_builder=build_provider,
+        registry_builder=discover_tools,
+    )
+    runtime_ref.append(runtime)
+    runner, context = runtime.runner, runtime.context
     loop = asyncio.get_running_loop()
     # Runner'ın SIGINT sayacı ikinci Ctrl+C'de loop'u kapatır. Kendi handler'ımız
     # aktif turu iptal işaretler; onay input'unda KeyboardInterrupt ret yolunu kullanır.
@@ -120,13 +119,9 @@ async def voice(config_path: Path) -> None:
     if not settings.primary_model:
         print("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.")
         return
-    settings.workspace.mkdir(parents=True, exist_ok=True)
-    audit = AuditLog(settings.audit_path)
-    gate = SafetyGate(discover_tools())
-    context = ToolContext(workspace=settings.workspace, settings=settings, audit=audit)
     approval_active = False
-    runner: CommandRunner
     controller: VoiceController | None = None
+    runtime_ref: list[Runtime] = []
 
     def approve(name: str, arguments: dict[str, Any]) -> bool:
         nonlocal approval_active
@@ -137,15 +132,28 @@ async def voice(config_path: Path) -> None:
             return request_approval(
                 name,
                 arguments,
-                gate.pending_notice,
-                on_interrupt=runner.cancel_current,
+                runtime_ref[0].gate.pending_notice,
+                on_interrupt=runtime_ref[0].runner.cancel_current,
             )
         finally:
             approval_active = False
             if controller is not None:
                 controller.resume_after_approval()
 
-    runner = CommandRunner(AgentLoop(build_provider(settings, audit), gate, context, approve))
+    runtime = create_runtime(
+        config_path,
+        approve,
+        settings=settings,
+        provider_builder=build_provider,
+        registry_builder=discover_tools,
+    )
+    runtime_ref.append(runtime)
+    runner, context, settings, audit = (
+        runtime.runner,
+        runtime.context,
+        runtime.settings,
+        runtime.audit,
+    )
     microphone = SoundDeviceMicrophone(settings.voice)
     sink = SoundDeviceSink()
     local_tts = PiperSynthesizer(settings.voice)

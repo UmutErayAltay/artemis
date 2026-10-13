@@ -1,192 +1,129 @@
-# Jarvis masaüstü — uygulanabilir ilk sürüm
+# Jarvis masaüstü — ilk sürüm planı
 
-Durum: uygulama öncesi plan. Kullanıcı F0–F3 üzerine masaüstünü şimdi istedi;
-F4 hafıza beklenmez. Bu izin F3 kapsamını genişletmeme kuralına bu çalışma için
-istisnadır. Hedef Windows 11; Linux çekirdeği Qt olmadan çalışmaya devam eder.
-Karar: [ADR 0011](adr/0011-desktop-ui.md).
+Uygulama öncesi plan; [ADR 0011](adr/0011-desktop-ui.md). Kullanıcı F0–F3 üzerine
+GUI'yi şimdi istedi: F4 hafıza beklenmez; F3'ü büyütmeme kuralına bu çalışma için
+istisnadır. Windows 11 hedeflenir, Linux çekirdeği Qt olmadan çalışır.
 
-## Teslimat ve görsel yön
+## Kapsam ve görsel yön
 
 `jarvis desktop --config config/config.yaml`: tek QApplication, ana panel,
-yüzen küçük komut penceresi ve sistem tepsisi. Mevcut metin komutları aynı
-CommandRunner üzerinden yürür. İlk sürümde ses bağlantısı, kalıcı sohbet/hafıza,
-Telegram, otomatik başlangıç, küresel kısayol, model seçici ve ayar editörü yoktur.
-F3 ses CLI'sı korunur; masaüstünde çalışan mikrofon/dinleme animasyonu gösterilmez.
-Gerekirse açık bilgi: “Ses bu masaüstü sürümünde bağlı değil.”
+yüzen hızlı komut penceresi, sistem tepsisi. Metin komutları mevcut runner'dan
+geçer. Ses bağlantısı, kalıcı hafıza, Telegram, otomatik başlangıç, küresel
+kısayol, ayar editörü ve model seçici kapsam dışıdır. F3 ses CLI'sı korunur;
+GUI'de çalışan mikrofon/dinleme animasyonu yoktur. Bilgi gerekirse “Ses bu
+masaüstü sürümünde bağlı değil.” olur. Marka Jarvis; artemis uyandırma sözcüğüdür.
 
-- Sade, kaliteli koyu yüzey: zemin `#0B1220`, panel `#111C2D`, yükseltilmiş
-  yüzey `#17263A`, metin `#E6EDF5`, ikincil metin `#A9B8C9`, vurgu `#53D6C7`.
-  Vurgu düğmesinde koyu metin; amber yalnız bekleyen onay, kırmızı yalnız hata.
-  İnce sınırlar, 12–16 px köşeler, 8 px aralık sistemi, 24 px panel boşluğu.
-  Sahte bilimkurgu göstergeleri, grafikler ve sürekli parıltı kullanılmaz.
-- Başlık “Jarvis”, küçük alt başlık “Kişisel asistan”; gerçek çalışma durumunu
-  ve yapılandırılmış model adını gösterir. “Hazır” yalnız çalışma zamanı kurulunca
-  görünür; model adı bir bağlantı/sağlık doğrulaması değildir.
-- Varsayılan pencere yaklaşık 1180×780 mantıksal piksel. Üstte kısa başlık,
-  ortada yeniden boyutlanabilir %65 sohbet / %35 “İşlem adımları” bölmesi,
-  altta çok satırlı komut alanı, “Gönder” ve çalışma sırasında “İptal et”.
-  900 px altında adımlar açılır panel olur; kaybolmaz. Boş durumda kısa bir
-  karşılama ve gerçek desteklenen komutları yazmaya davet vardır; uydurma geçmiş yoktur.
-- Sohbet düz metin ve seçilebilir içerik kullanır; HTML/link otomatik çalışmaz.
-  Enter gönderir, Shift+Enter satır açar; erişilebilir açıklaması görünürdür.
-  Tur çalışırken yeni gönderim kapanır, metin taslağı korunur. Geçmiş yalnız
-  bu oturumun görünümüdür; AgentLoop'a gizlice konuşma hafızası eklenmez.
-- Yaklaşık 480×160 yüzen pencere, aynı durum ve komut alanının küçük görünümüdür;
-  panel aç düğmesi vardır. Ayrı runner/sohbet yaratmaz. Tepsi menüsü “Paneli aç”,
-  “Hızlı komut”, “Çıkış”; basit özgün J simgesi QPainter ile çizilebilir.
-  Tepsi yoksa pencere kapanışı uygulamayı görünmez bırakmaz.
-- Normal panel kapatma tepsiye gizleyebilir; bekleyen onay önce reddedilir.
-  Onay kendi penceresinde ana paneli öne getirir. “Çıkış” temiz kapanışı başlatır.
-  Gizleme ile aktif bir turun iptali aynı şey değildir; aktif durum tepside anlaşılır.
-- Segoe UI / sistem yazı tipi, gövde en az 14 mantıksal px; sabit piksel tabanlı
-  yerleşim yerine Qt düzenleri. Klavye odağı belirgin, ikon düğmeleri adlandırılmış,
-  durumlar renk yanında metin taşır. Türkçe İ/ı/ş/ğ doğru görünür. 100/150/200% DPI,
-  küçük pencere ve uzun argümanlar kaydırmayla kullanılabilir olmalıdır.
+- Zemin `#0B1220`, panel `#111C2D`, yükseltilmiş yüzey `#17263A`, metin
+  `#E6EDF5`, ikincil metin `#A9B8C9`, vurgu `#53D6C7`; vurgu üstünde koyu metin.
+  Amber onay, kırmızı hata içindir; durumlar renk yanında metin taşır. 8 px
+  aralık sistemi, 24 px panel boşluğu, 12–16 px köşeler, ince sınırlar kullanılır.
+- Yaklaşık 1180×780 mantıksal px: Jarvis başlığı, gerçek durum, yapılandırılmış
+  model adı; %65 sohbet / %35 “İşlem adımları” yeniden boyutlanabilir bölmesi.
+  900 px altında adımlar açılır panel olur. Altta çok satırlı komut, “Gönder”,
+  çalışırken “İptal et”. Hazır durumu yalnız runtime kurulunca gösterilir;
+  model adı bağlantı sağlığı değildir. Yüzde ilerleme/sahte grafik yoktur.
+- Enter gönderir, Shift+Enter satır açar; çalışan turda gönderim kapanır, taslak
+  korunur. Sohbet seçilebilir düz metindir; HTML/link çalıştırılmaz. Görünen
+  oturum geçmişi AgentLoop'a gizli hafıza olarak eklenmez. Boş ekran kısa ve sakindir.
+- Yaklaşık 480×160 overlay aynı runtime/durumu kullanır. Tepsi: “Paneli aç”,
+  “Hızlı komut”, “Çıkış”; QPainter ile sade özgün J simgesi yeterlidir.
+  Panel kapanışı tepsiye gizleyebilir; bekleyen onay önce reddedilir. Tepsi yoksa
+  uygulama görünmez kalmaz. Gizleme aktif turu iptal etmez; “Çıkış” temizler.
+- Segoe UI/sistem fontu, en az 14 mantıksal px; Qt düzenleri ve kaydırma.
+  Belirgin klavye odağı, erişilebilir ikon adları, Türkçe İ/ı/ş/ğ ve okunabilir
+  kontrast gerekir. 100/150/200% DPI, dar pencere ve uzun argümanlar incelenir.
 
-## Sınırlar ve ortak kurulum
+## Modüller ve ortak kurulum
 
 | Dosya | Sorumluluk |
 | --- | --- |
-| `jarvis/channels/runtime.py` | Qt'siz Runtime ve ortak kurulum fabrikası |
-| `jarvis/channels/desktop/bridge.py` | Qt'siz işçi, mesajlar, onay aracısı ve sınırlı olay kuyruğu |
-| `jarvis/channels/desktop/app.py` | Lazy Qt giriş noktası, panel/overlay/tepsi, görünüm ve tema |
-| `jarvis/channels/desktop/demo.py` | Yalnız açık demo kipinin sahte sağlayıcısı ve izole araçları |
-| `jarvis/safety/audit.py` | İsteğe bağlı temizlenmiş kayıt gözlemcisi |
+| `channels/runtime.py` | Qt'siz ortak kurulum ve Runtime referansları |
+| `channels/desktop/bridge.py` | Qt'siz işçi, mesajlar, onay aracısı, olay kuyruğu |
+| `channels/desktop/app.py` | Lazy Qt girişi; panel, overlay, tepsi ve tema |
+| `channels/desktop/demo.py` | Açık demo için izole fake provider/araçlar |
+| `safety/audit.py` | İsteğe bağlı temizlenmiş kayıt gözlemcisi |
 
-Küçük `__init__.py` Qt import etmez. `pyproject.toml` içine isteğe bağlı
-`desktop = ["PySide6==6.12.0"]` eklenir. CLI yalnız desktop dalında Qt girişini
-import eder; eksik bağımlılık Türkçe kurulum mesajıyla sonlanır. `jarvis chat`,
-`jarvis voice` ve çekirdek testleri bu extra olmadan çalışır.
+Yollar `jarvis/` altındadır. `desktop` extra: `PySide6==6.12.0`; paket __init__
+Qt import etmez. CLI yalnız desktop dalında Qt yükler; eksikse Türkçe kurulum
+mesajı verir. Chat/voice kurulum tekrarı ortak fabrikaya çıkarılır: settings,
+workspace, audit, registry, gate, context, build_provider, AgentLoop, runner.
+Onay fabrikası gate/context alıp tam `(tool_name, arguments) -> bool` döndürür;
+CLI terminal, GUI köprü sunar. Ses pause/resume ve SIGINT korunur. Provider ve
+registry enjeksiyonu test/demo içindir; ikinci güvenlik/sağlayıcı kurulumu yoktur.
 
-Mevcut `chat()` ve `voice()` içindeki yinelenen kurulum runtime fabrikasına
-taşınır: ayarlar, çalışma dizini, AuditLog, keşfedilmiş kayıt, SafetyGate,
-ToolContext, build_provider, AgentLoop, CommandRunner. `Runtime` bunların
-gerekli referanslarını taşır. Onay fabrikası kapı/bağlamı alıp **tam olarak**
-`(tool_name, arguments) -> bool` döndürür; CLI terminal sunumu, GUI köprüsü
-aynı enjeksiyon noktasını kullanır. Sesin pause/resume onay davranışı korunur.
-Sağlayıcı ve kayıt enjeksiyonu yalnız test/demo bağımlılıklarıdır; üretim güvenlik
-ve sağlayıcı kurulumunun ikinci kopyası oluşmaz. Kurulum model çağrısı yapmaz.
+## İşçi ve onay sözleşmesi
 
-## İş parçacıkları ve mesaj sözleşmesi
+Qt ana thread'de, ayrı tek Python işçisi kendi asyncio loop/Runtime'ını oluşturur.
+GUI'de asyncio.run/qasync, Future.result veya blocking join; işçide QWidget yoktur.
+Komutlar loop.call_soon_threadsafe ile gider. Runner iptali ve asyncio.Event.set
+yalnız işçide yapılır. Tek aktif tur; kuyruk yoktur. İşçi de çift gönderimi reddeder;
+cleanup_pending bitmeden yeni tur başlamaz. Frozen dataclass mesajları yeterlidir:
 
-Qt yalnız ana iş parçacığında; ayrı tek Python işçisi kendi asyncio döngüsünü,
-Runtime'ını ve aktif turunu oluşturur. QApplication içinde asyncio.run/qasync,
-GUI'de Future.result/thread.join veya işçiden QWidget erişimi kullanılmaz.
-Normal komutlar `loop.call_soon_threadsafe(...)` ile işçiye gider; işçi coroutine
-başlatır. `runner.cancel_current()` ve asyncio.Event.set yalnız işçide çağrılır.
-En fazla bir aktif tur vardır; gönderim kuyruğu oluşturulmaz. Çift tıklama işçi
-tarafından da reddedilir. `cleanup_pending` bitmeden yeni tur kabul edilmez.
-
-Qt'siz frozen dataclass mesajları yeterlidir; genel RPC/olay çatısı yazılmaz.
-Metin/argüman taşıyan alanlar `repr=False`; Settings/provider nesneleri GUI'ye taşınmaz.
-
-| Yön | İleti ve temel yük |
+| Yön | Mesaj |
 | --- | --- |
-| GUI → işçi | `Submit(request_id, text)`, `Cancel(request_id)`, `Shutdown()` |
-| GUI → onay aracısı | `Decide(request_id, turn_id, approval_id, approved: bool)` |
-| İşçi → GUI | `State(request_id?, state, message)`; başlatılıyor/hazır/çalışıyor/onay/temizleniyor/kapalı/hata |
-| İşçi → GUI | `Approval(request_id, turn_id, approval_id, tool_name, arguments, notice, deadline)` |
-| İşçi → GUI | `Finished(request_id, RunResult)` veya sır içermeyen `Failed(request_id, error_type, message)` |
-| Audit → GUI | `Activity(request_id, turn_id, seq, event, fields)` ve `ActivityGap(dropped_count)` |
+| GUI → işçi | Submit(request_id, text), Cancel(request_id), Shutdown() |
+| GUI → onay aracısı | Decide(request_id, turn_id, approval_id, approved) |
+| İşçi → GUI | State(request_id?, state, message), Finished(request_id, RunResult), Failed(request_id, error_type, message) |
+| İşçi → GUI | Approval(request_id, turn_id, approval_id, tool_name, arguments, notice, deadline) |
+| Audit → GUI | Activity(request_id, turn_id, seq, event, fields), ActivityGap(dropped_count) |
 
-`request_id` gönderimde UUID, `turn_id` çekirdeğin gerçek UUID'sidir; audit
-turn_start ile bağlanır. Onay için ayrıca yeni UUID üretilir. Eski nesilden gelen
-durum/sonuç mevcut turu değiştirmez. Sonuç ve onay gibi kontrol iletileri
-kaybedilmez; aktivite kuyruğundan ayrıdır. Qt sinyalleri açık queued bağlantı ile
-GUI'ye iletilir; alternatif olarak GUI QTimer aynı thread-safe kuyruğu boşaltır.
+İstek/onay kimlikleri yeni UUID; turn_id çekirdeğin gerçek UUID'sidir. Eski
+iletiler mevcut turu değiştirmez. Metin/argüman alanları repr=False; Settings ve
+provider GUI'ye taşınmaz. Qt queued signal veya QTimer + thread-safe kuyruk kullanılır.
+Kontrol/onay/nihai sonuç iletileri aktivite kuyruğundan ayrıdır ve düşürülmez.
 
-### Senkron onayın güvenli köprüsü
+SafetyGate callback'i senkron çağırır; imza değişmez. Callback doğrulanmış argüman
+kopyasını ve gate.pending_notice'ı yakalar; kilitli aracıda üç kimlikle eşleşen
+concurrent.futures.Future[bool] oluşturur. Yalnız işçi, tur deadline'ına kadar
+Future.result bekler; timeout False. Karar bloke asyncio loop'a sıraya konmaz:
+GUI, aracının thread-safe metoduyla Future'ı çözer. asyncio.Future kullanılmaz.
+İptal/kapanış önce pending onayı kilit altında False ile geçersizleştirir, sonra
+loop'a iptal yollar. Callback iptal niyetini denetler, gerekirse kendi thread'inde
+runner iptalini uygular; kapının onay sonrası iptal/deadline kontrolü korunur.
+Finally pending kaydını kaldırır; eski/çift/geç karar yeni onayı çözemez.
 
-SafetyGate bugün callback'i senkron çağırır; bu sözleşme değişmez. Callback gerçek
-doğrulanmış argüman kopyasını ve `gate.pending_notice` değerini hemen yakalar.
-Kilitli bir aracıda `(request_id, turn_id, approval_id)` anahtarlı
-`concurrent.futures.Future[bool]` oluşturur, onay olayını gönderir ve **yalnız
-işçi thread'i** bu Future üzerinde bekler. Bekleme üst sınırı bağlamın mevcut
-monotonik tur deadline'ıdır; dolunca False. Bekleyen asyncio döngüsüne karar
-çözümünü sıraya koymak deadlock oluşturur: GUI kararı aracının thread-safe
-metodu üzerinden Future'a doğrudan iletir. asyncio.Future kullanılmaz.
+Onay paneli gerçek araç adını, tam seçilebilir/kaydırılabilir doğrulanmış JSON'u
+ve kapının notice/taint cümlesini gösterir. Argüman düzenlenmez. “Hayır” varsayılan
+ve odaklıdır; Enter/Escape/çarpı onay vermez. “Evet” açık etkinleştirme gerektirir.
+GUI risk politikası kurmaz ve araç dispatch etmez. Çıkış gönderimi kapatır, onayı
+reddeder, turu iptal eder; Qt açıkken “Temizleniyor” gösterilir. Aktif görev ve
+çekirdek temizliği bitince işçi/uygulama kapanır; thread terminate veya çalışan
+göreve loop.close yoktur. OS'ye ulaşan eylemin geri alındığı söylenmez.
 
-Onay görünümü tam araç adını, kaydırılabilir/seçilebilir doğrulanmış JSON
-argümanlarını ve kapının notice metnini gösterir; taint cümlesi aynen korunur.
-Argümanlar düzenlenemez. “Hayır” varsayılan/odaklıdır; Enter, Escape ve pencere
-çarpısı onay vermez. “Evet” yalnız açık etkinleştirmeyle True döndürür. Onay
-metni bir komut veya HTML değildir; otomatik yürütme/kopyalama yapılmaz.
+## Gerçek olaylar ve çevrimdışı inceleme
 
-İptal/kapanış önce eşleşen onayı kilit altında geçersizleştirip False ile çözer,
-sonra işçi döngüsüne iptali yollar. Callback, iptal işaretli kararın True olmasına
-izin vermez ve kendi thread'inde runner iptalini uygular; kapının onay sonrası
-iptal/deadline denetimi korunur. Çift karar, eski kimlik, timeout sonrası Evet
-ve kapanmış pencere yeni onayı çözemez. Bekleme bitince pending kaydı finally
-ile kaldırılır ve GUI onay kartı kapanır. Yeni bir onay için eski UI callback'i
-yeniden bağlanmaz. Kapı dışında risk/taint değerlendirmesi yapılmaz.
+AuditLog'da bugün observer yoktur. İsteğe bağlı on_record, mevcut redact ve başarılı
+JSONL yazımından sonra, dosya kilidi dışında bağımsız kayıt kopyası alır. Disk
+hatası hata olarak kalır. Gözlemci yalnız put_nowait yapar; queue-full durumunu
+kendi içinde işler. 256 kayıt, kayıt başına yaklaşık 16 KiB görünüm özeti;
+taşınca eski aktivite düşer ve boşluk sayacı görünür. Tam JSONL korunur. QTimer
+50–100 ms'de en çok 32 olay alır; liste 500 satırdır. Onay argümanları kısaltılmaz.
+Tool requested/dispatch/result ve approval olayları gerçek durumlarına çevrilir;
+`sent`: “Komut gönderildi; sonuç doğrulanmadı”; interrupted: belirsiz. Turn_end
+nihai tur sonucudur, bütün araçların başarısı değildir. Token akışı uydurulmaz.
+Anahtar alanı yoktur; sırlar config/argv/repr/loga taşınmaz, ücretli çağrı yapılmaz.
 
-Çıkış yeni gönderimi kapatır, onayı reddeder ve turu iptal eder. Qt açık kalırken
-işçi aktif görev/çekirdek temizliğinin bitmesini bekler; “Temizleniyor” gösterir.
-İşçi tamamlanınca uygulama çıkar; GUI'de bloklayan join, thread terminate veya
-çalışan görev üstüne loop.close yoktur. Geç kalan temizlik başarı diye gösterilmez.
-OS'ye gönderilmiş bir eylemin geri alındığı söylenmez.
-
-## Doğru ve sınırlı işlem görünümü
-
-AuditLog'da şu an callback yoktur. Tek isteğe bağlı `on_record` eklenir: kayıt
-mevcut redact ve başarılı JSONL yazımından **sonra**, dosya kilidi dışında,
-bağımsız kopya olarak gözlemciye verilir. Disk hatası eskisi gibi hata olur;
-gözlemci yalnız put_nowait yapan kısa bir fonksiyondur, yürütme veya onay yapmaz.
-Gözlemcinin beklenen kuyruk-dolu durumu kendi içinde işlenir; geniş exception
-yutma veya ham kayıt loglama eklenmez. Mevcut AuditLog(path) kullanımları korunur.
-
-Aktivite için en çok 256 kayıtlık thread-safe kuyruk, kayıt başına yaklaşık
-16 KiB görünüm özeti; taşınca en eski aktivite düşer ve görünür boşluk sayacı
-artar. Tam JSONL değişmez. QTimer 50–100 ms aralıkla en çok 32 olay tüketir;
-ekrandaki liste 500 satırla sınırlanır. Büyük sonuç alanları görünümde açıkça
-kısaltılır; **onay argümanları bu kısaltmaya tabi değildir**.
-
-`tool_requested`: istendi; `tool_dispatch`: başlatıldı; `approval`: onaylandı /
-reddedildi; `tool_result`: gerçek success/status/message; `tool_interrupted`:
-sonucu belirsiz. `status=sent` “Komut gönderildi; sonuç doğrulanmadı”dır.
-`turn_end` tek nihai tur sonucu; modelin bitmesi bütün araçların başarılı olduğu
-anlamına gelmez. Yüzde ilerleme, uydurma adım listesi ve token akışı yoktur.
-Ücret/token yalnız mevcut gerçek Usage verisinden gösterilebilir; MVP'de bu
-ikincil detay kaldırılabilir. Sağlayıcı hatası sırları temizlenmiş tür + mesajdır.
-API anahtarı alanı yoktur; sırlar YAML, argv, repr, screenshot fixture ve loga
-taşınmaz. Canlı ücretli çağrı geliştirme/doğrulamanın parçası değildir.
-
-## Çevrimdışı inceleme
-
-`jarvis desktop --demo` kalıcı “DEMO · Gerçek işlem yapılmaz” işareti taşır.
-Gerçek config/anahtar/sağlayıcı/araç keşfi kullanılmaz. TemporaryDirectory içinde
-audit ve workspace, senaryolu fake provider, özel izole ToolRegistry ve gerçek
-CommandRunner/AgentLoop/SafetyGate kullanılır. Demo araçları yalnız bellek içi
-örnek veri okur veya değiştirir; üretim plugin listesine kaydolmaz. Örnek okuma
-external olarak taint yaratır, ardından örnek yan etki aynı kapıdan onay ister.
-Sonuç “Demo örneği güncellendi” der; gerçek dosya/uygulama işlemi iddia etmez.
-Demo yalnız verilen örnek senaryoyu canlandırdığını açıklar. Normal kipte bu
-fixture'lar veya sahte aktivite kullanılamaz.
-
-Offscreen test QTimer ile gerçek pencereyi gösterip `window.grab().save(...)`
-ile boş/hazır, aktif/onay ve dar pencere görüntülerini geçici artifact dizinine
-alabilir. Ana masaüstü açılmaz; screenshot yalnız demo verisidir. Gerçek Windows
-tepsi/odak/DPI doğrulaması bu görüntülerle tamamlanmış sayılmaz.
+`jarvis desktop --demo`: kalıcı “DEMO · Gerçek işlem yapılmaz”; TemporaryDirectory,
+fake provider, özel ToolRegistry ve gerçek runner/loop/gate. Gerçek config,
+anahtar, sağlayıcı ve plugin keşfi kullanılmaz. Demo araçları yalnız bellek içi
+örnek veri okur/değiştirir: external okuma ardından taint nedeniyle onay isteyen
+yan etki. Sonuç açıkça demo sonucudur. Normal kip bu fixture'ları kullanmaz.
+Offscreen Qt testinde window.grab() ile hazır/onay/dar pencere PNG'leri alınır;
+yalnız demo verisi kullanılır. Windows tepsi/DPI/odak kabulü ayrıca yapılır.
 
 ## İki uygulama parçası ve kabul
 
-1. **Ortak runtime + Qt'siz köprü.** CLI/ses kurulumunu çıkar, audit gözlemcisini,
-   işçiyi ve onay aracısını ekle. Testler: aynı kapıdan geçiş, gerçek argüman/taint,
-   Evet/Hayır, timeout, iptal/kapanış, eski/çift karar, onay beklerken iptal,
-   cleanup_pending sırasında yeni tur engeli, taşan audit kuyruğu ve sır temizleme.
-   Çekirdek Qt yüklü olmadan import/CLI/test çalıştırır. CLI SIGINT ve ses onay
-   duraklatma regresyonları korunur. Gerçek ağ/masaüstü araçları kullanılmaz.
-2. **Qt arayüzü + açık demo + inceleme.** Görsel yönü panel/overlay/tepsiye uygula,
-   lazy CLI komutunu ve extra'yı bağla. İsteğe bağlı testler Qt yoksa importorskip;
-   varsa `QT_QPA_PLATFORM=offscreen` ile açılış, gönderim, varsayılan Hayır,
-   pencere/Escape reddi, iptal, overlay ile ortak durum ve temiz kapanış çalışır.
-   Evet yalnız açık tıklamayla doğrulanır; GUI timer heartbeat işçi çalışırken ve
-   onay beklerken ilerler. Hazır ve onay screenshot'ları görsel olarak incelenir.
-   README/ARCHITECTURE yeni komutu ve gerçek ses sınırını açıklar.
+1. Ortak runtime, audit observer, Qt'siz işçi/onay köprüsü. Testler: aynı gate,
+   tam argüman/taint, ret/onay/timeout, iptal/kapanış, eski/çift karar, pending
+   cleanup sırasında yeni tur engeli, audit taşması/redaction. Qt'siz çekirdek,
+   CLI SIGINT ve ses onay regresyonları korunur; gerçek araç/ağ kullanılmaz.
+2. Qt panel/overlay/tepsi, lazy CLI/extra, açık demo ve README/ARCHITECTURE.
+   Qt yoksa smoke testleri importorskip; varsa offscreen açılış/gönderim,
+   varsayılan Hayır/Enter/Escape/kapanış, açık Evet, iptal, ortak overlay durumu,
+   temiz kapanış. GUI timer heartbeat çalışma ve onay sırasında ilerlemelidir.
+   Screenshot'lar görsel incelenir; Windows gerçek kabulü ayrı raporlanır.
 
-Her parçada ilgili testler; sonunda `pytest -q`, `ruff check .`, `mypy`,
-`python -m bench.run --sahte`. Güvenlik regresyonu için geçici kopyada taint/onay
-denetimi kaldırılınca ilgili testin kırıldığı doğrulanır. Windows 11 kabulünde
-tepsi mevcut/yok, DPI, klavye, uzun Türkçe argüman, onay sırasında kapatma ve
-iptal ayrıca denenir. Yapılmayan Windows/canlı model kontrolü tamamlandı denmez.
-Uygulama ajanları kullanıcı talebiyle sırayla çalışır; bu belge kod yazmaz.
+Son kontroller: pytest -q, ruff check ., mypy, python -m bench.run --sahte.
+Geçici kopyada taint/onay kontrolünü kaldırınca güvenlik testinin kırıldığı
+kanıtlanır. Yapılmayan Windows/canlı model kontrolü tamamlandı denmez. Uygulama
+ajanları kullanıcı talebiyle sırayla çalışır; bu plan kod uygulamaz.

@@ -1,0 +1,329 @@
+"""Qt'siz masaüstü köprüsünün onay ve tek tur sözleşmesi."""
+
+from __future__ import annotations
+
+import json
+import threading
+import time
+from decimal import Decimal
+from pathlib import Path
+from typing import Any
+
+import pytest
+from pydantic import BaseModel, ConfigDict
+
+from jarvis.brain.fake import ScriptedProvider
+from jarvis.brain.models import Completion, ToolCall
+from jarvis.channels.desktop.bridge import (
+    Activity,
+    ActivityGap,
+    Approval,
+    DesktopBridge,
+    Failed,
+    Finished,
+    State,
+)
+from jarvis.channels.runtime import AuditObserver, Runtime, create_runtime
+from jarvis.config.settings import ModelConfig, Settings
+from jarvis.safety.audit import AuditLog
+from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from jarvis.tools.registry import ToolRegistry
+
+
+class EmptyArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class WriteArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    path: str
+
+
+class ExternalRead(BaseTool):
+    name = "external_read"
+    description = "Geçici dosyadan örnek veri okur."
+    args_model = EmptyArgs
+    risk = Risk.READ_ONLY
+    external = True
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        return ToolResult(success=True, status="ok", message="Okundu.", data={"value": "örnek"})
+
+
+class ConfirmWrite(BaseTool):
+    name = "confirm_write"
+    description = "İzole test dosyasını yazar."
+    args_model = WriteArgs
+    risk = Risk.SIDE_EFFECT
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        args = WriteArgs.model_validate(arguments)
+        (context.workspace / args.path).write_text("yazıldı", encoding="utf-8")
+        return ToolResult(success=True, status="ok", message="Yazıldı.")
+
+
+_event_cache: dict[DesktopBridge, list[Any]] = {}
+
+
+def _wait_for(bridge: DesktopBridge, kind: type[Any], timeout: float = 2.0) -> Any:
+    deadline = time.monotonic() + timeout
+    cached = _event_cache.setdefault(bridge, [])
+    for index, event in enumerate(cached):
+        if isinstance(event, kind):
+            return cached.pop(index)
+    while time.monotonic() < deadline:
+        for event in bridge.poll_events():
+            if isinstance(event, kind):
+                return event
+            cached.append(event)
+        time.sleep(0.005)
+    raise AssertionError(f"{kind.__name__} olayı gelmedi")
+
+
+def _fixture(
+    tmp_path: Path,
+    responses: list[Completion],
+    *,
+    max_seconds: float = 1.0,
+    provider_override: Any = None,
+) -> DesktopBridge:
+    settings = Settings(
+        workspace=tmp_path,
+        state_dir=tmp_path / "state",
+        audit_path=tmp_path / "audit.jsonl",
+        primary_model="fake",
+        models={
+            "fake": ModelConfig(
+                provider="ollama",
+                model="fake",
+                input_per_million=Decimal(0),
+                output_per_million=Decimal(0),
+            )
+        },
+        max_seconds=max_seconds,
+    )
+    registry = ToolRegistry()
+    registry.register(ExternalRead)
+    registry.register(ConfirmWrite)
+    provider = ScriptedProvider(responses)
+
+    def factory(
+        _config: Path, approve: Any, on_record: AuditObserver
+    ) -> Runtime:
+        return create_runtime(
+            _config,
+            approve,
+            settings=settings,
+            provider=provider_override if provider_override is not None else provider,
+            registry=registry,
+            audit=AuditLog(settings.audit_path, on_record),
+        )
+
+    bridge = DesktopBridge(tmp_path / "unused.yaml", factory)
+    assert _wait_for(bridge, State).state == "ready"
+    return bridge
+
+
+def _tool_scenario() -> list[Completion]:
+    return [
+        Completion(
+            tool_calls=[
+                ToolCall(id="read", name="external_read", arguments={}),
+                ToolCall(
+                    id="write",
+                    name="confirm_write",
+                    arguments={"path": "target.txt"},
+                ),
+            ]
+        ),
+        Completion(content="Tamamlandı."),
+    ]
+
+
+@pytest.mark.parametrize("approved", [False, True])
+def test_bridge_uses_gate_taint_and_exact_validated_arguments(tmp_path, approved):
+    bridge = _fixture(tmp_path, _tool_scenario())
+    try:
+        request_id = bridge.submit("oku ve yaz")
+        assert request_id is not None
+        assert bridge.submit("ikinci tur") is None
+        prompt = _wait_for(bridge, Approval)
+        assert prompt.request_id == request_id
+        assert prompt.tool_name == "confirm_write"
+        assert prompt.arguments == {"path": "target.txt"}
+        assert "dış bir içerik okunduktan sonra" in prompt.notice
+        assert bridge.decide(
+            prompt.request_id, prompt.turn_id, prompt.approval_id, approved
+        )
+        result = _wait_for(bridge, Finished).result
+        assert (tmp_path / "target.txt").exists() is approved
+        if approved:
+            assert result.stop_reason == "completed"
+        else:
+            assert result.stop_reason in {"completed", "denied_repeat"}
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_cancel_during_approval_invalidates_future_and_stale_decision(tmp_path):
+    bridge = _fixture(tmp_path, _tool_scenario())
+    try:
+        request_id = bridge.submit("oku ve yaz")
+        assert request_id is not None
+        prompt = _wait_for(bridge, Approval)
+        assert bridge.cancel(request_id)
+        assert not bridge.decide(
+            prompt.request_id, prompt.turn_id, prompt.approval_id, True
+        )
+        assert _wait_for(bridge, Finished).result.stop_reason == "cancelled"
+        assert not (tmp_path / "target.txt").exists()
+        assert bridge.decide(
+            prompt.request_id, prompt.turn_id, prompt.approval_id, True
+        ) is False
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_immediate_cancel_before_worker_starts_rejects_turn(tmp_path):
+    bridge = _fixture(tmp_path, _tool_scenario())
+    entered = threading.Event()
+    release = threading.Event()
+
+    def block_worker() -> None:
+        entered.set()
+        release.wait(2)
+
+    try:
+        assert bridge._loop is not None
+        bridge._loop.call_soon_threadsafe(block_worker)
+        assert entered.wait(2)
+        request_id = bridge.submit("oku ve yaz")
+        assert request_id is not None
+        assert bridge.cancel(request_id)
+        release.set()
+        deadline = time.monotonic() + 2
+        cancelled = False
+        while time.monotonic() < deadline and not cancelled:
+            cancelled = any(
+                isinstance(event, State)
+                and event.state == "cancelled"
+                and event.request_id == request_id
+                for event in bridge.poll_events()
+            )
+            time.sleep(0.005)
+        assert cancelled
+        assert not (tmp_path / "target.txt").exists()
+    finally:
+        release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_shutdown_before_queued_start_still_stops_worker(tmp_path):
+    bridge = _fixture(tmp_path, _tool_scenario())
+    entered = threading.Event()
+    release = threading.Event()
+
+    def block_worker() -> None:
+        entered.set()
+        release.wait(2)
+
+    try:
+        assert bridge._loop is not None
+        bridge._loop.call_soon_threadsafe(block_worker)
+        assert entered.wait(2)
+        assert bridge.submit("oku ve yaz") is not None
+        bridge.shutdown()
+        release.set()
+        assert bridge._stopped.wait(2)
+        assert not (tmp_path / "target.txt").exists()
+    finally:
+        release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_approval_timeout_fails_closed_and_cleanup_completes(tmp_path):
+    bridge = _fixture(tmp_path, _tool_scenario(), max_seconds=0.12)
+    try:
+        request_id = bridge.submit("oku ve yaz")
+        assert request_id is not None
+        prompt = _wait_for(bridge, Approval)
+        result = _wait_for(bridge, Finished, timeout=1.0).result
+        assert result.stop_reason in {"timeout", "denied_repeat"}
+        assert not (tmp_path / "target.txt").exists()
+        assert not bridge.decide(
+            prompt.request_id, prompt.turn_id, prompt.approval_id, True
+        )
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_shutdown_rejects_pending_approval_before_worker_stops(tmp_path):
+    bridge = _fixture(tmp_path, _tool_scenario())
+    request_id = bridge.submit("oku ve yaz")
+    assert request_id is not None
+    prompt = _wait_for(bridge, Approval)
+    bridge.shutdown()
+    assert bridge._stopped.wait(2)
+    assert not bridge.decide(prompt.request_id, prompt.turn_id, prompt.approval_id, True)
+    assert not (tmp_path / "target.txt").exists()
+
+
+def test_factory_failure_is_sanitized_and_worker_stops(tmp_path):
+    def broken_factory(_config: Path, _approve: Any, _observer: AuditObserver) -> Runtime:
+        raise ValueError("synthetic-secret must not escape")
+
+    bridge = DesktopBridge(tmp_path / "bad.yaml", broken_factory)
+    failure = _wait_for(bridge, Failed)
+    assert failure.error_type == "ValueError"
+    assert "synthetic-secret" not in failure.message
+    assert bridge._stopped.wait(2)
+    assert bridge.submit("yaz") is None
+    bridge.shutdown()
+
+
+def test_runtime_failure_is_sanitized_and_worker_recovers(tmp_path):
+    class BrokenProvider:
+        async def complete(self, *_args: Any, **_kwargs: Any) -> Completion:
+            raise KeyError("synthetic-secret")
+
+    bridge = _fixture(tmp_path, [], provider_override=BrokenProvider())
+    try:
+        request_id = bridge.submit("sor")
+        assert request_id is not None
+        failure = _wait_for(bridge, Failed)
+        assert failure.request_id == request_id
+        assert failure.error_type == "KeyError"
+        assert "synthetic-secret" not in failure.message
+        assert not bridge.stopped
+        second_id = bridge.submit("yeniden dene")
+        assert second_id is not None
+        second_failure = _wait_for(bridge, Failed)
+        assert second_failure.request_id == second_id
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_audit_view_is_redacted_bounded_and_reports_gaps(tmp_path, monkeypatch):
+    bridge = _fixture(tmp_path, [Completion(content="bitti")])
+    try:
+        monkeypatch.setenv("JARVIS_TEST_SECRET", "synthetic-secret")
+        assert bridge._runtime is not None
+        for index in range(300):
+            bridge._runtime.audit.emit("inspection", value=f"synthetic-secret-{index}")
+        events = bridge.poll_events(limit=512)
+        activities = [event for event in events if isinstance(event, Activity)]
+        gaps = [event for event in events if isinstance(event, ActivityGap)]
+        assert len(activities) <= 256
+        assert gaps and gaps[0].dropped_count > 0
+        stored = json.loads((tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()[-1])
+        assert "synthetic-secret" not in json.dumps(stored)
+        assert all("synthetic-secret" not in json.dumps(event.fields) for event in activities)
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
