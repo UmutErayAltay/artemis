@@ -1,5 +1,6 @@
 """Sırların YAML veya repr içine girmemesi için ayarlarda sır alanı bulunmaz."""
 
+import re
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal, Self
@@ -91,6 +92,42 @@ class MemoryConfig(BaseModel):
     embedding_cache_dir: Path | None = None
 
 
+class TelegramConfig(BaseModel):
+    """Telegram kanalı ve bildirimi (ADR 0016); `chat_id` verilmedikçe tamamen kapalıdır.
+
+    Bilerek token alanı YOKTUR: `extra="forbid"` sayesinde YAML'a yazılan bir `token:`
+    doğrulamada reddedilir; sır yalnız `token_env` adlı ortam değişkeninden okunur.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    chat_id: int | None = None
+    token_env: str = "JARVIS_TELEGRAM_BOT_TOKEN"
+    api_base: str = "https://api.telegram.org"
+    request_timeout_seconds: float = Field(default=10.0, gt=0, le=60)
+    poll_timeout_seconds: int = Field(default=25, ge=0, le=50)
+    approval_timeout_seconds: float = Field(default=120.0, gt=0, le=900)
+    max_message_age_seconds: int = Field(default=120, ge=1, le=3600)
+
+    @field_validator("token_env")
+    @classmethod
+    def validate_token_env(cls, value: str) -> str:
+        # `_TOKEN` son eki zorunludur: denetim temizleyicisi adında "token" geçen
+        # ortam değişkenlerinin DEĞERİNİ her kayıttan siler. Başka bir ad seçilirse
+        # token denetim dosyasına düz metin sızabilirdi.
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", value) or not value.endswith("_TOKEN"):
+            raise ValueError(
+                "token_env büyük harfli bir ortam değişkeni adı olmalı ve _TOKEN ile bitmeli"
+            )
+        return value
+
+    @field_validator("api_base")
+    @classmethod
+    def validate_api_base(cls, value: str) -> str:
+        # Sağlayıcı adresleriyle aynı kurallar: sır/query yok, HTTP yalnız yerel sunucu.
+        return Settings.validate_endpoint(value)
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -116,6 +153,7 @@ class Settings(BaseModel):
     applications: dict[str, str] = Field(default_factory=dict)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
+    telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

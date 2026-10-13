@@ -65,6 +65,25 @@ voice:
 #   embedding_model: null
 #   embedding_cache_dir: null        # varsayılan: state_dir/embedding (vault DIŞINDA)
 
+# Telegram (ADR 0016). KAPALI gelir: chat_id verilmedikçe ne araç ne kanal çalışır.
+# Bot token'ı BURAYA YAZILMAZ ve YAML'da `token:` alanı yoktur (eklenirse doğrulama
+# reddeder). Token yalnız ortam değişkeninden okunur; adını token_env belirler ve
+# _TOKEN ile bitmek zorundadır (denetim kaydı değeri bu sayede gizler).
+#   Windows: setx JARVIS_TELEGRAM_BOT_TOKEN "<BotFather'dan aldığınız token>"
+# Chat id'nizi @userinfobot'tan ya da bota mesaj yazdıktan sonra
+# https://api.telegram.org/bot<TOKEN>/getUpdates çıktısındaki message.chat.id'den bulun.
+# Yalnız bu kimliğe sahip ÖZEL sohbetten gelen mesaj çalıştırılır; grup, başka kullanıcı,
+# iletilmiş (forward) ve max_message_age_seconds'tan eski mesajlar çalıştırılmaz.
+# Onaylar düğmeyle sorulur; süre dolarsa cevap hayırdır. `jarvis telegram` ile başlatılır.
+# telegram:
+#   chat_id: 123456789
+#   token_env: JARVIS_TELEGRAM_BOT_TOKEN
+#   api_base: https://api.telegram.org
+#   request_timeout_seconds: 10
+#   poll_timeout_seconds: 25
+#   approval_timeout_seconds: 120
+#   max_message_age_seconds: 120
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

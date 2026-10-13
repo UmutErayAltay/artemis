@@ -132,6 +132,10 @@ def main() -> None:
         action="store_true",
         help="Panel açılınca sesi de aç (mikrofon yalnız bu bayrakla veya Ses düğmesiyle açılır)",
     )
+    telegram_parser = commands.add_parser(
+        "telegram", help="Telegram kanalını başlat (yalnız yapılandırılmış özel sohbet, ADR 0016)"
+    )
+    telegram_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     args = parser.parse_args()
     try:
         if args.command in {"voice", "desktop"}:
@@ -148,6 +152,11 @@ def main() -> None:
             use_voice = args.command == "voice" or args.ses
             demo = args.command == "desktop" and args.demo
             raise SystemExit(run_desktop(args.config, demo=demo, voice=use_voice))
+        elif args.command == "telegram":
+            # Lazy import: sohbet/ses kullanıcıları Telegram modüllerini yüklemez.
+            from jarvis.channels.telegram.channel import run_telegram
+
+            raise SystemExit(asyncio.run(run_telegram(args.config)))
         else:
             asyncio.run(chat(args.config))
     except (OSError, ValueError, ValidationError, yaml.YAMLError, ProviderError) as error:
