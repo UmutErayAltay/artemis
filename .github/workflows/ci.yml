@@ -39,5 +39,10 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: python -m pip install -e ".[dev,desktop]"
+      - name: Install Qt runtime libraries
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libegl1 libopengl0
       - run: pytest -q tests/test_desktop_gui.py
       - run: mypy jarvis/channels/desktop/app.py jarvis/channels/desktop/demo.py tests/test_desktop_gui.py

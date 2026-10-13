@@ -45,6 +45,13 @@ python -m pip install -e ".[desktop]"
 python -m jarvis desktop --demo
 ```
 
+Ubuntu'da PySide6 için gereken Qt grafik kitaplıklarını önce kurun:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libegl1 libopengl0
+```
+
 Demoda `örnek akış` yazıp Gönder'e basınca onay sürecini deneyebilirsiniz.
 Gerçek kullanım için aşağıdaki kurulum ve sağlayıcı ayarlarını tamamlayın:
 

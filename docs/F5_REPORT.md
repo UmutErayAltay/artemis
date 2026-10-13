@@ -64,6 +64,8 @@ F5'in gerçek Windows elle kabulü bekler; sahte/offscreen testle tamamlandı de
 
 QtCore/QtGui/QtWidgets için yalnız `PySide6-Essentials==6.12.0` kullanılır;
 kullanılmayan WebEngine/Addons kurulmaz. Çekirdek strict tip kontrolünü korur.
+Ubuntu Qt testleri için ayrıca sistemde `libegl1` ve `libopengl0` gerekir;
+CI ve README bu kurulumu içerir. Windows çekirdek ve Qt CI kontrolleri geçti.
 Qt'nin isteğe bağlı ve dinamik bağları için yalnız GUI adaptöründe `misc` ve
 `no-any-return` istisnaları vardır; Qt kurulu ortamda ayrıca tip kontrolü çalışır.
 Dar pencerede işlem listesi düğmeyle açılır; uzun satırların tamamı tooltip'te,
