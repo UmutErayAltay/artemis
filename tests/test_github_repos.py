@@ -137,10 +137,13 @@ def test_discover_aliases_owner_forms_and_collisions(tmp_path: Path) -> None:
     assert discover_projects("umut", tmp_path / "missing") == {}
 
 
-def test_runtime_merges_discovered_and_explicit_wins(tmp_path: Path) -> None:
+async def test_projects_discovered_per_call_and_explicit_wins(tmp_path: Path) -> None:
+    from jarvis.tools.base import ToolContext
+    from jarvis.tools.code_agent_jobs import CodeAgentJobs
+    from jarvis.tools.plugins.code_agent import CodeAgentStatus, StatusArguments
+
     repos = tmp_path / "repos"
     make_repo(repos / "alpha", "https://github.com/umut/alpha.git")
-    make_repo(repos / "beta", "https://github.com/umut/beta.git")
     explicit = tmp_path / "mine"
     settings = Settings(
         workspace=tmp_path / "ws",
@@ -151,12 +154,22 @@ def test_runtime_merges_discovered_and_explicit_wins(tmp_path: Path) -> None:
     runtime = create_runtime(
         tmp_path / "c.yaml", lambda *_: False, settings=settings, provider=object()  # type: ignore[arg-type]
     )
-    assert runtime.settings.code_agent.projects == {"alpha": explicit, "beta": repos / "beta"}
-    off = settings.model_copy(update={"code_agent": CodeAgentConfig(repos_dir=repos)})
-    runtime = create_runtime(
-        tmp_path / "c.yaml", lambda *_: False, settings=off, provider=object()  # type: ignore[arg-type]
-    )
-    assert runtime.settings.code_agent.projects == {}
+    from jarvis.safety.audit import AuditLog
+    from jarvis.tools.plugins.code_agent import available_projects
+
+    # Çalışırken eşitlenen repo yeniden başlatmasız görünür (kullanıcı hatası: liste boştu).
+    make_repo(repos / "beta", "https://github.com/umut/beta.git")
+    agent = runtime.settings.code_agent
+    assert available_projects(agent) == {"alpha": explicit, "beta": repos / "beta"}
+    context = ToolContext(
+        workspace=tmp_path, settings=runtime.settings,
+        audit=AuditLog(tmp_path / "a.jsonl"),
+        services={"code_agent_jobs": CodeAgentJobs(AuditLog(tmp_path / "a.jsonl"))},
+    )  # fmt: skip
+    listed = await CodeAgentStatus().execute(StatusArguments(), context)
+    assert listed.data["projects"] == ["alpha", "beta"]
+    off = CodeAgentConfig(repos_dir=repos)
+    assert available_projects(off) == {}
 
 
 def test_env_has_no_secrets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -232,14 +245,19 @@ def test_panel_sync_runs_off_gui_thread(tmp_path: Path) -> None:
     panel.github_owner.setText("umut")
     panel.repos_dir.setText(str(tmp_path / "r"))
     panel._bind_github()
+    # Bağlama anında kalıcı: tekrar açınca kullanıcı adı/klasör yeniden girilmez.
+    saved = load_settings(config).code_agent
+    assert saved.github_owner == "umut" and saved.repos_dir == tmp_path / "r"
     assert panel.github is not None and panel.github.isRunning()  # çağrı döndü, GUI serbest
     assert not panel.github_button.isEnabled()
     release = True
     deadline = time.monotonic() + 5
-    while len(got) < 2 and time.monotonic() < deadline:
+    while not got and time.monotonic() < deadline:
         app.processEvents()
         time.sleep(0.01)
     assert got[0][0].cloned == ["x"] and got[0][1] is False
+    app.processEvents()
+    assert len(got) == 1  # eşitleme sonrası Uygula/yeniden başlatma tetiklenmez
     assert "1 klonlandı" in panel.github_status.text()
     assert panel.github_list.count() == 2
     panel.finish_inventory()

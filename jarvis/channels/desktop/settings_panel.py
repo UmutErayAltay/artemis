@@ -65,14 +65,29 @@ def save_choices(
     if allow_all_applications is not None:
         raw["allow_all_applications"] = allow_all_applications
     if code_agent is not None:
-        # None değer alanı siler (örn. GitHub bağını kaldırmak); diğer code_agent alanları korunur.
-        section = raw.get("code_agent") or {}
-        for key, value in code_agent.items():
-            if value is None:
-                section.pop(key, None)
-            else:
-                section[key] = value
-        raw["code_agent"] = section
+        _merge_code_agent(raw, code_agent)
+    _write_validated(path, raw)
+
+
+def save_code_agent(path: Path, code_agent: dict[str, Any]) -> None:
+    """Yalnız code_agent alanları; model/cihaz seçimine bağlı değil (GitHub bağı hemen kalıcı)."""
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    _merge_code_agent(raw, code_agent)
+    _write_validated(path, raw)
+
+
+def _merge_code_agent(raw: dict[str, Any], code_agent: dict[str, Any]) -> None:
+    # None değer alanı siler (örn. GitHub bağını kaldırmak); diğer code_agent alanları korunur.
+    section = raw.get("code_agent") or {}
+    for key, value in code_agent.items():
+        if value is None:
+            section.pop(key, None)
+        else:
+            section[key] = value
+    raw["code_agent"] = section
+
+
+def _write_validated(path: Path, raw: dict[str, Any]) -> None:
     Settings.model_validate(raw)
     descriptor, temporary = tempfile.mkstemp(prefix=".settings-", suffix=".yaml", dir=path.parent)
     try:
@@ -476,6 +491,11 @@ class SettingsPanel(QWidget):
             return
         if not self.repos_dir.text().strip():
             self.repos_dir.setText(default_repos_dir())
+        try:
+            save_code_agent(self.config_path, self.github_values())
+        except (OSError, ValueError, KeyError, TypeError):
+            self.github_status.setText("GitHub ayarları kaydedilemedi.")
+            return
         self.run_github_sync(auto=False)
 
     def start_auto_sync(self) -> None:
@@ -522,10 +542,8 @@ class SettingsPanel(QWidget):
             f"{len(report.cloned)} klonlandı, {len(report.fetched)} güncellendi, "
             f"{len(report.skipped)} atlandı, {len(report.failed)} başarısız."
         )
+        # Yeniden başlatma yok: kod ajanı projeleri her çağrıda klasörden okur.
         self.github_synced.emit(report, self._github_auto)
-        if not self._github_auto:
-            # Kayıt + yeniden başlatma mevcut Uygula yolundan geçer (meşgulken reddedilir).
-            self._apply()
 
     def finish_inventory(self) -> None:
         if self.github is not None and self.github.isRunning():

@@ -54,7 +54,9 @@ hariçtir; repo adları klasör adı olacağından sıkı doğrulanır. Eksik re
 repoya yalnız `git fetch --prune` yapılır (pull/merge/reset yok, çalışma ağacına dokunulmaz);
 origin'i o repo olmayan klasör atlanır. Eşitleme QThread'de koşar; açılışta (otomatikse) bir
 kez çalışır, CLI'da yoktur. Klasördeki, origin'i `github.com/<sahip>/` olan git depoları
-`create_runtime` içinde yerel keşifle `projects` listesine eklenir (açık yazılanlar kazanır).
+her kod ajanı çağrısında yerel keşifle `projects` listesine eklenir (açık yazılanlar kazanır);
+`code_agent_status` izinli takma adları da listeler. Bağla düğmesi kullanıcı adı ve klasörü
+hemen config'e yazar.
 Sonuç: kullanıcının bilinçli tercihiyle bütün kendi repoları kod ajanının erişimine girer
 (yukarıdaki "yalnız güvenilen projeler" sınırı bu repolar için kullanıcı sorumluluğundadır).
-Açılışta çekilen yeni repolar Uygula/yeniden başlatmayla projeler listesine girer.
+Eşitlenen yeni repolar yeniden başlatma gerektirmez.
