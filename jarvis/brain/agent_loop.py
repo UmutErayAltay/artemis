@@ -229,7 +229,12 @@ class AgentLoop:
         history_private = any(message.private for message in past)
         record_steps: list[Message | ToolExchange] = []
         messages = [
-            Message(role="system", content=SYSTEM_PROMPT),
+            Message(
+                role="system",
+                content=SYSTEM_PROMPT + "\nİzinli uygulama takma adları (name argümanı): "
+                + json.dumps(list(settings.applications), ensure_ascii=False)
+                + ". Yalnız bu adları kullan; listede bulunan bir uygulamayı izinsiz sanma.",
+            ),
             *past,
             Message(role="user", content=text),
         ]

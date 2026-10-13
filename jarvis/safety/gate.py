@@ -85,7 +85,7 @@ class SafetyGate:
                 state,
                 started,
             )
-        risk = normalize_risk(tool.risk)
+        risk = normalize_risk(tool.risk_for(arguments, context))
         history_outbound = state.history_external and tool.outbound
         requires_approval = (
             risk is Risk.CONFIRM_REQUIRED

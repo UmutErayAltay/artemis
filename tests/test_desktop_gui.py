@@ -77,7 +77,7 @@ def test_demo_window_submits_plain_text_and_cleans_temporary_root(
         visible = window.chat.toPlainText()
         assert html_text in visible
         assert "DEMO ·" in visible
-        assert window.model_value.text() == "demo"
+        assert window.model_value.text() == "offline-demo"
     finally:
         _close_cleanly(app, window)
     assert not temp_path.exists()
@@ -209,7 +209,7 @@ def test_stale_ready_events_do_not_enable_or_reset_the_active_turn(
         assert window._busy
         assert window._active_request == "current-request"
         assert not window.prompt.isEnabled()
-        assert window.model_value.text() == "demo"
+        assert window.model_value.text() == "offline-demo"
     finally:
         window._busy = False
         window._active_request = None
@@ -443,5 +443,45 @@ def test_demo_mode_never_builds_or_starts_the_voice_controller(
         assert calls == []
         assert window._voice_on_ready is False
         assert not window.voice_button.isEnabled()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_settings_apply_restarts_runtime_with_selected_model_and_device(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jarvis.brain.fake import ScriptedProvider
+    from jarvis.channels.desktop.settings_panel import ModelInventory, SettingsPanel
+    from jarvis.channels.runtime import create_runtime
+    from jarvis.config.settings import load_settings
+    from tests.test_settings_panel import config
+
+    path = config(tmp_path)
+    settings_seen: list[Any] = []
+
+    def factory(config_path: Path, approve: Any, **kwargs: Any) -> Runtime:
+        settings = load_settings(config_path)
+        settings_seen.append(settings)
+        return create_runtime(config_path, approve, settings=settings,
+                              provider=ScriptedProvider([]), **kwargs)
+
+    monkeypatch.setattr(bridge_module, "create_runtime", factory)
+    monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
+    monkeypatch.setattr(ModelInventory, "run", lambda self: self.loaded.emit(["second-model"]))
+    window = build_window(path, app=app)
+    try:
+        _wait(app, lambda: window._worker_ready)
+        _wait(app, lambda: window.settings_panel.model_combo.findData("second-model") >= 0)
+        assert window.tabs.tabText(1) == "Ayarlar"
+        window.settings_panel.model_combo.setCurrentIndex(
+            window.settings_panel.model_combo.findData("second-model")
+        )
+        window.settings_panel.device_combo.addItem("Test mikrofonu", 9)
+        window.settings_panel.device_combo.setCurrentIndex(0)
+        window.settings_panel._apply()
+        _wait(app, lambda: len(settings_seen) == 2 and window._worker_ready)
+        assert settings_seen[-1].models[settings_seen[-1].primary_model].model == "second-model"
+        assert settings_seen[-1].voice.input_device == 9
+        assert window.model_value.text() == "second-model"
     finally:
         _close_cleanly(app, window)

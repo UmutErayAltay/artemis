@@ -64,6 +64,18 @@ Tepsi varsa pencereyi kapatmak paneli gizler; tepsi menüsünden **Çıkış** t
 uygulamayı kapatır. Tepsi yoksa pencere kapanışı temiz çıkış başlatır. Ses panelin
 içindedir: başlıktaki **Ses** düğmesi mikrofonu açar, `--ses` ile panel ses açık
 başlar (aşağıdaki ses modu bölümü).
+**Ayarlar** sekmesinde model, mikrofon ve izinli uygulama listesi bulunur. Uygulama
+eklemek için `.exe` dosyasını seçip **Uygula**'ya basın. Model başlığında gerçek
+model adı gösterilir. Mikrofonun farklı sürücü kopyaları tek seçenek altında
+toplanır; sanal girişler ayrıca açılabilir. Uygula yeni sohbet başlatır.
+Not Defteri'ne metin yazma, çalışma klasöründe metin dosyası oluşturup Not Defteri
+ile açma yoluyla yapılır. Açma başarısı görünür pencereyle doğrulanır.
+Uygulama seçmek istemiyorsanız **Bütün kurulu uygulamalara erişim** seçeneği
+Windows Başlat menüsündeki kayıtları otomatik kullanır. Normal işlemler tekrar
+onay istemez; silme, kaldırma ve belge/kod kaybı yaratabilecek kapatmalar onaylıdır.
+Tek başına **Artemis** dediğinizde yerel **Dinliyorum** yanıtı ve komut bekleme
+durumu gelir. Ayarlar'daki mikrofon seviyesi ve **Son duyulan** göstergesi, sesin
+girdiğini ve nasıl tanındığını gösterir; ayrı ses kaydı tutulmaz.
 Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.
 Testler ve bilinçli sınırlar [masaüstü raporunda](docs/F5_REPORT.md) bulunur.
 
@@ -229,8 +241,14 @@ Uygulamalar `applications` içindeki izinli takma adlarla açılır/kapatılır;
 shell komutu aracı yoktur. Kapatma, izinli `.exe` adına uyan bütün süreçlere normal
 kapatma isteği gönderir; kaydedilmemiş işler kaybolabilir. Windows'a bağlı uygulama
 ve pano işlevleri Linux'ta desteklenmediğini bildirir. Linux üzerinde çekirdek,
-dosyalar ve sahte platform
-adaptörleri test edilir. Uygulama/tarayıcı başlatma isteğinin gönderilmesi, ekranda
+dosyalar ve sahte platform adaptörleri test edilir.
+
+Günlük kullanımda seçili uygulamalar için tekrar kapatma onayını kaldırabilirsiniz:
+`close_without_confirmation: [brave]`. İsim `applications` içinde tanımlanmış
+olmalıdır. Varsayılan liste boştur; dış içerik okunan turda onay yine istenir
+([ADR 0017](docs/adr/0017-application-close-confirmation.md)).
+
+Uygulama/tarayıcı başlatma isteğinin gönderilmesi, ekranda
 açıldığının kanıtı sayılmaz. Windows'ta elle doğrulama ayrı bir teslimat kontrolüdür.
 Varsayılan masaüstü işlemleri ayrı Python işçisinde çalışır. İptal ve zaman aşımı
 işçiyi sonlandırıp çıkışını bekler; stdin/stdout iletişimi boyutla sınırlandırılır.

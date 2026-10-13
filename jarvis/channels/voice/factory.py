@@ -32,17 +32,22 @@ async def build_voice_controller(
     burada bağlanmaz; onay yalnız ``create_runtime``'a verilen ekran onayıdır.
     """
     settings = runtime.settings
-    microphone = SoundDeviceMicrophone(settings.voice)
+    microphone = SoundDeviceMicrophone(settings.voice, device=settings.voice.input_device)
     sink = SoundDeviceSink()
-    local_tts = PiperSynthesizer(settings.voice)
     recognizer = FasterWhisperRecognizer(settings.voice)
     await asyncio.to_thread(recognizer.prepare)
-    await asyncio.to_thread(local_tts.prepare)
     synthesizer: SpeechSynthesizer
     if settings.voice.tts_backend == "edge":
         primary_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
-        synthesizer = FallbackSynthesizer(primary_tts, local_tts)
+        if settings.voice.tts_local_fallback:
+            local_tts = PiperSynthesizer(settings.voice)
+            await asyncio.to_thread(local_tts.prepare)
+            synthesizer = FallbackSynthesizer(primary_tts, local_tts)
+        else:
+            synthesizer = primary_tts
     else:
+        local_tts = PiperSynthesizer(settings.voice)
+        await asyncio.to_thread(local_tts.prepare)
         synthesizer = local_tts
     return VoiceController(
         runtime.runner,
@@ -54,4 +59,6 @@ async def build_voice_controller(
         sink,
         run_command=run_command,
         on_state=on_state,
+        on_input_level=lambda level: on_state(f"level:{level}"),
+        on_transcript=lambda text: on_state("heard:" + text[:200]),
     )

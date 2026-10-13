@@ -14,7 +14,7 @@ from jarvis.tools.registry import discover_tools
 
 LABELS: dict[str, tuple[str, str]] = {
     "read_file": ("Dosya okuma", "Dosya okundu"),
-    "open_application": ("Uygulama açma", "Uygulama açma komutu gönderildi"),
+    "open_application": ("Uygulama açma", "Uygulama açıldı"),
 }
 
 # Gizli görünümlü argüman ve sonuç metni; hiçbir satırda geçmemeli.
@@ -74,7 +74,7 @@ def test_check_mark_only_for_verified_ok() -> None:
 def test_sent_never_shows_done_label_with_check() -> None:
     result = {"status": "sent", "success": False}
     line = _line("tool_result", tool="open_application", result=result)
-    assert "Uygulama açma komutu gönderildi" not in line.text
+    assert "Uygulama açıldı" not in line.text
     assert "✓" not in line.text
     assert line.kind == "sent"
 
@@ -192,7 +192,7 @@ def test_every_registered_tool_declares_label_and_done_label() -> None:
 
 # Tablodaki Türkçe metinler birebir tutulur; sessiz değişiklik kullanıcı arayüzünü bozar.
 EXPECTED_TOOL_LABELS: dict[str, tuple[str, str]] = {
-    "open_application": ("Uygulama açma", "Uygulama açma komutu gönderildi"),
+    "open_application": ("Uygulama açma", "Uygulama açıldı"),
     "close_application": ("Uygulama kapatma", "Uygulama kapatıldı"),
     "read_clipboard": ("Panoyu okuma", "Pano okundu"),
     "write_clipboard": ("Panoya yazma", "Panoya yazıldı"),

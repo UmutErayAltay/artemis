@@ -51,6 +51,12 @@ def create_runtime(
 ) -> Runtime:
     """CLI, ses ve masaüstü için aynı kapı ve sağlayıcı zincirini kurar."""
     loaded = settings if settings is not None else load_settings(config_path)
+    if loaded.allow_all_applications:
+        from jarvis.tools.app_catalog import installed_applications
+
+        loaded = loaded.model_copy(update={
+            "applications": {**installed_applications(), **loaded.applications}
+        })
     if not loaded.primary_model and provider is None:
         raise ValueError("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.")
     loaded.workspace.mkdir(parents=True, exist_ok=True)

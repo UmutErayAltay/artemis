@@ -8,8 +8,9 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jarvis.safety.paths import safe_join
 from jarvis.tools.base import BaseTool, ContentKind, Risk, ToolContext, ToolResult
-from jarvis.tools.platform import UnsupportedPlatformError, desktop_service
+from jarvis.tools.platform import UnsupportedPlatformError, WindowsDesktop, desktop_service
 from jarvis.tools.processes import DesktopProcessResult, run_desktop_action
 from jarvis.tools.registry import register_tool
 
@@ -20,6 +21,27 @@ class EmptyArguments(BaseModel):
 
 class ApplicationArguments(EmptyArguments):
     name: str = Field(min_length=1)
+
+
+def application_executable(context: ToolContext, name: str) -> str | None:
+    # Kurulu adlar boşluk/büyük harf farklarıyla söylenebilir; yol olarak yorumlanmaz.
+    def normalized(value: str) -> str:
+        return "".join(char for char in value.casefold() if char.isalnum() or char in "+#")
+
+    exact = next((
+        value for alias, value in context.settings.applications.items()
+        if alias.casefold() == name.casefold()
+    ), None)
+    if exact is not None:
+        return exact
+    return next((
+        value for alias, value in context.settings.applications.items()
+        if normalized(alias) == normalized(name)
+    ), None)
+
+
+class OpenApplicationArguments(ApplicationArguments):
+    file_path: str | None = None
 
 
 class ClipboardArguments(EmptyArguments):
@@ -71,25 +93,48 @@ def process_result(
 class OpenApplication(BaseTool):
     name = "open_application"
     label = "Uygulama açma"
-    done_label = "Uygulama açma komutu gönderildi"
-    description = "Yalnız ayarlardaki izinli uygulama takma adını açmayı ister."
-    args_model = ApplicationArguments
+    done_label = "Uygulama açıldı"
+    description = (
+        "İzinli uygulamayı açar ve görünür pencereyi doğrular. Not Defteri için file_path ile "
+        "çalışma klasöründeki mevcut metin dosyasını açabilir; metin yazmak için önce "
+        "create_file kullan."
+    )
+    args_model = OpenApplicationArguments
     risk = Risk.SIDE_EFFECT
 
+    def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
+        name = cast(OpenApplicationArguments, arguments).name.casefold()
+        if any(word in name for word in ("uninstall", "kaldır", "kaldir")):
+            return Risk.CONFIRM_REQUIRED
+        return self.risk
+
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
-        args = cast(ApplicationArguments, arguments)
-        executable = context.settings.applications.get(args.name)
+        args = cast(OpenApplicationArguments, arguments)
+        executable = application_executable(context, args.name)
         if executable is None:
             return ToolResult(status="error", message="Uygulama izin listesinde yok.")
         try:
+            payload: dict[str, object] = {"executable": executable}
+            document: str | None = None
+            if args.file_path is not None:
+                target = safe_join(context.workspace, args.file_path)
+                if not target.is_file():
+                    return ToolResult(message="Açılacak metin dosyası bulunamadı.")
+                document = str(target)
+                payload["file_path"] = document
             if "desktop" in context.services:
-                await asyncio.to_thread(
-                    desktop_service(context.services).open_application, executable
-                )
+                if document is None:
+                    await asyncio.to_thread(
+                        desktop_service(context.services).open_application, executable
+                    )
+                else:
+                    await asyncio.to_thread(
+                        desktop_service(context.services).open_document, executable, document
+                    )
             else:
                 return process_result(
                     await run_default_action(
-                        "open_application", {"executable": executable}, context
+                        "open_application", payload, context
                     )
                 )
             return ToolResult(
@@ -110,9 +155,34 @@ class CloseApplication(BaseTool):
     args_model = ApplicationArguments
     risk = Risk.CONFIRM_REQUIRED
 
+    def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
+        args = cast(ApplicationArguments, arguments)
+        executable = application_executable(context, args.name)
+        if (
+            application_executable(context, args.name) is not None
+            and args.name.casefold() in {
+                name.casefold() for name in context.settings.close_without_confirmation
+            }
+        ):
+            return Risk.SIDE_EFFECT
+        if context.settings.allow_all_applications and executable is not None:
+            try:
+                process = WindowsDesktop._application_process_name(executable).casefold()
+            except ValueError:
+                return Risk.CONFIRM_REQUIRED
+            # Kaydedilmemiş belge/kod veya çalışan shell işi içeren uygulamalar hassastır.
+            protected = {
+                "notepad.exe", "notepad++.exe", "winword.exe", "excel.exe",
+                "powerpnt.exe", "code.exe", "devenv.exe", "regedit.exe",
+                "cmd.exe", "powershell.exe", "pwsh.exe", "windowsterminal.exe",
+            }
+            if process not in protected:
+                return Risk.SIDE_EFFECT
+        return self.risk
+
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(ApplicationArguments, arguments)
-        executable = context.settings.applications.get(args.name)
+        executable = application_executable(context, args.name)
         if executable is None:
             return ToolResult(status="error", message="Uygulama izin listesinde yok.")
         try:

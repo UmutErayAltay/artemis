@@ -58,10 +58,33 @@ def _string_argument(
 def _dispatch(action: str, arguments: dict[str, Any]) -> dict[str, Any]:
     desktop = WindowsDesktop()
     if action == "open_application":
-        executable = _string_argument(arguments, "executable", 4096, minimum=1)
+        if set(arguments) not in ({"executable"}, {"executable", "file_path"}):
+            return _invalid()
+        executable = _string_argument(
+            {"executable": arguments["executable"]}, "executable", 4096, minimum=1
+        )
         if executable is None:
             return _invalid()
-        desktop.open_application(executable)
+        if arguments.get("file_path") is not None:
+            document = _string_argument(
+                {"file_path": arguments["file_path"]}, "file_path", 4096, minimum=1
+            )
+            if document is None:
+                return _invalid()
+            desktop.open_document(executable, document)
+        else:
+            desktop.open_application(executable)
+        try:
+            verified = desktop.wait_for_application_window(executable)
+        except (OSError, ValueError):
+            # Başlatma gerçekleşti; doğrulama arızasını açma başarısızlığı saymayız.
+            verified = False
+        if verified:
+            return {
+                "status": "ok",
+                "message": "Uygulama açıldı; görünür penceresi doğrulandı.",
+                "data": {"window_verified": True},
+            }
         return {
             "status": "sent",
             "message": "Uygulama açma isteği işletim sistemine gönderildi.",
@@ -72,6 +95,12 @@ def _dispatch(action: str, arguments: dict[str, Any]) -> dict[str, Any]:
         if executable is None:
             return _invalid()
         if not desktop.close_application(executable):
+            if not desktop.application_windows_open(executable):
+                return {
+                    "status": "ok",
+                    "message": "Uygulama pencereleri kapandı; arka plan süreçleri açık kalabilir.",
+                    "data": {"windows_closed": True, "processes_closed": False},
+                }
             return {
                 "status": "error",
                 "message": "Uygulamanın kapandığı doğrulanamadı.",

@@ -6,6 +6,7 @@ import ntpath
 import os
 import platform
 import subprocess
+import time
 from typing import Any, Protocol, cast
 
 
@@ -15,6 +16,8 @@ class UnsupportedPlatformError(RuntimeError):
 
 class DesktopPlatform(Protocol):
     def open_application(self, executable: str) -> None: ...
+
+    def open_document(self, executable: str, document: str) -> None: ...
 
     def open_browser(self, url: str) -> None: ...
 
@@ -78,9 +81,17 @@ class WindowsDesktop:
 
     def open_application(self, executable: str) -> None:
         self._require_windows()
+        if executable.startswith("startapp:"):
+            app_id = executable[len("startapp:"):].split("|", 1)[0]
+            command = [
+                ntpath.join(os.environ.get("SYSTEMROOT", r"C:\Windows"), "explorer.exe"),
+                "shell:AppsFolder\\" + app_id,
+            ]
+        else:
+            command = [executable]
         # Popen yalnız isteğin OS tarafından alındığını gösterir; araç 'sent' döndürür.
         subprocess.Popen(
-            [executable],
+            command,
             shell=False,
             env=child_environment(),
             stdin=subprocess.DEVNULL,
@@ -112,14 +123,30 @@ class WindowsDesktop:
             stderr=subprocess.DEVNULL,
         )
 
+    def open_document(self, executable: str, document: str) -> None:
+        """Not Defteri'ne düz dosya argümanı verir; shell veya klavye otomasyonu yoktur."""
+        self._require_windows()
+        if (
+            executable.startswith("startapp:")
+            and self._application_process_name(executable).casefold() == "notepad.exe"
+        ):
+            executable = ntpath.join(
+                os.environ.get("SYSTEMROOT", r"C:\Windows"), "System32", "notepad.exe"
+            )
+        if ntpath.basename(executable).casefold() != "notepad.exe":
+            raise ValueError("Metin dosyası yalnız Not Defteri ile açılabilir")
+        subprocess.Popen(
+            [executable, document], shell=False, env=child_environment(),
+            stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        )
+
     def close_application(self, executable: str) -> bool:
         self._require_windows()
-        name = ntpath.basename(executable)
+        name = self._application_process_name(executable)
         if not name.lower().endswith(".exe") or any(char in name for char in '*?"\r\n'):
             raise ValueError("Kapatma için açık bir .exe dosya adı gerekli.")
         system_root = os.environ.get("SYSTEMROOT", r"C:\Windows")
         taskkill = ntpath.join(system_root, "System32", "taskkill.exe")
-        tasklist = ntpath.join(system_root, "System32", "tasklist.exe")
         subprocess.run(
             # /F zorlamalı sonlandırmadır; onay metni kaydedilmemiş işleri
             # kaybettirebilecek bu etkiyi açıkça anlatır, ancak varsayılanı nazik kapatmadır.
@@ -130,6 +157,16 @@ class WindowsDesktop:
             env=child_environment(),
             timeout=10,
         )
+        for attempt in range(6):
+            if not self._application_pids(name):
+                return True
+            if attempt < 5:
+                time.sleep(0.2)
+        return False
+
+    def _application_pids(self, name: str) -> set[int]:
+        system_root = os.environ.get("SYSTEMROOT", r"C:\Windows")
+        tasklist = ntpath.join(system_root, "System32", "tasklist.exe")
         check = subprocess.run(
             [tasklist, "/FI", f"IMAGENAME eq {name}", "/FO", "CSV", "/NH"],
             shell=False,
@@ -139,11 +176,91 @@ class WindowsDesktop:
             timeout=10,
         )
         if check.returncode != 0:
-            return False
+            raise OSError("Uygulama süreçleri sorgulanamadı")
         rows = csv.reader(io.StringIO(check.stdout.decode("utf-8", errors="replace")))
         # taskkill başarısız dönebilir çünkü süreç zaten yoktur. Başarı için
         # tasklist doğrulamasında aynı ada sahip çalışan süreç kalmaması yeterlidir.
-        return not any(row and row[0].casefold() == name.casefold() for row in rows)
+        return {
+            int(row[1]) for row in rows
+            if len(row) > 1 and row[0].casefold() == name.casefold()
+        }
+
+    def application_windows_open(self, executable: str) -> bool:
+        """Arka plan süreçlerini görünen uygulama pencerelerinden ayırır."""
+        self._require_windows()
+        import ctypes
+        from ctypes import wintypes
+
+        pids = self._application_pids(self._application_process_name(executable))
+        user32 = self._win_dll("user32")
+        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
+        user32.EnumWindows.restype = wintypes.BOOL
+        user32.EnumChildWindows.argtypes = [wintypes.HWND, callback_type, wintypes.LPARAM]
+        user32.EnumChildWindows.restype = wintypes.BOOL
+        user32.IsWindowVisible.argtypes = [wintypes.HWND]
+        user32.IsWindowVisible.restype = wintypes.BOOL
+        user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]
+        user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+        user32.GetClassNameW.argtypes = [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]
+        user32.GetClassNameW.restype = ctypes.c_int
+        found = False
+        query_failed = False
+
+        def inspect_window(hwnd: Any, _lparam: Any) -> bool:
+            nonlocal found, query_failed
+            if user32.IsWindowVisible(hwnd):
+                pid = wintypes.DWORD()
+                if not user32.GetWindowThreadProcessId(hwnd, ctypes.byref(pid)):
+                    query_failed = True
+                elif pid.value in pids:
+                    found = True
+            return True
+
+        child_callback = callback_type(inspect_window)
+
+        def visit(hwnd: Any, lparam: Any) -> bool:
+            # Explorer'ın masaüstü ve görev çubuğu bir klasör açma başarısı değildir.
+            window_class = ctypes.create_unicode_buffer(256)
+            user32.GetClassNameW(hwnd, window_class, len(window_class))
+            if window_class.value in {
+                "Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW"
+            }:
+                return True
+            inspect_window(hwnd, lparam)
+            if user32.IsWindowVisible(hwnd):
+                # Paketli uygulamalarda üst pencere ApplicationFrameHost'a aittir.
+                user32.EnumChildWindows(hwnd, child_callback, 0)
+            return True
+
+        callback = callback_type(visit)
+        if not user32.EnumWindows(callback, 0):
+            raise OSError("Uygulama pencereleri sorgulanamadı")
+        if query_failed and not found:
+            raise OSError("Pencerenin uygulama kimliği doğrulanamadı")
+        return found
+
+    @staticmethod
+    def _application_process_name(executable: str) -> str:
+        if executable.startswith("startapp:"):
+            _app_id, separator, process = executable.partition("|")
+            if not separator or not process.casefold().endswith(".exe"):
+                raise ValueError("Kurulu uygulamanın süreç kimliği bilinmiyor")
+            return process
+        name = ntpath.basename(executable)
+        # Windows Hesap Makinesi başlatıcısı ayrı paket sürecini açar.
+        if name.casefold() == "calc.exe":
+            return "CalculatorApp.exe"
+        return name
+
+    def wait_for_application_window(self, executable: str) -> bool:
+        """Başlatma isteğinden sonra pencereyi sınırlı süre gerçek OS ile doğrular."""
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline:
+            if self.application_windows_open(executable):
+                return True
+            time.sleep(0.3)
+        return False
 
     def read_clipboard(self) -> str:
         self._require_windows()

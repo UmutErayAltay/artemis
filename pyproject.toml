@@ -25,7 +25,7 @@ dev = [
 voice = [
   "faster-whisper==1.2.1",
   "sounddevice==0.5.6",
-  "edge-tts==7.2.8",
+  "edge-tts==7.3.0",
   "piper-tts==1.8.0",
   "webrtcvad-wheels==2.0.14.post1",
 ]

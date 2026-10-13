@@ -103,6 +103,43 @@ class FakeSink:
         self.closed = True
 
 
+async def test_standalone_wake_acknowledges_without_model_and_opens_followup():
+    runner = FakeRunner()
+    sink = FakeSink()
+    states = []
+    heard = []
+    controller = VoiceController(
+        runner, VoiceConfig(), FakeMic(), FakeVAD([]), FakeRecognizer(["Artemis"]),
+        FakeTTS(), sink, on_state=states.append, on_transcript=heard.append,
+    )
+    try:
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 0, 1))
+        await controller._settle_active()
+        assert runner.commands == []
+        assert sink.chunks
+        assert heard == ["Artemis"]
+        assert states[-1] == "awaiting_command"
+        assert controller._wake_command("saat kaç") == "saat kaç"
+    finally:
+        await controller.close()
+
+
+async def test_input_level_and_heard_text_do_not_dispatch_non_wake_speech():
+    runner = FakeRunner()
+    levels = []
+    heard = []
+    controller = VoiceController(
+        runner, VoiceConfig(), FakeMic([AudioFrame(b"\xff\x7f", monotonic())]),
+        FakeVAD([False]), FakeRecognizer(["selam"]), FakeTTS(), FakeSink(),
+        on_input_level=levels.append, on_transcript=heard.append,
+    )
+    await controller._handle_utterance(AudioSegment(b"\x00\x00", 0, 1))
+    await controller.run()
+    assert heard == ["selam"]
+    assert levels == [100]
+    assert runner.commands == []
+
+
 def test_wake_word_uses_word_boundaries_and_casefold():
     controller = object.__new__(VoiceController)
     controller.config = VoiceConfig(wake_word="artemis", followup_seconds=8)
@@ -232,13 +269,87 @@ async def test_successful_reply_renews_followup_window():
     assert controller._wake_command("hava nasıl") == "hava nasıl"
 
 
+async def test_assistant_echo_does_not_start_turn_or_consume_followup():
+    runner = FakeRunner()
+    controller = VoiceController(
+        runner, VoiceConfig(require_wake_during_output=False), FakeMic(), FakeVAD([]),
+        FakeRecognizer(["Tarayıcıyı kapat.", "Tarayıcıyı aç."]),
+        FakeTTS(), FakeSink(), clock=lambda: 12.0,
+    )
+    controller._spoken_text = "Tarayıcıyı kapattım. Başka bir şey ister misin?"
+    controller._spoken_until = 11.2
+    controller._followup_until = 30.0
+    try:
+        # STT geç bitse bile yakalama zamanı yankı penceresi içindedir.
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 10, 11))
+        assert runner.commands == []
+        assert controller._followup_until == 30
+        # Farklı yeni komut aynı zaman penceresinde alınır.
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 10.5, 11))
+        await controller._settle_active()
+        assert runner.commands == ["Tarayıcıyı aç."]
+    finally:
+        await controller.close()
+
+
+async def test_unknown_echo_cannot_use_followup_but_new_wake_command_can():
+    runner = FakeRunner()
+    controller = VoiceController(
+        runner, VoiceConfig(), FakeMic(), FakeVAD([]),
+        FakeRecognizer(["Tereyiciyi kapat", "Artemis tarayıcı aç"]),
+        FakeTTS(), FakeSink(), clock=lambda: 12.0,
+    )
+    controller._spoken_text = "Tarayıcıyla ilgili işlem tamamlandı."
+    controller._spoken_until = 11.2
+    controller._output_requires_wake = True
+    controller._followup_until = 30.0
+    try:
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 10, 11))
+        assert runner.commands == []
+        assert controller._followup_until == 30
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 10.5, 11))
+        await controller._settle_active()
+        assert runner.commands == ["tarayıcı aç"]
+    finally:
+        await controller.close()
+
+
+async def test_wake_ack_does_not_require_repeating_wake_for_followup():
+    runner = FakeRunner()
+    controller = VoiceController(
+        runner, VoiceConfig(), FakeMic(), FakeVAD([]),
+        FakeRecognizer(["Artemis", "tarayıcı aç"]),
+        FakeTTS(), FakeSink(), clock=lambda: 12.0,
+    )
+    try:
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 10, 11))
+        await controller._settle_active()
+        assert controller._spoken_text == "Dinliyorum."
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 12.1, 13))
+        await controller._settle_active()
+        assert runner.commands == ["tarayıcı aç"]
+    finally:
+        await controller.close()
+
+
+def test_same_human_words_after_echo_window_are_allowed():
+    controller = VoiceController(
+        FakeRunner(), VoiceConfig(), FakeMic(), FakeVAD([]), FakeRecognizer([]),
+        FakeTTS(), FakeSink(),
+    )
+    controller._spoken_text = "Tarayıcı açmak için istek gönderdim."
+    controller._spoken_until = 10
+    assert controller._is_spoken_echo("Tarayıcı aç", 9)
+    assert not controller._is_spoken_echo("Tarayıcı aç", 11)
+
+
 class BlockingRunner(FakeRunner):
     async def run(self, text):
         self.commands.append(text)
         await asyncio.Future()
 
 
-async def test_speech_during_provider_cancels_active_turn_before_next_stt():
+async def test_stream_eof_cancels_pending_provider_after_non_wake_noise():
     start = monotonic()
     frames = [
         *[AudioFrame(b"a", start + index * 0.02) for index in range(7)],
@@ -278,7 +389,71 @@ class BlockingSink(FakeSink):
             raise
 
 
-async def test_speech_during_tts_aborts_playback_and_cancels_runner():
+async def test_noise_does_not_interrupt_but_final_wake_command_does():
+    runner = BlockingRunner()
+    controller = VoiceController(
+        runner, VoiceConfig(), FakeMic(), FakeVAD([]),
+        FakeRecognizer(["", "background noise", "Artemis open Brave"]),
+        FakeTTS(), FakeSink(),
+    )
+    controller._active = asyncio.create_task(controller._run_and_speak("first command"))
+    await asyncio.sleep(0)
+    original = controller._active
+    try:
+        for _ in range(2):
+            await controller._handle_utterance(AudioSegment(b"\x00\x00", 0, 1))
+            assert controller._active is original
+            assert not original.done()
+            assert runner.cancelled == 0
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 0, 1))
+        await asyncio.sleep(0)
+        assert original.cancelled()
+        assert runner.cancelled == 1
+        assert runner.commands == ["first command", "open Brave"]
+    finally:
+        await controller.close()
+
+
+async def test_sustained_speech_stops_playback_before_transcription_without_cancelling_runner():
+    runner = FakeRunner()
+    sink = BlockingSink()
+    heard = asyncio.Event()
+
+    class Mic(FakeMic):
+        async def frames(self):
+            await sink.started.wait()
+            # Kısa tık sesi eşik altında kalır.
+            for _ in range(3):
+                yield AudioFrame(b"\x01\x00", monotonic())
+            yield AudioFrame(b"\x00\x00", monotonic())
+            assert not sink.aborted
+            for _ in range(9):
+                yield AudioFrame(b"\x01\x00", monotonic())
+            await asyncio.sleep(0)
+            await asyncio.sleep(0)
+            assert sink.aborted
+            assert runner.cancelled == 0
+            # Konuşma henüz bitmedi; STT ve yeni araç çağrısı başlamadı.
+            assert recognizer.calls == 0
+            heard.set()
+            await asyncio.Future()
+
+    recognizer = FakeRecognizer([])
+    controller = VoiceController(
+        runner, VoiceConfig(barge_in_ms=180), Mic(),
+        FakeVAD([True] * 3 + [False] + [True] * 9), recognizer, FakeTTS(), sink,
+    )
+    controller._active = asyncio.create_task(controller._run_and_speak("first"))
+    listening = asyncio.create_task(controller.run())
+    try:
+        await asyncio.wait_for(heard.wait(), 1)
+        assert controller._wake_command("Brave aç") == "Brave aç"
+    finally:
+        controller.request_stop()
+        await listening
+
+
+async def test_stream_eof_aborts_pending_playback_after_non_wake_noise():
     start = monotonic()
     frames = [
         *[AudioFrame(b"a", start + index * 0.02) for index in range(7)],

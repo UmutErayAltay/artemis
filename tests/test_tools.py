@@ -457,6 +457,7 @@ def test_close_checks_exit_status_and_process_absence(
     monkeypatch: pytest.MonkeyPatch, exit_code: int, remaining: bool, expected: bool
 ) -> None:
     monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("jarvis.tools.platform.time.sleep", lambda _: None)
     output = b'"notepad.exe","1234"\r\n' if remaining else b""
     replies: Iterator[subprocess.CompletedProcess[bytes]] = iter(
         [
@@ -471,7 +472,7 @@ def test_close_checks_exit_status_and_process_absence(
         assert kwargs["shell"] is False
         assert "OPENROUTER_API_KEY" not in kwargs["env"]
         calls.append(args[0])
-        return next(replies)
+        return next(replies, subprocess.CompletedProcess([], 0, output, b""))
 
     monkeypatch.setattr("jarvis.tools.platform.subprocess.run", fake_run)
     assert WindowsDesktop().close_application(r"C:\Windows\notepad.exe") is expected
@@ -485,6 +486,109 @@ def test_close_description_warns_that_all_matching_processes_are_closed() -> Non
     assert definition is not None
     assert "tüm süreçlerini" in definition.description
     assert "kaybolabilir" in definition.description
+
+
+@pytest.mark.parametrize(("windows_open", "status"), [(False, "ok"), (True, "error")])
+def test_worker_reports_verified_window_closure_separately(
+    monkeypatch: pytest.MonkeyPatch, windows_open: bool, status: str
+) -> None:
+    from jarvis.tools.desktop_worker import _dispatch
+
+    monkeypatch.setattr(WindowsDesktop, "close_application", lambda *_: False)
+    monkeypatch.setattr(WindowsDesktop, "application_windows_open", lambda *_: windows_open)
+    result = _dispatch("close_application", {"executable": "brave.exe"})
+    assert result["status"] == status
+    if status == "ok":
+        assert result["data"] == {"windows_closed": True, "processes_closed": False}
+        assert "arka plan" in result["message"]
+
+
+def test_close_rechecks_until_processes_exit(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("jarvis.tools.platform.time.sleep", lambda _: None)
+    remaining: Iterator[set[int]] = iter([{42}, set()])
+    monkeypatch.setattr(WindowsDesktop, "_application_pids", lambda *_: next(remaining))
+    monkeypatch.setattr(
+        "jarvis.tools.platform.subprocess.run",
+        lambda *args, **kwargs: subprocess.CompletedProcess([], 0, b"", b""),
+    )
+    assert WindowsDesktop().close_application("brave.exe")
+
+
+@pytest.mark.parametrize(("visible", "expected"), [(True, "ok"), (False, "sent")])
+def test_open_worker_verifies_window_before_claiming_success(
+    monkeypatch: pytest.MonkeyPatch, visible: bool, expected: str
+) -> None:
+    from jarvis.tools.desktop_worker import _dispatch
+
+    monkeypatch.setattr(WindowsDesktop, "open_application", lambda *_: None)
+    monkeypatch.setattr(WindowsDesktop, "wait_for_application_window", lambda *_: visible)
+    result = _dispatch("open_application", {"executable": "notepad.exe"})
+    assert result["status"] == expected
+    assert result["data"].get("window_verified", False) is visible
+
+
+async def test_open_notepad_file_rejects_workspace_escape(tool_context: ToolContext) -> None:
+    desktop = FakeDesktop()
+    tool_context.services["desktop"] = desktop
+    result = await invoke(
+        tool_context, "open_application", name="notepad", file_path="../secret.txt"
+    )
+    assert result.status == "error"
+    assert desktop.opened == []
+
+
+def test_worker_document_arguments_are_explicit_and_extra_fields_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from jarvis.tools.desktop_worker import _dispatch
+
+    opened: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        WindowsDesktop, "open_document", lambda self, exe, doc: opened.append((exe, doc))
+    )
+    monkeypatch.setattr(WindowsDesktop, "wait_for_application_window", lambda *_: True)
+    arguments = {"executable": "notepad.exe", "file_path": "C:/test/note.txt"}
+    assert _dispatch("open_application", arguments)["status"] == "ok"
+    assert opened == [("notepad.exe", "C:/test/note.txt")]
+    assert _dispatch("open_application", {**arguments, "shell": True})["status"] == "error"
+    assert len(opened) == 1
+
+
+@pytest.mark.parametrize("query_ok", [True, False])
+def test_packaged_window_child_is_matched_and_unknown_pid_is_not_success(
+    monkeypatch: pytest.MonkeyPatch, query_ok: bool
+) -> None:
+    import ctypes
+    from ctypes import wintypes
+    from types import SimpleNamespace
+
+    class Function:
+        def __init__(self, callback: Any) -> None:
+            self.callback = callback
+
+        def __call__(self, *args: Any) -> Any:
+            return self.callback(*args)
+
+    def get_pid(hwnd: Any, pointer: Any) -> int:
+        ctypes.cast(pointer, ctypes.POINTER(wintypes.DWORD)).contents.value = 88 if hwnd == 2 else 9
+        return int(query_ok)
+
+    api = SimpleNamespace(
+        EnumWindows=Function(lambda callback, data: callback(1, data)),
+        EnumChildWindows=Function(lambda hwnd, callback, data: callback(2, data)),
+        IsWindowVisible=Function(lambda hwnd: True), GetWindowThreadProcessId=Function(get_pid),
+        GetClassNameW=Function(lambda *args: 0),
+    )
+    monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE, raising=False)
+    monkeypatch.setattr(WindowsDesktop, "_application_pids", lambda *_: {88})
+    monkeypatch.setattr(WindowsDesktop, "_win_dll", lambda *_: api)
+    if query_ok:
+        assert WindowsDesktop().application_windows_open("calc.exe")
+    else:
+        with pytest.raises(OSError):
+            WindowsDesktop().application_windows_open("calc.exe")
 
 
 def test_open_uses_no_shell_and_an_environment_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:

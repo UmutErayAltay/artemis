@@ -5,9 +5,11 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import os
 import queue
 import subprocess
 import threading
+import unicodedata
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from time import monotonic
@@ -19,6 +21,33 @@ from jarvis.safety.audit import AuditLog
 from jarvis.tools.platform import child_environment
 
 logger = logging.getLogger(__name__)
+
+_GHOST_PHRASES = {
+    "abone olmayı unutmayın", "izlediğiniz için teşekkürler",
+    "izlediğiniz için teşekkür ederim", "izlediğiniz için teşekkür ederiz",
+    "bu videoyu izlediğiniz için teşekkür ederim",
+    "bu videoyu izlediğiniz için teşekkür ederiz", "altyazı mk",
+}
+
+
+def is_ghost_transcript(text: str) -> bool:
+    normalized = text.replace("I", "ı").replace("İ", "i").lower()
+    normalized = " ".join("".join(
+        char for char in normalized if char.isalnum() or char.isspace()
+    ).split())
+    return normalized in _GHOST_PHRASES
+
+
+def is_repeating_transcript(text: str) -> bool:
+    """Bütünü aynı kısa kalıbı en az üç kez dönen STT çıktısını reddeder."""
+    words = "".join(char if char.isalnum() else " " for char in text.casefold()).split()
+    if len(words) < 6:
+        return False
+    for period in range(1, min(12, len(words) // 3) + 1):
+        matches = sum(word == words[index % period] for index, word in enumerate(words))
+        if matches / len(words) >= 0.95:
+            return True
+    return False
 
 
 def _edge_exception_types(edge_module: Any) -> tuple[type[Exception], ...]:
@@ -90,7 +119,7 @@ class SoundDeviceMicrophone:
 
     async def frames(self) -> AsyncIterator[AudioFrame]:
         try:
-            import sounddevice  # type: ignore[import-not-found]  # İsteğe bağlı voice grubu.
+            sounddevice = importlib.import_module("sounddevice")
         except ImportError as error:
             raise RuntimeError("Ses için `pip install .[voice]` kurulumu gerekli.") from error
         self._audio_errors = _audio_exception_types(sounddevice)
@@ -156,7 +185,7 @@ class SoundDeviceMicrophone:
 class WebRTCVAD:
     def __init__(self, config: VoiceConfig) -> None:
         try:
-            import webrtcvad  # type: ignore[import-not-found]  # İsteğe bağlı voice grubu.
+            webrtcvad = importlib.import_module("webrtcvad")
         except ImportError as error:
             raise RuntimeError(
                 "WebRTC VAD bağımlılığı yüklü değil; `pip install .[voice]`."
@@ -181,11 +210,29 @@ class FasterWhisperRecognizer:
         self._model: Any = None
         self._load_lock = threading.Lock()
         self._inference_lock = threading.Lock()
+        self._cuda_handles: list[Any] = []
+
+    def _prepare_cuda_libraries(self) -> None:
+        if os.name != "nt" or self.config.stt_device != "cuda":
+            return
+        import ctypes
+
+        for directory in self.config.cuda_library_dirs:
+            if not directory.is_dir():
+                raise RuntimeError("Yapılandırılmış CUDA kütüphane dizini bulunamadı")
+            self._cuda_handles.append(os.add_dll_directory(str(directory)))
+        for filename in ("cublasLt64_12.dll", "cublas64_12.dll", "cudnn64_9.dll"):
+            for directory in self.config.cuda_library_dirs:
+                path = directory / filename
+                if path.is_file():
+                    self._cuda_handles.append(ctypes.CDLL(str(path)))
+                    break
 
     def _load(self) -> Any:
         if self._model is None:
             with self._load_lock:
                 if self._model is None:
+                    self._prepare_cuda_libraries()
                     try:
                         whisper_module = importlib.import_module("faster_whisper")
                     except ImportError as error:
@@ -222,9 +269,20 @@ class FasterWhisperRecognizer:
         def infer() -> str:
             # asyncio iptali yerel inference thread'ini durduramaz.
             with self._inference_lock:
-                segments, _info = self._load().transcribe(
+                model = self._load()
+                language = None if self.config.stt_language == "auto" else "tr"
+                if self.config.stt_language == "tr_en":
+                    # Kısa Türkçe komutta tüm diller arasında yanlış tahmin yapma.
+                    # İngilizceye yalnız güçlü ses kanıtı olduğunda geçilir.
+                    detected, confidence, probabilities = model.detect_language(audio=samples)
+                    scores = dict(probabilities)
+                    if detected == "en" and confidence >= 0.7 and (
+                        scores.get("en", 0.0) >= 2 * scores.get("tr", 0.0)
+                    ):
+                        language = "en"
+                segments, _info = model.transcribe(
                     samples,
-                    language=None if self.config.stt_language == "auto" else "tr",
+                    language=language,
                     task="transcribe",
                     beam_size=(
                         self.config.stt_partial_beam_size
@@ -233,10 +291,23 @@ class FasterWhisperRecognizer:
                     ),
                     temperature=0,
                     hotwords=" ".join(self.config.stt_hotwords) or None,
-                    vad_filter=False,
+                    vad_filter=self.config.stt_vad_filter,
+                    vad_parameters={"min_speech_duration_ms": 100, "speech_pad_ms": 200},
                     condition_on_previous_text=False,
                 )
-                return " ".join(segment.text.strip() for segment in segments).strip()
+                decoded = list(segments)
+                if any(getattr(segment, "compression_ratio", 0.0) > 2.4 for segment in decoded):
+                    return ""
+                text = " ".join(
+                    segment.text.strip() for segment in decoded
+                    if getattr(segment, "avg_logprob", 0.0) >= self.config.stt_min_logprob
+                    and getattr(segment, "no_speech_prob", 0.0) <= self.config.stt_max_no_speech
+                ).strip()
+                if self.config.stt_language == "tr_en" and any(
+                    "CYRILLIC" in unicodedata.name(char, "") for char in text
+                ):
+                    return ""
+                return "" if is_ghost_transcript(text) or is_repeating_transcript(text) else text
 
         return await asyncio.to_thread(infer)
 
@@ -255,7 +326,7 @@ class SoundDeviceSink:
         on_first_pcm: Callable[[], None],
     ) -> None:
         try:
-            import sounddevice
+            sounddevice = importlib.import_module("sounddevice")
         except ImportError as error:
             raise RuntimeError("Ses için `pip install .[voice]` kurulumu gerekli.") from error
         audio_errors = _audio_exception_types(sounddevice)
@@ -309,6 +380,9 @@ class SoundDeviceSink:
                     if not notified and block:
                         notified = True
                         on_first_pcm()
+        except asyncio.CancelledError:
+            cancelled.set()
+            raise
         except audio_errors as error:
             failed = True
             raise RuntimeError("Ses çıkış aygıtı başarısız oldu.") from error
@@ -316,6 +390,13 @@ class SoundDeviceSink:
             failed = True
             raise
         finally:
+            # Önce aygıtı sustur; üretici thread/uzak akış temizliği bekletebilir.
+            aborted = stream is not None and (cancelled.is_set() or failed)
+            if aborted:
+                try:
+                    await asyncio.to_thread(stream.abort)
+                except cleanup_errors as error:
+                    logger.warning("Ses çıkışı iptal edilemedi (%s).", type(error).__name__)
             close_chunks = getattr(chunks, "aclose", None)
             if callable(close_chunks):
                 try:
@@ -325,9 +406,7 @@ class SoundDeviceSink:
             if stream is not None:
                 self._streams.discard(stream)
                 try:
-                    if cancelled.is_set() or failed:
-                        await asyncio.to_thread(stream.abort)
-                    else:
+                    if not aborted:
                         await asyncio.to_thread(stream.stop)
                 except cleanup_errors as error:
                     logger.warning("Ses çıkışı kapatılamadı (%s).", type(error).__name__)
@@ -488,7 +567,16 @@ class EdgeTTSynthesizer:
             finally:
                 try:
                     process.stdin.close()
-                    await process.stdin.wait_closed()
+                    close_wait = asyncio.create_task(process.stdin.wait_closed())
+                    try:
+                        # Windows pipe callback'i ortak Future'ı sonradan tamamlar;
+                        # feed iptali bu Future'ı iptal edip InvalidStateError üretmemeli.
+                        await asyncio.shield(close_wait)
+                    except asyncio.CancelledError:
+                        await self._stop(process)
+                        with suppress(BrokenPipeError, ConnectionResetError, OSError):
+                            await close_wait
+                        raise
                 except (BrokenPipeError, ConnectionResetError):
                     logger.debug("ffmpeg stdin kapanırken pipe zaten kapanmıştı.")
                 except (OSError, RuntimeError) as error:
@@ -564,6 +652,12 @@ class EdgeTTSynthesizer:
                     await asyncio.wait_for(process.wait(), 2.0)
                 except TimeoutError as error:
                     raise RuntimeError("ffmpeg süreci zamanında kapanmadı.") from error
+        # Proactor pipe'ları process.wait() dönüşünden sonra hâlâ açık olabilir.
+        # Çıkışı tüketmek transport kapanışını event loop kapanmadan tamamlar.
+        try:
+            await asyncio.wait_for(process.communicate(), 2.0)
+        except TimeoutError as error:
+            raise RuntimeError("ffmpeg pipe temizliği zamanında tamamlanmadı.") from error
 
     async def close(self) -> None:
         if self._process is not None:

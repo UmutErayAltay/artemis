@@ -177,6 +177,9 @@ def _arguments(value: Any) -> dict[str, Any]:
 
 
 def _chat_calls(value: Any) -> list[ToolCall]:
+    # OpenAI uyumlu yanıtlar araç çağrısı olmadığında null döndürebilir.
+    if value is None:
+        return []
     calls: list[ToolCall] = []
     for raw in _array(value):
         item = _object(raw)

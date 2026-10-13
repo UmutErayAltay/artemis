@@ -17,7 +17,11 @@ Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Tü
    tekrarlanmaz.
 3. Her araç `READ_ONLY`, `SIDE_EFFECT` veya `CONFIRM_REQUIRED` riskini bildirir.
    Bilinmeyen risk yan etkili sayılır. Silme, kapatma, para, dışarı mesaj, kayıt
-   defteri ve servis değişiklikleri onay gerektirir.
+   defteri ve servis değişiklikleri onay gerektirir. ADR 0017 uyarınca kullanıcının
+   `close_without_confirmation` ile seçtiği izinli uygulamalar temiz turda
+   yeniden onay sormadan kapatılabilir; dış içerik sonrası onay korunur.
+   ADR 0018'deki kullanıcı opt-in tüm kurulu uygulama erişiminde normal kapatma
+   SIDE_EFFECT'tir; belge/kod/shell işi kaybı olabilecek kapatmalar yine onaylıdır.
 4. Web, mail, dosya, pano veya MCP sonucu turu dış içerikle lekeliyorsa bu durum
    turun sonuna dek temizlenmez. Sonraki her yan etki onay ister. Onayda
    “Bu adım dış bir içerik okunduktan sonra istendi” yazılır. Araç sonuçları modele

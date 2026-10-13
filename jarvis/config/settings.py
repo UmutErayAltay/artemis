@@ -26,22 +26,31 @@ class VoiceConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     wake_word: str = Field(default="artemis", min_length=1, max_length=64)
+    input_device: int | str | None = None
     followup_seconds: float = Field(default=8.0, ge=0, le=120)
     sample_rate: Literal[16000] = 16000
     frame_ms: Literal[20, 30] = 20
     vad_aggressiveness: int = Field(default=2, ge=0, le=3)
     end_silence_ms: int = Field(default=600, ge=100, le=3000)
+    barge_in_ms: int = Field(default=180, ge=100, le=1000)
+    require_wake_during_output: bool = True
     pre_roll_ms: int = Field(default=300, ge=0, le=1000)
     max_utterance_seconds: float = Field(default=15.0, gt=0, le=120)
     queue_frames: int = Field(default=32, ge=2, le=256)
     stt_model: Path | None = None
     stt_device: Literal["cuda", "cpu"] = "cuda"
     stt_compute_type: str = "float16"
-    stt_language: Literal["tr", "auto"] = "tr"
+    cuda_library_dirs: list[Path] = Field(default_factory=list)
+    stt_language: Literal["tr", "tr_en", "auto"] = "tr"
     stt_beam_size: int = Field(default=5, ge=1, le=10)
     stt_partial_beam_size: int = Field(default=1, ge=1, le=10)
+    stt_partial_enabled: bool = True
+    stt_vad_filter: bool = True
+    stt_min_logprob: float = -1.0
+    stt_max_no_speech: float = Field(default=0.6, ge=0, le=1)
     stt_hotwords: tuple[str, ...] = Field(default=(), max_length=100)
     tts_backend: Literal["piper", "edge"] = "piper"
+    tts_local_fallback: bool = True
     piper_model: Path | None = None
     piper_config: Path | None = None
     piper_voice: str = ""
@@ -151,6 +160,9 @@ class Settings(BaseModel):
     allow_cloud_clipboard: bool = False
     fallback_seconds: float = Field(default=60.0, ge=0)
     applications: dict[str, str] = Field(default_factory=dict)
+    allow_all_applications: bool = False
+    # Temiz turda kapatma onayını atlayan, kullanıcının seçtiği takma adlar.
+    close_without_confirmation: list[str] = Field(default_factory=list)
     voice: VoiceConfig = Field(default_factory=VoiceConfig)
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
@@ -172,6 +184,8 @@ class Settings(BaseModel):
 
     @model_validator(mode="after")
     def validate_models(self) -> Self:
+        if any(name not in self.applications for name in self.close_without_confirmation):
+            raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")
         if self.primary_model and self.primary_model not in self.models:
             raise ValueError("Birincil model models içinde tanımlanmalı")
         if self.fallback_model:

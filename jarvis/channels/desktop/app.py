@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSplitter,
     QSystemTrayIcon,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -51,6 +52,7 @@ from jarvis.channels.desktop.bridge import (
     State,
     VoiceCommand,
 )
+from jarvis.channels.desktop.settings_panel import SettingsPanel, save_choices
 from jarvis.channels.desktop.steps import StepLine, step_line
 from jarvis.channels.runtime import Runtime, create_runtime
 
@@ -126,6 +128,7 @@ _VOICE_LABELS = {
     "off": "Ses kapalı",
     "preparing": "Ses hazırlanıyor…",
     "listening": "Dinliyor",
+    "awaiting_command": "Seni dinliyorum",
     "thinking": "Düşünüyor",
     "speaking": "Konuşuyor",
     "error": "Ses hatası",
@@ -138,6 +141,7 @@ _VOICE_TONES = {
     "off": "#718096",
     "preparing": "#FFD78C",
     "listening": "#53D6C7",
+    "awaiting_command": "#53D6C7",
     "thinking": "#FFD78C",
     "speaking": "#53D6C7",
     "error": "#F0B2AA",
@@ -568,6 +572,8 @@ class DesktopWindow(QMainWindow):
         if not isinstance(app_instance, QApplication):
             raise RuntimeError("Önce QApplication oluşturulmalı.")
         self._app = app_instance
+        self._config_path = config_path
+        self._restart_settings = False
         self._demo = demo
         # Demo hiçbir koşulda mikrofon açmaz; --ses bayrağı da demoda yok sayılır.
         self._voice_on_ready = voice and not demo
@@ -652,7 +658,7 @@ class DesktopWindow(QMainWindow):
             header_layout.addWidget(demo_banner, 0, Qt.AlignmentFlag.AlignVCenter)
         header_layout.addStretch(1)
         model_stack = QVBoxLayout()
-        model_caption = QLabel("YAPILANDIRILMIŞ MODEL")
+        model_caption = QLabel("SEÇİLİ MODEL")
         model_caption.setObjectName("eyebrow")
         self.model_value = QLabel("Yükleniyor…")
         self.model_value.setObjectName("muted")
@@ -767,7 +773,15 @@ class DesktopWindow(QMainWindow):
         self.splitter.setStretchFactor(0, 65)
         self.splitter.setStretchFactor(1, 35)
         self.splitter.setSizes([740, 390])
-        main.addWidget(self.splitter, 1)
+        self.tabs = QTabWidget()
+        self.tabs.addTab(self.splitter, "Sohbet")
+        self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
+        self.settings_panel.apply_requested.connect(self._apply_settings)
+        self.settings_scroll = QScrollArea()
+        self.settings_scroll.setWidgetResizable(True)
+        self.settings_scroll.setWidget(self.settings_panel)
+        self.tabs.addTab(self.settings_scroll, "Ayarlar")
+        main.addWidget(self.tabs, 1)
 
         self.setCentralWidget(root)
         self.setStyleSheet(_STYLE)
@@ -781,6 +795,29 @@ class DesktopWindow(QMainWindow):
             self._submit_overlay, self._cancel_active, self._show_panel
         )
         self.overlay.setStyleSheet(_STYLE)
+
+    def _apply_settings(self, model_id: str, device: int | str | None) -> None:
+        if self._demo or self._busy or self._exiting:
+            self.settings_panel.notice.setText(
+                "Ayarları değiştirmek için işlemin bitmesini bekleyin."
+            )
+            return
+        try:
+            save_choices(
+                self._config_path, model_id, device,
+                applications=self.settings_panel.applications,
+                allow_all_applications=self.settings_panel.all_applications.isChecked(),
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
+            return
+        self._voice_on_ready = self.bridge.voice_active
+        self._restart_settings = True
+        self._worker_ready = False
+        self._busy = True
+        self.bridge.shutdown()
+        self._set_status("Ayarlar uygulanıyor…", "running")
+        self._set_controls()
 
     def _build_tray(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
@@ -897,12 +934,15 @@ class DesktopWindow(QMainWindow):
         self.voice_dot.setStyleSheet(_dot_style(_VOICE_TONES.get(state, _VOICE_TONES["off"])))
         self.voice_state.setText(text)
         self.overlay.voice_state.setText(text)
-        on = state in {"preparing", "listening", "thinking", "speaking"}
+        on = state in {"preparing", "listening", "awaiting_command", "thinking", "speaking"}
         self.voice_button.setChecked(on)
         self.voice_button.setText("Ses: açık" if on else "Ses: kapalı")
+        if state == "off":
+            self.settings_panel.input_level.setValue(0)
 
     def _set_controls(self) -> None:
         enabled = self._worker_ready and not self._busy and not self._exiting
+        self.settings_panel.apply_button.setEnabled(enabled and not self._demo)
         self.voice_button.setEnabled(
             self._worker_ready and not self._exiting and not self._demo
         )
@@ -918,7 +958,21 @@ class DesktopWindow(QMainWindow):
         for event in self.bridge.poll_events(64):
             self._handle_event(event)
         if self.bridge.stopped:
-            self._finish_exit()
+            if self._restart_settings and not self._exiting:
+                self._restart_settings = False
+                self._busy = False
+                self._active_request = None
+                self._turn_steps.clear()
+                self.chat.clear()
+                self._append_chat("Sistem", "Ayarlar uygulandı; yeni sohbet başladı.")
+                self._show_voice_state("off")
+                self.bridge = DesktopBridge(self._config_path)
+                self.settings_panel.refresh()
+                self.settings_panel.notice.setText(
+                    "Ayarlar uygulandı; seçilen model ve mikrofon kullanılıyor."
+                )
+            else:
+                self._finish_exit()
 
     def _handle_event(self, event: BridgeEvent) -> None:
         if isinstance(event, State):
@@ -955,6 +1009,11 @@ class DesktopWindow(QMainWindow):
                 self._set_controls()
             elif event.state == "voice":
                 self._show_voice_state(event.message)
+            elif event.state == "voice_level":
+                if event.message.isdigit():
+                    self.settings_panel.input_level.setValue(min(100, int(event.message)))
+            elif event.state == "voice_heard":
+                self.settings_panel.last_heard.setText(event.message)
             elif event.state == "voice_error":
                 self._append_chat("Jarvis", event.message)
                 self._show_voice_state("off")
@@ -1154,6 +1213,7 @@ class DesktopWindow(QMainWindow):
         if not self._exiting:
             return
         self._timer.stop()
+        self.settings_panel.finish_inventory()
         if self._tray is not None:
             self._tray.hide()
         self.overlay.close()

@@ -73,6 +73,104 @@ async def test_faster_whisper_uses_configured_final_and_partial_profiles(monkeyp
     assert all(call["language"] is None for call in options)
     assert all(call["task"] == "transcribe" and call["temperature"] == 0 for call in options)
     assert all(call["hotwords"] == "artemis Visual Studio Code" for call in options)
+    assert "initial_prompt" not in options[0]
+    assert all(call["vad_filter"] for call in options)
+    assert all(call["condition_on_previous_text"] is False for call in options)
+
+
+@pytest.mark.parametrize("text,ghost", [
+    ("Abone olmayı unutmayın!", True),
+    ("Bu videoyu izlediğiniz için teşekkür ederim.", True),
+    ('Not defterine "Abone olmayı unutmayın" yaz.', False),
+    ("Artemis open Visual Studio Code ve tarayıcıyı aç", False),
+])
+def test_ghost_filter_only_rejects_complete_boilerplate(text, ghost):
+    assert voice_adapters.is_ghost_transcript(text) is ghost
+
+
+async def test_whisper_rejects_uncertain_and_no_speech_segments(tmp_path):
+    from types import SimpleNamespace
+
+    class Model:
+        def transcribe(self, _samples, **_kwargs):
+            return [
+                SimpleNamespace(text="wrong", avg_logprob=-2, no_speech_prob=0.1),
+                SimpleNamespace(text="noise", avg_logprob=-0.1, no_speech_prob=0.9),
+                SimpleNamespace(text="open Brave ve hesap makinesi", avg_logprob=-0.2,
+                                no_speech_prob=0.01),
+            ], None
+
+    recognizer = FasterWhisperRecognizer(VoiceConfig(stt_model=tmp_path))
+    recognizer._model = Model()
+    assert await recognizer.transcribe(b"\x00\x00") == "open Brave ve hesap makinesi"
+
+
+@pytest.mark.parametrize("detected,confidence,probabilities,expected", [
+    ("ru", 0.95, [("ru", 0.95), ("tr", 0.02), ("en", 0.01)], "tr"),
+    ("en", 0.5, [("en", 0.5), ("tr", 0.4)], "tr"),
+    ("tr", 0.9, [("tr", 0.9), ("en", 0.05)], "tr"),
+    ("en", 0.95, [("en", 0.95), ("tr", 0.01)], "en"),
+])
+async def test_bilingual_mode_prefers_turkish_and_never_selects_russian(
+    tmp_path, detected, confidence, probabilities, expected,
+):
+    from types import SimpleNamespace
+
+    options = []
+
+    class Model:
+        def detect_language(self, **_kwargs):
+            return detected, confidence, probabilities
+
+        def transcribe(self, _samples, **kwargs):
+            options.append(kwargs)
+            return [SimpleNamespace(text="tarayıcı aç")], None
+
+    recognizer = FasterWhisperRecognizer(VoiceConfig(stt_model=tmp_path, stt_language="tr_en"))
+    recognizer._model = Model()
+    assert await recognizer.transcribe(b"\x00\x00") == "tarayıcı aç"
+    assert options[0]["language"] == expected
+    assert options[0]["task"] == "transcribe"
+
+
+async def test_bilingual_mode_rejects_cyrillic_hallucination(tmp_path):
+    from types import SimpleNamespace
+
+    class Model:
+        def detect_language(self, **_kwargs):
+            return "tr", 0.99, [("tr", 0.99)]
+
+        def transcribe(self, _samples, **_kwargs):
+            return [SimpleNamespace(text="Игорь Негода")], None
+
+    recognizer = FasterWhisperRecognizer(VoiceConfig(stt_model=tmp_path, stt_language="tr_en"))
+    recognizer._model = Model()
+    assert await recognizer.transcribe(b"\x00\x00") == ""
+
+
+@pytest.mark.parametrize("text,repeating", [
+    ("Tarayıcı aç. " * 22, True),
+    ("Tarayıcıyı kapat. " * 5, True),
+    ("tarayıcı aç tarayıcı aç tarayıcı aç", True),
+    ("Tarayıcı aç ve YouTube'a git", False),
+    ('Not defterine tarayıcı aç tarayıcı aç tarayıcı aç yaz', False),
+    ("tarayıcı aç", False),
+])
+def test_repeated_whole_transcript_is_not_a_command(text, repeating):
+    assert voice_adapters.is_repeating_transcript(text) is repeating
+
+
+async def test_whisper_rejects_repetition_before_command_dispatch(tmp_path):
+    from types import SimpleNamespace
+
+    class Model:
+        def transcribe(self, _samples, **_kwargs):
+            return [SimpleNamespace(text="Tarayıcı aç. " * 22,
+                                    avg_logprob=-0.1, no_speech_prob=0.01)], None
+
+    recognizer = FasterWhisperRecognizer(VoiceConfig(stt_model=tmp_path))
+    recognizer._model = Model()
+    assert await recognizer.transcribe(b"\x00\x00") == ""
 
 
 def test_microphone_queue_is_bounded_and_pause_discards_frames():
@@ -124,6 +222,55 @@ async def test_sink_marks_first_real_short_pcm_write(monkeypatch):
 
     await sink.play(chunks(), asyncio.Event(), on_first)
     assert first_lengths == [960]  # 20 ms, not the whole 100 ms chunk.
+
+
+async def test_cancel_aborts_device_before_slow_generator_cleanup(monkeypatch):
+    events = []
+    written = asyncio.Event()
+
+    class Stream:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def write(self, _pcm):
+            pass
+
+        def abort(self):
+            events.append("abort")
+
+        def stop(self):
+            events.append("stop")
+
+        def close(self):
+            events.append("close")
+
+    fake_module = ModuleType("sounddevice")
+    fake_module.RawOutputStream = Stream
+    monkeypatch.setitem(__import__("sys").modules, "sounddevice", fake_module)
+
+    class Chunks:
+        def __aiter__(self):
+            return self
+
+        async def __anext__(self):
+            if written.is_set():
+                await asyncio.Future()
+            return PCMChunk(b"\x01\x00" * 240)
+
+        async def aclose(self):
+            events.append("generator_cleanup")
+
+    cancelled = asyncio.Event()
+    playback = asyncio.create_task(SoundDeviceSink().play(Chunks(), cancelled, written.set))
+    await written.wait()
+    playback.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await playback
+    assert cancelled.is_set()
+    assert events == ["abort", "generator_cleanup", "close"]
 
 
 async def test_microphone_drops_frame_already_dequeued_before_approval(monkeypatch):
@@ -326,6 +473,9 @@ async def test_edge_stream_yields_pcm_before_remote_stream_finishes(monkeypatch,
             self.returncode = self.returncode or 0
             return self.returncode
 
+        async def communicate(self):
+            return b"", b""
+
         def terminate(self):
             self.returncode = -15
 
@@ -399,6 +549,9 @@ async def test_edge_exception_family_normalizes_for_local_fallback(monkeypatch, 
         async def wait(self):
             return self.returncode or 0
 
+        async def communicate(self):
+            return b"", b""
+
         def terminate(self):
             self.returncode = -15
 
@@ -434,3 +587,70 @@ async def test_edge_exception_family_normalizes_for_local_fallback(monkeypatch, 
 
     assert [chunk.pcm async for chunk in fallback.stream("text", asyncio.Event())] == [b"fallback"]
     assert local.calls == 1
+
+
+async def test_edge_cancel_does_not_cancel_windows_pipe_closed_future(monkeypatch, tmp_path):
+    closed = asyncio.get_running_loop().create_future()
+    closing = asyncio.Event()
+
+    class Stdin:
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            closing.set()
+            await closed
+
+    class Stdout:
+        async def read(self, _size):
+            await closing.wait()
+            return b"pcm"
+
+    class Process:
+        stdin = Stdin()
+        stdout = Stdout()
+        returncode = None
+
+        def terminate(self):
+            assert not closed.cancelled()
+            closed.set_result(None)
+            self.returncode = -15
+
+        async def wait(self):
+            return self.returncode
+
+        async def communicate(self):
+            return b"", b""
+
+    process = Process()
+
+    async def create_process(*_args, **_kwargs):
+        return process
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+
+    class Communicate:
+        def __init__(self, *_args):
+            pass
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"mp3"}
+
+    edge = ModuleType("edge_tts")
+    edge.Communicate = Communicate
+    monkeypatch.setitem(__import__("sys").modules, "edge_tts", edge)
+    synth = EdgeTTSynthesizer(
+        VoiceConfig(allow_cloud_tts_text=True, edge_voice="test"),
+        AuditLog(tmp_path / "audit.jsonl"),
+    )
+    stream = synth.stream("synthetic", asyncio.Event())
+    assert (await anext(stream)).pcm == b"pcm"
+    await asyncio.wait_for(stream.aclose(), 1)
+    assert closed.done() and not closed.cancelled()
+    assert synth._process is None

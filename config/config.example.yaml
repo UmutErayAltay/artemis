@@ -21,6 +21,10 @@ primary_model: ''
 fallback_model: null
 models: {}
 applications: {}
+allow_all_applications: false # Windows Başlat menüsündeki tüm kurulu uygulamalar.
+# Temiz turda bu izinli takma adlar yeniden onay almadan kapatılır.
+# Dış içerik okunduktan sonraki kapatma yine onay ister.
+close_without_confirmation: []
 
 # Ses modelleri önceden ayrıca kurulmalıdır; Jarvis çalışma anında indirme yapmaz.
 # faster-whisper CUDA/float16 başlangıç profili; CPU için stt_device: cpu,
@@ -32,17 +36,24 @@ voice:
   frame_ms: 20
   vad_aggressiveness: 2
   end_silence_ms: 600
+  barge_in_ms: 180 # Seslendirme sırasında bu kadar sürekli konuşma sesi susturur.
+  require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
   pre_roll_ms: 300
   max_utterance_seconds: 15
   queue_frames: 32
   stt_model: ../models/whisper-small
   stt_device: cuda
   stt_compute_type: float16
-  stt_language: tr # auto otomatik dil seçer; cümle içi dil değişimini garanti etmez.
+  stt_language: tr_en # Türkçe öncelikli; güçlü İngilizce kanıtında en. auto tüm dilleri seçer.
+  cuda_library_dirs: [] # Windows: gerektiğinde yerel cublas/cudnn DLL dizinleri.
+  stt_vad_filter: true # Sessiz bölümleri STT öncesinde ele.
+  stt_min_logprob: -1.0
+  stt_max_no_speech: 0.6
   stt_beam_size: 5 # Kesin sonuç; daha yüksek değer daha yavaş olabilir.
   stt_partial_beam_size: 1
   stt_hotwords: [] # İsteğe bağlı yerel ipuçları; prompt veya transcript düzeltmesi değildir.
   tts_backend: piper
+  tts_local_fallback: true # Edge hatasında yerel sese dön; false seçili sesi korur.
   piper_model: ../models/tr_TR-dfki-medium.onnx
   piper_config: ../models/tr_TR-dfki-medium.onnx.json
   piper_voice: tr_TR-dfki-medium

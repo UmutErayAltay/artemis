@@ -94,6 +94,10 @@ class BaseTool(ABC):
     done_label: ClassVar[str] = ""
     content_kind: ClassVar[ContentKind] = "text"
 
+    def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
+        """Doğrulanmış argümanlar için riski bildirir; onay kararını kapı verir."""
+        return normalize_risk(self.risk)
+
     @abstractmethod
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         """Alt işlemin sonucu doğrulanmadan başarı bildirilmemelidir."""

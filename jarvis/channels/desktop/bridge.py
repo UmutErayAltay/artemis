@@ -465,7 +465,10 @@ class DesktopBridge:
             self._events.put(State("stopped", "İşçi durdu."))
             return
         self._ready.set()
-        self._events.put(State("ready", f"Hazır · {self._runtime.settings.primary_model}"))
+        configured = self._runtime.settings
+        model = configured.models.get(configured.primary_model)
+        display_model = model.model if model is not None else configured.primary_model
+        self._events.put(State("ready", f"Hazır · {display_model}"))
         if self._shutdown:
             loop.call_soon(loop.stop)
         try:
@@ -600,6 +603,12 @@ class DesktopBridge:
         self._events.put(State("voice", state))
 
     def _on_voice_state(self, state: str) -> None:
+        if state.startswith("level:"):
+            self._events.put(State("voice_level", state.removeprefix("level:")))
+            return
+        if state.startswith("heard:"):
+            self._events.put(State("voice_heard", state.removeprefix("heard:")))
+            return
         # "off" burada iletilmez: kapanışı _run_voice sonlandırır, böylece hata iletisi
         # her zaman "off"tan önce gelir ve referanslar temizlendikten sonra görünür.
         if state != "off":

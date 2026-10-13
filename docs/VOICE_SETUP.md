@@ -62,7 +62,7 @@ voice:
   stt_model: ../models/whisper-small
   stt_device: cuda
   stt_compute_type: float16
-  stt_language: tr
+  stt_language: tr_en
   stt_beam_size: 5
   stt_partial_beam_size: 1
   stt_hotwords: []
@@ -184,5 +184,5 @@ değerlendirin. Yanlış uyanma veya yanlış onay sayısı elle etiketlenmediys
 - [WebRTC VAD wheels](https://github.com/daanzu/py-webrtcvad-wheels)
 
 PyPI sürümleri hazırlık sırasında doğrulandı: faster-whisper 1.2.1,
-sounddevice 0.5.6, edge-tts 7.2.8, piper-tts 1.8.0,
+sounddevice 0.5.6, edge-tts 7.3.0, piper-tts 1.8.0,
 webrtcvad-wheels 2.0.14.post1. Bunlar canlı ses ölçümü sonucu değildir.

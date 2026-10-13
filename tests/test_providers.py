@@ -151,6 +151,29 @@ def ephemeral_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("ANTHROPIC_API_KEY", token_urlsafe())
 
 
+@pytest.mark.parametrize("name", ("openrouter", "ollama"))
+@pytest.mark.parametrize("calls", (None, False, 0, {}, ""))
+async def test_optional_tool_calls_null_only(
+    name: ProviderName, calls: Any, http_server: HTTPState, tmp_path: Path
+) -> None:
+    http_server.body = response_for(name)
+    message = (
+        http_server.body["choices"][0]["message"]
+        if name == "openrouter"
+        else http_server.body["message"]
+    )
+    message["tool_calls"] = calls
+    provider = provider_for(name, http_server, tmp_path)
+    if calls is None:
+        result = await provider.complete([Message(role="user", content="Merhaba")], [], timeout=2)
+        assert result.content == "Tamam."
+        assert result.tool_calls == []
+        assert result.usage.input_tokens == 100
+    else:
+        with pytest.raises(ProviderError):
+            await provider.complete([Message(role="user", content="Merhaba")], [], timeout=2)
+
+
 @pytest.mark.parametrize("name", PROVIDERS)
 async def test_tool_schema_and_calls_roundtrip(
     name: ProviderName, http_server: HTTPState, tmp_path: Path
