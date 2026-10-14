@@ -668,6 +668,26 @@ async def test_vault_search_tool_message_privacy_follows_cloud_file_setting(
     assert all(message.private is expected_private for message in tool_messages)
 
 
+async def test_disabled_memory_error_is_not_masked_even_without_cloud_file_permission(
+    tmp_path: Path,
+) -> None:
+    """Hata mesajı dosya içeriği taşımaz; maskelenirse model nedenini hiç göremez."""
+    provider = ScriptedProvider(
+        [
+            Completion(
+                tool_calls=[ToolCall(id="s1", name="vault_search", arguments={"query": "kahve"})]
+            ),
+            Completion(content="Hafıza kapalı."),
+        ]
+    )
+    context = make_context(tmp_path, MemoryConfig(), allow_cloud_file_content=False)
+    loop = AgentLoop(provider, SafetyGate(discover_tools()), context, no_approval)
+    await loop.run("notlarıma bak")
+    tool_messages = [message for message in provider.requests[1] if message.role == "tool"]
+    assert tool_messages and not any(message.private for message in tool_messages)
+    assert "Hafıza kapalı" in tool_messages[0].content
+
+
 # 11. Dışlama kuralları ve not listesi (sözleşme birimleri)
 
 

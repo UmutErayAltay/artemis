@@ -176,7 +176,9 @@ class SafetyGate:
         if tool.external or result.external:
             state.tainted = True
             result = result.model_copy(update={"external": True})
-        if tool.content_kind != "text":
+        # Başarısız sonuç dosya içeriği taşımaz; etiketlenirse "kapalı/bulunamadı" gibi
+        # hata mesajı da maskelenir ve model nedenini hiç göremez.
+        if tool.content_kind != "text" and result.success:
             result = result.model_copy(update={"content_kind": tool.content_kind})
         return self._finish(result, call, context, state, started)
 
