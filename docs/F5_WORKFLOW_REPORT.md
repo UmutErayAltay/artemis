@@ -12,19 +12,20 @@ Windows 11 ve gerçek Claude Code kabulü henüz yapılmadı.
 | Ruff | `All checks passed!` |
 | Mypy, Linux | 71 kaynak dosyası geçti |
 | Mypy, win32 hedefi | 71 kaynak dosyası geçti; Windows çalışma zamanı testi değildir |
-| CI run 38531636108 | Linux işleri geçti; Windows teardown ve platforma bağlı fault-injection testleri hata verdi; düzeltmeler sonrası CI tekrarı bekliyor |
+| CI run 38532547547, `bec6b8d` | [Dört Ubuntu/Windows işi de geçti](https://github.com/UmutErayAltay/jarvis/actions/runs/38532547547) |
 | F5 güvenlik mutasyonu | Onay riski SIDE_EFFECT'e indirilince hedef test kırıldı |
 | Tüm güvenlik mutasyonları | 4/4 yakalandı; geçici kopyalar dışında kaynak özeti değişmedi |
 | Mevcut genel sahte kabul bench'i | 39/39 geçti; tehlikeli hata 0, onaysız yan etki 0 |
 | Sahte bench kullanım/maliyet | 0 giriş/çıkış tokenı, $0 |
 | Gerçek Claude, ücretli çağrı, gerçek kullanıcı deposu | Çalıştırılmadı |
 
-CI'da Windows GUI testleri `code_agent.sqlite3` açık kaldığı için uygulama
-teardown'ında başarısız oldu. SQLite bağlantılarını açıkça kapatma ve bunu
-kanıtlayan yaşam döngüsü regresyonları eklendi. Windows çekirdek testinde kalan
-fault-injection hatası da POSIX `kill_tree` yaması varsaydığı için oluştu; test
-şimdi Windows Job Object yolu üzerinden temizleyip hata döndürüyor. Düzeltmeler
-sonrası CI sonucu henüz alınmadı.
+Önceki CI koşusu Windows GUI teardown'ında `code_agent.sqlite3` bağlantısının açık
+kalmasını ve Windows çekirdek testinde POSIX `kill_tree` yamasına bağlı fault-
+injection hatasını yakaladı. SQLite bağlantıları açıkça kapatıldı ve Windows testi
+platformun Job Object sürecini kullanacak şekilde düzeltildi. Sonraki CI koşusunda
+Ubuntu ve Windows çekirdek/UI işleri başarıyla geçti. Windows CI'daki sahte CLI
+ve Job Object testleri gerçek kullanıcı makinesi kabulü veya gerçek Claude Code
+oturumu anlamına gelmez.
 
 Genel `bench.run --sahte` mevcut SafetyGate ve dosya senaryolarını ölçer; Faz 5
 işlerini senaryo listesine almaz. Faz 5 taslak, onay, soru/cevap, iptal, zaman aşımı,
