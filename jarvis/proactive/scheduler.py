@@ -35,7 +35,6 @@ from jarvis.proactive.schedule import (
 )
 from jarvis.proactive.store import (
     ProactiveStore,
-    ProactiveStoreError,
     Reminder,
     reminder_event_id,
 )
@@ -84,8 +83,10 @@ class ProactiveScheduler:
         while not stop.is_set():
             try:
                 await self.tick()
-            except ProactiveStoreError as error:
-                # Depo arızası kanalı düşürmez; bir sonraki taramada yeniden denenir.
+            except (OSError, ValueError, RuntimeError) as error:
+                # Depo (ProactiveStoreError bir RuntimeError'dır), saat dilimi veya teslim
+                # arızası zamanlayıcıyı sessizce öldürmemeli: denetime yazılır, sonraki
+                # taramada yeniden denenir. Talep edilmiş oluşum varsa belirsiz kalır.
                 audit.emit("proactive_error", error_type=type(error).__name__)
             with suppress(TimeoutError):
                 await asyncio.wait_for(stop.wait(), timeout=self.config.poll_seconds)
@@ -127,7 +128,11 @@ class ProactiveScheduler:
             left -= int(outcome.delivered)
             handled += 1
         if missed:
-            handled += await self._deliver_missed(missed, now)
+            # Özet sınırdan bağımsız gönderilir: kaçırılanlar zaten "missed" kapandı ve
+            # başka iz bırakmazdı; tek mesaj olduğu için yine de sınıra sayılır.
+            delivered = await self._deliver_missed(missed, now)
+            handled += delivered
+            left -= delivered
         for briefing in self.config.briefings:
             scheduled = briefing_occurrence(
                 briefing.days,
@@ -204,7 +209,7 @@ class ProactiveScheduler:
             private=any(item.created_private for item in missed),
         )
         self._finish(event_id, now, outcome, "completed")
-        return 1
+        return int(outcome.delivered)
 
     async def _run_briefing(
         self, briefing: BriefingConfig, scheduled: datetime

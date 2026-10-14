@@ -250,7 +250,11 @@ async def test_two_schedulers_on_one_store_deliver_once(tmp_path: Path) -> None:
         clock=clock,
         owner="b",
     )
-    await asyncio.gather(scheduler_for(runtime, first, clock).tick(), other.tick())
+    # İkisi de oluşumu bekliyor görsün: ikinci süreç listeyi talepten ÖNCE okumuş olsun.
+    stale = other_store.due_reminders(NOW)
+    other_store.due_reminders = lambda now: stale  # type: ignore[method-assign]
+    await scheduler_for(runtime, first, clock).tick()
+    await other.tick()
     assert len(first.items) + len(second.items) == 1
 
 
@@ -364,7 +368,11 @@ async def test_briefing_over_budget_is_reported_and_marked_failed(tmp_path: Path
     runtime = make_runtime(tmp_path, provider=OverBudget(), briefings=(briefing(),))
     panel = Panel()
     clock = Clock(NOW + timedelta(minutes=1))
+    provider: OverBudget = runtime.provider  # type: ignore[assignment]
     await scheduler_for(runtime, panel, clock).tick()
+    # Gerçek bütçe defteri çağrıyı ağdan önce reddeder (test_budget); burada döngünün
+    # bu reddi tek denemede dürüstçe raporladığı ve tekrar denemediği sınanır.
+    assert provider.calls == 1
     assert panel.items and "maliyet tavanı" in panel.items[0][1]
     store: ProactiveStore = runtime.context.services["proactive_store"]
     scheduled = NOW
@@ -549,3 +557,136 @@ def test_runtime_creates_store_only_when_enabled(tmp_path: Path) -> None:
                               settings=settings)
     assert "proactive_store" not in disabled.context.services
     assert not (tmp_path / "off-state" / "proactive.sqlite3").exists()
+
+
+# 5. İnceleme bulguları -----------------------------------------------------------------
+
+
+async def test_agent_loop_marks_reminder_private_after_reading_file(tmp_path: Path) -> None:
+    # turn_private'ı döngü doldurur; aynı adımdaki ikinci çağrı birincinin gizliliğini görür.
+    workspace = tmp_path / "desktop"
+    workspace.mkdir()
+    (workspace / "bordro.txt").write_text("net 50.000", encoding="utf-8")
+    responses = [
+        Completion(
+            tool_calls=[
+                ToolCall(id="r", name="read_file", arguments={"path": "bordro.txt"}),
+                ToolCall(id="c", name="reminder_create",
+                         arguments={"text": "net 50.000", "in_minutes": 5}),
+            ]
+        ),
+        Completion(content="Kuruldu."),
+    ]
+    settings = Settings(
+        workspace=workspace,
+        state_dir=tmp_path / "state",
+        audit_path=tmp_path / "audit.jsonl",
+        persist_memory=False,
+        proactive=ProactiveConfig(enabled=True),
+    )
+    runtime = create_runtime(tmp_path / "x.yaml", lambda *_: True,
+                             provider=ScriptedProvider(responses), settings=settings)
+    await runtime.runner.run("bordrodaki tutarı hatırlat")
+    store: ProactiveStore = runtime.context.services["proactive_store"]
+    [reminder] = store.pending_reminders()
+    assert reminder.created_private is True
+    assert reminder.created_tainted is True
+
+
+async def test_reminder_from_previous_external_turn_is_marked_tainted(tmp_path: Path) -> None:
+    workspace = tmp_path / "desktop"
+    workspace.mkdir()
+    (workspace / "not.txt").write_text("yarın faturayı öde", encoding="utf-8")
+    responses = [
+        Completion(tool_calls=[ToolCall(id="r", name="read_file",
+                                        arguments={"path": "not.txt"})]),
+        Completion(content="Okudum."),
+        Completion(tool_calls=[ToolCall(id="c", name="reminder_create",
+                                        arguments={"text": "faturayı öde", "in_minutes": 5})]),
+        Completion(content="Kuruldu."),
+    ]
+    settings = Settings(
+        workspace=workspace,
+        state_dir=tmp_path / "state",
+        audit_path=tmp_path / "audit.jsonl",
+        persist_memory=False,
+        allow_cloud_file_content=True,
+        proactive=ProactiveConfig(enabled=True),
+    )
+    runtime = create_runtime(tmp_path / "x.yaml", never,
+                             provider=ScriptedProvider(responses), settings=settings)
+    await runtime.runner.run("notu oku")
+    await runtime.runner.run("bunu hatırlat")
+    store: ProactiveStore = runtime.context.services["proactive_store"]
+    [reminder] = store.pending_reminders()
+    assert reminder.created_tainted is True
+
+
+async def test_missed_summary_with_any_private_item_is_withheld_from_telegram(
+    tmp_path: Path, telegram_harness: Harness
+) -> None:
+    runtime = make_runtime(tmp_path, telegram=telegram_harness.settings.telegram)
+    add(runtime, "açık metin", NOW - timedelta(hours=20))
+    add(runtime, "gizli metin", NOW - timedelta(hours=21), private=True)
+    client = build_telegram_client(runtime.settings, runtime.audit)
+    assert client is not None
+    panel = Panel()
+    try:
+        await scheduler_for(runtime, panel, Clock(), telegram=client).tick()
+    finally:
+        client.close()
+    texts = [body.get("text") for body in sent_bodies(telegram_harness.fake)]
+    assert texts == [PRIVATE_WITHHELD]
+    assert "gizli metin" in panel.items[0][1]
+
+
+class Exploding(ProactiveScheduler):
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self.calls = 0
+
+    async def tick(self) -> int:
+        self.calls += 1
+        if self.calls == 1:
+            raise ValueError("saat dilimi çözülemedi")
+        return 0
+
+
+async def test_scheduler_survives_unexpected_error_and_audits_it(tmp_path: Path) -> None:
+    runtime = make_runtime(tmp_path, poll_seconds=1)
+    store = runtime.context.services["proactive_store"]
+    scheduler = Exploding(runtime, store, Deliverer(runtime.settings, runtime.audit, toast=None),
+                          clock=Clock())
+    stop = asyncio.Event()
+    task = asyncio.create_task(scheduler.serve(stop))
+
+    async def second_tick() -> None:
+        while scheduler.calls < 2 and not task.done():
+            await asyncio.sleep(0.05)
+
+    # Sınırlı bekleme: görev ölürse test takılmaz, kırılır.
+    await asyncio.wait_for(second_tick(), timeout=5)
+    assert not task.done(), "Zamanlayıcı beklenmeyen hatada durdu"
+    stop.set()
+    await asyncio.wait_for(task, timeout=3)
+    errors = [r for r in read_audit(tmp_path / "audit.jsonl") if r["event"] == "proactive_error"]
+    assert [error["error_type"] for error in errors] == ["ValueError"]
+
+
+def test_telegram_privacy_record_survives_interleaved_briefing_turn(tmp_path: Path) -> None:
+    from jarvis.channels.telegram.channel import TelegramChannel
+
+    channel = TelegramChannel(
+        object(),  # type: ignore[arg-type]
+        1,
+        audit=AuditLog(tmp_path / "a.jsonl"),
+        approval_timeout=5,
+        max_message_age=60,
+        poll_timeout=0,
+    )
+    channel.observe({"event": "turn_start", "turn_id": "kullanici"})
+    channel.observe({"event": "privacy_decision", "turn_id": "kullanici", "cloud_allowed": False})
+    channel.observe({"event": "turn_start", "turn_id": "brifing", "unattended": True})
+    assert "kullanici" in channel._private_turns
+    channel.observe({"event": "turn_start", "turn_id": "yeni", "unattended": False})
+    assert channel._private_turns == set()

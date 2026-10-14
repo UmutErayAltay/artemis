@@ -151,7 +151,10 @@ class TelegramChannel:
         event = record.get("event")
         turn_id = record.get("turn_id")
         if event == "turn_start":
-            self._private_turns.clear()
+            # Gözetimsiz brifing turu (ADR 0027) aynı denetime yazar ve kullanıcının
+            # yürüyen turu bekliyorken başlayabilir; onun gizlilik kaydını silmemeli.
+            if not record.get("unattended"):
+                self._private_turns.clear()
         elif (
             event == "privacy_decision"
             and record.get("cloud_allowed") is False

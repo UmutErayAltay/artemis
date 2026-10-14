@@ -54,7 +54,9 @@ class SafetyGate:
         started = monotonic()
         context.turn_id = state.turn_id
         context.deadline = state.deadline
-        context.turn_tainted = state.tainted
+        # Kayıt bayrağı bağlamda kalan dış içeriği de kapsar (ADR 0013): önceki turda
+        # okunan metinden kurulan hatırlatma da "dış içerikten" sayılır. Onay kuralı değişmez.
+        context.turn_tainted = state.tainted or state.history_external
         self.pending_notice = ""
         context.audit.emit(
             "tool_requested", turn_id=state.turn_id, tool=call.name, arguments=call.arguments

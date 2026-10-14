@@ -199,6 +199,8 @@ class BriefingConfig(BaseModel):
         # Saat dilimi ProactiveConfig.timezone'dan gelir; saniye hassasiyeti gerekmez.
         if value.tzinfo is not None:
             raise ValueError("Brifing saati saat dilimi taşımaz; proactive.timezone kullanılır")
+        # Not: YAML'da tırnaksız 9:30 altmışlık sayıya dönüşür ve burada reddedilir;
+        # örnek config saati tırnakla ("08:30") yazar.
         return value.replace(second=0, microsecond=0)
 
 

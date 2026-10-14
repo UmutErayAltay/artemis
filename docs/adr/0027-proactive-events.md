@@ -106,6 +106,14 @@ harcama defteri ve tek giriş `CommandRunner`.
 - v1 yan etki yapan bir otomasyon değildir: "her sabah 9'da X'i aç" kurulamaz. Bu
   bilinçli bir sınırdır; gözetimsiz onay kanalıyla birlikte ayrı ADR'de açılır.
 - Jarvis kapalıyken hiçbir şey çalışmaz; kaçırılan olaylar dürüstçe raporlanır.
+- Kullanıcıdan onay beklenirken (masaüstü penceresi ya da Telegram düğmesi) onay geri
+  çağrısı senkron olduğu için o sürecin döngüsü durur; zamanlayıcı o süre tarama yapmaz.
+  Hatırlatma gecikir ve pencere içindeyse "gecikmeli" teslim edilir, kaybolmaz. Uzun bir
+  bekleme (ya da bilgisayarın uykusu) iki süreç açıkken diğer sürecin yürüyen talebini
+  `uncertain` yapabilir; bu çift teslim üretmez, yalnız teslim edilmiş oluşum belirsiz
+  görünür. Canlılık sinyali (heartbeat) ihtiyaç ölçülürse eklenir.
+- Kayıttaki "dış içerikten kuruldu" bayrağı turun taint'ini ve bağlamda kalan dış içeriği
+  (ADR 0013 `history_external`) birlikte kapsar; hatırlatma kurmanın onay kuralı değişmez.
 - Windows'ta saat dilimi, toast ve tepsi davranışının kabulü kullanıcı tarafından
   yapılır. Sahte saatli testler gerçek uyku/uyanma ve yaz saati davranışını kanıtlamaz.
 - MCP (ADR 0028) ve ekran algısı (ADR 0029) proaktif turlara ancak kendi ADR'lerinde
