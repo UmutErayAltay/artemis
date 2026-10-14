@@ -409,6 +409,26 @@ class TelegramChannel:
                     break
 
 
+def _start_proactive(
+    runtime: Runtime, client: TelegramClient, stop: asyncio.Event
+) -> asyncio.Task[None] | None:
+    """Masaüstü kapalıyken de hatırlatma/brifing çalışsın (ADR 0027).
+
+    Masaüstü de açıksa iki zamanlayıcı aynı depoyu kullanır; oluşum talebi tek teslimi
+    garanti eder. İçe aktarma burada: proaktif katman kanal modülüne bağımlıdır.
+    """
+    from jarvis.proactive.delivery import Deliverer
+    from jarvis.proactive.scheduler import ProactiveScheduler
+    from jarvis.proactive.store import ProactiveStore
+
+    store = runtime.context.services.get("proactive_store")
+    if not runtime.settings.proactive.enabled or not isinstance(store, ProactiveStore):
+        return None
+    deliverer = Deliverer(runtime.settings, runtime.audit, telegram=client)
+    scheduler = ProactiveScheduler(runtime, store, deliverer)
+    return asyncio.create_task(scheduler.serve(stop))
+
+
 async def run_telegram(config_path: Path) -> int:
     settings = load_settings(config_path)
     config = settings.telegram
@@ -452,7 +472,16 @@ async def run_telegram(config_path: Path) -> int:
             print(f"Telegram'a bağlanılamadı ({error.error_type}).")
             return 1
         print("Jarvis Telegram kanalı açık. Durdurmak için Ctrl+C.")
-        await channel.serve(stop)
+        proactive = _start_proactive(runtime, client, stop)
+        try:
+            await channel.serve(stop)
+        finally:
+            stop.set()
+            if proactive is not None:
+                # Yürüyen brifing iptal edilir; talep edilmiş oluşum belirsiz raporlanır.
+                proactive.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await proactive
     finally:
         stop.set()
         if runtime is not None:

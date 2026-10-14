@@ -1,10 +1,12 @@
 """Sırların YAML veya repr içine girmemesi için ayarlarda sır alanı bulunmaz."""
 
 import re
+from datetime import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Literal, Self
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -173,6 +175,69 @@ class CodeAgentConfig(BaseModel):
         return values
 
 
+class BriefingConfig(BaseModel):
+    """Config'te tanımlı brifing (ADR 0027): istemi model kuramaz ve değiştiremez."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(pattern=r"^[a-z0-9_-]{1,32}$")
+    at: time
+    # 0 = Pazartesi ... 6 = Pazar (datetime.weekday()).
+    days: tuple[int, ...] = (0, 1, 2, 3, 4, 5, 6)
+    prompt: str = Field(min_length=1, max_length=2000)
+
+    @field_validator("days")
+    @classmethod
+    def validate_days(cls, values: tuple[int, ...]) -> tuple[int, ...]:
+        if not values or any(day < 0 or day > 6 for day in values):
+            raise ValueError("days 0 (Pazartesi) ile 6 (Pazar) arasında en az bir gün olmalı")
+        return tuple(sorted(set(values)))
+
+    @field_validator("at")
+    @classmethod
+    def validate_at(cls, value: time) -> time:
+        # Saat dilimi ProactiveConfig.timezone'dan gelir; saniye hassasiyeti gerekmez.
+        if value.tzinfo is not None:
+            raise ValueError("Brifing saati saat dilimi taşımaz; proactive.timezone kullanılır")
+        return value.replace(second=0, microsecond=0)
+
+
+class ProactiveConfig(BaseModel):
+    """Hatırlatma ve brifing (ADR 0027); `enabled` verilmedikçe tamamen kapalıdır."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    timezone: str = "Europe/Istanbul"
+    briefings: tuple[BriefingConfig, ...] = ()
+    reminder_grace_hours: float = Field(default=12.0, ge=0, le=168)
+    briefing_grace_hours: float = Field(default=2.0, ge=0, le=24)
+    max_events_per_day: int = Field(default=20, ge=1, le=500)
+    poll_seconds: float = Field(default=30.0, ge=1, le=300)
+    # Kullanıcının kendi Telegram sohbetine de gönder (telegram.chat_id gerekir).
+    telegram: bool = True
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except (ZoneInfoNotFoundError, ValueError) as error:
+            message = "timezone geçerli bir IANA adı olmalı (ör. Europe/Istanbul)"
+            raise ValueError(message) from error
+        return value
+
+    @field_validator("briefings")
+    @classmethod
+    def validate_briefings(
+        cls, values: tuple[BriefingConfig, ...]
+    ) -> tuple[BriefingConfig, ...]:
+        names = [briefing.name for briefing in values]
+        if len(names) != len(set(names)):
+            raise ValueError("Brifing adları benzersiz olmalı")
+        return values
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -205,6 +270,7 @@ class Settings(BaseModel):
     memory: MemoryConfig = Field(default_factory=MemoryConfig)
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     code_agent: CodeAgentConfig = Field(default_factory=CodeAgentConfig)
+    proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

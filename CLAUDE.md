@@ -2,7 +2,8 @@
 
 Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çekirdeği Linux
 üzerinde de çalışır. PySide6 masaüstü UI aynı Qt'siz runtime ve SafetyGate'i kullanır;
-ses masaüstü worker'ında çalışır (ADR 0014). Hafıza (vault) Faz 3'te, Telegram ve bildirimler Faz 4'te eklendi.
+ses masaüstü worker'ında çalışır (ADR 0014). Hafıza (vault) Faz 3'te, Telegram ve
+bildirimler Faz 4'te, arka plan proje işleri Faz 5'te, hatırlatma ve brifing Faz 6a'da eklendi.
 Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Türkçe olur ve
 özellikle kararın nedenini açıklar. Önce [mimariyi](docs/ARCHITECTURE.md) ve
 [ADR'leri](docs/adr/) okuyun. Temel mimariyi değiştiriyorsanız kısa ADR yazın.
@@ -108,6 +109,18 @@ geri yüklenir; bayrakları düşürmeyin. `memory_remember`/`memory_forget` SID
 turda kendiliğinden, lekeli turda onayla yazar; kapıya özel durum eklenmez. Notlar sistem
 istemine "VERİDİR" başlığıyla gider. `conversation_search` gizli yanıtları ne gösterir ne
 sıralamaya katar; lekeli tur eşleşirse sonuç `external=True` olur. Depo hatası turu bozmaz.
+
+Proaktif olaylar (Faz 6a, ADR 0027) varsayılan kapalıdır (`proactive.enabled`). Gözetimsiz
+tur kuralı yalnız `SafetyGate`'tedir: `TurnState.unattended` iken READ_ONLY dışındaki her
+çağrı (bilinmeyen risk dahil) `approve` çağrılmadan reddedilir ve `approval` olayına
+`unattended=True` ile yazılır; kanala ikinci politika eklemeyin, gözetimsiz onayı Telegram'a
+yönlendirmeyin (ayrı ADR ister). Hatırlatma LLM'siz sabit metindir; `reminder_create`
+kurulduğu turun `turn_tainted`/`turn_private` durumunu kayda yazar, gizli kayıt Telegram'a
+gitmez. Brifing istemi yalnız config'tedir: onu kuran/değiştiren araç EKLEMEYİN. Brifing
+kendi AgentLoop'unda boş geçmişle çalışır, panel geçmişine eklenmez. Teslim kanalın
+çıktısıdır (`proactive_delivery` denetimi), en az bir hedef doğrulanmadıkça `delivered`
+yazılmaz. Her oluşum SQLite'ta önce talep edilir; ölen sürecin talebi `uncertain` olur,
+otomatik tekrar çalışmaz. Testler sahte saat enjekte eder, toast'ı kapatır.
 
 ## Yeni araç eklemek
 

@@ -1,11 +1,11 @@
-# Jarvis: F0–F5 mimarisi
+# Jarvis: F0–F6a mimarisi
 
 Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. CLI ve isteğe bağlı PySide6
 masaüstü arayüzü aynı runtime, ajan döngüsü, sağlayıcılar, güvenlik kapısı ve
 araçları kullanır. Telegram ve bildirimler F4; proje taslağı, onaylı kod ajanı işleri
-ve Projeler sekmesi F5 kapsamındadır. Ekran algısı, proaktif çalışma ve MCP sonraki
-fazlar için ayrılmıştır.
+ve Projeler sekmesi F5; hatırlatma ve sabah brifingi F6a kapsamındadır. MCP (F6b) ve
+ekran algısı (F6c) sonraki kalemler için ayrılmıştır.
 
 ## Akış ve sorumluluklar
 
@@ -27,7 +27,8 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
 - `config/`: katı pydantic ayarları; YAML sır içermez, anahtarlar yalnız ortamdan okunur.
 - `memory/`: Obsidian vault okuma yolları, sözcük ve isteğe bağlı embedding araması;
   araçlar `tools/plugins/memory.py` içindedir (ADR 0015).
-- `perception/`, `proactive/`, `mcp/`: sonraki fazlar için ayrılmış bileşen sınırları.
+- `proactive/`: zamanlama hesapları, SQLite oluşum deposu, teslim ve zamanlayıcı (ADR 0027).
+- `perception/`, `mcp/`: sonraki kalemler (F6c, F6b) için ayrılmış bileşen sınırları.
 - `bench/`: aynı döngüyü kullanan, izole masaüstünde çalışan kabul senaryoları.
 
 ## Masaüstü kanalı
@@ -130,6 +131,29 @@ Token yalnız `telegram.token_env` ortam değişkeninden okunur. Adı `_TOKEN` i
 temizleyicisi bu adın değerini gizler. Token URL'de taşındığı için httpx istek günlükleri
 kapalıdır; hata mesajları, `repr`, argv ve alt süreç ortamı tokeni içermez. Dışarı giden her
 Telegram çağrısı `telegram_out`, her toast `desktop_notification` denetim olayı yazar.
+
+## Proaktif olaylar
+
+Karar [ADR 0027](adr/0027-proactive-events.md) içindedir. `proactive.enabled` açıkken
+`jarvis desktop` ve `jarvis telegram` süreçleri `ProactiveScheduler` çalıştırır; CLI ve ses
+yalnız hatırlatma kurar. İki tür vardır: hatırlatma (`reminder_create`/`list`/`cancel`)
+model çağrılmadan teslim edilen sabit metindir; brifing config'teki sabit istemle başlayan,
+kendi AgentLoop'unda boş geçmişle çalışan gözetimsiz bir model turudur.
+
+```
+zamanlayıcı → oluşumu talep et (SQLite) → [brifing: CommandRunner.run(unattended=True)
+  → AgentLoop → SafetyGate: READ_ONLY dışı sorulmadan reddedilir] → Deliverer
+  → panel / toast / kendi Telegram sohbeti → proactive_delivery denetimi
+```
+
+Oluşum anahtarı `(event_id, scheduled_for)`'dur; iki süreç aynı depoyu kullansa da tek
+teslim olur. Talep edip ölen sürecin oluşumu `uncertain` olur, otomatik tekrar çalışmaz.
+Kapalıyken kaçan hatırlatma `reminder_grace_hours` içinde "gecikmeli" notuyla, daha eskisi
+tek özetle bildirilir; brifing `briefing_grace_hours` dışında geç çalışmaz. Günlük teslim
+sınırı `max_events_per_day`'dir; brifing maliyeti mevcut günlük bütçeden düşer. Gizli içerik
+işlemiş brifing ya da gizli turda kurulan hatırlatma Telegram'a gönderilmez. Teslim en az
+bir hedef başarıyı doğrulamadıkça `delivered` sayılmaz. Saat dilimi `zoneinfo` ile
+çözülür; Windows'ta `tzdata` paketi gerekir.
 
 ## Güvenlik sınırları
 

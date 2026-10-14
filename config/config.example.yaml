@@ -113,6 +113,29 @@ voice:
 #   repos_dir: null                          # kendi repolarınızın klonlandığı klasör
 #   auto_sync: true                          # açılışta klonla/fetch et
 
+# Proaktif olaylar (ADR 0027). KAPALI gelir. Açıkken hatırlatma araçları çalışır ve
+# `jarvis desktop` ile `jarvis telegram` süreçleri zamanlayıcıyı çalıştırır (ikisi aynı anda
+# açıksa da her olay bir kez teslim edilir). Jarvis kapalıyken hiçbir şey çalışmaz.
+# Brifing istemini model kuramaz veya değiştiremez; yalnız buradan tanımlanır. Brifing
+# gözetimsiz bir model turudur: yalnız okuma araçları çalışır, yan etkili her işlem
+# sorulmadan reddedilir. Brifing tanımlamak ücretli model çağrısına izin vermektir;
+# daily_budget_usd yine geçerlidir. Gizli içerik (dosya/pano) taşıyan sonuç Telegram'a
+# gönderilmez. days: 0 = Pazartesi ... 6 = Pazar.
+# proactive:
+#   enabled: true
+#   timezone: Europe/Istanbul
+#   reminder_grace_hours: 12      # kapalıyken kaçan hatırlatma bu süre içinde "gecikmeli" gelir
+#   briefing_grace_hours: 2       # daha geç açılırsa brifing o gün çalışmaz
+#   max_events_per_day: 20
+#   poll_seconds: 30
+#   telegram: true                # telegram.chat_id ve token varsa oraya da gönder
+#   briefings:
+#     - name: sabah
+#       at: "08:30"
+#       days: [0, 1, 2, 3, 4]
+#       prompt: >-
+#         Bekleyen hatırlatmalarımı ve kod ajanı işlerinin durumunu kısaca özetle.
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

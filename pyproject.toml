@@ -12,6 +12,8 @@ dependencies = [
   "httpx==0.28.1",
   "PyYAML==6.0.3",
   "Send2Trash==1.8.3",
+  # Windows'ta sistem IANA saat dilimi veritabanı yok; zoneinfo bunu kullanır (ADR 0027).
+  "tzdata==2026.4; sys_platform == 'win32'",
 ]
 
 [project.optional-dependencies]

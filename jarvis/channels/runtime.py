@@ -15,6 +15,7 @@ from jarvis.brain.providers import Provider, build_provider
 from jarvis.channels.runner import CommandRunner
 from jarvis.config.settings import Settings, load_settings
 from jarvis.memory.store import MemoryStore
+from jarvis.proactive.store import ProactiveStore, ProactiveStoreError
 from jarvis.safety.audit import AuditLog
 from jarvis.safety.gate import SafetyGate
 from jarvis.tools.base import ToolContext
@@ -88,6 +89,14 @@ def create_runtime(
         except CodeAgentError as error:
             log.emit("code_agent_unavailable", reason=str(error))
             context.services["code_agent_unavailable"] = str(error)
+        if loaded.proactive.enabled:
+            # Hatırlatma deposu (ADR 0027); kurulamazsa araçlar dürüstçe "kapalı" der.
+            try:
+                context.services["proactive_store"] = ProactiveStore(
+                    loaded.state_dir / "proactive.sqlite3"
+                )
+            except ProactiveStoreError as error:
+                log.emit("proactive_unavailable", error_type=type(error).__name__)
         builder = provider_builder if provider_builder is not None else build_provider
         selected_provider = provider if provider is not None else builder(loaded, log)
         agent = AgentLoop(selected_provider, gate, context, approve)

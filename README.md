@@ -468,6 +468,24 @@ Ekran görüntüsü, Qt paneline sentetik bir taslak ve sahte durum kaydı veril
 yerel/offscreen üretildi; bu, gerçek Claude Code işinin veya Windows kabulünün
 kanıtı değildir.
 
+### Hatırlatma ve sabah brifingi (Faz 6a)
+
+Varsayılan kapalıdır; config'te `proactive.enabled: true` ile açılır (örnek:
+`config/config.example.yaml`). Açıkken "yarın 09:30'da annemi aramayı hatırlat" gibi bir
+istek `reminder_create` ile yerel bir kayıt kurar; zamanı gelince metin model çağrılmadan
+panelde, Windows bildiriminde ve yapılandırılmışsa kendi Telegram sohbetinizde görünür.
+`reminder_list` ve `reminder_cancel` bekleyenleri gösterir ve iptal eder.
+
+Brifingler yalnız config'te tanımlanır; Jarvis bir brifing istemini kendisi kuramaz veya
+değiştiremez. Brifing turu gözetimsizdir: yalnız okuma araçları çalışır, dosya oluşturma
+veya mesaj gönderme gibi her yan etki sorulmadan reddedilir ve denetime yazılır. Gizli
+içerik (dosya/pano) kullanan brifing Telegram'a gönderilmez.
+
+Zamanlayıcı yalnız `jarvis desktop` veya `jarvis telegram` açıkken çalışır; ikisi birlikte
+açık olsa da her olay bir kez teslim edilir. Kapalıyken kaçan hatırlatmalar açılışta
+gecikmeli ya da tek bir özet olarak bildirilir. Gerekçe:
+[ADR 0027](docs/adr/0027-proactive-events.md).
+
 Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
 çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
 repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,

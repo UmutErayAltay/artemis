@@ -75,6 +75,12 @@ class ToolContext:
     cancelled: asyncio.Event = field(default_factory=asyncio.Event)
     turn_id: str = ""
     deadline: float | None = None
+    # Çağrı anında turun lekeli olup olmadığı; kalıcı kayıt kuran araç (hatırlatma) bunu
+    # kayda yazar ki dış içerikten doğan kayıt sonradan da öyle gösterilsin (ADR 0027).
+    turn_tainted: bool = False
+    # Turda veya geçmişte buluta verilmeyecek (dosya/pano) içerik görüldü; kalıcı kayıt
+    # bunu taşır ki sonradan Telegram'a gönderilmesin (ADR 0016/0027). Döngü doldurur.
+    turn_private: bool = False
     services: dict[str, Any] = field(default_factory=dict, repr=False)
 
 

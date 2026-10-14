@@ -40,23 +40,23 @@ class CommandRunner:
         self.loop.context.audit.emit("context_reset", removed_turns=removed)
         return True
 
-    async def _run_locked(self, text: str) -> RunResult:
+    async def _run_locked(self, text: str, unattended: bool) -> RunResult:
         window = self.conversation.render()
-        result = await self.loop.run(text, window)
+        result = await self.loop.run(text, window, unattended=unattended)
         if result.record is not None:
             self.conversation.record(result.record)
         return result
 
-    async def run(self, text: str) -> RunResult:
+    async def run(self, text: str, *, unattended: bool = False) -> RunResult:
         async with self._lock:
             if not self.loop.cleanup_pending:
                 self.loop.context.cancelled.clear()
             task = asyncio.current_task()
             if task is None:
-                return await self._run_locked(text)
+                return await self._run_locked(text, unattended)
             self._active_task = task
             try:
-                return await self._run_locked(text)
+                return await self._run_locked(text, unattended)
             finally:
                 if self._active_task is task:
                     self._active_task = None

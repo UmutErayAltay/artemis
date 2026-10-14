@@ -52,6 +52,7 @@ from jarvis.channels.desktop.bridge import (
     DesktopBridge,
     Failed,
     Finished,
+    Proactive,
     State,
     ToolFinished,
     VoiceCommand,
@@ -1286,6 +1287,11 @@ class DesktopWindow(QMainWindow):
                     self._step_block_for(event.request_id),
                 )
                 self.pet.flash_error()
+            return
+        if isinstance(event, Proactive):
+            # Kendiliğinden mesaj ayrı konuşmacıyla görünür; modelin geçmişine eklenmez.
+            self._append_chat("Jarvis (kendiliğinden)", f"{event.title}\n{event.body}")
+            self.pet.answer(event.body)
             return
         if isinstance(event, ActivityGap):
             self._add_activity(f"{event.dropped_count} eski etkinlik görünümden düştü", "#FFD78C")

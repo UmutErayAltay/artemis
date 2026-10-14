@@ -22,6 +22,8 @@ ApprovalCallback = Callable[[str, dict[str, Any]], bool]
 TAINT_NOTICE = "Bu adım dış bir içerik okunduktan sonra istendi"
 # Taint bu turda değil, bağlamdaki önceki bir turdan geliyorsa kullanıcıya bu söylenir.
 HISTORY_TAINT_NOTICE = TAINT_NOTICE + " (önceki bir turda)"
+# Gözetimsiz (proaktif) turda onay verecek kimse yoktur; varsayılan cevap hayırdır (ADR 0027).
+UNATTENDED_NOTICE = "Gözetimsiz turda yan etkili işlem yapılmaz"
 
 
 @dataclass
@@ -32,6 +34,9 @@ class TurnState:
     # içinde değişmez; yalnız `outbound` araçlar için onay nedenidir.
     history_external: bool = False
     deadline: float | None = None
+    # Turu kullanıcı başlatmadı (zamanlanmış brifing). READ_ONLY dışındaki her çağrı onay
+    # sorulmadan reddedilir; kanal yalnız bu bayrağı verir, politika burada kalır (ADR 0027).
+    unattended: bool = False
 
 
 class SafetyGate:
@@ -49,6 +54,7 @@ class SafetyGate:
         started = monotonic()
         context.turn_id = state.turn_id
         context.deadline = state.deadline
+        context.turn_tainted = state.tainted
         self.pending_notice = ""
         context.audit.emit(
             "tool_requested", turn_id=state.turn_id, tool=call.name, arguments=call.arguments
@@ -86,13 +92,33 @@ class SafetyGate:
                 started,
             )
         risk = normalize_risk(tool.risk_for(arguments, context))
+        normalized = arguments.model_dump(mode="json")
+        if state.unattended and risk is not Risk.READ_ONLY:
+            # approve çağrılmaz: karşıda kimse yokken açık kalan onay, saatler sonra eski
+            # bağlamla yan etki üretebilirdi. Red yine onay olayı olarak denetime yazılır.
+            self.pending_notice = f"{UNATTENDED_NOTICE}. {tool.description}"
+            context.audit.emit(
+                "approval",
+                turn_id=state.turn_id,
+                tool=call.name,
+                arguments=normalized,
+                approved=False,
+                unattended=True,
+                notice=self.pending_notice,
+            )
+            return self._finish(
+                ToolResult(status="denied", message=f"{UNATTENDED_NOTICE}; işlem çalıştırılmadı."),
+                call,
+                context,
+                state,
+                started,
+            )
         history_outbound = state.history_external and tool.outbound
         requires_approval = (
             risk is Risk.CONFIRM_REQUIRED
             or (state.tainted and risk is not Risk.READ_ONLY)
             or (history_outbound and risk is not Risk.READ_ONLY)
         )
-        normalized = arguments.model_dump(mode="json")
         approved: bool | None = None
         if requires_approval:
             if state.tainted:

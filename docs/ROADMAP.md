@@ -148,7 +148,7 @@ koduna geçilebilir, fakat "tamamlandı" yalnız kendi kabulüyle yazılır.
 
 | Sıra | Kalem | Durum | Karar |
 | --- | --- | --- | --- |
-| 6a | Proaktiflik: hatırlatma ve sabah brifingi | ADR yazıldı; kod bekliyor | [ADR 0027](adr/0027-proactive-events.md) |
+| 6a | Proaktiflik: hatırlatma ve sabah brifingi | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0027](adr/0027-proactive-events.md) |
 | 6b | MCP istemcisi (stdio) | planlandı | ADR 0028 (yazılacak) |
 | 6c | Ekran algısı | planlandı | ADR 0029 (yazılacak) |
 

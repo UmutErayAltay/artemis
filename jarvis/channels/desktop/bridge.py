@@ -26,8 +26,12 @@ from jarvis.channels.runtime import (
     Runtime,
     create_runtime,
 )
+from jarvis.channels.telegram.api import TelegramClient, build_telegram_client
 from jarvis.channels.voice.core import VoiceController
 from jarvis.channels.voice.factory import build_voice_controller
+from jarvis.proactive.delivery import Deliverer
+from jarvis.proactive.scheduler import ProactiveScheduler
+from jarvis.proactive.store import ProactiveStore
 from jarvis.tools.base import ToolResult
 
 RuntimeFactory = Callable[[Path, ApprovalCallback, AuditObserver], Runtime]
@@ -118,8 +122,24 @@ class ActivityGap:
     dropped_count: int
 
 
+@dataclass(frozen=True)
+class Proactive:
+    """Jarvis'in kendiliğinden mesajı (ADR 0027); hiçbir isteğe ve geçmişe bağlı değildir."""
+
+    title: str
+    body: str
+
+
 BridgeEvent = (
-    State | Finished | ToolFinished | Failed | Approval | VoiceCommand | Activity | ActivityGap
+    State
+    | Finished
+    | ToolFinished
+    | Failed
+    | Approval
+    | VoiceCommand
+    | Activity
+    | ActivityGap
+    | Proactive
 )
 
 
@@ -251,6 +271,10 @@ class DesktopBridge:
         self._voice_stop_requested = False
         self._voice_controller: VoiceController | None = None
         self._voice_task: asyncio.Task[None] | None = None
+        # Proaktif zamanlayıcı (ADR 0027) yalnız işçi döngüsünde yaşar.
+        self._proactive_stop: asyncio.Event | None = None
+        self._proactive_task: asyncio.Task[None] | None = None
+        self._proactive_telegram: TelegramClient | None = None
         self._ready = threading.Event()
         self._stopped = threading.Event()
         self._thread = threading.Thread(
@@ -461,7 +485,9 @@ class DesktopBridge:
             seq = self._audit_seq
             turn = record.get("turn_id")
             if record.get("event") == "turn_start" and turn is not None:
-                self._turn_requests[str(turn)] = self._broker.request_id or ""
+                # Gözetimsiz brifing turu, o sırada yürüyen kullanıcı isteğine yazılmaz.
+                owner = "" if record.get("unattended") else self._broker.request_id or ""
+                self._turn_requests[str(turn)] = owner
                 if len(self._turn_requests) > 64:
                     self._turn_requests.pop(next(iter(self._turn_requests)))
         event = Activity(
@@ -516,6 +542,7 @@ class DesktopBridge:
         model = configured.models.get(configured.primary_model)
         display_model = model.model if model is not None else configured.primary_model
         self._events.put(State("ready", f"Hazır · {display_model}"))
+        loop.call_soon(self._start_proactive)
         if self._shutdown:
             loop.call_soon(loop.stop)
         try:
@@ -526,6 +553,45 @@ class DesktopBridge:
             loop.close()
             self._stopped.set()
             self._events.put(State("stopped", "İşçi durdu."))
+
+    def _start_proactive(self) -> None:
+        runtime = self._runtime
+        if runtime is None or self._shutdown or not runtime.settings.proactive.enabled:
+            return
+        store = runtime.context.services.get("proactive_store")
+        if not isinstance(store, ProactiveStore):
+            return
+        self._proactive_telegram = build_telegram_client(runtime.settings, runtime.audit)
+        deliverer = Deliverer(
+            runtime.settings,
+            runtime.audit,
+            panel=self._proactive_panel,
+            telegram=self._proactive_telegram,
+        )
+        scheduler = ProactiveScheduler(runtime, store, deliverer)
+        self._proactive_stop = asyncio.Event()
+        self._proactive_task = asyncio.get_running_loop().create_task(
+            scheduler.serve(self._proactive_stop)
+        )
+
+    def _proactive_panel(self, title: str, body: str) -> bool:
+        if self._shutdown:
+            return False
+        self._events.put(Proactive(title, body))
+        return True
+
+    def _stop_proactive(self) -> None:
+        if self._proactive_stop is not None:
+            self._proactive_stop.set()
+        task = self._proactive_task
+        if task is not None and not task.done():
+            # Yürüyen brifing iptal edilir; talep edilmiş oluşum sonradan belirsiz raporlanır.
+            task.cancel()
+
+    def _close_proactive_client(self) -> None:
+        client, self._proactive_telegram = self._proactive_telegram, None
+        if client is not None:
+            client.close()
 
     def _start_turn(self, request_id: str, text: str) -> None:
         if self._shutdown or self._runtime is None or self._runtime.agent.cleanup_pending:
@@ -732,6 +798,7 @@ class DesktopBridge:
 
     def _shutdown_on_worker(self, request_id: str | None) -> None:
         self._stop_voice_on_worker()
+        self._stop_proactive()
         # Çalışan kod ajanı süreçleri panelle birlikte durur; yetim kalıp commit atmasın.
         if self._runtime is not None:
             self._runtime.shutdown()
@@ -745,9 +812,15 @@ class DesktopBridge:
         with self._lock:
             active_request = self._active_request
             voice_busy = self._voice_starting or self._voice_task is not None
+        proactive = self._proactive_task
+        proactive_busy = proactive is not None and not proactive.done()
         if runtime is not None and (
-            runtime.agent.cleanup_pending or active_request is not None or voice_busy
+            runtime.agent.cleanup_pending
+            or active_request is not None
+            or voice_busy
+            or proactive_busy
         ):
             asyncio.get_running_loop().call_later(0.05, self._stop_loop_when_clean)
             return
+        self._close_proactive_client()
         asyncio.get_running_loop().stop()
