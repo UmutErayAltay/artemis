@@ -147,6 +147,7 @@ async def test_projects_discovered_per_call_and_explicit_wins(tmp_path: Path) ->
     explicit = tmp_path / "mine"
     settings = Settings(
         workspace=tmp_path / "ws",
+        persist_memory=False,
         code_agent=CodeAgentConfig(
             github_owner="umut", repos_dir=repos, projects={"alpha": explicit}
         ),

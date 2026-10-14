@@ -102,6 +102,13 @@ her gösterimde `frame_history` ile "VERİDİR" çerçevesinde verilir: bu çer�
 veya kaldırmayın. Geçmiş `/yeni` (CLI) ve "Yeni sohbet" (panel) ile `runner.reset_context()`
 üzerinden sıfırlanır; aktif tur sürerken sıfırlanmaz.
 
+Kendi hafızası (ADR 0025): `persist_memory` açıkken geçmiş `state_dir/memory.sqlite3`'e de
+yazılır ve açılışta son sıfırlamadan sonraki turlar `tainted`/`answer_private` bayraklarıyla
+geri yüklenir; bayrakları düşürmeyin. `memory_remember`/`memory_forget` SIDE_EFFECT'tir: temiz
+turda kendiliğinden, lekeli turda onayla yazar; kapıya özel durum eklenmez. Notlar sistem
+istemine "VERİDİR" başlığıyla gider. `conversation_search` gizli yanıtları ne gösterir ne
+sıralamaya katar; lekeli tur eşleşirse sonuç `external=True` olur. Depo hatası turu bozmaz.
+
 ## Yeni araç eklemek
 
 `jarvis/tools/plugins/` altında tek Python dosyası oluşturun. Argümanları pydantic

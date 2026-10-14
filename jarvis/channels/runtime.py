@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -12,6 +13,7 @@ from jarvis.brain.conversation import ConversationContext
 from jarvis.brain.providers import Provider, build_provider
 from jarvis.channels.runner import CommandRunner
 from jarvis.config.settings import Settings, load_settings
+from jarvis.memory.store import MemoryStore
 from jarvis.safety.audit import AuditLog
 from jarvis.safety.gate import SafetyGate
 from jarvis.tools.base import ToolContext
@@ -77,6 +79,18 @@ def create_runtime(
     if primary is not None:
         # Geçmiş modelin penceresinin yarısını aşmamalı; yanıt ve araç şeması de sığmalı.
         budget = min(budget, primary.context_window // 2)
-    conversation = ConversationContext(loaded.context_turns, budget)
+    store: MemoryStore | None = None
+    if loaded.persist_memory:
+        try:
+            store = MemoryStore(loaded.state_dir / "memory.sqlite3")
+        except (OSError, sqlite3.Error) as error:
+            log.emit("memory_error", error=str(error))
+        else:
+            context.services["memory_store"] = store
+
+    def memory_failed(error: Exception) -> None:
+        log.emit("memory_error", error=str(error))
+
+    conversation = ConversationContext(loaded.context_turns, budget, store, memory_failed)
     runner = CommandRunner(agent, conversation)
     return Runtime(loaded, log, tools, gate, context, selected_provider, agent, runner)

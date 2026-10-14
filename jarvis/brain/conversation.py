@@ -8,13 +8,18 @@ eski bir araç çıktısı, bir kez çerçevelenmiş metin olarak kalıp sonraki
 
 import json
 import math
+import sqlite3
 from collections import deque
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
 from jarvis.brain.models import Message
 from jarvis.tools.base import ToolResult
+
+if TYPE_CHECKING:
+    from jarvis.memory.store import MemoryStore
 
 CHARS_PER_TOKEN = 3  # Türkçe için temkinli tahmin; sağlayıcı tokenizer'ı değildir.
 SHORT_OUTPUT_CHARS = 400  # Kısaltılmış eski araç çıktısının gövde sınırı.
@@ -123,20 +128,49 @@ def _shortenable_outputs(record: TurnRecord) -> int:
 
 
 class ConversationContext:
-    def __init__(self, max_turns: int, token_budget: int) -> None:
+    def __init__(
+        self,
+        max_turns: int,
+        token_budget: int,
+        store: "MemoryStore | None" = None,
+        on_error: Callable[[Exception], None] | None = None,
+    ) -> None:
         if max_turns < 0 or token_budget < 1:
             raise ValueError("max_turns >= 0 ve token_budget >= 1 olmalı")
         self.max_turns = max_turns
         self.token_budget = token_budget
         # maxlen=0 hiçbir şey saklamaz: bağlam kapalıyken bellek de tutulmaz.
         self._turns: deque[TurnRecord] = deque(maxlen=max_turns)
+        # Kalıcı depo bozulsa bile tur belleğe yazılıp sürer (ADR 0025); hata bildirilir.
+        self._store = store
+        self._on_error = on_error
+        if store is not None:
+            try:
+                # Kayıtlar tainted/answer_private bayraklarıyla döner: ADR 0012/0013 korunur.
+                self._turns.extend(store.recent_turns(max_turns))
+            except (OSError, sqlite3.Error) as error:
+                self._report(error)
+
+    def _report(self, error: Exception) -> None:
+        if self._on_error is not None:
+            self._on_error(error)
 
     def record(self, turn: TurnRecord) -> None:
         self._turns.append(turn)
+        if self._store is not None:
+            try:
+                self._store.add_turn(turn)
+            except (OSError, sqlite3.Error) as error:
+                self._report(error)
 
     def reset(self) -> int:
         removed = len(self._turns)
         self._turns.clear()
+        if self._store is not None:
+            try:
+                self._store.mark_reset()
+            except (OSError, sqlite3.Error) as error:
+                self._report(error)
         return removed
 
     def __len__(self) -> int:

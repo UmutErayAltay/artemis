@@ -187,6 +187,8 @@ class Settings(BaseModel):
     # yarısıyla runtime'da ayrıca sınırlanır.
     context_turns: int = Field(default=6, ge=0, le=50)
     context_token_budget: int = Field(default=6000, ge=256, le=200_000)
+    # Kalıcı hafıza (ADR 0025): False iken diske hiçbir şey yazılmaz (test/demo).
+    persist_memory: bool = True
     daily_budget_usd: Decimal = Field(default=Decimal("1"), ge=0)
     allow_paid: bool = False
     allow_cloud_file_content: bool = False

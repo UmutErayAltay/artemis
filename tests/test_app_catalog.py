@@ -19,7 +19,7 @@ def test_all_applications_merge_without_overriding_explicit_paths(
         "jarvis.tools.app_catalog.installed_applications",
         lambda: {"Notepad++": "startapp:id|notepad++.exe", "brave": "catalog-value"},
     )
-    settings = Settings(workspace=tmp_path, allow_all_applications=True,
+    settings = Settings(workspace=tmp_path, allow_all_applications=True, persist_memory=False,
                         applications={"brave": "brave.exe", "notepad": "notepad.exe"})
     from jarvis.brain.fake import ScriptedProvider
 
