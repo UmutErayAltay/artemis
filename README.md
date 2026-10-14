@@ -501,6 +501,16 @@ gitmez. Sunucu süreci yalnız işletim sistemi değişkenlerini ve sizin `env_p
 ile adlandırdıklarınızı görür. MCP sunucusunun kendi yaptıkları SafetyGate'in dışındadır.
 Gerekçe: [ADR 0028](docs/adr/0028-mcp-client.md).
 
+### Ekran okuma (Faz 6c)
+
+Varsayılan kapalıdır; `perception.screen_enabled: true` ile açılır. "Ekrandaki hatayı oku"
+gibi bir istekte `screen_read` etkin pencerenin metnini Windows'un yerleşik OCR'ıyla okur;
+tüm ekran ancak açıkça istenirse okunur. Her okuma ekranda onay ister, sesli "evet" yetmez;
+zamanlanmış brifing ekranı okuyamaz. Görüntü diske yazılmaz ve gönderilmez, yalnız metin
+döner. Ekran metni dış içerik sayılır (sonraki yan etki onay ister) ve
+`allow_cloud_screen` kapalıyken bulut modele ve Telegram'a verilmez. Türkçe metin için
+Windows'ta Türkçe dil paketi gerekir. Gerekçe: [ADR 0029](docs/adr/0029-screen-perception.md).
+
 Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
 çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
 repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,

@@ -429,8 +429,17 @@ class AgentLoop:
                     if result.status == "denied":
                         denied.add(fingerprint)
                     private = (
-                        result.content_kind == "file" and not settings.allow_cloud_file_content
-                    ) or (result.content_kind == "clipboard" and not settings.allow_cloud_clipboard)
+                        (result.content_kind == "file" and not settings.allow_cloud_file_content)
+                        or (
+                            result.content_kind == "clipboard"
+                            and not settings.allow_cloud_clipboard
+                        )
+                        # Ekran metni (ADR 0029) ayrı izinle buluta verilir.
+                        or (
+                            result.content_kind == "screen"
+                            and not settings.perception.allow_cloud_screen
+                        )
+                    )
                     private_seen = private_seen or private
                     audit.emit(
                         "privacy_decision",

@@ -22,7 +22,7 @@ class Risk(str, Enum):
     CONFIRM_REQUIRED = "CONFIRM_REQUIRED"
 
 
-ContentKind = Literal["text", "file", "clipboard", "web"]
+ContentKind = Literal["text", "file", "clipboard", "web", "screen"]
 
 
 def normalize_risk(value: object) -> Risk:

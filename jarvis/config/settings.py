@@ -293,6 +293,17 @@ class MCPConfig(BaseModel):
         return values
 
 
+class PerceptionConfig(BaseModel):
+    """Ekran algısı (ADR 0029); varsayılan kapalıdır, açıkken her okuma onay ister."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    screen_enabled: bool = False
+    # Ekran metni varsayılan olarak dosya/pano gibi gizlidir: bulut modele ve Telegram'a gitmez.
+    allow_cloud_screen: bool = False
+    timeout_seconds: float = Field(default=20.0, ge=1, le=120)
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -327,6 +338,7 @@ class Settings(BaseModel):
     code_agent: CodeAgentConfig = Field(default_factory=CodeAgentConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
+    perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

@@ -157,6 +157,17 @@ voice:
 #       confirm_tools: [write_file, move_file]
 #       env_passthrough: []
 
+# Ekran algısı (ADR 0029). KAPALI gelir. Açıkken "ekranda ne yazıyor" gibi isteklerde
+# screen_read aracı etkin pencerenin (ya da istenirse tüm ekranın) metnini Windows'un
+# yerel OCR'ıyla okur. HER okuma ekrandaki pencerede onay ister; brifing (gözetimsiz tur)
+# ekranı okuyamaz. Görüntü diske yazılmaz ve hiçbir yere gönderilmez; yalnız metin döner.
+# Ekran metni dosya/pano gibi gizlidir: allow_cloud_screen false iken bulut modele ve
+# Telegram'a verilmez. Türkçe OCR için Windows'ta Türkçe dil paketi gerekir.
+# perception:
+#   screen_enabled: true
+#   allow_cloud_screen: false
+#   timeout_seconds: 20
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

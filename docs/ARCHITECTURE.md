@@ -1,11 +1,11 @@
-# Jarvis: F0–F6b mimarisi
+# Jarvis: F0–F6 mimarisi
 
 Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. CLI ve isteğe bağlı PySide6
 masaüstü arayüzü aynı runtime, ajan döngüsü, sağlayıcılar, güvenlik kapısı ve
 araçları kullanır. Telegram ve bildirimler F4; proje taslağı, onaylı kod ajanı işleri
-ve Projeler sekmesi F5; hatırlatma ve sabah brifingi F6a, stdio MCP istemcisi F6b
-kapsamındadır. Ekran algısı (F6c) sonraki kalem için ayrılmıştır.
+ve Projeler sekmesi F5; hatırlatma ve sabah brifingi F6a, stdio MCP istemcisi F6b, onaylı
+ekran okuma F6c kapsamındadır.
 
 ## Akış ve sorumluluklar
 
@@ -30,7 +30,7 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
 - `proactive/`: zamanlama hesapları, SQLite oluşum deposu, teslim ve zamanlayıcı (ADR 0027).
 - `mcp/`: stdio JSON-RPC istemcisi ve MCP araçlarını runtime registry kopyasına ekleyen
   tek köprü (ADR 0028).
-- `perception/`: ekran algısı (F6c) için ayrılmış bileşen sınırı.
+- `perception/`: sabit PowerShell betiğiyle bellekte ekran yakalama ve Windows OCR (ADR 0029).
 - `bench/`: aynı döngüyü kullanan, izole masaüstünde çalışan kabul senaryoları.
 
 ## Masaüstü kanalı
@@ -177,6 +177,15 @@ Risk varsayılanı SIDE_EFFECT'tir; `destructiveHint` CONFIRM_REQUIRED'a yüksel
 Her MCP aracı `outbound`'dur. Alt süreç ortamı `child_environment()` artı
 `env_passthrough` adlarıdır. Her okuma 1 MiB ile, her çağrı sunucu zaman aşımı ve turun
 kalan süresiyle sınırlıdır.
+
+## Ekran algısı
+
+Karar [ADR 0029](adr/0029-screen-perception.md) içindedir. `screen_read` varsayılan
+kapalıdır; açıkken CONFIRM_REQUIRED'dır, bu yüzden gözetimsiz turda çalışmaz. Okuma
+`perception/screen.py`'deki sabit PowerShell 5.1 betiğiyle yapılır: kapsam yalnız ortam
+değişkeniyle gider, ekran bellekte yakalanır, `Windows.Media.Ocr` metne çevirir, görüntü
+diske yazılmaz. Sonuç `external=True` ve `content_kind="screen"` taşır; döngü bu türü
+`allow_cloud_screen` kapalıyken gizli sayar (bulut, Telegram, kalıcı hafıza bayrakları).
 
 ## Güvenlik sınırları
 
