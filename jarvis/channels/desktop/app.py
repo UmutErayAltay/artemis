@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from pydantic import BaseModel
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
     QBrush,
@@ -52,9 +53,11 @@ from jarvis.channels.desktop.bridge import (
     Failed,
     Finished,
     State,
+    ToolFinished,
     VoiceCommand,
 )
 from jarvis.channels.desktop.pet import TEAL, PetWidget, level_from_message
+from jarvis.channels.desktop.projects_panel import ProjectsPanel
 from jarvis.channels.desktop.settings_panel import SettingsPanel, save_choices
 from jarvis.channels.desktop.steps import StepLine, step_line
 from jarvis.channels.runtime import Runtime, create_runtime
@@ -257,7 +260,7 @@ class Mascot(QWidget):
 
 
 def _is_user_speaker(speaker: str) -> bool:
-    """"Siz" ve "Siz (ses)" aynı kullanıcı balonudur."""
+    """ "Siz" ve "Siz (ses)" aynı kullanıcı balonudur."""
     return speaker.startswith("Siz")
 
 
@@ -270,9 +273,7 @@ def _detail_text(activity: Activity) -> str:
     """Ham araç adı ve alanlar; yalnız ayrıntı ipucunda görünür, görünür satıra girmez."""
     raw_tool = activity.fields.get("tool")
     head = f"Ham araç adı: {raw_tool}" if isinstance(raw_tool, str) else f"Olay: {activity.event}"
-    payload = json.dumps(
-        activity.fields, ensure_ascii=False, indent=2, sort_keys=True, default=str
-    )
+    payload = json.dumps(activity.fields, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if len(payload) > _DETAIL_LIMIT:
         payload = payload[:_DETAIL_LIMIT] + "\n…"
     text = f"{head}\n{payload}"
@@ -414,9 +415,13 @@ class ChatTranscript(QWidget):
         welcome_layout.addWidget(description)
         suggestions = QHBoxLayout()
         suggestions.addWidget(QLabel("Örnekler"))
-        suggestion_texts = ("Merhaba", "örnek akış") if demo else (
-            "Saat kaç?",
-            "Dosyalarımı listele",
+        suggestion_texts = (
+            ("Merhaba", "örnek akış")
+            if demo
+            else (
+                "Saat kaç?",
+                "Dosyalarımı listele",
+            )
         )
         for text in suggestion_texts:
             button = QPushButton(text)
@@ -466,9 +471,7 @@ class ChatTranscript(QWidget):
         row_layout = QHBoxLayout(bubble_row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         bubble = QFrame()
-        bubble.setObjectName(
-            "messageUser" if _is_user_speaker(speaker) else "messageAssistant"
-        )
+        bubble.setObjectName("messageUser" if _is_user_speaker(speaker) else "messageAssistant")
         bubble_layout = QVBoxLayout(bubble)
         bubble_layout.setContentsMargins(14, 10, 14, 11)
         bubble_layout.setSpacing(5)
@@ -492,9 +495,10 @@ class ChatTranscript(QWidget):
         column.addWidget(bubble_row)
         self.content_layout.insertWidget(self.content_layout.count() - 1, row)
         QTimer.singleShot(
-            0, lambda: self._scroll_area.verticalScrollBar().setValue(
+            0,
+            lambda: self._scroll_area.verticalScrollBar().setValue(
                 self._scroll_area.verticalScrollBar().maximum()
-            )
+            ),
         )
 
     def clear(self) -> None:
@@ -590,9 +594,7 @@ class ApprovalDialog(QDialog):
         self._decided = True
         accepted = self._on_decision(self.item, approved)
         decision = approved and accepted
-        self.done(
-            QDialog.DialogCode.Accepted if decision else QDialog.DialogCode.Rejected
-        )
+        self.done(QDialog.DialogCode.Accepted if decision else QDialog.DialogCode.Rejected)
 
     def reject(self) -> None:
         self._choose(False)
@@ -710,9 +712,7 @@ class DesktopWindow(QMainWindow):
                     registry=registry,
                     audit=audit,
                 )
-                runtime.context.services["demo_records"] = {
-                    "sample": "Demo kitaplığı: örnek metin"
-                }
+                runtime.context.services["demo_records"] = {"sample": "Demo kitaplığı: örnek metin"}
                 return runtime
 
             self.bridge = DesktopBridge(config_path, factory)
@@ -910,6 +910,12 @@ class DesktopWindow(QMainWindow):
         self.splitter.setSizes([740, 390])
         self.tabs = QTabWidget()
         self.tabs.addTab(self.splitter, "Sohbet")
+        self.projects_panel = ProjectsPanel(demo=self._demo)
+        self.projects_panel.tool_requested.connect(self._submit_project_tool)
+        self._projects_timer = QTimer(self)
+        self._projects_timer.setInterval(2000)
+        self._projects_timer.timeout.connect(self._refresh_projects)
+        self._projects_timer.start()
         self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
         self.settings_panel.apply_requested.connect(self._apply_settings)
         self.settings_panel.continuous_mode.toggled.connect(self._live_continuous)
@@ -918,6 +924,7 @@ class DesktopWindow(QMainWindow):
         self.settings_scroll.setWidgetResizable(True)
         self.settings_scroll.setWidget(self.settings_panel)
         self.tabs.addTab(self.settings_scroll, "Ayarlar")
+        self.tabs.addTab(self.projects_panel, "Projeler")
         main.addWidget(self.tabs, 1)
 
         self.setCentralWidget(root)
@@ -953,9 +960,7 @@ class DesktopWindow(QMainWindow):
             self._tray.showMessage("Jarvis", text, QSystemTrayIcon.MessageIcon.Information, 6000)
 
     def _build_overlay(self) -> None:
-        self.overlay = QuickOverlay(
-            self._submit_overlay, self._cancel_active, self._show_panel
-        )
+        self.overlay = QuickOverlay(self._submit_overlay, self._cancel_active, self._show_panel)
         self.overlay.setStyleSheet(_STYLE)
 
     def _apply_settings(self, model_id: str, device: int | str | None) -> None:
@@ -966,7 +971,9 @@ class DesktopWindow(QMainWindow):
             return
         try:
             save_choices(
-                self._config_path, model_id, device,
+                self._config_path,
+                model_id,
+                device,
                 applications=self.settings_panel.applications,
                 allow_all_applications=self.settings_panel.all_applications.isChecked(),
                 code_agent=self.settings_panel.github_values(),
@@ -1071,6 +1078,23 @@ class DesktopWindow(QMainWindow):
         self.overlay.set_busy(True)
         return True
 
+    def _submit_project_tool(self, name: str, arguments: BaseModel) -> None:
+        request_id = self.bridge.submit_tool(name, arguments)
+        if request_id is None:
+            self.projects_panel.notice.setText("Başka işlem sürüyor; istek çalıştırılmadı.")
+            return
+        self._active_request = request_id
+        self._busy = True
+        self._set_controls()
+
+    def _refresh_projects(self) -> None:
+        if (
+            self.tabs.currentWidget() is self.projects_panel
+            and self._worker_ready
+            and not self._busy
+        ):
+            self.projects_panel.refresh()
+
     def _new_chat(self) -> None:
         # Ekran, işçi sıfırlamayı doğruladığında (context_reset olayı) temizlenir;
         # işçi reddederse görünen sohbet ile modelin bağlamı ayrışmaz.
@@ -1127,9 +1151,8 @@ class DesktopWindow(QMainWindow):
     def _set_controls(self) -> None:
         enabled = self._worker_ready and not self._busy and not self._exiting
         self.settings_panel.apply_button.setEnabled(enabled and not self._demo)
-        self.voice_button.setEnabled(
-            self._worker_ready and not self._exiting and not self._demo
-        )
+        self.voice_button.setEnabled(self._worker_ready and not self._exiting and not self._demo)
+        self.projects_panel.set_busy(not enabled)
         self.prompt.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
         self.new_chat_button.setEnabled(enabled)
@@ -1237,6 +1260,11 @@ class DesktopWindow(QMainWindow):
         if isinstance(event, Approval):
             self._show_approval(event)
             return
+        if isinstance(event, ToolFinished):
+            if event.request_id == self._active_request:
+                self._dismiss_approval_for(event.request_id)
+                self.projects_panel.accept_result(event.tool_name, event.result)
+            return
         if isinstance(event, Finished):
             if event.request_id == self._active_request:
                 self._dismiss_approval_for(event.request_id)
@@ -1287,9 +1315,7 @@ class DesktopWindow(QMainWindow):
         self.pet.set_approval(True)
 
     def _decide_approval(self, item: Approval, approved: bool) -> bool:
-        return self.bridge.decide(
-            item.request_id, item.turn_id, item.approval_id, approved
-        )
+        return self.bridge.decide(item.request_id, item.turn_id, item.approval_id, approved)
 
     def _dismiss_approval_for(self, request_id: str) -> None:
         dialog = self._approval_dialog
@@ -1313,9 +1339,7 @@ class DesktopWindow(QMainWindow):
         elif event.event == "tool_result":
             result = fields.get("result", {})
             status = (
-                result.get("status", "bilinmiyor")
-                if isinstance(result, dict)
-                else "bilinmiyor"
+                result.get("status", "bilinmiyor") if isinstance(result, dict) else "bilinmiyor"
             )
             status_labels = {
                 "ok": "tamamlandı",

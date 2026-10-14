@@ -1,10 +1,16 @@
 """Tek kullanıcıdan eşzamanlı gelen turların onay bağlamını karıştırmaz."""
 
 import asyncio
+from time import monotonic
 from typing import Any
+
+from pydantic import BaseModel
 
 from jarvis.brain.agent_loop import AgentLoop, RunResult
 from jarvis.brain.conversation import ConversationContext
+from jarvis.brain.models import ToolCall
+from jarvis.safety.gate import TurnState
+from jarvis.tools.base import ToolResult
 
 
 class CommandRunner:
@@ -56,3 +62,30 @@ class CommandRunner:
                     self._active_task = None
                 if not self.loop.cleanup_pending:
                     self.loop.context.cancelled.clear()
+
+    async def dispatch_tool(self, name: str, arguments: BaseModel) -> ToolResult:
+        """UI'nin tipli çağrısı: LLM olmadan, aynı kilit ve SafetyGate ile yeni tur."""
+        if self._lock.locked() or self.loop.cleanup_pending:
+            return ToolResult(message="Başka bir işlem sürüyor; araç çalıştırılmadı.")
+        async with self._lock:
+            context = self.loop.context
+            context.cancelled.clear()
+            self._active_task = asyncio.current_task()
+            state = TurnState(
+                deadline=monotonic() + context.settings.max_seconds,
+                history_external=self.conversation.render().external,
+            )
+            context.audit.emit("turn_start", turn_id=state.turn_id, channel="typed_tool")
+            try:
+                return await self.loop.gate.dispatch(
+                    ToolCall(
+                        id=state.turn_id, name=name, arguments=arguments.model_dump(mode="json")
+                    ),
+                    context,
+                    state,
+                    self.loop.approve,
+                )
+            finally:
+                self._active_task = None
+                if not self.loop.cleanup_pending:
+                    context.cancelled.clear()

@@ -15,6 +15,8 @@ from time import monotonic
 from typing import Any
 from uuid import uuid4
 
+from pydantic import BaseModel
+
 from jarvis.brain.agent_loop import RunResult
 from jarvis.channels.runtime import (
     Approval as ApprovalCallback,
@@ -26,6 +28,7 @@ from jarvis.channels.runtime import (
 )
 from jarvis.channels.voice.core import VoiceController
 from jarvis.channels.voice.factory import build_voice_controller
+from jarvis.tools.base import ToolResult
 
 RuntimeFactory = Callable[[Path, ApprovalCallback, AuditObserver], Runtime]
 # İşçi döngüsünde çalışır: runtime, köprünün istek modelinden geçen komut çalıştırıcısı
@@ -36,9 +39,7 @@ VoiceFactory = Callable[
 ]
 
 _BUSY_TEXT = "Şu an başka bir işlem sürüyor; komut çalıştırılmadı."
-_VOICE_ERROR_TEXT = (
-    "Ses açılamadı; ses paketini, model dosyalarını ve mikrofonu kontrol edin."
-)
+_VOICE_ERROR_TEXT = "Ses açılamadı; ses paketini, model dosyalarını ve mikrofonu kontrol edin."
 
 
 def _tool_labels(runtime: Runtime) -> dict[str, tuple[str, str]]:
@@ -66,6 +67,13 @@ class State:
 class Finished:
     request_id: str
     result: Any = field(repr=False)
+
+
+@dataclass(frozen=True)
+class ToolFinished:
+    request_id: str
+    tool_name: str
+    result: ToolResult = field(repr=False)
 
 
 @dataclass(frozen=True)
@@ -110,7 +118,9 @@ class ActivityGap:
     dropped_count: int
 
 
-BridgeEvent = State | Finished | Failed | Approval | VoiceCommand | Activity | ActivityGap
+BridgeEvent = (
+    State | Finished | ToolFinished | Failed | Approval | VoiceCommand | Activity | ActivityGap
+)
 
 
 @dataclass
@@ -184,9 +194,7 @@ class _ApprovalBroker:
                 if self.pending is item:
                     self.pending = None
 
-    def decide(
-        self, request_id: str, turn_id: str, approval_id: str, approved: bool
-    ) -> bool:
+    def decide(self, request_id: str, turn_id: str, approval_id: str, approved: bool) -> bool:
         with self.lock:
             item = self.pending
             if (
@@ -326,6 +334,49 @@ class DesktopBridge:
         loop.call_soon_threadsafe(self._start_turn, request_id, text)
         return request_id
 
+    def submit_tool(self, name: str, arguments: BaseModel) -> str | None:
+        """Tipli GUI isteği aynı worker ve onay aracısından geçer; model çağrılmaz."""
+        if len(arguments.model_dump_json().encode("utf-8")) > 32 * 1024:
+            return None
+        request_id = str(uuid4())
+        with self._lock:
+            if (
+                not self._ready.is_set()
+                or self._stopped.is_set()
+                or self._shutdown
+                or self._active_request is not None
+                or self._cleanup_pending
+            ):
+                return None
+            self._active_request = request_id
+            self._broker.begin_request(request_id)
+        loop = self._loop
+        if loop is None:
+            with self._lock:
+                self._active_request = None
+            return None
+        self._events.put(State("running", "Araç isteği çalışıyor.", request_id))
+        loop.call_soon_threadsafe(
+            self._start_tool, request_id, name, arguments.model_copy(deep=True)
+        )
+        return request_id
+
+    def _start_tool(self, request_id: str, name: str, arguments: BaseModel) -> None:
+        self._active_task = asyncio.create_task(self._run_tool(request_id, name, arguments))
+
+    async def _run_tool(self, request_id: str, name: str, arguments: BaseModel) -> None:
+        runtime = self._runtime
+        try:
+            if runtime is None or self._shutdown or self._broker.is_cancelled():
+                self._events.put(Failed(request_id, "Cancelled", "Araç başlamadan iptal edildi."))
+                return
+            result = await runtime.runner.dispatch_tool(name, arguments)
+            self._events.put(ToolFinished(request_id, name, result))
+        except (OSError, ValueError, RuntimeError, TypeError) as error:
+            self._events.put(Failed(request_id, type(error).__name__, "Araç tamamlanamadı."))
+        finally:
+            self._finish_request(request_id)
+
     def cancel(self, request_id: str) -> bool:
         with self._lock:
             if self._active_request != request_id or self._shutdown:
@@ -354,9 +405,7 @@ class DesktopBridge:
         loop.call_soon_threadsafe(self._reset_on_worker)
         return True
 
-    def decide(
-        self, request_id: str, turn_id: str, approval_id: str, approved: bool
-    ) -> bool:
+    def decide(self, request_id: str, turn_id: str, approval_id: str, approved: bool) -> bool:
         return self._broker.decide(request_id, turn_id, approval_id, approved)
 
     def shutdown(self) -> None:
@@ -404,9 +453,7 @@ class DesktopBridge:
             result = fields.get("result")
             if event_name == "tool_result" and isinstance(result, dict):
                 summary["result"] = {
-                    key: result[key]
-                    for key in ("status", "success", "message")
-                    if key in result
+                    key: result[key] for key in ("status", "success", "message") if key in result
                 }
             fields = summary
         with self._audit_lock:
@@ -686,9 +733,8 @@ class DesktopBridge:
     def _shutdown_on_worker(self, request_id: str | None) -> None:
         self._stop_voice_on_worker()
         # Çalışan kod ajanı süreçleri panelle birlikte durur; yetim kalıp commit atmasın.
-        jobs = self._runtime.context.services.get("code_agent_jobs") if self._runtime else None
-        if jobs is not None:
-            jobs.shutdown()
+        if self._runtime is not None:
+            self._runtime.shutdown()
         if request_id is not None:
             self._cancel_on_worker(request_id)
         else:

@@ -111,6 +111,7 @@ async def chat(config_path: Path) -> None:
             print(f"Jarvis: {result.text}")
     finally:
         signal.signal(signal.SIGINT, previous_sigint)
+        runtime.shutdown()
 
 
 def main() -> None:

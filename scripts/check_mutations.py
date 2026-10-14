@@ -1,4 +1,4 @@
-"""Üç güvenlik regresyon testini geçici kaynak kopyalarında mutasyonla sınar."""
+"""Güvenlik regresyonlarını geçici kaynak kopyalarında mutasyonla sınar."""
 
 from __future__ import annotations
 
@@ -47,6 +47,16 @@ MUTATIONS = (
         test="tests/test_tools.py::test_trash_error_does_not_destroy_file",
         before='return ToolResult(status="error", message=f"Dosya işlemi başarısız: {detail}")',
         after='return ToolResult(success=True, status="ok", message="Dosya işlemi başarılı.")',
+    ),
+    Mutation(
+        name="f5_start_approval_removed",
+        source="jarvis/tools/plugins/code_agent.py",
+        test=(
+            "tests/test_code_agent.py::"
+            "test_prepare_never_spawns_and_start_approves_entire_immutable_spec"
+        ),
+        before="args_model = StartArguments\n    risk = Risk.CONFIRM_REQUIRED",
+        after="args_model = StartArguments\n    risk = Risk.SIDE_EFFECT",
     ),
 )
 

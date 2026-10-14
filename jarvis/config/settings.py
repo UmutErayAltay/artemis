@@ -148,7 +148,10 @@ class CodeAgentConfig(BaseModel):
     projects: dict[str, Path] = Field(default_factory=dict)
     command: str = Field(default="claude", min_length=1)
     max_minutes: float = Field(default=20.0, ge=1, le=120)
-    model: str | None = None
+    model: str | None = None  # Eski yönetici modeli ayarı; manager_model kazanır.
+    manager_model: str | None = Field(default=None, min_length=1, max_length=128)
+    coder_model: str | None = Field(default=None, min_length=1, max_length=128)
+    tester_model: str | None = Field(default=None, min_length=1, max_length=128)
     # Kendi GitHub repoları (ADR 0023): sahip + klasör verilirse klasördeki repolar
     # çalışma anında projeler listesine eklenir. Kimlik doğrulamayı `gh` yönetir.
     github_owner: str | None = None

@@ -472,7 +472,8 @@ def test_settings_apply_restarts_runtime_with_selected_model_and_device(
     try:
         _wait(app, lambda: window._worker_ready)
         _wait(app, lambda: window.settings_panel.model_combo.findData("second-model") >= 0)
-        assert window.tabs.tabText(1) == "Ayarlar"
+        assert window.tabs.indexOf(window.settings_scroll) >= 0
+        window.tabs.setCurrentWidget(window.settings_scroll)
         window.settings_panel.model_combo.setCurrentIndex(
             window.settings_panel.model_combo.findData("second-model")
         )

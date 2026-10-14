@@ -435,6 +435,7 @@ async def run_telegram(config_path: Path) -> int:
     # Gizlilik izlemesi: runtime kurulmadan önce de olaylar kaçmasın diye hemen bağlanır.
     audit.on_record = channel.observe
     stop = asyncio.Event()
+    runtime: Runtime | None = None
     try:
         runtime = create_runtime(config_path, channel.approve, settings=settings, audit=audit)
         channel.attach(runtime)
@@ -454,5 +455,7 @@ async def run_telegram(config_path: Path) -> int:
         await channel.serve(stop)
     finally:
         stop.set()
+        if runtime is not None:
+            runtime.shutdown()
         client.close()
     return 0
