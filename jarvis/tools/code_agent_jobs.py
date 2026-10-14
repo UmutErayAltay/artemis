@@ -15,7 +15,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
-from contextlib import suppress
+from contextlib import ExitStack, closing, suppress
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -136,39 +136,48 @@ class CodeAgentJobs:
         if store_path is not None:
             store_path.parent.mkdir(parents=True, exist_ok=True)
             try:
-                self._ownership = StoreOwnership(store_path.with_suffix(".lock"))
+                ownership = StoreOwnership(store_path.with_suffix(".lock"))
+                self._ownership = ownership
             except OSError as error:
                 raise CodeAgentError(
                     "Proje iş servisi başka bir runtime tarafından kullanılıyor; "
                     "bu kanalda proje araçları kapalı."
                 ) from error
-            descriptor = os.open(store_path, os.O_CREAT | os.O_RDWR, 0o600)
-            os.close(descriptor)
-            with sqlite3.connect(store_path) as connection:
-                connection.execute(
-                    "CREATE TABLE IF NOT EXISTS records (key TEXT PRIMARY KEY, "
-                    "kind TEXT NOT NULL, value TEXT NOT NULL)"
-                )
-                for key, kind, value in connection.execute("SELECT key, kind, value FROM records"):
-                    record = json.loads(value)
-                    if kind == "draft":
-                        self._drafts[key] = ProjectSpec.model_validate(record)
-                    else:
-                        if record["status"] in ACTIVE or record["status"] == "cleanup_pending":
-                            record.update(
-                                status="interrupted",
-                                cleanup_pending=True,
-                                summary="Önceki süreç kesildi; otomatik yeniden başlatılmadı. "
-                                "Depo kilidi belirsiz süreç nedeniyle korunuyor.",
-                            )
-                        self._jobs[key] = record
-            for record in self._jobs.values():
-                self._save(record["job_id"], "job", record)
+            with ExitStack() as initialization:
+                initialization.callback(ownership.close)
+                descriptor = os.open(store_path, os.O_CREAT | os.O_RDWR, 0o600)
+                os.close(descriptor)
+                with closing(sqlite3.connect(store_path)) as connection, connection:
+                    connection.execute(
+                        "CREATE TABLE IF NOT EXISTS records (key TEXT PRIMARY KEY, "
+                        "kind TEXT NOT NULL, value TEXT NOT NULL)"
+                    )
+                    for key, kind, value in connection.execute(
+                        "SELECT key, kind, value FROM records"
+                    ):
+                        record = json.loads(value)
+                        if kind == "draft":
+                            self._drafts[key] = ProjectSpec.model_validate(record)
+                        else:
+                            if record["status"] in ACTIVE or record["status"] == "cleanup_pending":
+                                record.update(
+                                    status="interrupted",
+                                    cleanup_pending=True,
+                                    summary="Önceki süreç kesildi; otomatik yeniden başlatılmadı. "
+                                    "Depo kilidi belirsiz süreç nedeniyle korunuyor.",
+                                )
+                            self._jobs[key] = record
+                for record in self._jobs.values():
+                    self._save(record["job_id"], "job", record)
+                initialization.pop_all()
 
     def _save(self, key: str, kind: str, record: dict[str, Any]) -> None:
         if self._store_path is not None:
             try:
-                with sqlite3.connect(self._store_path, timeout=2) as connection:
+                with (
+                    closing(sqlite3.connect(self._store_path, timeout=2)) as connection,
+                    connection,
+                ):
                     connection.execute(
                         "INSERT OR REPLACE INTO records VALUES (?, ?, ?)",
                         (key, kind, json.dumps(record, ensure_ascii=False)),

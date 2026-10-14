@@ -361,9 +361,19 @@ def test_normal_exit_cleans_child_with_closed_stdio(tmp_path: Path, repo: Path) 
 def test_cleanup_failure_retains_repo_lock(
     tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    jobs, _ = make_jobs(tmp_path, reply())
-    monkeypatch.setattr("jarvis.tools.code_agent_process.kill_tree", lambda proc: False)
+    from jarvis.tools.code_agent_process import ProcessCapture
+
+    jobs, factory = make_jobs(tmp_path, reply())
+    original_finish = ProcessCapture.finish
+
+    def unverified_cleanup(capture: ProcessCapture, kill: bool) -> bool:
+        # Gerçek çocukları temizler; yalnız doğrulama sonucu her platformda başarısızdır.
+        original_finish(capture, kill=kill)
+        return False
+
+    monkeypatch.setattr(ProcessCapture, "finish", unverified_cleanup)
     job = run_job(jobs, repo)
+    assert factory.procs[0].poll() is not None
     assert job["status"] == "cleanup_pending" and job["cleanup_pending"]
     with pytest.raises(CodeAgentError, match="belirsiz"):
         jobs.start("alias", repo, "görev", command=sys.executable)
