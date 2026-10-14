@@ -64,6 +64,12 @@ ignore_missing_imports = true
 module = ["PySide6.*"]
 ignore_missing_imports = true
 
+# PySide6 yalnız `[desktop]` ekiyle kurulur; `checks` işinde Qt tipleri Any olur ve
+# QWidget/QThread alt sınıfları `misc` hatası verir.
 [[tool.mypy.overrides]]
-module = ["jarvis.channels.desktop.app"]
+module = [
+  "jarvis.channels.desktop.app",
+  "jarvis.channels.desktop.pet",
+  "jarvis.channels.desktop.settings_panel",
+]
 disable_error_code = ["misc", "no-any-return"]

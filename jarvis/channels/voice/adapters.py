@@ -220,7 +220,8 @@ class FasterWhisperRecognizer:
         for directory in self.config.cuda_library_dirs:
             if not directory.is_dir():
                 raise RuntimeError("Yapılandırılmış CUDA kütüphane dizini bulunamadı")
-            self._cuda_handles.append(os.add_dll_directory(str(directory)))
+            handle = os.add_dll_directory(str(directory))  # type: ignore[attr-defined, unused-ignore]
+            self._cuda_handles.append(handle)
         for filename in ("cublasLt64_12.dll", "cublas64_12.dll", "cudnn64_9.dll"):
             for directory in self.config.cuda_library_dirs:
                 path = directory / filename

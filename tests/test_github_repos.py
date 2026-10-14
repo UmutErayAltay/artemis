@@ -192,10 +192,16 @@ def test_env_has_no_secrets(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> 
         github_repos.run_command(["gh"], None, 5)
 
 
-def test_settings_validation_and_roundtrip(tmp_path: Path) -> None:
+def test_settings_validation() -> None:
     for bad in ("-bad", "a" * 40, "x y", "a/b", ""):
         with pytest.raises(ValueError):
             CodeAgentConfig(github_owner=bad)
+
+
+def test_settings_roundtrip(tmp_path: Path) -> None:
+    # settings_panel modül başında PySide6 içe aktarır; CI'ın `checks` işi yalnız
+    # `[dev]` kurar, bu yüzden Qt yoksa atlanır (doğrulama testi yine koşar).
+    pytest.importorskip("PySide6")
     from jarvis.channels.desktop.settings_panel import save_choices
 
     path = tmp_path / "config.yaml"

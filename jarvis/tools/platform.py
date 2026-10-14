@@ -193,7 +193,9 @@ class WindowsDesktop:
 
         pids = self._application_pids(self._application_process_name(executable))
         user32 = self._win_dll("user32")
-        callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
+        callback_type = ctypes.WINFUNCTYPE(  # type: ignore[attr-defined, unused-ignore]
+            wintypes.BOOL, wintypes.HWND, wintypes.LPARAM
+        )
         user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
         user32.EnumWindows.restype = wintypes.BOOL
         user32.EnumChildWindows.argtypes = [wintypes.HWND, callback_type, wintypes.LPARAM]

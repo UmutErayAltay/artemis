@@ -59,7 +59,7 @@ def installed_applications() -> dict[str, str]:
     result = subprocess.run(
         [str(powershell), "-NoProfile", "-NonInteractive", "-Command", _SCRIPT],
         capture_output=True, env=child_environment(), timeout=30,
-        creationflags=subprocess.CREATE_NO_WINDOW,
+        creationflags=subprocess.CREATE_NO_WINDOW,  # type: ignore[attr-defined, unused-ignore]
     )
     if result.returncode != 0:
         raise OSError("Kurulu uygulama kataloğu alınamadı")
