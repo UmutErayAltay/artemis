@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import queue
 import shutil
 import subprocess
@@ -23,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from jarvis.tools.code_agent_process import kill_tree, process_options
+from jarvis.tools.code_agent_process import NO_WINDOW, kill_tree
 
 SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = ("2025-06-18", "2025-03-26", "2024-11-05")
 MAX_MESSAGE_BYTES = 1 << 20
@@ -31,6 +32,21 @@ MAX_LIST_PAGES = 20
 ERROR_MESSAGE_LIMIT = 200
 GRACEFUL_EXIT_SECONDS = 1.0
 CLEANUP_SECONDS = 2.0
+
+
+def _spawn_options() -> dict[str, Any]:
+    """Süreç ağacı `kill_tree` ile kapatılabilsin diye yeni grup/oturum açılır.
+
+    Kod ajanının `process_options()`'ı kullanılmaz: Windows'ta CREATE_SUSPENDED ekler,
+    çünkü o süreç Job Object'e bağlandıktan sonra devam ettirilir. MCP sunucusu devam
+    ettirilmediği için askıda kalır ve her çağrı zaman aşımına düşerdi (Windows CI'da
+    ölçüldü).
+    """
+    if os.name == "nt":
+        return {
+            "creationflags": NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+        }
+    return {"start_new_session": True}
 
 
 class MCPError(RuntimeError):
@@ -100,7 +116,7 @@ class _Session:
                 env=dict(env),
                 cwd=cwd,
                 shell=False,
-                **process_options(),
+                **_spawn_options(),
             )
         except (OSError, ValueError) as exc:
             raise MCPError("MCP sunucusu başlatılamadı.", error_type="process") from exc
@@ -223,7 +239,12 @@ class _Session:
 
     # --- temizlik --------------------------------------------------------
 
-    def close(self) -> None:
+    def close(self, *, graceful: bool = True) -> None:
+        """Hata yolunda (`graceful=False`) sunucunun kendiliğinden çıkması beklenmez.
+
+        Takılmış ya da bozuk yanıt vermiş sunucu EOF'a uymaz; beklemek yalnız süre sınırını
+        aşırır. Süreç ağacı doğrudan kapatılır.
+        """
         proc = self._proc
         self._outgoing.put(None)
         writer = self._threads[2]
@@ -231,7 +252,7 @@ class _Session:
         if not writer.is_alive():
             self._close_pipe(proc.stdin)  # EOF: uyumlu sunucu kendiliğinden çıkar.
         try:
-            proc.wait(timeout=GRACEFUL_EXIT_SECONDS)
+            proc.wait(timeout=GRACEFUL_EXIT_SECONDS if graceful else 0)
         except subprocess.TimeoutExpired:
             kill_tree(proc)
             # Sınır dolarsa vazgeçilir; bekleme sınırsız olmaz.
@@ -274,11 +295,14 @@ class StdioMCPClient:
     def list_tools(self) -> list[MCPToolSpec]:
         deadline = time.monotonic() + self.timeout
         session = self._open(deadline)
+        graceful = False
         try:
             self._handshake(session)
-            return self._collect_tools(session)
+            tools = self._collect_tools(session)
+            graceful = True
+            return tools
         finally:
-            session.close()
+            session.close(graceful=graceful)
 
     def call_tool(
         self, name: str, arguments: Mapping[str, Any], *, timeout: float | None = None
@@ -286,12 +310,15 @@ class StdioMCPClient:
         limit = self.timeout if timeout is None else min(timeout, self.timeout)
         deadline = time.monotonic() + limit
         session = self._open(deadline)
+        graceful = False
         try:
             self._handshake(session)
             result = session.request("tools/call", {"name": name, "arguments": dict(arguments)})
-            return self._parse_call_result(result)
+            parsed = self._parse_call_result(result)
+            graceful = True
+            return parsed
         finally:
-            session.close()
+            session.close(graceful=graceful)
 
     def _open(self, deadline: float) -> _Session:
         return _Session(self.command, self.env, self.cwd, deadline, self.max_message_bytes)
