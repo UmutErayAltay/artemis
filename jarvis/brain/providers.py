@@ -166,6 +166,14 @@ def _openrouter_max_price(model: ModelConfig) -> dict[str, float]:
     }
 
 
+_TRUNCATED = "…(yanıt uzunluk sınırında kesildi; devam için \"devam et\" de)"
+
+
+def _mark_truncated(content: str, truncated: bool) -> str:
+    """Sağlayıcı çıktı sınırında durduysa bunu sessizce yutma; kullanıcı yarım cevabı bilsin."""
+    return f"{content.rstrip()}\n\n{_TRUNCATED}" if truncated and content.strip() else content
+
+
 def _arguments(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         try:
@@ -276,7 +284,10 @@ class OpenRouterProvider:
             _reported_cost(usage["cost"]) if "cost" in usage else calculated_usage.cost_usd
         )
         return Completion(
-            content=_string(message.get("content") or ""),
+            content=_mark_truncated(
+                _string(message.get("content") or ""),
+                _object(choices[0]).get("finish_reason") == "length",
+            ),
             tool_calls=_chat_calls(message.get("tool_calls", [])),
             usage=Usage(
                 input_tokens=calculated_usage.input_tokens,
@@ -366,7 +377,7 @@ class AnthropicProvider:
                 )
         usage = _object(data.get("usage"))
         return Completion(
-            content="\n".join(content),
+            content=_mark_truncated("\n".join(content), data.get("stop_reason") == "max_tokens"),
             tool_calls=calls,
             usage=_usage(self.model, usage.get("input_tokens"), usage.get("output_tokens")),
             provider="anthropic",
@@ -407,7 +418,9 @@ class OllamaProvider:
             raise ProviderError("Yerel sağlayıcı tamamlanmış bir yanıt döndürmedi.")
         message = _object(data.get("message"))
         return Completion(
-            content=_string(message.get("content") or ""),
+            content=_mark_truncated(
+                _string(message.get("content") or ""), data.get("done_reason") == "length"
+            ),
             tool_calls=_chat_calls(message.get("tool_calls", [])),
             usage=_usage(self.model, data.get("prompt_eval_count"), data.get("eval_count")),
             provider="ollama",

@@ -421,3 +421,26 @@ async def test_ollama_incomplete_response_is_not_success(
     http_server.body = response
     with pytest.raises(ProviderError):
         await provider_for("ollama", http_server, tmp_path).complete([], [], timeout=2)
+
+
+@pytest.mark.parametrize("name", PROVIDERS)
+async def test_length_cut_is_marked_not_silent(
+    name: ProviderName, http_server: HTTPState, tmp_path: Path
+) -> None:
+    response = response_for(name)
+    if name == "openrouter":
+        response["choices"][0]["finish_reason"] = "length"
+    elif name == "anthropic":
+        response["stop_reason"] = "max_tokens"
+    else:
+        response["done_reason"] = "length"
+    http_server.body = response
+    result = await provider_for(name, http_server, tmp_path).complete(
+        [Message(role="user", content="Merhaba")], [], timeout=2
+    )
+    assert result.content.endswith("devam et\" de)")
+    http_server.body = response_for(name)
+    normal = await provider_for(name, http_server, tmp_path).complete(
+        [Message(role="user", content="Merhaba")], [], timeout=2
+    )
+    assert "kesildi" not in normal.content
