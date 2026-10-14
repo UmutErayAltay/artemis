@@ -485,3 +485,24 @@ def test_settings_apply_restarts_runtime_with_selected_model_and_device(
         assert window.model_value.text() == "second-model"
     finally:
         _close_cleanly(app, window)
+
+
+def test_step_block_is_wide_enough_for_its_longest_visible_line(app: QApplication) -> None:
+    # Sola hizalı blok, sarılan etiketin küçük ipucuna sıkışınca satırlar üst üste biniyordu.
+    from jarvis.channels.desktop.steps import StepLine
+
+    block = StepBlock()
+    activity = Activity("r", "t", 1, "tool_result", {"tool": "x"})
+    line = "Demo belleğe yazıldı ✓"
+    block.add_line(activity, StepLine(line, "ok", False))
+    block.add_line(activity, StepLine("İç adım çok uzun bir model satırı " * 4, "info", True))
+    labels = block.findChildren(QLabel)
+    needed = max(
+        label.fontMetrics().horizontalAdvance(label.text())
+        for label in labels
+        if label.text() == line
+    )
+    # Gizli iç satır genişliği büyütmez; görünür satır tek satıra sığar.
+    assert needed < block.minimumWidth() < needed + 60
+    block._toggle.setChecked(True)
+    assert block.minimumWidth() == 520

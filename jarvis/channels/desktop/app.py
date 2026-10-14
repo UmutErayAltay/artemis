@@ -350,7 +350,25 @@ class StepBlock(QFrame):
     def _refresh(self) -> None:
         visible = any(not line.internal for _label, line, _activity in self._rows)
         self._toggle.setVisible(visible)
+        self._fit_width()
         self.setVisible(visible)
+
+    def _fit_width(self) -> None:
+        """Sohbette sola hizalı blok, sarılan etiketin küçük ipucuna göre daralmasın.
+
+        Sarmalı QLabel genişlik ipucunu birkaç sözcüğe göre verir; blok o genişliğe
+        sıkışınca satırlar üst üste biner. En uzun görünür satır sığacak kadar (en çok
+        520 px) genişlik ayrılır; daha uzun satır o genişlikte sarılır.
+        """
+        layout = self.layout()
+        if layout is None:
+            return
+        margins = layout.contentsMargins()
+        widest = self._toggle.sizeHint().width()
+        for label, line, _activity in self._rows:
+            if self._details or not line.internal:
+                widest = max(widest, label.fontMetrics().horizontalAdvance(label.text()))
+        self.setMinimumWidth(min(520, widest + margins.left() + margins.right() + 4))
 
 
 @dataclass

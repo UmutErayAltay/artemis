@@ -40,6 +40,14 @@ kullanıcının dosyalarına veya uygulamalarına erişmez.
 
 ![Ana panelle aynı çalışma katmanını kullanan hızlı komut penceresi](docs/assets/desktop/overlay.png)
 
+### Masaüstü pet
+
+![Masaüstü petinin hazır, dinliyor, düşünüyor, onay bekliyor durumları ve yanıt balonu](docs/assets/desktop/pet.png)
+
+Pet ekranın köşesinde durur ve Jarvis'in o an ne yaptığını gösterir: hazır, dinliyor,
+düşünüyor ya da onayını bekliyor. Yanıtlar ve iş bitişleri kısa bir balonla görünür
+([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)).
+
 Python 3.12 ortamında arayüzü kurup ücretsiz, ağsız demoyu açın:
 
 ```powershell
@@ -80,7 +88,7 @@ girdiğini ve nasıl tanındığını gösterir; ayrı ses kaydı tutulmaz.
 Tepsi menüsündeki **Peti göster/gizle** köşede duran animasyonlu masaüstü petini açar;
 pete tıklamak sesi açıp kapatır, kod ajanı bitince pet balonu ve bildirim gösterilir
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). Pet kendi komut veya onay
-yolu taşımaz. Ekran görüntüleri pet ve son panel tasarımından önce alınmıştır.
+yolu taşımaz.
 Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.
 Testler ve bilinçli sınırlar [masaüstü raporunda](docs/F5_REPORT.md) bulunur.
 
