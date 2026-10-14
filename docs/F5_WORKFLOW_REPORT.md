@@ -31,7 +31,7 @@ Sahte bench'in makinece okunabilir çıktısı yok sayılan
 sentetik taslak ve sahte durum verisiyle üretildi; gerçek iş veya CLI çağrısı
 göstermez: [ekran görüntüsü](assets/desktop/projects.png).
 
-## Kabul edilmeyen sınırlar
+## Bilinçli sınırlamalar
 
 Yerel kod ajanı OS sandbox değildir. Claude Code Bash ve alt ajan çağrıları
 Jarvis SafetyGate tarafından tek tek denetlenmez. Profil ayarları model seçimine

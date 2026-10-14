@@ -1,9 +1,11 @@
-# Jarvis: F0–F4 mimarisi
+# Jarvis: F0–F5 mimarisi
 
 Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. CLI ve isteğe bağlı PySide6
 masaüstü arayüzü aynı runtime, ajan döngüsü, sağlayıcılar, güvenlik kapısı ve
-araçları kullanır. Telegram ve bildirimler F4'tür; arka plan ajanları sonraki fazlardadır.
+araçları kullanır. Telegram ve bildirimler F4; proje taslağı, onaylı kod ajanı işleri
+ve Projeler sekmesi F5 kapsamındadır. Ekran algısı, proaktif çalışma ve MCP sonraki
+fazlar için ayrılmıştır.
 
 ## Akış ve sorumluluklar
 
@@ -25,8 +27,7 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
 - `config/`: katı pydantic ayarları; YAML sır içermez, anahtarlar yalnız ortamdan okunur.
 - `memory/`: Obsidian vault okuma yolları, sözcük ve isteğe bağlı embedding araması;
   araçlar `tools/plugins/memory.py` içindedir (ADR 0015).
-- `perception/`, `proactive/`, `jobs/`, `mcp/`: sonraki fazların ayrılmış
-  sınırları; F1'de sahte işlevler sunmaz.
+- `perception/`, `proactive/`, `mcp/`: sonraki fazlar için ayrılmış bileşen sınırları.
 - `bench/`: aynı döngüyü kullanan, izole masaüstünde çalışan kabul senaryoları.
 
 ## Masaüstü kanalı
@@ -102,7 +103,8 @@ Faz 5 ([ADR 0026](adr/0026-background-project-workflow.md)) bu işi aşamalı ha
 getirir: `code_agent_prepare` yalnız taslak saklar; `code_agent_start` tam taslak
 için onay ister. Sabit şemalı CLI segmentleri `question` ile `completed` çıktısını
 ayırt eder; cevap yeni bir onaydan sonra yakalanmış session UUID ile `--resume`
-üzerinden gider. SQLite iş deposu (`state_dir/code_agent.sqlite3`) tek runtime tarafından
+üzerinden gider. İş yöneticisi `tools/code_agent_jobs.py` içindedir; SQLite deposu
+(`state_dir/code_agent.sqlite3`) tek runtime tarafından
 sahiplenilir; yeniden açılışta etkin işler `interrupted` olur, otomatik sürdürülmez.
 Süreç ve alt süreç temizliği doğrulanmadan iş `done` olmaz. Projeler sekmesi sadece
 durumu sunar; eylemler ortak bridge ve SafetyGate üzerinden geçer.
