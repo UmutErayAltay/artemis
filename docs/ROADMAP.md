@@ -149,8 +149,8 @@ koduna geçilebilir, fakat "tamamlandı" yalnız kendi kabulüyle yazılır.
 | Sıra | Kalem | Durum | Karar |
 | --- | --- | --- | --- |
 | 6a | Proaktiflik: hatırlatma ve sabah brifingi | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0027](adr/0027-proactive-events.md) |
-| 6b | MCP istemcisi (stdio) | planlandı | ADR 0028 (yazılacak) |
-| 6c | Ekran algısı | planlandı | ADR 0029 (yazılacak) |
+| 6b | MCP istemcisi (stdio) | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0028](adr/0028-mcp-client.md) |
+| 6c | Ekran algısı | ADR yazıldı; kod sürüyor | [ADR 0029](adr/0029-screen-perception.md) |
 
 Sıranın gerekçesi: 6a, F4 bildirimleri ve F5 SQLite/süreç altyapısını yeniden kullanır ve
 yeni bir dış veri kaynağı açmaz. 6b yeni bir dış araç yüzeyi açar; risk ve taint kuralları

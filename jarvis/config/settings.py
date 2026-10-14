@@ -240,6 +240,59 @@ class ProactiveConfig(BaseModel):
         return values
 
 
+ENV_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+
+
+class MCPServerConfig(BaseModel):
+    """Tek bir stdio MCP sunucusu (ADR 0028). Sır alanı yoktur; yalnız ortam adları verilir."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(pattern=r"^[a-z0-9_]{1,24}$")
+    command: str = Field(min_length=1)
+    args: tuple[str, ...] = ()
+    cwd: Path | None = None
+    # Zorunlu ve varsayılansız: "file" sonuçları buluta/Telegram'a gitmez (CLAUDE.md 12).
+    content: Literal["file", "text"]
+    timeout_seconds: float = Field(default=15.0, ge=1, le=300)
+    # Riski yalnız kullanıcı düşürür; sunucunun readOnlyHint'i dikkate alınmaz.
+    read_only_tools: tuple[str, ...] = ()
+    confirm_tools: tuple[str, ...] = ()
+    # Değer değil AD: değer çalışma anında ortamdan okunur, yalnız bu sunucuya verilir.
+    env_passthrough: tuple[str, ...] = ()
+
+    @field_validator("env_passthrough")
+    @classmethod
+    def validate_env_names(cls, values: tuple[str, ...]) -> tuple[str, ...]:
+        if any(not ENV_NAME_RE.fullmatch(value) for value in values):
+            raise ValueError("env_passthrough büyük harfli ortam değişkeni adları içermeli")
+        return values
+
+    @model_validator(mode="after")
+    def validate_tool_lists(self) -> Self:
+        if set(self.read_only_tools) & set(self.confirm_tools):
+            raise ValueError("Bir araç hem read_only_tools hem confirm_tools içinde olamaz")
+        return self
+
+
+class MCPConfig(BaseModel):
+    """MCP istemcisi (ADR 0028); `servers` boşken hiçbir süreç başlatılmaz."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    servers: tuple[MCPServerConfig, ...] = ()
+
+    @field_validator("servers")
+    @classmethod
+    def validate_servers(
+        cls, values: tuple[MCPServerConfig, ...]
+    ) -> tuple[MCPServerConfig, ...]:
+        names = [server.name for server in values]
+        if len(names) != len(set(names)):
+            raise ValueError("MCP sunucu adları benzersiz olmalı")
+        return values
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -273,6 +326,7 @@ class Settings(BaseModel):
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     code_agent: CodeAgentConfig = Field(default_factory=CodeAgentConfig)
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
+    mcp: MCPConfig = Field(default_factory=MCPConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -343,4 +397,12 @@ def load_settings(path: Path) -> Settings:
         }
     if agent_updates:
         updates["code_agent"] = agent.model_copy(update=agent_updates)
+    if any(server.cwd is not None for server in settings.mcp.servers):
+        servers = tuple(
+            server
+            if server.cwd is None or server.cwd.is_absolute()
+            else server.model_copy(update={"cwd": (base / server.cwd).resolve()})
+            for server in settings.mcp.servers
+        )
+        updates["mcp"] = settings.mcp.model_copy(update={"servers": servers})
     return settings.model_copy(update=updates)

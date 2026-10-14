@@ -33,6 +33,15 @@ class ToolRegistry:
         self._tools[name] = cls()
         return cls
 
+    def copy(self) -> ToolRegistry:
+        """Aynı araç örnekleriyle yeni registry: runtime'a özel eklemeler globali değiştirmez."""
+        clone = ToolRegistry()
+        clone._tools = dict(self._tools)
+        return clone
+
+    def __contains__(self, name: object) -> bool:
+        return name in self._tools
+
     def get(self, name: str) -> BaseTool | None:
         return self._tools.get(name)
 
@@ -41,7 +50,11 @@ class ToolRegistry:
             ToolDefinition(
                 name=encode_tool_name(tool.name),
                 description=tool.description,
-                parameters=tool.args_model.model_json_schema(),
+                parameters=(
+                    tool.parameters_schema
+                    if tool.parameters_schema is not None
+                    else tool.args_model.model_json_schema()
+                ),
                 risk=normalize_risk(tool.risk),
             )
             for tool in self._tools.values()

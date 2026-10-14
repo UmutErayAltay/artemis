@@ -77,6 +77,11 @@ def create_runtime(
         if registry is not None
         else (registry_builder() if registry_builder is not None else discover_tools())
     )
+    if loaded.mcp.servers:
+        # Lazy: MCP yapılandırılmamışsa köprü ve istemci hiç yüklenmez (ADR 0028).
+        from jarvis.mcp.bridge import discover_mcp_tools
+
+        tools = discover_mcp_tools(loaded, log, tools)
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
     # Runtime kurulamazsa sahibi dışarıya dönmez; callback kilidi kapatır.

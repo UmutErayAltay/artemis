@@ -486,6 +486,21 @@ açık olsa da her olay bir kez teslim edilir. Kapalıyken kaçan hatırlatmalar
 gecikmeli ya da tek bir özet olarak bildirilir. Gerekçe:
 [ADR 0027](docs/adr/0027-proactive-events.md).
 
+### MCP sunucuları (Faz 6b)
+
+Varsayılan kapalıdır; `mcp.servers` altına stdio sunucusu eklenince araçları
+`mcp_<sunucu>_<araç>` adıyla modele görünür (örnek: `config/config.example.yaml`). Jarvis
+kendi küçük istemcisini kullanır, ayrıca `mcp` paketi gerekmez. Her çağrıda sunucu kısa
+ömürlü bir süreç olarak başlatılır ve süreç ağacı iş bitince kapatılır.
+
+Güvenlik varsayılanları: her MCP aracı yan etkili ve dışarı giden sayılır; sonucu dış
+içeriktir ve turu lekeler. Sunucunun "salt okunur" beyanı riski düşürmez; bunu yalnız
+siz `read_only_tools` ile yaparsınız, `destructiveHint` bildiren araç ise onay ister.
+Kişisel veri döndüren sunucuda `content: file` seçin; o sonuçlar buluta ve Telegram'a
+gitmez. Sunucu süreci yalnız işletim sistemi değişkenlerini ve sizin `env_passthrough`
+ile adlandırdıklarınızı görür. MCP sunucusunun kendi yaptıkları SafetyGate'in dışındadır.
+Gerekçe: [ADR 0028](docs/adr/0028-mcp-client.md).
+
 Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
 çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
 repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,

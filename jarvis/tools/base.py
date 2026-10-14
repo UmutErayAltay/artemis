@@ -99,6 +99,9 @@ class BaseTool(ABC):
     label: ClassVar[str] = ""
     done_label: ClassVar[str] = ""
     content_kind: ClassVar[ContentKind] = "text"
+    # Şeması çalışma anında bilinen araçlar (MCP köprüsü, ADR 0028) için modele gösterilen
+    # JSON şeması; None ise pydantic modelinden üretilir.
+    parameters_schema: ClassVar[dict[str, Any] | None] = None
 
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
         """Doğrulanmış argümanlar için riski bildirir; onay kararını kapı verir."""

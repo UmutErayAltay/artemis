@@ -1,1 +1,1 @@
-"""MCP bağlantıları sonraki faz için ayrılmıştır."""
+"""MCP istemcisi ve araç köprüsü (ADR 0028)."""

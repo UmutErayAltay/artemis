@@ -3,7 +3,8 @@
 Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çekirdeği Linux
 üzerinde de çalışır. PySide6 masaüstü UI aynı Qt'siz runtime ve SafetyGate'i kullanır;
 ses masaüstü worker'ında çalışır (ADR 0014). Hafıza (vault) Faz 3'te, Telegram ve
-bildirimler Faz 4'te, arka plan proje işleri Faz 5'te, hatırlatma ve brifing Faz 6a'da eklendi.
+bildirimler Faz 4'te, arka plan proje işleri Faz 5'te, hatırlatma ve brifing Faz 6a'da,
+MCP istemcisi Faz 6b'de eklendi.
 Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Türkçe olur ve
 özellikle kararın nedenini açıklar. Önce [mimariyi](docs/ARCHITECTURE.md) ve
 [ADR'leri](docs/adr/) okuyun. Temel mimariyi değiştiriyorsanız kısa ADR yazın.
@@ -121,6 +122,16 @@ kendi AgentLoop'unda boş geçmişle çalışır, panel geçmişine eklenmez. Te
 çıktısıdır (`proactive_delivery` denetimi), en az bir hedef doğrulanmadıkça `delivered`
 yazılmaz. Her oluşum SQLite'ta önce talep edilir; ölen sürecin talebi `uncertain` olur,
 otomatik tekrar çalışmaz. Testler sahte saat enjekte eder, toast'ı kapatır.
+
+MCP (Faz 6b, ADR 0028) `mcp.servers` boşken hiçbir süreç başlatmaz ve köprüyü yüklemez.
+`@register_tool` kuralının tek istisnası `jarvis/mcp/bridge.py`'dir: MCP araçları
+runtime'a özel registry kopyasına eklenir, global registry'ye değil; çakışan ad asla
+üzerine yazılmaz. MCP aracı varsayılan SIDE_EFFECT + `outbound` + `external`'dır; sunucunun
+`readOnlyHint`'i riski DÜŞÜRMEZ (yalnız kullanıcının `read_only_tools` listesi), bu kuralı
+gevşetmeyin. `content: file|text` zorunludur, varsayılan eklemeyin. Sunucuya yalnız
+`child_environment()` ve `env_passthrough` adları gider. İstemci SDK kullanmaz; her çağrı
+taze süreçtir, tüm beklemeler sınırlıdır ve süreç ağacı her yolda kapatılır. Testler yalnız
+`tests/mcp_fake_server.py` sahte stdio sunucusunu kullanır.
 
 ## Yeni araç eklemek
 

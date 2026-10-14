@@ -136,6 +136,27 @@ voice:
 #       prompt: >-
 #         Bekleyen hatırlatmalarımı ve kod ajanı işlerinin durumunu kısaca özetle.
 
+# MCP sunucuları (ADR 0028). KAPALI gelir: servers boşken hiçbir süreç başlatılmaz.
+# Yalnız stdio (yerel süreç) desteklenir; her çağrıda sunucu yeniden başlatılır ve iş
+# bitince kapatılır. Sunucu üçüncü taraf koddur: kendi yaptıkları (ağ, dosya) SafetyGate'in
+# dışındadır, kapı yalnız çağrıyı denetler. Her MCP aracı varsayılan olarak yan etkilidir
+# ve dışarı giden (outbound) sayılır; sonucu turu lekeler. Sunucunun "readOnly" beyanı
+# riski DÜŞÜRMEZ; bir aracı okuma-yalnız saymak için read_only_tools'a siz yazarsınız.
+# content ZORUNLU: dosya/not/mail gibi kişisel veri döndüren sunucuda "file" seçin; bu
+# sonuçlar buluta ve Telegram'a gitmez. Anahtar gerekiyorsa YAML'a yazmayın:
+# env_passthrough yalnız ortam değişkeni ADINI listeler, değer o sunucuya aktarılır.
+# Araç adları modele mcp_<sunucu>_<araç> olarak görünür.
+# mcp:
+#   servers:
+#     - name: notlar
+#       command: npx                     # Windows'ta npx.cmd otomatik çözülür; shell yok
+#       args: ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/siz/Notlar"]
+#       content: file
+#       timeout_seconds: 20
+#       read_only_tools: [read_text_file, list_directory, search_files]
+#       confirm_tools: [write_file, move_file]
+#       env_passthrough: []
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

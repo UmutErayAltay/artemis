@@ -1,11 +1,11 @@
-# Jarvis: F0–F6a mimarisi
+# Jarvis: F0–F6b mimarisi
 
 Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. CLI ve isteğe bağlı PySide6
 masaüstü arayüzü aynı runtime, ajan döngüsü, sağlayıcılar, güvenlik kapısı ve
 araçları kullanır. Telegram ve bildirimler F4; proje taslağı, onaylı kod ajanı işleri
-ve Projeler sekmesi F5; hatırlatma ve sabah brifingi F6a kapsamındadır. MCP (F6b) ve
-ekran algısı (F6c) sonraki kalemler için ayrılmıştır.
+ve Projeler sekmesi F5; hatırlatma ve sabah brifingi F6a, stdio MCP istemcisi F6b
+kapsamındadır. Ekran algısı (F6c) sonraki kalem için ayrılmıştır.
 
 ## Akış ve sorumluluklar
 
@@ -28,7 +28,9 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
 - `memory/`: Obsidian vault okuma yolları, sözcük ve isteğe bağlı embedding araması;
   araçlar `tools/plugins/memory.py` içindedir (ADR 0015).
 - `proactive/`: zamanlama hesapları, SQLite oluşum deposu, teslim ve zamanlayıcı (ADR 0027).
-- `perception/`, `mcp/`: sonraki kalemler (F6c, F6b) için ayrılmış bileşen sınırları.
+- `mcp/`: stdio JSON-RPC istemcisi ve MCP araçlarını runtime registry kopyasına ekleyen
+  tek köprü (ADR 0028).
+- `perception/`: ekran algısı (F6c) için ayrılmış bileşen sınırı.
 - `bench/`: aynı döngüyü kullanan, izole masaüstünde çalışan kabul senaryoları.
 
 ## Masaüstü kanalı
@@ -154,6 +156,27 @@ sınırı `max_events_per_day`'dir; brifing maliyeti mevcut günlük bütçeden 
 işlemiş brifing ya da gizli turda kurulan hatırlatma Telegram'a gönderilmez. Teslim en az
 bir hedef başarıyı doğrulamadıkça `delivered` sayılmaz. Saat dilimi `zoneinfo` ile
 çözülür; Windows'ta `tzdata` paketi gerekir.
+
+## MCP
+
+Karar [ADR 0028](adr/0028-mcp-client.md) içindedir. `mcp.servers` boşsa köprü hiç
+yüklenmez. Doluysa `create_runtime` her sunucuyu kendi zaman aşımıyla keşfeder
+(`tools/list`); başarısız sunucu `mcp_unavailable` ile atlanır. Araçlar global registry'yi
+değiştirmeden runtime'a özel bir kopyaya `mcp_<sunucu>_<araç>` adıyla eklenir; çakışan ya
+da sınırı aşan ad kaydedilmez. Şema `parameters_schema` ile modele aynen verilir, gönderim
+öncesi `required`/`additionalProperties` sınanır.
+
+```
+model → SafetyGate (risk, taint, outbound, gözetimsiz kural) → MCPTool.execute
+  → StdioMCPClient: süreç başlat → initialize → tools/call → süreç ağacını kapat
+  → ToolResult(external=True, content_kind=file|text)
+```
+
+Risk varsayılanı SIDE_EFFECT'tir; `destructiveHint` CONFIRM_REQUIRED'a yükseltir,
+`readOnlyHint` düşürmez; yalnız kullanıcının `read_only_tools` listesi READ_ONLY yapar.
+Her MCP aracı `outbound`'dur. Alt süreç ortamı `child_environment()` artı
+`env_passthrough` adlarıdır. Her okuma 1 MiB ile, her çağrı sunucu zaman aşımı ve turun
+kalan süresiyle sınırlıdır.
 
 ## Güvenlik sınırları
 
