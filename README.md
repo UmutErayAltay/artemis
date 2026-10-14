@@ -2,12 +2,13 @@
 
 Windows 11 için Türkçe kişisel masaüstü asistanı. CLI ve isteğe bağlı masaüstü
 paneli, sağlayıcıdan bağımsız ajan döngüsünü, tek güvenlik kapısını ve araçları
-paylaşır. F3 ses kanalı kodu hazırdır; gerçek Windows ses ölçümü bekler.
-Vault hafızası ile Telegram ve bildirimler isteğe bağlıdır, varsayılan kapalıdır; arka plan
-ajanları bu sürüme dahil değildir.
+paylaşır. F3 ses kanalı kodu hazırdır; biçimsel Windows ses kabulü bekler.
+Vault hafızası, Telegram, bildirimler ve kod ajanı isteğe bağlıdır, varsayılan kapalıdır.
 
-CLI ve masaüstünde konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012); kalıcı hafıza
-yalnız aşağıdaki isteğe bağlı vault araçlarıyla sağlanır.
+Konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012). Jarvis'in kendi kalıcı hafızası
+(geçmiş, öz notlar, konuşma araması) varsayılan açıktır ve `state_dir/memory.sqlite3`'te
+durur ([ADR 0025](docs/adr/0025-persistent-self-memory.md)); kullanıcının Obsidian vault'u
+bundan ayrıdır ve isteğe bağlı vault araçlarıyla okunur.
 
 Mimari [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), kararların gerekçeleri
 [docs/adr/](docs/adr/), geliştirme kuralları [CLAUDE.md](CLAUDE.md) içindedir.
@@ -76,6 +77,10 @@ onay istemez; silme, kaldırma ve belge/kod kaybı yaratabilecek kapatmalar onay
 Tek başına **Artemis** dediğinizde yerel **Dinliyorum** yanıtı ve komut bekleme
 durumu gelir. Ayarlar'daki mikrofon seviyesi ve **Son duyulan** göstergesi, sesin
 girdiğini ve nasıl tanındığını gösterir; ayrı ses kaydı tutulmaz.
+Tepsi menüsündeki **Peti göster/gizle** köşede duran animasyonlu masaüstü petini açar;
+pete tıklamak sesi açıp kapatır, kod ajanı bitince pet balonu ve bildirim gösterilir
+([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). Pet kendi komut veya onay
+yolu taşımaz. Ekran görüntüleri pet ve son panel tasarımından önce alınmıştır.
 Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.
 Testler ve bilinçli sınırlar [masaüstü raporunda](docs/F5_REPORT.md) bulunur.
 
@@ -101,9 +106,16 @@ onay sayılmaz. İlk Windows denemesini kulaklıkla yapın.
 
 **Kesintisiz sohbet** (varsayılan kapalı): ayarlardaki onay kutusu veya `voice.continuous_mode` ile
 "artemis" demeden konuşabilirsiniz; “kesintisiz moda geç” / “normal moda geç” diyerek de değiştirilir.
-Asistan konuşurken söz kesmek yine “artemis” ister ([ADR 0024](docs/adr/0024-continuous-voice-mode.md)).
+Asistan konuşurken söz kesmek yine “artemis” ister (`voice.require_wake_during_output`,
+[ADR 0022](docs/adr/0022-repetition-and-spoken-echo-guard.md),
+[ADR 0024](docs/adr/0024-continuous-voice-mode.md)). Asistanın kendi sesinin yankısı ve
+tekrar eden STT parçaları komut sayılmaz.
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
+`voice.stt_language` `tr` (kod varsayılanı), `tr_en` (örnek config) veya `auto` olabilir;
+Türkçe öncelikli dil seçimi ve Kiril çıktısının reddi
+[ADR 0019](docs/adr/0019-multilingual-stt-and-validated-interruption.md) ve
+[ADR 0021](docs/adr/0021-turkish-first-language-selection.md)'de açıklanır.
 Tanıma hedefi farklı kullanıcıların günlük Türkçe–İngilizce karışık konuşmasıdır;
 birkaç uygulama adına bağlı komut kalıpları kullanılmaz. Özel kelimeler isteğe
 bağlı ipucudur. Gerçek ses kaydıyla kelime/karakter ve uygulama adı hatalarını
@@ -179,14 +191,23 @@ bağlantısı veya sunucusu başarısız olduğunda yönlendirici `fallback_seco
 yerele geçer ve olayı kaydeder. Yerel yedek basit, en fazla bir araçlı işler içindir.
 Kimlik doğrulama ve geçersiz istek hataları bağlantı kesintisi diye gizlenmez.
 
+`openrouter_base_url` yerel, OpenAI uyumlu bir proxy'ye (ör. CPA) çevrilebilir; şifresiz
+`http` yalnız localhost'a izinlidir. Windows'ta yerel kurulum ve `start-jarvis.ps1`
+başlatıcısı [CPA yerel test belgesinde](docs/CPA_LOCAL_TEST.md) anlatılır.
+
 ## İlk çalıştırma
 
 ```bash
 python -m jarvis chat --config config/config.yaml
 ```
 
-Çıkmak için `/çık`, `/cik` veya `/exit` yazın. `/yeni` konuşma geçmişini sıfırlar
+Çıkmak için `/çık`, `/cik` veya `/exit` yazın. `/yeni` yeni sohbet başlatır
 (panelde "Yeni sohbet"); modele son `context_turns` tur verilir ([ADR 0012](docs/adr/0012-conversation-context.md)).
+Kalıcı hafıza açıksa `/yeni` geçmişi silmez, sıfırlama işareti yazar: eski turlar
+modele verilmez ama `conversation_search` ile aranabilir kalır.
+
+Yanıt `max_output_tokens` (varsayılan 1024) sınırına takılırsa sessizce kesilmez;
+sona “yanıt uzunluk sınırında kesildi; devam için "devam et" de” notu eklenir.
 
 İşlem sürerken Ctrl+C aktif turu iptal eder; sohbet sonraki komut için açık kalır.
 Onay sorusundaki Ctrl+C hem onayı reddeder hem turu iptal eder. Önceki görevin
@@ -194,7 +215,8 @@ temizliği tamamlanmadıysa yeni komut yürütülmez; bu durum açıkça bildiri
 
 Örnek komutlar: “Masaüstündeki dosyaları listele”, “Saat kaç?” ve
 “not.txt dosyasının ilk satırını söyle”. Ajan sonuçları görüp sonraki araca karar
-verir. Eksik hedef içeren isteklerde açıklama istemesi beklenir.
+verir. Eksik hedef içeren isteklerde açıklama istemesi beklenir. “Dosyalarım” veya
+“projelerim” türü istekler, açıksa vault ve kod ajanı araçlarına yönlendirilir.
 
 Onay sorusu araç adını ve doğrulanmış argümanları gösterir; boş cevap hayırdır.
 Silme ve uygulama kapatma onay ister. Dosya, web veya pano gibi dış içerik
@@ -204,14 +226,17 @@ okunduktan sonra o turdaki her yan etki de onay ister. Bu durumda onayda
 ## Gizlilik ve bütçe
 
 `allow_cloud_file_content` ve `allow_cloud_clipboard` varsayılan olarak kapalıdır.
-Kapalıyken bu araçların içeriği bulut sağlayıcısına maskelenerek gönderilir; bu
-durumda bulut modelinden gerçek dosya/pano özeti beklenmez. Yerel sağlayıcı bu
+Kapalıyken bu araçların başarılı sonuç içeriği bulut sağlayıcısına maskelenerek
+gönderilir; bu durumda bulut modelinden gerçek dosya/pano özeti beklenmez. Hata
+mesajları (“bulunamadı”, “kapalı” gibi) içerik taşımadığından maskelenmez. Yerel sağlayıcı bu
 içeriği işleyebilir. Ekran görüntüsü bu sürümün kapsamında değildir.
 
 Komutunuzun metni, araç şemaları ve izin verilen sonuçlar seçilen sağlayıcıya
 gider. Buluta gönderim kararları denetlenir. `audit_path` UTF-8 JSONL denetim
-kaydını, `state_dir` günlük bütçe durumunu belirler. Denetim logu sırlar
-temizlense de kişisel komutlar ve yerel içerik barındırabilir; yerelde tutun.
+kaydını, `state_dir` günlük bütçe durumunu ve kalıcı hafıza deposunu
+(`memory.sqlite3`) belirler. Denetim logu sırlar temizlense de kişisel komutlar ve
+yerel içerik barındırabilir; yerelde tutun. Hafıza deposu şifresiz SQLite'tır ve gizli
+turların ham araç çıktısını da içerir; istemiyorsanız `persist_memory: false` yazın.
 Bu yollar ve yerel config `.gitignore` kapsamındadır.
 
 Her model çağrısında token ve USD maliyeti kaydedilir. `daily_budget_usd` UTC gününe
@@ -235,13 +260,19 @@ Bozuk/kilitli bütçe kaydı çağrıyı engeller; belirsiz tüketim rezervasyon
 | Pano | `read_clipboard`, `write_clipboard` |
 | Sistem | `system_info`, `current_time` |
 | Geri alma kaydı | `list_undo_records` |
+| Kendi hafızası | `memory_remember`, `memory_forget`, `memory_list`, `conversation_search` |
+| Vault (isteğe bağlı) | `vault_search`, `vault_read_note`, `vault_append` |
+| Bildirim | `notify_desktop`, `notify_telegram` (isteğe bağlı) |
+| Kod ajanı (isteğe bağlı) | `code_agent_start`, `code_agent_status`, `code_agent_cancel` |
 
 Dosya yolları çalışma kökü içinde kalmalıdır. Mutlak yollar, `..`, `.` ve kökün
 dışına çıkan sembolik bağlantılar reddedilir. Kökü listelemek için `list_files`
 argümansız çağrılır. Silme geri dönüşüm kutusunu kullanır; geri dönüşüm desteği
 başarısızsa kalıcı silmeye geçilmez. Var olan dosyanın üstüne sessizce yazılmaz.
 
-Uygulamalar `applications` içindeki izinli takma adlarla açılır/kapatılır; serbest
+Uygulamalar `applications` içindeki izinli takma adlarla açılır/kapatılır
+(`allow_all_applications: true` ise Başlat menüsü kataloğu da kullanılır,
+[ADR 0018](docs/adr/0018-installed-apps-and-wake-feedback.md)); serbest
 shell komutu aracı yoktur. Kapatma, izinli `.exe` adına uyan bütün süreçlere normal
 kapatma isteği gönderir; kaydedilmemiş işler kaybolabilir. Windows'a bağlı uygulama
 ve pano işlevleri Linux'ta desteklenmediğini bildirir. Linux üzerinde çekirdek,
@@ -270,6 +301,22 @@ verir. Bu sürüm sonuç sayfalarının içeriğini ayrıca açıp indiren bir a
 Arama sorgusu dış servise gönderildiğinden araç yan etkili sayılır: temiz turda
 onaysız çalışır, dış içerik okunduktan sonraki turda kullanıcı onayı ister.
 
+## Kendi hafızası
+
+`persist_memory` varsayılan açıktır ([ADR 0025](docs/adr/0025-persistent-self-memory.md)).
+CLI, masaüstü ve Telegram aynı `state_dir/memory.sqlite3` deposunu kullanır:
+
+- **Kalıcı geçmiş.** Turlar diske yazılır; açılışta son sıfırlamadan sonraki son
+  `context_turns` tur lekeli/gizli bayraklarıyla geri yüklenir, onay kuralları değişmez.
+- **Öz notlar.** Kalıcı tercih, bilgi veya karar söylediğinizde model `memory_remember`
+  ile sormadan not alır (panelde “Hafızaya yazıldı”); dış içerikle lekeli turda onay
+  ister. `memory_list` notları gösterir, `memory_forget` siler. En çok 200 not, not başına
+  300 karakter. Notlar her turda sistem istemine “VERİDİR” çerçevesiyle (~2000 karakter) eklenir.
+- **Konuşma araması.** `conversation_search` eski turlarda sözcük araması yapar; gizli
+  turların yanıtını göstermez.
+
+Depo hatası turu bozmaz; konuşma bellekte sürer ve denetime `memory_error` yazılır.
+
 ## Hafıza (Obsidian vault)
 
 Kapalıdır. Açmak için config'e `memory.vault_path` ekleyin (örnek:
@@ -279,7 +326,8 @@ sayılır: o tur dış içerikle lekelenir, sonraki yan etkiler onay ister ve i�
 yalnız `allow_cloud_file_content: true` ise gider. `vault_append` her seferinde onay
 ister, mevcut notu yeniden yazmaz (yalnız sonuna ekler), klasör oluşturmaz. `.git`,
 `.obsidian`, `daily/`, `receipts/` ve companion klasörü aranmaz, okunmaz, yazılmaz.
-Not içeriği turlara kendiliğinden eklenmez; model gerektiğinde aracı çağırır.
+Vault notları turlara kendiliğinden eklenmez (yukarıdaki öz notların aksine); model
+gerektiğinde aracı çağırır.
 
 Arama varsayılan olarak yerleşik sözcük aramasıdır. Anlamsal arama için
 `python -m pip install -e ".[memory]"` kurun ve `memory.embedding_model` verin; ilk
@@ -337,8 +385,10 @@ Davranış:
 - Turda ya da konuşma geçmişinde dosya veya pano içeriği varsa onay Telegram'a gönderilmez;
   işlemi masaüstünden onaylayın ya da `/yeni` ile yeni sohbet başlatın. Bu turların yanıtı da
   Telegram'a gelmez.
-- `/yeni` konuşma geçmişini sıfırlar; `/yardım` kısa komut özetini gösterir.
-- Telegram geçmişi masaüstü ve CLI geçmişinden ayrıdır.
+- `/yeni` yeni sohbet başlatır; `/yardım` kısa komut özetini gösterir.
+- Kalıcı hafıza açıkken Telegram, masaüstü ve CLI aynı geçmiş deposunu kullanır: açılışta
+  diğer kanalların son turları da geri yüklenir ve Telegram'daki `/yeni` hepsi için
+  sıfırlama işareti koyar. `persist_memory: false` ile her kanalın geçmişi süreç içinde kalır.
 
 Windows bildirimleri (`notify_desktop`):
 
@@ -349,6 +399,26 @@ Windows bildirimleri (`notify_desktop`):
 
 Bu kanal Linux'ta test edildi; gerçek bot ve Windows toast'ı henüz denenmedi
 ([yol haritası](docs/ROADMAP.md), Faz 4).
+
+## Kod ajanı ve GitHub
+
+Kapalıdır; `code_agent.projects` boşsa ve GitHub bağlanmamışsa araç çalışmaz
+([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). `code_agent_start` her seferinde
+proje ve görev metnini göstererek onay ister, görevi arka planda `claude -p` (headless
+Claude Code) ile çalıştırır ve hemen `status="sent"` döner. Ajan yalnız yerel commit
+atar; push ve web araçları yasaktır. Çalışma ağacı kirliyse görev başlamaz, böylece
+değişiklikler taban commit'e geri sarılabilir. Sonuç, çıkış kodu ve git'teki gerçek
+commit'lerle doğrulanır. Ayarlar: `projects` (takma ad → yol), `command`, `max_minutes`, `model`.
+
+Ajanın Bash'i kısıtsızdır: repo içeriğindeki bir enjeksiyon sizin yetkinizle komut
+çalıştırabilir. Yalnız güvendiğiniz kendi projelerinizi açın.
+
+Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
+çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
+repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,
+varsayılan açık) bunu her açılışta tekrarlar. Klasördeki depolar kod ajanına otomatik
+eklenir. Kimlik doğrulama `gh auth login` ile yapılır; Jarvis token okumaz. Config anahtarları:
+`code_agent.github_owner`, `code_agent.repos_dir`, `code_agent.auto_sync`.
 
 ## Doğrulama ve ölçüm
 
@@ -386,9 +456,12 @@ model senaryolardaki sentetik içeriği görür. Aynı senaryo setini en az iki 
 çalıştırın; yalnız toplam başarıya göre seçim yapmayın, tehlikeli hata sayısını
 ayrı değerlendirin. API kotası ve ücretsiz model erişilebilirliği değişebilir.
 
-GitHub Actions Ubuntu ve Windows üzerinde test → ruff → mypy ve sahte kabul
-koşucusunu çalıştıracak biçimde tanımlıdır. Yerel Linux sonucu, Windows CI sonucu
-yerine geçmez. Bu oturumda push yapılmadığından uzak CI çalıştırıldığı iddia edilmez.
+GitHub Actions ([ci.yml](.github/workflows/ci.yml)) Ubuntu ve Windows üzerinde iki iş
+koşar. `checks` yalnız `[dev]` ekiyle pytest → `bench.run --sahte` →
+`bench.voice_latency --sahte` → ruff → mypy çalıştırır; PySide6 olmadığından Qt
+testleri burada atlanır. `desktop-ui` `[dev,desktop]` ile offscreen Qt testlerini ve
+masaüstü mypy kontrolünü çalıştırır. Yerel Linux sonucu Windows CI sonucunun yerine
+geçmez; CI de gerçek Windows ses/masaüstü kabulünün yerine geçmez.
 
 ## Geliştirme
 

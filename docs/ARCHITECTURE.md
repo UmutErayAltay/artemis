@@ -98,7 +98,8 @@ Kod ajanı ([ADR 0023](adr/0023-code-agent-and-desktop-pet.md)): `code_agent_sta
 (`jarvis/tools/code_agent_jobs.py`), yerel commit atabilir, push edemez; sonuç git'ten
 doğrulanır ve `code_agent_started`/`code_agent_done` denetim olaylarıyla bildirilir.
 
-`jarvis telegram` ayrı bir süreçtir; geçmişi masaüstü ve CLI'dan ayrıdır. Bir mesaj yalnız
+`jarvis telegram` ayrı bir süreçtir; `persist_memory` açıkken masaüstü ve CLI ile aynı
+`state_dir/memory.sqlite3` geçmiş deposunu paylaşır (ADR 0025), kapalıyken geçmişi süreç içinde kalır. Bir mesaj yalnız
 özel sohbetten (`chat.id == from.id == telegram.chat_id`), iletilmemiş, düz metin ve
 `max_message_age_seconds` içinde gelirse çalıştırılır. Başlangıçtaki eski güncellemeler atılır.
 

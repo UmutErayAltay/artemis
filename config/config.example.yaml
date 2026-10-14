@@ -8,6 +8,7 @@ provider_timeout_seconds: 15
 max_output_tokens: 1024
 # Konuşma bağlamı (ADR 0012): modele verilen önceki tur sayısı; 0 kapatır.
 context_turns: 6
+persist_memory: true   # Geçmiş ve öz notlar state_dir/memory.sqlite3 içinde (ADR 0025).
 context_token_budget: 6000
 daily_budget_usd: '1.00'
 allow_paid: false
@@ -38,6 +39,7 @@ voice:
   end_silence_ms: 600
   barge_in_ms: 180 # Seslendirme sırasında bu kadar sürekli konuşma sesi susturur.
   require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
+  continuous_mode: false # true: "artemis" demeden dinler (ADR 0024).
   pre_roll_ms: 300
   max_utterance_seconds: 15
   queue_frames: 32
@@ -104,6 +106,9 @@ voice:
 #   command: claude
 #   max_minutes: 20
 #   model: null                              # doluysa --model olarak geçilir
+#   github_owner: null                       # Ayarlar > GitHub ile de yazılır
+#   repos_dir: null                          # kendi repolarınızın klonlandığı klasör
+#   auto_sync: true                          # açılışta klonla/fetch et
 
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
