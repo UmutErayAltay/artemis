@@ -1,7 +1,8 @@
 # Faz 5 doğrulama raporu
 
-2026-10-14. Bu çalışma kümesinde Faz 5 kodlandı ve otomatik doğrulamadan geçti;
-Windows 11 ve gerçek Claude Code kabulü henüz yapılmadı.
+2026-10-14. Faz 5 kodlandı ve otomatik doğrulamadan geçti. Aynı gün kullanıcı
+Windows 11'de gerçek Claude Code ile kabulü yaptığını bildirdi; faz tamamlandı.
+Aşağıdaki tablo otomatik doğrulamanın kaydıdır; elle kabulün ayrıntısı kullanıcıdadır.
 
 ## Sonuçlar
 
@@ -46,6 +47,7 @@ Jarvis SafetyGate tarafından tek tek denetlenmez. Profil ayarları model seçim
 yön verir; gerçek model dağılımı ya da harcama üst sınırı değildir. Windows Job
 Object süreç yolu Windows CI'da sınandı; bu kullanıcı Windows 11 kabulü değildir.
 Claude Code oturum açma, gerçek kullanıcı aboneliği ve
-uçtan uca gerçek proje işi denenmedi. Yeniden başlatmada açık işler otomatik
+uçtan uca gerçek proje işi otomatik doğrulamada denenmedi; bunlar kullanıcının
+Windows 11 elle kabulünde sınandı. Yeniden başlatmada açık işler otomatik
 çalışmaz; kesinti olarak kalır. Temizliği doğrulanamayan iş başarı sayılmaz ve
 depo sahiplik kilidi korunur.

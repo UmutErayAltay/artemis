@@ -121,8 +121,8 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta ve gerçek botla denenmedi
 
 ### Faz 5 — Arka plan işleri
 
-Durum: kodlandı ve Linux'ta otomatik doğrulandı; Windows 11 ve gerçek Claude Code
-kabulü bekliyor ([F5 doğrulama raporu](F5_WORKFLOW_REPORT.md)). Karar:
+Durum: tamamlandı. Kullanıcı 2026-10-14'te Windows 11'de gerçek Claude Code ile kabulü
+yaptığını bildirdi ([F5 doğrulama raporu](F5_WORKFLOW_REPORT.md)). Karar:
 [ADR 0026](adr/0026-background-project-workflow.md).
 
 **Kapsam**
@@ -140,16 +140,33 @@ kabulü bekliyor ([F5 doğrulama raporu](F5_WORKFLOW_REPORT.md)). Karar:
 - Durdurulan iş tamamlandı olarak işaretlenmez; kodlayıcıya sır aktarılmadığı testle doğrulanır.
 - Kullanıcı Windows 11'de küçük bir projeyi başlattı, bitirdi ve bir kez durdurdu.
 
-### Faz 6 — Sonra
+### Faz 6 — Proaktiflik, MCP, ekran algısı
 
-Durum: kapsam dışı; başlangıç kararı kullanıcıya aittir.
+Durum: başladı (2026-10-14, kullanıcı kararı). Kalemler aşağıdaki sırayla, her biri ayrı
+oturumda ve kendi ADR'siyle ele alınır; bir kalemin Windows kabulü bitmeden sonrakinin
+koduna geçilebilir, fakat "tamamlandı" yalnız kendi kabulüyle yazılır.
+
+| Sıra | Kalem | Durum | Karar |
+| --- | --- | --- | --- |
+| 6a | Proaktiflik: hatırlatma ve sabah brifingi | ADR yazıldı; kod bekliyor | [ADR 0027](adr/0027-proactive-events.md) |
+| 6b | MCP istemcisi (stdio) | planlandı | ADR 0028 (yazılacak) |
+| 6c | Ekran algısı | planlandı | ADR 0029 (yazılacak) |
+
+Sıranın gerekçesi: 6a, F4 bildirimleri ve F5 SQLite/süreç altyapısını yeniden kullanır ve
+yeni bir dış veri kaynağı açmaz. 6b yeni bir dış araç yüzeyi açar; risk ve taint kuralları
+için 6a'daki gözetimsiz tur kuralından yararlanır. 6c en hassas veriyi (ekran içeriği,
+CLAUDE.md 12. kural) taşır ve yalnız Windows'ta anlamlıdır; en sona kalır.
 
 **Kapsam**
-- Ekran algısı, proaktiflik (sabah brifingi, hatırlatma) ve MCP. Her kalem önce kısa ADR ile
-  tanımlanır ve ayrı oturumda, sırayla ele alınır.
+- 6a: kullanıcının kurduğu hatırlatmalar ve config'te tanımlı sabah brifingi; gözetimsiz
+  tur kuralı (ADR 0027).
+- 6b: Artemis'teki stdio MCP v1'in taşınması; araçlar `@register_tool` yerine tek bir
+  MCP köprüsü üzerinden kayda girer, ad kuralı (9. kural) korunur.
+- 6c: kullanıcının açıkça başlattığı ekran görüntüsü/metin okuma; varsayılan kapalı.
 
 **Bitiş şartı**
 - Ekran verisi, proaktif olaylar ve MCP araçları SafetyGate ve taint kurallarından geçer;
   testle gösterilir.
+- Gözetimsiz (proaktif) turda READ_ONLY dışındaki hiçbir araç çalışmaz (testle).
 - Risk sınıfı bildirilmeyen MCP aracı SIDE_EFFECT sayılır (testle).
 - Her kalemin Windows kabulü kullanıcı tarafından yapılır.
