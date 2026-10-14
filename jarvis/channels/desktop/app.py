@@ -10,8 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
+    QBrush,
     QCloseEvent,
     QColor,
     QFont,
@@ -21,6 +22,7 @@ from PySide6.QtGui import (
     QPainter,
     QPen,
     QPixmap,
+    QRadialGradient,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -52,7 +54,7 @@ from jarvis.channels.desktop.bridge import (
     State,
     VoiceCommand,
 )
-from jarvis.channels.desktop.pet import PetWidget, level_from_message
+from jarvis.channels.desktop.pet import TEAL, PetWidget, level_from_message
 from jarvis.channels.desktop.settings_panel import SettingsPanel, save_choices
 from jarvis.channels.desktop.steps import StepLine, step_line
 from jarvis.channels.runtime import Runtime, create_runtime
@@ -60,68 +62,125 @@ from jarvis.channels.runtime import Runtime, create_runtime
 _STYLE = """
 QWidget {
   background: #0B1220; color: #E6EDF5;
-  font-family: 'Segoe UI', sans-serif; font-size: 14px;
+  font-family: 'Segoe UI Variable Text', 'Segoe UI', sans-serif; font-size: 14px;
 }
 QLabel { background: transparent; }
 QFrame#card {
-  background: #111C2D; border: 1px solid #223148; border-radius: 14px;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #15243A, stop:1 #101B2D);
+  border: 1px solid #243750; border-radius: 22px;
 }
 QFrame#raised {
-  background: #17263A; border: 1px solid #2A3B52; border-radius: 12px;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1A2B43, stop:1 #15233A);
+  border: 1px solid #2E4260; border-radius: 20px;
 }
 QFrame#messageUser {
-  background: #193840; border: 1px solid #2A5358; border-radius: 13px;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1E4A50, stop:1 #173A44);
+  border: 1px solid #2F6A6B; border-radius: 20px; border-bottom-right-radius: 6px;
 }
 QFrame#messageAssistant {
-  background: #17263A; border: 1px solid #2A3B52; border-radius: 13px;
+  background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #1D2F48, stop:1 #172840);
+  border: 1px solid #2E4260; border-radius: 20px; border-bottom-left-radius: 6px;
 }
-QLabel#eyebrow { color: #A9B8C9; font-size: 12px; font-weight: 600; }
-QLabel#title { color: #E6EDF5; font-size: 24px; font-weight: 700; }
-QLabel#muted { color: #A9B8C9; }
-QLabel#status { background: transparent; border: none; padding: 0 2px; }
+QFrame#chip {
+  background: #0E1828; border: 1px solid #2E4260; border-radius: 17px;
+}
+QLabel#eyebrow { color: #B4C3D4; font-size: 11px; font-weight: 700; letter-spacing: 1px; }
+QLabel#title {
+  color: #F2F6FA; font-size: 24px; font-weight: 800;
+  font-family: 'Segoe UI Variable Display', 'Segoe UI', sans-serif;
+}
+QLabel#muted { color: #B4C3D4; }
+QLabel#section { color: #FFD78C; font-size: 16px; font-weight: 800; padding-top: 10px; }
+QLabel#status { background: transparent; border: none; padding: 0 2px; font-weight: 700; }
 QLabel#rawToolName {
-  color: #A9B8C9; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px;
+  color: #B4C3D4; font-family: 'Cascadia Mono', Consolas, monospace; font-size: 12px;
 }
 QFrame#stepBlock {
-  background: #0E1828; border: 1px solid #26374D; border-radius: 11px;
+  background: #0F1A2B; border: 1px solid #2A3E58; border-radius: 16px;
 }
 QPushButton#stepDetailsToggle {
-  color: #A9B8C9; background: transparent; border: none;
+  color: #B4C3D4; background: transparent; border: none;
   padding: 2px 0px; min-height: 0px; font-size: 12px;
 }
 QPushButton#stepDetailsToggle:hover { color: #53D6C7; background: transparent; border: none; }
-QPlainTextEdit#mainPrompt { padding: 8px 12px; }
+QPlainTextEdit#mainPrompt { padding: 8px 14px; }
 QLabel#demo {
-  color: #0B1220; background: #53D6C7; border-radius: 9px;
-  padding: 6px 10px; font-weight: 800;
+  color: #3B2A07; background: #FFD78C; border-radius: 15px;
+  padding: 6px 14px; font-weight: 800;
 }
-QPlainTextEdit, QListWidget {
-  background: #0E1828; border: 1px solid #26374D; border-radius: 11px;
+QPlainTextEdit, QListWidget, QLineEdit, QComboBox {
+  background: #0E1828; border: 1px solid #2A3E58; border-radius: 16px;
   padding: 12px; selection-background-color: #255B61;
 }
-QPlainTextEdit:focus, QListWidget:focus { border: 1px solid #53D6C7; }
+QLineEdit, QComboBox { padding: 7px 14px; border-radius: 18px; min-height: 22px; }
+QComboBox::drop-down { border: none; width: 34px; }
+QComboBox::down-arrow { image: url(@CHEVRON@); width: 12px; height: 8px; }
+QComboBox QAbstractItemView {
+  background: #12203A; border: 1px solid #2E4260; border-radius: 12px;
+  selection-background-color: #255B61; outline: none; padding: 4px;
+}
+QPlainTextEdit:focus, QListWidget:focus, QLineEdit:focus, QComboBox:focus {
+  border: 2px solid #53D6C7;
+}
 QPushButton {
-  background: #17263A; color: #E6EDF5; border: 1px solid #30445E;
-  border-radius: 10px; padding: 9px 14px; min-height: 20px; font-weight: 600;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #1F3350, stop:1 #182A44);
+  color: #E6EDF5; border: 1px solid #33496A;
+  border-radius: 19px; padding: 8px 18px; min-height: 22px; font-weight: 700;
 }
-QPushButton:hover { border-color: #53D6C7; background: #1D3046; }
+QPushButton:hover { border-color: #53D6C7; background: #223954; }
+QPushButton:pressed { background: #16263D; }
 QPushButton:focus { border: 2px solid #53D6C7; }
-QPushButton:disabled { color: #718096; background: #111C2D; border-color: #243247; }
+QPushButton:disabled { color: #8493A8; background: #111C2D; border-color: #243247; }
 QPushButton#primary {
-  color: #0B1220; background: #53D6C7;
-  border-color: #53D6C7; font-weight: 800;
+  color: #0B1220; border-color: #53D6C7; font-weight: 800;
+  background: qlineargradient(x1:0, y1:0, x2:0, y2:1, stop:0 #72E5D8, stop:1 #45C2B3);
 }
-QPushButton#primary:hover { background: #78E4D7; }
-QPushButton#danger { color: #FFD9D5; border-color: #79423F; background: #3A252B; }
+QPushButton#primary:hover { background: #8AEEE2; }
+QPushButton#primary:pressed { background: #3DB3A5; }
+QPushButton#primary:focus { border: 2px solid #FFD78C; }
+QPushButton#danger { color: #FFD9D5; border-color: #8A504D; background: #3A252B; }
+QPushButton#danger:hover { border-color: #F0B2AA; background: #47292F; }
 QPushButton#amber { color: #FFD78C; border-color: #795D31; background: #332B1E; }
-QSplitter::handle { background: #0B1220; width: 8px; }
-QScrollBar:vertical { background: #0E1828; width: 11px; margin: 3px; }
-QScrollBar::handle:vertical { background: #34465E; min-height: 24px; border-radius: 5px; }
-QListWidget::item { padding: 7px 5px; border-bottom: 1px solid #1C2A3D; }
+QPushButton#suggestion { color: #FFD78C; border-color: #795D31; background: #2A2619; }
+QPushButton#suggestion:hover { border-color: #FFD78C; background: #3A3120; }
+QPushButton#voiceToggle:checked { color: #0B1220; background: #53D6C7; border-color: #53D6C7; }
+QSplitter::handle { background: #0B1220; width: 10px; }
+QScrollBar:vertical { background: transparent; width: 12px; margin: 4px; }
+QScrollBar::handle:vertical { background: #3A5070; min-height: 28px; border-radius: 4px; }
+QScrollBar::handle:vertical:hover { background: #53D6C7; }
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0px; }
+QListWidget::item { padding: 8px 6px; border-bottom: 1px solid #1C2A3D; }
 QDialog { background: #111C2D; }
-QPushButton#primary:disabled { color: #718096; background: #23313F; border-color: #334354; }
-QPushButton#danger:disabled { color: #887574; background: #29272C; border-color: #454047; }
-"""
+QTabWidget::pane { border: none; top: 6px; }
+QTabBar { background: transparent; }
+QTabBar::tab {
+  background: #121F33; color: #B4C3D4; border: 1px solid #2A3E58; border-radius: 17px;
+  padding: 7px 22px; margin: 0 6px 0 2px; font-weight: 700; min-height: 20px;
+}
+QTabBar::tab:hover { border-color: #53D6C7; }
+QTabBar::tab:selected { background: #53D6C7; color: #0B1220; border-color: #53D6C7; }
+QTabBar::tab:focus { border: 2px solid #78E4D7; }
+QCheckBox { spacing: 10px; padding: 3px 0; }
+QCheckBox::indicator {
+  width: 18px; height: 18px; border-radius: 6px;
+  border: 2px solid #4A6285; background: #0E1828;
+}
+QCheckBox::indicator:hover { border-color: #53D6C7; }
+QCheckBox::indicator:checked {
+  border-color: #53D6C7;
+  background: qradialgradient(cx:.5, cy:.5, radius:.6, fx:.5, fy:.5,
+    stop:0 #53D6C7, stop:0.45 #53D6C7, stop:0.55 #0E1828, stop:1 #0E1828);
+}
+QCheckBox::indicator:disabled { border-color: #2F3F57; }
+QCheckBox:focus { color: #FFD78C; }
+QProgressBar {
+  background: #0E1828; border: 1px solid #2A3E58; border-radius: 12px;
+  text-align: center; min-height: 22px; font-weight: 600;
+}
+QProgressBar::chunk { background: #53D6C7; border-radius: 11px; }
+QPushButton#primary:disabled { color: #8493A8; background: #23313F; border-color: #334354; }
+QPushButton#danger:disabled { color: #8D7C7B; background: #29272C; border-color: #454047; }
+""".replace("@CHEVRON@", (Path(__file__).with_name("chevron.svg")).as_posix())
 
 
 # Köprü ses durumunu makine okunur taşır; Türkçe metne ekran çevirir.
@@ -161,6 +220,42 @@ _STEP_TURNS_KEPT = 8
 _STEP_EVENTS_PER_TURN = 200
 
 
+class Mascot(QWidget):
+    """Başlıktaki küçük, statik pet yüzü; pet.py renkleriyle çizilir, hareketi yoktur."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setFixedSize(54, 56)
+        self.setAccessibleName("Jarvis yüzü")
+
+    def paintEvent(self, event: Any) -> None:
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing)
+        p.setPen(QPen(QColor("#2A3B52"), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawLine(QPointF(27, 12), QPointF(27, 5))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(TEAL)
+        p.drawEllipse(QPointF(27, 5), 3.2, 3.2)
+        grad = QRadialGradient(QPointF(19, 21), 36)
+        grad.setColorAt(0.0, QColor("#2F4A6C"))
+        grad.setColorAt(0.6, QColor("#16253B"))
+        grad.setColorAt(1.0, QColor("#0A1220"))
+        p.setBrush(QBrush(grad))
+        p.setPen(QPen(TEAL, 2))
+        p.drawEllipse(QRectF(3, 11, 48, 43))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(255, 215, 140, 60))
+        for x in (11, 43):
+            p.drawEllipse(QPointF(x, 40), 4.5, 3)
+        p.setBrush(TEAL)
+        for x in (19, 35):
+            p.drawEllipse(QPointF(x, 31), 3.6, 4.4)
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        p.setPen(QPen(TEAL, 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.drawArc(QRectF(21, 34, 12, 8), 200 * 16, 140 * 16)
+        p.end()
+
+
 def _is_user_speaker(speaker: str) -> bool:
     """"Siz" ve "Siz (ses)" aynı kullanıcı balonudur."""
     return speaker.startswith("Siz")
@@ -168,7 +263,7 @@ def _is_user_speaker(speaker: str) -> bool:
 
 def _dot_style(color: str) -> str:
     """Durum noktasının rengi; metin ayrı etikette düz kalır."""
-    return f"QLabel {{ color: {color}; font-size: 15px; background: transparent; }}"
+    return f"QLabel {{ color: {color}; font-size: 20px; background: transparent; }}"
 
 
 def _detail_text(activity: Activity) -> str:
@@ -443,7 +538,7 @@ class ApprovalDialog(QDialog):
         notice.setWordWrap(True)
         notice.setStyleSheet(
             "QLabel { color:#FFD78C; background:#332B1E; border:1px solid #795D31; "
-            "border-radius:10px; padding:11px; }"
+            "border-radius:16px; padding:12px 14px; }"
         )
         layout.addWidget(notice)
         layout.addWidget(QLabel("Doğrulanmış araç argümanları"))
@@ -661,13 +756,7 @@ class DesktopWindow(QMainWindow):
         header_layout = QHBoxLayout(header)
         header_layout.setContentsMargins(18, 15, 18, 15)
         header_layout.setSpacing(14)
-        mark = QLabel("J")
-        mark.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        mark.setFixedSize(44, 44)
-        mark.setStyleSheet(
-            "QLabel { color:#0B1220; background:#53D6C7; border-radius:14px; "
-            "font-size:26px; font-weight:900; }"
-        )
+        mark = Mascot()
         header_layout.addWidget(mark)
         title_stack = QVBoxLayout()
         title = QLabel("Jarvis")
@@ -701,14 +790,15 @@ class DesktopWindow(QMainWindow):
         self.voice_state.setAccessibleName("Ses durumu")
         self.voice_button = QPushButton("Ses: kapalı")
         self.voice_button.setCheckable(True)
+        self.voice_button.setObjectName("voiceToggle")
         self.voice_button.setAccessibleName("Sesi aç veya kapat")
         if self._demo:
             self.voice_button.setToolTip("Demo modunda ses yok")
         else:
             self.voice_button.setToolTip("Mikrofonu yalnız siz açarsınız; onaylar ekrandadır")
         self.voice_button.clicked.connect(self._toggle_voice)
-        header_layout.addWidget(self.voice_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        header_layout.addWidget(self.voice_state, 0, Qt.AlignmentFlag.AlignVCenter)
+        voice_chip = self._chip(self.voice_dot, self.voice_state)
+        header_layout.addWidget(voice_chip, 0, Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self.voice_button)
         self.status_dot = QLabel("●")
         self.status_dot.setObjectName("statusDot")
@@ -717,8 +807,8 @@ class DesktopWindow(QMainWindow):
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setMinimumWidth(92)
         self._set_status("Başlatılıyor…", "running")
-        header_layout.addWidget(self.status_dot, 0, Qt.AlignmentFlag.AlignVCenter)
-        header_layout.addWidget(self.status_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        status_chip = self._chip(self.status_dot, self.status_label)
+        header_layout.addWidget(status_chip, 0, Qt.AlignmentFlag.AlignVCenter)
         main.addWidget(header)
 
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -820,6 +910,18 @@ class DesktopWindow(QMainWindow):
         QTimer.singleShot(0, self.prompt.setFocus)
         # Açılışta bir kez, arka plan thread'inde; CLI'da eşitleme yoktur.
         QTimer.singleShot(0, self.settings_panel.start_auto_sync)
+
+    @staticmethod
+    def _chip(dot: QLabel, label: QLabel) -> QFrame:
+        """Nokta + metin tek hap rozetinde; widget'lar aynı kalır, yalnız kapsayıcı eklenir."""
+        chip = QFrame()
+        chip.setObjectName("chip")
+        row = QHBoxLayout(chip)
+        row.setContentsMargins(12, 3, 14, 3)
+        row.setSpacing(6)
+        row.addWidget(dot)
+        row.addWidget(label)
+        return chip
 
     def _github_synced(self, report: Any, auto: bool) -> None:
         if not (auto and report.cloned):

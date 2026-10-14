@@ -233,6 +233,7 @@ class SettingsPanel(QWidget):
         self.applications: dict[str, str] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
+        layout.setSpacing(10)
         title = QLabel("Ayarlar")
         title.setObjectName("title")
         layout.addWidget(title)
@@ -262,6 +263,7 @@ class SettingsPanel(QWidget):
         self.advanced_devices.toggled.connect(self._toggle_device_detail)
         layout.addWidget(self.advanced_devices)
         app_title = QLabel("Açılabilecek uygulamalar")
+        app_title.setObjectName("section")
         layout.addWidget(app_title)
         self.all_applications = QCheckBox("Bütün kurulu uygulamalara erişim")
         self.all_applications.toggled.connect(self._sync_application_access)
@@ -284,6 +286,7 @@ class SettingsPanel(QWidget):
         self.application_hint.setWordWrap(True)
         layout.addWidget(self.application_hint)
         github_title = QLabel("GitHub")
+        github_title.setObjectName("section")
         layout.addWidget(github_title)
         github_form = QFormLayout()
         self.github_owner = QLineEdit()
