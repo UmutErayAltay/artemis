@@ -97,15 +97,18 @@ voice:
 #   approval_timeout_seconds: 120
 #   max_message_age_seconds: 120
 
-# Kod ajanı (ADR 0023). KAPALI gelir: projects boşsa araçlar çalışmaz. Model yalnız
-# takma adı seçer; ajan headless `claude -p` olarak o projede çalışır, YEREL commit atabilir,
-# push edemez. Çalışma ağacı kirliyse görev başlamaz. Her başlatma onay ister.
+# Kod ajanı (ADR 0023/0026). KAPALI gelir: projects boşsa araçlar çalışmaz. Her iş
+# tam taslak için onay ister; ajan headless `claude -p` olarak çalışır, yerel commit
+# atabilir. Claude Bash/alt ajan araçları SafetyGate dışındadır; OS sandbox yoktur.
 # code_agent:
 #   projects:
 #     jarvis: C:/Users/siz/Projects/jarvis   # göreli yol bu dosyaya göre çözülür
 #   command: claude
 #   max_minutes: 20
 #   model: null                              # doluysa --model olarak geçilir
+#   manager_model: opus                      # örnek CLI takma adı; isteğe bağlı
+#   coder_model: sonnet                      # örnek CLI takma adı; isteğe bağlı
+#   tester_model: haiku                      # örnek CLI takma adı; isteğe bağlı
 #   github_owner: null                       # Ayarlar > GitHub ile de yazılır
 #   repos_dir: null                          # kendi repolarınızın klonlandığı klasör
 #   auto_sync: true                          # açılışta klonla/fetch et

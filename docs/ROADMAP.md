@@ -121,6 +121,10 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta ve gerçek botla denenmedi
 
 ### Faz 5 — Arka plan işleri
 
+Durum: kodlandı ve Linux'ta otomatik doğrulandı; Windows 11 ve gerçek Claude Code
+kabulü bekliyor ([F5 doğrulama raporu](F5_WORKFLOW_REPORT.md)). Karar:
+[ADR 0026](adr/0026-background-project-workflow.md).
+
 **Kapsam**
 - Artemis'in proje atölyesi taşınır: görüşme, spec, ardından ayrı süreçte çalışan kodlayıcı.
   İş yalnız sonuç olayı başarılı ve çıkış kodu sıfır ise tamamlanır.

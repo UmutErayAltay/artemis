@@ -421,6 +421,53 @@ commit'lerle doğrulanır. Ayarlar: `projects` (takma ad → yol), `command`, `m
 Ajanın Bash'i kısıtsızdır: repo içeriğindeki bir enjeksiyon sizin yetkinizle komut
 çalıştırabilir. Yalnız güvendiğiniz kendi projelerinizi açın.
 
+### Aşamalı proje işleri (Faz 5)
+
+Masaüstündeki **Projeler** sekmesi, izinli proje için görev, kapsam ve kabul
+ölçütlerini içeren bir taslak hazırlar. Taslak çalıştırma başlatmaz; tam metni
+inceleyip SafetyGate onayını verdikten sonra kodlama işi arka planda başlar.
+Claude Code'un `question` çıktısı işi beklemeye alır; Projeler sekmesinde soruyu
+yanıtlayıp ayrıca onaylayarak aynı CLI oturumunu sürdürebilirsiniz. İptal, durum,
+sonuç ve doğrulanan yerel commit'ler aynı sekmede görünür. `jarvis desktop`
+gereklidir; demo kipinde bu eylemler kapalıdır.
+
+Yönetici, kodlayıcı ve mekanik/test alt ajanı için model profilleri isteğe bağlı
+`code_agent.manager_model`, `code_agent.coder_model` ve
+`code_agent.tester_model` ayarlarıyla seçilir. Örnek Claude Code rol dağılımı:
+
+```yaml
+code_agent:
+  manager_model: opus
+  coder_model: sonnet
+  tester_model: haiku
+```
+
+Bu yalnızca örnektir; takma adlar Claude CLI kurulumunuzun güncel resmi model
+kimlikleriyle eşleşmelidir. Bunlar Jarvis'in model kimliği veya fiyat listesi
+değildir. Claude Code oturum açma ve
+abonelik erişimini kullanıcı kendi CLI kurulumu üzerinden sağlar; Jarvis anahtar
+okumaz veya kopyalamaz. Profil, gerçek alt ajan kullanımını ya da toplam harcamayı
+zorlamaz. Tekrar bakın: [ADR 0026](docs/adr/0026-background-project-workflow.md).
+
+İş metaverisi `state_dir/code_agent.sqlite3` içinde tutulur; uygulama yeniden
+başlatıldığında yarım kalan işler kesinti olarak gösterilir ve kendiliğinden
+yeniden çalıştırılmaz. Bu depo yerel kullanıcının yetkileriyle çalışır; Claude
+Code'un Bash ve alt ajan araçları Jarvis SafetyGate tarafından tek tek
+denetlenmez, OS sandbox'ı yoktur. Aynı veritabanını kullanan ikinci runtime proje
+eylemlerini sahiplik kilidi nedeniyle kapalı tutar. Sınırda süreç temizliği
+doğrulanamazsa iş başarıya çevrilmez ve kilit korunur; uygulama kapanışında
+temizliğin tamamlanması gerekir. Daha fazla bilgi:
+[Faz 5 planı](docs/F5_PLAN.md), [mimari](docs/ARCHITECTURE.md) ve
+[yol haritası](docs/ROADMAP.md). Otomatik kontrol sonuçları:
+[Faz 5 doğrulama raporu](docs/F5_WORKFLOW_REPORT.md) ·
+[HTML raporu](docs/F5_WORKFLOW_REPORT.html).
+
+![Projeler sekmesinin sentetik örnek sunumu](docs/assets/desktop/projects.png)
+
+Ekran görüntüsü, Qt paneline sentetik bir taslak ve sahte durum kaydı verilerek
+yerel/offscreen üretildi; bu, gerçek Claude Code işinin veya Windows kabulünün
+kanıtı değildir.
+
 Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
 çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
 repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,

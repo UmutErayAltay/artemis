@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis Faz 5 doğrulama raporu</title>
+  <style>
+    :root { color-scheme: dark; font: 16px/1.55 system-ui, sans-serif; background: #0b1220; color: #e6edf5; }
+    body { max-width: 920px; margin: 3rem auto; padding: 0 1.25rem 4rem; }
+    h1, h2 { color: #72e5d8; line-height: 1.2; }
+    p, li { color: #c7d2e1; }
+    .stamp { color: #b4c3d4; }
+    table { width: 100%; border-collapse: collapse; margin: 1.25rem 0 2rem; }
+    th, td { border-bottom: 1px solid #2a3e58; padding: .65rem; text-align: left; vertical-align: top; }
+    th { color: #ffd78c; }
+    code { color: #9deade; }
+    a { color: #72e5d8; }
+    img { display: block; width: 100%; border: 1px solid #2a3e58; border-radius: 12px; margin: 1rem 0; }
+    .note { border-left: 3px solid #ffd78c; padding-left: 1rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Faz 5: arka plan proje işleri</h1>
+    <p class="stamp">Doğrulama tarihi: 2026-10-14 · Durum: otomatik doğrulandı; Windows ve gerçek Claude Code kabulü bekliyor.</p>
+
+    <h2>Kontroller</h2>
+    <table>
+      <tbody>
+        <tr><th>Tüm testler</th><td>807 geçti, 1 test seçilmedi · 27.90 sn</td></tr>
+        <tr><th>F5, süreç ve CLI testleri</th><td>41 geçti · 4.13 sn</td></tr>
+        <tr><th>Ruff</th><td><code>All checks passed!</code></td></tr>
+        <tr><th>Mypy</th><td>Linux ve win32 hedeflerinde 71 kaynak dosyası geçti</td></tr>
+        <tr><th>CI</th><td>Ubuntu/Windows matrisindeki dört CI işi bu yerel kontrolde çalıştırılmadı</td></tr>
+        <tr><th>Güvenlik mutasyonları</th><td>4/4 yakalandı; kaynak özeti değişmedi</td></tr>
+        <tr><th>Genel sahte kabul bench'i</th><td>39/39 geçti; tehlikeli hata 0, onaysız yan etki 0</td></tr>
+        <tr><th>Sahte kullanım</th><td>0 token, $0</td></tr>
+      </tbody>
+    </table>
+
+    <p>Faz 5 taslak, SafetyGate onayı, sahte CLI soru/cevap, iptal, zaman aşımı, şema doğrulama ve süreç sahipliği testleriyle doğrulandı. Sahte LLM diyaloğu taslak hazırlar, reddi ve onayı işler, CLI sorusunu alır ve aynı session UUID'siyle devam eder. Genel sahte bench Faz 5 işlerini içermez; bunlar pytest hedeflerinde sınandı.</p>
+
+    <h2>Projeler paneli</h2>
+    <p>Görüntü, Qt paneline sentetik taslak ve sahte durum verisi verilerek üretildi. Gerçek Claude Code işi veya Windows kabulü göstermez.</p>
+    <img src="assets/desktop/projects.png" alt="Sentetik taslak içeren Jarvis Projeler paneli">
+
+    <h2>Bilinen sınırlar</h2>
+    <ul>
+      <li>Kod ajanı yerel kullanıcının yetkileriyle çalışır; OS sandbox yoktur. Claude Code Bash ve alt ajan çağrıları Jarvis SafetyGate tarafından tek tek denetlenmez.</li>
+      <li>Model profili gerçek model dağılımını veya harcama üst sınırını garanti etmez.</li>
+      <li>Windows Job Object ve gerçek Claude Code oturumu elle doğrulanmadı.</li>
+      <li>Gerçek kullanıcı deposu, ücretli model çağrısı ve abonelik erişimi kullanılmadı.</li>
+      <li>Yeniden başlatmada etkin işler kesinti olarak kalır; otomatik devam etmez. Temizlik doğrulanamazsa iş başarı sayılmaz ve repo kilidi korunur.</li>
+    </ul>
+    <p class="note">Sahte CLI kontrolleri abonelik erişimini, gecikmeyi veya gerçek model davranışını kanıtlamaz.</p>
+    <p><a href="F5_WORKFLOW_REPORT.md">Ayrıntılı Markdown raporu</a> · <a href="F5_PLAN.md">Faz 5 planı</a> · <a href="adr/0026-background-project-workflow.md">ADR 0026</a></p>
+  </main>
+</body>
+</html>

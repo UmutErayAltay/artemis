@@ -98,6 +98,21 @@ Kod ajanı ([ADR 0023](adr/0023-code-agent-and-desktop-pet.md)): `code_agent_sta
 (`jarvis/tools/code_agent_jobs.py`), yerel commit atabilir, push edemez; sonuç git'ten
 doğrulanır ve `code_agent_started`/`code_agent_done` denetim olaylarıyla bildirilir.
 
+Faz 5 ([ADR 0026](adr/0026-background-project-workflow.md)) bu işi aşamalı hale
+getirir: `code_agent_prepare` yalnız taslak saklar; `code_agent_start` tam taslak
+için onay ister. Sabit şemalı CLI segmentleri `question` ile `completed` çıktısını
+ayırt eder; cevap yeni bir onaydan sonra yakalanmış session UUID ile `--resume`
+üzerinden gider. SQLite iş deposu (`state_dir/code_agent.sqlite3`) tek runtime tarafından
+sahiplenilir; yeniden açılışta etkin işler `interrupted` olur, otomatik sürdürülmez.
+Süreç ve alt süreç temizliği doğrulanmadan iş `done` olmaz. Projeler sekmesi sadece
+durumu sunar; eylemler ortak bridge ve SafetyGate üzerinden geçer.
+
+Yetki sınırı yerel kullanıcı hesabıdır; container/VM veya OS sandbox yoktur.
+Claude Code'un kendi Bash ve alt ajan çağrıları Jarvis SafetyGate'inden geçmez.
+Model profilleri CLI'ye yön verir, gerçek model dağılımını veya harcama üst sınırını
+garanti etmez. Windows Job Object davranışı ve gerçek Claude Code oturumu ayrıca
+Windows 11'de elle kabul edilmelidir.
+
 `jarvis telegram` ayrı bir süreçtir; `persist_memory` açıkken masaüstü ve CLI ile aynı
 `state_dir/memory.sqlite3` geçmiş deposunu paylaşır (ADR 0025), kapalıyken geçmişi süreç içinde kalır. Bir mesaj yalnız
 özel sohbetten (`chat.id == from.id == telegram.chat_id`), iletilmemiş, düz metin ve
