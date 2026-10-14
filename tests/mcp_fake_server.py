@@ -6,6 +6,7 @@ Gerçek bir MCP sunucusu yoktur; her mod istemcinin tek bir hata yolunu sınar.
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
@@ -89,7 +90,16 @@ def handle_call(message: dict[str, Any]) -> None:
     request_id = message["id"]
     params = message.get("params", {})
     if MODE == "hang_call":
+        if len(sys.argv) > 2:
+            with open(sys.argv[2], "w", encoding="utf-8") as handle:
+                handle.write(str(os.getpid()))
         sleep_forever()
+    if MODE == "flood":
+        line = json.dumps(
+            {"jsonrpc": "2.0", "method": "notifications/message", "params": "x" * 900}
+        )
+        sys.stdout.write((line + "\n") * 11000)  # ~10 MiB
+        sys.stdout.flush()
     if MODE == "big":
         sys.stdout.write("x" * (2 << 20) + "\n")
         sys.stdout.flush()
@@ -127,6 +137,15 @@ def handle_initialize(message: dict[str, Any]) -> bool:
         with open(sys.argv[2], "w", encoding="utf-8") as handle:
             handle.write(str(child.pid))
         sleep_forever()
+    if MODE == "deep":
+        sys.stdout.write("[" * 100000 + "]" * 100000 + "\n")
+        sys.stdout.flush()
+        return True
+    if MODE == "orphan":
+        # Torun stdout/stderr'i miras alır: lider çıksa da boru açık kalır.
+        child = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(60)"])
+        with open(sys.argv[2], "w", encoding="utf-8") as handle:
+            handle.write(str(child.pid))
     if MODE == "garbage":
         sys.stdout.write("bu json degil\n")
         sys.stdout.flush()
@@ -146,6 +165,11 @@ def handle_initialize(message: dict[str, Any]) -> bool:
 
 
 def main() -> None:
+    # MCP stdio UTF-8'dir; Windows'ta metin akışları kod sayfasıyla açılır (PYTHONUTF8 alt
+    # sürece aktarılmaz), bu yüzden açıkça UTF-8'e çevrilir.
+    for stream in (sys.stdin, sys.stdout):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(encoding="utf-8")
     if MODE == "die":
         sys.exit(3)
     while (message := read_message()) is not None:

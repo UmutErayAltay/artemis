@@ -142,6 +142,9 @@ voice:
 # dışındadır, kapı yalnız çağrıyı denetler. Her MCP aracı varsayılan olarak yan etkilidir
 # ve dışarı giden (outbound) sayılır; sonucu turu lekeler. Sunucunun "readOnly" beyanı
 # riski DÜŞÜRMEZ; bir aracı okuma-yalnız saymak için read_only_tools'a siz yazarsınız.
+# read_only_tools/confirm_tools sunucunun HAM araç adlarıdır (mcp_<sunucu>_ öneki yok).
+# read_only_tools'a yazılan aracın argümanları onay sorulmadan sunucuya (ve onun ağına)
+# gider: yalnız gerçekten okuyan ve güvendiğiniz araçları yazın.
 # content ZORUNLU: dosya/not/mail gibi kişisel veri döndüren sunucuda "file" seçin; bu
 # sonuçlar buluta ve Telegram'a gitmez. Anahtar gerekiyorsa YAML'a yazmayın:
 # env_passthrough yalnız ortam değişkeni ADINI listeler, değer o sunucuya aktarılır.

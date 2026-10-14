@@ -496,6 +496,8 @@ kendi küçük istemcisini kullanır, ayrıca `mcp` paketi gerekmez. Her çağr�
 Güvenlik varsayılanları: her MCP aracı yan etkili ve dışarı giden sayılır; sonucu dış
 içeriktir ve turu lekeler. Sunucunun "salt okunur" beyanı riski düşürmez; bunu yalnız
 siz `read_only_tools` ile yaparsınız, `destructiveHint` bildiren araç ise onay ister.
+`read_only_tools`/`confirm_tools` sunucunun ham araç adlarını alır (`mcp_<sunucu>_` öneki
+olmadan). Okuma-yalnız saydığınız aracın argümanları onay sorulmadan sunucuya gider.
 Kişisel veri döndüren sunucuda `content: file` seçin; o sonuçlar buluta ve Telegram'a
 gitmez. Sunucu süreci yalnız işletim sistemi değişkenlerini ve sizin `env_passthrough`
 ile adlandırdıklarınızı görür. MCP sunucusunun kendi yaptıkları SafetyGate'in dışındadır.

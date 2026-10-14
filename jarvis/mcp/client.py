@@ -7,6 +7,15 @@ Neden her çağrıda taze süreç: kalıcı oturum, yetim süreç ve yeniden ba�
 durumunu v1'e sokmaz. Tüm adımlar TEK bir deadline altındadır; sınırsız
 `read`/`wait`/`join` yoktur. Hata metinleri kullanıcıya gösterilebilir kısa
 Türkçedir: komut satırı, ortam ve ham sunucu çıktısı içermez (sır taşıyabilir).
+Sunucunun kendi hata metni de kullanıcıya/modele taşınmaz: üçüncü taraf metnidir.
+
+Ortam: istemci `os.environ`'u çocuğa aktarmaz ve PATH'i çağıranın verdiği ortamdan alır.
+Tek istisna Windows'ta `shutil.which`'in PATHEXT'i `os.environ`'dan okumasıdır; bu yalnız
+komut adı çözümlemesidir, çocuğa değer taşımaz.
+
+Bilinen sınır (Windows): sunucu lideri çıktıktan sonra `taskkill /T` ağacı bulamaz, bu
+yüzden normal çıkışta bırakılan torun süreçler Windows'ta temizlenmez. POSIX'te lider
+çıksa da süreç grubu (`start_new_session`) `killpg` ile temizlenir.
 """
 
 from __future__ import annotations
@@ -29,9 +38,12 @@ from jarvis.tools.code_agent_process import NO_WINDOW, kill_tree
 SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = ("2025-06-18", "2025-03-26", "2024-11-05")
 MAX_MESSAGE_BYTES = 1 << 20
 MAX_LIST_PAGES = 20
-ERROR_MESSAGE_LIMIT = 200
 GRACEFUL_EXIT_SECONDS = 1.0
 CLEANUP_SECONDS = 2.0
+# Bildirim seli tek tek küçük satırlarla da bellek/süre yiyebilir; oturum toplamı sınırlıdır.
+MAX_SESSION_BYTES = 8 << 20
+CANCEL_POLL_SECONDS = 0.1
+UNSAFE_BATCH_CHARACTERS = frozenset('"&|<>^%!')
 
 
 def _spawn_options() -> dict[str, Any]:
@@ -43,14 +55,12 @@ def _spawn_options() -> dict[str, Any]:
     ölçüldü).
     """
     if os.name == "nt":
-        return {
-            "creationflags": NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-        }
+        return {"creationflags": NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
     return {"start_new_session": True}
 
 
 class MCPError(RuntimeError):
-    """`error_type`: timeout | protocol | process | remote | too_large | version."""
+    """`error_type`: timeout | protocol | process | remote | too_large | version | cancelled."""
 
     def __init__(self, message: str, *, error_type: str) -> None:
         super().__init__(message)
@@ -77,6 +87,32 @@ def _encode(message: Mapping[str, Any]) -> bytes:
     return json.dumps(message, ensure_ascii=False).encode("utf-8") + b"\n"
 
 
+def _resolve_command(command: Sequence[str], path: str) -> str:
+    """Komutu çözer; çalışma dizinindeki gölgelemeyi ve .cmd argüman enjeksiyonunu reddeder."""
+    if not command:
+        raise MCPError("MCP sunucu komutu boş.", error_type="process")
+    resolved = shutil.which(command[0], path=path)
+    if resolved is None:
+        raise MCPError("MCP sunucu komutu bulunamadı.", error_type="process")
+    if not os.path.isabs(command[0]):
+        # Windows'ta `which` mevcut dizini PATH'in başına ekleyebilir: dizine bırakılan
+        # sahte bir dosya gerçek komutun yerine çalışırdı. Yalnız dizinin kendisi reddedilir;
+        # altındaki bir .venv/bin gibi PATH'te açıkça duran yollar meşrudur.
+        located = Path(resolved).absolute().parent.resolve()
+        if located == Path.cwd().resolve():
+            raise MCPError("Çalışma dizinindeki komut kullanılmaz.", error_type="process")
+    validate_command_arguments(resolved, command[1:])
+    return resolved
+
+
+def validate_command_arguments(resolved: str, arguments: Sequence[str]) -> None:
+    """`.cmd`/`.bat` çağrısı cmd.exe üzerinden geçer; meta karakterli argüman komut enjekte eder."""
+    if not resolved.lower().endswith((".cmd", ".bat")):
+        return
+    if any(UNSAFE_BATCH_CHARACTERS & set(argument) for argument in arguments):
+        raise MCPError("Toplu iş dosyası komutunda güvensiz karakter var.", error_type="process")
+
+
 class _Session:
     """Tek bir taze sürecin ömrü: başlat, konuş, her yolda temizle."""
 
@@ -87,7 +123,9 @@ class _Session:
         cwd: Path | None,
         deadline: float,
         max_message_bytes: int,
+        cancel: threading.Event | None = None,
     ) -> None:
+        self._cancel = cancel
         self._deadline = deadline
         self._max = max_message_bytes
         self._next_id = 0
@@ -101,12 +139,7 @@ class _Session:
     def _spawn(
         command: Sequence[str], env: Mapping[str, str], cwd: Path | None
     ) -> subprocess.Popen[bytes]:
-        if not command:
-            raise MCPError("MCP sunucu komutu boş.", error_type="process")
-        # os.environ'a bakmamak için PATH çağıranın verdiği ortamdan alınır.
-        resolved = shutil.which(command[0], path=env.get("PATH", ""))
-        if resolved is None:
-            raise MCPError("MCP sunucu komutu bulunamadı.", error_type="process")
+        resolved = _resolve_command(command, env.get("PATH", ""))
         try:
             return subprocess.Popen(
                 [resolved, *command[1:]],
@@ -133,11 +166,16 @@ class _Session:
     def _read_stdout(self) -> None:
         stream = self._proc.stdout
         assert stream is not None
+        total = 0
         try:
             while True:
                 line = stream.readline(self._max + 1)
                 if not line:
                     self._incoming.put(("eof", b""))
+                    return
+                total += len(line)
+                if total > MAX_SESSION_BYTES:
+                    self._incoming.put(("too_large", b""))
                     return
                 if len(line) > self._max and not line.endswith(b"\n"):
                     # Kalanını okumak sınırı delmek olur; okuma burada biter.
@@ -208,30 +246,34 @@ class _Session:
     def _unwrap(message: dict[str, Any]) -> dict[str, Any]:
         error = message.get("error")
         if error is not None:
-            detail = error.get("message") if isinstance(error, dict) else None
-            text = detail[:ERROR_MESSAGE_LIMIT] if isinstance(detail, str) else ""
-            prefix = "MCP sunucusu hata döndürdü"
-            raise MCPError(f"{prefix}: {text}" if text else prefix, error_type="remote")
+            # Sunucu metni bilerek taşınmaz: üçüncü taraf içeriği hata mesajına sızmasın.
+            raise MCPError("MCP sunucusu hata döndürdü.", error_type="remote")
         result = message.get("result")
         if not isinstance(result, dict):
             raise MCPError("MCP yanıtı beklenen yapıda değil.", error_type="protocol")
         return result
 
     def _receive(self) -> dict[str, Any]:
-        remaining = self._deadline - time.monotonic()
-        try:
+        # Kısa dilimlerle beklenir ki iptal en çok 0.1 sn gecikmeyle fark edilsin.
+        while True:
+            if self._cancel is not None and self._cancel.is_set():
+                raise MCPError("MCP çağrısı iptal edildi.", error_type="cancelled")
+            remaining = self._deadline - time.monotonic()
             if remaining <= 0:
-                raise queue.Empty
-            kind, raw = self._incoming.get(timeout=remaining)
-        except queue.Empty:
-            raise MCPError("MCP sunucusu zamanında yanıt vermedi.", error_type="timeout") from None
+                raise MCPError("MCP sunucusu zamanında yanıt vermedi.", error_type="timeout")
+            try:
+                kind, raw = self._incoming.get(timeout=min(CANCEL_POLL_SECONDS, remaining))
+            except queue.Empty:
+                continue
+            break
         if kind == "eof":
             raise MCPError("MCP sunucusu yanıt vermeden kapandı.", error_type="process")
         if kind == "too_large":
             raise MCPError("MCP yanıtı izin verilen boyutu aştı.", error_type="too_large")
         try:
             decoded = json.loads(raw.decode("utf-8"))
-        except ValueError as exc:  # UnicodeDecodeError ve JSONDecodeError ikisi de ValueError
+        except (ValueError, RecursionError) as exc:
+            # Unicode/JSON hataları ValueError'dır; derin iç içe girdi RecursionError verir.
             raise MCPError("MCP yanıtı geçerli JSON değil.", error_type="protocol") from exc
         if not isinstance(decoded, dict):
             raise MCPError("MCP yanıtı beklenen yapıda değil.", error_type="protocol")
@@ -258,6 +300,11 @@ class _Session:
             # Sınır dolarsa vazgeçilir; bekleme sınırsız olmaz.
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=CLEANUP_SECONDS)
+        else:
+            if os.name != "nt":
+                # Lider düzgün çıkmış olabilir ama bıraktığı torun boruları açık tutar
+                # (okuyucu EOF görmez). Grup boşsa killpg ProcessLookupError verir, zararsız.
+                kill_tree(proc)
         for thread in self._threads:
             thread.join(timeout=1.0)
         # Okuyan iş parçacığı sürüyorsa kapatmak tampon kilidinde asılabilir; bırakılır.
@@ -305,11 +352,16 @@ class StdioMCPClient:
             session.close(graceful=graceful)
 
     def call_tool(
-        self, name: str, arguments: Mapping[str, Any], *, timeout: float | None = None
+        self,
+        name: str,
+        arguments: Mapping[str, Any],
+        *,
+        timeout: float | None = None,
+        cancel: threading.Event | None = None,
     ) -> MCPCallResult:
         limit = self.timeout if timeout is None else min(timeout, self.timeout)
         deadline = time.monotonic() + limit
-        session = self._open(deadline)
+        session = self._open(deadline, cancel)
         graceful = False
         try:
             self._handshake(session)
@@ -320,8 +372,8 @@ class StdioMCPClient:
         finally:
             session.close(graceful=graceful)
 
-    def _open(self, deadline: float) -> _Session:
-        return _Session(self.command, self.env, self.cwd, deadline, self.max_message_bytes)
+    def _open(self, deadline: float, cancel: threading.Event | None = None) -> _Session:
+        return _Session(self.command, self.env, self.cwd, deadline, self.max_message_bytes, cancel)
 
     @staticmethod
     def _handshake(session: _Session) -> None:
