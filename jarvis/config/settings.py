@@ -36,6 +36,7 @@ class VoiceConfig(BaseModel):
     end_silence_ms: int = Field(default=600, ge=100, le=3000)
     barge_in_ms: int = Field(default=180, ge=100, le=1000)
     require_wake_during_output: bool = True
+    continuous_mode: bool = False
     pre_roll_ms: int = Field(default=300, ge=0, le=1000)
     max_utterance_seconds: float = Field(default=15.0, gt=0, le=120)
     queue_frames: int = Field(default=32, ge=2, le=256)

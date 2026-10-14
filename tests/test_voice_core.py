@@ -1,7 +1,10 @@
 """Ses kanalı sözleşmeleri sahte adaptörlerle sınanır."""
 
 import asyncio
+import math
 from time import monotonic
+
+import pytest
 
 from bench.voice_latency import group_live_events
 from jarvis.channels.voice.core import (
@@ -145,6 +148,7 @@ def test_wake_word_uses_word_boundaries_and_casefold():
     controller.config = VoiceConfig(wake_word="artemis", followup_seconds=8)
     controller.clock = lambda: 10.0
     controller._followup_until = 0.0
+    controller.continuous = False
 
     assert controller._wake_command("ARTEMİS, saat kaç?") == "saat kaç?"
     assert controller._wake_command("heyartemis saat kaç") is None
@@ -160,6 +164,7 @@ def test_expired_followup_does_not_dispatch():
     controller.config = VoiceConfig(followup_seconds=2)
     controller.clock = lambda: 20.0
     controller._followup_until = 19.0
+    controller.continuous = False
 
     assert controller._wake_command("saat kaç") is None
 
@@ -579,3 +584,117 @@ async def test_run_command_kwarg_replaces_runner_and_default_is_runner_run():
         runner, VoiceConfig(), FakeMic(), FakeVAD([]), FakeRecognizer([]), FakeTTS(), FakeSink()
     )
     assert default.run_command == runner.run
+
+
+def _continuous(texts, *, continuous=True, **config):
+    runner = FakeRunner()
+    sink = FakeSink()
+    states = []
+    controller = VoiceController(
+        runner, VoiceConfig(continuous_mode=continuous, **config), FakeMic(), FakeVAD([]),
+        FakeRecognizer(texts), FakeTTS(), sink, clock=lambda: 100.0, on_state=states.append,
+    )
+    return controller, runner, sink, states
+
+
+async def _say(controller, start=50.0):
+    await controller._handle_utterance(AudioSegment(b"\x00\x00", start, start + 1))
+    await controller._settle_active()
+
+
+async def test_continuous_mode_runs_commands_without_wake_word_and_default_does_not():
+    on, runner_on, _, _ = _continuous(["saat kaç", "Artemis hava nasıl"])
+    off, runner_off, _, _ = _continuous(["saat kaç"], continuous=False)
+    try:
+        await _say(on)
+        await _say(on)
+        await _say(off)
+        assert runner_on.commands == ["saat kaç", "hava nasıl"]
+        assert runner_off.commands == []
+    finally:
+        await on.close()
+        await off.close()
+
+
+async def test_continuous_wake_alone_still_acknowledges():
+    controller, runner, sink, _ = _continuous(["Artemis"])
+    try:
+        await _say(controller)
+        assert runner.commands == []
+        assert controller._spoken_text == "Dinliyorum."
+        assert sink.chunks
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize("phrase", [
+    "kesintisiz moda geç", "Kesintisiz modu aç", "Artemis, kesintisiz mod aç",
+    "SÜREKLİ DİNLE", "artemis sürekli dinle",
+])
+async def test_voice_toggle_enables_locally_with_spoken_confirmation(phrase):
+    controller, runner, _, states = _continuous([phrase], continuous=False)
+    try:
+        await _say(controller)
+        assert runner.commands == []
+        assert controller.continuous is True
+        assert controller._spoken_text == "Kesintisiz mod açık."
+        assert "mode:on" in states
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize("phrase", [
+    "kesintisiz modu kapat", "Kesintisiz moddan çık", "Artemis normal moda geç",
+])
+async def test_voice_toggle_disables_locally_with_spoken_confirmation(phrase):
+    controller, runner, _, states = _continuous([phrase])
+    try:
+        await _say(controller)
+        assert runner.commands == []
+        assert controller.continuous is False
+        assert controller._spoken_text == "Kesintisiz mod kapalı."
+        assert "mode:off" in states
+    finally:
+        await controller.close()
+
+
+async def test_toggle_phrase_inside_longer_sentence_is_a_normal_command():
+    controller, runner, _, _ = _continuous(
+        ["kesintisiz moda geç ve saati söyle"], continuous=False
+    )
+    try:
+        await _say(controller)
+        assert controller.continuous is False
+        assert runner.commands == []
+        controller.continuous = True
+        controller.recognizer = FakeRecognizer(["Artemis kesintisiz moda geçmeyi anlat"])
+        await _say(controller)
+        assert controller.continuous is True
+        assert runner.commands == ["kesintisiz moda geçmeyi anlat"]
+    finally:
+        await controller.close()
+
+
+async def test_continuous_still_needs_wake_while_assistant_is_speaking():
+    controller, runner, _, _ = _continuous(["tarayıcıyı aç", "Artemis tarayıcıyı aç"])
+    controller._spoken_text = "Hava bugün güneşli olacak."
+    controller._spoken_until = math.inf
+    controller._output_requires_wake = True
+    try:
+        await _say(controller, start=60.0)
+        assert runner.commands == []
+        await _say(controller, start=61.0)
+        assert runner.commands == ["tarayıcıyı aç"]
+    finally:
+        await controller.close()
+
+
+async def test_continuous_still_ignores_assistant_echo():
+    controller, runner, _, _ = _continuous(["Hava bugün güneşli olacak."])
+    controller._spoken_text = "Hava bugün güneşli olacak."
+    controller._spoken_until = 101.0
+    try:
+        await _say(controller, start=99.0)
+        assert runner.commands == []
+    finally:
+        await controller.close()

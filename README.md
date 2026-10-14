@@ -98,6 +98,10 @@ varsayılan yerel sestir. Ses masaüstü uygulamasının içinde çalışır; mi
 yalnız **Ses** düğmesi ya da `--ses` açar. Onaylar tam tool/argümanlarla ekrandaki
 pencereden alınır ([ADR 0014](docs/adr/0014-voice-in-desktop.md)); sesli “evet”
 onay sayılmaz. İlk Windows denemesini kulaklıkla yapın.
+
+**Kesintisiz sohbet** (varsayılan kapalı): ayarlardaki onay kutusu veya `voice.continuous_mode` ile
+"artemis" demeden konuşabilirsiniz; “kesintisiz moda geç” / “normal moda geç” diyerek de değiştirilir.
+Asistan konuşurken söz kesmek yine “artemis” ister ([ADR 0024](docs/adr/0024-continuous-voice-mode.md)).
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
 Tanıma hedefi farklı kullanıcıların günlük Türkçe–İngilizce karışık konuşmasıdır;

@@ -576,6 +576,8 @@ class DesktopWindow(QMainWindow):
         self._config_path = config_path
         self._restart_settings = False
         self._demo = demo
+        self._continuous = False
+        self._voice_state = "off"
         # Demo hiçbir koşulda mikrofon açmaz; --ses bayrağı da demoda yok sayılır.
         self._voice_on_ready = voice and not demo
         self._temporary: tempfile.TemporaryDirectory[str] | None = None
@@ -802,6 +804,7 @@ class DesktopWindow(QMainWindow):
         self.tabs.addTab(self.splitter, "Sohbet")
         self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
         self.settings_panel.apply_requested.connect(self._apply_settings)
+        self.settings_panel.continuous_mode.toggled.connect(self._live_continuous)
         self.settings_panel.github_synced.connect(self._github_synced)
         self.settings_scroll = QScrollArea()
         self.settings_scroll.setWidgetResizable(True)
@@ -847,6 +850,7 @@ class DesktopWindow(QMainWindow):
                 applications=self.settings_panel.applications,
                 allow_all_applications=self.settings_panel.all_applications.isChecked(),
                 code_agent=self.settings_panel.github_values(),
+                continuous_mode=self.settings_panel.continuous_mode.isChecked(),
             )
         except (OSError, ValueError, KeyError, TypeError):
             self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
@@ -966,13 +970,30 @@ class DesktopWindow(QMainWindow):
         elif not self.bridge.stop_voice():
             self.voice_button.setChecked(False)
 
+    def _live_continuous(self, checked: bool) -> None:
+        # Kayıt Uygula ile olur; ses açıksa kip hemen uygulanır.
+        self.bridge.set_continuous(checked)
+
+    def _show_continuous(self, on: bool) -> None:
+        self._continuous = on
+        box = self.settings_panel.continuous_mode
+        box.blockSignals(True)
+        box.setChecked(on)
+        box.blockSignals(False)
+        self._show_voice_state(self._voice_state)
+
     def _set_status(self, text: str, tone: str) -> None:
         # Durum düz metindir; ton yalnız yanındaki noktanın rengini belirler.
         self.status_label.setText(text)
         self.status_dot.setStyleSheet(_dot_style(_STATUS_TONES[tone]))
 
     def _show_voice_state(self, state: str) -> None:
+        self._voice_state = state
+        if state == "off":
+            self._continuous = False
         text = _VOICE_LABELS.get(state, _VOICE_LABELS["off"])
+        if self._continuous:
+            text += " · Kesintisiz"
         self.voice_dot.setStyleSheet(_dot_style(_VOICE_TONES.get(state, _VOICE_TONES["off"])))
         self.voice_state.setText(text)
         self.overlay.voice_state.setText(text)
@@ -1054,6 +1075,8 @@ class DesktopWindow(QMainWindow):
                 self._set_controls()
             elif event.state == "voice":
                 self._show_voice_state(event.message)
+            elif event.state == "voice_mode":
+                self._show_continuous(event.message == "on")
             elif event.state == "voice_level":
                 level = level_from_message(event.message)
                 if level is not None:

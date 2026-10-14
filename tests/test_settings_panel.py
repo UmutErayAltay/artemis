@@ -85,3 +85,14 @@ def test_global_app_access_is_saved_without_expanding_manual_list(tmp_path: Path
     settings = load_settings(path)
     assert settings.allow_all_applications
     assert settings.applications == {"brave": "brave.exe"}
+
+
+def test_continuous_mode_choice_is_saved_and_defaults_off(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    assert load_settings(path).voice.continuous_mode is False
+    save_choices(path, "first-model", None, continuous_mode=True)
+    assert load_settings(path).voice.continuous_mode is True
+    save_choices(path, "first-model", None)
+    assert load_settings(path).voice.continuous_mode is True
+    save_choices(path, "first-model", None, continuous_mode=False)
+    assert load_settings(path).voice.continuous_mode is False

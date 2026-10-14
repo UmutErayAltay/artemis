@@ -21,6 +21,16 @@ from jarvis.config.settings import VoiceConfig
 
 logger = logging.getLogger(__name__)
 
+# Kip cümleleri normalize sözcük dizisi olarak tam eşleşir; uzun komut içindekiler kaçırılır.
+_CONTINUOUS_ON = {
+    ("kesintisiz", "moda", "geç"), ("kesintisiz", "modu", "aç"),
+    ("kesintisiz", "mod", "aç"), ("sürekli", "dinle"),
+}
+_CONTINUOUS_OFF = {
+    ("kesintisiz", "modu", "kapat"), ("kesintisiz", "moddan", "çık"),
+    ("normal", "moda", "geç"),
+}
+
 
 @dataclass(frozen=True)
 class AudioFrame:
@@ -208,12 +218,16 @@ class VoiceController:
         self._spoken_text = ""
         self._spoken_until = 0.0
         self._output_requires_wake = False
+        # Çalışma anı kipi; config yalnız başlangıç değeridir (ADR 0024).
+        self.continuous = config.continuous_mode
 
     async def run(self) -> None:
         """Mikrofon yalnız bu açıkça çağrılan döngü süresince tüketilir."""
         try:
             frames = self.microphone.frames().__aiter__()
             self._emit_state("listening")
+            if self.continuous:
+                self._emit_state("mode:on")
             while not self._closed:
 
                 async def next_audio_frame() -> AudioFrame:
@@ -310,6 +324,17 @@ class VoiceController:
             return
         self.on_transcript(transcript)
         self.on_timing("stt_final", self.clock())
+        toggle = self._continuous_toggle(transcript)
+        if toggle is not None:
+            if self._active is not None and not self._active.done():
+                self._barge_cancelled = True
+                self.runner.cancel_current()
+                self._active.cancel()
+            await self._settle_active()
+            self.set_continuous(toggle)
+            text = "Kesintisiz mod açık." if toggle else "Kesintisiz mod kapalı."
+            self._active = asyncio.create_task(self._acknowledge_wake(text))
+            return
         command = self._wake_command(transcript)
         if command is None:
             return
@@ -327,6 +352,23 @@ class VoiceController:
     @staticmethod
     def _speech_words(text: str) -> list[str]:
         return re.findall(r"\w+", text.replace("I", "ı").replace("İ", "i").lower())
+
+    def set_continuous(self, enabled: bool) -> None:
+        """Kesintisiz kipi çalışırken değiştirir; arayüze bildirir."""
+        self.continuous = enabled
+        self._emit_state("mode:on" if enabled else "mode:off")
+
+    def _continuous_toggle(self, transcript: str) -> bool | None:
+        """Yalnız (uyandırma sözcüğü + ) kip cümlesinden ibaret söz; LLM'e gitmez."""
+        words = self._speech_words(transcript)
+        wake = self._speech_words(self.config.wake_word)
+        if words[: len(wake)] == wake:
+            words = words[len(wake):]
+        if tuple(words) in _CONTINUOUS_ON:
+            return True
+        if tuple(words) in _CONTINUOUS_OFF:
+            return False
+        return None
 
     def _is_spoken_echo(self, text: str, speech_start: float) -> bool:
         if not self._spoken_text or speech_start > self._spoken_until:
@@ -351,15 +393,15 @@ class VoiceController:
         self._spoken_until = math.inf
         self._output_requires_wake = requires_wake
 
-    async def _acknowledge_wake(self) -> None:
-        """Tek başına uyandırmada LLM çağırmadan kısa sesli/görsel karşılık verir."""
+    async def _acknowledge_wake(self, text: str = "Dinliyorum.") -> None:
+        """Tek başına uyandırmada (ve kip değişiminde) LLM çağırmadan kısa karşılık verir."""
         cancelled = asyncio.Event()
         self.microphone.pause()
         self._emit_state("awaiting_command")
         try:
             await self.sink.play(
-                self.synthesizer.stream("Dinliyorum.", cancelled), cancelled,
-                lambda: self._mark_spoken("Dinliyorum.", requires_wake=False),
+                self.synthesizer.stream(text, cancelled), cancelled,
+                lambda: self._mark_spoken(text, requires_wake=False),
             )
         except (OSError, RuntimeError, ValueError) as error:
             logger.warning("Uyandırma sesi üretilemedi (%s).", type(error).__name__)
@@ -388,7 +430,9 @@ class VoiceController:
             self._followup_until = 0.0
             return transcript
         self._followup_until = 0.0
-        return None
+        # Kesintisiz kipte wake word'süz nihai söz komuttur (çıktı sırasında
+        # _handle_utterance zaten wake word ister; yankı da öncesinde elenir).
+        return transcript if self.continuous else None
 
     def _start_partial_decode(self) -> None:
         method = getattr(self.recognizer, "transcribe_partial", None)

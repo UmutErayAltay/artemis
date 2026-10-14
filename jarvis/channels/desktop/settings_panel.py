@@ -37,6 +37,7 @@ def save_choices(
     *, applications: dict[str, str] | None = None,
     allow_all_applications: bool | None = None,
     code_agent: dict[str, Any] | None = None,
+    continuous_mode: bool | None = None,
 ) -> None:
     """Diğer alanları korur; doğrulamadan sonra aynı dizinde atomik değiştirir."""
     settings = load_settings(path)
@@ -57,6 +58,8 @@ def save_choices(
         }
         raw["primary_model"] = "cpa-selected"
     raw.setdefault("voice", {})["input_device"] = device
+    if continuous_mode is not None:
+        raw["voice"]["continuous_mode"] = continuous_mode
     if applications is not None:
         raw["applications"] = applications
         raw["close_without_confirmation"] = [
@@ -253,6 +256,8 @@ class SettingsPanel(QWidget):
         self.last_heard.setWordWrap(True)
         form.addRow("Son duyulan", self.last_heard)
         layout.addLayout(form)
+        self.continuous_mode = QCheckBox("Kesintisiz sohbet (Artemis demeden dinle)")
+        layout.addWidget(self.continuous_mode)
         self.advanced_devices = QCheckBox("Sanal ve diğer ses girişlerini göster")
         self.advanced_devices.toggled.connect(self._toggle_device_detail)
         layout.addWidget(self.advanced_devices)
@@ -333,6 +338,7 @@ class SettingsPanel(QWidget):
             self.add_application_button.setEnabled(False)
             self.remove_application_button.setEnabled(False)
             self.advanced_devices.setEnabled(False)
+            self.continuous_mode.setEnabled(False)
             self.all_applications.setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
                            self.github_auto, self.github_button):
@@ -349,6 +355,10 @@ class SettingsPanel(QWidget):
                 self.model_combo.addItem(model.model, model.model)
             self.model_combo.setCurrentIndex(self.model_combo.findData(selected))
             self._refresh_devices(settings)
+            # Yenileme kaydedilmiş değeri gösterir; canlı ses kipini değiştirmemeli.
+            self.continuous_mode.blockSignals(True)
+            self.continuous_mode.setChecked(settings.voice.continuous_mode)
+            self.continuous_mode.blockSignals(False)
             self.applications = dict(settings.applications)
             self._refresh_applications()
             self.all_applications.setChecked(settings.allow_all_applications)

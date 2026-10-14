@@ -606,6 +606,9 @@ class DesktopBridge:
         if state.startswith("level:"):
             self._events.put(State("voice_level", state.removeprefix("level:")))
             return
+        if state.startswith("mode:"):
+            self._events.put(State("voice_mode", state.removeprefix("mode:")))
+            return
         if state.startswith("heard:"):
             self._events.put(State("voice_heard", state.removeprefix("heard:")))
             return
@@ -658,6 +661,22 @@ class DesktopBridge:
                 self._voice_controller = None
                 self._voice_stop_requested = False
             self._emit_voice_state("off")
+
+    def set_continuous(self, enabled: bool) -> bool:
+        """Çalışan ses denetleyicisinin kesintisiz kipini değiştirir (GUI thread'i)."""
+        loop = self._loop
+        if loop is None or not self.voice_active:
+            return False
+        try:
+            loop.call_soon_threadsafe(self._set_continuous_on_worker, enabled)
+        except RuntimeError:
+            return False
+        return True
+
+    def _set_continuous_on_worker(self, enabled: bool) -> None:
+        controller = self._voice_controller
+        if controller is not None:
+            controller.set_continuous(enabled)
 
     def _stop_voice_on_worker(self) -> None:
         controller = self._voice_controller
