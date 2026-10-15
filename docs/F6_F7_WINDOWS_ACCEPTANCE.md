@@ -85,4 +85,27 @@ pytest -q                      # Windows'ta da yeşil olmalı
 
 | # | Sonuç | Gözlem |
 | --- | --- | --- |
-| 1 |  |  |
+| 1 | geçti (kısmen) | Hatırlatma 2 dk sonra panelde, `proactive_delivery` delivered. Toast `disabled`: Windows bildirimleri bu uygulama için kapalı (kullanıcı ayarı, kod dürüst raporluyor). |
+| 2 | yapılmadı | Yeniden açılış CPA anahtarını elle (Read-Host) istiyor; kullanıcıyla birlikte yapılacak. |
+| 3 | geçti (kısmen) | Brifing 00:04'te geldi, panel ok. Model yazma aracını hiç çağırmadı (yalnız okuma yaptığını söyledi), bu yüzden `unattended=True` red yolu gerçek olarak tetiklenmedi. |
+| 4 | geçti | `mcp_ready` notlar + browser; test klasörü listesi a.txt, b.txt doğru. |
+| 5 | geçti | `write_file` onay penceresi açtı, Hayır → `denied`, dosya oluşmadı. |
+| 6 | geçti | Çağrı sonrası `server-filesystem` node süreci yok. |
+| 7 | kaldı | `active_window`: onay penceresi kapanınca odak Jarvis paneline dönüyor, hep Jarvis'in kendi penceresi okunuyor (Not Defteri öndeyken onaylansa da). Düzeltme önerisi: hedef pencereyi onaydan önce yakala veya Jarvis'in kendi süreç pencerelerini atla. `screen` kapsamında Türkçe OCR: "Merhaba dünya ğüşiöç" → "Merhaba dünya ğğş»ç" (ü/i/ö kayıyor). |
+| 8 | yapılmadı | Ekran ölçeğini değiştirmeyi gerektiriyor; kullanıcıyla. |
+| 9 | uygulanamaz | Türkçe OCR dil paketi kurulu (`language: tr`), "paket yok" yolu tetiklenemez. |
+| 10 | geçti | `autostart ac` → açık, `durum` → açık; Run değeri `pythonw.exe -m jarvis desktop --arka-plan --config <mutlak yol>`, `--ses` yok. Not: Run girdisi OPENROUTER_API_KEY taşımaz → açılışta başlayan Jarvis modele bağlanamaz (anahtar yalnız start-jarvis.ps1'de elle giriliyor). |
+| 11 | yapılmadı | Oturum kapatma yerel Claude Code oturumunu da kapatır; kullanıcı yapmalı. |
+| 12 | geçti (kısmen) | İkinci `desktop` → "Jarvis zaten açık; panel öne getirildi", süreç sayısı değişmedi. Tepsideyken varyantı denenmedi. |
+| 13 | yapılmadı | Tepsi menüsü UI otomasyonuyla erişilemedi; kullanıcı işareti kaldırmalı. |
+| 14 | geçti (kısmen) | Başlıklar/süreç adları gerçek pencerelerle eşleşiyor. Listede "Program Manager" (explorer masaüstü penceresi) var; görünmez/araç penceresi sayılıp elenmeli. |
+| 15 | kaldı | Büyüt/küçült/öne getir gerçekten oldu. "Sol yarıya al" her seferinde çıkış kodu 4: Windows PowerShell 5.1'de `[Marshal]::SizeOf($infoType)` `SizeOf(object)` aşırı yüklemesine düşüp "System.RuntimeType yapı olarak sıralanamıyor" hatası veriyor. `SizeOf($info)` ile denendi → ok, konum doğrulaması geçti. Çoklu monitör denenmedi (tek ekran). |
+| 16 | kaldı | Ses düzeyi/kapat/aç hepsi çıkış kodu 4: `[System.__ComObject]` üzerinde `SetMasterVolumeLevelScalar` metodu yok (PowerShell COM arayüzü üzerinden çağıramıyor). Çağrılar C# yardımcı statik metoduna taşınmalı. Ses değişmedi. |
+| 17 | geçti | "Parlaklığı 40 yap" → WMI geri okuması 40 (dizüstü panel). Sonra 100'e geri alındı. |
+| 18 | bekliyor |  |
+| 19 | bekliyor |  |
+| 20 | bekliyor |  |
+| 21 | geçti | `mcp_ready` içinde `mcp_browser_browse`. |
+| 22 | kaldı (beklenti) | Başlık "Example Domain" doğru döndü, ama onay penceresi açılmadı: temiz turda MCP aracı SIDE_EFFECT olduğu için onaysız çalıştı (CLAUDE.md kural 3 ile uyumlu). Liste ya da risk sınıfı düzeltilmeli. |
+| 23 | geçti (kısmen) | 127.0.0.1:8080 → sunucu "yerel veya özel ağa çözülüyor" diye reddetti. file:// isteğini model aracı çağırmadan kendisi reddetti; sunucu tarafı reddi gerçek olarak denenmedi. |
+| 24 | geçti | Çağrı sonrası ms-playwright Chromium süreci yok. |
