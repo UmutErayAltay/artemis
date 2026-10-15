@@ -18,6 +18,8 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 SHOW_MESSAGE = b"show\n"
 MAX_READ = 16
 CONNECT_TIMEOUT_MS = 500
+# Meşgul birincil örneğin iletiyi okuyup bağlantıyı kapatması için tanınan süre.
+DELIVERY_TIMEOUT_MS = 2000
 # Bağlanıp ileti göndermeyen istemci sunucuda asılı kalmasın.
 CLIENT_TIMEOUT_MS = 1000
 SWEEP_INTERVAL_MS = 250
@@ -52,7 +54,7 @@ def notify_running(name: str, *, show: bool, timeout_ms: int = CONNECT_TIMEOUT_M
         socket.waitForBytesWritten(timeout_ms)
         # Bağlantıyı okuyan taraf kapatır: istemci hemen kopsaydı Windows'ta (adlandırılmış
         # boru) kopma, iletiden önce işlenip ileti kaybolabiliyordu.
-        if socket.waitForDisconnected(timeout_ms):
+        if socket.waitForDisconnected(DELIVERY_TIMEOUT_MS):
             return True
     socket.abort()
     return True

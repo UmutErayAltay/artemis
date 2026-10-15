@@ -537,11 +537,19 @@ def test_instance_name_is_per_user_and_state_dir(tmp_path: Path) -> None:
 
 
 def test_second_instance_asks_first_to_show_panel(app: QApplication, tmp_path: Path) -> None:
+    import threading
+
     server, shown = _server(tmp_path)
+    answers: list[bool] = []
+    # Gerçekte ikinci örnek ayrı süreçtir; istemci bloklarken sunucu olay döngüsü dönmeli.
+    client = threading.Thread(
+        target=lambda: answers.append(notify_running(server.name, show=True))
+    )
     try:
-        assert notify_running(server.name, show=True)
-        _wait(app, lambda: shown == [1])
+        client.start()
+        _wait(app, lambda: shown == [1] and answers == [True])
     finally:
+        client.join(timeout=5)
         server.close()
 
 
