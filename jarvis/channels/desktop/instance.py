@@ -50,9 +50,11 @@ def notify_running(name: str, *, show: bool, timeout_ms: int = CONNECT_TIMEOUT_M
     if show:
         socket.write(SHOW_MESSAGE)
         socket.waitForBytesWritten(timeout_ms)
-    socket.disconnectFromServer()
-    if socket.state() != QLocalSocket.LocalSocketState.UnconnectedState:
-        socket.waitForDisconnected(timeout_ms)
+        # Bağlantıyı okuyan taraf kapatır: istemci hemen kopsaydı Windows'ta (adlandırılmış
+        # boru) kopma, iletiden önce işlenip ileti kaybolabiliyordu.
+        if socket.waitForDisconnected(timeout_ms):
+            return True
+    socket.abort()
     return True
 
 
@@ -106,6 +108,9 @@ class InstanceServer(QObject):
             return
         if connection.bytesAvailable() < len(SHOW_MESSAGE):
             return
+        self._consume(connection)
+
+    def _consume(self, connection: QLocalSocket) -> None:
         data = bytes(connection.read(MAX_READ).data())
         self._drop(connection)
         if data == SHOW_MESSAGE:
@@ -113,10 +118,14 @@ class InstanceServer(QObject):
 
     def _on_disconnected(self) -> None:
         connection = self.sender()
-        if not isinstance(connection, QLocalSocket):
+        if not isinstance(connection, QLocalSocket) or connection not in self._pending:
             return
-        if self._pending.pop(connection, None) is not None:
-            connection.deleteLater()
+        # Kopma, okunmamış iletiden önce gelebilir: önce tamponda kalanı değerlendir.
+        if connection.bytesAvailable() >= len(SHOW_MESSAGE):
+            self._consume(connection)
+            return
+        self._pending.pop(connection, None)
+        connection.deleteLater()
 
     def _drop(self, connection: QLocalSocket) -> None:
         if self._pending.pop(connection, None) is None:

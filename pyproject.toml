@@ -74,5 +74,6 @@ module = [
   "jarvis.channels.desktop.pet",
   "jarvis.channels.desktop.settings_panel",
   "jarvis.channels.desktop.projects_panel",
+  "jarvis.channels.desktop.instance",
 ]
 disable_error_code = ["misc", "no-any-return"]
