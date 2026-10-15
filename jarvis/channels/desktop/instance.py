@@ -101,6 +101,9 @@ class InstanceServer(QObject):
             self._pending[connection] = time.monotonic()
             connection.readyRead.connect(self._on_ready)
             connection.disconnected.connect(self._on_disconnected)
+            # Windows'ta boru okuyucusu veriyi sinyal bağlanmadan önce almış olabilir; o
+            # durumda readyRead bir daha gelmez. Tampon hemen ve her süpürmede yoklanır.
+            self._poll(connection)
         if self._pending and not self._sweeper.isActive():
             self._sweeper.start()
 
@@ -108,9 +111,11 @@ class InstanceServer(QObject):
         connection = self.sender()
         if not isinstance(connection, QLocalSocket) or connection not in self._pending:
             return
-        if connection.bytesAvailable() < len(SHOW_MESSAGE):
-            return
-        self._consume(connection)
+        self._poll(connection)
+
+    def _poll(self, connection: QLocalSocket) -> None:
+        if connection in self._pending and connection.bytesAvailable() >= len(SHOW_MESSAGE):
+            self._consume(connection)
 
     def _consume(self, connection: QLocalSocket) -> None:
         data = bytes(connection.read(MAX_READ).data())
@@ -140,7 +145,8 @@ class InstanceServer(QObject):
     def _sweep(self) -> None:
         limit = time.monotonic() - CLIENT_TIMEOUT_MS / 1000
         for connection, opened in list(self._pending.items()):
-            if opened < limit:
+            self._poll(connection)
+            if connection in self._pending and opened < limit:
                 self._drop(connection)
         if not self._pending:
             self._sweeper.stop()

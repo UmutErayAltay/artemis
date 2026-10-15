@@ -547,7 +547,11 @@ def test_second_instance_asks_first_to_show_panel(app: QApplication, tmp_path: P
     )
     try:
         client.start()
-        _wait(app, lambda: shown == [1] and answers == [True])
+        try:
+            _wait(app, lambda: shown == [1] and answers == [True])
+        except AssertionError:
+            client.join(timeout=5)
+            raise AssertionError(f"shown={shown} answers={answers}") from None
     finally:
         client.join(timeout=5)
         server.close()
