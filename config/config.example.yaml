@@ -159,6 +159,13 @@ voice:
 #       read_only_tools: [read_text_file, list_directory, search_files]
 #       confirm_tools: [write_file, move_file]
 #       env_passthrough: []
+#     # Jarvis'in tarayıcı sunucusu (ADR 0032). Önce: pip install -e ".[browser]" ve
+#     # python -m playwright install chromium. read_only_tools ÖNERİLMEZ: browse form doldurabilir.
+#     - name: browser
+#       command: "{python}"              # tam olarak bu: Jarvis'in kendi Python'u
+#       args: ["-m", "jarvis.mcp_servers.browser"]
+#       content: text
+#       timeout_seconds: 90
 
 # Ekran algısı (ADR 0029). KAPALI gelir. Açıkken "ekranda ne yazıyor" gibi isteklerde
 # screen_read aracı etkin pencerenin (ya da istenirse tüm ekranın) metnini Windows'un

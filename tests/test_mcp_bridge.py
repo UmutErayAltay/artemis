@@ -507,3 +507,15 @@ def test_discovery_keeps_config_order_when_names_collide(tmp_path: Path) -> None
     )
     [definition] = extended.definitions()
     assert definition.name == "mcp_a_b_c" and "birinci" in definition.description
+
+
+def test_python_placeholder_means_jarvis_interpreter_only_on_exact_match() -> None:
+    import sys
+
+    from jarvis.config.settings import MCPServerConfig
+    from jarvis.mcp.bridge import server_command
+
+    exact = MCPServerConfig(name="b", command="{python}", args=("-m", "x"), content="text")
+    assert server_command(exact) == [sys.executable, "-m", "x"]
+    other = MCPServerConfig(name="b", command="x{python}", content="text")
+    assert server_command(other) == ["x{python}"]

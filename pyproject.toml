@@ -33,6 +33,8 @@ voice = [
 ]
 desktop = ["PySide6-Essentials==6.12.0"]
 memory = ["fastembed==0.8.1", "numpy==2.5.3"]
+# ADR 0032: tarayıcı MCP sunucusu; ayrıca bir kez `python -m playwright install chromium`.
+browser = ["playwright==1.63.0"]
 
 [project.scripts]
 jarvis = "jarvis.channels.cli:main"

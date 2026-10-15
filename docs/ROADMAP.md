@@ -181,7 +181,7 @@ Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla)
 | --- | --- | --- | --- |
 | 7a | Windows açılışında başlama ve tek örnek | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0030](adr/0030-autostart-single-instance.md) |
 | 7b | Pencere ve sistem kontrolü | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0031](adr/0031-window-and-system-control.md) |
-| 7c | Tarayıcı otomasyonu (MCP üzerinden) | planlandı | ADR 0032 |
+| 7c | Tarayıcı otomasyonu (MCP üzerinden) | kodlandı ve Linux'ta doğrulandı (sahte arka uç); gerçek Chromium ve Windows'ta denenmedi | [ADR 0032](adr/0032-browser-automation-mcp.md) |
 
 Sıranın gerekçesi: 7a, 6a hatırlatmalarının gerçekten çalışmasının ön koşuludur (Jarvis
 kapalıyken hatırlatma gelmez) ve yeni araç yüzeyi açmaz. 7b Artemis'in `windows.*`

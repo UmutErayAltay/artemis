@@ -534,6 +534,23 @@ Uyku, kapatma ve yeniden başlatma her seferinde onay ister. Kapatma ve yeniden 
 iptal et" demek yeter. Ses ve parlaklık ayarlandıktan sonra geri okunur; parlaklık yalnız
 dizüstü dahili ekranda çalışır. Gerekçe: [ADR 0031](docs/adr/0031-window-and-system-control.md).
 
+### Tarayıcı otomasyonu (Faz 7c)
+
+Jarvis'in kendi MCP sunucusu bir sayfayı görünmez Chromium'da açar, düğmeye tıklar, forma
+yazar ve metin okur (`browse` aracı, MCP adıyla `mcp_browser_browse`). Kurulum bir kez:
+
+```powershell
+pip install -e ".[browser]"
+python -m playwright install chromium
+```
+
+Sonra config'e `mcp.servers` altında `browser` girdisini ekleyin (örnek
+`config/config.example.yaml`'da). Yalnız `http`/`https` ve genel internet adresleri açılır;
+yerel ağ, `localhost` ve `file://` reddedilir, yönlendirme ve sayfanın kendi istekleri de
+aynı kuraldan geçer. Her çağrı çerezsiz yeni bir profil kullanır: girişli hesaplarınızı
+görmez. Sonuç dış içeriktir; ardından gelen her yan etki onay ister. Gerekçe:
+[ADR 0032](docs/adr/0032-browser-automation-mcp.md).
+
 Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
 çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
 repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,

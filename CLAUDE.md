@@ -4,7 +4,7 @@ Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çeki
 üzerinde de çalışır. PySide6 masaüstü UI aynı Qt'siz runtime ve SafetyGate'i kullanır;
 ses masaüstü worker'ında çalışır (ADR 0014). Hafıza (vault) Faz 3'te, Telegram ve
 bildirimler Faz 4'te, arka plan proje işleri Faz 5'te, hatırlatma ve brifing Faz 6a'da,
-MCP istemcisi Faz 6b'de, ekran okuma Faz 6c'de, açılışta başlama Faz 7a'da, pencere/sistem kontrolü Faz 7b'de eklendi.
+MCP istemcisi Faz 6b'de, ekran okuma Faz 6c'de, açılışta başlama Faz 7a'da, pencere/sistem kontrolü Faz 7b'de, tarayıcı MCP sunucusu Faz 7c'de eklendi.
 Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Türkçe olur ve
 özellikle kararın nedenini açıklar. Önce [mimariyi](docs/ARCHITECTURE.md) ve
 [ADR'leri](docs/adr/) okuyun. Temel mimariyi değiştiriyorsanız kısa ADR yazın.
@@ -151,6 +151,13 @@ PowerShell betikleriyle çalışır; değerler argv'ye değil ortama gider, `shu
 sabit bayraklardır. `power` aracında `sleep`/`shutdown`/`restart` CONFIRM_REQUIRED kalmalıdır;
 kapatma gecikmesi 30 sn altına inemez. Kilit, uyku ve kapatma `sent` döner, başarı denmez.
 `window_list` başlıkları `content_kind="screen"`'dir. Testler PowerShell çalıştırmaz.
+
+Tarayıcı MCP sunucusu (Faz 7c, ADR 0032) `jarvis/mcp_servers/browser.py` ayrı süreçtir.
+`check_url` her isteğe (`context.route`) ve WebSocket'e (`context.route_web_socket`)
+uygulanır; yalnız ilk adresi denetlemeye geri dönmeyin. `JARVIS_BROWSER_ALLOW_LOCAL` şema
+kuralını asla gevşetmez. Bağlam çerezsiz ve indirmesizdir. Testler gerçek Chromium ya da ağ
+kullanmaz (`JARVIS_BROWSER_FAKE`); MCP `command: "{python}"` yalnız tam eşleşmede
+`sys.executable` olur.
 
 ## Yeni araç eklemek
 

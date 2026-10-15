@@ -13,6 +13,7 @@ import asyncio
 import json
 import os
 import re
+import sys
 import threading
 import unicodedata
 from collections.abc import Callable
@@ -56,9 +57,22 @@ def server_environment(server: MCPServerConfig) -> dict[str, str]:
     return env
 
 
+PYTHON_PLACEHOLDER = "{python}"
+
+
+def server_command(server: MCPServerConfig) -> list[str]:
+    """ADR 0032: tam olarak `{python}` Jarvis'in yorumlayıcısıdır; başka yer tutucu yoktur.
+
+    Açılışta (ADR 0030) etkin sanal ortam olmadığından PATH'teki `python` başka bir ortam
+    olabilir; Jarvis'in kendi sunucuları aynı ortamda çalışmalıdır.
+    """
+    command = sys.executable if server.command == PYTHON_PLACEHOLDER else server.command
+    return [command, *server.args]
+
+
 def default_client(server: MCPServerConfig) -> StdioMCPClient:
     return StdioMCPClient(
-        [server.command, *server.args],
+        server_command(server),
         env=server_environment(server),
         cwd=server.cwd,
         timeout=server.timeout_seconds,
