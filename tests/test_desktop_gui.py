@@ -537,23 +537,30 @@ def test_instance_name_is_per_user_and_state_dir(tmp_path: Path) -> None:
 
 
 def test_second_instance_asks_first_to_show_panel(app: QApplication, tmp_path: Path) -> None:
-    import threading
+    import subprocess
+    import sys
 
     server, shown = _server(tmp_path)
-    answers: list[bool] = []
-    # Gerçekte ikinci örnek ayrı süreçtir; istemci bloklarken sunucu olay döngüsü dönmeli.
-    client = threading.Thread(
-        target=lambda: answers.append(notify_running(server.name, show=True))
+    # Gerçekteki gibi ikinci örnek ayrı bir süreçtir (aynı iş parçacığında Windows boruları
+    # sunucu okumadan tıkanır); sunucu bu sırada olay döngüsünü döndürür.
+    script = (
+        "import sys\n"
+        "from PySide6.QtCore import QCoreApplication\n"
+        "from jarvis.channels.desktop.instance import notify_running\n"
+        "app = QCoreApplication([])\n"
+        "sys.exit(0 if notify_running(sys.argv[1], show=True) else 3)\n"
     )
+    client = subprocess.Popen([sys.executable, "-c", script, server.name])
     try:
-        client.start()
         try:
-            _wait(app, lambda: shown == [1] and answers == [True])
+            _wait(app, lambda: shown == [1] and client.poll() is not None, timeout=15.0)
         except AssertionError:
-            client.join(timeout=5)
-            raise AssertionError(f"shown={shown} answers={answers}") from None
+            raise AssertionError(f"shown={shown} exit={client.poll()}") from None
+        assert client.returncode == 0
     finally:
-        client.join(timeout=5)
+        if client.poll() is None:
+            client.kill()
+            client.wait(timeout=5)
         server.close()
 
 
