@@ -182,7 +182,8 @@ def _clean(text: str) -> str:
 
 
 def _parse_payload(stdout: str) -> dict[str, object] | None:
-    lines = [line for line in stdout.splitlines() if line.strip()]
+    # `splitlines` U+2028/U+0085'te de böler ve OCR metni bunları içerebilir; BOM atılır.
+    lines = [line.lstrip("\ufeff") for line in stdout.split("\n") if line.strip()]
     if not lines:
         return None
     try:

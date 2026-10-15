@@ -18,6 +18,7 @@ import base64
 import json
 import subprocess
 import sys
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Literal, get_args
@@ -104,14 +105,16 @@ _WINDOW_NATIVE_TYPE = "\n".join(
         "    GetWindowText(h, b, 512);",
         "    return b.ToString();",
         "  }",
+        "  public static bool Listed(IntPtr h) {",
+        "    if (!IsWindowVisible(h)) return false;",
+        "    if (GetWindow(h, 4) != IntPtr.Zero) return false;",
+        "    if (Title(h).Length == 0) return false;",
+        "    return !IsCloaked(h);",
+        "  }",
         "  public static long[] TopLevel() {",
         "    List<long> found = new List<long>();",
         "    EnumProc proc = delegate(IntPtr h, IntPtr l) {",
-        "      if (!IsWindowVisible(h)) return true;",
-        "      if (GetWindow(h, 4) != IntPtr.Zero) return true;",
-        "      if (Title(h).Length == 0) return true;",
-        "      if (IsCloaked(h)) return true;",
-        "      found.Add(h.ToInt64());",
+        "      if (Listed(h)) found.Add(h.ToInt64());",
         "      return true;",
         "    };",
         "    EnumWindows(proc, IntPtr.Zero);",
@@ -174,7 +177,9 @@ WINDOW_CONTROL_SCRIPT = "\n".join(
         "  }",
         "  [void][JarvisWin]::SetProcessDPIAware()",
         "  $h = [IntPtr]$idValue",
-        "  if (-not [JarvisWin]::IsWindow($h) -or -not [JarvisWin]::IsWindowVisible($h)) {",
+        "  # window_list ile aynı süzgeç: listede görünmeyen pencereye (araç penceresi, gizli",
+        "  # pencere, yeniden kullanılmış kimlik) dokunulmaz.",
+        "  if (-not [JarvisWin]::IsWindow($h) -or -not [JarvisWin]::Listed($h)) {",
         "    exit 5",
         "  }",
         "  switch ($action) {",
@@ -409,13 +414,23 @@ def _clean_line(text: str, limit: int) -> str:
     Pencere başlıkları e-posta konusu veya belge adı taşıyabilir: NUL/ESC gibi karakterler
     JSONL denetim kaydını ve terminali bozabilir, satır sonları da istem enjeksiyonuna yarar.
     """
-    spaced = "".join(" " if ch in "\t\r\n" else ch for ch in text)
-    cleaned = "".join(ch for ch in spaced if ord(ch) >= 32 and ord(ch) != 127)
-    return " ".join(cleaned.split())[:limit]
+    # Satır ayırıcılar (\t\r\n, U+0085, U+2028/2029) boşluk olur; diğer kontrol ve biçim
+    # karakterleri (ESC, yön işaretleri, sıfır genişlik) atılır: görünmez yön karakterleri
+    # başlığı modele kullanıcının gördüğünden farklı gösterebilir.
+    pieces: list[str] = []
+    for ch in text:
+        category = unicodedata.category(ch)
+        if ch in "\t\r\n\x85" or category in {"Zl", "Zp"}:
+            pieces.append(" ")
+        elif category not in {"Cc", "Cf", "Cs", "Co"}:
+            pieces.append(ch)
+    return " ".join("".join(pieces).split())[:limit]
 
 
 def _parse_payload(stdout: str) -> dict[str, object] | None:
-    lines = [line for line in stdout.splitlines() if line.strip()]
+    # `splitlines` U+2028/U+0085'te de böler; PowerShell 5.1 bunları JSON'da kaçışlamaz ve
+    # bir sekme başlığı tek satırlık çıktıyı bölebilirdi. Yalnız \n'e göre bölünür, BOM atılır.
+    lines = [line.lstrip("\ufeff") for line in stdout.split("\n") if line.strip()]
     if not lines:
         return None
     try:

@@ -182,6 +182,10 @@ class Power(BaseTool):
         service = _service(context)
         outcome = await asyncio.to_thread(lambda: service.power(args.action, delay_seconds=delay))
         context.audit.emit(
-            "power", turn_id=context.turn_id, action=args.action, status=outcome.status
+            "power",
+            turn_id=context.turn_id,
+            action=args.action,
+            delay_seconds=delay if args.action in ("shutdown", "restart") else None,
+            status=outcome.status,
         )
         return _result(outcome, {"action": args.action})

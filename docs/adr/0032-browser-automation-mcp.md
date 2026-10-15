@@ -29,8 +29,10 @@ hazırdır (ADR 0028): her çağrı taze süreç, varsayılan SIDE_EFFECT + outb
   tıklamayla açılan yeni sekme) ve `context.route_web_socket` ile WebSocket bağlantılarına
   uygulanır; reddedilen istek iptal edilir. Ad çözülemeyen ve küresel olmayan (ör. CGNAT)
   adresler de reddedilir. `file:`, `data:`, `javascript:`, `chrome:` asla
-  açılmaz. Kalan risk: Chromium'un adresi doğrulamadan sonra yeniden çözmesi (DNS
-  yeniden bağlama); ölçülürse ayrı ADR ile ele alınır.
+  açılmaz. HTTP isteği üretmeyen kanallar tarayıcı bayraklarıyla kapatılır: WebRTC'nin
+  yerel UDP'si (`disable_non_proxied_udp`) ve DNS ön getirme. Kalan risk: Chromium'un
+  adresi doğrulamadan sonra yeniden çözmesi (DNS yeniden bağlama); ölçülürse ayrı ADR ile
+  ele alınır.
 
 - **Temiz profil.** Her çağrı çerez, oturum ve profil taşımayan yeni bir bağlamdır;
   indirme kapalıdır, service worker engellenir. Tarayıcı kullanıcının girişli

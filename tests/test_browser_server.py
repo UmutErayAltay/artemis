@@ -388,3 +388,132 @@ def test_real_chromium_fill_click_read(tmp_path: Path) -> None:
     finally:
         server.shutdown()
         server.server_close()
+
+
+# --- İnceleme bulguları: geçersiz IDNA, gerçek arka ucun bağlam düzeyi korumaları ----------
+
+
+def test_invalid_idna_host_is_rejected_not_raised() -> None:
+    def broken(host: str) -> list[str]:
+        raise UnicodeError("label too long")
+
+    assert check_url("http://a..com/", broken) == "Host çözülemedi."
+
+
+class _Recorder:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, Any]] = []
+
+
+class _FakePage:
+    url = "https://example.org/son"
+
+    def __init__(self, recorder: _Recorder) -> None:
+        self.recorder = recorder
+
+    def goto(self, url: str, timeout: int) -> None:
+        self.recorder.events.append(("goto", url))
+
+    def title(self) -> str:
+        return "Başlık"
+
+    def inner_text(self, selector: str, timeout: int) -> str:
+        return "metin"
+
+
+class _FakeContext:
+    def __init__(self, recorder: _Recorder) -> None:
+        self.recorder = recorder
+        self.guard: Any = None
+        self.socket_guard: Any = None
+
+    def route(self, pattern: str, handler: Any) -> None:
+        self.recorder.events.append(("context.route", pattern))
+        self.guard = handler
+
+    def route_web_socket(self, pattern: str, handler: Any) -> None:
+        self.recorder.events.append(("context.route_web_socket", pattern))
+        self.socket_guard = handler
+
+    def new_page(self) -> _FakePage:
+        self.recorder.events.append(("new_page", None))
+        return _FakePage(self.recorder)
+
+    def close(self) -> None:
+        self.recorder.events.append(("context.close", None))
+
+
+class _FakeBrowser:
+    def __init__(self, recorder: _Recorder) -> None:
+        self.recorder = recorder
+        self.context: _FakeContext | None = None
+
+    def new_context(self, **kwargs: Any) -> _FakeContext:
+        self.recorder.events.append(("new_context", kwargs))
+        self.context = _FakeContext(self.recorder)
+        return self.context
+
+
+class _Route:
+    def __init__(self, url: str) -> None:
+        self.request = type("R", (), {"url": url})()
+        self.outcome = ""
+
+    def continue_(self) -> None:
+        self.outcome = "continue"
+
+    def abort(self) -> None:
+        self.outcome = "abort"
+
+
+class _Socket:
+    def __init__(self, url: str) -> None:
+        self.url = url
+        self.outcome = ""
+
+    def connect_to_server(self) -> None:
+        self.outcome = "connect"
+
+    def close(self) -> None:
+        self.outcome = "close"
+
+
+def test_real_backend_guards_whole_context_and_websockets_before_any_page() -> None:
+    recorder = _Recorder()
+    fake = _FakeBrowser(recorder)
+    request = browser.BrowseRequest.model_validate({"url": "https://example.org/"})
+
+    def public_only(url: str) -> bool:
+        return check_url(url, lambda host: ["93.184.216.34"]) is None
+
+    state = browser.PlaywrightBackend._drive(fake, request, public_only, True, RuntimeError)
+    names = [name for name, _ in recorder.events]
+    assert names.index("context.route") < names.index("new_page")
+    assert names.index("context.route_web_socket") < names.index("new_page")
+    assert names[-1] == "context.close"
+    assert recorder.events[0] == (
+        "new_context",
+        {"accept_downloads": False, "service_workers": "block"},
+    )
+    assert state.body_text == "metin"
+    context = fake.context
+    assert context is not None
+    for url, expected in [
+        ("https://example.org/a.js", "continue"),
+        ("http://127.0.0.1:8080/", "abort"),
+        ("file:///etc/passwd", "abort"),
+    ]:
+        route = _Route(url)
+        context.guard(route)
+        assert route.outcome == expected, url
+    for url, expected in [("wss://example.org/s", "connect"), ("ws://127.0.0.1:9222/", "close")]:
+        sock = _Socket(url)
+        context.socket_guard(sock)
+        assert sock.outcome == expected, url
+
+
+def test_chromium_disables_non_http_local_channels() -> None:
+    assert any(
+        "webrtc-ip-handling-policy=disable_non_proxied_udp" in a for a in browser.CHROMIUM_ARGS
+    )
+    assert "--dns-prefetch-disable" in browser.CHROMIUM_ARGS

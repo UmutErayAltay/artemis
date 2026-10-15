@@ -115,7 +115,8 @@ def check_url(url: str, resolve: Resolver, *, allow_local: bool = False) -> str 
     except ValueError:
         try:
             addresses = resolve(host)
-        except OSError:
+        except (OSError, UnicodeError):
+            # Geçersiz IDNA etiketi (`a..com`, 64+ karakter) UnicodeError verir.
             return "Host çözülemedi."
         if not addresses:
             return "Host çözülemedi."
@@ -228,6 +229,17 @@ class Backend(Protocol):
         ...
 
 
+# `route` yalnız HTTP isteklerini görür. WebRTC (yerel UDP/ICE) ve DNS ön getirme yerel ağa
+# istek dışı yoldan ulaşabilir; bu kanallar tarayıcı düzeyinde kapatılır (ADR 0032).
+CHROMIUM_ARGS = (
+    "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+    "--dns-prefetch-disable",
+    "--disable-features=NetworkPrediction",
+)
+URL_LIMIT = 2000
+
+
 class PlaywrightBackend:
     """Gerçek Chromium. Playwright burada tembel yüklenir: kurulu olmayabilir."""
 
@@ -245,7 +257,7 @@ class PlaywrightBackend:
         try:
             with sync_playwright() as playwright:
                 try:
-                    browser = playwright.chromium.launch(headless=True)
+                    browser = playwright.chromium.launch(headless=True, args=CHROMIUM_ARGS)
                 except (PlaywrightError, OSError) as exc:
                     raise BackendUnavailable(INSTALL_HINT) from exc
                 try:
@@ -444,10 +456,10 @@ def run_browse(
 
     if collect_body:
         (title, body), truncated = _fit([state.title, state.body_text])
-        payload: dict[str, Any] = {"title": title, "url": state.url, "text": body}
+        payload: dict[str, Any] = {"title": title, "url": state.url[:URL_LIMIT], "text": body}
     else:
         texts, truncated = _fit(state.read_texts)
-        payload = {"title": state.title[:200], "url": state.url, "read_texts": texts}
+        payload = {"title": state.title[:200], "url": state.url[:URL_LIMIT], "read_texts": texts}
     payload["truncated"] = truncated
     payload["blocked_requests"] = blocked
     return {
@@ -525,8 +537,20 @@ def main() -> None:
             message = json.loads(line)
         except (ValueError, RecursionError):
             continue  # bozuk satır sunucuyu düşürmez
-        if isinstance(message, dict):
+        if not isinstance(message, dict):
+            continue
+        try:
             handle_message(message)
+        except (ValueError, TypeError, KeyError, RecursionError):
+            # Beklenmeyen girdi süreci düşürmez; istek kimliği varsa iç hata yanıtı döner.
+            if "id" in message:
+                _send(
+                    {
+                        "jsonrpc": "2.0",
+                        "id": message.get("id"),
+                        "error": {"code": -32603, "message": "İç hata."},
+                    }
+                )
 
 
 if __name__ == "__main__":

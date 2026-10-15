@@ -481,3 +481,23 @@ def test_stderr_never_reaches_message() -> None:
     runner = FakeRunner(returncode=9, stderr="SIR-GIZLI-METIN")
     outcome = make(runner).control_window(3, "focus")
     assert "SIR-GIZLI-METIN" not in outcome.message
+
+
+def test_payload_survives_line_separators_and_bom() -> None:
+    from jarvis.tools.system_control import _parse_payload
+
+    title = "Sekme başlığı\u0085son"
+    stdout = "﻿" + json.dumps({"title": title}, ensure_ascii=False) + "\n"
+    assert _parse_payload(stdout) == {"title": title}
+
+
+def test_window_titles_drop_bidi_and_separator_characters() -> None:
+    from jarvis.tools.system_control import _clean_line
+
+    assert _clean_line("a\u202eb\u2028c\u200bd", 50) == "ab cd"
+
+
+def test_window_control_uses_the_same_filter_as_the_list() -> None:
+    from jarvis.tools import system_control
+
+    assert "[JarvisWin]::Listed($h)" in system_control.WINDOW_CONTROL_SCRIPT
