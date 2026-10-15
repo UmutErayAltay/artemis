@@ -1,8 +1,8 @@
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
 $env:PYTHONUTF8 = '1'
-# Yerel proxy anahtarı yalnız bu süreç ortamında tutulur.
-if (-not $env:OPENROUTER_API_KEY) {
+# Yerel proxy anahtarı Kimlik Bilgisi Yöneticisi'nde yoksa sorulur ve yalnız bu süreç ortamında tutulur.
+if (-not $env:OPENROUTER_API_KEY -and -not (cmdkey /list:Jarvis/OPENROUTER_API_KEY | Select-String "Jarvis/OPENROUTER_API_KEY")) {
     $cpaSecret = Read-Host 'EasyCLIProxyAPI access key' -AsSecureString
     $cpaPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($cpaSecret)
     try {

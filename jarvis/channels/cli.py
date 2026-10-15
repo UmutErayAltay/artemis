@@ -165,6 +165,9 @@ def main() -> None:
     )
     telegram_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     args = parser.parse_args()
+    from jarvis.tools.credentials import load_into_environment
+
+    load_into_environment()
     try:
         if args.command in {"voice", "desktop"}:
             try:
