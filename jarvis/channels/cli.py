@@ -13,8 +13,10 @@ from pydantic import ValidationError
 
 from jarvis.brain.errors import ProviderError
 from jarvis.brain.providers import build_provider
+from jarvis.channels.autostart import Autostart
 from jarvis.channels.runtime import Runtime, create_runtime
 from jarvis.config.settings import load_settings
+from jarvis.safety.audit import AuditLog
 from jarvis.tools.registry import discover_tools
 
 
@@ -114,6 +116,20 @@ async def chat(config_path: Path) -> None:
         runtime.shutdown()
 
 
+def autostart(config_path: Path, action: str) -> int:
+    """Kayıt yalnız bu komutla veya tepsi menüsüyle değişir; model araçla değiştiremez."""
+    settings = load_settings(config_path)
+    manager = Autostart(config_path, emit=AuditLog(settings.audit_path).emit)
+    if action == "ac":
+        result = manager.enable()
+    elif action == "kapat":
+        result = manager.disable()
+    else:
+        result = manager.status()
+    print(result.message)
+    return 0 if result.success else 1
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Türkçe güvenli masaüstü asistanı")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -133,6 +149,17 @@ def main() -> None:
         action="store_true",
         help="Panel açılınca sesi de aç (mikrofon yalnız bu bayrakla veya Ses düğmesiyle açılır)",
     )
+    desktop_parser.add_argument(
+        "--arka-plan",
+        dest="background",
+        action="store_true",
+        help="Paneli açmadan tepside başlat (Windows açılışı bunu kullanır, ADR 0030)",
+    )
+    autostart_parser = commands.add_parser(
+        "autostart", help="Windows açılışında tepside başlamayı aç/kapat (ADR 0030)"
+    )
+    autostart_parser.add_argument("action", choices=["ac", "kapat", "durum"])
+    autostart_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     telegram_parser = commands.add_parser(
         "telegram", help="Telegram kanalını başlat (yalnız yapılandırılmış özel sohbet, ADR 0016)"
     )
@@ -152,7 +179,12 @@ def main() -> None:
             # (ADR 0014). `jarvis voice`, `jarvis desktop --ses` ile aynı yoldur.
             use_voice = args.command == "voice" or args.ses
             demo = args.command == "desktop" and args.demo
-            raise SystemExit(run_desktop(args.config, demo=demo, voice=use_voice))
+            background = args.command == "desktop" and args.background
+            raise SystemExit(
+                run_desktop(args.config, demo=demo, voice=use_voice, background=background)
+            )
+        elif args.command == "autostart":
+            raise SystemExit(autostart(args.config, args.action))
         elif args.command == "telegram":
             # Lazy import: sohbet/ses kullanıcıları Telegram modüllerini yüklemez.
             from jarvis.channels.telegram.channel import run_telegram

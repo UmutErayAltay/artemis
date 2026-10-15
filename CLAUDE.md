@@ -4,7 +4,7 @@ Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çeki
 üzerinde de çalışır. PySide6 masaüstü UI aynı Qt'siz runtime ve SafetyGate'i kullanır;
 ses masaüstü worker'ında çalışır (ADR 0014). Hafıza (vault) Faz 3'te, Telegram ve
 bildirimler Faz 4'te, arka plan proje işleri Faz 5'te, hatırlatma ve brifing Faz 6a'da,
-MCP istemcisi Faz 6b'de, ekran okuma Faz 6c'de eklendi.
+MCP istemcisi Faz 6b'de, ekran okuma Faz 6c'de, açılışta başlama Faz 7a'da eklendi.
 Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Türkçe olur ve
 özellikle kararın nedenini açıklar. Önce [mimariyi](docs/ARCHITECTURE.md) ve
 [ADR'leri](docs/adr/) okuyun. Temel mimariyi değiştiriyorsanız kısa ADR yazın.
@@ -139,6 +139,12 @@ Görüntü diske yazılmaz, saklanmaz, modele gönderilmez; yalnız yerel OCR me
 metni `external=True` ve `content_kind="screen"`'dir; `allow_cloud_screen` kapalıyken gizli
 sayılır. Betik sabittir, kapsam yalnız ortam değişkeniyle gider; testler PowerShell
 çalıştırmaz (sahte runner/okuyucu).
+
+Açılışta başlama (Faz 7a, ADR 0030) yalnız `jarvis autostart` komutu ve tepsi menüsüyle
+değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt
+yalnız HKCU `Run` değeridir, yazılınca geri okunur; komut `--ses` taşımaz. Tek örnek yerel
+sokette yalnız sabit `show` iletisini tanır; sokete komut eklemeyin. Testler gerçek kayıt
+defterine dokunmaz (sahte depo).
 
 ## Yeni araç eklemek
 

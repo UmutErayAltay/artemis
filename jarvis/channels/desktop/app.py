@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import html
 import json
+import sys
 import tempfile
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel
+import yaml
+from pydantic import BaseModel, ValidationError
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import (
+    QAction,
     QBrush,
     QCloseEvent,
     QColor,
@@ -44,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from jarvis.channels.autostart import Autostart
 from jarvis.channels.desktop.bridge import (
     Activity,
     ActivityGap,
@@ -57,11 +61,14 @@ from jarvis.channels.desktop.bridge import (
     ToolFinished,
     VoiceCommand,
 )
+from jarvis.channels.desktop.instance import InstanceServer, claim_instance, instance_name
 from jarvis.channels.desktop.pet import TEAL, PetWidget, level_from_message
 from jarvis.channels.desktop.projects_panel import ProjectsPanel
 from jarvis.channels.desktop.settings_panel import SettingsPanel, save_choices
 from jarvis.channels.desktop.steps import StepLine, step_line
 from jarvis.channels.runtime import Runtime, create_runtime
+from jarvis.config.settings import load_settings
+from jarvis.safety.audit import AuditLog
 
 _STYLE = """
 QWidget {
@@ -727,6 +734,8 @@ class DesktopWindow(QMainWindow):
         self._exiting = False
         self._allow_close = False
         self._tray: QSystemTrayIcon | None = None
+        self._autostart_action: QAction | None = None
+        self._tray_attempts = 0
         self._approval_dialog: ApprovalDialog | None = None
         self._active_request: str | None = None
         self._turn_steps: dict[str, _TurnSteps] = {}
@@ -1000,6 +1009,12 @@ class DesktopWindow(QMainWindow):
         open_action = menu.addAction("Paneli aç")
         quick_action = menu.addAction("Hızlı komut")
         pet_action = menu.addAction("Peti göster/gizle")
+        if sys.platform == "win32" and not self._demo:
+            # ADR 0030: kayıt defteri değişikliği yalnız kullanıcının bu tıklamasıyla olur.
+            self._autostart_action = menu.addAction("Windows açılışında başlat")
+            self._autostart_action.setCheckable(True)
+            self._autostart_action.setChecked(self._autostart_state() == "on")
+            self._autostart_action.toggled.connect(self._toggle_autostart)
         menu.addSeparator()
         exit_action = menu.addAction("Çıkış")
         open_action.triggered.connect(self._show_panel)
@@ -1010,6 +1025,55 @@ class DesktopWindow(QMainWindow):
         self._tray.activated.connect(self._tray_activated)
         self._tray.show()
         self._app.setQuitOnLastWindowClosed(False)
+
+    def _autostart(self) -> Autostart | None:
+        try:
+            settings = load_settings(self._config_path)
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
+            return None
+        return Autostart(self._config_path, emit=AuditLog(settings.audit_path).emit)
+
+    def _autostart_state(self) -> str:
+        autostart = self._autostart()
+        return autostart.status().state if autostart is not None else "off"
+
+    def _toggle_autostart(self, enabled: bool) -> None:
+        autostart = self._autostart()
+        if autostart is None:
+            message, success = "Ayarlar okunamadı; açılış kaydı değiştirilmedi.", False
+        else:
+            result = autostart.enable() if enabled else autostart.disable()
+            message, success = result.message, result.success
+        if not success and self._autostart_action is not None:
+            # Seçim kutusu gerçek durumu göstermeli: başarısızlıkta eski haline döner.
+            self._autostart_action.blockSignals(True)
+            self._autostart_action.setChecked(not enabled)
+            self._autostart_action.blockSignals(False)
+        if self._tray is not None:
+            self._tray.showMessage("Jarvis", message, QSystemTrayIcon.MessageIcon.Information, 6000)
+
+    def present(self, *, background: bool) -> None:
+        """`--arka-plan` paneli göstermez; tepsi yoksa görünmez süreç bırakılmaz.
+
+        Windows oturum açılışında Explorer tepsisi Jarvis'ten sonra hazır olabilir: arka
+        planda tepsi bir süre yeniden denenir, ancak hâlâ yoksa panel gösterilir.
+        """
+        if not background:
+            self.show()
+            return
+        self._tray_attempts = 0
+        self._wait_for_tray()
+
+    def _wait_for_tray(self) -> None:
+        if self._tray is None and not self._exiting:
+            self._build_tray()
+        if self._tray is not None or self._exiting:
+            return
+        self._tray_attempts += 1
+        if self._tray_attempts >= TRAY_RETRY_ATTEMPTS:
+            self.show()
+            return
+        QTimer.singleShot(TRAY_RETRY_MS, self, self._wait_for_tray)
 
     @staticmethod
     def _tray_pixmap() -> QPixmap:
@@ -1028,6 +1092,10 @@ class DesktopWindow(QMainWindow):
 
     def _tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
         if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self._show_panel()
+
+    def show_from_instance(self) -> None:
+        if not self._exiting:
             self._show_panel()
 
     def _show_panel(self) -> None:
@@ -1482,12 +1550,40 @@ def build_window(
     return DesktopWindow(config_path, demo=demo, voice=voice, app=app)
 
 
-def run_desktop(config_path: Path, *, demo: bool = False, voice: bool = False) -> int:
+TRAY_RETRY_MS = 2000
+TRAY_RETRY_ATTEMPTS = 15
+
+
+def _instance_key(config_path: Path) -> Path:
+    try:
+        return load_settings(config_path).state_dir
+    except (OSError, ValueError, ValidationError, yaml.YAMLError):
+        # Bozuk config'te pencere zaten hatayı gösterir; anahtar yine kurulum başına tekildir.
+        return config_path.resolve()
+
+
+def run_desktop(
+    config_path: Path, *, demo: bool = False, voice: bool = False, background: bool = False
+) -> int:
     current = QApplication.instance()
     app = current if isinstance(current, QApplication) else QApplication([])
+    server: InstanceServer | None = None
+    if not demo:
+        # ADR 0030: aynı durum dizininde ikinci örnek açılmaz; var olanın paneli öne gelir.
+        # Pencere kurulmadan önce sahiplenilir: kurulum uzun sürer ve yarış penceresi açar.
+        server = claim_instance(instance_name(_instance_key(config_path)), show=not background)
+        if server is None:
+            if not background:
+                print("Jarvis zaten açık; panel öne getirildi.")
+            return 0
+        if not server.is_listening():
+            print("Uyarı: tek örnek koruması kurulamadı; ikinci Jarvis açılırsa çakışabilir.")
     app.setApplicationName("Jarvis")
     app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(_STYLE)
     window = build_window(config_path, demo=demo, voice=voice, app=app)
-    window.show()
+    if server is not None:
+        server.setParent(window)
+        server.show_requested.connect(window.show_from_instance)
+    window.present(background=background)
     return app.exec()

@@ -513,6 +513,16 @@ döner. Ekran metni dış içerik sayılır (sonraki yan etki onay ister) ve
 `allow_cloud_screen` kapalıyken bulut modele ve Telegram'a verilmez. Türkçe metin için
 Windows'ta Türkçe dil paketi gerekir. Gerekçe: [ADR 0029](docs/adr/0029-screen-perception.md).
 
+### Windows açılışında başlama (Faz 7a)
+
+`jarvis autostart ac` (ya da tepsi menüsünde **Windows açılışında başlat**) Jarvis'i Windows
+oturumu açılınca paneli göstermeden tepside başlatır; hatırlatma ve brifingler böylece
+kaçmaz. Kayıt yalnız sizin kullanıcınızın `Run` anahtarına yazılır, yönetici izni
+gerekmez; `jarvis autostart durum` kaydın bu kurulumla eşleşip eşleşmediğini, `kapat`
+kaldırmayı gösterir. Mikrofon açılışta kendiliğinden açılmaz. Jarvis'i ikinci kez
+başlatmak yeni pencere açmaz, çalışan panel öne gelir. Model bu ayarı değiştiremez.
+Gerekçe: [ADR 0030](docs/adr/0030-autostart-single-instance.md).
+
 Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
 çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
 repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,

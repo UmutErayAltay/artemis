@@ -507,3 +507,162 @@ def test_step_block_is_wide_enough_for_its_longest_visible_line(app: QApplicatio
     assert needed < block.minimumWidth() < needed + 60
     block._toggle.setChecked(True)
     assert block.minimumWidth() == 520
+
+
+# --- ADR 0030: tek örnek ve arka planda başlama ---------------------------------------
+
+from PySide6.QtNetwork import QLocalSocket  # noqa: E402
+
+from jarvis.channels.desktop.instance import (  # noqa: E402
+    InstanceServer,
+    instance_name,
+    notify_running,
+)
+
+
+def _server(tmp_path: Path) -> tuple[InstanceServer, list[int]]:
+    server = InstanceServer(instance_name(tmp_path, user="test"))
+    assert server.listen()
+    shown: list[int] = []
+    server.show_requested.connect(lambda: shown.append(1))
+    return server, shown
+
+
+def test_instance_name_is_per_user_and_state_dir(tmp_path: Path) -> None:
+    first = instance_name(tmp_path / "a", user="umut")
+    assert first == instance_name(tmp_path / "a", user="umut")
+    assert first != instance_name(tmp_path / "b", user="umut")
+    assert first != instance_name(tmp_path / "a", user="baska")
+    assert first.startswith("jarvis-") and len(first) == len("jarvis-") + 16
+
+
+def test_second_instance_asks_first_to_show_panel(app: QApplication, tmp_path: Path) -> None:
+    server, shown = _server(tmp_path)
+    try:
+        assert notify_running(server.name, show=True)
+        _wait(app, lambda: shown == [1])
+    finally:
+        server.close()
+
+
+def test_background_second_instance_does_not_open_panel(app: QApplication, tmp_path: Path) -> None:
+    server, shown = _server(tmp_path)
+    try:
+        assert notify_running(server.name, show=False)
+        end = time.monotonic() + 0.3
+        while time.monotonic() < end:
+            app.processEvents()
+        assert shown == []
+    finally:
+        server.close()
+
+
+def test_unknown_message_is_ignored(app: QApplication, tmp_path: Path) -> None:
+    server, shown = _server(tmp_path)
+    try:
+        socket = QLocalSocket()
+        socket.connectToServer(server.name)
+        assert socket.waitForConnected(500)
+        socket.write(b"run calc.exe\n")
+        socket.waitForBytesWritten(500)
+        end = time.monotonic() + 0.3
+        while time.monotonic() < end:
+            app.processEvents()
+        assert shown == []
+        socket.abort()
+    finally:
+        server.close()
+
+
+def test_no_running_instance_returns_false(tmp_path: Path) -> None:
+    assert not notify_running(instance_name(tmp_path, user="yok"), show=True, timeout_ms=200)
+
+
+def test_background_start_stays_in_tray_and_instance_message_shows_panel(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = build_window(tmp_path / "ignored.yaml", demo=True, app=app)
+    try:
+        real_tray = window._tray
+        window._tray = object()  # type: ignore[assignment]
+        window.present(background=True)
+        assert not window.isVisible()
+        window.show_from_instance()
+        assert window.isVisible()
+        window._tray = real_tray
+    finally:
+        _wait(app, lambda: window.status_label.text() == "Hazır", timeout=10.0)
+        _close_cleanly(app, window)
+
+
+def test_claim_returns_none_when_another_instance_listens(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from jarvis.channels.desktop.instance import claim_instance
+
+    first = claim_instance(instance_name(tmp_path, user="yaris"), show=False)
+    assert first is not None and first.is_listening()
+    try:
+        assert claim_instance(first.name, show=False) is None
+    finally:
+        first.close()
+
+
+def test_pending_connections_are_capped(app: QApplication, tmp_path: Path) -> None:
+    from jarvis.channels.desktop import instance as instance_module
+
+    server, _shown = _server(tmp_path)
+    sockets = []
+    try:
+        for _ in range(instance_module.MAX_PENDING + 5):
+            socket = QLocalSocket()
+            socket.connectToServer(server.name)
+            assert socket.waitForConnected(500)
+            sockets.append(socket)
+        end = time.monotonic() + 0.3
+        while time.monotonic() < end:
+            app.processEvents()
+        assert len(server._pending) <= instance_module.MAX_PENDING
+    finally:
+        for socket in sockets:
+            socket.abort()
+        server.close()
+
+
+def test_background_start_waits_for_late_tray_then_shows_panel(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import jarvis.channels.desktop.app as app_module
+
+    monkeypatch.setattr(app_module, "TRAY_RETRY_MS", 10)
+    monkeypatch.setattr(app_module, "TRAY_RETRY_ATTEMPTS", 3)
+    window = build_window(tmp_path / "ignored.yaml", demo=True, app=app)
+    try:
+        if window._tray is not None:
+            pytest.skip("Bu masaüstünde tepsi kullanılabilir.")
+        window.present(background=True)
+        assert not window.isVisible()
+        _wait(app, window.isVisible)
+        assert window._tray_attempts == 3
+    finally:
+        _wait(app, lambda: window.status_label.text() == "Hazır", timeout=10.0)
+        _close_cleanly(app, window)
+
+
+def test_failed_autostart_toggle_restores_checkbox(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtGui import QAction
+
+    window = build_window(tmp_path / "ignored.yaml", demo=True, app=app)
+    try:
+        action = QAction("Windows açılışında başlat", window)
+        action.setCheckable(True)
+        window._autostart_action = action
+        monkeypatch.setattr(window, "_autostart", lambda: None)
+        action.toggled.connect(window._toggle_autostart)
+        action.setChecked(True)
+        assert not action.isChecked()
+    finally:
+        _wait(app, lambda: window.status_label.text() == "Hazır", timeout=10.0)
+        _close_cleanly(app, window)

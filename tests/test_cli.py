@@ -20,8 +20,12 @@ def desktop_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     app_module = importlib.import_module("jarvis.channels.desktop.app")
     calls: list[dict[str, Any]] = []
 
-    def fake_run_desktop(config_path: Path, *, demo: bool = False, voice: bool = False) -> int:
-        calls.append({"config_path": config_path, "demo": demo, "voice": voice})
+    def fake_run_desktop(
+        config_path: Path, *, demo: bool = False, voice: bool = False, background: bool = False
+    ) -> int:
+        calls.append(
+            {"config_path": config_path, "demo": demo, "voice": voice, "background": background}
+        )
         return 0
 
     monkeypatch.setattr(app_module, "run_desktop", fake_run_desktop)
@@ -58,5 +62,16 @@ def test_demo_and_ses_are_both_passed_and_demo_ownership_stays_in_the_window(
     # CLI bayrakları olduğu gibi iletir; demoda sesi kapatan karar pencerededir (GUI testi).
     assert _run_cli(monkeypatch, "desktop", "--demo", "--ses") == 0
     assert desktop_calls == [
-        {"config_path": Path("config/config.yaml"), "demo": True, "voice": True}
+        {
+            "config_path": Path("config/config.yaml"),
+            "demo": True,
+            "voice": True,
+            "background": False,
+        }
     ]
+
+
+def test_background_flag_starts_desktop_in_tray_without_voice(monkeypatch, desktop_calls):
+    assert _run_cli(monkeypatch, "desktop", "--arka-plan") == 0
+    assert desktop_calls[0]["background"] is True
+    assert desktop_calls[0]["voice"] is False

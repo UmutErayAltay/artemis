@@ -170,3 +170,33 @@ CLAUDE.md 12. kural) taşır ve yalnız Windows'ta anlamlıdır; en sona kalır.
 - Gözetimsiz (proaktif) turda READ_ONLY dışındaki hiçbir araç çalışmaz (testle).
 - Risk sınıfı bildirilmeyen MCP aracı SIDE_EFFECT sayılır (testle).
 - Her kalemin Windows kabulü kullanıcı tarafından yapılır.
+
+### Faz 7 — Windows'ta yaşayan Jarvis
+
+Durum: başladı (2026-10-15, kullanıcı kararı). Amaç: Jarvis'i bilgisayar açıkken hep hazır
+ve Windows'u yönetebilir hale getirmek; Artemis'te kalan masaüstü araçlarını taşımak.
+Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla) yapılır.
+
+| Sıra | Kalem | Durum | Karar |
+| --- | --- | --- | --- |
+| 7a | Windows açılışında başlama ve tek örnek | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0030](adr/0030-autostart-single-instance.md) |
+| 7b | Pencere ve sistem kontrolü | planlandı | ADR 0031 |
+| 7c | Tarayıcı otomasyonu (MCP üzerinden) | planlandı | ADR 0032 |
+
+Sıranın gerekçesi: 7a, 6a hatırlatmalarının gerçekten çalışmasının ön koşuludur (Jarvis
+kapalıyken hatırlatma gelmez) ve yeni araç yüzeyi açmaz. 7b Artemis'in `windows.*`
+araçlarını taşır; yerel ve geri alınabilir işlerden geri alınamayanlara (kapatma, yeniden
+başlatma) doğru risk sınıfı belirlenir. 7c, 6b MCP istemcisini kullanır; Artemis'teki
+Playwright sunucusu yeni araç yazılmadan bağlanır ve URL doğrulaması korunur.
+
+**Kapsam dışı (ayrı faz ve ADR):** fare/klavye kontrolü, görsel modelle ekran anlama,
+gözetimsiz onay kanalı, kurulum paketi.
+
+**Bitiş şartı**
+- Açılışta başlama yalnız kullanıcının açık eylemiyle (CLI veya tepsi menüsü) kurulur ve
+  kaldırılır; model bunu araçla yapamaz. Yazılan kayıt geri okunarak doğrulanır (testle).
+- Aynı durum dizini için ikinci masaüstü örneği açılmaz; var olan paneli öne getirir (testle).
+- Geri alınamaz sistem işlemleri (kapatma, yeniden başlatma, oturumu kapatma) her zaman onay
+  ister ve gözetimsiz turda çalışmaz (testle).
+- Tarayıcı otomasyonu yerel/özel adreslere ve `file:`/`data:`/`javascript:` şemalarına gitmez.
+- Her kalemin Windows kabulü kullanıcı tarafından yapılır.
