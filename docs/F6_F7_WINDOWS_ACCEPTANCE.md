@@ -103,7 +103,7 @@ pytest -q                      # Windows'ta da yeşil olmalı
 | 16 | kaldı | Ses düzeyi/kapat/aç hepsi çıkış kodu 4: `[System.__ComObject]` üzerinde `SetMasterVolumeLevelScalar` metodu yok (PowerShell COM arayüzü üzerinden çağıramıyor). Çağrılar C# yardımcı statik metoduna taşınmalı. Ses değişmedi. |
 | 17 | geçti | "Parlaklığı 40 yap" → WMI geri okuması 40 (dizüstü panel). Sonra 100'e geri alındı. |
 | 18 | bekliyor |  |
-| 19 | bekliyor |  |
+| 19 | kaldı | Onay penceresi çıktı, "Evet, onayla"ya basıldı; `shutdown.exe /s` ve `/a` ikisi de çıkış kodu 203 (ERROR_ENVVAR_NOT_FOUND), kapatma planlanmadı. Kök neden: `platform.child_environment()` izin listesinde `COMPUTERNAME` yok; shutdown.exe onsuz 203 veriyor. Dışarıda üretildi: aynı ortamla `shutdown /a` → 203, `COMPUTERNAME` eklenince → 1116 (beklenen). Öneri: izin listesine `COMPUTERNAME` ekle. 60 sn uyarısı ve iptal bu yüzden denenemedi. |
 | 20 | bekliyor |  |
 | 21 | geçti | `mcp_ready` içinde `mcp_browser_browse`. |
 | 22 | kaldı (beklenti) | Başlık "Example Domain" doğru döndü, ama onay penceresi açılmadı: temiz turda MCP aracı SIDE_EFFECT olduğu için onaysız çalıştı (CLAUDE.md kural 3 ile uyumlu). Liste ya da risk sınıfı düzeltilmeli. |
