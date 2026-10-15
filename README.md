@@ -523,6 +523,17 @@ kaldırmayı gösterir. Mikrofon açılışta kendiliğinden açılmaz. Jarvis'i
 başlatmak yeni pencere açmaz, çalışan panel öne gelir. Model bu ayarı değiştiremez.
 Gerekçe: [ADR 0030](docs/adr/0030-autostart-single-instance.md).
 
+### Pencere ve sistem kontrolü (Faz 7b)
+
+"Açık pencereleri listele", "Chrome'u sol yarıya al", "sesi 30 yap", "parlaklığı düşür",
+"bilgisayarı kilitle" gibi istekler `window_list`, `window_control`, `volume_set`,
+`brightness_set` ve `power` araçlarıyla yapılır. Pencere başlıkları ekran içeriği sayılır:
+bulut modele gitmez (`perception.allow_cloud_screen` kapalıyken tur yerel modelle sürer).
+Uyku, kapatma ve yeniden başlatma her seferinde onay ister. Kapatma ve yeniden başlatma
+`system_control.shutdown_delay_seconds` (varsayılan 60) sonra olur; bu sürede "kapatmayı
+iptal et" demek yeter. Ses ve parlaklık ayarlandıktan sonra geri okunur; parlaklık yalnız
+dizüstü dahili ekranda çalışır. Gerekçe: [ADR 0031](docs/adr/0031-window-and-system-control.md).
+
 Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
 çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
 repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,

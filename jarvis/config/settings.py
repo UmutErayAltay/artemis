@@ -293,6 +293,16 @@ class MCPConfig(BaseModel):
         return values
 
 
+class SystemControlConfig(BaseModel):
+    """Pencere ve sistem kontrolü (ADR 0031)."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    # Kapatma/yeniden başlatma bu kadar sonra olur; arada `cancel_shutdown` ile iptal edilir.
+    shutdown_delay_seconds: int = Field(default=60, ge=30, le=600)
+    timeout_seconds: float = Field(default=15.0, ge=1, le=120)
+
+
 class PerceptionConfig(BaseModel):
     """Ekran algısı (ADR 0029); varsayılan kapalıdır, açıkken her okuma onay ister."""
 
@@ -339,6 +349,7 @@ class Settings(BaseModel):
     proactive: ProactiveConfig = Field(default_factory=ProactiveConfig)
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
+    system_control: SystemControlConfig = Field(default_factory=SystemControlConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

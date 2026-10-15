@@ -171,6 +171,12 @@ voice:
 #   allow_cloud_screen: false
 #   timeout_seconds: 20
 
+# Pencere ve sistem kontrolü (ADR 0031). Uyku/kapatma/yeniden başlatma her zaman onay ister;
+# kapatma bu kadar saniye sonra olur ve "kapatmayı iptal et" ile durdurulabilir (en az 30).
+# system_control:
+#   shutdown_delay_seconds: 60
+#   timeout_seconds: 15
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

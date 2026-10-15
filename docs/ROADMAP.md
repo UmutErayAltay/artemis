@@ -180,7 +180,7 @@ Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla)
 | Sıra | Kalem | Durum | Karar |
 | --- | --- | --- | --- |
 | 7a | Windows açılışında başlama ve tek örnek | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0030](adr/0030-autostart-single-instance.md) |
-| 7b | Pencere ve sistem kontrolü | planlandı | ADR 0031 |
+| 7b | Pencere ve sistem kontrolü | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0031](adr/0031-window-and-system-control.md) |
 | 7c | Tarayıcı otomasyonu (MCP üzerinden) | planlandı | ADR 0032 |
 
 Sıranın gerekçesi: 7a, 6a hatırlatmalarının gerçekten çalışmasının ön koşuludur (Jarvis
