@@ -412,7 +412,10 @@ def test_child_environment_excludes_provider_credentials(monkeypatch: pytest.Mon
     monkeypatch.setenv("DISPLAY", ":77")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/test")
     monkeypatch.setenv("USERPROFILE", r"C:\Users\test")
+    monkeypatch.setenv("SYSTEMDRIVE", "C:")
     environment = child_environment()
+    # Eksik SystemDrive Brave profilini bozuyordu; GUI uygulamaları bunu almalı.
+    assert environment["SYSTEMDRIVE"] == "C:"
     assert "UNRELATED_TEST_VALUE" not in environment
     assert "JARVIS_TEST_TOKEN" not in environment
     assert environment["DISPLAY"] == ":77"
@@ -431,6 +434,23 @@ def test_child_environment_excludes_provider_credentials(monkeypatch: pytest.Mon
         "HOMEDRIVE",
         "HOMEPATH",
         "HOME",
+        "SYSTEMDRIVE",
+        "PROGRAMDATA",
+        "ALLUSERSPROFILE",
+        "PUBLIC",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "PROGRAMW6432",
+        "COMMONPROGRAMFILES",
+        "COMMONPROGRAMFILES(X86)",
+        "COMMONPROGRAMW6432",
+        "COMSPEC",
+        "COMPUTERNAME",
+        "USERNAME",
+        "USERDOMAIN",
+        "OS",
+        "PROCESSOR_ARCHITECTURE",
+        "NUMBER_OF_PROCESSORS",
         "LANG",
         "LC_ALL",
         "LC_CTYPE",
