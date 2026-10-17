@@ -172,7 +172,7 @@ ekleyip `primary_model` değerini bu takma ada ayarlayın:
 
 | Alan | Değer |
 | --- | --- |
-| `provider` | `openrouter`, `anthropic` veya `ollama` |
+| `provider` | `openrouter`, `anthropic`, `ollama` veya `openai_compatible` (ayrıca `endpoint`) |
 | `model` | Sağlayıcının güncel model kimliği |
 | `input_per_million` | Milyon girdi token'ı başına USD; ondalık YAML metni |
 | `output_per_million` | Milyon çıktı token'ı başına USD; ondalık YAML metni |
@@ -186,6 +186,12 @@ kullanımı ayrıca açık kullanıcı izni ve `allow_paid: true` gerektirir.
 | --- | --- |
 | `OPENROUTER_API_KEY` | OpenRouter çağrısı |
 | `ANTHROPIC_API_KEY` | Anthropic çağrısı |
+
+Kendi OpenAI uyumlu ucunuz (LM Studio, vLLM, OpenAI, CPA vb.) için config'te `endpoints:` altında
+`base_url` ve isteğe bağlı `api_key: false` tanımlayıp modelde `provider: openai_compatible` ile
+`endpoint: <id>` verin (örnek: `config/config.example.yaml`). Anahtar ortamda
+`JARVIS_<ID>_API_KEY` (id büyük harf, `-` yerine `_`) ya da Kimlik Bilgisi Yöneticisi'nde
+`Jarvis/<id>` olarak aranır (ADR 0033).
 
 Anahtarları yalnız çalıştırma ortamından sağlayın. YAML, komut satırı argümanları,
 test fixture'ları veya depoya anahtar yazmayın. Proje `.env` dosyasını otomatik

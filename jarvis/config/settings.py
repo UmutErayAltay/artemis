@@ -12,16 +12,50 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 GITHUB_OWNER_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
+ENDPOINT_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
+
+
+def _validate_base_url(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.username or parsed.password or parsed.query or parsed.fragment:
+        raise ValueError("Sağlayıcı adresinde sır, query veya fragment bulunamaz")
+    if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+        raise ValueError("Geçerli HTTP(S) sağlayıcı adresi gerekli")
+    if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
+        raise ValueError("Şifresiz HTTP yalnız yerel sunucu için kullanılabilir")
+    return value.rstrip("/")
+
+
+class EndpointConfig(BaseModel):
+    """Kullanıcının tanımladığı OpenAI uyumlu uç (ADR 0033); anahtar burada tutulmaz."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    base_url: str
+    # False: anahtarsız yerel sunucu; Authorization başlığı hiç gönderilmez.
+    api_key: bool = True
+
+    @field_validator("base_url")
+    @classmethod
+    def validate_base_url(cls, value: str) -> str:
+        return _validate_base_url(value)
 
 
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    provider: Literal["openrouter", "anthropic", "ollama"]
+    provider: Literal["openrouter", "anthropic", "ollama", "openai_compatible"]
     model: str = Field(min_length=1)
     input_per_million: Decimal = Field(ge=0)
     output_per_million: Decimal = Field(ge=0)
     context_window: int = Field(default=32768, ge=1024)
+    endpoint: str | None = None
+
+    @model_validator(mode="after")
+    def validate_endpoint_use(self) -> Self:
+        if (self.provider == "openai_compatible") != (self.endpoint is not None):
+            raise ValueError("endpoint yalnız ve her zaman openai_compatible modelde verilir")
+        return self
 
 
 class VoiceConfig(BaseModel):
@@ -321,6 +355,7 @@ class Settings(BaseModel):
     state_dir: Path = Path(".jarvis")
     audit_path: Path = Path(".jarvis/audit.jsonl")
     models: dict[str, ModelConfig] = Field(default_factory=dict)
+    endpoints: dict[str, EndpointConfig] = Field(default_factory=dict)
     primary_model: str = ""
     fallback_model: str | None = None
     max_steps: int = Field(default=8, ge=1, le=100)
@@ -357,17 +392,22 @@ class Settings(BaseModel):
     @field_validator("openrouter_base_url", "anthropic_base_url", "ollama_base_url")
     @classmethod
     def validate_endpoint(cls, value: str) -> str:
-        parsed = urlparse(value)
-        if parsed.username or parsed.password or parsed.query or parsed.fragment:
-            raise ValueError("Sağlayıcı adresinde sır, query veya fragment bulunamaz")
-        if parsed.scheme not in {"https", "http"} or not parsed.hostname:
-            raise ValueError("Geçerli HTTP(S) sağlayıcı adresi gerekli")
-        if parsed.scheme == "http" and parsed.hostname not in {"localhost", "127.0.0.1", "::1"}:
-            raise ValueError("Şifresiz HTTP yalnız yerel sunucu için kullanılabilir")
-        return value.rstrip("/")
+        return _validate_base_url(value)
+
+    @field_validator("endpoints")
+    @classmethod
+    def validate_endpoint_ids(cls, values: dict[str, EndpointConfig]) -> dict[str, EndpointConfig]:
+        if any(not ENDPOINT_ID_RE.fullmatch(name) for name in values):
+            raise ValueError("Uç kimliği yalnız [A-Za-z0-9_-] ve 1-40 karakter olabilir")
+        return values
 
     @model_validator(mode="after")
     def validate_models(self) -> Self:
+        if any(
+            m.endpoint is not None and m.endpoint not in self.endpoints
+            for m in self.models.values()
+        ):
+            raise ValueError("Modelin endpoint değeri endpoints içinde tanımlanmalı")
         if any(name not in self.applications for name in self.close_without_confirmation):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")
         if self.primary_model and self.primary_model not in self.models:

@@ -21,6 +21,21 @@ fallback_seconds: 60
 primary_model: ''
 fallback_model: null
 models: {}
+# Kendi OpenAI uyumlu ucunuz (ADR 0033): adres + isteğe bağlı anahtar. Anahtar YAML'a yazılmaz;
+# ortamda JARVIS_<UC_ID>_API_KEY ya da Kimlik Bilgisi Yöneticisi'nde Jarvis/<uc-id> olarak tutulur.
+# endpoints:
+#   yerel-proxy:
+#     base_url: http://127.0.0.1:8317/v1   # http yalnız localhost için; uzak uç https olmalı
+#   lm-studio:
+#     base_url: http://127.0.0.1:1234/v1
+#     api_key: false                       # anahtarsız yerel sunucu; Authorization gönderilmez
+# models:
+#   proxy-model:
+#     provider: openai_compatible
+#     endpoint: yerel-proxy
+#     model: <sağlayıcının model kimliği>
+#     input_per_million: '0'
+#     output_per_million: '0'
 applications: {}
 allow_all_applications: false # Windows Başlat menüsündeki tüm kurulu uygulamalar.
 # Temiz turda bu izinli takma adlar yeniden onay almadan kapatılır.

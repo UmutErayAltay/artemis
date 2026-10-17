@@ -13,9 +13,11 @@ from jarvis.brain.models import Completion, Message
 from jarvis.brain.providers import (
     AnthropicProvider,
     OllamaProvider,
+    OpenAICompatibleProvider,
     OpenRouterProvider,
     Provider,
     _check_paid,
+    _endpoint_key,
     _key,
 )
 from jarvis.config.settings import ModelConfig, Settings
@@ -57,6 +59,8 @@ class ProviderRouter:
                     self._providers[alias] = OpenRouterProvider(settings, model)
                 elif model.provider == "anthropic":
                     self._providers[alias] = AnthropicProvider(settings, model)
+                elif model.provider == "openai_compatible":
+                    self._providers[alias] = OpenAICompatibleProvider(settings, model)
                 else:
                     self._providers[alias] = OllamaProvider(settings, model)
 
@@ -84,6 +88,8 @@ class ProviderRouter:
             _key("OPENROUTER_API_KEY")
         elif model.provider == "anthropic":
             _key("ANTHROPIC_API_KEY")
+        elif model.provider == "openai_compatible":
+            _endpoint_key(self.settings, model)
         amount = _reservation(model, self.settings.max_output_tokens)
         try:
             reservation = self.ledger.reserve(amount)
@@ -96,6 +102,7 @@ class ProviderRouter:
             )
             raise
         started = self._clock()
+        # Yerel uç dahil openai_compatible kaydı yazılır: uç adresi config'te değişebilir.
         if model.provider != "ollama":
             try:
                 self._emit_audit(

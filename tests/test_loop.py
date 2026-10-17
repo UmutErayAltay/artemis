@@ -207,7 +207,10 @@ async def test_provider_errors_stop_honestly(tmp_path, error, reason):
             raise error
 
     loop.provider = FailingProvider()
-    assert (await loop.run("dene")).stop_reason == reason
+    result = await loop.run("dene")
+    assert result.stop_reason == reason
+    if reason == "provider_error":
+        assert "hata" in result.text  # gerçek sebep kullanıcıya görünür
 
 
 async def test_completion_over_budget_never_dispatches(tmp_path):

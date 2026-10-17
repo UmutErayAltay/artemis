@@ -472,7 +472,7 @@ class AgentLoop:
             return finish("budget", "Günlük maliyet tavanı yeni model çağrısını engelledi.")
         except ProviderError as error:
             audit.emit("provider_error", turn_id=state.turn_id, error_type=type(error).__name__)
-            return finish("provider_error", "Model sağlayıcısı yanıt veremedi; işlem durduruldu.")
+            return finish("provider_error", f"Model sağlayıcısı yanıt veremedi: {error}")
         except _OuterTaskCancelled as cancellation:
             self.context.cancelled.set()
             audit.emit(

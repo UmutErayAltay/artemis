@@ -22,6 +22,7 @@ from jarvis.brain.models import Completion, Message, ToolCall, Usage
 from jarvis.config.settings import ModelConfig, Settings
 from jarvis.safety.audit import AuditLog
 from jarvis.tools.base import ToolDefinition
+from jarvis.tools.credentials import read_secret
 
 _PRIVATE_PLACEHOLDER = "[Gizlilik ayarı nedeniyle içerik buluta gönderilmedi.]"
 _TOOL_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
@@ -222,6 +223,15 @@ async def _post(
         raise RetryableProviderError(
             f"Sağlayıcı sunucu hatası verdi (HTTP {response.status_code})."
         )
+    if response.status_code in {401, 403}:
+        raise ProviderError(
+            f"Sağlayıcı API anahtarını reddetti (HTTP {response.status_code}). "
+            "Ayarlardaki anahtarı kontrol edin."
+        )
+    if response.status_code == 404:
+        raise ProviderError(
+            "Sağlayıcı adresi veya model bulunamadı (HTTP 404). Adresi ve model adını kontrol edin."
+        )
     if response.status_code >= 300:
         raise ProviderError(f"Sağlayıcı isteği kabul etmedi (HTTP {response.status_code}).")
     try:
@@ -234,7 +244,25 @@ async def _post(
 def _key(name: str) -> str:
     key = os.environ.get(name, "")
     if not key:
-        raise ProviderError(f"{name} ortam değişkeni tanımlı değil.")
+        raise ProviderError(
+            f"{name} ortam değişkeni tanımlı değil. Ortamda {name} tanımlayın veya "
+            f"Kimlik Bilgisi Yöneticisi'ne Jarvis/{name} olarak kaydedin."
+        )
+    return key
+
+
+def _endpoint_key(settings: Settings, model: ModelConfig) -> str | None:
+    """Özel uç anahtarı: önce ortam, sonra kasa. Ortama yazılmaz (alt süreçlere geçmesin)."""
+    endpoint_id = model.endpoint or ""
+    if not settings.endpoints[endpoint_id].api_key:
+        return None
+    variable = f"JARVIS_{endpoint_id.upper().replace('-', '_')}_API_KEY"
+    key = os.environ.get(variable) or read_secret(f"Jarvis/{endpoint_id}")
+    if not key:
+        raise ProviderError(
+            f"'{endpoint_id}' ucu için API anahtarı kayıtlı değil. Ortamda {variable} "
+            f"tanımlayın veya Kimlik Bilgisi Yöneticisi'ne Jarvis/{endpoint_id} olarak kaydedin."
+        )
     return key
 
 
@@ -272,31 +300,73 @@ class OpenRouterProvider:
             {"Authorization": f"Bearer {_key('OPENROUTER_API_KEY')}"},
             timeout=timeout,
         )
-        choices = _array(data.get("choices"))
-        if not choices:
-            raise ProviderError("Sağlayıcı yanıtında tamamlanmış bir seçenek yok.")
-        message = _object(_object(choices[0]).get("message"))
-        usage = _object(data.get("usage"))
-        calculated_usage = _usage(
-            self.model, usage.get("prompt_tokens"), usage.get("completion_tokens")
+        return _chat_completion(data, self.model, "openrouter", openrouter=True)
+
+
+def _chat_completion(
+    data: dict[str, Any], model: ModelConfig, provider: str, *, openrouter: bool
+) -> Completion:
+    """OpenAI biçimli sohbet yanıtını çevirir; gerçek maliyet alanı yalnız OpenRouter'dadır."""
+    choices = _array(data.get("choices"))
+    if not choices:
+        raise ProviderError("Sağlayıcı yanıtında tamamlanmış bir seçenek yok.")
+    message = _object(_object(choices[0]).get("message"))
+    if (
+        not openrouter
+        and "usage" not in data
+        and not (model.input_per_million or model.output_per_million)
+    ):
+        # Yerel sunucular usage döndürmeyebilir; ücretsiz modelde maliyet yine sıfırdır.
+        usage = Usage(input_tokens=0, output_tokens=0, cost_usd=Decimal(0))
+    else:
+        raw = _object(data.get("usage"))
+        usage = _usage(model, raw.get("prompt_tokens"), raw.get("completion_tokens"))
+        if openrouter and "cost" in raw:
+            usage = usage.model_copy(update={"cost_usd": _reported_cost(raw["cost"])})
+    return Completion(
+        content=_mark_truncated(
+            _string(message.get("content") or ""),
+            _object(choices[0]).get("finish_reason") == "length",
+        ),
+        tool_calls=_chat_calls(message.get("tool_calls", [])),
+        usage=usage,
+        provider=provider,
+        model=model.model,
+    )
+
+
+class OpenAICompatibleProvider:
+    """Kullanıcı tanımlı OpenAI uyumlu uç; OpenRouter'a özel alanlar gönderilmez (400 verir)."""
+
+    def __init__(self, settings: Settings, model: ModelConfig) -> None:
+        self.settings = settings
+        self.model = model
+
+    async def complete(
+        self,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        *,
+        timeout: float,
+    ) -> Completion:
+        _check_paid(self.settings, self.model)
+        endpoint = self.settings.endpoints[self.model.endpoint or ""]
+        key = _endpoint_key(self.settings, self.model)
+        payload: dict[str, Any] = {
+            "model": self.model.model,
+            "messages": _chat_messages(_cloud_messages(messages)),
+            "max_tokens": self.settings.max_output_tokens,
+            "stream": False,
+        }
+        if tools:
+            payload["tools"] = _tool_schemas(tools)
+        data = await _post(
+            f"{endpoint.base_url}/chat/completions",
+            payload,
+            {"Authorization": f"Bearer {key}"} if key else {},
+            timeout=timeout,
         )
-        actual_cost = (
-            _reported_cost(usage["cost"]) if "cost" in usage else calculated_usage.cost_usd
-        )
-        return Completion(
-            content=_mark_truncated(
-                _string(message.get("content") or ""),
-                _object(choices[0]).get("finish_reason") == "length",
-            ),
-            tool_calls=_chat_calls(message.get("tool_calls", [])),
-            usage=Usage(
-                input_tokens=calculated_usage.input_tokens,
-                output_tokens=calculated_usage.output_tokens,
-                cost_usd=actual_cost,
-            ),
-            provider="openrouter",
-            model=self.model.model,
-        )
+        return _chat_completion(data, self.model, "openai_compatible", openrouter=False)
 
 
 class AnthropicProvider:
