@@ -999,7 +999,7 @@ class DesktopWindow(QMainWindow):
         self.overlay = QuickOverlay(self._submit_overlay, self._cancel_active, self._show_panel)
         self.overlay.setStyleSheet(_STYLE)
 
-    def _apply_settings(self, model_id: str, device: int | str | None) -> None:
+    def _apply_settings(self, device: int | str | None) -> None:
         if self._demo or self._busy or self._exiting:
             self.settings_panel.notice.setText(
                 "Ayarları değiştirmek için işlemin bitmesini bekleyin."
@@ -1008,7 +1008,6 @@ class DesktopWindow(QMainWindow):
         try:
             save_choices(
                 self._config_path,
-                model_id,
                 device,
                 applications=self.settings_panel.applications,
                 allow_all_applications=self.settings_panel.all_applications.isChecked(),

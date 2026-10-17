@@ -27,27 +27,32 @@ def config(tmp_path: Path, *, local: bool = True) -> Path:
     return path
 
 
-def test_save_new_local_model_and_microphone_preserves_settings(tmp_path: Path) -> None:
+def test_save_microphone_preserves_settings_and_never_touches_model(tmp_path: Path) -> None:
     path = config(tmp_path)
-    save_choices(path, "selected-model", 7)
+    save_choices(path, 7)
     settings = load_settings(path)
-    assert settings.models[settings.primary_model].model == "selected-model"
+    assert settings.primary_model == "first" and list(settings.models) == ["first"]
     assert settings.voice.input_device == 7
     assert settings.voice.stt_model == tmp_path / "models/whisper"
     assert settings.close_without_confirmation == ["brave"]
     assert settings.applications == {"brave": "brave.exe"}
     assert not list(tmp_path.glob(".settings-*"))
-    save_choices(path, "first-model", None)
+    save_choices(path, None)
     assert load_settings(path).primary_model == "first"
     assert load_settings(path).voice.input_device is None
 
 
-def test_unknown_remote_model_cannot_gain_zero_price(tmp_path: Path) -> None:
-    path = config(tmp_path, local=False)
-    previous = path.read_bytes()
-    with pytest.raises(ValueError):
-        save_choices(path, "unknown", None)
-    assert path.read_bytes() == previous
+def test_settings_panel_has_no_model_combo_or_inventory(tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from jarvis.channels.desktop import settings_panel
+
+    app = QApplication.instance() or QApplication([])
+    assert not hasattr(settings_panel, "ModelInventory")
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    assert not hasattr(panel, "model_combo") and not hasattr(panel, "inventory")
+    panel.deleteLater()
+    app.processEvents()
 
 
 def test_microphone_driver_copies_collapse_and_selected_device_is_preserved() -> None:
@@ -72,7 +77,7 @@ def test_application_list_save_preserves_model_and_removes_obsolete_exceptions(
     tmp_path: Path,
 ) -> None:
     path = config(tmp_path)
-    save_choices(path, "first-model", None, applications={"notepad": "notepad.exe"})
+    save_choices(path, None, applications={"notepad": "notepad.exe"})
     settings = load_settings(path)
     assert settings.applications == {"notepad": "notepad.exe"}
     assert settings.close_without_confirmation == []
@@ -81,7 +86,7 @@ def test_application_list_save_preserves_model_and_removes_obsolete_exceptions(
 
 def test_global_app_access_is_saved_without_expanding_manual_list(tmp_path: Path) -> None:
     path = config(tmp_path)
-    save_choices(path, "first-model", 2, allow_all_applications=True)
+    save_choices(path, 2, allow_all_applications=True)
     settings = load_settings(path)
     assert settings.allow_all_applications
     assert settings.applications == {"brave": "brave.exe"}
@@ -90,9 +95,9 @@ def test_global_app_access_is_saved_without_expanding_manual_list(tmp_path: Path
 def test_continuous_mode_choice_is_saved_and_defaults_off(tmp_path: Path) -> None:
     path = config(tmp_path)
     assert load_settings(path).voice.continuous_mode is False
-    save_choices(path, "first-model", None, continuous_mode=True)
+    save_choices(path, None, continuous_mode=True)
     assert load_settings(path).voice.continuous_mode is True
-    save_choices(path, "first-model", None)
+    save_choices(path, None)
     assert load_settings(path).voice.continuous_mode is True
-    save_choices(path, "first-model", None, continuous_mode=False)
+    save_choices(path, None, continuous_mode=False)
     assert load_settings(path).voice.continuous_mode is False

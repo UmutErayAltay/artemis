@@ -20,7 +20,7 @@ from jarvis.channels.desktop import bridge as bridge_module
 from jarvis.channels.desktop import provider_section as section_module
 from jarvis.channels.desktop.app import build_window
 from jarvis.channels.desktop.provider_section import PRESETS, ProviderSection, probe_models
-from jarvis.channels.desktop.settings_panel import ModelInventory, SettingsPanel
+from jarvis.channels.desktop.settings_panel import SettingsPanel
 from jarvis.channels.runtime import create_runtime
 from jarvis.config.settings import load_settings
 from tests.test_desktop_gui import _close_cleanly, _wait
@@ -172,8 +172,29 @@ def test_test_button_ignores_key_when_not_required(
     section._test.wait(3000)
     app.processEvents()
     assert calls == [None]
-    assert section.model_name.itemText(0) == "m1"
     assert "tamam" in section.status.text()
+
+
+def test_fetch_fills_models_from_selected_connection(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _vault: dict[str, str]
+) -> None:
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_probe(url: str, key: str | None) -> tuple[str, list[str]]:
+        calls.append((url, key))
+        return "Bağlantı tamam, 2 model bulundu.", ["a/m1", "a/m2"]
+
+    monkeypatch.setattr(section_module, "probe_models", fake_probe)
+    section = ProviderSection(config(tmp_path))
+    _fill(section, "yerel", "https://x.example/v1", SECRET)
+    section._save()
+    section._fetch_models()
+    assert section._fetch is not None
+    section._fetch.wait(3000)
+    app.processEvents()
+    assert calls == [("https://x.example/v1", SECRET)]
+    assert [section.model_name.itemText(i) for i in range(2)] == ["a/m1", "a/m2"]
+    assert section.alias.text() == "a-m1"  # takma ad model adından türer
 
 
 def test_delete_blocked_when_referenced_then_removes_secret(
@@ -184,7 +205,8 @@ def test_delete_blocked_when_referenced_then_removes_secret(
     _fill(section, "yerel", "https://x.example/v1", SECRET)
     section._save()
     section.model_name.setEditText("m-1")
-    section._add_model(primary=False)
+    section.make_primary.setChecked(False)
+    section._add_model()
     section._delete()
     assert "yerel" in load_settings(path).endpoints and _vault
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -200,9 +222,13 @@ def test_add_model_and_make_primary(app: QApplication, tmp_path: Path) -> None:
     section = ProviderSection(path)
     _fill(section, "yerel", "https://x.example/v1")
     section._save()
+    assert section.price_box.isHidden()  # fiyat varsayılan kapalı, 0 yazılır
+    section.paid.setChecked(True)
+    assert not section.price_box.isHidden()
     section.model_name.setEditText("vendor/Model 1")
     section.output_price.setText("2")
-    section._add_model(primary=True)
+    section.make_primary.setChecked(True)
+    section._add_model()
     settings = load_settings(path)
     model = settings.models["vendor-Model-1"]
     assert (model.provider, model.endpoint, model.model) == (
@@ -258,7 +284,6 @@ def test_startup_opens_settings_when_provider_missing(
 
     monkeypatch.setattr(bridge_module, "create_runtime", factory)
     monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
-    monkeypatch.setattr(ModelInventory, "run", lambda self: None)
     window = build_window(config(tmp_path), app=app)
     try:
         _wait(app, lambda: window._worker_ready)
@@ -275,35 +300,97 @@ def test_remove_model_ok_and_refused_for_primary(app: QApplication, tmp_path: Pa
     section._save()
     for name, primary in (("m-1", True), ("m-2", False)):
         section.model_name.setEditText(name)
-        section._add_model(primary=primary)
-    section.registered.setCurrentIndex(section.registered.findData("m-1"))
+        section.make_primary.setChecked(primary)
+        section._add_model()
+    section._remove_model()  # seçim yok
+    assert "seçin" in section.status.text()
+    section.select_model("m-1")
     section._remove_model()
     assert "kaldırılamaz" in section.status.text()
     assert "m-1" in load_settings(path).models
-    section.registered.setCurrentIndex(section.registered.findData("m-2"))
+    section.select_model("m-2")
     section._remove_model()
     assert "m-2" not in load_settings(path).models
 
 
-def test_subscription_option_hides_fields_and_writes_valid_model(
+def _two_same_id(tmp_path: Path) -> Path:
+    path = config(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"] = {"proxy_cli": {"base_url": "http://127.0.0.1:8317/v1", "api_key": False}}
+    raw["models"]["first"]["model"] = "claude-haiku-5-5"
+    raw["models"]["haiku 5-5"] = {
+        "provider": "openai_compatible",
+        "endpoint": "proxy_cli",
+        "model": "claude-haiku-5-5",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return path
+
+
+def test_primary_is_chosen_by_alias_when_model_ids_collide(
+    app: QApplication, tmp_path: Path
+) -> None:
+    path = _two_same_id(tmp_path)
+    section = ProviderSection(path)
+    section.select_model("haiku 5-5")
+    section._make_primary()
+    assert load_settings(path).primary_model == "haiku 5-5"
+    assert "Beyin: haiku 5-5 (proxy_cli)" in section.banner.text()
+    section.select_model("first")
+    section._make_primary()
+    assert load_settings(path).primary_model == "first"
+
+
+def test_list_rows_show_primary_and_legacy_tags(app: QApplication, tmp_path: Path) -> None:
+    path = _two_same_id(tmp_path)
+    section = ProviderSection(path)
+    rows = dict(section.model_rows())
+    assert "eski ayar" in rows["first"] and "Beyin" in rows["first"]
+    assert "eski ayar" not in rows["haiku 5-5"] and "Beyin" not in rows["haiku 5-5"]
+    assert "proxy_cli · claude-haiku-5-5" in rows["haiku 5-5"]
+    section.select_model("haiku 5-5")
+    section._make_primary()
+    assert "Beyin" in dict(section.model_rows())["haiku 5-5"]
+    assert not hasattr(section, "registered")
+
+
+def test_add_model_unchecks_primary_when_one_works_and_refuses_duplicate_alias(
+    app: QApplication, tmp_path: Path
+) -> None:
+    path = _two_same_id(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["primary_model"] = "haiku 5-5"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    section = ProviderSection(path)
+    assert not section.make_primary.isChecked()  # çalışan beyin var
+    section.model_name.setEditText("other-model")
+    section._add_model()
+    settings = load_settings(path)
+    assert settings.primary_model == "haiku 5-5" and "other-model" in settings.models
+    before = path.read_bytes()
+    section.model_name.setEditText("other-model")
+    section.alias.setText("other-model")
+    section._add_model()
+    assert "kullanımda" in section.status.text() and path.read_bytes() == before
+
+
+def test_subscription_connection_writes_valid_cli_model(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setattr(section_module.shutil, "which", lambda name: "/bin/claude")
     path = config(tmp_path)
     section = ProviderSection(path)
     section.show()
-    section.preset.setCurrentIndex(section.preset.findData(-1))
-    section._apply_preset()
-    assert not section.base_url.isVisible() and not section.key.isVisible()
+    assert section.add_connection.currentData() == section_module.CLI_KEY  # tek seçenek
     assert section.cli_test_button.isVisible()
     assert "/bin/claude" in section.status.text()
     assert [section.model_name.itemText(i) for i in range(3)] == ["haiku", "sonnet", "opus"]
     section.model_name.setEditText("sonnet")
-    section._add_model(primary=True)
+    section.make_primary.setChecked(True)
+    section._add_model()
     settings = load_settings(path)
     assert settings.primary_model == "claude-cli-sonnet"
     model = settings.models["claude-cli-sonnet"]
     assert (model.provider, model.model, model.endpoint) == ("claude_cli", "sonnet", None)
-    section.preset.setCurrentIndex(0)
-    section._apply_preset()
-    assert section.base_url.isVisible() and not section.cli_test_button.isVisible()

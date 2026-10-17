@@ -211,16 +211,16 @@ def test_settings_roundtrip(tmp_path: Path) -> None:
                              "input_per_million": "0", "output_per_million": "0"}},
         "code_agent": {"command": "claude"},
     }), encoding="utf-8")
-    save_choices(path, "m", None, code_agent={
+    save_choices(path, None, code_agent={
         "github_owner": "umut", "repos_dir": "Projeler", "auto_sync": False})
     agent = load_settings(path).code_agent
     assert agent.github_owner == "umut" and agent.auto_sync is False
     assert agent.repos_dir == (tmp_path / "Projeler").resolve() and agent.command == "claude"
     before = path.read_bytes()
     with pytest.raises(ValueError):
-        save_choices(path, "m", None, code_agent={"github_owner": "-x"})
+        save_choices(path, None, code_agent={"github_owner": "-x"})
     assert path.read_bytes() == before
-    save_choices(path, "m", None, code_agent={"github_owner": None, "repos_dir": None})
+    save_choices(path, None, code_agent={"github_owner": None, "repos_dir": None})
     assert load_settings(path).code_agent.github_owner is None
 
 
@@ -245,7 +245,6 @@ def test_panel_sync_runs_off_gui_thread(tmp_path: Path) -> None:
         return SyncReport(cloned=["x"], failed=[("y", "boom")])
 
     panel = SettingsPanel(config, github_sync=slow_sync)
-    panel.inventory = None
     got: list[tuple[SyncReport, bool]] = []
     panel.github_synced.connect(lambda r, a: got.append((r, a)))
     panel.apply_requested.connect(lambda *_: got.append((SyncReport(), False)))

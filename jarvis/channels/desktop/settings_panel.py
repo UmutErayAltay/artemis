@@ -1,4 +1,4 @@
-"""Model ve mikrofon seçimleri; sırlar config dosyasına yazılmaz."""
+"""Mikrofon, uygulama ve GitHub seçimleri; modeller ProviderSection'dadır."""
 
 from __future__ import annotations
 
@@ -8,9 +8,7 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
-import httpx
 import yaml
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
@@ -34,30 +32,15 @@ from jarvis.tools.github_repos import GitHubError, Runner, SyncReport, run_comma
 
 
 def save_choices(
-    path: Path, model_id: str, device: int | str | None,
+    path: Path, device: int | str | None,
     *, applications: dict[str, str] | None = None,
     allow_all_applications: bool | None = None,
     code_agent: dict[str, Any] | None = None,
     continuous_mode: bool | None = None,
 ) -> None:
-    """Diğer alanları korur; doğrulamadan sonra aynı dizinde atomik değiştirir."""
-    settings = load_settings(path)
+    """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir."""
+    load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    matches = [alias for alias, item in settings.models.items() if item.model == model_id]
-    if matches:
-        raw["primary_model"] = matches[0]
-    else:
-        base = urlparse(settings.openrouter_base_url)
-        primary = settings.models[settings.primary_model]
-        if (
-            base.hostname not in {"localhost", "127.0.0.1", "::1"}
-            or primary.provider != "openrouter"
-        ):
-            raise ValueError("Yeni model yalnız yapılandırılmış yerel API'den seçilebilir")
-        raw["models"]["cpa-selected"] = {
-            **primary.model_dump(mode="json"), "model": model_id,
-        }
-        raw["primary_model"] = "cpa-selected"
     raw.setdefault("voice", {})["input_device"] = device
     if continuous_mode is not None:
         raw["voice"]["continuous_mode"] = continuous_mode
@@ -151,43 +134,11 @@ def microphone_choices(
     return result
 
 
-class ModelInventory(QThread):
-    loaded = Signal(list)
-    failed = Signal(str)
-
-    def __init__(self, config_path: Path, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.config_path = config_path
-
-    def run(self) -> None:
-        try:
-            settings = load_settings(self.config_path)
-            # Uzak kataloglara yeni kimlik bilgisi gönderilmez.
-            if urlparse(settings.openrouter_base_url).hostname not in {
-                "localhost", "127.0.0.1", "::1"
-            }:
-                self.failed.emit("Model listesi yapılandırılmış modellerden alınır.")
-                return
-            key = os.environ.get("OPENROUTER_API_KEY", "")
-            response = httpx.get(
-                settings.openrouter_base_url + "/models",
-                headers={"Authorization": "Bearer " + key}, timeout=5, follow_redirects=False,
-            )
-            response.raise_for_status()
-            models = sorted({
-                item["id"] for item in response.json()["data"]
-                if isinstance(item, dict) and isinstance(item.get("id"), str)
-            })
-            self.loaded.emit(models)
-        except (OSError, ValueError, KeyError, TypeError, httpx.HTTPError):
-            self.failed.emit("API model listesi alınamadı; kayıtlı modeller kullanılabilir.")
-
-
 GitHubSyncFunction = Callable[[str, Path, Runner, Callable[[], bool]], SyncReport]
 
 
 class GitHubSync(QThread):
-    """gh/git alt süreçlerini GUI dışında koşar (ModelInventory ile aynı kalıp)."""
+    """gh/git alt süreçlerini GUI dışında koşar."""
 
     done = Signal(object)
     failed = Signal(str)
@@ -214,7 +165,7 @@ def default_repos_dir() -> str:
 
 
 class SettingsPanel(QWidget):
-    apply_requested = Signal(str, object)
+    apply_requested = Signal(object)  # mikrofon aygıtı; model seçimi ProviderSection'da
     # (SyncReport, otomatik_mi): otomatik eşitleme sonucu pencere tarafından baloncukla duyurulur.
     github_synced = Signal(object, bool)
 
@@ -227,7 +178,6 @@ class SettingsPanel(QWidget):
     ) -> None:
         super().__init__()
         self.config_path = config_path
-        self.inventory: ModelInventory | None = None
         self.github: GitHubSync | None = None
         self._github_sync = github_sync
         self._github_auto = False
@@ -241,13 +191,10 @@ class SettingsPanel(QWidget):
         self.providers = ProviderSection(config_path, demo=demo)
         layout.addWidget(self.providers)
         form = QFormLayout()
-        self.model_combo = QComboBox()
-        self.model_combo.setAccessibleName("Beyin modeli")
         self.device_combo = QComboBox()
         self.device_combo.setAccessibleName("Mikrofon girişi")
         self.current_device = QLabel()
         self.current_device.setWordWrap(True)
-        form.addRow("Beyin modeli", self.model_combo)
         form.addRow("Mikrofon girişi", self.device_combo)
         form.addRow("Kullanılan mikrofon", self.current_device)
         self.input_level = QProgressBar()
@@ -323,10 +270,12 @@ class SettingsPanel(QWidget):
         self.github_list.setMaximumHeight(120)
         self.github_list.setAccessibleName("GitHub eşitleme sonuçları")
         layout.addWidget(self.github_list)
-        self.refresh_button = QPushButton("Model ve mikrofon listesini yenile")
+        self.refresh_button = QPushButton("Mikrofon listesini yenile")
         self.refresh_button.clicked.connect(self.refresh)
         layout.addWidget(self.refresh_button)
-        self.notice = QLabel("Uygula seçilen modeli ve mikrofonu kaydeder; yeni sohbet başlar.")
+        self.notice = QLabel(
+            "Uygula mikrofon, uygulama ve GitHub ayarlarını kaydeder; yeni sohbet başlar."
+        )
         self.notice.setWordWrap(True)
         self.notice.setTextFormat(Qt.TextFormat.PlainText)
         self.current_device.setTextFormat(Qt.TextFormat.PlainText)
@@ -356,12 +305,6 @@ class SettingsPanel(QWidget):
         try:
             settings = load_settings(self.config_path)
             self.providers.reload()
-            primary = settings.models.get(settings.primary_model)
-            selected = primary.model if primary else None
-            self.model_combo.clear()
-            for model in settings.models.values():
-                self.model_combo.addItem(model.model, model.model)
-            self.model_combo.setCurrentIndex(self.model_combo.findData(selected))
             self._refresh_devices(settings)
             # Yenileme kaydedilmiş değeri gösterir; canlı ses kipini değiştirmemeli.
             self.continuous_mode.blockSignals(True)
@@ -378,20 +321,6 @@ class SettingsPanel(QWidget):
         except (OSError, ValueError, KeyError):
             self.notice.setText("Ayarlar okunamadı.")
             return
-        if self.inventory is None or not self.inventory.isRunning():
-            self.inventory = ModelInventory(self.config_path, self)
-            self.inventory.loaded.connect(self._models_loaded)
-            self.inventory.failed.connect(self.notice.setText)
-            self.inventory.finished.connect(lambda: self.refresh_button.setEnabled(True))
-            self.refresh_button.setEnabled(False)
-            self.inventory.start()
-
-    def _models_loaded(self, models: list[str]) -> None:
-        selected = self.model_combo.currentData()
-        for model in models:
-            if self.model_combo.findData(model) < 0:
-                self.model_combo.addItem(model, model)
-        self.model_combo.setCurrentIndex(self.model_combo.findData(selected))
 
     def _refresh_devices(self, settings: Settings) -> None:
         self.device_combo.clear()
@@ -481,10 +410,7 @@ class SettingsPanel(QWidget):
             self.notice.setText("Uygulama listeden çıkarıldı; kaydetmek için Uygula'ya bas.")
 
     def _apply(self) -> None:
-        if self.model_combo.currentData() is not None:
-            self.apply_requested.emit(
-                self.model_combo.currentData(), self.device_combo.currentData()
-            )
+        self.apply_requested.emit(self.device_combo.currentData())
 
     def github_values(self) -> dict[str, Any]:
         """save_choices(code_agent=...) için; boş alan None olur ve kaydı siler."""
@@ -567,5 +493,3 @@ class SettingsPanel(QWidget):
         if self.github is not None and self.github.isRunning():
             self.github.requestInterruption()
             self.github.wait(6000)
-        if self.inventory is not None:
-            self.inventory.wait(6000)
