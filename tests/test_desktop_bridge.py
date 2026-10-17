@@ -680,3 +680,17 @@ def test_approval_carries_tool_label_and_labels_are_a_copy(tmp_path):
     finally:
         bridge.shutdown()
         assert bridge._stopped.wait(2)
+
+
+def test_ignore_reset_on_close_only_swallows_proactor_reset() -> None:
+    from unittest.mock import MagicMock
+
+    from jarvis.channels.desktop.bridge import _ignore_reset_on_close
+
+    loop = MagicMock()
+    handle = "<Handle _ProactorBasePipeTransport._call_connection_lost(SSLError(1))>"
+    _ignore_reset_on_close(loop, {"exception": ConnectionResetError(), "handle": handle})
+    loop.default_exception_handler.assert_not_called()
+    _ignore_reset_on_close(loop, {"exception": ConnectionResetError(), "handle": "other"})
+    _ignore_reset_on_close(loop, {"exception": ValueError(), "handle": handle})
+    assert loop.default_exception_handler.call_count == 2

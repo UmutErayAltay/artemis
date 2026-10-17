@@ -60,6 +60,15 @@ def _tool_labels(runtime: Runtime) -> dict[str, tuple[str, str]]:
     return labels
 
 
+def _ignore_reset_on_close(loop: asyncio.AbstractEventLoop, context: dict[str, Any]) -> None:
+    """Windows Proactor, karşı taraf zaten kopardığı TLS soketini kapatırken
+    ConnectionResetError (WinError 10054) basar; bağlantı zaten bitmiştir, gürültüdür."""
+    reset = isinstance(context.get("exception"), ConnectionResetError)
+    if reset and "_call_connection_lost" in repr(context.get("handle")):
+        return
+    loop.default_exception_handler(context)
+
+
 @dataclass(frozen=True)
 class State:
     state: str
@@ -514,6 +523,7 @@ class DesktopBridge:
 
     def _thread_main(self) -> None:
         loop = asyncio.new_event_loop()
+        loop.set_exception_handler(_ignore_reset_on_close)
         asyncio.set_event_loop(loop)
         self._loop = loop
         try:
