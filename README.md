@@ -198,6 +198,13 @@ ve API anahtarını girin, **Bağlantıyı test et** ile doğrulayın, modeli ek
 yap** deyin. Anahtar yalnız Kimlik Bilgisi Yöneticisi'ne yazılır, YAML'a girmez. Çalışan bir
 sağlayıcı yoksa Jarvis açılışta Ayarlar'ı bu bölümde açar (ADR 0034).
 
+Claude Pro/Max aboneliğiniz varsa API anahtarı olmadan kullanabilirsiniz: Claude Code CLI'yi
+kurup `claude` ile giriş yapın, sonra Ayarlar > Model sağlayıcıları > **Abonelik: Claude
+(Claude Code CLI)** ile modeli (`haiku`, `sonnet`, `opus`) ekleyin; ya da config'te
+`provider: claude_cli`, `model: sonnet` ve iki fiyat için `0` verin. Jarvis giriş belirteci görmez; CLI araçları
+kapalı, yalnız metin üretici olarak çalıştırılır (ADR 0035). Her istek yeni süreçtir, API'den
+yavaştır.
+
 Anahtarları yalnız çalıştırma ortamından sağlayın. YAML, komut satırı argümanları,
 test fixture'ları veya depoya anahtar yazmayın. Proje `.env` dosyasını otomatik
 yüklemez. Sağlayıcı anahtarları log ve nesne gösterimlerinden temizlenir; uygulama

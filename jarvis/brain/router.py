@@ -12,6 +12,7 @@ from jarvis.brain.errors import BudgetExceeded, ProviderError, RetryableProvider
 from jarvis.brain.models import Completion, Message
 from jarvis.brain.providers import (
     AnthropicProvider,
+    ClaudeCliProvider,
     OllamaProvider,
     OpenAICompatibleProvider,
     OpenRouterProvider,
@@ -61,6 +62,8 @@ class ProviderRouter:
                     self._providers[alias] = AnthropicProvider(settings, model)
                 elif model.provider == "openai_compatible":
                     self._providers[alias] = OpenAICompatibleProvider(settings, model)
+                elif model.provider == "claude_cli":
+                    self._providers[alias] = ClaudeCliProvider(settings, model)
                 else:
                     self._providers[alias] = OllamaProvider(settings, model)
 

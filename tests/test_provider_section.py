@@ -283,3 +283,27 @@ def test_remove_model_ok_and_refused_for_primary(app: QApplication, tmp_path: Pa
     section.registered.setCurrentIndex(section.registered.findData("m-2"))
     section._remove_model()
     assert "m-2" not in load_settings(path).models
+
+
+def test_subscription_option_hides_fields_and_writes_valid_model(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(section_module.shutil, "which", lambda name: "/bin/claude")
+    path = config(tmp_path)
+    section = ProviderSection(path)
+    section.show()
+    section.preset.setCurrentIndex(section.preset.findData(-1))
+    section._apply_preset()
+    assert not section.base_url.isVisible() and not section.key.isVisible()
+    assert section.cli_test_button.isVisible()
+    assert "/bin/claude" in section.status.text()
+    assert [section.model_name.itemText(i) for i in range(3)] == ["haiku", "sonnet", "opus"]
+    section.model_name.setEditText("sonnet")
+    section._add_model(primary=True)
+    settings = load_settings(path)
+    assert settings.primary_model == "claude-cli-sonnet"
+    model = settings.models["claude-cli-sonnet"]
+    assert (model.provider, model.model, model.endpoint) == ("claude_cli", "sonnet", None)
+    section.preset.setCurrentIndex(0)
+    section._apply_preset()
+    assert section.base_url.isVisible() and not section.cli_test_button.isVisible()

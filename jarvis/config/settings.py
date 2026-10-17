@@ -44,7 +44,7 @@ class EndpointConfig(BaseModel):
 class ModelConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    provider: Literal["openrouter", "anthropic", "ollama", "openai_compatible"]
+    provider: Literal["openrouter", "anthropic", "ollama", "openai_compatible", "claude_cli"]
     model: str = Field(min_length=1)
     input_per_million: Decimal = Field(ge=0)
     output_per_million: Decimal = Field(ge=0)

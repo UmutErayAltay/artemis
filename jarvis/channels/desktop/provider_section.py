@@ -5,7 +5,9 @@ Anahtar YAML'a, loga ve mesajlara girmez; yalnız Kimlik Bilgisi Yöneticisi'ne 
 
 from __future__ import annotations
 
+import asyncio
 import re
+import shutil
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
@@ -25,8 +27,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from jarvis.brain.providers import endpoint_key_variable, stored_endpoint_key
-from jarvis.config.settings import ENDPOINT_ID_RE, EndpointConfig, load_settings
+from jarvis.brain.errors import ProviderError
+from jarvis.brain.models import Message
+from jarvis.brain.providers import ClaudeCliProvider, endpoint_key_variable, stored_endpoint_key
+from jarvis.config.settings import ENDPOINT_ID_RE, EndpointConfig, ModelConfig, load_settings
 from jarvis.tools.credentials import delete_secret, write_secret
 
 # (görünen ad, önerilen kimlik, adres, anahtar gerekli mi)
@@ -43,6 +47,8 @@ PRESETS: tuple[tuple[str, str, str, bool], ...] = (
     ("LM Studio", "lmstudio", "http://127.0.0.1:1234/v1", False),
     ("Ollama", "ollama", "http://127.0.0.1:11434/v1", False),
 )
+CLI_LABEL = "Abonelik: Claude (Claude Code CLI)"
+CLI_MODELS = ("haiku", "sonnet", "opus")
 _BAD_URL = "Adres geçersiz: https:// ile başlamalı (http yalnız yerel sunucu için)."
 
 
@@ -88,6 +94,41 @@ class ConnectionTest(QThread):
         self.done.emit(message, models)
 
 
+class CliTest(QThread):
+    """Tek küçük gerçek istek atar (abonelik kotasından az miktar harcar)."""
+
+    done = Signal(str)
+
+    def __init__(self, config_path: Path, model: str, parent: QWidget) -> None:
+        super().__init__(parent)
+        self._config_path = config_path
+        self._model = model
+
+    def run(self) -> None:
+        try:
+            settings = load_settings(self._config_path)
+            model = ModelConfig(
+                provider="claude_cli",
+                model=self._model,
+                input_per_million=Decimal(0),
+                output_per_million=Decimal(0),
+            )
+            prompt = [Message(role="user", content="Tek kelimeyle yanıt ver: merhaba")]
+            provider = ClaudeCliProvider(settings, model)
+            completion = asyncio.run(provider.complete(prompt, [], timeout=60))
+        except ProviderError as error:
+            self.done.emit(str(error))
+            return
+        except (OSError, ValueError):
+            self.done.emit("Test çalıştırılamadı.")
+            return
+        self.done.emit(
+            "Claude Code aboneliği çalışıyor."
+            if completion.content.strip()
+            else "Claude Code boş yanıt verdi."
+        )
+
+
 class ProviderSection(QWidget):
     changed = Signal()  # YAML değişti; pencere çalışma zamanını yeniden başlatır
 
@@ -95,6 +136,7 @@ class ProviderSection(QWidget):
         super().__init__()
         self.config_path = config_path
         self._test: ConnectionTest | None = None
+        self._cli_test: CliTest | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         title = QLabel("Model sağlayıcıları")
@@ -114,6 +156,7 @@ class ProviderSection(QWidget):
         self.preset.setAccessibleName("Sağlayıcı şablonu")
         for index, (label, *_rest) in enumerate(PRESETS):
             self.preset.addItem(label, index)
+        self.preset.addItem(CLI_LABEL, -1)
         self.preset.activated.connect(self._apply_preset)
         self.endpoint_id = QLineEdit()
         self.endpoint_id.setAccessibleName("Sağlayıcı kimliği")
@@ -125,6 +168,7 @@ class ProviderSection(QWidget):
         self.key = QLineEdit()
         self.key.setAccessibleName("API anahtarı")
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
+        self._form = form
         form.addRow("Şablon", self.preset)
         form.addRow("Kimlik", self.endpoint_id)
         form.addRow("Adres", self.base_url)
@@ -140,7 +184,11 @@ class ProviderSection(QWidget):
         self.delete_button.clicked.connect(self._delete)
         for button in (self.test_button, self.save_button, self.delete_button):
             buttons.addWidget(button)
+        self.cli_test_button = QPushButton("Test et (abonelik kotasından az harcar)")
+        self.cli_test_button.clicked.connect(self._test_cli)
+        buttons.addWidget(self.cli_test_button)
         layout.addLayout(buttons)
+        self._endpoint_buttons = (self.test_button, self.save_button, self.delete_button)
         model_form = QFormLayout()
         self.model_name = QComboBox()
         self.model_name.setEditable(True)
@@ -149,6 +197,7 @@ class ProviderSection(QWidget):
         self.alias.setAccessibleName("Model takma adı")
         self.input_price = QLineEdit("0")
         self.output_price = QLineEdit("0")
+        self._model_form = model_form
         model_form.addRow("Model", self.model_name)
         model_form.addRow("Takma ad", self.alias)
         model_form.addRow("Girdi USD/milyon", self.input_price)
@@ -173,6 +222,7 @@ class ProviderSection(QWidget):
         self.status = QLabel()
         self.status.setWordWrap(True)
         layout.addWidget(self.status)
+        self._cli_mode(False)
         if demo:
             self.setEnabled(False)
             self.status.setText("Demo modunda sağlayıcılar değiştirilmez.")
@@ -193,6 +243,8 @@ class ProviderSection(QWidget):
         for alias, model in settings.models.items():
             if model.provider == "openai_compatible":
                 self.registered.addItem(f"{alias} ({model.endpoint})", alias)
+            elif model.provider == "claude_cli":
+                self.registered.addItem(f"{alias} (Claude Code)", alias)
         self.endpoint_list.clear()
         for name, endpoint in settings.endpoints.items():
             if not endpoint.api_key:
@@ -218,7 +270,29 @@ class ProviderSection(QWidget):
         self.key.clear()
         self.key.setPlaceholderText("kayıtlı" if stored_endpoint_key(name) else "")
 
+    def _cli_mode(self, on: bool) -> None:
+        self.cli_active = on
+        for row in (1, 2, 3, 4):  # kimlik, adres, anahtar gerekli, anahtar
+            self._form.setRowVisible(row, not on)
+        for row in (2, 3):  # girdi/çıktı fiyatı
+            self._model_form.setRowVisible(row, not on)
+        for button in self._endpoint_buttons:
+            button.setVisible(not on)
+        self.cli_test_button.setVisible(on)
+
     def _apply_preset(self) -> None:
+        on = self.preset.currentData() == -1
+        self._cli_mode(on)
+        if on:
+            found = shutil.which("claude")
+            self.status.setText(
+                f"Claude Code CLI bulundu: {found}"
+                if found
+                else "Claude Code CLI bulunamadı. Kurun ve `claude` ile giriş yapın."
+            )
+            self.model_name.clear()
+            self.model_name.addItems(CLI_MODELS)
+            return
         _label, slug, url, needs_key = PRESETS[self.preset.currentData()]
         if not self.endpoint_id.text() or self.endpoint_id.text() in {p[1] for p in PRESETS}:
             self.endpoint_id.setText(slug)
@@ -322,7 +396,18 @@ class ProviderSection(QWidget):
         self.status.setText("Sağlayıcı silindi.")
         self.changed.emit()
 
+    def _test_cli(self) -> None:
+        if self._cli_test is not None and self._cli_test.isRunning():
+            return
+        self.status.setText("Claude Code deneniyor…")
+        model = self.model_name.currentText().strip() or "haiku"
+        self._cli_test = CliTest(self.config_path, model, self)
+        self._cli_test.done.connect(self.status.setText)
+        self._cli_test.start()
+
     def _add_model(self, *, primary: bool) -> None:
+        if self.cli_active:
+            return self._add_cli_model(primary=primary)
         name = self.endpoint_id.text().strip()
         model = self.model_name.currentText().strip()
         alias = self.alias.text().strip() or re.sub(r"[^A-Za-z0-9_-]", "-", model).strip("-")[:40]
@@ -368,6 +453,33 @@ class ProviderSection(QWidget):
             )
             + (" Birincil model yapıldı." if primary else "")
         )
+        self.changed.emit()
+
+    def _add_cli_model(self, *, primary: bool) -> None:
+        model = self.model_name.currentText().strip()
+        slug = re.sub(r"[^A-Za-z0-9_-]", "-", model)
+        alias = self.alias.text().strip() or f"claude-cli-{slug}"[:40]
+        if not model:
+            self.status.setText("Model adı yazın veya listeden seçin.")
+            return
+        try:
+            raw = self._raw()
+        except (OSError, yaml.YAMLError):
+            self.status.setText("Ayarlar okunamadı.")
+            return
+        models: dict[str, object] = raw.setdefault("models", {})  # type: ignore[assignment]
+        models[alias] = {
+            "provider": "claude_cli",
+            "model": model,
+            "input_per_million": "0",
+            "output_per_million": "0",
+        }
+        if primary:
+            raw["primary_model"] = alias
+        if not self._write(raw):
+            return
+        self.reload()
+        self.status.setText("Model eklendi." + (" Birincil model yapıldı." if primary else ""))
         self.changed.emit()
 
     def _remove_model(self) -> None:
