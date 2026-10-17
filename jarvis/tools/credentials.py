@@ -58,6 +58,10 @@ if sys.platform == "win32":
         if not advapi.CredWriteW(ctypes.byref(cred), 0):
             raise OSError(f"Anahtar kaydedilemedi (hata {ctypes.get_last_error()}).")
 
+    def _delete_secret_windows(target: str) -> None:
+        advapi = ctypes.WinDLL("advapi32", use_last_error=True)
+        advapi.CredDeleteW(target, _CRED_TYPE_GENERIC, 0)  # yoksa zaten silinmiş sayılır
+
 
 def read_secret(target: str = TARGET) -> str | None:
     # Windows gövdesi platform bloğunda tanımlı; mypy Linux'ta bu dalı hiç analiz etmez.
@@ -71,6 +75,11 @@ def write_secret(secret: str, target: str = TARGET) -> None:
         _write_secret_windows(secret, target)
         return
     raise OSError("Kimlik Bilgisi Yöneticisi yalnız Windows'ta var.")
+
+
+def delete_secret(target: str) -> None:
+    if sys.platform == "win32":
+        _delete_secret_windows(target)
 
 
 def load_into_environment() -> None:

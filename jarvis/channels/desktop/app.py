@@ -47,6 +47,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from jarvis.brain.providers import provider_problem
 from jarvis.channels.autostart import Autostart
 from jarvis.channels.desktop.bridge import (
     Activity,
@@ -930,6 +931,7 @@ class DesktopWindow(QMainWindow):
         self.settings_panel.apply_requested.connect(self._apply_settings)
         self.settings_panel.continuous_mode.toggled.connect(self._live_continuous)
         self.settings_panel.github_synced.connect(self._github_synced)
+        self.settings_panel.providers.changed.connect(self._providers_changed)
         self.settings_scroll = QScrollArea()
         self.settings_scroll.setWidgetResizable(True)
         self.settings_scroll.setWidget(self.settings_panel)
@@ -945,6 +947,30 @@ class DesktopWindow(QMainWindow):
         QTimer.singleShot(0, self.prompt.setFocus)
         # Açılışta bir kez, arka plan thread'inde; CLI'da eşitleme yoktur.
         QTimer.singleShot(0, self.settings_panel.start_auto_sync)
+        if not self._demo:
+            self._check_provider(open_settings=True)
+
+    def _check_provider(self, *, open_settings: bool) -> None:
+        """Birincil model çağrılamayacaksa ilk tur patlamadan Ayarlar'ı sağlayıcı bölümünde açar."""
+        try:
+            reason = provider_problem(load_settings(self._config_path))
+        except (OSError, ValueError):
+            return
+        self.settings_panel.providers.show_problem(reason)
+        if reason and open_settings:
+            self.tabs.setCurrentWidget(self.settings_scroll)
+            QTimer.singleShot(
+                0, lambda: self.settings_scroll.ensureWidgetVisible(self.settings_panel.providers)
+            )
+
+    def _providers_changed(self) -> None:
+        self._check_provider(open_settings=False)
+        if self._busy or self._exiting or self._demo:
+            self.settings_panel.providers.status.setText(
+                "Kaydedildi; işlem bitince Uygula ile yeni ayarlar devreye girer."
+            )
+            return
+        self._restart_runtime()
 
     @staticmethod
     def _chip(dot: QLabel, label: QLabel) -> QFrame:
@@ -992,6 +1018,10 @@ class DesktopWindow(QMainWindow):
         except (OSError, ValueError, KeyError, TypeError):
             self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
             return
+        self._restart_runtime()
+
+    def _restart_runtime(self) -> None:
+        """Config değişince çalışma zamanını yeniden kurar (Uygula ve sağlayıcı kaydı)."""
         self._voice_on_ready = self.bridge.voice_active
         self._restart_settings = True
         self._worker_ready = False

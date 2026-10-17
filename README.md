@@ -193,6 +193,11 @@ Kendi OpenAI uyumlu ucunuz (LM Studio, vLLM, OpenAI, CPA vb.) için config'te `e
 `JARVIS_<ID>_API_KEY` (id büyük harf, `-` yerine `_`) ya da Kimlik Bilgisi Yöneticisi'nde
 `Jarvis/<id>` olarak aranır (ADR 0033).
 
+Terminalsiz yol: masaüstünde **Ayarlar > Model sağlayıcıları** bölümünden şablon seçip adresi
+ve API anahtarını girin, **Bağlantıyı test et** ile doğrulayın, modeli ekleyip **Birincil model
+yap** deyin. Anahtar yalnız Kimlik Bilgisi Yöneticisi'ne yazılır, YAML'a girmez. Çalışan bir
+sağlayıcı yoksa Jarvis açılışta Ayarlar'ı bu bölümde açar (ADR 0034).
+
 Anahtarları yalnız çalıştırma ortamından sağlayın. YAML, komut satırı argümanları,
 test fixture'ları veya depoya anahtar yazmayın. Proje `.env` dosyasını otomatik
 yüklemez. Sağlayıcı anahtarları log ve nesne gösterimlerinden temizlenir; uygulama

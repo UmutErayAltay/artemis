@@ -28,6 +28,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from jarvis.channels.desktop.provider_section import ProviderSection
 from jarvis.config.settings import GITHUB_OWNER_RE, Settings, load_settings
 from jarvis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
@@ -237,6 +238,8 @@ class SettingsPanel(QWidget):
         title = QLabel("Ayarlar")
         title.setObjectName("title")
         layout.addWidget(title)
+        self.providers = ProviderSection(config_path, demo=demo)
+        layout.addWidget(self.providers)
         form = QFormLayout()
         self.model_combo = QComboBox()
         self.model_combo.setAccessibleName("Beyin modeli")
@@ -352,7 +355,9 @@ class SettingsPanel(QWidget):
     def refresh(self) -> None:
         try:
             settings = load_settings(self.config_path)
-            selected = settings.models[settings.primary_model].model
+            self.providers.reload()
+            primary = settings.models.get(settings.primary_model)
+            selected = primary.model if primary else None
             self.model_combo.clear()
             for model in settings.models.values():
                 self.model_combo.addItem(model.model, model.model)

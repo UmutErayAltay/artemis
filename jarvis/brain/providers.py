@@ -251,19 +251,46 @@ def _key(name: str) -> str:
     return key
 
 
-def _endpoint_key(settings: Settings, model: ModelConfig) -> str | None:
+def endpoint_key_variable(endpoint_id: str) -> str:
+    return f"JARVIS_{endpoint_id.upper().replace('-', '_')}_API_KEY"
+
+
+def stored_endpoint_key(endpoint_id: str) -> str | None:
     """Özel uç anahtarı: önce ortam, sonra kasa. Ortama yazılmaz (alt süreçlere geçmesin)."""
+    return os.environ.get(endpoint_key_variable(endpoint_id)) or read_secret(
+        f"Jarvis/{endpoint_id}"
+    )
+
+
+def _endpoint_key(settings: Settings, model: ModelConfig) -> str | None:
     endpoint_id = model.endpoint or ""
     if not settings.endpoints[endpoint_id].api_key:
         return None
-    variable = f"JARVIS_{endpoint_id.upper().replace('-', '_')}_API_KEY"
-    key = os.environ.get(variable) or read_secret(f"Jarvis/{endpoint_id}")
+    key = stored_endpoint_key(endpoint_id)
     if not key:
+        variable = endpoint_key_variable(endpoint_id)
         raise ProviderError(
             f"'{endpoint_id}' ucu için API anahtarı kayıtlı değil. Ortamda {variable} "
             f"tanımlayın veya Kimlik Bilgisi Yöneticisi'ne Jarvis/{endpoint_id} olarak kaydedin."
         )
     return key
+
+
+def provider_problem(settings: Settings) -> str | None:
+    """Ağsız hazırlık denetimi: birincil model çağrılabilir mi? Sebep Türkçe; sorun yoksa None."""
+    model = settings.models.get(settings.primary_model)
+    if model is None:
+        return "Henüz bir model sağlayıcısı ve birincil model ayarlanmamış."
+    try:
+        if model.provider == "openrouter":
+            _key("OPENROUTER_API_KEY")
+        elif model.provider == "anthropic":
+            _key("ANTHROPIC_API_KEY")
+        elif model.provider == "openai_compatible":
+            _endpoint_key(settings, model)
+    except ProviderError as error:
+        return str(error)
+    return None
 
 
 def _check_paid(settings: Settings, model: ModelConfig) -> None:
