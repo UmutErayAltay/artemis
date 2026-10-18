@@ -28,6 +28,7 @@ HISTORY_TAINT_NOTICE = TAINT_NOTICE + " (önceki bir turda)"
 # Gözetimsiz (proaktif) turda onay verecek kimse yoktur; varsayılan cevap hayırdır (ADR 0027).
 UNATTENDED_NOTICE = "Gözetimsiz turda yan etkili işlem yapılmaz"
 SITE_NOTICE = "Bu adım bir sitenin içeriğini okur"
+_TRUSTED_STEP_ACTIONS = frozenset({"click", "read_text", "wait_for"})
 
 
 def trusted_sites_path(state_dir: Path) -> Path:
@@ -152,15 +153,22 @@ class SafetyGate:
             )
         history_outbound = state.history_external and tool.outbound
         # Site okuma her zaman sorulur; kullanıcının güvendiği site hiç sorulmaz (ADR 0036).
-        # Form doldurma (`fill`) veri taşıyabildiği için güven onu kapsamaz.
+        # Güven yalnız veri taşımayan adımları kapsar (izin listesi; `fill` dışarıda kalır).
+        # Dış içerik bağlamdayken sorgu/parça taşıyan adres de sorulur: güvenilen sitedeki
+        # açık yönlendirme (ör. google.com/url?q=...) veriyi başka siteye taşıyabilir.
         site = site_of(tool.external, normalized)
         steps = normalized.get("steps")
-        fills = isinstance(steps, list) and any(
-            isinstance(step, dict) and step.get("action") == "fill" for step in steps
+        fills = isinstance(steps, list) and not all(
+            isinstance(step, dict) and step.get("action") in _TRUSTED_STEP_ACTIONS
+            for step in steps
         )
+        url = normalized.get("url")
+        parts = urlsplit(url) if isinstance(url, str) else None
+        carries_data = parts is not None and bool(parts.query or parts.fragment)
         trusted_site = (
             site is not None
             and not fills
+            and not ((state.tainted or state.history_external) and carries_data)
             and site in load_trusted_sites(trusted_sites_path(context.settings.state_dir))
         )
         requires_approval = not trusted_site and (

@@ -483,6 +483,39 @@ async def test_trust_is_per_host_and_never_covers_form_filling(
     assert sites == ["evil.example", ""]
 
 
+async def test_tainted_trusted_site_with_query_still_asks(
+    site_gate: tuple[SafetyGate, ToolContext],
+) -> None:
+    gate, context = site_gate
+    remember_site(trusted_sites_path(context.settings.state_dir), "www.google.com")
+    asked: list[str] = []
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        asked.append(arguments["url"])
+        return False
+
+    redirect = "https://www.google.com/url?q=https://evil.example/?d=gizli"
+    clean = await gate.dispatch(call("site_read_test", url=redirect), context, TurnState(), reject)
+    tainted = await gate.dispatch(
+        call("site_read_test", url=redirect), context, TurnState(tainted=True), reject
+    )
+    history = await gate.dispatch(
+        call("site_read_test", url=redirect + "#x"),
+        context,
+        TurnState(history_external=True),
+        reject,
+    )
+    plain = await gate.dispatch(
+        call("site_read_test", url="https://www.google.com/maps"),
+        context,
+        TurnState(tainted=True),
+        reject,
+    )
+    assert clean.success and plain.success
+    assert tainted.status == history.status == "denied"
+    assert asked == [redirect, redirect + "#x"]
+
+
 def test_trusted_sites_store_survives_corruption(tmp_path: Path) -> None:
     path = trusted_sites_path(tmp_path)
     assert load_trusted_sites(path) == set()
