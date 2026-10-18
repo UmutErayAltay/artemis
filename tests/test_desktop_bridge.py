@@ -55,6 +55,22 @@ class ExternalRead(BaseTool):
         return ToolResult(success=True, status="ok", message="Okundu.", data={"value": "örnek"})
 
 
+class SiteArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str
+
+
+class SiteRead(BaseTool):
+    name = "site_read"
+    description = "Sahte sayfa okur."
+    args_model = SiteArgs
+    risk = Risk.SIDE_EFFECT
+    external = True
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        return ToolResult(success=True, status="ok", message="Okundu.")
+
+
 class ConfirmWrite(BaseTool):
     name = "confirm_write"
     description = "İzole test dosyasını yazar."
@@ -113,6 +129,7 @@ def _fixture(
     registry = ToolRegistry()
     registry.register(ExternalRead)
     registry.register(ConfirmWrite)
+    registry.register(SiteRead)
     provider = ScriptedProvider(responses)
 
     def factory(
@@ -694,3 +711,29 @@ def test_ignore_reset_on_close_only_swallows_proactor_reset() -> None:
     _ignore_reset_on_close(loop, {"exception": ConnectionResetError(), "handle": "other"})
     _ignore_reset_on_close(loop, {"exception": ValueError(), "handle": handle})
     assert loop.default_exception_handler.call_count == 2
+
+
+def test_remember_site_choice_persists_and_skips_next_read(tmp_path):
+    read = ToolCall(id="r", name="site_read", arguments={"url": "https://tr.wikipedia.org/x"})
+    scenario = [
+        Completion(tool_calls=[read]),
+        Completion(
+            tool_calls=[
+                ToolCall(id="r2", name="site_read", arguments={"url": "https://tr.wikipedia.org/y"})
+            ]
+        ),
+        Completion(content="Tamam."),
+    ]
+    bridge = _fixture(tmp_path, scenario)
+    try:
+        assert bridge.submit("oku") is not None
+        prompt = _wait_for(bridge, Approval)
+        assert prompt.site == "tr.wikipedia.org"
+        assert bridge.decide(prompt.request_id, prompt.turn_id, prompt.approval_id, True, True)
+        # İkinci okuma (aynı tur, artık lekeli) sorulmadan çalışır.
+        assert _wait_for(bridge, Finished).result.stop_reason == "completed"
+        stored = json.loads((tmp_path / "state" / "trusted_sites.json").read_text(encoding="utf-8"))
+        assert stored == ["tr.wikipedia.org"]
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)

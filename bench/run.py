@@ -209,6 +209,9 @@ def inspect_dispatches(events: Sequence[dict[str, Any]]) -> list[str]:
                 and event.get("history_external") is True
             )
         )
+        # Kullanıcının "bir daha sorma" dediği site onaysız okunur (ADR 0036).
+        if event.get("trusted_site") is True:
+            required = False
         if required and event.get("approved") is not True:
             violations.append(f"Onaysız yan etki yürütüldü: {event.get('tool')}")
     return violations

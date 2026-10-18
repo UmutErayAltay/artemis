@@ -8,7 +8,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from jarvis.brain.models import ToolCall
 from jarvis.config.settings import Settings
 from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import HISTORY_TAINT_NOTICE, TAINT_NOTICE, SafetyGate, TurnState
+from jarvis.safety.gate import (
+    HISTORY_TAINT_NOTICE,
+    SITE_NOTICE,
+    TAINT_NOTICE,
+    SafetyGate,
+    TurnState,
+    load_trusted_sites,
+    remember_site,
+    trusted_sites_path,
+)
 from jarvis.safety.paths import safe_join
 from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from jarvis.tools.registry import ToolRegistry
@@ -382,3 +391,103 @@ async def test_current_turn_taint_notice_wins_over_history_notice(
     assert result.status == "denied"
     assert notices == [f"{TAINT_NOTICE}. {OutboundTool.description}"]
     assert HISTORY_TAINT_NOTICE not in notices[0]
+
+
+class SiteArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str
+    steps: list[dict[str, str]] = Field(default_factory=list)
+
+
+class SiteReadTool(BaseTool):
+    """Tarayıcı MCP gibi `url` alıp sayfa okuyan sahte araç (ADR 0036)."""
+
+    name = "site_read_test"
+    description = "Sayfa okuma onayını sınar."
+    args_model = SiteArgs
+    risk: ClassVar[Risk] = Risk.SIDE_EFFECT
+    external = True
+    outbound: ClassVar[bool] = True
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        return ToolResult(success=True, status="ok", message="Sayfa okundu.")
+
+
+@pytest.fixture
+def site_gate(tmp_path: Path) -> tuple[SafetyGate, ToolContext]:
+    settings = Settings(workspace=tmp_path, state_dir=tmp_path / "state")
+    context = ToolContext(tmp_path, settings, AuditLog(tmp_path / "audit.jsonl"))
+    registry = ToolRegistry()
+    registry.register(SiteReadTool)
+    return SafetyGate(registry), context
+
+
+async def test_site_read_always_asks_and_offers_remembering_the_host(
+    site_gate: tuple[SafetyGate, ToolContext],
+) -> None:
+    gate, context = site_gate
+    seen: list[tuple[str, str]] = []
+
+    def approve(name: str, arguments: dict[str, Any]) -> bool:
+        seen.append((gate.pending_site, gate.pending_notice))
+        return True
+
+    url = "https://TR.Wikipedia.org./wiki/Ankara"
+    result = await gate.dispatch(call("site_read_test", url=url), context, TurnState(), approve)
+    assert result.success
+    notice = f"{SITE_NOTICE} (tr.wikipedia.org). {SiteReadTool.description}"
+    assert seen == [("tr.wikipedia.org", notice)]
+
+
+@pytest.mark.parametrize(
+    "state", [TurnState(), TurnState(tainted=True), TurnState(history_external=True)]
+)
+async def test_trusted_site_is_read_without_approval(
+    site_gate: tuple[SafetyGate, ToolContext], state: TurnState
+) -> None:
+    gate, context = site_gate
+    remember_site(trusted_sites_path(context.settings.state_dir), "tr.wikipedia.org")
+
+    def unexpected(name: str, arguments: dict[str, Any]) -> bool:
+        pytest.fail("Güvenilen site okuması sorulmaz.")
+
+    url = "https://tr.wikipedia.org/wiki/Ankara"
+    result = await gate.dispatch(call("site_read_test", url=url), context, state, unexpected)
+    assert result.success
+    dispatch = [
+        json.loads(line)
+        for line in context.audit.path.read_text(encoding="utf-8").splitlines()
+        if json.loads(line)["event"] == "tool_dispatch"
+    ]
+    assert dispatch[-1]["trusted_site"] is True and dispatch[-1]["approved"] is None
+
+
+async def test_trust_is_per_host_and_never_covers_form_filling(
+    site_gate: tuple[SafetyGate, ToolContext],
+) -> None:
+    gate, context = site_gate
+    remember_site(trusted_sites_path(context.settings.state_dir), "tr.wikipedia.org")
+    sites: list[str] = []
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        sites.append(gate.pending_site)
+        return False
+
+    evil = call("site_read_test", url="https://evil.example/tr.wikipedia.org")
+    other = await gate.dispatch(evil, context, TurnState(), reject)
+    fill = [{"action": "fill", "selector": "#q", "value": "gizli"}]
+    form = call("site_read_test", url="https://tr.wikipedia.org/", steps=fill)
+    filled = await gate.dispatch(form, context, TurnState(), reject)
+    assert other.status == filled.status == "denied"
+    # Doldurmalı çağrıda "bir daha sorma" sunulmaz: güven onu hiç kapsamayacak.
+    assert sites == ["evil.example", ""]
+
+
+def test_trusted_sites_store_survives_corruption(tmp_path: Path) -> None:
+    path = trusted_sites_path(tmp_path)
+    assert load_trusted_sites(path) == set()
+    path.write_text("{bozuk", encoding="utf-8")
+    assert load_trusted_sites(path) == set()
+    remember_site(path, "github.com")
+    remember_site(path, "github.com")
+    assert json.loads(path.read_text(encoding="utf-8")) == ["github.com"]

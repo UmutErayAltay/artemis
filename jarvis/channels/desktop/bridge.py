@@ -32,6 +32,7 @@ from jarvis.channels.voice.factory import build_voice_controller
 from jarvis.proactive.delivery import Deliverer
 from jarvis.proactive.scheduler import ProactiveScheduler
 from jarvis.proactive.store import ProactiveStore
+from jarvis.safety.gate import remember_site, trusted_sites_path
 from jarvis.tools.base import ToolResult
 
 RuntimeFactory = Callable[[Path, ApprovalCallback, AuditObserver], Runtime]
@@ -107,6 +108,8 @@ class Approval:
     deadline: float | None = None
     # Yalnız gösterim: okunur Türkçe ad. Boşsa arayüz ham tool_name'i başlık yapar.
     tool_label: str = ""
+    # Doluysa pencere "bu site için bir daha sorma" seçeneğini de sunar (ADR 0036).
+    site: str = ""
 
 
 @dataclass(frozen=True)
@@ -157,7 +160,8 @@ class _PendingApproval:
     request_id: str
     turn_id: str
     approval_id: str
-    future: Future[bool] = field(default_factory=Future, repr=False)
+    # True/False ya da "site": onayla ve bu site için bir daha sorma (ADR 0036).
+    future: Future[bool | str] = field(default_factory=Future, repr=False)
 
 
 class _ApprovalBroker:
@@ -187,6 +191,7 @@ class _ApprovalBroker:
             item = _PendingApproval(request_id, runtime.context.turn_id, approval_id)
             self.pending = item
             notice = runtime.gate.pending_notice
+            site = runtime.gate.pending_site
             deadline = runtime.context.deadline
             tool = runtime.registry.get(tool_name)
             tool_label = tool.label if tool is not None else ""
@@ -200,6 +205,7 @@ class _ApprovalBroker:
                     notice,
                     deadline,
                     tool_label,
+                    site,
                 )
             )
         timeout = (
@@ -208,13 +214,16 @@ class _ApprovalBroker:
             else runtime.context.settings.max_seconds
         )
         try:
-            approved = item.future.result(timeout=timeout) is True
+            decision = item.future.result(timeout=timeout)
+            approved = decision is True or decision == "site"
             with self.lock:
                 cancelled = self.cancel_requested.is_set()
                 if cancelled:
                     # Callback senkron biçimde kapının içindedir; işçi eventi
                     # event loop'a sıraya koymadan önce iptal işaretlenmelidir.
                     runtime.runner.cancel_current()
+            if decision == "site" and site and not cancelled:
+                remember_site(trusted_sites_path(runtime.context.settings.state_dir), site)
             return approved and not cancelled
         except TimeoutError:
             return False
@@ -223,7 +232,14 @@ class _ApprovalBroker:
                 if self.pending is item:
                     self.pending = None
 
-    def decide(self, request_id: str, turn_id: str, approval_id: str, approved: bool) -> bool:
+    def decide(
+        self,
+        request_id: str,
+        turn_id: str,
+        approval_id: str,
+        approved: bool,
+        remember_site: bool = False,
+    ) -> bool:
         with self.lock:
             item = self.pending
             if (
@@ -234,7 +250,8 @@ class _ApprovalBroker:
                 or item.future.done()
             ):
                 return False
-            item.future.set_result(approved is True)
+            approved = approved is True
+            item.future.set_result("site" if approved and remember_site else approved)
             return True
 
     def invalidate(self) -> None:
@@ -438,8 +455,15 @@ class DesktopBridge:
         loop.call_soon_threadsafe(self._reset_on_worker)
         return True
 
-    def decide(self, request_id: str, turn_id: str, approval_id: str, approved: bool) -> bool:
-        return self._broker.decide(request_id, turn_id, approval_id, approved)
+    def decide(
+        self,
+        request_id: str,
+        turn_id: str,
+        approval_id: str,
+        approved: bool,
+        remember_site: bool = False,
+    ) -> bool:
+        return self._broker.decide(request_id, turn_id, approval_id, approved, remember_site)
 
     def shutdown(self) -> None:
         with self._lock:

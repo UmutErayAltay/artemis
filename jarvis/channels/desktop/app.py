@@ -591,17 +591,23 @@ class ApprovalDialog(QDialog):
         self.yes_button.setDefault(False)
         self.yes_button.setAutoDefault(False)
         buttons.addWidget(self.no_button)
+        self.site_button: QPushButton | None = None
+        if item.site:
+            self.site_button = QPushButton(f"Evet, {item.site} için bir daha sorma")
+            self.site_button.setAutoDefault(False)
+            self.site_button.clicked.connect(lambda: self._choose(True, remember_site=True))
+            buttons.addWidget(self.site_button)
         buttons.addWidget(self.yes_button)
         layout.addLayout(buttons)
         self.no_button.clicked.connect(lambda: self._choose(False))
         self.yes_button.clicked.connect(lambda: self._choose(True))
         self.no_button.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def _choose(self, approved: bool) -> None:
+    def _choose(self, approved: bool, remember_site: bool = False) -> None:
         if self._decided:
             return
         self._decided = True
-        accepted = self._on_decision(self.item, approved)
+        accepted = self._on_decision(self.item, approved, remember_site)
         decision = approved and accepted
         self.done(QDialog.DialogCode.Accepted if decision else QDialog.DialogCode.Rejected)
 
@@ -1418,8 +1424,12 @@ class DesktopWindow(QMainWindow):
         dialog.open()
         self.pet.set_approval(True)
 
-    def _decide_approval(self, item: Approval, approved: bool) -> bool:
-        return self.bridge.decide(item.request_id, item.turn_id, item.approval_id, approved)
+    def _decide_approval(
+        self, item: Approval, approved: bool, remember_site: bool = False
+    ) -> bool:
+        return self.bridge.decide(
+            item.request_id, item.turn_id, item.approval_id, approved, remember_site
+        )
 
     def _dismiss_approval_for(self, request_id: str) -> None:
         dialog = self._approval_dialog

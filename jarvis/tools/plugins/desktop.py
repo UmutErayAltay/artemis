@@ -274,8 +274,9 @@ class OpenURL(BaseTool):
     done_label = "Bağlantı tarayıcıya gönderildi"
     description = "Yalnız http/https adresini tarayıcıya gönderir; sayfanın açıldığını iddia etmez."
     args_model = URLArguments
-    risk = Risk.SIDE_EFFECT
-    outbound = True
+    # Kullanıcı kararı (ADR 0036): site açmak hiç sorulmaz, okumak sorulur. Adresteki veri
+    # o siteye gidebilir; bu kabul edilen risktir.
+    risk = Risk.READ_ONLY
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(URLArguments, arguments)

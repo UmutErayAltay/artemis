@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
+from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 from pydantic import ValidationError
@@ -24,6 +27,35 @@ TAINT_NOTICE = "Bu adım dış bir içerik okunduktan sonra istendi"
 HISTORY_TAINT_NOTICE = TAINT_NOTICE + " (önceki bir turda)"
 # Gözetimsiz (proaktif) turda onay verecek kimse yoktur; varsayılan cevap hayırdır (ADR 0027).
 UNATTENDED_NOTICE = "Gözetimsiz turda yan etkili işlem yapılmaz"
+SITE_NOTICE = "Bu adım bir sitenin içeriğini okur"
+
+
+def trusted_sites_path(state_dir: Path) -> Path:
+    return state_dir / "trusted_sites.json"
+
+
+def load_trusted_sites(path: Path) -> set[str]:
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return set()
+    return {str(host) for host in data} if isinstance(data, list) else set()
+
+
+def remember_site(path: Path, host: str) -> None:
+    """Kullanıcının "bu site için bir daha sorma" seçimini kalıcı yazar (ADR 0036)."""
+    sites = load_trusted_sites(path) | {host}
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(sorted(sites), ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def site_of(external: bool, arguments: dict[str, Any]) -> str | None:
+    """Dış içerik okuyan ve `url` alan araçta okunan sitenin host'u (ör. tarayıcı MCP)."""
+    url = arguments.get("url")
+    if not external or not isinstance(url, str):
+        return None
+    host = (urlsplit(url).hostname or "").rstrip(".").lower()
+    return host or None
 
 
 @dataclass
@@ -43,6 +75,8 @@ class SafetyGate:
     def __init__(self, registry: ToolRegistry) -> None:
         self.registry = registry
         self.pending_notice = ""
+        # Onay penceresindeki "bu site için bir daha sorma" seçeneği için okunan host.
+        self.pending_site = ""
 
     async def dispatch(
         self,
@@ -58,6 +92,7 @@ class SafetyGate:
         # okunan metinden kurulan hatırlatma da "dış içerikten" sayılır. Onay kuralı değişmez.
         context.turn_tainted = state.tainted or state.history_external
         self.pending_notice = ""
+        self.pending_site = ""
         context.audit.emit(
             "tool_requested", turn_id=state.turn_id, tool=call.name, arguments=call.arguments
         )
@@ -116,17 +151,34 @@ class SafetyGate:
                 started,
             )
         history_outbound = state.history_external and tool.outbound
-        requires_approval = (
-            risk is Risk.CONFIRM_REQUIRED
+        # Site okuma her zaman sorulur; kullanıcının güvendiği site hiç sorulmaz (ADR 0036).
+        # Form doldurma (`fill`) veri taşıyabildiği için güven onu kapsamaz.
+        site = site_of(tool.external, normalized)
+        steps = normalized.get("steps")
+        fills = isinstance(steps, list) and any(
+            isinstance(step, dict) and step.get("action") == "fill" for step in steps
+        )
+        trusted_site = (
+            site is not None
+            and not fills
+            and site in load_trusted_sites(trusted_sites_path(context.settings.state_dir))
+        )
+        requires_approval = not trusted_site and (
+            site is not None
+            or risk is Risk.CONFIRM_REQUIRED
             or (state.tainted and risk is not Risk.READ_ONLY)
             or (history_outbound and risk is not Risk.READ_ONLY)
         )
         approved: bool | None = None
         if requires_approval:
+            if site is not None and not fills:
+                self.pending_site = site
             if state.tainted:
                 notice = TAINT_NOTICE
             elif history_outbound:
                 notice = HISTORY_TAINT_NOTICE
+            elif site is not None:
+                notice = f"{SITE_NOTICE} ({site})"
             else:
                 notice = "Bu işlem onay gerektirir."
             # Onay ekranı tool açıklamasını da taşır; kullanıcı etkilenecek kapsamı
@@ -173,6 +225,7 @@ class SafetyGate:
             tainted=state.tainted,
             outbound=tool.outbound,
             history_external=state.history_external,
+            trusted_site=trusted_site,
         )
         try:
             result = await tool.execute(arguments, context)
