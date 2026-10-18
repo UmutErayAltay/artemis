@@ -77,5 +77,7 @@ module = [
   "jarvis.channels.desktop.settings_panel",
   "jarvis.channels.desktop.projects_panel",
   "jarvis.channels.desktop.instance",
+  "jarvis.channels.desktop.provider_section",
 ]
-disable_error_code = ["misc", "no-any-return"]
+# Qt yokken Any olan ifadelerdeki ignore'lar `unused-ignore` olur; Qt varken gerekir.
+disable_error_code = ["misc", "no-any-return", "unused-ignore"]
