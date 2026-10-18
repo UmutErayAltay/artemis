@@ -6,9 +6,10 @@ onay istesin, onay kısmında bu site için bir daha sorma seçeneği de olsun".
 
 **Karar:**
 
-- `open_url` READ_ONLY ve `outbound` değildir: hiçbir turda (lekeli ya da geçmişi dış
-  içerikli) onay sormaz. Adres argümanındaki veri o siteye gidebilir; tarayıcıya adres
-  göndermek kullanıcının kabul ettiği risktir. Gözetimsiz turda da çalışabilir.
+- `open_url` açmak sorulmaz (`risk_for` READ_ONLY döner). Ara yol (kullanıcı onayı,
+  2026-10-18): bağlamda dış içerik varken (bu tur ya da önceki tur) adres sorgu ya da parça
+  (`?`, `#`) taşıyorsa SIDE_EFFECT olur ve taint/ADR 0013 onayı işler; araç `outbound` kalır.
+  Bilinen sınır: yoldaki veri (`site.com/GIZLI`) yakalanmaz; gerekirse host izin listesi.
 - Dış içerik okuyan ve `url` argümanı alan araç (bugün tarayıcı MCP `browse`) **her** çağrıda
   onay ister; uyarı `Bu adım bir sitenin içeriğini okur (<host>)` olur.
 - Masaüstü onay penceresi üçüncü düğme sunar: "Evet, <host> için bir daha sorma". Seçim
@@ -21,5 +22,4 @@ onay istesin, onay kısmında bu site için bir daha sorma seçeneği de olsun".
   `pending_site` değeriyle yapılır; politika yalnız `SafetyGate`'tedir. Telegram ve CLI
   hatırlama sunmaz. Liste dosyadan elle düzenlenir/silinir.
 
-**Sonuç:** ADR 0013'ün `open_url` kısmı kalkar; `web_search` ve `notify_telegram` için
-geçerlidir.
+**Sonuç:** ADR 0013 `open_url` için yalnız veri taşıyan adreste işler.

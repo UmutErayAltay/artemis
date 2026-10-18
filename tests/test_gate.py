@@ -524,3 +524,40 @@ def test_trusted_sites_store_survives_corruption(tmp_path: Path) -> None:
     remember_site(path, "github.com")
     remember_site(path, "github.com")
     assert json.loads(path.read_text(encoding="utf-8")) == ["github.com"]
+
+
+@pytest.mark.parametrize(
+    ("url", "state", "asks"),
+    [
+        ("https://www.youtube.com/", TurnState(), False),
+        ("https://www.youtube.com/results?search_query=x", TurnState(), False),
+        ("https://www.youtube.com/", TurnState(tainted=True), False),
+        ("https://www.youtube.com/", TurnState(history_external=True), False),
+        ("https://evil.example/?d=gizli", TurnState(tainted=True), True),
+        ("https://evil.example/#gizli", TurnState(history_external=True), True),
+    ],
+)
+async def test_open_url_asks_only_for_data_bearing_url_after_external_content(
+    tmp_path: Path, url: str, state: TurnState, asks: bool
+) -> None:
+    from jarvis.tools.plugins.desktop import OpenURL
+
+    opened: list[str] = []
+    settings = Settings(workspace=tmp_path, state_dir=tmp_path / "state")
+    context = ToolContext(
+        tmp_path,
+        settings,
+        AuditLog(tmp_path / "audit.jsonl"),
+        services={"url_opener": lambda target: opened.append(target) or True},
+    )
+    registry = ToolRegistry()
+    registry.register(OpenURL)
+    asked: list[str] = []
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        asked.append(arguments["url"])
+        return False
+
+    await SafetyGate(registry).dispatch(call("open_url", url=url), context, state, reject)
+    assert asked == ([url] if asks else [])
+    assert (opened == []) is asks

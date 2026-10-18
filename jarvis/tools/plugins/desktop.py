@@ -274,9 +274,17 @@ class OpenURL(BaseTool):
     done_label = "Bağlantı tarayıcıya gönderildi"
     description = "Yalnız http/https adresini tarayıcıya gönderir; sayfanın açıldığını iddia etmez."
     args_model = URLArguments
-    # Kullanıcı kararı (ADR 0036): site açmak hiç sorulmaz, okumak sorulur. Adresteki veri
-    # o siteye gidebilir; bu kabul edilen risktir.
-    risk = Risk.READ_ONLY
+    risk = Risk.SIDE_EFFECT
+    outbound = True
+
+    def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
+        # Kullanıcı kararı (ADR 0036): site açmak sorulmaz. Tek istisna: bağlamda dış içerik
+        # varken sorgu/parça (`?`, `#`) veri taşıyabilir; o zaman taint/ADR 0013 onayı işler.
+        # ponytail: yoldaki veri (site.com/GIZLI) yakalanmaz; gerekirse host izin listesi.
+        parts = urlsplit(cast(URLArguments, arguments).url)
+        if context.turn_tainted and (parts.query or parts.fragment):
+            return Risk.SIDE_EFFECT
+        return Risk.READ_ONLY
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(URLArguments, arguments)
