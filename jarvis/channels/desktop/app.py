@@ -759,6 +759,7 @@ class DesktopWindow(QMainWindow):
             on_show_panel=self._show_panel,
             on_quick=self._show_overlay,
             on_approval=self._focus_approval,
+            on_quit=self._request_exit,
         )
 
     def voice_button_click(self) -> None:

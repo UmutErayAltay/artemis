@@ -12,6 +12,7 @@ import os
 import random
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, cast
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer
@@ -19,6 +20,7 @@ from PySide6.QtGui import (
     QBrush,
     QColor,
     QContextMenuEvent,
+    QCursor,
     QFont,
     QFontMetrics,
     QGuiApplication,
@@ -113,6 +115,19 @@ def _alpha(color: QColor, alpha: float) -> QColor:
     return out
 
 
+@dataclass
+class _Particle:
+    """Gövde merkezine göre konumlanan kısa ömürlü süs: uyku "z"si ya da kıvılcım."""
+
+    kind: str
+    x: float
+    y: float
+    vx: float
+    vy: float
+    life: float
+    age: float = 0.0
+
+
 class PetWidget(QWidget):
     def __init__(
         self,
@@ -121,6 +136,7 @@ class PetWidget(QWidget):
         on_show_panel: Callable[[], None],
         on_quick: Callable[[], None],
         on_approval: Callable[[], None],
+        on_quit: Callable[[], None],
         settings: QSettings | None = None,
         reduced_motion: bool | None = None,
     ) -> None:
@@ -136,6 +152,7 @@ class PetWidget(QWidget):
         self._on_show_panel = on_show_panel
         self._on_quick = on_quick
         self._on_approval = on_approval
+        self._on_quit = on_quit
         self._settings = settings if settings is not None else QSettings(
             # Ini biçimi: testler setPath ile tmp'ye yönlendirebilir; kayıt defteri kirlenmez.
             QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Jarvis", "pet"
@@ -182,6 +199,10 @@ class PetWidget(QWidget):
         self._blink_at = random.uniform(3, 7)
         self._glance_at = random.uniform(2, 5)
         self._shown_state = "off"
+        self._hovered = False
+        self._hover = 0.0
+        self._particles: list[_Particle] = []
+        self._z_at = 0.0
 
         # Balon
         self._bubble_text = ""
@@ -281,6 +302,8 @@ class PetWidget(QWidget):
         text = job_summary(str(fields.get("project", "")), status, fields.get("commits"))
         self._reaction = "happy" if status == "done" else "sad"
         self._react_age = 0.0
+        if status == "done":
+            self._burst()
         self.say(text, "job")
         self._refresh_access()
         return text
@@ -365,10 +388,22 @@ class PetWidget(QWidget):
         )
         menu.addSeparator()
         menu.addAction("Peti gizle").triggered.connect(lambda: self.set_pet_visible(False))
+        menu.addSeparator()
+        # Tepsideki "Çıkış" ile aynı yol: işçi temiz kapanır, uygulama sonlanır.
+        menu.addAction("Kapat").triggered.connect(self._on_quit)
         return menu
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
         self.build_menu().exec(event.globalPos())
+
+    def enterEvent(self, event: Any) -> None:
+        super().enterEvent(event)
+        self._hovered = True
+        self._drag_dx += 5.0  # anten selam verir gibi sallanır
+
+    def leaveEvent(self, event: Any) -> None:
+        super().leaveEvent(event)
+        self._hovered = False
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -476,6 +511,11 @@ class PetWidget(QWidget):
         elif state == "error":
             eye, smile, mw, glow, color = 0.85, -0.7, 9.0, 0.3, ERROR
             gaze = QPointF(0, 0.5)
+        elif self._reaction is None:
+            smile += 0.35 * self._hover
+            follow = self._cursor_gaze() if motion else None
+            if follow is not None:
+                gaze = follow
         elif self._reaction == "happy":
             eye, smile, mw, happy = 1.0, 1.0, 13.0, 1.0
         elif self._reaction == "sad":
@@ -518,9 +558,51 @@ class PetWidget(QWidget):
                 else QPointF(0, 0)
             )
 
+        self._hover = _ease(self._hover, 1.0 if self._hovered else 0.0, dt, 10)
+        self._tick_particles(dt, state, motion)
+
         # Anten sürüklemede geride kalır
         self._antenna = _ease(self._antenna, -self._drag_dx * 0.6, dt, 10)
         self._drag_dx = _ease(self._drag_dx, 0.0, dt, 12)
+
+    def _cursor_gaze(self) -> QPointF | None:
+        """İmleç yakınsa gözler ona döner; uzaktaysa rastgele bakış sürer."""
+        center = self.mapToGlobal(self._body_rect().center())
+        d = QCursor.pos() - center
+        dist = math.hypot(d.x(), d.y())
+        if dist < 1 or dist > 700:
+            return None
+        k = min(1.0, dist / 160)
+        return QPointF(d.x() / dist * k, d.y() / dist * k * 0.8)
+
+    def _burst(self) -> None:
+        if self._reduced:
+            return
+        for i in range(10):
+            a = i * 2 * math.pi / 10 + random.uniform(-0.2, 0.2)
+            speed = random.uniform(10, 16)  # pencere 120 px: kıvılcım kenarda söner
+            self._particles.append(
+                _Particle(
+                    "spark",
+                    math.cos(a) * 42,
+                    math.sin(a) * 42,
+                    math.cos(a) * speed,
+                    math.sin(a) * speed - 6,
+                    0.9,
+                )
+            )
+
+    def _tick_particles(self, dt: float, state: str, motion: float) -> None:
+        if motion and state == "off" and self._t >= self._z_at:
+            self._z_at = self._t + 1.6
+            self._particles.append(_Particle("z", 22, -24, 5, -12, 2.4))
+        for pt in self._particles:
+            pt.age += dt
+            pt.x += pt.vx * dt
+            pt.y += pt.vy * dt
+            if pt.kind == "spark":
+                pt.vy += 30 * dt
+        self._particles = [pt for pt in self._particles if pt.age < pt.life]
 
     # ------------------------------------------------------------------ çizim
 
@@ -550,7 +632,8 @@ class PetWidget(QWidget):
         if self._reaction == "happy" and self._shown_state in {"idle", "off"}:
             age = self._react_age
             dy -= abs(math.sin(age * 9)) * 16 * math.exp(-age * 2.0) * motion
-        sx, sy = breath, 2 - breath
+        grow = 1 + 0.04 * self._hover
+        sx, sy = breath * grow, (2 - breath) * grow
         if self._droop > 0.01:
             dy += 5 * self._droop
             sy *= 1 - 0.07 * self._droop
@@ -573,7 +656,8 @@ class PetWidget(QWidget):
         p.drawEllipse(QPointF(cx + dx * 0.5, 111), shadow_w, 4.5)
 
         # Yumuşak ışıma
-        glow = self._glow + (0.12 * math.sin(t * 2.2) if state == "approval" else 0.0)
+        glow = self._glow + 0.08 * self._hover
+        glow += 0.12 * math.sin(t * 2.2) if state == "approval" else 0.0
         g = QRadialGradient(QPointF(cx + dx, cy + dy), radius + 22)
         g.setColorAt(0.55, _alpha(tint, glow))
         g.setColorAt(1.0, _alpha(tint, 0.0))
@@ -597,6 +681,10 @@ class PetWidget(QWidget):
         p.scale(sx, sy)
         self._paint_character(p, tint, state)
         p.restore()
+
+        if state == "speaking":
+            self._paint_waves(p, cx + dx, cy + dy, tint)
+        self._paint_particles(p, cx + dx, cy + dy)
 
         # Rozetler gövdenin üstünde, ölçeksiz çizilir
         if state == "thinking":
@@ -702,6 +790,46 @@ class PetWidget(QWidget):
         p.setPen(QPen(_alpha(tint, 0.9), 2.6, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap,
                       Qt.PenJoinStyle.RoundJoin))
         p.drawPolyline(QPolygonF(top))
+
+    def _paint_waves(self, p: QPainter, cx: float, cy: float, tint: QColor) -> None:
+        """Konuşurken iki yandan dışa yayılan ses yayları."""
+        motion = 0.0 if self._reduced else 1.0
+        p.setBrush(Qt.BrushStyle.NoBrush)
+        for i in range(2):
+            phase = (self._t * 1.6 * motion + i * 0.5) % 1.0
+            r = _RADIUS + 10 + phase * 16
+            p.setPen(
+                QPen(
+                    _alpha(tint, 0.55 * (1 - phase)),
+                    2.2,
+                    Qt.PenStyle.SolidLine,
+                    Qt.PenCapStyle.RoundCap,
+                )
+            )
+            box = QRectF(cx - r, cy - r, 2 * r, 2 * r)
+            p.drawArc(box, -28 * 16, 56 * 16)
+            p.drawArc(box, 152 * 16, 56 * 16)
+
+    def _paint_particles(self, p: QPainter, cx: float, cy: float) -> None:
+        for pt in self._particles:
+            k = pt.age / pt.life
+            x, y = cx + pt.x, cy + pt.y
+            if pt.kind == "z":
+                alpha = min(1.0, pt.age / 0.3) * (1 - k)
+                font = QFont("Segoe UI")
+                font.setPixelSize(round(9 + 8 * k))
+                font.setBold(True)
+                p.setFont(font)
+                p.setPen(_alpha(TEXT, 0.75 * alpha))
+                p.drawText(QPointF(x + 3 * math.sin(pt.age * 2.5), y), "z")
+                continue
+            size = 1.5 + 4 * (1 - k)
+            color = AMBER if int(pt.vx * 10) % 2 else TEAL
+            p.setPen(
+                QPen(_alpha(color, 1 - k), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
+            )
+            p.drawLine(QPointF(x - size, y), QPointF(x + size, y))
+            p.drawLine(QPointF(x, y - size), QPointF(x, y + size))
 
     def _paint_dots(self, p: QPainter, cx: float, cy: float) -> None:
         motion = 0.0 if self._reduced else 1.0

@@ -55,6 +55,7 @@ def made(app: QApplication, tmp_path: Path) -> Any:
             on_show_panel=calls.cb("panel"),
             on_quick=calls.cb("quick"),
             on_approval=calls.cb("approval"),
+            on_quit=calls.cb("quit"),
             settings=QSettings(str(tmp_path / "pet.ini"), QSettings.Format.IniFormat),
             **kwargs,
         )
@@ -274,12 +275,14 @@ def test_menu_entries_and_hide_is_persisted(made: Any) -> None:
     pet.show()
     menu = pet.build_menu()
     labels = [a.text() for a in menu.actions() if not a.isSeparator()]
-    assert labels == ["Paneli aç", "Hızlı komut", "Sesi aç", "Peti gizle"]
+    assert labels == ["Paneli aç", "Hızlı komut", "Sesi aç", "Peti gizle", "Kapat"]
     pet.set_voice("listening")
     assert "Sesi kapat" in [a.text() for a in pet.build_menu().actions()]
     menu.actions()[0].trigger()
     assert calls.log == ["panel"]
     menu.actions()[-1].trigger()
+    assert calls.log == ["panel", "quit"]
+    next(a for a in menu.actions() if a.text() == "Peti gizle").trigger()
     assert not pet.isVisible()
     assert pet._settings.value("visible", True, type=bool) is False
     pet.start()
@@ -324,6 +327,7 @@ def test_position_restored_from_settings(app: QApplication, tmp_path: Path) -> N
         on_show_panel=lambda: None,
         on_quick=lambda: None,
         on_approval=lambda: None,
+        on_quit=lambda: None,
         settings=settings,
     )
     assert pet._anchor == QPoint(33, 44)
@@ -366,3 +370,20 @@ def test_reduced_motion_freezes_ambient_motion(made: Any) -> None:
     _settle(pet, 5.0)
     assert pet._offsets("speaking")[1] == 0.0
     assert pet._blink_p is None
+
+
+def test_particles_sleep_z_and_success_burst(made: Any) -> None:
+    pet, _ = made(reduced_motion=False)
+    for _ in range(60):
+        pet.tick(0.05)  # ses kapalı: uyku "z"leri çıkar, ömrü dolanlar silinir
+    assert {pt.kind for pt in pet._particles} == {"z"} and len(pet._particles) <= 3
+    pet.code_agent_event("code_agent_done", {"job_id": "1", "status": "done"})
+    assert sum(pt.kind == "spark" for pt in pet._particles) == 10
+    for _ in range(30):
+        pet.tick(0.05)
+    assert not any(pt.kind == "spark" for pt in pet._particles)
+    quiet, _ = made(reduced_motion=True)
+    for _ in range(60):
+        quiet.tick(0.05)
+    quiet.code_agent_event("code_agent_done", {"job_id": "1", "status": "done"})
+    assert quiet._particles == []
