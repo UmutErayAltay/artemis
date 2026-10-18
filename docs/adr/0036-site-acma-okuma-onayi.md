@@ -15,7 +15,7 @@ onay istesin, onay kısmında bu site için bir daha sorma seçeneği de olsun".
   `state_dir/trusted_sites.json`'a (tam host, alt alan adı kapsanmaz) yazılır. Bu host'a
   sonraki okumalar taint ve ADR 0013 kuralı dahil hiç sorulmaz; `tool_dispatch` denetimine
   `trusted_site=true` yazılır ve bench değişmezi bunu kabul eder.
-- Güven yalnız `click`/`read_text`/`wait_for` adımlı çağrıyı kapsar (`fill` form verisi taşır); dış içerik bağlamdayken sorgu ya da parça (`?`, `#`) taşıyan adres yine sorulur (güvenilen sitedeki açık yönlendirme veriyi başka siteye taşıyabilir). Kapsanmayan çağrıda "bir daha
+- Güven yalnız `click`/`read_text`/`wait_for` adımlı çağrıyı kapsar (`fill` form verisi taşır); dış içerik bağlamdayken sorgu ya da parça (`?`, `#`) taşıyan adres yine sorulur (güvenilen sitedeki açık yönlendirme veriyi başka siteye taşıyabilir). İzin listesi dışı adımlı çağrıda "bir daha
   sorma" sunulmaz. Gözetimsiz turda güvenilen site de okunmaz (ADR 0027 önce gelir).
 - Onay imzası `(tool_name, arguments) -> bool` kalır: hatırlama kanal tarafında, kapının
   `pending_site` değeriyle yapılır; politika yalnız `SafetyGate`'tedir. Telegram ve CLI
