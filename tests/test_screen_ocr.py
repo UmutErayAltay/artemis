@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import re
 import subprocess
 import sys
@@ -90,7 +91,8 @@ def test_env_carries_scope_and_no_secrets(
     assert env["JARVIS_SCREEN_SCOPE"] == scope
     for key in ("JARVIS_TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY", "JARVIS_UNLISTED_SETTING"):
         assert key not in env
-    assert set(env) <= set(child_environment()) | {"JARVIS_SCREEN_SCOPE"}
+    assert env["JARVIS_OWN_PID"] == str(os.getpid())
+    assert set(env) <= set(child_environment()) | {"JARVIS_SCREEN_SCOPE", "JARVIS_OWN_PID"}
 
 
 def test_script_contract_and_nothing_written_to_disk() -> None:

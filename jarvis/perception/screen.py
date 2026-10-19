@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 import subprocess
 import sys
 from collections.abc import Callable
@@ -46,6 +47,25 @@ _NATIVE_TYPE = "\n".join(
         '  [DllImport("dwmapi.dll")]',
         "  public static extern int DwmGetWindowAttribute(",
         "    IntPtr h, int attr, out RECT r, int size);",
+        '  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);',
+        '  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);',
+        '  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);',
+        '  [DllImport("user32.dll")]',
+        "  public static extern uint GetWindowThreadProcessId(IntPtr h, out uint pid);",
+        "  // Onay penceresi kapanınca odak Jarvis'e döner; Jarvis'in (panel, pet) pencereleri",
+        "  // atlanıp z-sırasında arkadaki ilk görünür, başlıklı kullanıcı penceresi seçilir.",
+        "  public static IntPtr Target(uint ownPid) {",
+        "    IntPtr h = GetForegroundWindow();",
+        "    while (h != IntPtr.Zero) {",
+        "      uint pid;",
+        "      GetWindowThreadProcessId(h, out pid);",
+        "      StringBuilder b = new StringBuilder(2);",
+        "      if (pid != ownPid && IsWindowVisible(h) && !IsIconic(h)",
+        "          && GetWindowText(h, b, 2) > 0) return h;",
+        "      h = GetWindow(h, 2);",
+        "    }",
+        "    return IntPtr.Zero;",
+        "  }",
         "}",
         "'@",
     ]
@@ -87,7 +107,9 @@ SCREEN_SCRIPT = "\n".join(
         "}",
         "$title = ''",
         "if ($scope -eq 'active_window') {",
-        "  $hwnd = [JarvisNative]::GetForegroundWindow()",
+        "  $ownPid = [uint32]0",
+        "  [void][uint32]::TryParse($env:JARVIS_OWN_PID, [ref]$ownPid)",
+        "  $hwnd = [JarvisNative]::Target($ownPid)",
         "  if ($hwnd -eq [IntPtr]::Zero) { exit 4 }",
         "  $rect = New-Object JarvisNative+RECT",
         "  $size = [System.Runtime.InteropServices.Marshal]::SizeOf([type][JarvisNative+RECT])",
@@ -217,7 +239,11 @@ def read_screen(
         "-EncodedCommand",
         encoded,
     ]
-    env = {**child_environment(), "JARVIS_SCREEN_SCOPE": scope}
+    env = {
+        **child_environment(),
+        "JARVIS_SCREEN_SCOPE": scope,
+        "JARVIS_OWN_PID": str(os.getpid()),
+    }
     try:
         completed = runner(
             command,
