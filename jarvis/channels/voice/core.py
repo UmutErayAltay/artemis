@@ -21,15 +21,13 @@ from jarvis.config.settings import VoiceConfig
 
 logger = logging.getLogger(__name__)
 
-# Kip cümleleri normalize sözcük dizisi olarak tam eşleşir; uzun komut içindekiler kaçırılır.
-_CONTINUOUS_ON = {
-    ("kesintisiz", "moda", "geç"), ("kesintisiz", "modu", "aç"),
-    ("kesintisiz", "mod", "aç"), ("sürekli", "dinle"),
-}
-_CONTINUOUS_OFF = {
-    ("kesintisiz", "modu", "kapat"), ("kesintisiz", "moddan", "çık"),
-    ("normal", "moda", "geç"),
-}
+# Kip cümlesi: en çok 4 sözcük, "kesintisiz"/"sürekli" ve tek yönlü bir fiil. STT ve kullanıcı
+# farklı sözcükler kullanır ("kesintisiz sohbete geç"); uzun komut içindekiler yine kaçırılır.
+_CONTINUOUS_MAX_WORDS = 4
+_CONTINUOUS_KEYS = {"kesintisiz", "sürekli"}
+_CONTINUOUS_ON_VERBS = {"geç", "aç", "başlat", "gir", "dinle"}
+_CONTINUOUS_OFF_VERBS = {"kapat", "çık", "bitir", "durdur"}
+_CONTINUOUS_OFF = {("normal", "moda", "geç"), ("normal", "moda", "dön")}
 
 
 _FOLD = str.maketrans("ışçğöü", "iscgou")
@@ -431,11 +429,13 @@ class VoiceController:
         if span is not None and not self._speech_words(transcript[: span[0]]):
             transcript = transcript[span[1]:]
         words = self._speech_words(transcript)
-        if tuple(words) in _CONTINUOUS_ON:
-            return True
         if tuple(words) in _CONTINUOUS_OFF:
             return False
-        return None
+        if len(words) > _CONTINUOUS_MAX_WORDS or not _CONTINUOUS_KEYS & set(words):
+            return None
+        on = bool(_CONTINUOUS_ON_VERBS & set(words))
+        off = bool(_CONTINUOUS_OFF_VERBS & set(words))
+        return on if on != off else None
 
     def _is_spoken_echo(self, text: str, speech_start: float) -> bool:
         if not self._spoken_text or speech_start > self._spoken_until:

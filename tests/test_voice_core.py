@@ -670,7 +670,8 @@ async def test_continuous_wake_alone_still_acknowledges():
 
 @pytest.mark.parametrize("phrase", [
     "kesintisiz moda geç", "Kesintisiz modu aç", "Artemis, kesintisiz mod aç",
-    "SÜREKLİ DİNLE", "artemis sürekli dinle",
+    "SÜREKLİ DİNLE", "artemis sürekli dinle", "Artemis, kesintisiz sohbete geç.",
+    "kesintisiz sohbet modunu başlat",
 ])
 async def test_voice_toggle_enables_locally_with_spoken_confirmation(phrase):
     controller, runner, _, states = _continuous([phrase], continuous=False)
@@ -686,6 +687,7 @@ async def test_voice_toggle_enables_locally_with_spoken_confirmation(phrase):
 
 @pytest.mark.parametrize("phrase", [
     "kesintisiz modu kapat", "Kesintisiz moddan çık", "Artemis normal moda geç",
+    "kesintisiz sohbeti bitir",
 ])
 async def test_voice_toggle_disables_locally_with_spoken_confirmation(phrase):
     controller, runner, _, states = _continuous([phrase])
