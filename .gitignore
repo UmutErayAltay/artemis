@@ -24,3 +24,5 @@ models/
 !jarvis/channels/voice/models/
 bench/audio/
 .DS_Store
+desktop/
+uv.lock
