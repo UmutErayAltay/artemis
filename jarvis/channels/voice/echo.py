@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import AsyncIterator, Callable
 from dataclasses import replace
 from typing import Any, Protocol, cast
@@ -13,6 +14,10 @@ from jarvis.channels.voice.core import AudioFrame, Microphone
 logger = logging.getLogger(__name__)
 
 _ECHO_ERRORS: tuple[type[Exception], ...] = (RuntimeError, ValueError, OSError)
+# Saat ancak bu kadar kopunca yeniden hizalanır. Geri çağrı ve yazma saatleri birkaç on ms
+# titrer; AEC3 kesintisiz akış ister ve böyle küçük, sabit kaymaları kendi gecikme
+# kestiricisiyle izler. Her karede saate atlamak süzgeci bozuyordu (uçtan uca ~1 dB).
+_RESYNC_MS = 100
 
 
 def _load_livekit_rtc() -> Any:
@@ -68,7 +73,13 @@ class LivekitResampler:
 
 
 class EchoReference:
-    """Konuşmacı çıkışını hedef hızda mono int16 olarak güvenle saklar."""
+    """Konuşmacı çıkışını hedef hızda mono int16 olarak, çalındığı zamanla birlikte saklar.
+
+    Tampon bir zaman çizelgesidir: ilk örneğin saati ``_start`` tutulur. Mikrofon karesi kendi
+    yakalama saatiyle (``pull(..., at=...)``) aynı anın referansını ister. Sıra ile eşlemek
+    yetmiyordu: STT döngüyü tutarken mikrofon kuyruğundan kare düşünce referans akmaya devam
+    ediyor, iki akış saniyelerce kayıyor ve uçtan uca denemede yankı azaltma ~0,4 dB'e iniyordu.
+    """
 
     def __init__(
         self,
@@ -76,6 +87,7 @@ class EchoReference:
         *,
         max_ms: int = 2000,
         resampler_factory: Callable[[int, int], Resampler] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         if target_rate <= 0:
             raise ValueError("Hedef örnekleme hızı pozitif olmalıdır.")
@@ -92,6 +104,9 @@ class EchoReference:
             resampler_factory if resampler_factory is not None else default_factory
         )
         self._buffer = bytearray()
+        # Tampondaki ilk örneğin çalınma saati; boş tamponda anlamsızdır.
+        self._start = 0.0
+        self._clock = clock
         self._resamplers: dict[int, Resampler] = {}
         self._lock = threading.Lock()
 
@@ -122,11 +137,23 @@ class EchoReference:
                     if len(converted) % 2:
                         raise ValueError("Örnekleyici 16 bitlik tam örnekler döndürmelidir.")
 
+                now = self._clock()
+                if not self._buffer:
+                    self._start = now
+                else:
+                    # Çalma arasında boşluk olduysa (cevaplar arası) zaman çizelgesi
+                    # sessizlikle doldurulur; ardışık bloklar ise bitişik kalır.
+                    end = self._start + len(self._buffer) // 2 / self._target_rate
+                    gap = int((now - end) * self._target_rate)
+                    if gap > self._target_rate * _RESYNC_MS // 1000:
+                        self._buffer.extend(bytes(min(gap, self._max_samples) * 2))
                 self._buffer.extend(converted)
                 max_bytes = self._max_samples * 2
                 overflow = len(self._buffer) - max_bytes
                 if overflow > 0:
+                    overflow -= overflow % 2
                     del self._buffer[:overflow]
+                    self._start += overflow // 2 / self._target_rate
         except ImportError as error:
             raise RuntimeError(
                 "Yankı referansı dönüştürülemedi; numpy veya livekit yüklü değil; "
@@ -167,15 +194,36 @@ class EchoReference:
         mono = np.clip(mono, -32768, 32767)
         return mono.astype("<i2").tobytes()
 
-    def pull(self, samples: int) -> bytes:
-        """İstenen örnekleri tüketir; eksik kısmı sessizlikle doldurur."""
+    def pull(self, samples: int, at: float | None = None) -> bytes:
+        """İstenen örnekleri tüketir; eksik kısmı sessizlikle doldurur.
+
+        ``at`` verilirse o andan başlayan örnekler döner (daha eskiler atılır, henüz
+        çalınmamış kısım sessizliktir); verilmezse tampon sırayla tüketilir.
+        """
         if samples < 0:
             raise ValueError("Örnek sayısı negatif olamaz.")
 
         with self._lock:
-            available = min(samples, len(self._buffer) // 2)
-            result = bytes(self._buffer[: available * 2])
+            lead = 0
+            if at is not None and self._buffer:
+                offset = round((at - self._start) * self._target_rate)
+                if offset > 0:
+                    drop = min(offset, len(self._buffer) // 2)
+                    del self._buffer[: drop * 2]
+                    self._start += drop / self._target_rate
+                    if not self._buffer:
+                        # Hepsi geçmişte kaldı; sıradaki besleme yeni çizelge başlatır.
+                        lead = samples
+                else:
+                    # İstenen an tampondan önce: başı sessizlik, sonra tampon.
+                    lead = min(samples, -offset)
+            elif at is not None:
+                lead = samples
+            available = min(samples - lead, len(self._buffer) // 2)
+            result = bytes(lead * 2) + bytes(self._buffer[: available * 2])
             del self._buffer[: available * 2]
+            self._start += available / self._target_rate
+            available += lead
 
         if available < samples:
             result += bytes((samples - available) * 2)
@@ -254,19 +302,34 @@ class EchoCanceller:
         else:
             self._frame_factory = frame_factory
         self._lock = threading.Lock()
+        self._next_time: float | None = None
 
         self._apm = self._apm_factory()
 
-    def process(self, pcm: bytes) -> bytes:
-        """Mikrofon örneğini yankı iptalinden geçirir."""
+    def process(self, pcm: bytes, start_time: float | None = None) -> bytes:
+        """Mikrofon örneğini yankı iptalinden geçirir.
+
+        ``start_time`` karenin ilk örneğinin yakalanma saatidir; verilirse referans o ana
+        göre hizalanır (bkz. ``EchoReference``).
+        """
         if len(pcm) % self._frame_bytes:
             raise ValueError("PCM verisi 10 ms'lik karelere bölünmelidir.")
 
         with self._lock:
+            if start_time is not None:
+                expected = self._next_time
+                if expected is not None and abs(start_time - expected) * 1000 < _RESYNC_MS:
+                    start_time = expected
+                self._next_time = start_time + len(pcm) // 2 / self._rate
             output = bytearray()
             for offset in range(0, len(pcm), self._frame_bytes):
                 microphone_frame = pcm[offset : offset + self._frame_bytes]
-                reference = self._reference.pull(self._samples_per_frame)
+                at = (
+                    None
+                    if start_time is None
+                    else start_time + offset // 2 / self._rate
+                )
+                reference = self._reference.pull(self._samples_per_frame, at)
 
                 reverse_frame = self._frame_factory(
                     reference,
@@ -294,12 +357,13 @@ class EchoCanceller:
             # kaybediyor; ölçümde yankı azaltma 19,5 dB'den 6,9 dB'ye düşüyor ve
             # yaklaşık 0,5 s boyunca düşük kalıyordu.
             self._reference.clear()
+            self._next_time = None
 
 
 class FrameEchoCanceller(Protocol):
     """Mikrofon sarmalayıcısının kare iptalcisi arayüzü."""
 
-    def process(self, pcm: bytes) -> bytes:
+    def process(self, pcm: bytes, start_time: float | None = None) -> bytes:
         ...
 
     def reset(self) -> None:
@@ -360,7 +424,9 @@ class EchoCancelledMicrophone:
 
             try:
                 canceller = self._canceller_for(frame.sample_rate)
-                pcm = canceller.process(frame.pcm)
+                # Zaman damgası geri çağrı anıdır (karenin sonu); başlangıca çekilir.
+                duration = len(frame.pcm) // 2 / frame.sample_rate
+                pcm = canceller.process(frame.pcm, frame.timestamp - duration)
             except _ECHO_ERRORS as error:
                 self._disable(error)
                 yield frame

@@ -126,9 +126,11 @@ class FakeCanceller:
         self.reset_error: Exception | None = None
         self.process_calls = 0
         self.reset_calls = 0
+        self.start_times: list[float | None] = []
 
-    def process(self, pcm: bytes) -> bytes:
+    def process(self, pcm: bytes, start_time: float | None = None) -> bytes:
         self.process_calls += 1
+        self.start_times.append(start_time)
         if self.error is not None:
             raise self.error
         return b"\x02\x00" * (len(pcm) // 2)
@@ -573,3 +575,94 @@ def test_real_livekit_aec_reduces_delayed_echo() -> None:
     assert output_energy <= threshold, (
         "Yankı iptali yetersiz: çıkış enerjisi beklenen eşiğin üzerinde."
     )
+
+
+class FakeClock:
+    def __init__(self) -> None:
+        self.now = 100.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
+def test_reference_pull_at_returns_samples_played_at_that_time() -> None:
+    clock = FakeClock()
+    reference = EchoReference(1000, clock=clock)
+    reference.feed(_pack_i16(list(range(1, 11))), 1000, 1, 2)  # 100.000-100.010 s
+
+    # Mikrofon karesi 3 ms sonrasını ister: önceki örnekler atılır.
+    assert reference.pull(3, at=100.003) == _pack_i16([4, 5, 6])
+    # Tamponun başından önceki an: başı sessizlik.
+    clock.now = 200.0
+    reference.clear()
+    reference.feed(_pack_i16([7, 8]), 1000, 1, 2)
+    assert reference.pull(4, at=199.998) == _pack_i16([0, 0, 7, 8])
+
+
+def test_reference_pull_at_skips_samples_when_microphone_frames_were_dropped() -> None:
+    # STT döngüyü tutarken mikrofon kareleri düşerse referans sıra ile değil saatle
+    # eşlenmeli; aksi halde iki akış kalıcı olarak kayar.
+    clock = FakeClock()
+    reference = EchoReference(1000, clock=clock)
+    reference.feed(_pack_i16(list(range(1, 101))), 1000, 1, 2)  # 100.000-100.100 s
+    assert reference.pull(2, at=100.000) == _pack_i16([1, 2])
+    # 50 ms'lik mikrofon kareleri kayboldu; sıradaki kare 100.052'de yakalandı.
+    assert reference.pull(2, at=100.052) == _pack_i16([53, 54])
+    # Bütün tampon geçmişte kaldı: sessizlik.
+    assert reference.pull(2, at=100.5) == b"\x00" * 4
+
+
+def test_reference_fills_playback_gaps_with_silence() -> None:
+    clock = FakeClock()
+    reference = EchoReference(1000, clock=clock)
+    reference.feed(_pack_i16([1, 2]), 1000, 1, 2)  # 100.000-100.002
+    clock.now = 100.202  # cevaplar arası 200 ms sessizlik
+    reference.feed(_pack_i16([3, 4]), 1000, 1, 2)
+    assert reference.pull(2, at=100.202) == _pack_i16([3, 4])
+
+
+def test_microphone_passes_frame_start_time_to_canceller() -> None:
+    frame = AudioFrame(pcm=_pack_i16([1] * 480), timestamp=10.0, sample_rate=48000)
+    canceller = FakeCanceller()
+    microphone = EchoCancelledMicrophone(FakeMicrophone([frame]), lambda _rate: canceller)
+
+    asyncio.run(_collect_frames(microphone))
+
+    # Zaman damgası karenin sonudur; 480 örnek @48 kHz = 10 ms önce başlamıştır.
+    assert canceller.start_times == [pytest.approx(9.99)]
+
+
+def test_canceller_aligns_each_subframe_by_time() -> None:
+    clock = FakeClock()
+    reference = EchoReference(16000, clock=clock)
+    reference.feed(_pack_i16(list(range(1, 481))), 16000, 1, 2)  # 30 ms
+    factory = FakeApmFactory()
+    canceller = EchoCanceller(
+        16000, reference, apm_factory=factory, frame_factory=fake_frame_factory,
+    )
+
+    canceller.process(_pack_i16([0] * 320), start_time=100.010)
+
+    reverse = factory.instances[0].references
+    assert reverse[0] == _pack_i16(list(range(161, 321)))
+    assert reverse[1] == _pack_i16(list(range(321, 481)))
+
+
+def test_canceller_smooths_small_timestamp_jitter_and_resyncs_on_gaps() -> None:
+    clock = FakeClock()
+    reference = EchoReference(16000, clock=clock)
+    reference.feed(_pack_i16(list(range(1, 16001))), 16000, 1, 2)  # 100.0-101.0 s
+    factory = FakeApmFactory()
+    canceller = EchoCanceller(
+        16000, reference, apm_factory=factory, frame_factory=fake_frame_factory,
+    )
+
+    canceller.process(_pack_i16([0] * 160), start_time=100.000)
+    # 30 ms titreşim: akış kesintisiz kalır (sıradaki örnekler 161..).
+    canceller.process(_pack_i16([0] * 160), start_time=100.040)
+    # 500 ms kopma (düşen kareler): saate yeniden hizalanır.
+    canceller.process(_pack_i16([0] * 160), start_time=100.520)
+
+    references = factory.instances[0].references
+    assert references[1] == _pack_i16(list(range(161, 321)))
+    assert references[2] == _pack_i16(list(range(8321, 8481)))
