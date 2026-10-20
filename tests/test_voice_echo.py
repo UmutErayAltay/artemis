@@ -1,0 +1,414 @@
+"""Yankı iptali modülünün donanım gerektirmeyen testleri."""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import struct
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
+from typing import Any
+
+import pytest
+
+from jarvis.channels.voice.core import AudioFrame
+from jarvis.channels.voice.echo import (
+    EchoCancelledMicrophone,
+    EchoCanceller,
+    EchoReference,
+)
+
+np: Any = pytest.importorskip("numpy")
+
+
+def _pack_i16(values: list[int]) -> bytes:
+    return struct.pack(f"<{len(values)}h", *values)
+
+
+@dataclass
+class FakeFrame:
+    data: memoryview[int]
+
+
+class FakeApm:
+    """Mükemmel çıkarma yapan sahte AEC işlemci."""
+
+    def __init__(self) -> None:
+        self.events: list[str] = []
+        self.references: list[bytes] = []
+
+    def process_reverse_stream(self, data: Any) -> None:
+        self.events.append("reverse")
+        self.references.append(bytes(data.data))
+
+    def set_stream_delay_ms(self, delay_ms: int) -> None:
+        self.events.append(f"delay:{delay_ms}")
+
+    def process_stream(self, data: Any) -> None:
+        self.events.append("stream")
+        samples = np.frombuffer(data.data, dtype="<i2").copy()
+        reference = np.frombuffer(self.references[-1], dtype="<i2")
+        samples -= reference
+        data.data[:] = samples.astype("<i2").tobytes()
+
+
+class FakeApmFactory:
+    def __init__(self) -> None:
+        self.instances: list[FakeApm] = []
+
+    def __call__(self) -> FakeApm:
+        instance = FakeApm()
+        self.instances.append(instance)
+        return instance
+
+
+def fake_frame_factory(data: bytes, _rate: int, samples: int) -> FakeFrame:
+    return FakeFrame(memoryview(bytearray(data)))
+
+
+class FakeResampler:
+    """Her ikinci örneği atan sahte çevirici."""
+
+    def __init__(self, factor: int = 2) -> None:
+        self.factor = factor
+        self.process_calls = 0
+
+    def process(self, pcm: bytes) -> bytes:
+        self.process_calls += 1
+        count = len(pcm) // 2
+        values = list(struct.unpack(f"<{count}h", pcm))
+        kept = values[:: self.factor]
+        return _pack_i16(kept)
+
+
+class RecordingResamplerFactory:
+    def __init__(self) -> None:
+        self.calls: list[tuple[int, int]] = []
+        self.instances: list[FakeResampler] = []
+
+    def __call__(self, input_rate: int, output_rate: int) -> FakeResampler:
+        self.calls.append((input_rate, output_rate))
+        instance = FakeResampler()
+        self.instances.append(instance)
+        return instance
+
+
+class FakeMicrophone:
+    def __init__(self, frames: list[AudioFrame]) -> None:
+        self._frames = frames
+        self.discard_pending_calls = 0
+        self.pause_calls = 0
+        self.resume_calls = 0
+        self.close_called = False
+
+    async def frames(self) -> AsyncIterator[AudioFrame]:
+        for frame in self._frames:
+            yield frame
+
+    def discard_pending(self) -> None:
+        self.discard_pending_calls += 1
+
+    def pause(self) -> None:
+        self.pause_calls += 1
+
+    def resume(self) -> None:
+        self.resume_calls += 1
+
+    async def close(self) -> None:
+        self.close_called = True
+
+
+class FakeCanceller:
+    def __init__(self, error: Exception | None = None) -> None:
+        self.error = error
+        self.reset_error: Exception | None = None
+        self.process_calls = 0
+        self.reset_calls = 0
+
+    def process(self, pcm: bytes) -> bytes:
+        self.process_calls += 1
+        if self.error is not None:
+            raise self.error
+        return b"\x02\x00" * (len(pcm) // 2)
+
+    def reset(self) -> None:
+        self.reset_calls += 1
+        if self.reset_error is not None:
+            raise self.reset_error
+
+
+async def _collect_frames(microphone: EchoCancelledMicrophone) -> list[AudioFrame]:
+    return [frame async for frame in microphone.frames()]
+
+
+def test_reference_same_rate_round_trip_and_zero_padding() -> None:
+    reference = EchoReference(16000)
+    pcm = _pack_i16([100, -200, 300])
+
+    reference.feed(pcm, 16000, 1, 2)
+
+    assert reference.pull(3) == pcm
+    assert reference.pull(2) == b"\x00" * 4
+
+
+def test_reference_averages_stereo_channels() -> None:
+    reference = EchoReference(16000)
+    stereo = struct.pack("<hhhh", 100, 300, -100, -300)
+
+    reference.feed(stereo, 16000, 2, 2)
+
+    assert reference.pull(2) == _pack_i16([200, -200])
+
+
+def test_reference_converts_int32_and_int8() -> None:
+    reference = EchoReference(16000)
+
+    reference.feed(struct.pack("<i", 0x12340000), 16000, 1, 4)
+    assert reference.pull(1) == _pack_i16([0x1234])
+
+    reference.feed(struct.pack("<i", -65536), 16000, 1, 4)
+    assert reference.pull(1) == _pack_i16([-1])
+
+    reference.feed(bytes([127, 0x80]), 16000, 1, 1)
+    assert reference.pull(2) == _pack_i16([127, -128])
+
+
+def test_reference_drops_oldest_samples_when_buffer_is_full() -> None:
+    reference = EchoReference(16000, max_ms=10)
+    values = list(range(200))
+
+    reference.feed(_pack_i16(values), 16000, 1, 2)
+
+    result = reference.pull(200)
+    expected = _pack_i16(values[40:]) + bytes(40 * 2)
+    assert result == expected
+
+
+def test_reference_rejects_invalid_sample_width() -> None:
+    reference = EchoReference(16000)
+
+    with pytest.raises(ValueError, match="Örnek genişliği"):
+        reference.feed(b"\x00\x00", 16000, 1, 3)
+
+
+def test_reference_clear_empties_buffer() -> None:
+    reference = EchoReference(16000)
+    reference.feed(_pack_i16([1, 2, 3]), 16000, 1, 2)
+
+    reference.clear()
+
+    assert reference.pull(3) == b"\x00" * 6
+
+
+def test_reference_caches_resampler_per_input_rate() -> None:
+    factory = RecordingResamplerFactory()
+    reference = EchoReference(16000, resampler_factory=factory)
+
+    reference.feed(_pack_i16([1, 2, 3, 4]), 32000, 1, 2)
+    reference.feed(_pack_i16([5, 6]), 32000, 1, 2)
+
+    assert factory.calls == [(32000, 16000)]
+    assert factory.instances[0].process_calls == 2
+    assert reference.pull(3) == _pack_i16([1, 3, 5])
+
+    reference.feed(_pack_i16([9, 10]), 24000, 1, 2)
+    assert factory.calls == [(32000, 16000), (24000, 16000)]
+
+    reference.clear()
+    reference.feed(_pack_i16([11, 12]), 32000, 1, 2)
+    assert len(factory.calls) == 3
+    assert len(factory.instances) == 3
+
+
+def test_canceller_cancels_and_records_call_order() -> None:
+    reference = EchoReference(16000)
+    reference_values = list(range(320))
+    reference.feed(_pack_i16(reference_values), 16000, 1, 2)
+
+    factory = FakeApmFactory()
+    canceller = EchoCanceller(
+        16000,
+        reference,
+        apm_factory=factory,
+        frame_factory=fake_frame_factory,
+    )
+    microphone_values = list(range(1000, 1320))
+
+    output = canceller.process(_pack_i16(microphone_values))
+
+    assert len(output) == len(microphone_values) * 2
+    assert output == _pack_i16([1000] * 320)
+    assert factory.instances[0].events == [
+        "reverse",
+        "delay:50",
+        "stream",
+        "reverse",
+        "delay:50",
+        "stream",
+    ]
+
+
+def test_canceller_rejects_invalid_rate_and_frame_size() -> None:
+    reference = EchoReference(16000)
+
+    with pytest.raises(ValueError, match="16000 veya 48000"):
+        EchoCanceller(
+            44100,
+            reference,
+            apm_factory=FakeApmFactory(),
+            frame_factory=fake_frame_factory,
+        )
+
+    canceller = EchoCanceller(
+        16000,
+        reference,
+        apm_factory=FakeApmFactory(),
+        frame_factory=fake_frame_factory,
+    )
+    with pytest.raises(ValueError, match="10 ms"):
+        canceller.process(b"\x00" * (160 * 2 - 2))
+
+
+def test_canceller_reset_creates_new_apm_and_clears_reference() -> None:
+    reference = EchoReference(16000)
+    reference.feed(_pack_i16([1, 2, 3]), 16000, 1, 2)
+    factory = FakeApmFactory()
+    canceller = EchoCanceller(
+        16000,
+        reference,
+        apm_factory=factory,
+        frame_factory=fake_frame_factory,
+    )
+
+    canceller.reset()
+
+    assert len(factory.instances) == 2
+    assert reference.pull(3) == b"\x00" * 6
+
+
+def test_microphone_processes_frames_and_preserves_frame_metadata() -> None:
+    inner_frames = [
+        AudioFrame(
+            pcm=_pack_i16([1] * 160),
+            timestamp=12.5,
+            sample_rate=48000,
+            raw_pcm=b"ham",
+        )
+    ]
+    inner = FakeMicrophone(inner_frames)
+    canceller = FakeCanceller()
+    states: list[str] = []
+    microphone = EchoCancelledMicrophone(inner, canceller, states.append)
+
+    frames = asyncio.run(_collect_frames(microphone))
+
+    assert len(frames) == 1
+    assert frames[0].pcm == b"\x02\x00" * 160
+    assert frames[0].timestamp == 12.5
+    assert frames[0].sample_rate == 48000
+    assert frames[0].raw_pcm is None
+    assert canceller.process_calls == 1
+    assert states == []
+    assert not microphone.passthrough
+
+
+def test_microphone_runtime_error_switches_to_passthrough_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    inner_frames = [
+        AudioFrame(pcm=_pack_i16([1] * 160), timestamp=1.0),
+        AudioFrame(pcm=_pack_i16([2] * 160), timestamp=2.0),
+    ]
+    inner = FakeMicrophone(inner_frames)
+    canceller = FakeCanceller(RuntimeError("Sahte çalışma hatası."))
+    states: list[str] = []
+    microphone = EchoCancelledMicrophone(inner, canceller, states.append)
+    caplog.set_level(logging.WARNING)
+
+    frames = asyncio.run(_collect_frames(microphone))
+
+    assert frames[0] is inner_frames[0]
+    assert frames[1] is inner_frames[1]
+    assert canceller.process_calls == 1
+    assert states == ["echo:off"]
+    assert microphone.passthrough
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.WARNING
+
+
+def test_microphone_type_error_propagates() -> None:
+    inner = FakeMicrophone(
+        [AudioFrame(pcm=_pack_i16([1] * 160), timestamp=1.0)]
+    )
+    canceller = FakeCanceller(TypeError("Sahte tür hatası."))
+    microphone = EchoCancelledMicrophone(inner, canceller)
+
+    with pytest.raises(TypeError, match="Sahte tür hatası"):
+        asyncio.run(_collect_frames(microphone))
+
+    assert not microphone.passthrough
+
+
+def test_microphone_delegates_lifecycle_operations() -> None:
+    inner = FakeMicrophone([])
+    canceller = FakeCanceller()
+    canceller.reset_error = RuntimeError("Sahte sıfırlama hatası.")
+    microphone = EchoCancelledMicrophone(inner, canceller)
+
+    microphone.discard_pending()
+    microphone.pause()
+    microphone.resume()
+    asyncio.run(microphone.close())
+
+    assert inner.discard_pending_calls == 1
+    assert canceller.reset_calls == 1
+    assert inner.pause_calls == 1
+    assert inner.resume_calls == 1
+    assert inner.close_called
+
+
+def _energy(samples: Any) -> float:
+    values = np.asarray(samples, dtype=np.float64)
+    return float(np.sum(values * values))
+
+
+def test_real_livekit_aec_reduces_delayed_echo() -> None:
+    pytest.importorskip("livekit.rtc")
+
+    rate = 16000
+    sample_count = rate * 3
+    block_samples = rate // 100
+    rng = np.random.default_rng(20240517)
+
+    noise = rng.standard_normal(sample_count)
+    spectrum = np.fft.rfft(noise)
+    frequencies = np.fft.rfftfreq(sample_count, 1.0 / rate)
+    spectrum[(frequencies < 200) | (frequencies > 3400)] = 0
+    band_limited = np.fft.irfft(spectrum, n=sample_count)
+    far_float = band_limited / np.max(np.abs(band_limited))
+    far = np.rint(far_float * (0.45 * 32767)).astype("<i2")
+
+    delay_samples = rate * 40 // 1000
+    echo = np.zeros(sample_count, dtype="<i2")
+    scaled = np.rint(far[:-delay_samples].astype(np.float64) * 0.3)
+    echo[delay_samples:] = scaled.astype("<i2")
+
+    reference = EchoReference(rate, max_ms=500)
+    canceller = EchoCanceller(rate, reference, delay_ms=40)
+    output = bytearray()
+
+    for start in range(0, sample_count, block_samples):
+        far_block = far[start : start + block_samples]
+        echo_block = echo[start : start + block_samples]
+        reference.feed(far_block.tobytes(), rate, 1, 2)
+        output.extend(canceller.process(echo_block.tobytes()))
+
+    output_samples = np.frombuffer(bytes(output), dtype="<i2")
+    last_second = sample_count - rate
+    echo_energy = _energy(echo[-last_second:])
+    output_energy = _energy(output_samples[-last_second:])
+    threshold = echo_energy / (10.0 ** (15.0 / 10.0))
+
+    assert output_energy <= threshold, (
+        "Yankı iptali yetersiz: çıkış enerjisi beklenen eşiğin üzerinde."
+    )
