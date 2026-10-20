@@ -91,7 +91,19 @@ async def build_voice_controller(
             reference.retarget(rate)
             return EchoCanceller(rate, reference, delay_ms=settings.voice.echo_delay_ms)
 
-        microphone = EchoCancelledMicrophone(microphone, make_canceller, on_state)
+        echo_off_reported = False
+
+        def report_echo_state(state: str) -> None:
+            # Mikrofon sarmalayıcısı ve hoparlör beslemesi aynı arızayı ayrı ayrı görebilir
+            # (ör. livekit yok); kullanıcıya tek bildirim yeter.
+            nonlocal echo_off_reported
+            if state == "echo:off":
+                if echo_off_reported:
+                    return
+                echo_off_reported = True
+            on_state(state)
+
+        microphone = EchoCancelledMicrophone(microphone, make_canceller, report_echo_state)
     if denoiser is not None:
         microphone = DenoisedMicrophone(
             microphone, denoiser, on_state, raw_for_stt=not settings.voice.noise_suppression_stt
@@ -101,7 +113,7 @@ async def build_voice_controller(
     else:
         sink = SoundDeviceSink(
             echo_reference=echo_reference,
-            on_echo_failure=lambda: on_state("echo:off"),
+            on_echo_failure=lambda: report_echo_state("echo:off"),
         )
     recognizer = FasterWhisperRecognizer(settings.voice)
     await asyncio.to_thread(recognizer.prepare)

@@ -255,6 +255,10 @@ async def test_echo_cancellation_wraps_microphone_and_shares_sink_reference(monk
     assert callable(on_echo_failure)
     on_echo_failure()
     assert states == ["echo:off"]
+    # Aynı arızayı mikrofon sarmalayıcısı da bildirirse sohbette ikinci mesaj çıkmaz.
+    microphone._on_state("echo:off")
+    on_echo_failure()
+    assert states == ["echo:off"]
 
 
 async def test_echo_cancellation_is_applied_before_denoising(monkeypatch, tmp_path):
