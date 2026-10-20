@@ -275,7 +275,7 @@ async def test_wrapper_keeps_frame_count_and_aligns_timestamps_with_delay() -> N
 
 async def test_wrapper_passes_controls_through_and_resets_on_discard() -> None:
     inner, fake = FakeInner(3), FakeDenoiser()
-    mic = dn.DenoisedMicrophone(inner, fake)
+    mic = dn.DenoisedMicrophone(inner, fake, clock=lambda: -1.0)
     mic.pause()
     mic.resume()
     mic.discard_pending()
@@ -290,7 +290,7 @@ async def test_wrapper_passes_controls_through_and_resets_on_discard() -> None:
 
 async def test_wrapper_drops_in_flight_frame_when_reset_arrives() -> None:
     inner, fake = FakeInner(3), FakeDenoiser()
-    mic = dn.DenoisedMicrophone(inner, fake)
+    mic = dn.DenoisedMicrophone(inner, fake, clock=lambda: -1.0)
     seen: list[AudioFrame] = []
     async for frame in mic.frames():
         seen.append(frame)
@@ -307,9 +307,10 @@ async def test_wrapper_failure_switches_to_passthrough_with_one_warning_and_stat
     mic = dn.DenoisedMicrophone(inner, fake, states.append)
     with caplog.at_level(logging.WARNING, logger=dn.logger.name):
         out = await _collect(mic)
-    assert len(out) == 5 and mic.passthrough
-    assert out[1].pcm == inner.sent[1].pcm  # hata veren kare ham iletilir
-    assert [f.pcm for f in out[2:]] == [f.pcm for f in inner.sent[2:]]
+    assert mic.passthrough
+    # Gecikme içindeki ham kare (0) hata anında sırayla akıtılır: ses kaybolmaz.
+    assert [f.pcm for f in out[1:]] == [f.pcm for f in inner.sent]
+    assert [f.timestamp for f in out] == sorted(f.timestamp for f in out)
     assert fake.calls == 2  # geçiş sonrası denoiser'a dokunulmaz
     assert states == ["denoise:off"]
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
@@ -318,7 +319,7 @@ async def test_wrapper_failure_switches_to_passthrough_with_one_warning_and_stat
 
 async def test_wrapper_timestamps_never_go_backwards_across_resets() -> None:
     inner = FakeInner(12)
-    mic = dn.DenoisedMicrophone(inner, FakeDenoiser())
+    mic = dn.DenoisedMicrophone(inner, FakeDenoiser(), clock=lambda: -1.0)
     stamps: list[float] = []
     async for frame in mic.frames():
         stamps.append(frame.timestamp)
@@ -354,7 +355,9 @@ async def test_non_finite_output_takes_failure_path(caplog: pytest.LogCaptureFix
     )
     with caplog.at_level(logging.WARNING, logger=dn.logger.name):
         out = await _collect(mic)
-    assert len(out) == 20 and mic.passthrough and states == ["denoise:off"]
+    assert mic.passthrough and states == ["denoise:off"]
+    assert out[-1].pcm == b"\x01\x00" * 320
+    assert [f.timestamp for f in out] == sorted(f.timestamp for f in out)
     assert sum(r.levelno == logging.WARNING for r in caplog.records) == 1
 
 
@@ -383,6 +386,85 @@ async def test_cancelled_frames_does_not_race_with_new_frames() -> None:
     first.cancel()
     await _collect(mic)
     assert not overlap
+
+
+async def test_frame_captured_before_reset_is_never_emitted_after_it() -> None:
+    """Onay/duraklatma öncesi yakalanan kare, iç mikrofon geç teslim etse bile atılır."""
+    now = [10.0]
+
+    class LateInner(FakeInner):
+        async def frames(self) -> AsyncIterator[AudioFrame]:
+            yield AudioFrame(b"\x01\x00" * 160, 9.0)  # sıfırlamadan önce yakalandı
+            yield AudioFrame(b"\x02\x00" * 160, 11.0)  # sonra
+
+    fake = FakeDenoiser()
+    mic = dn.DenoisedMicrophone(LateInner(0), fake, clock=lambda: now[0])
+    mic.pause()  # sıfırlama anı = 10.0; iç mikrofon eski kareyi hâlâ teslim ediyor
+    mic.resume()
+    out = await _collect(mic)
+    assert fake.calls == 1 and [f.timestamp for f in out] == [11.0]
+
+
+async def test_reset_from_another_thread_never_raises_inside_frames() -> None:
+    import threading
+
+    class Endless(FakeInner):
+        async def frames(self) -> AsyncIterator[AudioFrame]:
+            for index in range(300):
+                yield AudioFrame(b"\0\0" * 160, float(index))
+                await asyncio.sleep(0)
+
+    mic = dn.DenoisedMicrophone(Endless(0), FakeDenoiser(), clock=lambda: -1.0)
+    stop = threading.Event()
+
+    def hammer() -> None:
+        while not stop.is_set():
+            mic.discard_pending()
+            mic.pause()
+            mic.resume()
+
+    thread = threading.Thread(target=hammer)
+    thread.start()
+    try:
+        out = await _collect(mic)  # IndexError/RuntimeError dışarı sızmamalı
+    finally:
+        stop.set()
+        thread.join()
+    stamps = [f.timestamp for f in out]
+    assert stamps == sorted(stamps)
+
+
+def test_underruns_and_late_blocks_warn_rate_limited(
+    caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner(), block_frames=10)
+    with caplog.at_level(logging.WARNING, logger=dn.logger.name):
+        for _ in range(3):
+            den._fifo = den._fifo[:0]
+            den.process_frame(b"\0\0" * 320)
+        assert den.underruns == 3
+        warned = [r for r in caplog.records if "tampon" in r.getMessage()]
+        assert len(warned) == 1  # hız sınırı: 30 sn içinde tek uyarı
+        base = time.monotonic()
+        monkeypatch.setattr(dn.time, "monotonic", lambda: base + 31)
+        den._fifo = den._fifo[:0]
+        den.process_frame(b"\0\0" * 320)
+        assert len([r for r in caplog.records if "tampon" in r.getMessage()]) == 2
+
+    class Slow(IdentityRunner):
+        def infer(self, feat_erb: Any, feat_spec: Any) -> dn.GraphOutputs:
+            time.sleep(0.03)
+            return super().infer(feat_erb, feat_spec)
+
+    caplog.clear()
+    slow = dn.DeepFilterNetDenoiser(runner=Slow(), block_frames=1)  # bütçe 10 ms
+    with caplog.at_level(logging.WARNING, logger=dn.logger.name):
+        for _ in range(4):
+            slow.process_frame(b"\0\0" * 320)
+    assert slow.late_blocks >= 1
+    assert len([r for r in caplog.records if "yavaş" in r.getMessage()]) == 1
 
 
 async def test_wrapper_does_not_block_event_loop_during_processing() -> None:

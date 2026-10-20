@@ -25,6 +25,7 @@ import hashlib
 import importlib
 import logging
 import threading
+import time
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -75,11 +76,15 @@ DEFAULT_MAX_DB_DF_THRESH = 35.0
 NOISE_LEVEL_ATTEN_DB: dict[str, float] = {"hafif": 12.0, "orta": 24.0, "guclu": 100.0}
 
 
+class DenoiseDependencyError(RuntimeError):
+    """numpy/onnxruntime kurulu değil; model dosyası sorunundan ayrı raporlanır."""
+
+
 def _np() -> Any:
     try:
         return importlib.import_module("numpy")
     except ImportError as error:
-        raise RuntimeError(
+        raise DenoiseDependencyError(
             "Gürültü engelleme için numpy gerekli: `pip install .[voice]`."
         ) from error
 
@@ -421,7 +426,7 @@ class OnnxGraphRunner:
         try:
             ort = importlib.import_module("onnxruntime")
         except ImportError as error:
-            raise RuntimeError(
+            raise DenoiseDependencyError(
                 "Gürültü engelleme için onnxruntime gerekli: `pip install .[voice]`."
             ) from error
         self._errors = _ort_error_types(ort)
@@ -461,6 +466,9 @@ class OnnxGraphRunner:
             coefs=coefs.reshape(steps, NB_DF, DF_ORDER, 2),
             lsnr=lsnr.reshape(steps),
         )
+
+
+_WARN_INTERVAL_SECONDS = 30.0
 
 
 # --- Denoiser -------------------------------------------------------------------------
@@ -510,12 +518,22 @@ class DeepFilterNetDenoiser:
         self.delay_hops = worst + LOOKAHEAD + 1
         self.delay_samples = self.delay_hops * per_hop + RESAMPLE_DELAY_16K
         self.underruns = 0
+        self.late_blocks = 0
+        self._last_warned: dict[str, float] = {}
         self._stft = Stft()
         self._istft = Istft()
         self._features = FeatureExtractor(self._widths, self._alpha)
         self._up = Upsampler3()
         self._down = Downsampler3()
         self.reset()
+
+    def _warn_limited(self, key: str, message: str, *args: object) -> None:
+        """İlk oluşta hemen, sonra anahtar başına en çok 30 sn'de bir uyarır."""
+        now = time.monotonic()
+        last = self._last_warned.get(key)
+        if last is None or now - last >= _WARN_INTERVAL_SECONDS:
+            self._last_warned[key] = now
+            logger.warning(message, *args)
 
     @property
     def atten_lim_db(self) -> float:
@@ -594,6 +612,11 @@ class DeepFilterNetDenoiser:
         need = signal48.size
         if self._fifo.size < need:
             self.underruns += 1
+            self._warn_limited(
+                "underrun",
+                "Gürültü engelleme çıktı tamponu boş kaldı (%d kez); ses boşlukları olabilir.",
+                self.underruns,
+            )
             self._fifo = np.concatenate([self._fifo, np.zeros(need - self._fifo.size, "float32")])
         chunk, self._fifo = self._fifo[:need], self._fifo[need:]
         out16 = self._down.process(chunk)
@@ -605,15 +628,16 @@ class DeepFilterNetDenoiser:
     def _finalize_block(self) -> None:
         np = _np()
         last = self._n_hops - 1
+        final_last = last - LOOKAHEAD
+        count = final_last - self._next_final + 1
+        if count <= 0:
+            return
+        began = time.perf_counter()
         window = self.block_frames + self.context_frames
         first = max(0, self._n_hops - window)
         lo = first - self._hist_base
         erb = np.stack(self._erb_hist[lo:])
         cplx = np.stack(self._cplx_hist[lo:])
-        final_last = last - LOOKAHEAD
-        count = final_last - self._next_final + 1
-        if count <= 0:
-            return
         outputs = self._runner.infer(erb, np.stack([cplx.real, cplx.imag]))
         # Grafiğin t. çıktısı t-LOOKAHEAD. kareye aittir: kare j için çıktı j+LOOKAHEAD.
         start = self._next_final - first + LOOKAHEAD
@@ -635,6 +659,16 @@ class DeepFilterNetDenoiser:
             audio = audio[HOP_SIZE:]  # kare 0 "hop -1"i üretir; girdide karşılığı yok
         self._fifo = np.concatenate([self._fifo, audio])
         self._next_final = final_last + 1
+        # Blok, gerçek zamandan uzun sürerse çalışan iş parçacığı yetişemez (akış gecikir).
+        budget = self.block_frames * HOP_SIZE / MODEL_SR
+        if time.perf_counter() - began > budget:
+            self.late_blocks += 1
+            self._warn_limited(
+                "late",
+                "Gürültü engelleme gerçek zamandan yavaş (blok %.0f ms'den uzun sürdü); "
+                "ses gecikebilir. bağlam/blok değerlerini küçültün veya kapatın.",
+                budget * 1000,
+            )
 
     def _trim_history(self) -> None:
         keep = self.block_frames + self.context_frames + 2 * LOOKAHEAD
@@ -662,37 +696,69 @@ _DENOISE_ERRORS = (RuntimeError, ValueError, OSError, ArithmeticError)
 
 
 class DenoisedMicrophone:
-    """``Microphone`` protokolünü bir iç mikrofonun üstünde gürültü engelleyerek uygular."""
+    """``Microphone`` protokolünü bir iç mikrofonun üstünde gürültü engelleyerek uygular.
+
+    ``pause/resume/discard_pending`` başka bir iş parçacığından (onay akışı) gelebilir. Bu
+    yüzden paylaşılan durum yalnız ``_state_lock`` altında değişir; damga ve ham kare
+    tamponlarına yalnız ``frames()`` (olay döngüsü) dokunur, sıfırlama onlara nesil sayacıyla
+    iletilir. Sıfırlama anından ÖNCE yakalanmış kareler (iç mikrofon geç teslim etse bile)
+    atılır: onay/duraklatma sırasındaki ses sonradan komut olarak kullanılamaz.
+    """
 
     def __init__(
         self,
         inner: Microphone,
         denoiser: FrameDenoiser,
         on_state: Callable[[str], None] | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._inner = inner
         self._denoiser = denoiser
         self._on_state = on_state or (lambda _state: None)
+        self._clock = clock  # AudioFrame.timestamp ile aynı saat (monotonic)
         self._passthrough = False
+        self._state_lock = threading.Lock()
         self._generation = 0
+        self._reset_time = float("-inf")
         self._reset_pending = False
         # İptal edilen frames()'in uçuştaki çağrısı ile yenisi çakışmasın.
         self._lock = threading.Lock()
+        self._seen_generation = 0
         self._last_stamp = float("-inf")
         delay_frames = round(denoiser.delay_samples / denoiser.frame_samples)
         self._stamps: deque[float] = deque(maxlen=delay_frames + 1)
+        # Henüz çıktıya yansımamış (gecikme içindeki) ham kareler; hata anında ham olarak akıtılır.
+        self._frame_samples = denoiser.frame_samples
+        self._delay_samples = denoiser.delay_samples
+        self._raw: deque[AudioFrame] = deque(
+            maxlen=-(-denoiser.delay_samples // denoiser.frame_samples)
+        )
 
     @property
     def passthrough(self) -> bool:
         return self._passthrough
 
-    def _process(self, pcm: bytes) -> bytes:
-        """İş parçacığında çalışır; bekleyen sıfırlama, çıkarımdan önce uygulanır."""
+    @property
+    def underruns(self) -> int:
+        return int(getattr(self._denoiser, "underruns", 0))
+
+    def _process(self, pcm: bytes, generation: int) -> bytes | None:
+        """İş parçacığında çalışır; bekleyen sıfırlama çıkarımdan önce uygulanır."""
         with self._lock:
-            if self._reset_pending:
-                self._reset_pending = False
+            with self._state_lock:
+                if generation != self._generation:
+                    return None  # kare, sıfırlamadan önceki nesle ait
+                reset, self._reset_pending = self._reset_pending, False
+            if reset:
                 self._denoiser.reset()
             return self._denoiser.process_frame(pcm)
+
+    def _unemitted_part(self, pending: AudioFrame, index: int) -> AudioFrame:
+        """Tampon doluysa ilk karenin çıktıya zaten yansımış başını (gecikme taşması) keser."""
+        if index or len(self._raw) < (self._raw.maxlen or 0):
+            return pending
+        extra = len(self._raw) * self._frame_samples - self._delay_samples
+        return AudioFrame(pending.pcm[2 * extra :], pending.timestamp) if extra > 0 else pending
 
     def _fail(self, error: Exception) -> None:
         if self._passthrough:
@@ -706,29 +772,45 @@ class DenoisedMicrophone:
         self._on_state("denoise:off")
 
     def _request_reset(self) -> None:
-        # Önce bayrak, sonra nesil: uçuştaki kare nesil farkıyla atılır, sıradaki kare sıfırlanır.
-        self._reset_pending = True
-        self._generation += 1
-        self._stamps.clear()
+        with self._state_lock:
+            self._reset_pending = True
+            self._generation += 1
+            self._reset_time = self._clock()
+
+    def _snapshot(self) -> tuple[int, float]:
+        with self._state_lock:
+            return self._generation, self._reset_time
 
     async def frames(self) -> AsyncIterator[AudioFrame]:
         async for frame in self._inner.frames():
             if self._passthrough:
                 yield frame
                 continue
-            generation = self._generation
+            generation, reset_time = self._snapshot()
+            if generation != self._seen_generation:
+                self._seen_generation = generation
+                self._stamps.clear()
+                self._raw.clear()
+            if frame.timestamp <= reset_time:
+                continue  # sıfırlamadan önce yakalanmış kare (iç kuyrukta kalmış olabilir)
             try:
-                pcm = await asyncio.to_thread(self._process, frame.pcm)
+                pcm = await asyncio.to_thread(self._process, frame.pcm, generation)
             except _DENOISE_ERRORS as error:
                 self._fail(error)
-                yield frame
+                if self._snapshot()[0] == generation:
+                    # Gecikme içinde kalan ham sesi kaybetme: sırayla akıt, sonra bu kareyi.
+                    for index, pending in enumerate(self._raw):
+                        yield self._unemitted_part(pending, index)
+                    yield frame
+                self._raw.clear()
                 continue
-            if generation != self._generation:
-                continue  # işlenirken discard_pending/resume geldi; bayat çıktı atılır
+            if pcm is None or self._snapshot()[0] != generation:
+                continue  # işlenirken sıfırlama geldi; bayat çıktı atılır
             self._stamps.append(frame.timestamp)
+            self._raw.append(frame)
             # Çıktı, gecikme kadar önce yakalanan sesi taşır; zaman damgası da onunki olur.
-            # Isınmada (sıfırlamadan sonra) en eski bekleyen damga kullanılır; böylece damgalar
-            # hiç geriye gitmez. max(), sıfırlama sonrası saat farkına karşı ek güvencedir.
+            # Isınmada (sıfırlamadan sonra) en eski bekleyen damga kullanılır; damgalar geriye
+            # gitmez. max(), sıfırlama sonrası saat farkına karşı ek güvencedir.
             stamp = max(self._stamps[0], self._last_stamp)
             self._last_stamp = stamp
             yield AudioFrame(pcm, stamp)

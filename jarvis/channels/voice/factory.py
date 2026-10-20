@@ -21,18 +21,23 @@ from jarvis.channels.voice.core import Microphone, SpeechSynthesizer, VoiceContr
 from jarvis.channels.voice.denoise import (
     NOISE_LEVEL_ATTEN_DB,
     DeepFilterNetDenoiser,
+    DenoiseDependencyError,
     DenoisedMicrophone,
 )
+from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 
 logger = logging.getLogger(__name__)
 
 
 def _denoise_reason(error: Exception) -> str:
+    """``kind:metin``; kind `deps` (paket eksik) ve `model` (dosya sorunu) farklı çözüm ister."""
+    if isinstance(error, DenoiseDependencyError | ImportError):
+        return "deps:onnxruntime veya numpy kurulu değil"
     if isinstance(error, OSError):
-        return "model dosyaları bulunamadı veya okunamadı"
+        return "model:model dosyaları bulunamadı veya okunamadı"
     if isinstance(error, ValueError):
-        return "model dosyası doğrulanamadı veya dizin ayarlı değil"
-    return "onnxruntime/numpy eksik ya da model yüklenemedi"
+        return "model:model dosyası sha256 doğrulamasından geçmedi"
+    return "model:model yüklenemedi (dosya bozuk olabilir)"
 
 
 RunCommand = Callable[[str], Awaitable[RunResult]]
@@ -56,9 +61,7 @@ async def build_voice_controller(
         # Gürültü engelleme isteğe bağlı bir iyileştirmedir: kurulamazsa ses hattı ham
         # mikrofonla sürer, ama durum görünür olur (sessizce çalışıyormuş gibi davranılmaz).
         try:
-            model_dir = settings.voice.noise_model_dir
-            if model_dir is None:
-                raise ValueError("model dizini ayarlı değil")
+            model_dir = settings.voice.noise_model_dir or DEFAULT_NOISE_MODEL_DIR
             denoiser = await asyncio.to_thread(
                 DeepFilterNetDenoiser,
                 model_dir,

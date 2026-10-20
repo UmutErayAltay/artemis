@@ -59,7 +59,7 @@ voice:
   # Modeli bir kez `python scripts/fetch_noise_model.py` ile indirin. Yankı giderme DEĞİLDİR.
   noise_suppression: false
   noise_suppression_level: orta # hafif (12 dB sınır) | orta (24 dB) | guclu (sınırsız)
-  # Verilmezse config/../models/deepfilternet3 (fetch_noise_model.py varsayılanı) kullanılır.
+  # Verilmezse <depo>/models/deepfilternet3 (fetch_noise_model.py varsayılanı, config konumundan bağımsız).
   # noise_model_dir: ../models/deepfilternet3
   pre_roll_ms: 300
   max_utterance_seconds: 15

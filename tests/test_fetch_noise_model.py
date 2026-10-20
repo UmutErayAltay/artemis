@@ -115,6 +115,30 @@ def test_rejects_missing_member(fetch: ModuleType, tmp_path: Path) -> None:
         )
 
 
+def test_default_dest_is_the_shared_runtime_default(fetch: ModuleType) -> None:
+    from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
+
+    assert fetch.DEFAULT_DEST == DEFAULT_NOISE_MODEL_DIR and fetch.DEFAULT_DEST.is_absolute()
+
+
+def test_main_prints_resolved_absolute_path(
+    fetch: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    blob = _tar(_good())
+    monkeypatch.setattr(fetch, "TARBALL_SHA256", hashlib.sha256(blob).hexdigest())
+    monkeypatch.setattr(fetch, "MEMBER_SHA256", _hashes(FILES))
+    monkeypatch.setattr(fetch.extract_model, "__kwdefaults__", {
+        "tarball_sha256": fetch.TARBALL_SHA256, "member_sha256": fetch.MEMBER_SHA256,
+        "url": fetch.SOURCE_URL,
+    })
+    local = tmp_path / "ok.tar.gz"
+    local.write_bytes(blob)
+    monkeypatch.chdir(tmp_path)
+    assert fetch.main(["--tarball", str(local), "--dest", "rel/m"]) == 0
+    assert f'"{tmp_path / "rel" / "m"}"' in capsys.readouterr().out
+
+
 def test_pinned_hashes_match_denoiser_and_main_reports_failure(
     fetch: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:

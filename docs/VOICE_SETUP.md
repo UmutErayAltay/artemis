@@ -108,7 +108,7 @@ kullanın ya da mevcut yankı korumalarına (ADR 0022) güvenin.
    voice:
      noise_suppression: true
      noise_suppression_level: orta   # hafif (12 dB) | orta (24 dB) | guclu (sınırsız)
-     noise_model_dir: ../models/deepfilternet3   # verilmezse bu varsayılan kullanılır
+     noise_model_dir: ../models/deepfilternet3   # verilmezse <depo>/models/deepfilternet3 (betiğin yazdığı yer)
    ```
 
    Ya da ayarlar panelinde **Gürültü engelleme** kutusunu işaretleyip düzeyi seçin;

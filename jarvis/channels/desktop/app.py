@@ -1337,12 +1337,15 @@ class DesktopWindow(QMainWindow):
                 self.pet.heard(event.message)
             elif event.state == "voice_denoise":
                 if event.message.startswith("unavailable:"):
-                    reason = event.message.removeprefix("unavailable:")
+                    kind, _, reason = event.message.removeprefix("unavailable:").partition(":")
+                    fix = (
+                        'Paketleri `pip install -e ".[voice]"` ile kurun'
+                        if kind == "deps"
+                        else "Modeli `python scripts/fetch_noise_model.py` ile indirin"
+                    )
                     self._append_chat(
                         "Jarvis",
-                        f"Gürültü engelleme açılamadı: {reason}. Modeli "
-                        "`python scripts/fetch_noise_model.py` ile indirin; "
-                        "ses işlenmeden sürüyor.",
+                        f"Gürültü engelleme açılamadı: {reason}. {fix}; ses işlenmeden sürüyor.",
                     )
                 elif event.message == "off":
                     self._append_chat(

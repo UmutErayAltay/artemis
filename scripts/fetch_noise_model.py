@@ -17,7 +17,9 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_DEST = ROOT / "models" / "deepfilternet3"
+sys.path.insert(0, str(ROOT))  # betik doğrudan çalıştırılınca jarvis içe aktarılabilsin
+from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR as DEFAULT_DEST  # noqa: E402
+
 SOURCE_URL = (
     "https://github.com/Rikorose/DeepFilterNet/raw/"
     "d375b2d8309e0935d165700c91da9de862a99c31/models/DeepFilterNet3_onnx.tar.gz"
@@ -112,8 +114,9 @@ def main(argv: list[str] | None = None) -> int:
     except (OSError, ValueError, tarfile.TarError) as error:
         print(f"Model kurulamadı: {error}", file=sys.stderr)
         return 1
-    print(f"{len(written)} dosya yazıldı: {args.dest}")
-    print(f'config.yaml → voice.noise_model_dir: "{args.dest}"')
+    dest = args.dest.resolve()
+    print(f"{len(written)} dosya yazıldı: {dest}")
+    print(f'config.yaml → voice.noise_model_dir: "{dest}"')
     return 0
 
 

@@ -13,7 +13,8 @@ ISTFT `libDF` (Rust) kaynağından numpy'a taşındı (`jarvis/channels/voice/de
 config alanlarıdır; panelde onay kutusu + düzey kutusu vardır. Model dosyaları
 `scripts/fetch_noise_model.py` ile bir kez indirilir; arşiv ve her dosya sha256'ya sabitlidir
 (çalışma anında indirme yok, yükleme öncesi her açılışta yeniden doğrulanır).
-`noise_model_dir` verilmezse `config/../models/deepfilternet3` kullanılır (betiğin varsayılanıyla aynı, cwd'den bağımsız).
+`noise_model_dir` verilmezse `<depo>/models/deepfilternet3` kullanılır; tek sabit
+(`jarvis/config/model_paths.py`) hem runtime hem fetch betiğince kullanılır (cwd ve config konumundan bağımsız).
 Model kurulamazsa (eksik dizin, sha256 uyuşmazlığı, onnxruntime yok) ses hattı DÜŞMEZ: tek uyarı
 kaydı + `denoise:unavailable:<neden>` durumu (sohbette görünür) ile ham mikrofonla sürülür.
 Çalışma anında hata olursa `DenoisedMicrophone` TEK uyarı kaydı yazar, oturum boyunca ham
@@ -42,7 +43,10 @@ yaklaşıklanır. Grafiğin t. çıktısı t-2. kareye aittir (ölçülerek doğ
   toplama (en kötü durum, hop başına 10 ms), 4 ms yeniden örnekleme FIR. Blok küçülürse gecikme
   ve ardışık çıkarım yükü artar/azalır (blok 5: 74 ms, blok 2: 34 ms).
 - CPU (1 iş parçacığı, bu makine): bağlam 50 ≈ %12 çekirdek (kare başına 2.4 ms ort.),
-  bağlam 100 ≈ %19 (3.8 ms). Çıkarım blok başına bir kez olduğundan en kötü kare 28–32 ms
+  bağlam 100 ≈ %19 (3.8 ms). Maliyetin nedeni durumsuz tam dizi grafikler: her blokta
+  `bağlam + blok` (110) hop yeniden çıkarılır, yani her hop ~11 kez işlenir; durumlu (GRU durumu
+  dışarı verilen) bir ONNX dışa aktarımı bunu kaldırır, bu turda yapılmadı. Çıkarım gerçek zamandan
+  yavaşlar veya çıktı tamponu boş kalırsa (`underruns`, `late_blocks`) hız sınırlı Türkçe uyarı yazılır. Çıkarım blok başına bir kez olduğundan en kötü kare 28–32 ms
   sürebilir; ses iş parçacığında (`asyncio.to_thread`) çalışır, olay döngüsünü bloklamaz.
 - ASR ödünleşimi: güçlü bastırma Whisper doğruluğunu düşürebilir (konuşma bozulur). Düzeyler
   bastırma sınırıdır (libDF `atten_lim_db`): hafif 12 dB, orta 24 dB (varsayılan), güçlü

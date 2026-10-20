@@ -77,9 +77,11 @@ async def test_noise_suppression_failure_degrades_to_raw_mic_with_visible_state(
 ):
     mic = object()
     _patch_voice_deps(monkeypatch, mic)
+    monkeypatch.setattr(factory, "DEFAULT_NOISE_MODEL_DIR", tmp_path / "varsayilan-yok")
     cases = [
-        (VoiceConfig(noise_suppression=True), "dizin ayarlı değil"),
-        (VoiceConfig(noise_suppression=True, noise_model_dir=tmp_path / "yok"), "bulunamadı"),
+        (VoiceConfig(noise_suppression=True), "model:model dosyaları bulunamadı"),
+        (VoiceConfig(noise_suppression=True, noise_model_dir=tmp_path / "yok"),
+         "model:model dosyaları bulunamadı"),
     ]
     for config, reason in cases:
         states: list[str] = []
@@ -101,4 +103,18 @@ async def test_noise_suppression_failure_degrades_to_raw_mic_with_visible_state(
         lambda _: None, states.append,
     )
     assert controller.microphone is mic
-    assert any("doğrulanamadı" in s for s in states)
+    assert any("model:model dosyası sha256" in s for s in states)
+
+
+async def test_missing_dependencies_are_reported_as_deps_not_model(monkeypatch):
+    _patch_voice_deps(monkeypatch, object())
+
+    def no_onnxruntime(*_args, **_kwargs):
+        raise factory.DenoiseDependencyError("onnxruntime yok")
+
+    monkeypatch.setattr(factory, "DeepFilterNetDenoiser", no_onnxruntime)
+    states: list[str] = []
+    await factory.build_voice_controller(
+        _runtime(VoiceConfig(noise_suppression=True)), lambda _: None, states.append
+    )
+    assert any(s.startswith("denoise:unavailable:deps:") for s in states)

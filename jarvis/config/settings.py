@@ -11,6 +11,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
+
 GITHUB_OWNER_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 ENDPOINT_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
 
@@ -445,8 +447,8 @@ def load_settings(path: Path) -> Settings:
                 path_value if path_value.is_absolute() else (base / path_value).resolve()
             )
     if settings.voice.noise_model_dir is None:
-        # fetch_noise_model.py varsayılanı (repo/models/deepfilternet3); cwd'den bağımsız.
-        voice_updates["noise_model_dir"] = (base / "../models/deepfilternet3").resolve()
+        # Betikle aynı tek sabit (depo kökü/models/deepfilternet3); cwd'den bağımsız.
+        voice_updates["noise_model_dir"] = DEFAULT_NOISE_MODEL_DIR
     if voice_updates:
         updates["voice"] = settings.voice.model_copy(update=voice_updates)
     memory_updates: dict[str, Path] = {}
