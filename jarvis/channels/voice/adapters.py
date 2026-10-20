@@ -709,6 +709,8 @@ class EdgeTTSynthesizer:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.DEVNULL,
                 env=child_environment(),
+                # pythonw altında konsol uygulaması her yanıtta pencere açmasın.
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
             )
 
         start_task = asyncio.create_task(create())

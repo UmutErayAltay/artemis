@@ -177,6 +177,7 @@ class WindowsDesktop:
             capture_output=True,
             env=child_environment(),
             timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         for attempt in range(6):
             if not self._application_pids(name):
@@ -195,6 +196,7 @@ class WindowsDesktop:
             capture_output=True,
             env=child_environment(),
             timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
         if check.returncode != 0:
             raise OSError("Uygulama süreçleri sorgulanamadı")
