@@ -324,6 +324,64 @@ async def test_sink_reference_failure_does_not_stop_playback_or_further_feeds(
     assert len(warnings) == 1
 
 
+async def test_sink_reference_import_error_keeps_playback_and_reports_once(
+    monkeypatch,
+    caplog,
+) -> None:
+    writes = []
+
+    class Stream:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def write(self, pcm):
+            writes.append(pcm)
+
+        def stop(self):
+            pass
+
+        def abort(self):
+            pass
+
+        def close(self):
+            pass
+
+    fake_module = ModuleType("sounddevice")
+    fake_module.RawOutputStream = Stream
+    monkeypatch.setitem(__import__("sys").modules, "sounddevice", fake_module)
+
+    class FailingReference:
+        def __init__(self):
+            self.calls = 0
+
+        def feed(self, _pcm, _sample_rate, _channels, _sample_width):
+            self.calls += 1
+            raise ImportError("Sahte numpy içe aktarma hatası.")
+
+    reference = FailingReference()
+    failures: list[bool] = []
+    sink = SoundDeviceSink(
+        reference,
+        on_echo_failure=lambda: failures.append(True),
+    )
+
+    async def chunks():
+        yield PCMChunk(b"x" * 1920, 24000, 1, 2)
+
+    with caplog.at_level("WARNING"):
+        await sink.play(chunks(), asyncio.Event(), lambda: None)
+
+    assert len(writes) == 2
+    assert reference.calls == 1
+    assert failures == [True]
+    assert sink._echo_reference is None
+    warnings = [record for record in caplog.records if "Yankı" in record.getMessage()]
+    assert len(warnings) == 1
+
+
 async def test_cancel_aborts_device_before_slow_generator_cleanup(monkeypatch):
     events = []
     written = asyncio.Event()

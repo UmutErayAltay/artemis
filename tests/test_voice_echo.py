@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 import logging
 import struct
+import threading
 from collections.abc import AsyncIterator
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -169,8 +171,8 @@ def test_reference_converts_int32_and_int8() -> None:
     reference.feed(struct.pack("<i", -65536), 16000, 1, 4)
     assert reference.pull(1) == _pack_i16([-1])
 
-    reference.feed(bytes([127, 0x80]), 16000, 1, 1)
-    assert reference.pull(2) == _pack_i16([127, -128])
+    reference.feed(bytes([100, 0x80]), 16000, 1, 1)
+    assert reference.pull(2) == _pack_i16([25600, -32768])
 
 
 def test_reference_drops_oldest_samples_when_buffer_is_full() -> None:
@@ -287,7 +289,7 @@ def test_canceller_rejects_invalid_rate_and_frame_size() -> None:
         canceller.process(b"\x00" * (160 * 2 - 2))
 
 
-def test_canceller_reset_creates_new_apm_and_clears_reference() -> None:
+def test_canceller_reset_keeps_apm_and_clears_reference() -> None:
     reference = EchoReference(16000)
     reference.feed(_pack_i16([1, 2, 3]), 16000, 1, 2)
     factory = FakeApmFactory()
@@ -300,8 +302,60 @@ def test_canceller_reset_creates_new_apm_and_clears_reference() -> None:
 
     canceller.reset()
 
-    assert len(factory.instances) == 2
+    assert len(factory.instances) == 1
     assert reference.pull(3) == b"\x00" * 6
+
+
+def test_canceller_reset_from_another_thread_is_safe() -> None:
+    reference = EchoReference(16000)
+    process_entered = threading.Event()
+    release_process = threading.Event()
+    reset_started = threading.Event()
+    reset_done = threading.Event()
+    output_lengths: list[int] = []
+
+    class BlockingApm(FakeApm):
+        def process_stream(self, data: Any) -> None:
+            process_entered.set()
+            if not release_process.wait(5):
+                raise TimeoutError("APM işlemi zamanında sürdürülemedi.")
+            super().process_stream(data)
+
+    apm = BlockingApm()
+    canceller = EchoCanceller(
+        16000,
+        reference,
+        apm_factory=lambda: apm,
+        frame_factory=fake_frame_factory,
+    )
+    pcm = _pack_i16([1] * 160)
+
+    def process_loop() -> None:
+        for index in range(100):
+            output = canceller.process(pcm)
+            output_lengths.append(len(output))
+            if index == 0 and not reset_done.wait(5):
+                raise TimeoutError("Yankı iptalci sıfırlaması zamanında tamamlanmadı.")
+
+    def reset_from_thread() -> None:
+        reset_started.set()
+        try:
+            canceller.reset()
+        finally:
+            reset_done.set()
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        process_future = executor.submit(process_loop)
+        assert process_entered.wait(5)
+
+        reset_future = executor.submit(reset_from_thread)
+        assert reset_started.wait(5)
+
+        release_process.set()
+        process_future.result(timeout=10)
+        reset_future.result(timeout=10)
+
+    assert output_lengths == [len(pcm)] * 100
 
 
 def test_microphone_processes_frames_and_preserves_frame_metadata() -> None:

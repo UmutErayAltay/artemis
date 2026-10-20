@@ -60,5 +60,15 @@ testi sentetik kipte `>= 15 dB` yankı azaltma eşiğini doğrular.
 - Metin düzeyindeki yankı korumaları (ADR 0022) kalır; AEC ses yankısını azaltır,
   metin tekrarlarını engellemez.
 - Kulaklıkla çalışırken AEC'ye gerek yoktur; özellik kapalı bırakılabilir.
-- İşlem maliyeti 10 ms'lik kare başına yaklaşık 1 ms'nin altındadır; `livekit`
-  bağımlılığının paket boyutu yaklaşık 10 MB'dir.
+- AEC3 çıktısı, algoritmik işlem gecikmesi nedeniyle mikrofonuna göre yaklaşık
+  9-10 ms gecikmelidir. Kare zaman damgaları kaydırılmaz; bu fark VAD ve STT
+  açısından ihmal edilebilir.
+- `reset()` artık yankı iptalcisini yeniden kurmaz; yalnızca referans tamponunu
+  temizler. APM her yeniden kurulduğunda uyarlanabilir süzgeç yakınsamasını
+  kaybediyordu: ölçümde yankı azaltma 19,5 dB'den 6,9 dB'ye düşüyor ve yaklaşık
+  0,5 s boyunca düşük kalıyordu.
+- Doğrulayıcı ölçümlerinde yaklaşık 1 s yakınsamadan sonra 29-55 dB yankı
+  azaltma sağlandı; ilk 0,3-1 s'de azaltma yalnızca yaklaşık 3 dB'deydi.
+  Çift konuşma sırasında yakın-uç enerji yaklaşık 1 dB içinde korundu.
+- 20 ms'lik kare başına CPU maliyeti yaklaşık 0,2 ms'dir; işlem sırasında ağ
+  bağlantısı gözlenmedi. `livekit` bağımlılığının paket boyutu yaklaşık 10 MB'dir.

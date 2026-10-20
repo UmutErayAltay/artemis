@@ -364,10 +364,15 @@ class FasterWhisperRecognizer:
 class SoundDeviceSink:
     """PCM'i küçük bloklarla yazıp ilk gerçek sink yazımında işaret üretir."""
 
-    def __init__(self, echo_reference: EchoReferenceSink | None = None) -> None:
+    def __init__(
+        self,
+        echo_reference: EchoReferenceSink | None = None,
+        on_echo_failure: Callable[[], None] | None = None,
+    ) -> None:
         self._streams: set[Any] = set()
         self._audio_errors: tuple[type[Exception], ...] = ()
         self._echo_reference = echo_reference
+        self._on_echo_failure = on_echo_failure
 
     def _feed_echo_reference(
         self,
@@ -381,13 +386,15 @@ class SoundDeviceSink:
             return
         try:
             reference.feed(pcm, sample_rate, channels, sample_width)
-        except (ValueError, RuntimeError, OSError) as error:
+        except (ImportError, ValueError, RuntimeError, OSError) as error:
             self._echo_reference = None
             logger.warning(
                 "Yankı referansı beslenemedi (%s); ses çıkışı sürüyor ve "
                 "yankı referansı kapatıldı.",
                 type(error).__name__,
             )
+            if self._on_echo_failure is not None:
+                self._on_echo_failure()
 
     async def play(
         self,

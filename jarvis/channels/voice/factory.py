@@ -99,7 +99,10 @@ async def build_voice_controller(
     if echo_reference is None:
         sink = SoundDeviceSink()
     else:
-        sink = SoundDeviceSink(echo_reference=echo_reference)
+        sink = SoundDeviceSink(
+            echo_reference=echo_reference,
+            on_echo_failure=lambda: on_state("echo:off"),
+        )
     recognizer = FasterWhisperRecognizer(settings.voice)
     await asyncio.to_thread(recognizer.prepare)
     synthesizer: SpeechSynthesizer

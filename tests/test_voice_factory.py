@@ -172,8 +172,9 @@ def _capture_sink(monkeypatch):
     calls = []
 
     class FakeSink:
-        def __init__(self, echo_reference=None):
+        def __init__(self, echo_reference=None, on_echo_failure=None):
             self._echo_reference = echo_reference
+            self._on_echo_failure = on_echo_failure
 
     def make_sink(*_args, **kwargs):
         sink = FakeSink(**kwargs)
@@ -231,9 +232,10 @@ async def test_echo_cancellation_wraps_microphone_and_shares_sink_reference(monk
     sink_calls = _capture_sink(monkeypatch)
     cancellers = _capture_canceller(monkeypatch)
     config = VoiceConfig(echo_cancellation=True)
+    states: list[str] = []
 
     controller = await factory.build_voice_controller(
-        _runtime(config), lambda _: None, lambda _: None
+        _runtime(config), lambda _: None, states.append
     )
 
     microphone = controller.microphone
@@ -244,10 +246,15 @@ async def test_echo_cancellation_wraps_microphone_and_shares_sink_reference(monk
     assert cancellers == [canceller]
 
     kwargs, sink = sink_calls[0]
-    assert set(kwargs) == {"echo_reference"}
+    assert set(kwargs) == {"echo_reference", "on_echo_failure"}
     assert isinstance(sink._echo_reference, factory.EchoReference)
     assert kwargs["echo_reference"] is sink._echo_reference
     assert canceller.reference is sink._echo_reference
+
+    on_echo_failure = kwargs["on_echo_failure"]
+    assert callable(on_echo_failure)
+    on_echo_failure()
+    assert states == ["echo:off"]
 
 
 async def test_echo_cancellation_is_applied_before_denoising(monkeypatch, tmp_path):
