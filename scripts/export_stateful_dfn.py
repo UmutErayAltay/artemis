@@ -288,6 +288,48 @@ def verify(net: Any, step: Any, onnx_dir: Path, seconds: float = 6.0) -> dict[st
     }
 
 
+GOLDEN_FRAMES = 52
+DEFAULT_GOLDEN = ROOT / "tests" / "data" / "dfn3_step_golden.npz"
+
+
+def make_golden(net: Any) -> dict[str, Any]:
+    """Torch TAM DİZİ modelden (bağımsız referans) küçük altın vektör: adım modeli girdileri
+    (ileri bakış kaydırması uygulanmış) ve beklenen m/coefs/lsnr. Testler CI'da env olmadan
+    dışa aktarılan ONNX'i hop hop bununla karşılaştırır."""
+    import torch
+    from df.model import ModelParams
+    from libdf import DF
+
+    p = ModelParams()
+    df_state = DF(sr=p.sr, fft_size=p.fft_size, hop_size=p.hop_size, nb_bands=p.nb_erb,
+                  min_nb_erb_freqs=p.min_nb_freqs)
+    spec, feat_erb, feat_spec = make_features(net, df_state, p, 1.0)
+    n, la = GOLDEN_FRAMES, p.conv_lookahead
+    spec, feat_erb, feat_spec = spec[:, :, :n], feat_erb[:, :, :n], feat_spec[:, :, :n]
+    with torch.no_grad():
+        _, m, lsnr, coefs = net(spec, feat_erb, feat_spec.permute(0, 2, 3, 1).unsqueeze(1))
+    erb_in = torch.cat([feat_erb[:, :, la:], torch.zeros_like(feat_erb[:, :, :la])], dim=2)
+    spec_in = torch.cat([feat_spec[:, :, la:], torch.zeros_like(feat_spec[:, :, :la])], dim=2)
+    return {
+        "feat_erb": erb_in.numpy().astype("float32"), "feat_spec": spec_in.numpy().astype("float32"),
+        "m": m.numpy().astype("float32"),
+        "coefs": coefs.permute(0, 2, 3, 1, 4).reshape(1, n, p.nb_df, 2 * p.df_order).numpy(),
+        "lsnr": lsnr.numpy().astype("float32"),
+    }
+
+
+def write_golden(path: Path, golden: dict[str, Any]) -> str:
+    import io
+
+    import numpy as np
+
+    buffer = io.BytesIO()
+    np.savez_compressed(buffer, **golden)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(buffer.getvalue())
+    return _sha256(buffer.getvalue())
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawTextHelpFormatter
@@ -295,6 +337,7 @@ def main() -> int:
     parser.add_argument("--archive", type=Path, default=DEFAULT_ARCHIVE)
     parser.add_argument("--official-onnx", type=Path, required=True)
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--golden-out", type=Path, default=DEFAULT_GOLDEN)
     parser.add_argument("--check-only", action="store_true", help="dosya yazma, yalnız doğrula")
     args = parser.parse_args()
 
@@ -383,6 +426,13 @@ def main() -> int:
     if args.check_only:
         print(json.dumps(manifest, indent=1, ensure_ascii=False))
         return 0
+    golden = make_golden(net)
+    golden_sha = write_golden(args.golden_out, golden)
+    manifest["golden"] = {
+        "file": f"tests/data/{args.golden_out.name}", "sha256": golden_sha,
+        "frames": GOLDEN_FRAMES, "tolerance": TOLERANCE,
+        "source": "torch DfNet.forward (tam dizi), sentetik konuşma+gürültü, ilk 52 kare",
+    }
     args.out.mkdir(parents=True, exist_ok=True)
     (args.out / "dfn3_step.onnx").write_bytes(blob)
     (args.out / "dfn3_step.json").write_text(

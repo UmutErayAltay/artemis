@@ -864,6 +864,7 @@ class DenoisedMicrophone:
         )
         # Ham geçiş/akıtma 16 kHz kare üretmek zorunda: 48k kareler bu süzgeçle indirilir.
         self._pt_down = Downsampler3()
+        self._ring_delay = denoiser.delay_samples
         self._raw: deque[AudioFrame] = deque(
             maxlen=-(-denoiser.delay_samples // denoiser.frame_samples)
         )
@@ -901,12 +902,11 @@ class DenoisedMicrophone:
     def _unemitted_part(self, pending: AudioFrame, index: int) -> AudioFrame:
         """Tampon doluysa ilk karenin çıktıya zaten yansımış başını (gecikme taşması) keser.
 
-        ``pending`` 16 kHz'dir (48k ham kareler önce indirilir).
+        ``pending`` 16 kHz'dir (48k ham kareler gelişte indirilip halkada 16 kHz tutulur).
         """
         if index or len(self._raw) < (self._raw.maxlen or 0):
             return pending
-        is_48k = self._raw[0].sample_rate == MODEL_SR
-        delay = self._delay_samples_48k if is_48k else self._delay_samples
+        delay = self._ring_delay
         extra = len(self._raw) * self._frame_samples - delay
         return AudioFrame(pending.pcm[2 * extra :], pending.timestamp) if extra > 0 else pending
 
@@ -946,6 +946,9 @@ class DenoisedMicrophone:
                 self._pt_down.reset()
             if frame.timestamp <= reset_time:
                 continue  # sıfırlamadan önce yakalanmış kare (iç kuyrukta kalmış olabilir)
+            # Ham yol süzgeci HER karede kesintisiz çalışır: akıtma/ham geçiş ısınma geçişi olmadan
+            # sürer. 16 kHz karelerde dönüşüm yoktur (aynı nesne).
+            low = self._to_16k(frame)
             try:
                 pcm = await asyncio.to_thread(
                     self._process, frame.pcm, generation, frame.sample_rate
@@ -954,16 +957,18 @@ class DenoisedMicrophone:
                 self._fail(error)
                 if self._snapshot()[0] == generation:
                     # Gecikme içinde kalan ham sesi kaybetme: sırayla akıt, sonra bu kareyi.
-                    self._pt_down.reset()
                     for index, pending in enumerate(self._raw):
-                        yield self._unemitted_part(self._to_16k(pending), index)
-                    yield self._to_16k(frame)
+                        yield self._unemitted_part(pending, index)
+                    yield low
                 self._raw.clear()
                 continue
             if pcm is None or self._snapshot()[0] != generation:
                 continue  # işlenirken sıfırlama geldi; bayat çıktı atılır
             self._stamps.append(frame.timestamp)
-            self._raw.append(frame)
+            self._raw.append(low)
+            self._ring_delay = (
+                self._delay_samples_48k if frame.sample_rate == MODEL_SR else self._delay_samples
+            )
             # Çıktı, gecikme kadar önce yakalanan sesi taşır; zaman damgası da onunki olur.
             # Isınmada (sıfırlamadan sonra) en eski bekleyen damga kullanılır; damgalar geriye
             # gitmez. max(), sıfırlama sonrası saat farkına karşı ek güvencedir.

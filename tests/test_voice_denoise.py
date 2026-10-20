@@ -740,6 +740,19 @@ async def test_48k_failure_flushes_ring_and_passthrough_is_16k(
     assert sum(r.levelno == logging.WARNING for r in caplog.records) == 1
 
 
+async def test_48k_failure_flush_continues_raw_downsampler_without_warmup_transient() -> None:
+    """Akıtılan + ham geçen ses, ham akışın tek geçişte indirilmişiyle (hizalı) aynıdır."""
+    inner, fake = Inner48(8), Fake48Denoiser(fail_at=4)
+    out = await _collect(dn.DenoisedMicrophone(inner, fake))
+    raw = np.concatenate([np.frombuffer(f.pcm, "<i2") for f in inner.sent]).astype(np.float32)
+    expected = dn.Downsampler3().process(raw / 32768.0) * 32768.0
+    expected = np.clip(np.rint(expected), -32768, 32767).astype(np.int16)
+    flushed = np.concatenate([np.frombuffer(f.pcm, "<i2") for f in out[3:]])
+    assert flushed.size > 320 * 3
+    tail = expected[expected.size - flushed.size :]
+    assert np.abs(flushed.astype(int) - tail.astype(int)).max() <= 1
+
+
 async def test_48k_mixed_with_reset_drops_stale_frames() -> None:
     fake = Fake48Denoiser()
 
