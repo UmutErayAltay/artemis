@@ -3,8 +3,8 @@
 **Bağlam:** Artemis'in ölçülen oda gürültüsü 0.019–0.075 (tam ölçekli RMS) aralığındaydı;
 VAD ve Whisper bu seviyede boş/yanlış parça üretebiliyor. Mikrofon yolunda yankı giderme
 (AEC) YOKTUR: asistanın kendi sesi mikrofona girerse bu özellik onu temizlemez (yankı
-korumaları ADR 0022'dedir). Kullanıcı Krisp benzeri, RTX gerektirmeyen, ayardan açılıp
-kapanan bir çözüm istedi.
+korumaları ADR 0022'dedir). (Sonradan ADR 0038 ile isteğe bağlı yankı engelleme eklendi.)
+Kullanıcı Krisp benzeri, RTX gerektirmeyen, ayardan açılıp kapanan bir çözüm istedi.
 
 **Karar:** DeepFilterNet3, resmi checkpoint'ten türetilmiş DURUMLU bir ONNX adım modeliyle
 (`jarvis/channels/voice/models/dfn3/dfn3_step.onnx`, yaklaşık 8 MB, pakete dahil) onnxruntime CPU

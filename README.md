@@ -122,6 +122,9 @@ tekrar eden STT parçaları komut sayılmaz.
 `voice.noise_suppression` mikrofonu DeepFilterNet3 ile işlemcide temizler, ekran kartı gerekmez;
 yankı gidermez, model pakete dahildir (indirme yok) ve yaklaşık 34 ms gecikme ekler ([ADR 0037](docs/adr/0037-noise-suppression.md),
 kurulum: [ses rehberi](docs/VOICE_SETUP.md)).
+İsteğe bağlı **yankı engelleme**, Jarvis'in hoparlörden çalan kendi sesinin mikrofon
+yolunda oluşturduğu yankıyı azaltır; işlem yereldir ve varsayılan kapalıdır
+([ADR 0038](docs/adr/0038-echo-cancellation.md)).
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
 `voice.stt_language` `tr` (kod varsayılanı), `tr_en` (örnek config) veya `auto` olabilir;

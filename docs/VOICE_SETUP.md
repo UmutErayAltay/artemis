@@ -91,8 +91,8 @@ gönderilmesine izin verir.
 ## Gürültü engelleme (isteğe bağlı, ADR 0037)
 
 DeepFilterNet3, işlemcide çalışır (ekran kartı gerekmez) ve mikrofon sesini STT/VAD'a
-gitmeden temizler. Yankı gidermez: asistanın hoparlör sesi mikrofona giriyorsa kulaklık
-kullanın ya da mevcut yankı korumalarına (ADR 0022) güvenin.
+gitmeden temizler. Bu bölüm yalnız gürültü engeller; akustik yankı için
+[Yankı engelleme bölümüne](#yankı-engelleme-isteğe-bağlı-adr-0038) bakın.
 
 1. `pip install -e ".[voice]"` (onnxruntime ve numpy dahildir; torch gerekmez). Model
    (`jarvis/channels/voice/models/dfn3/dfn3_step.onnx`, yaklaşık 8 MB) pakete dahildir:
@@ -123,6 +123,31 @@ oturum boyunca ham sese dönülür ve sohbette görünür bir ileti çıkar. Öl
 tam dizi grafiklerle parite testi için `scripts/fetch_noise_model.py` ve
 `JARVIS_DFN_MODEL_DIR`.
 
+## Yankı engelleme (isteğe bağlı, ADR 0038)
+
+Yankı engelleme, asistanın hoparlörden oynattığı sesin mikrofon yolunda oluşturduğu
+yankıyı azaltır; böylece söz kesme ve kesintisiz modda asistanın kendi sesini
+kullanıcı komutu sanma riski düşer. İşlem tamamen yereldir; ses sunucusuna
+bağlanılmaz. Özellik varsayılan kapalıdır.
+
+Panelde **Yankı engelleme (hoparlörle kullanırken)** kutusunu işaretleyin veya
+`config/config.yaml` içinde `voice.echo_cancellation: true` ayarını yapın:
+
+```yaml
+voice:
+  echo_cancellation: true
+  echo_delay_ms: 50
+```
+
+`voice.echo_delay_ms`, çıkış ile giriş arasındaki gecikmeyi AEC3'e ipucu olarak
+verir; varsayılanı 50 ms'dir. Oda ve aygıt gecikmesi farklıysa değeri ayarlayın;
+hatalı ipucu yankı azaltımını düşürebilir. Kulaklıkla çalışıyorsanız bu özelliğe
+gerek yoktur; kapalı bırakın.
+
+`livekit` eksikse veya çalışma anında hata verirse tek uyarı yazılır. Bu oturumda
+ham ses olduğu gibi iletilir ve sohbette `echo:off` durumu gösterilir. Hoparlör
+çıkışını referansa beslerken oluşan hata oynatma akışını kesmez.
+
 ## Gizlilik ve kullanım
 
 Uyandırma sözcüğü **artemis**. Ham mikrofon kaydı diske yazılmaz. Mikrofon yalnız
@@ -148,8 +173,10 @@ ipuçlarıdır; boş liste genel kullanım başlangıcıdır. Bu ipuçları her 
 veya modelin bilmediği özel adlara yönelik doğruluğu kanıtlamaz. STT'ye prompt
 verilmez ve tanınan metne sonradan yaklaşık uygulama adı eklenmez.
 
-İlk doğrulamayı kulaklıkla yapın. Akustik yankı giderme bu sürümde yoktur;
-hoparlör sesi VAD tarafından yeni konuşma sayılıp yanlış söz kesme üretebilir.
+İlk doğrulamayı kulaklıkla yapın. Akustik yankı giderme artık isteğe bağlı bir
+seçenek olarak vardır (ADR 0038); ardından hoparlörle, yankı engelleme açıkken
+doğrulayın. Özellik kapalıyken hoparlör sesi VAD tarafından yeni konuşma sayılıp
+yanlış söz kesme üretebilir.
 
 ## Windows elle kabul kontrolü
 
