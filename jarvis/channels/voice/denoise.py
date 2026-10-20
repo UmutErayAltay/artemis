@@ -783,10 +783,12 @@ class DenoisedMicrophone:
 
     async def frames(self) -> AsyncIterator[AudioFrame]:
         async for frame in self._inner.frames():
-            if self._passthrough:
-                yield frame
-                continue
             generation, reset_time = self._snapshot()
+            if self._passthrough:
+                # Ham geçişte de sıfırlama öncesi kare atılır; iç mikrofonun süzgecine güvenilmez.
+                if frame.timestamp > reset_time:
+                    yield frame
+                continue
             if generation != self._seen_generation:
                 self._seen_generation = generation
                 self._stamps.clear()
