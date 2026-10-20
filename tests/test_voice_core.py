@@ -12,6 +12,7 @@ from jarvis.channels.voice.core import (
     AudioSegment,
     PCMChunk,
     VoiceController,
+    find_wake_word,
 )
 from jarvis.config.settings import VoiceConfig
 
@@ -157,6 +158,46 @@ def test_wake_word_uses_word_boundaries_and_casefold():
     assert controller._wake_command("Artemis?") == ""
     assert controller._wake_command("Artemis? saat kaç?") == "saat kaç?"
     assert controller._wake_command("saat kaç") is None
+
+
+@pytest.mark.parametrize(
+    ("transcript", "command"),
+    [
+        # Uçtan uca denemede Whisper'ın gerçekten yazdığı biçimler.
+        ("Artemiz tarayıcıyı aç", "tarayıcıyı aç"),
+        ("Arteniz, ses seviyesini kıs.", "ses seviyesini kıs."),
+        ("Ar temiz bilgisayarı kapat", "bilgisayarı kapat"),
+        ("Arkemiz müziği durdur", "müziği durdur"),
+        ("artemiş saat kaç", "saat kaç"),
+        ("Artemıs", ""),
+    ],
+)
+def test_wake_word_accepts_close_spellings(transcript: str, command: str):
+    controller = object.__new__(VoiceController)
+    controller.config = VoiceConfig(wake_word="artemis", followup_seconds=8)
+    controller.clock = lambda: 10.0
+    controller._followup_until = 0.0
+    controller.continuous = False
+
+    assert controller._wake_command(transcript) == command
+
+
+@pytest.mark.parametrize(
+    "transcript",
+    [
+        "sesi artırmış", "hatemiz son", "Artemisia çiçeği", "temiz bir oda", "Ar, temiz",
+        "ertesi gün",
+    ],
+)
+def test_wake_word_rejects_other_words(transcript: str):
+    assert find_wake_word(transcript, "artemis") is None
+
+
+def test_short_wake_word_needs_exact_match():
+    assert find_wake_word("jarvis aç", "jarvis") == (0, 6)
+    assert find_wake_word("jarviz aç", "jarvis") == (0, 6)
+    assert find_wake_word("ev aç", "eva") is None
+    assert find_wake_word("eva aç", "eva") == (0, 3)
 
 
 def test_expired_followup_does_not_dispatch():

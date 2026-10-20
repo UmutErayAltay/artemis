@@ -32,6 +32,66 @@ _CONTINUOUS_OFF = {
 }
 
 
+_FOLD = str.maketrans("ışçğöü", "iscgou")
+
+
+def _fold(word: str) -> str:
+    """Türkçe küçük harf + aksan katlama; sondaki z de s sayılır.
+
+    Whisper "Artemis"i "Artemıs/Artemiş" ve en sık "Artemiz" yazıyor (sondaki s'nin
+    yumuşaması); bunlar yazım farkı değil, aynı söz.
+    """
+    folded = word.replace("I", "ı").replace("İ", "i").lower().translate(_FOLD)
+    return folded[:-1] + "s" if folded.endswith("z") else folded
+
+
+def _edit_distance(a: str, b: str, limit: int) -> int:
+    """Levenshtein; ``limit`` aşılınca erken döner (yalnız eşik karşılaştırması gerekir)."""
+    if abs(len(a) - len(b)) > limit:
+        return limit + 1
+    previous = list(range(len(b) + 1))
+    for i, char_a in enumerate(a, 1):
+        current = [i]
+        for j, char_b in enumerate(b, 1):
+            current.append(min(
+                previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (char_a != char_b),
+            ))
+        if min(current) > limit:
+            return limit + 1
+        previous = current
+    return previous[-1]
+
+
+def find_wake_word(transcript: str, wake_word: str) -> tuple[int, int] | None:
+    """Uyandırma sözcüğünün transcript'teki (başlangıç, bitiş) konumu; yoksa None.
+
+    Tek sözcüklü uyandırmada yakın yazımlar da kabul edilir: uçtan uca denemede Whisper
+    "Artemis"i çoğu kez "Artemiz", "Arteniz", "Ar temiz" yazdı ve komutlar kayboldu.
+    Katlamadan sonra 5+ harfli sözcükte en çok bir harf farkı kabul edilir (daha kısada tam
+    eşleşme); boşlukla bölünmüş iki parça birleşik de denenir. İki harf farkı fazla
+    gevşekti: "artırmış" da "artemis" sayılıyordu. Bu yalnız dinleme kapısıdır, onay değildir:
+    her araç yine SafetyGate'ten geçer. Çok sözcüklü uyandırma ifadesi tam eşleşme ister.
+    """
+    wake = _fold(wake_word)
+    if not wake.isalnum():
+        match = re.search(
+            rf"(?<!\w){re.escape(wake_word)}(?!\w)", transcript,
+            flags=re.IGNORECASE | re.UNICODE,
+        )
+        return match.span() if match else None
+    limit = 1 if len(wake) >= 5 else 0
+    tokens = list(re.finditer(r"\w+", transcript))
+    for index, token in enumerate(tokens):
+        word = _fold(token.group())
+        if _edit_distance(word, wake, limit) <= limit:
+            return token.span()
+        if index + 1 < len(tokens) and transcript[token.end():tokens[index + 1].start()] == " ":
+            joined = word + _fold(tokens[index + 1].group())
+            if len(word) >= 2 and _edit_distance(joined, wake, limit) <= limit:
+                return token.start(), tokens[index + 1].end()
+    return None
+
+
 @dataclass(frozen=True)
 class AudioFrame:
     pcm: bytes = field(repr=False)
@@ -325,10 +385,7 @@ class VoiceController:
             and self._output_requires_wake
             and self._spoken_text
             and segment.speech_start <= self._spoken_until
-            and not re.search(
-                rf"(?<!\w){re.escape(self.config.wake_word)}(?!\w)",
-                transcript, flags=re.IGNORECASE | re.UNICODE,
-            )
+            and find_wake_word(transcript, self.config.wake_word) is None
         ):
             self.on_transcript("Ses kesildi; yeni komut için Artemis diyerek başla.")
             return
@@ -370,10 +427,10 @@ class VoiceController:
 
     def _continuous_toggle(self, transcript: str) -> bool | None:
         """Yalnız (uyandırma sözcüğü + ) kip cümlesinden ibaret söz; LLM'e gitmez."""
+        span = find_wake_word(transcript, self.config.wake_word)
+        if span is not None and not self._speech_words(transcript[: span[0]]):
+            transcript = transcript[span[1]:]
         words = self._speech_words(transcript)
-        wake = self._speech_words(self.config.wake_word)
-        if words[: len(wake)] == wake:
-            words = words[len(wake):]
         if tuple(words) in _CONTINUOUS_ON:
             return True
         if tuple(words) in _CONTINUOUS_OFF:
@@ -427,10 +484,9 @@ class VoiceController:
 
     def _wake_command(self, transcript: str) -> str | None:
         """None: wake word yok/expired; boş dize: wake word tek başına."""
-        word = re.escape(self.config.wake_word)
-        match = re.search(rf"(?<!\w){word}(?!\w)", transcript, flags=re.IGNORECASE | re.UNICODE)
-        if match:
-            tail = transcript[match.end() :].lstrip(" \t,.;:!?-")
+        span = find_wake_word(transcript, self.config.wake_word)
+        if span is not None:
+            tail = transcript[span[1] :].lstrip(" \t,.;:!?-")
             if not tail.strip(" \t,.;:!?-"):
                 self._followup_until = self.clock() + self.config.followup_seconds
                 return ""
