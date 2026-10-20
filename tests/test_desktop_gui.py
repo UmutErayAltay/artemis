@@ -483,6 +483,36 @@ def test_settings_apply_restarts_runtime_with_selected_device_and_keeps_model(
         _close_cleanly(app, window)
 
 
+def test_noise_suppression_controls_load_enable_and_save(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from jarvis.channels.desktop.settings_panel import SettingsPanel
+    from jarvis.config.settings import load_settings
+    from tests.test_settings_panel import config
+
+    path = config(tmp_path)
+    monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
+    panel = SettingsPanel(path)
+    assert not panel.noise_suppression.isChecked() and not panel.noise_level.isEnabled()
+    assert panel.noise_level.currentData() == "orta"
+    panel.noise_suppression.setChecked(True)
+    assert panel.noise_level.isEnabled()
+    panel.noise_level.setCurrentIndex(panel.noise_level.findData("guclu"))
+    from jarvis.channels.desktop.settings_panel import save_choices
+
+    save_choices(
+        path, None,
+        noise_suppression=panel.noise_suppression.isChecked(),
+        noise_suppression_level=str(panel.noise_level.currentData()),
+    )
+    panel.refresh()
+    voice = load_settings(path).voice
+    assert voice.noise_suppression and voice.noise_suppression_level == "guclu"
+    assert panel.noise_suppression.isChecked() and panel.noise_level.currentData() == "guclu"
+    panel.noise_suppression.setChecked(False)
+    assert not panel.noise_level.isEnabled()
+
+
 def test_step_block_is_wide_enough_for_its_longest_visible_line(app: QApplication) -> None:
     # Sola hizalı blok, sarılan etiketin küçük ipucuna sıkışınca satırlar üst üste biniyordu.
     from jarvis.channels.desktop.steps import StepLine

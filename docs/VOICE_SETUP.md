@@ -88,6 +88,36 @@ seçip `voice.edge_voice` alanına yazın; `voice.tts_backend: edge`, FFmpeg yol
 `voice.allow_cloud_tts_text: true` gerekir. Bu ayar yanıt metninin dış servise
 gönderilmesine izin verir.
 
+## Gürültü engelleme (isteğe bağlı, ADR 0037)
+
+DeepFilterNet3, işlemcide çalışır (ekran kartı gerekmez) ve mikrofon sesini STT/VAD'a
+gitmeden temizler. Yankı gidermez: asistanın hoparlör sesi mikrofona giriyorsa kulaklık
+kullanın ya da mevcut yankı korumalarına (ADR 0022) güvenin.
+
+1. `pip install -e ".[voice]"` (onnxruntime ve numpy dahildir; torch gerekmez).
+2. Modeli bir kez indirin; betik arşivi ve her dosyayı sha256 ile doğrular, NOTICE yazar:
+
+   ```powershell
+   python scripts/fetch_noise_model.py            # models/deepfilternet3
+   python scripts/fetch_noise_model.py --dest D:\modeller\deepfilternet3
+   ```
+
+3. `config/config.yaml` içinde (göreli yol config dizinine göre çözülür):
+
+   ```yaml
+   voice:
+     noise_suppression: true
+     noise_suppression_level: orta   # hafif (12 dB) | orta (24 dB) | guclu (sınırsız)
+     noise_model_dir: ../models/deepfilternet3
+   ```
+
+   Ya da ayarlar panelinde **Gürültü engelleme** kutusunu işaretleyip düzeyi seçin;
+   **Uygula** sesi yeniden başlatır ve değişiklik o zaman geçerli olur.
+
+Model eksik veya bozuksa ses "açılamadı" hatası verir. Çalışma sırasında model hata verirse
+oturum boyunca ham sese dönülür ve sohbette görünür bir ileti çıkar. Ölçüm:
+`python -m bench.denoise_rtf --model-dir models/deepfilternet3`.
+
 ## Gizlilik ve kullanım
 
 Uyandırma sözcüğü **artemis**. Ham mikrofon kaydı diske yazılmaz. Mikrofon yalnız

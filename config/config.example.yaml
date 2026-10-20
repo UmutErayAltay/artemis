@@ -55,6 +55,11 @@ voice:
   barge_in_ms: 180 # Seslendirme sırasında bu kadar sürekli konuşma sesi susturur.
   require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
   continuous_mode: false # true: "artemis" demeden dinler (ADR 0024).
+  # Gürültü engelleme (ADR 0037): DeepFilterNet3, işlemcide çalışır, ekran kartı gerekmez.
+  # Modeli bir kez `python scripts/fetch_noise_model.py` ile indirin. Yankı giderme DEĞİLDİR.
+  noise_suppression: false
+  noise_suppression_level: orta # hafif (12 dB sınır) | orta (24 dB) | guclu (sınırsız)
+  # noise_model_dir: ../models/deepfilternet3
   pre_roll_ms: 300
   max_utterance_seconds: 15
   queue_frames: 32

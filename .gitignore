@@ -23,3 +23,6 @@ reports/
 models/
 bench/audio/
 .DS_Store
+
+# Gürültü engelleme modeli (scripts/fetch_noise_model.py); ADR 0037
+/models/

@@ -73,6 +73,11 @@ class VoiceConfig(BaseModel):
     barge_in_ms: int = Field(default=180, ge=100, le=1000)
     require_wake_during_output: bool = True
     continuous_mode: bool = False
+    # ADR 0037: DeepFilterNet3 gürültü engelleme (CPU). Düzey bastırma sınırını (dB) belirler:
+    # hafif 12, orta 24, güçlü sınırsız; güçlü bastırma Whisper doğruluğunu düşürebilir.
+    noise_suppression: bool = False
+    noise_suppression_level: Literal["hafif", "orta", "guclu"] = "orta"
+    noise_model_dir: Path | None = None
     pre_roll_ms: int = Field(default=300, ge=0, le=1000)
     max_utterance_seconds: float = Field(default=15.0, gt=0, le=120)
     queue_frames: int = Field(default=32, ge=2, le=256)
@@ -432,7 +437,7 @@ def load_settings(path: Path) -> Settings:
         value = getattr(settings, field)
         updates[field] = value if value.is_absolute() else (base / value).resolve()
     voice_updates: dict[str, Path] = {}
-    for field in ("stt_model", "piper_model", "piper_config"):
+    for field in ("stt_model", "piper_model", "piper_config", "noise_model_dir"):
         value = getattr(settings.voice, field)
         if value is not None:
             path_value = value

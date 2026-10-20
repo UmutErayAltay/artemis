@@ -20,6 +20,9 @@ jobs:
       - run: python -m pip install -e ".[dev]"
       # Embedding indeksi (npz önbellek, artımlı güncelleme) numpy ister; fastembed modeli indirmez.
       - run: python -m pip install numpy==2.5.3
+      # Gürültü engelleme (ADR 0037): saf DSP ve sahte çalıştırıcı testleri onnxruntime ister;
+      # gerçek model testleri JARVIS_DFN_MODEL_DIR yoksa atlanır.
+      - run: python -m pip install onnxruntime==1.31.0
       - run: pytest -q
       - run: python -m bench.run --sahte
       - run: python -m bench.voice_latency --sahte --iterations 3

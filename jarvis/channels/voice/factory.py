@@ -16,7 +16,12 @@ from jarvis.channels.voice.adapters import (
     SoundDeviceSink,
     WebRTCVAD,
 )
-from jarvis.channels.voice.core import SpeechSynthesizer, VoiceController
+from jarvis.channels.voice.core import Microphone, SpeechSynthesizer, VoiceController
+from jarvis.channels.voice.denoise import (
+    NOISE_LEVEL_ATTEN_DB,
+    DeepFilterNetDenoiser,
+    DenoisedMicrophone,
+)
 
 RunCommand = Callable[[str], Awaitable[RunResult]]
 StateCallback = Callable[[str], None]
@@ -32,7 +37,23 @@ async def build_voice_controller(
     burada bağlanmaz; onay yalnız ``create_runtime``'a verilen ekran onayıdır.
     """
     settings = runtime.settings
-    microphone = SoundDeviceMicrophone(settings.voice, device=settings.voice.input_device)
+    microphone: Microphone = SoundDeviceMicrophone(
+        settings.voice, device=settings.voice.input_device
+    )
+    if settings.voice.noise_suppression:
+        model_dir = settings.voice.noise_model_dir
+        if model_dir is None:
+            raise ValueError(
+                "voice.noise_model_dir için DeepFilterNet3 modeli gerekli; "
+                "`python scripts/fetch_noise_model.py` ile indirin."
+            )
+        denoiser = await asyncio.to_thread(
+            DeepFilterNetDenoiser,
+            model_dir,
+            atten_lim_db=NOISE_LEVEL_ATTEN_DB[settings.voice.noise_suppression_level],
+            frame_samples=settings.voice.sample_rate * settings.voice.frame_ms // 1000,
+        )
+        microphone = DenoisedMicrophone(microphone, denoiser, on_state)
     sink = SoundDeviceSink()
     recognizer = FasterWhisperRecognizer(settings.voice)
     await asyncio.to_thread(recognizer.prepare)

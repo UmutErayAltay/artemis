@@ -101,3 +101,33 @@ def test_continuous_mode_choice_is_saved_and_defaults_off(tmp_path: Path) -> Non
     assert load_settings(path).voice.continuous_mode is True
     save_choices(path, None, continuous_mode=False)
     assert load_settings(path).voice.continuous_mode is False
+
+
+def test_noise_suppression_defaults_off_and_choices_are_saved(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    voice = load_settings(path).voice
+    assert (voice.noise_suppression, voice.noise_suppression_level) == (False, "orta")
+    assert voice.noise_model_dir is None
+    save_choices(path, None, noise_suppression=True, noise_suppression_level="guclu")
+    voice = load_settings(path).voice
+    assert (voice.noise_suppression, voice.noise_suppression_level) == (True, "guclu")
+    save_choices(path, None)  # verilmeyen anahtarlar korunur
+    assert load_settings(path).voice.noise_suppression is True
+    save_choices(path, None, noise_suppression=False)
+    voice = load_settings(path).voice
+    assert (voice.noise_suppression, voice.noise_suppression_level) == (False, "guclu")
+
+
+def test_noise_model_dir_is_resolved_relative_to_config(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["voice"]["noise_model_dir"] = "../models/deepfilternet3"
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    expected = (tmp_path / "../models/deepfilternet3").resolve()
+    assert load_settings(path).voice.noise_model_dir == expected
+
+
+def test_invalid_noise_level_is_rejected(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    with pytest.raises(ValueError):
+        save_choices(path, None, noise_suppression_level="cok-guclu")

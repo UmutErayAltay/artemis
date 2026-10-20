@@ -37,6 +37,8 @@ def save_choices(
     allow_all_applications: bool | None = None,
     code_agent: dict[str, Any] | None = None,
     continuous_mode: bool | None = None,
+    noise_suppression: bool | None = None,
+    noise_suppression_level: str | None = None,
 ) -> None:
     """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir."""
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
@@ -44,6 +46,10 @@ def save_choices(
     raw.setdefault("voice", {})["input_device"] = device
     if continuous_mode is not None:
         raw["voice"]["continuous_mode"] = continuous_mode
+    if noise_suppression is not None:
+        raw["voice"]["noise_suppression"] = noise_suppression
+    if noise_suppression_level is not None:
+        raw["voice"]["noise_suppression_level"] = noise_suppression_level
     if applications is not None:
         raw["applications"] = applications
         raw["close_without_confirmation"] = [
@@ -209,6 +215,23 @@ class SettingsPanel(QWidget):
         layout.addLayout(form)
         self.continuous_mode = QCheckBox("Kesintisiz sohbet (Artemis demeden dinle)")
         layout.addWidget(self.continuous_mode)
+        self.noise_suppression = QCheckBox("Gürültü engelleme")
+        self.noise_suppression.setToolTip(
+            "DeepFilterNet3; işlemcide çalışır, ekran kartı gerekmez. Yankı gidermez. "
+            "Model dosyaları gerekir (scripts/fetch_noise_model.py). "
+            "Değişiklik ses yeniden başlayınca uygulanır."
+        )
+        layout.addWidget(self.noise_suppression)
+        self.noise_level = QComboBox()
+        for label, key in (("Hafif", "hafif"), ("Orta", "orta"), ("Güçlü", "guclu")):
+            self.noise_level.addItem(label, key)
+        self.noise_level.setAccessibleName("Gürültü engelleme düzeyi")
+        self.noise_level.setToolTip(
+            "Güçlü bastırma konuşma tanıma doğruluğunu düşürebilir; Orta önerilir."
+        )
+        self.noise_level.setEnabled(False)
+        self.noise_suppression.toggled.connect(self.noise_level.setEnabled)
+        layout.addWidget(self.noise_level)
         self.advanced_devices = QCheckBox("Sanal ve diğer ses girişlerini göster")
         self.advanced_devices.toggled.connect(self._toggle_device_detail)
         layout.addWidget(self.advanced_devices)
@@ -294,6 +317,7 @@ class SettingsPanel(QWidget):
             self.remove_application_button.setEnabled(False)
             self.advanced_devices.setEnabled(False)
             self.continuous_mode.setEnabled(False)
+            self.noise_suppression.setEnabled(False)
             self.all_applications.setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
                            self.github_auto, self.github_button):
@@ -310,6 +334,11 @@ class SettingsPanel(QWidget):
             self.continuous_mode.blockSignals(True)
             self.continuous_mode.setChecked(settings.voice.continuous_mode)
             self.continuous_mode.blockSignals(False)
+            self.noise_suppression.setChecked(settings.voice.noise_suppression)
+            self.noise_level.setCurrentIndex(
+                max(0, self.noise_level.findData(settings.voice.noise_suppression_level))
+            )
+            self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self.applications = dict(settings.applications)
             self._refresh_applications()
             self.all_applications.setChecked(settings.allow_all_applications)

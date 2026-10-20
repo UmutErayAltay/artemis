@@ -756,6 +756,9 @@ class DesktopBridge:
         if state.startswith("mode:"):
             self._events.put(State("voice_mode", state.removeprefix("mode:")))
             return
+        if state.startswith("denoise:"):
+            self._events.put(State("voice_denoise", state.removeprefix("denoise:")))
+            return
         if state.startswith("heard:"):
             self._events.put(State("voice_heard", state.removeprefix("heard:")))
             return

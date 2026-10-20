@@ -1020,6 +1020,8 @@ class DesktopWindow(QMainWindow):
                 allow_all_applications=self.settings_panel.all_applications.isChecked(),
                 code_agent=self.settings_panel.github_values(),
                 continuous_mode=self.settings_panel.continuous_mode.isChecked(),
+                noise_suppression=self.settings_panel.noise_suppression.isChecked(),
+                noise_suppression_level=str(self.settings_panel.noise_level.currentData()),
             )
         except (OSError, ValueError, KeyError, TypeError):
             self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
@@ -1333,6 +1335,13 @@ class DesktopWindow(QMainWindow):
             elif event.state == "voice_heard":
                 self.settings_panel.last_heard.setText(event.message)
                 self.pet.heard(event.message)
+            elif event.state == "voice_denoise":
+                if event.message == "off":
+                    self._append_chat(
+                        "Jarvis",
+                        "Gürültü engelleme hata verdi ve bu oturumda kapatıldı; "
+                        "ses işlenmeden devam ediyor.",
+                    )
             elif event.state == "voice_error":
                 self._append_chat("Jarvis", event.message)
                 self.pet.flash_error()
