@@ -6,48 +6,81 @@ VAD ve Whisper bu seviyede boş/yanlış parça üretebiliyor. Mikrofon yolunda 
 korumaları ADR 0022'dedir). Kullanıcı Krisp benzeri, RTX gerektirmeyen, ayardan açılıp
 kapanan bir çözüm istedi.
 
-**Karar:** DeepFilterNet3'ün resmi ONNX dışa aktarımı (enc, erb_dec, df_dec) onnxruntime CPU
-(tek iş parçacığı) ile çalışır; STFT, ERB bantları, özellik normalizasyonu, derin filtre ve
-ISTFT `libDF` (Rust) kaynağından numpy'a taşındı (`jarvis/channels/voice/denoise.py`).
-`voice.noise_suppression` (varsayılan kapalı), `noise_suppression_level` ve `noise_model_dir`
-config alanlarıdır; panelde onay kutusu + düzey kutusu vardır. Model dosyaları
-`scripts/fetch_noise_model.py` ile bir kez indirilir; arşiv ve her dosya sha256'ya sabitlidir
-(çalışma anında indirme yok, yükleme öncesi her açılışta yeniden doğrulanır).
-`noise_model_dir` verilmezse `<depo>/models/deepfilternet3` kullanılır; tek sabit
-(`jarvis/config/model_paths.py`) hem runtime hem fetch betiğince kullanılır (cwd ve config konumundan bağımsız).
-Model kurulamazsa (eksik dizin, sha256 uyuşmazlığı, onnxruntime yok) ses hattı DÜŞMEZ: tek uyarı
+**Karar:** DeepFilterNet3, resmi checkpoint'ten türetilmiş DURUMLU bir ONNX adım modeliyle
+(`jarvis/channels/voice/models/dfn3/dfn3_step.onnx`, yaklaşık 8 MB, pakete dahil) onnxruntime CPU
+(tek iş parçacığı) üzerinde çalışır: her 10 ms'lik hop için model bir kez çalışır, GRU gizli
+durumları ve nedensel evrişim geçmişi açık girdi/çıktıdır. STFT, ERB bantları, özellik
+normalizasyonu, derin filtre ve ISTFT `libDF` (Rust) kaynağından numpy'a taşındı
+(`jarvis/channels/voice/denoise.py`). `voice.noise_suppression` (varsayılan kapalı),
+`noise_suppression_level` ve `noise_model_dir` config alanlarıdır; panelde onay kutusu + düzey
+kutusu vardır. Model depoda durur, İNDİRME YOKTUR; kodda sabitlenmiş sha256 ile her açılışta
+doğrulanır. `noise_model_dir` verilmezse paket içi dizin kullanılır (tek sabit:
+`jarvis/config/model_paths.py`; cwd ve config konumundan bağımsız); verilirse aynı hash'li
+`dfn3_step.onnx` aranır, farklı dosya ValueError ile reddedilir.
+Model kurulamazsa (eksik dosya, sha256 uyuşmazlığı, onnxruntime yok) ses hattı DÜŞMEZ: tek uyarı
 kaydı + `denoise:unavailable:<neden>` durumu (sohbette görünür) ile ham mikrofonla sürülür.
 Çalışma anında hata olursa `DenoisedMicrophone` TEK uyarı kaydı yazar, oturum boyunca ham
 sese döner ve `denoise:off` durumu sohbette görünür; sessizce çalışıyormuş gibi davranmaz.
 
+**Tarihçe / neden durumlu:** İlk sürüm resmi ONNX dışa aktarımını (enc, erb_dec, df_dec) kullandı;
+bu grafikler TAM DİZİ çalışır ve GRU durumunu gizler. Akışta her 10 hop'ta son 110 hop yeniden
+çalıştırılıyor, gizli durum 100 hop'luk bağlamla yaklaşıklanıyordu: her hop ~11 kez işlenir, akış
+çevrimdışıdan 19.3 dB (SI-SDR 17.2 vs 20.0) uzaktı ve 80 ms blok toplama gecikmesi vardı.
+Adım modeli bunların hepsini kaldırır. Resmi grafikler artık yalnız parite referansıdır
+(`enhance_fullseq`, `OnnxGraphRunner`, `scripts/fetch_noise_model.py`).
+
+**Adım modeli:** `scripts/export_stateful_dfn.py` (yalnız torch venv'inde çalışan geliştirme aracı;
+çalışma anı bağımlılığı değildir) resmi `DeepFilterNet3.zip` checkpoint'ini (sha256 doğrulanır)
+tek kare işleyen bir modüle çevirir. Durumlar dört adlı tensörde toplanır (float32, toplu boyut 1):
+`gru_h [5,1,256]` (enc.emb_gru, erb_dec.emb_gru x2, df_dec.df_gru x2), `erb_hist [1,1,2,32]`
+(erb_conv0 3x3 girdi geçmişi), `spec_hist [1,2,2,96]` (df_conv0 3x3), `c0_hist [1,64,4,96]`
+(df_convp, `df_pathway_kernel_size_t=5`). Zaman çekirdeği 1 olan tüm diğer evrişimler (transposed
+dahil) durumsuzdur; betik bunu doğrular. Başlangıç durumu sıfırdır (tam dizi modelin sıfır
+dolgusuyla aynı). Betik, dışa aktarmadan ÖNCE adım modelini tam diziye karşı doğrular ve 1e-4 aşılırsa
+yazmaz: torch `DfNet.forward` karşısında en büyük mutlak hata m 1.2e-6, coefs 1.0e-6, lsnr 2.1e-5;
+resmi ONNX grafikleri karşısında 1.9e-6 / 1.5e-6 / 4.2e-5; dışa aktarılan ONNX (onnxruntime) için
+8.6e-7 / 1.1e-6 / 2.5e-5 (600 kare). Her GRU katmanı ve her evrişim geçmişi için durumu bozan
+mutasyon bu doğrulamada hatayı 0.04–26 mertebesine çıkarır. Çıktı deterministiktir (betik iki kez
+çalıştırıldığında aynı sha256), `dfn3_step.json` manifesti kaynak sha256'ları, sürümleri ve
+parite sayılarını taşır; `NOTICE` MIT/Apache-2.0 ve Hendrik Schröter'i belirtir (türev çalışma).
+
+**Hizalama ve eşikler:** İleri bakış (2 hop) modelin DIŞINDADIR: t. çıktı spektrumun t-2. karesine
+aittir (resmi grafiklerle aynı sözleşme), bu yüzden t. hop gelince t-2. kare tamamlanır; ilk iki
+çıktı atılır. libDF (`tract.rs`) kodlayıcıyı her karede çalıştırır, ERB/DF kod çözücüyü yalnız
+`apply_stages` aşamayı uygulayacaksa. Varsayılan eşiklerde (-15/35/35) lsnr çıktısı [-15, 35]
+aralığındadır; kod çözücüler hiç atlanmaz, durum ilerlemesi libDF ile aynıdır. Adım modeli kod
+çözücüleri her zaman çalıştırır; yalnız özel, daha dar eşiklerde libDF'in atlanan karelerde
+dondurduğu kod çözücü GRU durumları burada ilerler (uygulanan aşamalar aynıdır).
+
 **Neden başkası değil:** RNNoise daha düşük kalitelidir. Torch'lu DeepFilterNet ağırdır ve
 `deepfilterlib` için cp312 tekeri yoktur. NVIDIA Broadcast RTX gerektirir.
 
-**Mühendislik:** ONNX grafikleri TAM DİZİ çalışır, GRU durumu dışarı verilmez. Akışta her
-`block_frames` (10) yeni hop'ta son `context_frames + block_frames` hop üzerinde çıkarım yapılır,
-yalnız ileri bakışı (2 hop) karşılanmış kareler tutulur; gizli durum bağlam penceresiyle
-yaklaşıklanır. Grafiğin t. çıktısı t-2. kareye aittir (ölçülerek doğrulandı). Üç ölçüm
-(tests/test_voice_denoise.py; noisy_snr0.wav, 10.6 sn):
+**Ölçümler** (tests/test_voice_denoise.py; noisy_snr0.wav, 10.6 sn; bu makine, 1 iş parçacığı):
 
-- Çevrimdışı yol ↔ resmi Rust `deep-filter -D` çıktısı: **65.15 dB** SNR (hedef ≥ 30).
-- Akış yolu ↔ çevrimdışı (16 kHz): bağlam 50 → 11.8 dB, 100 → 17.6 dB, 300 → 22.8 dB,
-  tüm dosya (1000) → 73.6 dB (yani akış mekaniği tam; fark yalnız GRU durumunun yaklaşıklığı).
-- SI-SDR (temiz referansa göre): gürültülü 6.1 dB → çevrimdışı 20.0 dB.
+- Durumlu çevrimdışı yol ↔ resmi tam dizi grafikler (48 kHz): **135.62 dB** SNR (en büyük mutlak
+  fark 1.3e-7, yani float hassasiyeti).
+- Durumlu çevrimdışı ↔ resmi Rust `deep-filter -D` çıktısı: **65.15 dB** (önceki sürümle aynı).
+- Akış ↔ çevrimdışı (16 kHz, gecikme hizalı): **73.67 dB** (eski bağlam yaklaşıklığı: 17.6 dB). Kalan
+  fark akışın int16 nicemlemesidir. Sentetik sinyalde 75.6 dB (CI testi, eşik 40 dB).
+- SI-SDR (temiz referansa göre): gürültülü 6.1 dB → 48 kHz çevrimdışı 20.0 dB. 16 kHz giriş yolunda
+  (mikrofonun gerçek yolu) çevrimdışı ve akış ikisi de **16.21 dB**: akış artık çevrimdışıyla
+  birebir aynıdır; 20.0'a kıyasla fark akışın değil 16 kHz bant sınırlı girdinin etkisidir
+  (model 8 kHz üstünü görmez). Eski akış aynı protokolde 17.17 dB ölçtü (çevrimdışıdan "iyi" olması
+  yaklaşıklığın bir yan etkisiydi, eşdeğerlik değil).
+- Gecikme: **34 ms** (30 ms STFT+ileri bakış, 4 ms yeniden örnekleme FIR), eskiden 114 ms.
+- Bench (`python -m bench.denoise_rtf`, 20 sn gürültü, 20 ms kare): yeni kare başına ort. 2.2–2.4 ms,
+  en kötü 3.7–5.7 ms, CPU %10.8–11.9; eski ort. 4.0–4.3 ms, en kötü 39.6–56.4 ms, CPU %20.0–21.1.
+  Maliyetin ana kalemi hop başına tek model çağrısıdır (~1 ms).
 
 **Sonuçlar:**
 
-- Varsayılan bağlam 100: 50'de akış çevrimdışıdan belirgin kötü (11.8 dB); 100 ≈ %19 CPU ile
-  makul ara nokta (17.6 dB; SI-SDR akış 17.2 dB, çevrimdışı 20.0, gürültülü 6.1). 300 → 22.8 dB
-  ama ≈ %35+ çekirdek.
-- Gecikme (varsayılan blok 10, bağlam 100): 114 ms = 30 ms STFT+ileri bakış, 80 ms blok
-  toplama (en kötü durum, hop başına 10 ms), 4 ms yeniden örnekleme FIR. Blok küçülürse gecikme
-  ve ardışık çıkarım yükü artar/azalır (blok 5: 74 ms, blok 2: 34 ms).
-- CPU (1 iş parçacığı, bu makine): bağlam 50 ≈ %12 çekirdek (kare başına 2.4 ms ort.),
-  bağlam 100 ≈ %19 (3.8 ms). Maliyetin nedeni durumsuz tam dizi grafikler: her blokta
-  `bağlam + blok` (110) hop yeniden çıkarılır, yani her hop ~11 kez işlenir; durumlu (GRU durumu
-  dışarı verilen) bir ONNX dışa aktarımı bunu kaldırır, bu turda yapılmadı. Çıkarım gerçek zamandan
-  yavaşlar veya çıktı tamponu boş kalırsa (`underruns`, `late_blocks`) hız sınırlı Türkçe uyarı yazılır. Çıkarım blok başına bir kez olduğundan en kötü kare 28–32 ms
-  sürebilir; ses iş parçacığında (`asyncio.to_thread`) çalışır, olay döngüsünü bloklamaz.
+- Bağlam/blok ayarları kalktı; akış yolunda blok toplama, bağlam penceresi ve yeniden çıkarım yok.
+  Çıkarım hop başına bir kez ve eşit sürelidir, en kötü kare 20 ms bütçesinin çok altındadır.
+  Çıkarım gerçek zamandan yavaşlar veya çıktı tamponu boş kalırsa (`underruns`, `late_frames`)
+  hız sınırlı Türkçe uyarı yazılır. Ses iş parçacığında (`asyncio.to_thread`) çalışır.
+- Model dosyası depoda durur (`.gitignore`'daki `models/` kuralına bu dizin için istisna eklendi).
+  Yeniden üretim: `scripts/export_stateful_dfn.py` (torch venv'i); yeni dosyanın sha256'sı
+  `denoise.py::STEP_MODEL_SHA256` ile birlikte güncellenir.
 - ASR ödünleşimi: güçlü bastırma Whisper doğruluğunu düşürebilir (konuşma bozulur). Düzeyler
   bastırma sınırıdır (libDF `atten_lim_db`): hafif 12 dB, orta 24 dB (varsayılan), güçlü
   sınırsız. Bu repoda Whisper WER'i ölçülmedi; kabul için kendi mikrofonunuzla

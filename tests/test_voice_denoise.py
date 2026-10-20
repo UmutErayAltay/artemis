@@ -1,6 +1,8 @@
 """Gürültü engelleme (ADR 0037): saf DSP, akış sarmalayıcı, model bütünlüğü, gerçek model.
 
-Gerçek model testleri ``JARVIS_DFN_MODEL_DIR`` (enc/erb_dec/df_dec.onnx) olmadan atlanır.
+Pakete dahil durumlu adım modeli (``models/dfn3``) her zaman vardır; onunla çalışan testler
+sentetik sinyalle CI'da da koşar. Resmi tam dizi grafiklerle parite testleri
+``JARVIS_DFN_MODEL_DIR`` (enc/erb_dec/df_dec.onnx) olmadan atlanır.
 ``JARVIS_DFN_ASSETS`` DeepFilterNet ``assets`` dizinini (noisy_snr0.wav, clean_freesound_33711.wav),
 ``JARVIS_DFN_GOLDEN_WAV`` resmi ``deep-filter -D`` çıktısını gösterir; yoksa ilgili test atlanır.
 """
@@ -22,21 +24,35 @@ pytest.importorskip("onnxruntime")
 
 from jarvis.channels.voice import denoise as dn  # noqa: E402
 from jarvis.channels.voice.core import AudioFrame  # noqa: E402
+from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR  # noqa: E402
 
 
-class IdentityRunner:
-    """mask=1, DF merkez katsayı=1 (j. kare için j kareyi aynen verir), lsnr=0."""
-
-    def __init__(self) -> None:
-        self.calls = 0
+class IdentityGraphRunner:
+    """Tam dizi: mask=1, DF merkez katsayı=1 (j. kare için j kareyi aynen verir), lsnr=0."""
 
     def infer(self, feat_erb: Any, feat_spec: Any) -> dn.GraphOutputs:
-        self.calls += 1
         steps = feat_erb.shape[0]
         coefs = np.zeros((steps, dn.NB_DF, dn.DF_ORDER, 2), dtype=np.float32)
         coefs[:, :, 2, 0] = 1.0
         mask = np.ones((steps, dn.NB_ERB), np.float32)
         return dn.GraphOutputs(mask, coefs, np.zeros(steps, np.float32))
+
+
+class IdentityRunner:
+    """Durumlu: IdentityGraphRunner'ın kare kare eşi; çağrı ve sıfırlama sayılır."""
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.resets = 0
+
+    def reset(self) -> None:
+        self.resets += 1
+
+    def step(self, feat_erb: Any, feat_spec: Any) -> dn.StepOutputs:
+        self.calls += 1
+        coefs = np.zeros((dn.NB_DF, dn.DF_ORDER, 2), dtype=np.float32)
+        coefs[:, 2, 0] = 1.0
+        return dn.StepOutputs(np.ones(dn.NB_ERB, np.float32), coefs, 0.0)
 
 
 def _snr(reference: Any, estimate: Any) -> float:
@@ -102,6 +118,8 @@ def test_offline_identity_runner_reconstructs_input_aligned() -> None:
     out = dn.DeepFilterNetDenoiser(runner=IdentityRunner()).enhance_48k(signal)
     assert out.shape == signal.shape
     assert np.abs(out - signal).max() < 1e-5
+    reference = dn.enhance_fullseq(signal, IdentityGraphRunner())  # tam dizi referans yolu
+    assert np.abs(reference - signal).max() < 1e-5
 
 
 def test_resampler_round_trip_snr_after_delay_alignment() -> None:
@@ -131,9 +149,9 @@ def test_atten_lim_follows_libdf_semantics() -> None:
 
 def test_atten_limit_mixes_noisy_back() -> None:
     class ZeroMask(IdentityRunner):
-        def infer(self, feat_erb: Any, feat_spec: Any) -> dn.GraphOutputs:
-            out = super().infer(feat_erb, feat_spec)
-            return dn.GraphOutputs(out.mask * 0, out.coefs * 0, out.lsnr)
+        def step(self, feat_erb: Any, feat_spec: Any) -> dn.StepOutputs:
+            out = super().step(feat_erb, feat_spec)
+            return dn.StepOutputs(out.mask * 0, out.coefs * 0, out.lsnr)
 
     rng = np.random.default_rng(4)
     signal = (rng.standard_normal(24000) * 0.1).astype(np.float32)
@@ -153,29 +171,32 @@ def _stream(den: dn.DeepFilterNetDenoiser, x: Any) -> Any:
     return np.concatenate(out).astype(np.float32) / 32768
 
 
-@pytest.mark.parametrize("block", [1, 2, 5, 10])
-def test_streaming_identity_is_input_delayed_by_documented_delay(block: int) -> None:
+@pytest.mark.parametrize("frame_samples", [160, 320, 480])
+def test_streaming_identity_is_input_delayed_by_documented_delay(frame_samples: int) -> None:
     x = _tone(2.0, 16000, (400.0, 1800.0, 5000.0))
-    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner(), block_frames=block, context_frames=20)
+    runner = IdentityRunner()
+    den = dn.DeepFilterNetDenoiser(runner=runner, frame_samples=frame_samples)
     out = _stream(den, x)
     delay = den.delay_samples
-    assert out.size == x.size - x.size % 320
-    assert den.underruns == 0
+    assert out.size == x.size - x.size % frame_samples
+    assert den.underruns == 0 and runner.calls == out.size // 160  # hop başına tek model çağrısı
     # Isınma sessizliktir; yalnız son 64 örnekte simetrik FIR'ın ön-yankısı görülebilir.
     assert np.abs(out[: delay - 2 * dn.RESAMPLE_DELAY_16K]).max() < 1e-6
     assert _snr(x[300 : out.size - delay - 300], out[delay + 300 : out.size - 300]) > 55
 
 
-def test_streaming_delay_for_defaults_is_documented_value() -> None:
+def test_streaming_delay_is_documented_value_without_block_latency() -> None:
     den = dn.DeepFilterNetDenoiser(runner=IdentityRunner())
-    assert (den.delay_hops, den.delay_samples) == (11, 1824)  # 114 ms
+    assert (den.delay_hops, den.delay_samples) == (3, 544)  # 34 ms (eskiden 114 ms)
 
 
 def test_reset_restarts_stream_deterministically() -> None:
     x = _tone(1.0, 16000, (700.0,))
-    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner())
+    runner = IdentityRunner()
+    den = dn.DeepFilterNetDenoiser(runner=runner)
     first = _stream(den, x)
     den.reset()
+    assert runner.resets == 2  # kurucu + açık reset: model durumu da sıfırlanır
     assert np.array_equal(first, _stream(den, x))
 
 
@@ -187,10 +208,6 @@ def test_process_frame_rejects_wrong_length() -> None:
 
 def test_constructor_validates_parameters() -> None:
     with pytest.raises(ValueError):
-        dn.DeepFilterNetDenoiser(runner=IdentityRunner(), block_frames=0)
-    with pytest.raises(ValueError):
-        dn.DeepFilterNetDenoiser(runner=IdentityRunner(), context_frames=2)
-    with pytest.raises(ValueError):
         dn.DeepFilterNetDenoiser(runner=IdentityRunner(), frame_samples=300)
     with pytest.raises(ValueError):
         dn.DeepFilterNetDenoiser()
@@ -199,18 +216,139 @@ def test_constructor_validates_parameters() -> None:
 # --- Model bütünlüğü ------------------------------------------------------------------
 
 
+VENDORED = DEFAULT_NOISE_MODEL_DIR
+
+
+def test_vendored_model_is_present_and_matches_pinned_hash_and_manifest() -> None:
+    import hashlib
+    import json
+
+    blob = dn.verify_step_model(VENDORED)
+    assert hashlib.sha256(blob).hexdigest() == dn.STEP_MODEL_SHA256
+    manifest = json.loads((VENDORED / "dfn3_step.json").read_text(encoding="utf-8"))
+    assert manifest["onnx_sha256"] == dn.STEP_MODEL_SHA256
+    assert max(manifest["parity"]["torch_full_sequence_max_abs_err"].values()) < 1e-4
+    assert max(manifest["parity"]["official_onnx_max_abs_err"].values()) < 1e-4
+    assert (VENDORED / "NOTICE").is_file()
+    assert {k: tuple(v) for k, v in manifest["inputs"].items() if k in dn.STATE_SHAPES} == (
+        dn.STATE_SHAPES
+    )
+
+
 def test_model_hash_mismatch_raises_value_error(tmp_path: Path) -> None:
-    for name in dn.MODEL_SHA256:
-        (tmp_path / name).write_bytes(b"bozuk")
+    (tmp_path / dn.STEP_MODEL_NAME).write_bytes(b"bozuk")
     with pytest.raises(ValueError, match="sha256"):
         dn.DeepFilterNetDenoiser(tmp_path)
+    # Tek bayt değişmiş gerçek model de reddedilir.
+    blob = bytearray((VENDORED / dn.STEP_MODEL_NAME).read_bytes())
+    blob[-1] ^= 1
+    (tmp_path / dn.STEP_MODEL_NAME).write_bytes(bytes(blob))
+    with pytest.raises(ValueError, match="sha256"):
+        dn.StatefulOnnxRunner(tmp_path)
 
 
 def test_missing_model_dir_and_file_are_os_errors(tmp_path: Path) -> None:
-    with pytest.raises(OSError, match="fetch_noise_model"):
+    with pytest.raises(OSError, match="okunamadı"):
         dn.DeepFilterNetDenoiser(tmp_path / "yok")
-    with pytest.raises(OSError, match="fetch_noise_model"):
+    with pytest.raises(OSError, match="okunamadı"):
         dn.DeepFilterNetDenoiser(tmp_path)
+
+
+def test_official_full_sequence_hash_mismatch_still_raises(tmp_path: Path) -> None:
+    for name in dn.MODEL_SHA256:
+        (tmp_path / name).write_bytes(b"bozuk")
+    with pytest.raises(ValueError, match="sha256"):
+        dn.OnnxGraphRunner(tmp_path)
+
+
+# --- Gerçek adım modeli (pakete dahil; sentetik sinyal, CI'da da koşar) ----------------
+
+
+def _speechlike(seconds: float) -> Any:
+    """Gürültülü konuşma benzeri sinyal (16 kHz, tam ölçekli değil): armonikler + gürültü."""
+    rng = np.random.default_rng(7)
+    t = np.arange(int(seconds * 16000)) / 16000
+    pitch = 130 + 25 * np.sin(2 * np.pi * 0.6 * t)
+    phase = 2 * np.pi * np.cumsum(pitch) / 16000
+    envelope = 0.5 + 0.5 * np.sin(2 * np.pi * 1.3 * t)
+    voiced = sum(np.sin(h * phase) / h for h in range(1, 20)) * envelope
+    noise = rng.standard_normal(t.size) * 0.08
+    return (0.12 * voiced + noise).astype(np.float32)
+
+
+@pytest.fixture(scope="module")
+def vendored() -> dn.DeepFilterNetDenoiser:
+    return dn.DeepFilterNetDenoiser(VENDORED)
+
+
+def _streaming_vs_offline_snr(den: dn.DeepFilterNetDenoiser, x16: Any) -> float:
+    """Akış çıktısı ile aynı girdinin çevrimdışı çıktısı (aynı FIR zinciri), gecikme hizalı."""
+    offline = dn.Downsampler3().process(den.enhance_48k(dn.Upsampler3().process(x16)))
+    streamed = _stream(den, x16)
+    a = streamed[den.delay_hops * 160 :]  # offline yalnız FIR gecikmeli; akış +3 hop daha geç
+    b = offline[: a.size]
+    n = min(a.size, b.size)
+    return _snr(b[200 : n - 200], a[200 : n - 200])
+
+
+def test_stateful_streaming_matches_offline_exactly_after_delay_alignment(
+    vendored: dn.DeepFilterNetDenoiser,
+) -> None:
+    snr = _streaming_vs_offline_snr(vendored, _speechlike(4.0))
+    print(f"\nSENTETİK AKIŞ vs ÇEVRİMDIŞI: {snr:.2f} dB SNR")
+    assert snr >= 40  # fark yalnız akışın int16 nicemlemesidir
+
+
+def test_stateful_output_does_not_depend_on_frame_chunking(
+    vendored: dn.DeepFilterNetDenoiser,
+) -> None:
+    x = _speechlike(2.0)
+    vendored.reset()
+    coarse = _stream(vendored, x)
+    fine = _stream(dn.DeepFilterNetDenoiser(VENDORED, frame_samples=160), x)
+    n = min(coarse.size, fine.size)
+    assert np.abs(coarse[:n] - fine[:n]).max() < 1e-6
+
+
+def test_reset_gives_output_identical_to_fresh_denoiser(
+    vendored: dn.DeepFilterNetDenoiser,
+) -> None:
+    x = _speechlike(2.0)
+    vendored.reset()
+    _stream(vendored, _speechlike(1.0)[::-1].copy())  # durumu (GRU, evrişim, normlar) kirlet
+    vendored.reset()
+    after_reset = _stream(vendored, x)
+    fresh = _stream(dn.DeepFilterNetDenoiser(VENDORED), x)
+    assert np.array_equal(after_reset, fresh)
+
+
+def test_state_actually_carries_across_hops() -> None:
+    """Aynı girdi, geçmişle ve geçmişsiz farklı çıktı verir: GRU/evrişim durumu etkili."""
+    rng = np.random.default_rng(5)
+    erb = (rng.standard_normal((40, dn.NB_ERB)) * 0.3).astype(np.float32)
+    spec = (rng.standard_normal((40, 2, dn.NB_DF)) * 0.3).astype(np.float32)
+    with_history = dn.StatefulOnnxRunner(VENDORED)
+    for t in range(39):
+        with_history.step(erb[t], spec[t])
+    carried = with_history.step(erb[39], spec[39])
+    fresh = dn.StatefulOnnxRunner(VENDORED).step(erb[39], spec[39])
+    assert np.abs(carried.mask - fresh.mask).max() > 1e-3
+    assert np.abs(carried.coefs - fresh.coefs).max() > 1e-3
+
+
+def test_step_runner_state_is_exactly_the_documented_layout() -> None:
+    runner = dn.StatefulOnnxRunner(VENDORED)
+    assert {k: v.shape for k, v in runner._state.items()} == dn.STATE_SHAPES
+    feat_erb = np.zeros(dn.NB_ERB, np.float32)
+    feat_spec = np.zeros((2, dn.NB_DF), np.float32)
+    out = runner.step(feat_erb, feat_spec)
+    assert out.mask.shape == (dn.NB_ERB,) and out.coefs.shape == (dn.NB_DF, dn.DF_ORDER, 2)
+    assert -15.0 <= out.lsnr <= 35.0  # libDF karar aralığı: varsayılan eşiklerde atlama olmaz
+    before = {k: v.copy() for k, v in runner._state.items()}
+    runner.step(feat_erb + 0.1, feat_spec + 0.1)
+    assert any(not np.array_equal(before[k], runner._state[k]) for k in before)
+    runner.reset()
+    assert all(not v.any() for v in runner._state.values())
 
 
 # --- Mikrofon sarmalayıcı -------------------------------------------------------------
@@ -335,11 +473,11 @@ async def test_wrapper_timestamps_never_go_backwards_across_resets() -> None:
 
 async def test_non_finite_output_takes_failure_path(caplog: pytest.LogCaptureFixture) -> None:
     class NanRunner(IdentityRunner):
-        def infer(self, feat_erb: Any, feat_spec: Any) -> dn.GraphOutputs:
-            out = super().infer(feat_erb, feat_spec)
-            return dn.GraphOutputs(out.mask * np.float32("nan"), out.coefs, out.lsnr)
+        def step(self, feat_erb: Any, feat_spec: Any) -> dn.StepOutputs:
+            out = super().step(feat_erb, feat_spec)
+            return dn.StepOutputs(out.mask * np.float32("nan"), out.coefs, out.lsnr)
 
-    den = dn.DeepFilterNetDenoiser(runner=NanRunner(), block_frames=2)
+    den = dn.DeepFilterNetDenoiser(runner=NanRunner())
     with pytest.raises(ValueError, match="sonlu"):
         for _ in range(20):
             den.process_frame(b"\0\0" * 320)
@@ -351,7 +489,7 @@ async def test_non_finite_output_takes_failure_path(caplog: pytest.LogCaptureFix
 
     states: list[str] = []
     mic = dn.DenoisedMicrophone(
-        Inner(0), dn.DeepFilterNetDenoiser(runner=NanRunner(), block_frames=2), states.append
+        Inner(0), dn.DeepFilterNetDenoiser(runner=NanRunner()), states.append
     )
     with caplog.at_level(logging.WARNING, logger=dn.logger.name):
         out = await _collect(mic)
@@ -434,12 +572,14 @@ async def test_reset_from_another_thread_never_raises_inside_frames() -> None:
     assert stamps == sorted(stamps)
 
 
-def test_underruns_and_late_blocks_warn_rate_limited(
+def test_underruns_and_late_frames_warn_rate_limited(
     caplog: pytest.LogCaptureFixture, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import time
 
-    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner(), block_frames=10)
+    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner())
+    # Kararlı akışta tampon asla boşalmaz; model çıktısı gecikirse (burada: üretilmezse) boşalır.
+    monkeypatch.setattr(den, "_advance", lambda *_: np.zeros(0, dtype="float32"))
     with caplog.at_level(logging.WARNING, logger=dn.logger.name):
         for _ in range(3):
             den._fifo = den._fifo[:0]
@@ -454,16 +594,16 @@ def test_underruns_and_late_blocks_warn_rate_limited(
         assert len([r for r in caplog.records if "tampon" in r.getMessage()]) == 2
 
     class Slow(IdentityRunner):
-        def infer(self, feat_erb: Any, feat_spec: Any) -> dn.GraphOutputs:
+        def step(self, feat_erb: Any, feat_spec: Any) -> dn.StepOutputs:
             time.sleep(0.03)
-            return super().infer(feat_erb, feat_spec)
+            return super().step(feat_erb, feat_spec)
 
     caplog.clear()
-    slow = dn.DeepFilterNetDenoiser(runner=Slow(), block_frames=1)  # bütçe 10 ms
+    slow = dn.DeepFilterNetDenoiser(runner=Slow())  # bütçe 20 ms
     with caplog.at_level(logging.WARNING, logger=dn.logger.name):
         for _ in range(4):
             slow.process_frame(b"\0\0" * 320)
-    assert slow.late_blocks >= 1
+    assert slow.late_frames >= 1
     assert len([r for r in caplog.records if "yavaş" in r.getMessage()]) == 1
 
 
@@ -489,12 +629,12 @@ async def test_wrapper_does_not_block_event_loop_during_processing() -> None:
     assert ticks >= 10
 
 
-# --- Gerçek model (JARVIS_DFN_MODEL_DIR) ----------------------------------------------
+# --- Resmi varlıklar ve tam dizi referans (env ile; yoksa atlanır) ----------------------
 
 MODEL_DIR = os.environ.get("JARVIS_DFN_MODEL_DIR")
 ASSETS = Path(os.environ.get("JARVIS_DFN_ASSETS", "/home/user/rikorose/deepfilternet/assets"))
 GOLDEN = os.environ.get("JARVIS_DFN_GOLDEN_WAV")
-real_model = pytest.mark.skipif(not MODEL_DIR, reason="JARVIS_DFN_MODEL_DIR yok")
+official_graphs = pytest.mark.skipif(not MODEL_DIR, reason="JARVIS_DFN_MODEL_DIR yok")
 
 
 def _read_wav(path: Path) -> Any:
@@ -511,50 +651,59 @@ def _assets() -> tuple[Any, Any]:
     return _read_wav(noisy), _read_wav(clean)
 
 
-@pytest.fixture(scope="module")
-def real_denoiser() -> dn.DeepFilterNetDenoiser:
-    assert MODEL_DIR
-    return dn.DeepFilterNetDenoiser(Path(MODEL_DIR))
+@official_graphs
+def test_stateful_offline_matches_official_full_sequence_graphs() -> None:
+    noisy, _ = _assets()
+    reference = dn.enhance_fullseq(noisy, dn.OnnxGraphRunner(Path(MODEL_DIR or "")))
+    ours = dn.DeepFilterNetDenoiser(VENDORED).enhance_48k(noisy)
+    snr = _snr(reference, ours)
+    print(f"\nDURUMLU vs RESMİ TAM DİZİ (48 kHz): {snr:.2f} dB SNR, "
+          f"en büyük mutlak fark {np.abs(reference - ours).max():.2e}")
+    assert snr >= 80  # model eşdeğerliği 1e-4 altında; float hassasiyetine yakın olmalı
 
 
-@real_model
+@official_graphs
 @pytest.mark.skipif(not GOLDEN, reason="JARVIS_DFN_GOLDEN_WAV (deep-filter -D çıktısı) yok")
-def test_offline_matches_rust_golden(real_denoiser: dn.DeepFilterNetDenoiser) -> None:
+def test_stateful_offline_matches_rust_golden(vendored: dn.DeepFilterNetDenoiser) -> None:
     noisy, _ = _assets()
     assert GOLDEN
     golden = _read_wav(Path(GOLDEN))
-    ours = real_denoiser.enhance_48k(noisy)[: golden.size]
+    ours = vendored.enhance_48k(noisy)[: golden.size]
     snr = _snr(golden, ours)
-    print(f"\nPARITE: bizim çıktı vs Rust altın çıktı = {snr:.2f} dB SNR")
+    print(f"\nPARITE: durumlu çıktı vs Rust altın çıktı = {snr:.2f} dB SNR")
     assert snr >= 30
 
 
-@real_model
-def test_streaming_matches_offline_at_16k(real_denoiser: dn.DeepFilterNetDenoiser) -> None:
-    noisy, _ = _assets()
+def test_real_speech_streaming_matches_offline_and_si_sdr(
+    vendored: dn.DeepFilterNetDenoiser,
+) -> None:
+    noisy, clean = _assets()
     size = noisy.size // 3 * 3
     x16 = dn.Downsampler3().process(noisy[:size])
-    # Referans: 48 kHz girdinin çevrimdışı çıktısı, aynı FIR ile 16 kHz'e indirilmiş
-    # (x16 da bu FIR'dan geçtiği için ikisi de 32 örnek geç; akış çıktısı delay_samples sonra
-    # hizalıdır).
-    offline = dn.Downsampler3().process(real_denoiser.enhance_48k(noisy)[:size])
-    den = dn.DeepFilterNetDenoiser(Path(MODEL_DIR or ""))  # varsayılan bağlam 100, blok 10
-    streamed = _stream(den, x16)
-    a = streamed[den.delay_samples :]
-    b = offline[: a.size]
-    n = min(a.size, b.size)
-    snr = _snr(b[200 : n - 200], a[200 : n - 200])
-    print(f"\nAKIŞ vs ÇEVRİMDIŞI (bağlam {den.context_frames}, blok 10): {snr:.2f} dB SNR")
-    assert snr >= 18
+    snr = _streaming_vs_offline_snr(vendored, x16)
+    print(f"\nAKIŞ vs ÇEVRİMDIŞI (gerçek konuşma, durumlu): {snr:.2f} dB SNR")
+    assert snr >= 40
+    # Akışın temiz konuşmaya karşı SI-SDR'ı (16 kHz, gecikme hizalı) çevrimdışıya yakın olmalı.
+    clean16 = dn.Downsampler3().process(clean[:size])  # x16 ile aynı FIR: birbirine hizalı
+    vendored.reset()
+    delay = vendored.delay_samples
+    streamed = _stream(vendored, x16)[delay:]  # girdiye göre toplam gecikme kadar kaydır
+    offline = dn.Downsampler3().process(vendored.enhance_48k(dn.Upsampler3().process(x16)))
+    offline = offline[dn.RESAMPLE_DELAY_16K :]  # yalnız FIR gecikmeli
+    n = min(streamed.size, offline.size, clean16.size) - 2000
+    ref = clean16[1000:n]
+    stream_sdr = _si_sdr(ref, streamed[1000:n])
+    offline_sdr = _si_sdr(ref, offline[1000:n])
+    print(f"SI-SDR vs temiz (16 kHz): akış {stream_sdr:.2f} dB, çevrimdışı {offline_sdr:.2f} dB")
+    assert abs(stream_sdr - offline_sdr) < 0.5
 
 
-@real_model
 def test_noise_reduction_improves_si_sdr_against_clean(
-    real_denoiser: dn.DeepFilterNetDenoiser,
+    vendored: dn.DeepFilterNetDenoiser,
 ) -> None:
     noisy, clean = _assets()
     n = min(noisy.size, clean.size)
-    enhanced = real_denoiser.enhance_48k(noisy)
+    enhanced = vendored.enhance_48k(noisy)
     before = _si_sdr(clean[1000 : n - 1000], noisy[1000 : n - 1000])
     after = _si_sdr(clean[1000 : n - 1000], enhanced[1000 : n - 1000])
     print(f"\nSI-SDR vs temiz: gürültülü {before:.2f} dB -> iyileştirilmiş {after:.2f} dB")

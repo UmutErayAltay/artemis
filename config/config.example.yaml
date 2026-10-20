@@ -56,11 +56,12 @@ voice:
   require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
   continuous_mode: false # true: "artemis" demeden dinler (ADR 0024).
   # Gürültü engelleme (ADR 0037): DeepFilterNet3, işlemcide çalışır, ekran kartı gerekmez.
-  # Modeli bir kez `python scripts/fetch_noise_model.py` ile indirin. Yankı giderme DEĞİLDİR.
+  # Model pakete dahildir (indirme yok), yaklaşık 34 ms gecikme ekler. Yankı giderme DEĞİLDİR.
   noise_suppression: false
   noise_suppression_level: orta # hafif (12 dB sınır) | orta (24 dB) | guclu (sınırsız)
-  # Verilmezse <depo>/models/deepfilternet3 (fetch_noise_model.py varsayılanı, config konumundan bağımsız).
-  # noise_model_dir: ../models/deepfilternet3
+  # Verilmezse pakete dahil model (jarvis/channels/voice/models/dfn3) kullanılır. Başka bir dizin
+  # verilirse içinde aynı sha256'lı dfn3_step.onnx bulunmalıdır; farklı dosya reddedilir.
+  # noise_model_dir: ../models/dfn3
   pre_roll_ms: 300
   max_utterance_seconds: 15
   queue_frames: 32

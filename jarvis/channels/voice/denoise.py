@@ -1,17 +1,28 @@
 """İsteğe bağlı mikrofon gürültü engelleme: DeepFilterNet3 (ONNX) + kendi numpy DSP'miz (ADR 0037).
 
-Resmi ONNX dışa aktarımı üç grafikten oluşur (enc, erb_dec, df_dec) ve TAM DİZİ çalışır:
-GRU durumu grafiğin içindedir, dışarı verilmez. Torch ve ``deepfilterlib`` yoktur; STFT,
-ERB bantları, özellik normalizasyonu, derin filtre ve ISTFT ``libDF`` (Rust) kaynağından
-birebir taşınmıştır: ``libDF/src/lib.rs`` ve ``libDF/src/tract.rs``.
+Akış yolu DURUMLU adım modeli kullanır (``models/dfn3/dfn3_step.onnx``): her 10 ms'lik hop için
+model bir kez çalışır; GRU gizli durumları ve nedensel evrişim geçmişi açık girdi/çıktıdır ve
+hop'lar arasında bu modülde tutulur. Resmi dışa aktarım (enc/erb_dec/df_dec) tam dizi çalıştığı
+ve GRU durumunu gizlediği için eskiden son 110 hop her 10 hop'ta yeniden çalıştırılıyordu
+(~11 kat gereksiz iş, yaklaşık bağlam sonucu, 80 ms blok gecikmesi). Adım modeli resmi
+checkpoint'ten ``scripts/export_stateful_dfn.py`` ile üretilir ve tam dizi modele 1e-4 altında
+uyduğu orada kanıtlanır. Torch ve ``deepfilterlib`` çalışma anında yoktur; STFT, ERB bantları,
+özellik normalizasyonu, derin filtre ve ISTFT ``libDF`` (Rust) kaynağından birebir taşınmıştır:
+``libDF/src/lib.rs`` ve ``libDF/src/tract.rs``.
 
 Gecikme muhasebesi (48 kHz, hop 480): ISTFT yarım pencere (480) + 2 hop ileri bakış
-(``conv_lookahead = df_lookahead = 2``) = 3 hop = 30 ms; ``deep-filter -D`` ile aynıdır.
-Akışta buna blok toplama gecikmesi (``block_frames``) ve 16k<->48k FIR gecikmesi (4 ms) eklenir.
+(``conv_lookahead = df_lookahead = 2``) = 3 hop = 30 ms; ``deep-filter -D`` ile aynıdır. Buna yalnız
+16k<->48k FIR gecikmesi (4 ms) eklenir: toplam 34 ms, blok toplama gecikmesi yoktur.
 
-Akış yolunda her ``block_frames`` yeni hop'ta grafikler son ``context_frames + block_frames``
-hop üzerinde çalışır; yalnız ileri bakışı karşılanmış kare çıktıları tutulur. Gizli GRU durumu
-bu bağlam penceresiyle yaklaşıklanır (ölçüm: tests/test_voice_denoise.py).
+İleri bakış modelin dışındadır: adım modelinin t. çıktısı spektrumun t-2. karesine aittir (resmi
+grafiklerle aynı sözleşme). Bu yüzden t. hop geldiğinde t-2. kare tamamlanır; ilk iki çıktı
+(kare -2, -1) modelin durumunu ısıtır ve atılır.
+
+Eşikler (libDF ``apply_stages``): libDF kodlayıcıyı her karede çalıştırır, ERB/DF kod çözücüyü ise
+yalnız ilgili aşama uygulanacaksa. Varsayılan eşiklerde (-15/35/35) lsnr çıktısı zaten [-15, 35]
+aralığındadır, yani kod çözücüler hiç atlanmaz ve durum ilerlemesi libDF ile birebir aynıdır.
+Burada kod çözücüler her zaman çalışır (tek grafik); özel, daha dar eşiklerde libDF'in atlanan
+karelerde dondurduğu kod çözücü GRU durumları bu yolda ilerler, uygulanan aşamalar ise aynıdır.
 
 Bilinçli sapmalar (libDF ile): (1) son-işlem filtresi (post filter) yok, varsayılanı zaten
 kapalıdır; (2) 5+ ardışık dijital sessizlik hop'unda libDF çıktıyı sıfırlayıp durumu
@@ -38,7 +49,20 @@ logger = logging.getLogger(__name__)
 
 Array = Any  # numpy tembel içe aktarılır; tip yalnız belgeleme amaçlıdır.
 
-# Resmi DeepFilterNet3_onnx.tar.gz içeriği (Rikorose/DeepFilterNet, d375b2d8).
+# Durumlu adım modeli (scripts/export_stateful_dfn.py; kaynak: resmi DeepFilterNet3.zip).
+STEP_MODEL_NAME = "dfn3_step.onnx"
+STEP_MODEL_SHA256 = "a76b89869279b483c639bb437a3bcdbf6bfb0192c1115ecdcf87402f2b1d4f70"
+# Durum tensörleri (adı -> şekli); yerleşim dfn3_step.json ve dışa aktarma betiğinde belgelidir.
+STATE_SHAPES: dict[str, tuple[int, ...]] = {
+    "gru_h": (5, 1, 256),
+    "erb_hist": (1, 1, 2, 32),
+    "spec_hist": (1, 2, 2, 96),
+    "c0_hist": (1, 64, 4, 96),
+}
+_STEP_OUTPUTS = ["m", "coefs", "lsnr", *(f"{name}_out" for name in STATE_SHAPES)]
+
+# Resmi DeepFilterNet3_onnx.tar.gz içeriği (Rikorose/DeepFilterNet, d375b2d8): yalnız tam dizi
+# referans yolu (parite testi, scripts/fetch_noise_model.py); çalışma anında kullanılmaz.
 MODEL_SHA256: dict[str, str] = {
     "enc.onnx": "7c5399d3da8a50ebef1c1a0ae421b33376aa5e45d0e92df16da7e83c9c131916",
     "erb_dec.onnx": "ab669a1d10afe20911728b33053a452071042317a90581092b325da7b2f9d895",
@@ -55,6 +79,7 @@ NB_DF = 96
 MIN_NB_ERB_FREQS = 2
 DF_ORDER = 5
 LOOKAHEAD = 2  # max(conv_lookahead, df_lookahead)
+DELAY_HOPS = LOOKAHEAD + 1  # ISTFT yarım pencere + ileri bakış
 NORM_TAU = 1.0
 MEAN_NORM_INIT = (-60.0, -90.0)
 UNIT_NORM_INIT = (0.001, 0.0001)
@@ -468,6 +493,128 @@ class OnnxGraphRunner:
         )
 
 
+class StepOutputs(NamedTuple):
+    mask: Array  # (32,) ERB kazançları
+    coefs: Array  # (96, 5, 2) derin filtre katsayıları (gerçek, sanal)
+    lsnr: float  # yerel SNR tahmini (dB)
+
+
+class StepRunner(Protocol):
+    """Durumlu tek-kare çıkarımı; durum çalıştırıcıdadır. Testlerde sahtesi enjekte edilir."""
+
+    def reset(self) -> None:
+        """Tüm GRU/evrişim durumlarını sıfırlar (akışın başı)."""
+        ...
+
+    def step(self, feat_erb: Array, feat_spec: Array) -> StepOutputs:
+        """feat_erb: (32,); feat_spec: (2, 96) [gerçek, sanal]. Çıktı t-LOOKAHEAD. kareye aittir."""
+        ...
+
+
+def verify_step_model(model_dir: Path) -> bytes:
+    """``dfn3_step.onnx`` dosyasını okur ve sabitlenmiş sha256'ya karşı doğrular.
+
+    Doğrulanan baytlar doğrudan oturuma verilir (doğrulama ile yükleme arasında dosya değişemez).
+    Model pakete dahildir; dosya yoksa paket bozuktur (indirme adımı yoktur).
+    """
+    path = model_dir / STEP_MODEL_NAME
+    try:
+        data = path.read_bytes()
+    except OSError as error:
+        raise OSError(
+            f"Gürültü engelleme model dosyası okunamadı: {path}. Jarvis'i yeniden kurun "
+            "(model pakete dahildir) ya da `voice.noise_model_dir` ayarını kaldırın."
+        ) from error
+    actual = hashlib.sha256(data).hexdigest()
+    if actual != STEP_MODEL_SHA256:
+        raise ValueError(
+            f"Gürültü engelleme model dosyasının sha256 değeri beklenenle eşleşmiyor: {path} "
+            f"(beklenen {STEP_MODEL_SHA256[:12]}…, bulunan {actual[:12]}…). "
+            "Dosyayı paketle gelen sürümle değiştirin."
+        )
+    return data
+
+
+class StatefulOnnxRunner:
+    """Adım modelini onnxruntime CPU (tek iş parçacığı) ile çalıştırır; durumu hop'lar arası tutar.
+    """
+
+    def __init__(self, model_dir: Path) -> None:
+        blob = verify_step_model(model_dir)
+        try:
+            ort = importlib.import_module("onnxruntime")
+        except ImportError as error:
+            raise DenoiseDependencyError(
+                "Gürültü engelleme için onnxruntime gerekli: `pip install .[voice]`."
+            ) from error
+        self._errors = _ort_error_types(ort)
+        options = ort.SessionOptions()
+        options.intra_op_num_threads = 1
+        options.inter_op_num_threads = 1
+        options.log_severity_level = 3
+        try:
+            self._session = ort.InferenceSession(
+                blob, sess_options=options, providers=["CPUExecutionProvider"]
+            )
+        except self._errors as error:
+            raise RuntimeError(f"Gürültü engelleme modeli yüklenemedi: {error}") from error
+        self.reset()
+
+    def reset(self) -> None:
+        np = _np()
+        self._state = {
+            name: np.zeros(shape, dtype="float32") for name, shape in STATE_SHAPES.items()
+        }
+
+    def step(self, feat_erb: Array, feat_spec: Array) -> StepOutputs:
+        np = _np()
+        feeds = {
+            "feat_erb": np.ascontiguousarray(feat_erb, dtype="float32").reshape(1, 1, 1, NB_ERB),
+            "feat_spec": np.ascontiguousarray(feat_spec, dtype="float32").reshape(1, 2, 1, NB_DF),
+            **self._state,
+        }
+        try:
+            mask, coefs, lsnr, *states = self._session.run(_STEP_OUTPUTS, feeds)
+        except self._errors as error:
+            raise RuntimeError(f"Gürültü engelleme çıkarımı başarısız: {error}") from error
+        self._state = dict(zip(STATE_SHAPES, states, strict=True))
+        return StepOutputs(
+            mask.reshape(NB_ERB), coefs.reshape(NB_DF, DF_ORDER, 2), float(lsnr.reshape(()))
+        )
+
+
+def enhance_fullseq(
+    signal: Array, runner: GraphRunner, params: RuntimeParams | None = None
+) -> Array:
+    """Resmi TAM DİZİ grafiklerle çevrimdışı iyileştirme (parite referansı; üretimde kullanılmaz).
+
+    Çıktı girdiyle hizalıdır (STFT + ileri bakış gecikmesi telafi edilir) ve aynı uzunluktadır.
+    Sinyalin ardından sessizlik geliyormuş gibi 3 hop eklenir (akıştaki davranış). Altın çıktıyla
+    (``deep-filter -D``) ölçülen SNR: tests/test_voice_denoise.py. Durumlu yol buna eşlenir.
+    """
+    np = _np()
+    params = params or RuntimeParams()
+    widths, alpha = erb_widths(), norm_alpha()
+    signal = np.asarray(signal, dtype="float32")
+    real_hops = -(-signal.size // HOP_SIZE)
+    total = real_hops + DELAY_HOPS
+    padded = np.zeros(total * HOP_SIZE, dtype="float32")
+    padded[: signal.size] = signal
+    stft, istft, features = Stft(), Istft(), FeatureExtractor(widths, alpha)
+    spec = stft.analyze(padded)
+    erb, cplx = features.push(spec)
+    outputs = runner.infer(erb, np.stack([cplx.real, cplx.imag]))
+    zeros = np.zeros((LOOKAHEAD, FREQ_SIZE), dtype="complex64")
+    # Grafiğin t. çıktısı t-LOOKAHEAD. kareye aittir (ileri bakış girdi kaydırmasıyla sağlanır).
+    enhanced = enhance_spectra(
+        np.concatenate([zeros, spec]),
+        outputs.mask[LOOKAHEAD:], outputs.coefs[LOOKAHEAD:], outputs.lsnr[LOOKAHEAD:],
+        widths, params,
+    )
+    audio = istft.synthesize(enhanced)
+    return audio[HOP_SIZE : HOP_SIZE + signal.size].copy()  # kare t, hop t-1'i tamamlar
+
+
 _WARN_INTERVAL_SECONDS = 30.0
 
 
@@ -481,45 +628,32 @@ class DeepFilterNetDenoiser:
         self,
         model_dir: Path | None = None,
         *,
-        runner: GraphRunner | None = None,
+        runner: StepRunner | None = None,
         atten_lim_db: float = 100.0,
-        block_frames: int = 10,
-        context_frames: int = 100,
         frame_samples: int = 320,
         params: RuntimeParams | None = None,
     ) -> None:
-        if block_frames < 1:
-            raise ValueError("block_frames en az 1 olmalı")
-        if context_frames < 2 * LOOKAHEAD:
-            raise ValueError(f"context_frames en az {2 * LOOKAHEAD} olmalı")
         per_hop = HOP_SIZE // RESAMPLE_FACTOR  # 160 örnek (16 kHz) = 10 ms
         if frame_samples <= 0 or frame_samples % per_hop:
             raise ValueError(f"frame_samples {per_hop}'in katı olmalı")
         if runner is None:
             if model_dir is None:
                 raise ValueError("model_dir veya runner verilmeli")
-            runner = OnnxGraphRunner(model_dir)
+            runner = StatefulOnnxRunner(model_dir)
         self._runner = runner
         base = params or RuntimeParams()
         self._params = RuntimeParams(
             atten_lim_db, base.min_db_thresh, base.max_db_erb_thresh, base.max_db_df_thresh
         )
-        self.block_frames = block_frames
-        self.context_frames = context_frames
         self.frame_samples = frame_samples
-        self._hops_per_call = frame_samples // per_hop
+        # Sabit gecikme: t. hop geldiğinde t-2. kare biter, ISTFT bir hop daha geriden gelir.
+        self.delay_hops = DELAY_HOPS
+        self.delay_samples = DELAY_HOPS * per_hop + RESAMPLE_DELAY_16K
+        self.underruns = 0
+        self.late_frames = 0
+        self._last_warned: dict[str, float] = {}
         self._widths = erb_widths()
         self._alpha = norm_alpha()
-        # Sabit gecikme: bir kare ancak ileri bakışı (LOOKAHEAD) geldikten VE blok sınırına
-        # ulaşıldığında bitmiş olur. En kötü bekleme = blok içinde birikmiş hop + LOOKAHEAD + 1.
-        worst = max(
-            (self._hops_per_call * (call + 1)) % block_frames for call in range(block_frames)
-        )
-        self.delay_hops = worst + LOOKAHEAD + 1
-        self.delay_samples = self.delay_hops * per_hop + RESAMPLE_DELAY_16K
-        self.underruns = 0
-        self.late_blocks = 0
-        self._last_warned: dict[str, float] = {}
         self._stft = Stft()
         self._istft = Istft()
         self._features = FeatureExtractor(self._widths, self._alpha)
@@ -540,49 +674,68 @@ class DeepFilterNetDenoiser:
         return self._params.atten_lim_db
 
     def reset(self) -> None:
-        """Tüm akış durumunu (STFT, normalizasyon, bağlam, yeniden örnekleyici) sıfırlar."""
+        """Tüm akış durumunu (STFT, normalizasyon, model GRU/evrişim durumu, FIR) sıfırlar."""
         np = _np()
         self._stft.reset()
         self._istft.reset()
         self._features.reset()
         self._up.reset()
         self._down.reset()
-        self._spec_hist: list[Array] = []
-        self._erb_hist: list[Array] = []
-        self._cplx_hist: list[Array] = []
-        self._hist_base = 0  # listenin ilk elemanının mutlak hop indeksi
-        self._n_hops = 0
-        self._next_final = 0  # henüz bitirilmemiş ilk kare
+        self._runner.reset()
+        # DF için j-2..j+2 kareleri: son 4 gürültülü spektrum (akış başında sıfır).
+        self._spec_tail = np.zeros((2 * LOOKAHEAD, FREQ_SIZE), dtype="complex64")
+        self._warmup = LOOKAHEAD  # kare -2 ve -1 çıktıları atılır
+        self._first_frame_done = False
         self._fifo = np.zeros(self.delay_hops * HOP_SIZE, dtype="float32")
 
-    # -- Çevrimdışı yol (Rust altın çıktısıyla eşlenir) --
+    def _advance(self, spec: Array, erb: Array, cplx: Array) -> Array:
+        """Yeni hop'ları modele verir; tamamlanan 48 kHz örnekleri döner (boş olabilir)."""
+        np = _np()
+        hops = spec.shape[0]
+        feat_spec = np.stack([cplx.real, cplx.imag], axis=1)  # (hops, 2, 96)
+        masks = np.empty((hops, NB_ERB), dtype="float32")
+        coefs = np.empty((hops, NB_DF, DF_ORDER, 2), dtype="float32")
+        lsnr = np.empty(hops, dtype="float32")
+        for hop in range(hops):  # durum sırayla ilerler; her hop için model bir kez çalışır
+            out = self._runner.step(erb[hop], feat_spec[hop])
+            masks[hop], coefs[hop], lsnr[hop] = out.mask, out.coefs, out.lsnr
+        # Çıktı i, ctx[i + 2] karesine karşılık gelir; DF için ctx[i : i + 5] kullanılır.
+        ctx = np.concatenate([self._spec_tail, spec])
+        self._spec_tail = ctx[-2 * LOOKAHEAD :].copy()
+        drop = min(self._warmup, hops)
+        self._warmup -= drop
+        if drop == hops:
+            return np.zeros(0, dtype="float32")
+        enhanced = enhance_spectra(
+            ctx[drop:], masks[drop:], coefs[drop:], lsnr[drop:], self._widths, self._params
+        )
+        audio = self._istft.synthesize(enhanced)
+        if not self._first_frame_done:
+            self._first_frame_done = True
+            audio = audio[HOP_SIZE:]  # kare 0 "hop -1"i üretir; girdide karşılığı yok
+        return audio
+
+    # -- Çevrimdışı yol --
 
     def enhance_48k(self, signal: Array) -> Array:
-        """Tüm sinyali (48 kHz float32) tam dizi grafiklerle iyileştirir.
+        """Tüm sinyali (48 kHz float32) durumlu adım modeliyle iyileştirir.
 
-        Çıktı girdiyle hizalıdır (STFT + ileri bakış gecikmesi telafi edilir) ve aynı uzunluktadır.
-        Sinyalin ardından sessizlik geliyormuş gibi 3 hop eklenir (akıştaki davranış).
-        Altın çıktıyla (``deep-filter -D``) ölçülen SNR: tests/test_voice_denoise.py.
+        Çıktı girdiyle hizalıdır ve aynı uzunluktadır (``enhance_fullseq`` ile aynı sözleşme).
+        Akış durumunu sıfırlar: sürmekte olan bir ``process_frame`` akışıyla birlikte kullanmayın.
         """
         np = _np()
         signal = np.asarray(signal, dtype="float32")
         real_hops = -(-signal.size // HOP_SIZE)
-        total = real_hops + LOOKAHEAD + 1
-        padded = np.zeros(total * HOP_SIZE, dtype="float32")
+        padded = np.zeros((real_hops + self.delay_hops) * HOP_SIZE, dtype="float32")
         padded[: signal.size] = signal
-        stft, istft, features = Stft(), Istft(), FeatureExtractor(self._widths, self._alpha)
-        spec = stft.analyze(padded)
-        erb, cplx = features.push(spec)
-        outputs = self._runner.infer(erb, np.stack([cplx.real, cplx.imag]))
-        zeros = np.zeros((LOOKAHEAD, FREQ_SIZE), dtype="complex64")
-        # Grafiğin t. çıktısı t-LOOKAHEAD. kareye aittir (ileri bakış girdi kaydırmasıyla sağlanır).
-        enhanced = enhance_spectra(
-            np.concatenate([zeros, spec]),
-            outputs.mask[LOOKAHEAD:], outputs.coefs[LOOKAHEAD:], outputs.lsnr[LOOKAHEAD:],
-            self._widths, self._params,
-        )
-        audio = istft.synthesize(enhanced)
-        return audio[HOP_SIZE : HOP_SIZE + signal.size].copy()  # kare t, hop t-1'i tamamlar
+        self.reset()
+        try:
+            spec = self._stft.analyze(padded)
+            erb, cplx = self._features.push(spec)
+            audio = self._advance(spec, erb, cplx)
+        finally:
+            self.reset()
+        return audio[: signal.size].copy()
 
     # -- Akış yolu --
 
@@ -598,17 +751,11 @@ class DeepFilterNetDenoiser:
             raise ValueError(
                 f"Kare {self.frame_samples} örnek olmalı, {raw.size} örnek geldi"
             )
+        began = time.perf_counter()
         signal48 = self._up.process(raw.astype("float32") / 32768.0)
         spec = self._stft.analyze(signal48)
         erb, cplx = self._features.push(spec)
-        for row in range(spec.shape[0]):
-            self._spec_hist.append(spec[row])
-            self._erb_hist.append(erb[row])
-            self._cplx_hist.append(cplx[row])
-            self._n_hops += 1
-            if self._n_hops % self.block_frames == 0:
-                self._finalize_block()
-        self._trim_history()
+        self._fifo = np.concatenate([self._fifo, self._advance(spec, erb, cplx)])
         need = signal48.size
         if self._fifo.size < need:
             self.underruns += 1
@@ -623,59 +770,17 @@ class DeepFilterNetDenoiser:
         if not np.isfinite(out16).all():
             raise ValueError("Gürültü engelleme sonlu olmayan (NaN/inf) örnek üretti")
         pcm_out: bytes = np.clip(np.rint(out16 * 32768.0), -32768, 32767).astype("<i2").tobytes()
-        return pcm_out
-
-    def _finalize_block(self) -> None:
-        np = _np()
-        last = self._n_hops - 1
-        final_last = last - LOOKAHEAD
-        count = final_last - self._next_final + 1
-        if count <= 0:
-            return
-        began = time.perf_counter()
-        window = self.block_frames + self.context_frames
-        first = max(0, self._n_hops - window)
-        lo = first - self._hist_base
-        erb = np.stack(self._erb_hist[lo:])
-        cplx = np.stack(self._cplx_hist[lo:])
-        outputs = self._runner.infer(erb, np.stack([cplx.real, cplx.imag]))
-        # Grafiğin t. çıktısı t-LOOKAHEAD. kareye aittir: kare j için çıktı j+LOOKAHEAD.
-        start = self._next_final - first + LOOKAHEAD
-        picked = slice(start, start + count)
-        # DF için j-2 .. j+2 kareleri; akış başında j-2 < 0 ise sıfır spektrum.
-        ctx_first = self._next_final - LOOKAHEAD
-        rows = [
-            self._spec_hist[index - self._hist_base]
-            if index >= 0 else np.zeros(FREQ_SIZE, dtype="complex64")
-            for index in range(ctx_first, final_last + LOOKAHEAD + 1)
-        ]
-        enhanced = enhance_spectra(
-            np.stack(rows),
-            outputs.mask[picked], outputs.coefs[picked], outputs.lsnr[picked],
-            self._widths, self._params,
-        )
-        audio = self._istft.synthesize(enhanced)
-        if self._next_final == 0:
-            audio = audio[HOP_SIZE:]  # kare 0 "hop -1"i üretir; girdide karşılığı yok
-        self._fifo = np.concatenate([self._fifo, audio])
-        self._next_final = final_last + 1
-        # Blok, gerçek zamandan uzun sürerse çalışan iş parçacığı yetişemez (akış gecikir).
-        budget = self.block_frames * HOP_SIZE / MODEL_SR
+        # Kare, gerçek zamandan uzun sürerse çalışan iş parçacığı yetişemez (akış gecikir).
+        budget = self.frame_samples / IN_SR
         if time.perf_counter() - began > budget:
-            self.late_blocks += 1
+            self.late_frames += 1
             self._warn_limited(
                 "late",
-                "Gürültü engelleme gerçek zamandan yavaş (blok %.0f ms'den uzun sürdü); "
-                "ses gecikebilir. bağlam/blok değerlerini küçültün veya kapatın.",
+                "Gürültü engelleme gerçek zamandan yavaş (kare %.0f ms'den uzun sürdü); "
+                "ses gecikebilir. Kapatmayı düşünün.",
                 budget * 1000,
             )
-
-    def _trim_history(self) -> None:
-        keep = self.block_frames + self.context_frames + 2 * LOOKAHEAD
-        extra = len(self._spec_hist) - keep
-        if extra > 0:
-            del self._spec_hist[:extra], self._erb_hist[:extra], self._cplx_hist[:extra]
-            self._hist_base += extra
+        return pcm_out
 
 
 # --- Mikrofon sarmalayıcı -------------------------------------------------------------

@@ -94,29 +94,28 @@ DeepFilterNet3, işlemcide çalışır (ekran kartı gerekmez) ve mikrofon sesin
 gitmeden temizler. Yankı gidermez: asistanın hoparlör sesi mikrofona giriyorsa kulaklık
 kullanın ya da mevcut yankı korumalarına (ADR 0022) güvenin.
 
-1. `pip install -e ".[voice]"` (onnxruntime ve numpy dahildir; torch gerekmez).
-2. Modeli bir kez indirin; betik arşivi ve her dosyayı sha256 ile doğrular, NOTICE yazar:
-
-   ```powershell
-   python scripts/fetch_noise_model.py            # models/deepfilternet3
-   python scripts/fetch_noise_model.py --dest D:\modeller\deepfilternet3
-   ```
-
-3. `config/config.yaml` içinde (göreli yol config dizinine göre çözülür):
+1. `pip install -e ".[voice]"` (onnxruntime ve numpy dahildir; torch gerekmez). Model
+   (`jarvis/channels/voice/models/dfn3/dfn3_step.onnx`, yaklaşık 8 MB) pakete dahildir:
+   İNDİRME ADIMI YOKTUR. Dosya her açılışta koda sabitlenmiş sha256 ile doğrulanır.
+2. `config/config.yaml` içinde (göreli yol config dizinine göre çözülür):
 
    ```yaml
    voice:
      noise_suppression: true
      noise_suppression_level: orta   # hafif (12 dB) | orta (24 dB) | guclu (sınırsız)
-     noise_model_dir: ../models/deepfilternet3   # verilmezse <depo>/models/deepfilternet3 (betiğin yazdığı yer)
+     # noise_model_dir: ../models/dfn3   # verilmezse pakete dahil model; verilen dizinde aynı sha256'lı dfn3_step.onnx olmalı
    ```
 
    Ya da ayarlar panelinde **Gürültü engelleme** kutusunu işaretleyip düzeyi seçin;
    **Uygula** sesi yeniden başlatır ve değişiklik o zaman geçerli olur.
 
-Model eksik, bozuk veya onnxruntime yoksa ses hattı düşmez: sohbette "Gürültü engelleme açılamadı: <neden>" iletisi çıkar ve ham mikrofonla sürülür. Çalışma sırasında model hata verirse
+Gecikme yaklaşık 34 ms'dir (30 ms STFT+ileri bakış, 4 ms yeniden örnekleme). Model eksik,
+bozuk veya onnxruntime yoksa ses hattı düşmez: sohbette "Gürültü engelleme açılamadı: <neden>" iletisi çıkar ve ham mikrofonla sürülür. Çalışma sırasında model hata verirse
 oturum boyunca ham sese dönülür ve sohbette görünür bir ileti çıkar. Ölçüm:
-`python -m bench.denoise_rtf --model-dir models/deepfilternet3`.
+`python -m bench.denoise_rtf`. Geliştirme: modeli yeniden üretmek için
+`scripts/export_stateful_dfn.py` (torch venv'inde; çalışma anı bağımlılığı değildir), resmi
+tam dizi grafiklerle parite testi için `scripts/fetch_noise_model.py` ve
+`JARVIS_DFN_MODEL_DIR`.
 
 ## Gizlilik ve kullanım
 

@@ -218,7 +218,7 @@ class SettingsPanel(QWidget):
         self.noise_suppression = QCheckBox("Gürültü engelleme")
         self.noise_suppression.setToolTip(
             "DeepFilterNet3; işlemcide çalışır, ekran kartı gerekmez. Yankı gidermez. "
-            "Model dosyaları gerekir (scripts/fetch_noise_model.py). "
+            "Model pakete dahildir; indirme gerekmez. "
             "Değişiklik ses yeniden başlayınca uygulanır."
         )
         layout.addWidget(self.noise_suppression)

@@ -1,0 +1,8 @@
+DeepFilterNet3 durumlu adım modeli (dfn3_step.onnx)
+Yazar: Hendrik Schröter (Rikorose/DeepFilterNet). Lisans: MIT veya Apache-2.0 (çift lisans).
+Kaynak: https://github.com/Rikorose/DeepFilterNet, commit d375b2d8309e0935d165700c91da9de862a99c31, models/DeepFilterNet3.zip
+Arşiv sha256: 49c52edc8947ae1f9bf50d81530beaf3a2c3245aeaf34b6f31ff535cd22284d2
+Bu dosya TÜREV bir çalışmadır: resmi DeepFilterNet3 ağırlıkları aynen kullanılarak, her
+zaman karesini ayrı işleyen ve GRU/evrişim durumlarını açık girdi-çıktı yapan bir grafiğe
+dönüştürülmüştür (scripts/export_stateful_dfn.py). Ağırlıklar değiştirilmemiştir.
+Telif: Copyright (c) Hendrik Schröter. MIT ve Apache-2.0 lisans metinleri yukarıdaki depoda.

@@ -1341,7 +1341,7 @@ class DesktopWindow(QMainWindow):
                     fix = (
                         'Paketleri `pip install -e ".[voice]"` ile kurun'
                         if kind == "deps"
-                        else "Modeli `python scripts/fetch_noise_model.py` ile indirin"
+                        else "Jarvis'i yeniden kurun veya `voice.noise_model_dir` ayarına bakın"
                     )
                     self._append_chat(
                         "Jarvis",

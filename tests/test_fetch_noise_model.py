@@ -115,10 +115,13 @@ def test_rejects_missing_member(fetch: ModuleType, tmp_path: Path) -> None:
         )
 
 
-def test_default_dest_is_the_shared_runtime_default(fetch: ModuleType) -> None:
+def test_default_dest_is_dev_reference_dir_not_the_runtime_model_dir(fetch: ModuleType) -> None:
     from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 
-    assert fetch.DEFAULT_DEST == DEFAULT_NOISE_MODEL_DIR and fetch.DEFAULT_DEST.is_absolute()
+    # Resmi tam dizi grafikler yalnız parite içindir; pakete dahil modelin üstüne yazılmaz.
+    assert fetch.DEFAULT_DEST.is_absolute()
+    assert fetch.DEFAULT_DEST != DEFAULT_NOISE_MODEL_DIR
+    assert DEFAULT_NOISE_MODEL_DIR not in fetch.DEFAULT_DEST.parents
 
 
 def test_main_prints_resolved_absolute_path(

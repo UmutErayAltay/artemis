@@ -1,8 +1,10 @@
-"""DeepFilterNet3 ONNX modelini indirir ve doğrular (ADR 0037); yalnız standart kütüphane.
+"""Resmi DeepFilterNet3 ONNX grafiklerini indirir ve doğrular (ADR 0037); yalnız standart kütüphane.
+
+GELİŞTİRME ARACI: Jarvis çalışma anında bu dosyalara ihtiyaç duymaz (durumlu adım modeli pakete
+dahildir). Resmi tam dizi grafikler yalnız parite testi içindir: akış yolunun çevrimdışı resmi
+yola uyduğunu ölçmek için `JARVIS_DFN_MODEL_DIR` bu dizini göstermelidir.
 
 Kullanım: python scripts/fetch_noise_model.py [--dest models/deepfilternet3]
-Jarvis çalışma anında indirme yapmaz; modeli bir kez bu betikle kurun ve
-`voice.noise_model_dir` ile gösterin.
 """
 
 from __future__ import annotations
@@ -17,8 +19,7 @@ from collections.abc import Mapping
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))  # betik doğrudan çalıştırılınca jarvis içe aktarılabilsin
-from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR as DEFAULT_DEST  # noqa: E402
+DEFAULT_DEST = ROOT / "models" / "deepfilternet3"  # models/ git'te yok sayılır
 
 SOURCE_URL = (
     "https://github.com/Rikorose/DeepFilterNet/raw/"

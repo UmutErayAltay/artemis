@@ -1,6 +1,8 @@
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from jarvis.channels.voice import factory
 from jarvis.config.settings import VoiceConfig
 
@@ -72,6 +74,19 @@ async def test_noise_suppression_wraps_microphone_with_level_mapping(monkeypatch
     assert seen == {"model_dir": tmp_path, "atten_lim_db": 12.0, "frame_samples": 320}
 
 
+async def test_noise_suppression_works_out_of_the_box_with_vendored_model(monkeypatch):
+    """noise_model_dir verilmeden pakete dahil model yüklenir: indirme adımı yok."""
+    pytest.importorskip("onnxruntime")
+    mic = object()
+    _patch_voice_deps(monkeypatch, mic)
+    states: list[str] = []
+    controller = await factory.build_voice_controller(
+        _runtime(VoiceConfig(noise_suppression=True)), lambda _: None, states.append
+    )
+    assert isinstance(controller.microphone, factory.DenoisedMicrophone)
+    assert not [s for s in states if s.startswith("denoise:unavailable")]
+
+
 async def test_noise_suppression_failure_degrades_to_raw_mic_with_visible_state(
     monkeypatch, tmp_path: Path, caplog
 ):
@@ -95,8 +110,7 @@ async def test_noise_suppression_failure_degrades_to_raw_mic_with_visible_state(
         assert sum(r.levelno >= 30 for r in caplog.records if "Gürültü" in r.getMessage()) == 1
     # sha256 uyuşmazlığı da düşürmez
     (tmp_path / "bad").mkdir()
-    for name in ("enc.onnx", "erb_dec.onnx", "df_dec.onnx"):
-        (tmp_path / "bad" / name).write_bytes(b"x")
+    (tmp_path / "bad" / "dfn3_step.onnx").write_bytes(b"x")
     states = []
     controller = await factory.build_voice_controller(
         _runtime(VoiceConfig(noise_suppression=True, noise_model_dir=tmp_path / "bad")),

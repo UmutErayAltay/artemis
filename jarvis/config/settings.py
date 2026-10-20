@@ -79,6 +79,7 @@ class VoiceConfig(BaseModel):
     # hafif 12, orta 24, güçlü sınırsız; güçlü bastırma Whisper doğruluğunu düşürebilir.
     noise_suppression: bool = False
     noise_suppression_level: Literal["hafif", "orta", "guclu"] = "orta"
+    # Verilmezse pakete dahil durumlu adım modeli (jarvis/channels/voice/models/dfn3).
     noise_model_dir: Path | None = None
     pre_roll_ms: int = Field(default=300, ge=0, le=1000)
     max_utterance_seconds: float = Field(default=15.0, gt=0, le=120)
@@ -447,7 +448,7 @@ def load_settings(path: Path) -> Settings:
                 path_value if path_value.is_absolute() else (base / path_value).resolve()
             )
     if settings.voice.noise_model_dir is None:
-        # Betikle aynı tek sabit (depo kökü/models/deepfilternet3); cwd'den bağımsız.
+        # Pakete dahil model dizini; cwd ve config konumundan bağımsız.
         voice_updates["noise_model_dir"] = DEFAULT_NOISE_MODEL_DIR
     if voice_updates:
         updates["voice"] = settings.voice.model_copy(update=voice_updates)

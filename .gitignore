@@ -21,5 +21,6 @@ config/config.yaml
 state/
 reports/
 models/
+!jarvis/channels/voice/models/
 bench/audio/
 .DS_Store

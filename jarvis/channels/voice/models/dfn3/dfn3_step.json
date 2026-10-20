@@ -1,0 +1,122 @@
+{
+ "source_archive": "DeepFilterNet3.zip",
+ "source_archive_sha256": "49c52edc8947ae1f9bf50d81530beaf3a2c3245aeaf34b6f31ff535cd22284d2",
+ "checkpoint": "DeepFilterNet3/checkpoints/model_120.ckpt.best",
+ "checkpoint_epoch": 120,
+ "upstream_commit": "d375b2d8309e0935d165700c91da9de862a99c31",
+ "export_script_sha256": "479020d0fc115d0c0d93748f7fd96285a676ecf01542558a3bab742c02fc52c3",
+ "versions": {
+  "python": "3.11.15",
+  "torch": "2.3.1+cpu",
+  "onnx": "1.16.2",
+  "onnxruntime": "1.19.2",
+  "numpy": "1.26.4",
+  "opset": 17
+ },
+ "inputs": {
+  "feat_erb": [
+   1,
+   1,
+   1,
+   32
+  ],
+  "feat_spec": [
+   1,
+   2,
+   1,
+   96
+  ],
+  "gru_h": [
+   5,
+   1,
+   256
+  ],
+  "erb_hist": [
+   1,
+   1,
+   2,
+   32
+  ],
+  "spec_hist": [
+   1,
+   2,
+   2,
+   96
+  ],
+  "c0_hist": [
+   1,
+   64,
+   4,
+   96
+  ]
+ },
+ "outputs": {
+  "m": [
+   1,
+   1,
+   1,
+   32
+  ],
+  "coefs": [
+   1,
+   1,
+   96,
+   10
+  ],
+  "lsnr": [
+   1,
+   1,
+   1
+  ],
+  "gru_h_out": [
+   5,
+   1,
+   256
+  ],
+  "erb_hist_out": [
+   1,
+   1,
+   2,
+   32
+  ],
+  "spec_hist_out": [
+   1,
+   2,
+   2,
+   96
+  ],
+  "c0_hist_out": [
+   1,
+   64,
+   4,
+   96
+  ]
+ },
+ "state_layout": {
+  "gru_h": "katman 0 enc.emb_gru; 1-2 erb_dec.emb_gru; 3-4 df_dec.df_gru (gizli 256)",
+  "erb_hist": "erb_conv0 girdisinin son 2 karesi (en eski önce)",
+  "spec_hist": "df_conv0 girdisinin son 2 karesi (en eski önce)",
+  "c0_hist": "df_convp girdisinin (c0) son 4 karesi (en eski önce)"
+ },
+ "alignment": "t. çıktı spektrumun t-2. karesine aittir (conv_lookahead=df_lookahead=2)",
+ "parity": {
+  "frames": 600,
+  "torch_full_sequence_max_abs_err": {
+   "m": 1.1920928955078125e-06,
+   "coefs": 1.0132789611816406e-06,
+   "lsnr": 2.09808349609375e-05
+  },
+  "official_onnx_max_abs_err": {
+   "m": 1.9371509552001953e-06,
+   "coefs": 1.4901161193847656e-06,
+   "lsnr": 4.1961669921875e-05
+  },
+  "exported_onnx_vs_official_max_abs_err": {
+   "m": 8.642673492431641e-07,
+   "coefs": 1.0728836059570312e-06,
+   "lsnr": 2.47955322265625e-05
+  }
+ },
+ "tolerance": 0.0001,
+ "onnx_sha256": "a76b89869279b483c639bb437a3bcdbf6bfb0192c1115ecdcf87402f2b1d4f70"
+}
