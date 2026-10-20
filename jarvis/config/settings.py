@@ -82,6 +82,10 @@ class VoiceConfig(BaseModel):
     # false: temizlenmiş ses yalnız algılamaya (VAD, bitiş, barge-in, seviye) gider; STT aynı
     # aralığın HAM sesini alır (ölçüm: Whisper temizlenmiş sesle çoğunlukla kötüleşir, ADR 0037).
     noise_suppression_stt: bool = False
+    # ADR 0038: WebRTC AEC3 (livekit) ile yalnız yerelde yankı engelleme;
+    # hoparlörle kullanımda Jarvis'in kendi sesini mikrofondan siler.
+    echo_cancellation: bool = False
+    echo_delay_ms: int = Field(default=50, ge=0, le=500)
     # Verilmezse pakete dahil durumlu adım modeli (jarvis/channels/voice/models/dfn3).
     noise_model_dir: Path | None = None
     pre_roll_ms: int = Field(default=300, ge=0, le=1000)

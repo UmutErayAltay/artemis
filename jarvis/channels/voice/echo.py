@@ -15,6 +15,18 @@ logger = logging.getLogger(__name__)
 _ECHO_ERRORS: tuple[type[Exception], ...] = (RuntimeError, ValueError, OSError)
 
 
+def _load_livekit_rtc() -> Any:
+    """LiveKit RTC modülünü yalnızca kullanılırken yükler."""
+    try:
+        from livekit import rtc
+    except ImportError as error:
+        raise RuntimeError(
+            "Yankı işleme için livekit yüklü değil; "
+            '`pip install -e ".[voice]"` komutunu çalıştırın.'
+        ) from error
+    return rtc
+
+
 class Resampler(Protocol):
     """Mono int16 örnekleri başka bir örnekleme hızına çevirir."""
 
@@ -30,7 +42,7 @@ class LivekitResampler:
             raise ValueError("Örnekleme hızları pozitif olmalıdır.")
 
         # LiveKit yalnızca gerçekten çevirici gerektiğinde yüklenir.
-        from livekit import rtc
+        rtc = _load_livekit_rtc()
 
         self._rtc: Any = rtc
         self._input_rate = input_rate
@@ -74,6 +86,7 @@ class EchoReference:
             return LivekitResampler(input_rate, output_rate)
 
         self._target_rate = target_rate
+        self._max_ms = max_ms
         self._max_samples = target_rate * max_ms // 1000
         self._resampler_factory: Callable[[int, int], Resampler] = (
             resampler_factory if resampler_factory is not None else default_factory
@@ -113,6 +126,19 @@ class EchoReference:
             overflow = len(self._buffer) - max_bytes
             if overflow > 0:
                 del self._buffer[:overflow]
+
+    def retarget(self, target_rate: int) -> None:
+        """Hedef hızı değiştirir; eski örnekleri ve çevirici önbelleğini temizler."""
+        if target_rate <= 0:
+            raise ValueError("Hedef örnekleme hızı pozitif olmalıdır.")
+
+        with self._lock:
+            if target_rate == self._target_rate:
+                return
+            self._target_rate = target_rate
+            self._max_samples = target_rate * self._max_ms // 1000
+            self._buffer.clear()
+            self._resamplers.clear()
 
     @staticmethod
     def _to_mono(pcm: bytes, channels: int, sample_width: int) -> bytes:
@@ -193,8 +219,11 @@ class EchoCanceller:
         self._apm_factory: Callable[[], Apm]
         self._frame_factory: Callable[[bytes, int, int], Any]
 
+        livekit_rtc: Any = None
+        if apm_factory is None or frame_factory is None:
+            livekit_rtc = _load_livekit_rtc()
+
         if apm_factory is None:
-            from livekit import rtc as livekit_rtc
 
             def default_apm_factory() -> Apm:
                 return cast(
@@ -210,10 +239,9 @@ class EchoCanceller:
             self._apm_factory = apm_factory
 
         if frame_factory is None:
-            from livekit import rtc as livekit_frame_rtc
 
             def default_frame_factory(data: bytes, rate: int, samples: int) -> Any:
-                return livekit_frame_rtc.AudioFrame(data, rate, 1, samples)
+                return livekit_rtc.AudioFrame(data, rate, 1, samples)
 
             self._frame_factory = default_frame_factory
         else:
@@ -272,14 +300,26 @@ class EchoCancelledMicrophone:
     def __init__(
         self,
         inner: Microphone,
-        canceller: FrameEchoCanceller,
+        canceller_factory: Callable[[int], FrameEchoCanceller],
         on_state: Callable[[str], None] | None = None,
     ) -> None:
         self._inner = inner
-        self._canceller = canceller
+        self._canceller_factory = canceller_factory
+        self._canceller: FrameEchoCanceller | None = None
+        self._canceller_rate: int | None = None
         self._on_state = on_state if on_state is not None else _ignore_state
         self._passthrough = False
         self._state_lock = threading.Lock()
+
+    def _canceller_for(self, rate: int) -> FrameEchoCanceller:
+        """İlk karede kurar; örnekleme hızı değişirse yenisini oluşturur."""
+        with self._state_lock:
+            canceller = self._canceller
+            if canceller is None or self._canceller_rate != rate:
+                canceller = self._canceller_factory(rate)
+                self._canceller = canceller
+                self._canceller_rate = rate
+            return canceller
 
     @property
     def passthrough(self) -> bool:
@@ -307,7 +347,8 @@ class EchoCancelledMicrophone:
                 continue
 
             try:
-                pcm = self._canceller.process(frame.pcm)
+                canceller = self._canceller_for(frame.sample_rate)
+                pcm = canceller.process(frame.pcm)
             except _ECHO_ERRORS as error:
                 self._disable(error)
                 yield frame
@@ -317,8 +358,12 @@ class EchoCancelledMicrophone:
 
     def discard_pending(self) -> None:
         self._inner.discard_pending()
+        with self._state_lock:
+            canceller = self._canceller
+        if canceller is None:
+            return
         try:
-            self._canceller.reset()
+            canceller.reset()
         except _ECHO_ERRORS:
             # Sıfırlama hatası mevcut ses akışını bozmamalıdır.
             return

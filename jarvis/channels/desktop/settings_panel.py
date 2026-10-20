@@ -40,6 +40,7 @@ def save_choices(
     noise_suppression: bool | None = None,
     noise_suppression_level: str | None = None,
     noise_suppression_stt: bool | None = None,
+    echo_cancellation: bool | None = None,
 ) -> None:
     """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir."""
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
@@ -53,6 +54,8 @@ def save_choices(
         raw["voice"]["noise_suppression_level"] = noise_suppression_level
     if noise_suppression_stt is not None:
         raw["voice"]["noise_suppression_stt"] = noise_suppression_stt
+    if echo_cancellation is not None:
+        raw["voice"]["echo_cancellation"] = echo_cancellation
     if applications is not None:
         raw["applications"] = applications
         raw["close_without_confirmation"] = [
@@ -244,6 +247,14 @@ class SettingsPanel(QWidget):
         self.noise_stt.setEnabled(False)
         self.noise_suppression.toggled.connect(self.noise_stt.setEnabled)
         layout.addWidget(self.noise_stt)
+        self.echo_cancellation = QCheckBox("Yankı engelleme (hoparlörle kullanırken)")
+        self.echo_cancellation.setToolTip(
+            "WebRTC yankı giderici; Jarvis'in hoparlörden çıkan kendi sesini mikrofondan "
+            "siler, böylece konuşurken araya girmek ve kendi sesini komut sanmamak güvenilir "
+            "olur. Yerelde çalışır. Kulaklıkla gerekmez. Değişiklik ses yeniden başlayınca "
+            "uygulanır."
+        )
+        layout.addWidget(self.echo_cancellation)
         self.advanced_devices = QCheckBox("Sanal ve diğer ses girişlerini göster")
         self.advanced_devices.toggled.connect(self._toggle_device_detail)
         layout.addWidget(self.advanced_devices)
@@ -331,6 +342,7 @@ class SettingsPanel(QWidget):
             self.continuous_mode.setEnabled(False)
             self.noise_suppression.setEnabled(False)
             self.noise_stt.setEnabled(False)
+            self.echo_cancellation.setEnabled(False)
             self.all_applications.setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
                            self.github_auto, self.github_button):
@@ -354,6 +366,7 @@ class SettingsPanel(QWidget):
             self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self.noise_stt.setChecked(settings.voice.noise_suppression_stt)
             self.noise_stt.setEnabled(self.noise_suppression.isChecked() and not self._demo)
+            self.echo_cancellation.setChecked(settings.voice.echo_cancellation)
             self.applications = dict(settings.applications)
             self._refresh_applications()
             self.all_applications.setChecked(settings.allow_all_applications)

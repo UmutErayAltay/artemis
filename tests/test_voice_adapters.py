@@ -224,6 +224,106 @@ async def test_sink_marks_first_real_short_pcm_write(monkeypatch):
     assert first_lengths == [960]  # 20 ms, not the whole 100 ms chunk.
 
 
+async def test_sink_feeds_every_written_block_to_echo_reference(monkeypatch) -> None:
+    writes = []
+
+    class Stream:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def write(self, pcm):
+            writes.append(pcm)
+
+        def stop(self):
+            pass
+
+        def abort(self):
+            pass
+
+        def close(self):
+            pass
+
+    fake_module = ModuleType("sounddevice")
+    fake_module.RawOutputStream = Stream
+    monkeypatch.setitem(__import__("sys").modules, "sounddevice", fake_module)
+
+    class Reference:
+        def __init__(self):
+            self.calls = []
+
+        def feed(self, pcm, sample_rate, channels, sample_width):
+            self.calls.append((pcm, sample_rate, channels, sample_width))
+
+    reference = Reference()
+    sink = SoundDeviceSink(reference)
+
+    async def chunks():
+        yield PCMChunk(b"x" * 4800, 24000, 1, 2)
+
+    await sink.play(chunks(), asyncio.Event(), lambda: None)
+
+    assert len(writes) == 5
+    assert len(reference.calls) == 5
+    assert [call[0] for call in reference.calls] == writes
+    assert all(call[1:] == (24000, 1, 2) for call in reference.calls)
+
+
+async def test_sink_reference_failure_does_not_stop_playback_or_further_feeds(
+    monkeypatch,
+    caplog,
+) -> None:
+    writes = []
+
+    class Stream:
+        def __init__(self, **_kwargs):
+            pass
+
+        def start(self):
+            pass
+
+        def write(self, pcm):
+            writes.append(pcm)
+
+        def stop(self):
+            pass
+
+        def abort(self):
+            pass
+
+        def close(self):
+            pass
+
+    fake_module = ModuleType("sounddevice")
+    fake_module.RawOutputStream = Stream
+    monkeypatch.setitem(__import__("sys").modules, "sounddevice", fake_module)
+
+    class FailingReference:
+        def __init__(self):
+            self.calls = 0
+
+        def feed(self, _pcm, _sample_rate, _channels, _sample_width):
+            self.calls += 1
+            raise ValueError("Sahte referans hatası.")
+
+    reference = FailingReference()
+    sink = SoundDeviceSink(reference)
+
+    async def chunks():
+        yield PCMChunk(b"x" * 1920, 24000, 1, 2)
+
+    with caplog.at_level("WARNING"):
+        await sink.play(chunks(), asyncio.Event(), lambda: None)
+
+    assert len(writes) == 2
+    assert reference.calls == 1
+    assert sink._echo_reference is None
+    warnings = [record for record in caplog.records if "Yankı" in record.getMessage()]
+    assert len(warnings) == 1
+
+
 async def test_cancel_aborts_device_before_slow_generator_cleanup(monkeypatch):
     events = []
     written = asyncio.Event()

@@ -13,7 +13,7 @@ import unicodedata
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from time import monotonic
-from typing import Any
+from typing import Any, Protocol
 
 from jarvis.channels.voice.core import AudioFrame, PCMChunk, SpeechSynthesizer
 from jarvis.config.settings import VoiceConfig
@@ -21,6 +21,20 @@ from jarvis.safety.audit import AuditLog
 from jarvis.tools.platform import child_environment
 
 logger = logging.getLogger(__name__)
+
+
+class EchoReferenceSink(Protocol):
+    """Yankı referansına yazılan ses örneğini alır."""
+
+    def feed(
+        self,
+        pcm: bytes,
+        sample_rate: int,
+        channels: int,
+        sample_width: int,
+    ) -> None:
+        ...
+
 
 _GHOST_PHRASES = {
     "abone olmayı unutmayın", "izlediğiniz için teşekkürler",
@@ -350,9 +364,30 @@ class FasterWhisperRecognizer:
 class SoundDeviceSink:
     """PCM'i küçük bloklarla yazıp ilk gerçek sink yazımında işaret üretir."""
 
-    def __init__(self) -> None:
+    def __init__(self, echo_reference: EchoReferenceSink | None = None) -> None:
         self._streams: set[Any] = set()
         self._audio_errors: tuple[type[Exception], ...] = ()
+        self._echo_reference = echo_reference
+
+    def _feed_echo_reference(
+        self,
+        pcm: bytes,
+        sample_rate: int,
+        channels: int,
+        sample_width: int,
+    ) -> None:
+        reference = self._echo_reference
+        if reference is None:
+            return
+        try:
+            reference.feed(pcm, sample_rate, channels, sample_width)
+        except (ValueError, RuntimeError, OSError) as error:
+            self._echo_reference = None
+            logger.warning(
+                "Yankı referansı beslenemedi (%s); ses çıkışı sürüyor ve "
+                "yankı referansı kapatıldı.",
+                type(error).__name__,
+            )
 
     async def play(
         self,
@@ -412,6 +447,12 @@ class SoundDeviceSink:
                             logger.warning("Ses çıkışı iptal edilemedi (%s).", type(error).__name__)
                         await asyncio.shield(write_task)
                         raise
+                    self._feed_echo_reference(
+                        block,
+                        chunk.sample_rate,
+                        chunk.channels,
+                        chunk.sample_width,
+                    )
                     if not notified and block:
                         notified = True
                         on_first_pcm()

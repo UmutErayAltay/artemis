@@ -166,3 +166,124 @@ async def test_denoise_on_captures_microphone_at_48k_and_off_stays_16k(monkeypat
         lambda _: None, lambda _: None,
     )
     assert opened[-1]["capture_rate"] is None
+
+
+def _capture_sink(monkeypatch):
+    calls = []
+
+    class FakeSink:
+        def __init__(self, echo_reference=None):
+            self._echo_reference = echo_reference
+
+    def make_sink(*_args, **kwargs):
+        sink = FakeSink(**kwargs)
+        calls.append((kwargs, sink))
+        return sink
+
+    monkeypatch.setattr(factory, "SoundDeviceSink", make_sink)
+    return calls
+
+
+def _capture_canceller(monkeypatch):
+    created = []
+
+    class FakeCanceller:
+        def __init__(self, rate, reference, *, delay_ms):
+            self.rate = rate
+            self.reference = reference
+            self.delay_ms = delay_ms
+
+        def process(self, pcm):
+            return pcm
+
+        def reset(self):
+            return None
+
+    def make_canceller(rate, reference, *, delay_ms):
+        canceller = FakeCanceller(rate, reference, delay_ms=delay_ms)
+        created.append(canceller)
+        return canceller
+
+    monkeypatch.setattr(factory, "EchoCanceller", make_canceller)
+    return created
+
+
+async def test_echo_cancellation_off_keeps_raw_microphone_and_sink(monkeypatch):
+    mic = object()
+    _patch_voice_deps(monkeypatch, mic)
+    sink_calls = _capture_sink(monkeypatch)
+
+    controller = await factory.build_voice_controller(
+        _runtime(VoiceConfig()), lambda _: None, lambda _: None
+    )
+
+    assert controller.microphone is mic
+    assert not isinstance(controller.microphone, factory.EchoCancelledMicrophone)
+    assert len(sink_calls) == 1
+    kwargs, sink = sink_calls[0]
+    assert kwargs == {}
+    assert sink._echo_reference is None
+
+
+async def test_echo_cancellation_wraps_microphone_and_shares_sink_reference(monkeypatch):
+    mic = object()
+    _patch_voice_deps(monkeypatch, mic)
+    sink_calls = _capture_sink(monkeypatch)
+    cancellers = _capture_canceller(monkeypatch)
+    config = VoiceConfig(echo_cancellation=True)
+
+    controller = await factory.build_voice_controller(
+        _runtime(config), lambda _: None, lambda _: None
+    )
+
+    microphone = controller.microphone
+    assert isinstance(microphone, factory.EchoCancelledMicrophone)
+    assert microphone._inner is mic
+
+    canceller = microphone._canceller_for(config.sample_rate)
+    assert cancellers == [canceller]
+
+    kwargs, sink = sink_calls[0]
+    assert set(kwargs) == {"echo_reference"}
+    assert isinstance(sink._echo_reference, factory.EchoReference)
+    assert kwargs["echo_reference"] is sink._echo_reference
+    assert canceller.reference is sink._echo_reference
+
+
+async def test_echo_cancellation_is_applied_before_denoising(monkeypatch, tmp_path):
+    mic = object()
+    _patch_voice_deps(monkeypatch, mic)
+    sink_calls = _capture_sink(monkeypatch)
+    cancellers = _capture_canceller(monkeypatch)
+
+    class FakeDenoiser:
+        frame_samples = 320
+        delay_samples = 0
+
+        def __init__(self, _model_dir, **_kwargs):
+            pass
+
+    monkeypatch.setattr(factory, "DeepFilterNetDenoiser", FakeDenoiser)
+    config = VoiceConfig(
+        noise_suppression=True,
+        echo_cancellation=True,
+        noise_model_dir=tmp_path,
+    )
+
+    controller = await factory.build_voice_controller(
+        _runtime(config), lambda _: None, lambda _: None
+    )
+
+    denoised = controller.microphone
+    assert isinstance(denoised, factory.DenoisedMicrophone)
+    assert denoised._raw_for_stt is True
+
+    microphone = denoised._inner
+    assert isinstance(microphone, factory.EchoCancelledMicrophone)
+    assert microphone._inner is mic
+
+    canceller = microphone._canceller_for(48000)
+    _kwargs, sink = sink_calls[0]
+    assert isinstance(sink._echo_reference, factory.EchoReference)
+    assert canceller.reference is sink._echo_reference
+    assert cancellers == [canceller]

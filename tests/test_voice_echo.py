@@ -220,6 +220,24 @@ def test_reference_caches_resampler_per_input_rate() -> None:
     assert len(factory.instances) == 3
 
 
+def test_reference_retarget_clears_buffer_and_resampler_cache() -> None:
+    factory = RecordingResamplerFactory()
+    reference = EchoReference(16000, resampler_factory=factory)
+
+    reference.feed(_pack_i16([1, 2]), 32000, 1, 2)
+    reference.retarget(16000)
+
+    assert reference.pull(1) == _pack_i16([1])
+    assert factory.calls == [(32000, 16000)]
+
+    reference.retarget(48000)
+
+    assert reference.pull(1) == b"\x00\x00"
+    reference.feed(_pack_i16([3, 4]), 32000, 1, 2)
+
+    assert factory.calls == [(32000, 16000), (32000, 48000)]
+
+
 def test_canceller_cancels_and_records_call_order() -> None:
     reference = EchoReference(16000)
     reference_values = list(range(320))
@@ -297,8 +315,14 @@ def test_microphone_processes_frames_and_preserves_frame_metadata() -> None:
     ]
     inner = FakeMicrophone(inner_frames)
     canceller = FakeCanceller()
+    factory_calls: list[int] = []
     states: list[str] = []
-    microphone = EchoCancelledMicrophone(inner, canceller, states.append)
+
+    def make_canceller(rate: int) -> FakeCanceller:
+        factory_calls.append(rate)
+        return canceller
+
+    microphone = EchoCancelledMicrophone(inner, make_canceller, states.append)
 
     frames = asyncio.run(_collect_frames(microphone))
 
@@ -307,6 +331,7 @@ def test_microphone_processes_frames_and_preserves_frame_metadata() -> None:
     assert frames[0].timestamp == 12.5
     assert frames[0].sample_rate == 48000
     assert frames[0].raw_pcm is None
+    assert factory_calls == [48000]
     assert canceller.process_calls == 1
     assert states == []
     assert not microphone.passthrough
@@ -321,14 +346,21 @@ def test_microphone_runtime_error_switches_to_passthrough_once(
     ]
     inner = FakeMicrophone(inner_frames)
     canceller = FakeCanceller(RuntimeError("Sahte çalışma hatası."))
+    factory_calls: list[int] = []
     states: list[str] = []
-    microphone = EchoCancelledMicrophone(inner, canceller, states.append)
+
+    def make_canceller(rate: int) -> FakeCanceller:
+        factory_calls.append(rate)
+        return canceller
+
+    microphone = EchoCancelledMicrophone(inner, make_canceller, states.append)
     caplog.set_level(logging.WARNING)
 
     frames = asyncio.run(_collect_frames(microphone))
 
     assert frames[0] is inner_frames[0]
     assert frames[1] is inner_frames[1]
+    assert factory_calls == [16000]
     assert canceller.process_calls == 1
     assert states == ["echo:off"]
     assert microphone.passthrough
@@ -336,12 +368,80 @@ def test_microphone_runtime_error_switches_to_passthrough_once(
     assert caplog.records[0].levelno == logging.WARNING
 
 
+def test_microphone_factory_error_switches_to_passthrough_once(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    inner_frames = [
+        AudioFrame(pcm=_pack_i16([1] * 160), timestamp=1.0),
+        AudioFrame(pcm=_pack_i16([2] * 160), timestamp=2.0),
+    ]
+    inner = FakeMicrophone(inner_frames)
+    factory_calls: list[int] = []
+    states: list[str] = []
+
+    def make_canceller(rate: int) -> FakeCanceller:
+        factory_calls.append(rate)
+        raise RuntimeError("Sahte kurulum hatası.")
+
+    microphone = EchoCancelledMicrophone(inner, make_canceller, states.append)
+    caplog.set_level(logging.WARNING)
+
+    frames = asyncio.run(_collect_frames(microphone))
+
+    assert frames[0] is inner_frames[0]
+    assert frames[1] is inner_frames[1]
+    assert factory_calls == [16000]
+    assert states == ["echo:off"]
+    assert microphone.passthrough
+    assert len(caplog.records) == 1
+    assert caplog.records[0].levelno == logging.WARNING
+
+
+def test_microphone_rebuilds_canceller_when_sample_rate_changes() -> None:
+    inner_frames = [
+        AudioFrame(
+            pcm=_pack_i16([1] * 160),
+            timestamp=1.0,
+            sample_rate=48000,
+        ),
+        AudioFrame(
+            pcm=_pack_i16([2] * 160),
+            timestamp=2.0,
+            sample_rate=16000,
+        ),
+    ]
+    inner = FakeMicrophone(inner_frames)
+    cancellers = [FakeCanceller(), FakeCanceller()]
+    factory_calls: list[int] = []
+    states: list[str] = []
+
+    def make_canceller(rate: int) -> FakeCanceller:
+        factory_calls.append(rate)
+        return cancellers[len(factory_calls) - 1]
+
+    microphone = EchoCancelledMicrophone(inner, make_canceller, states.append)
+
+    frames = asyncio.run(_collect_frames(microphone))
+
+    assert factory_calls == [48000, 16000]
+    assert cancellers[0].process_calls == 1
+    assert cancellers[1].process_calls == 1
+    assert frames[0].sample_rate == 48000
+    assert frames[1].sample_rate == 16000
+    assert states == []
+    assert not microphone.passthrough
+
+
 def test_microphone_type_error_propagates() -> None:
     inner = FakeMicrophone(
         [AudioFrame(pcm=_pack_i16([1] * 160), timestamp=1.0)]
     )
     canceller = FakeCanceller(TypeError("Sahte tür hatası."))
-    microphone = EchoCancelledMicrophone(inner, canceller)
+
+    def make_canceller(_rate: int) -> FakeCanceller:
+        return canceller
+
+    microphone = EchoCancelledMicrophone(inner, make_canceller)
 
     with pytest.raises(TypeError, match="Sahte tür hatası"):
         asyncio.run(_collect_frames(microphone))
@@ -350,10 +450,17 @@ def test_microphone_type_error_propagates() -> None:
 
 
 def test_microphone_delegates_lifecycle_operations() -> None:
-    inner = FakeMicrophone([])
+    inner = FakeMicrophone(
+        [AudioFrame(pcm=_pack_i16([1] * 160), timestamp=1.0)]
+    )
     canceller = FakeCanceller()
     canceller.reset_error = RuntimeError("Sahte sıfırlama hatası.")
-    microphone = EchoCancelledMicrophone(inner, canceller)
+
+    def make_canceller(_rate: int) -> FakeCanceller:
+        return canceller
+
+    microphone = EchoCancelledMicrophone(inner, make_canceller)
+    asyncio.run(_collect_frames(microphone))
 
     microphone.discard_pending()
     microphone.pause()

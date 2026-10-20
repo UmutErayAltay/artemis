@@ -125,6 +125,20 @@ def test_noise_suppression_defaults_off_and_choices_are_saved(tmp_path: Path) ->
     assert load_settings(path).voice.noise_suppression_stt is True
 
 
+def test_echo_cancellation_defaults_off_and_choice_is_saved(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    assert load_settings(path).voice.echo_cancellation is False
+
+    save_choices(path, None, echo_cancellation=True)
+    assert load_settings(path).voice.echo_cancellation is True
+
+    save_choices(path, None)
+    assert load_settings(path).voice.echo_cancellation is True
+
+    save_choices(path, None, echo_cancellation=False)
+    assert load_settings(path).voice.echo_cancellation is False
+
+
 def test_noise_model_dir_is_resolved_relative_to_config(tmp_path: Path) -> None:
     path = config(tmp_path)
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))

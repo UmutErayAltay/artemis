@@ -62,6 +62,8 @@ voice:
   # false (önerilen): temizlenmiş ses yalnız algılamaya (VAD, cümle bitişi, söz kesme, seviye)
   # gider; STT aynı aralığın HAM sesini alır. true: STT de temizlenmiş sesi alır (ADR 0037).
   noise_suppression_stt: false
+  echo_cancellation: false # ADR 0038: hoparlörle kullanırken Jarvis'in kendi sesini mikrofondan siler.
+  echo_delay_ms: 50 # Hoparlör→mikrofon gecikme tahmini; AEC3 kendisi de ayarlar.
   # Verilmezse pakete dahil model (jarvis/channels/voice/models/dfn3) kullanılır. Başka bir dizin
   # verilirse içinde aynı sha256'lı dfn3_step.onnx bulunmalıdır; farklı dosya reddedilir.
   # noise_model_dir: ../models/dfn3

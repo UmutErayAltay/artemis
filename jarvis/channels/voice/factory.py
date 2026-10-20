@@ -25,6 +25,11 @@ from jarvis.channels.voice.denoise import (
     DenoiseDependencyError,
     DenoisedMicrophone,
 )
+from jarvis.channels.voice.echo import (
+    EchoCancelledMicrophone,
+    EchoCanceller,
+    EchoReference,
+)
 from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 
 logger = logging.getLogger(__name__)
@@ -77,11 +82,24 @@ async def build_voice_controller(
         device=settings.voice.input_device,
         capture_rate=MODEL_SR if denoiser is not None else None,
     )
+    echo_reference: EchoReference | None = None
+    if settings.voice.echo_cancellation:
+        reference = EchoReference(MODEL_SR if denoiser is not None else settings.voice.sample_rate)
+        echo_reference = reference
+
+        def make_canceller(rate: int) -> EchoCanceller:
+            reference.retarget(rate)
+            return EchoCanceller(rate, reference, delay_ms=settings.voice.echo_delay_ms)
+
+        microphone = EchoCancelledMicrophone(microphone, make_canceller, on_state)
     if denoiser is not None:
         microphone = DenoisedMicrophone(
             microphone, denoiser, on_state, raw_for_stt=not settings.voice.noise_suppression_stt
         )
-    sink = SoundDeviceSink()
+    if echo_reference is None:
+        sink = SoundDeviceSink()
+    else:
+        sink = SoundDeviceSink(echo_reference=echo_reference)
     recognizer = FasterWhisperRecognizer(settings.voice)
     await asyncio.to_thread(recognizer.prepare)
     synthesizer: SpeechSynthesizer
