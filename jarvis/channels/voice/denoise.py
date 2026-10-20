@@ -649,6 +649,8 @@ class DeepFilterNetDenoiser:
         # Sabit gecikme: t. hop geldiğinde t-2. kare biter, ISTFT bir hop daha geriden gelir.
         self.delay_hops = DELAY_HOPS
         self.delay_samples = DELAY_HOPS * per_hop + RESAMPLE_DELAY_16K
+        # 48 kHz girdide yükseltici FIR yoktur: yalnız indirici FIR'ın yarısı kalır (2 ms).
+        self.delay_samples_48k = DELAY_HOPS * per_hop + RESAMPLE_DELAY_16K // 2
         self.underruns = 0
         self.late_frames = 0
         self._last_warned: dict[str, float] = {}
@@ -752,7 +754,26 @@ class DeepFilterNetDenoiser:
                 f"Kare {self.frame_samples} örnek olmalı, {raw.size} örnek geldi"
             )
         began = time.perf_counter()
-        signal48 = self._up.process(raw.astype("float32") / 32768.0)
+        return self._process48(self._up.process(raw.astype("float32") / 32768.0), began)
+
+    def process_frame_48k(self, pcm: bytes) -> bytes:
+        """48 kHz int16 mono kare alır, 16 kHz int16 kare döner (yükseltici FIR atlanır).
+
+        Mikrofon 48 kHz yakalayınca >8 kHz bilgi modele ulaşır (16 kHz yolunda yoktur). Gecikme
+        ``delay_samples_48k``. Bir akışta ``process_frame`` ile karıştırılmaz.
+        """
+        np = _np()
+        raw = np.frombuffer(pcm, dtype="<i2")
+        if raw.size != self.frame_samples * RESAMPLE_FACTOR:
+            raise ValueError(
+                f"48 kHz kare {self.frame_samples * RESAMPLE_FACTOR} örnek olmalı, "
+                f"{raw.size} örnek geldi"
+            )
+        began = time.perf_counter()
+        return self._process48(raw.astype("float32") / 32768.0, began)
+
+    def _process48(self, signal48: Array, began: float) -> bytes:
+        np = _np()
         spec = self._stft.analyze(signal48)
         erb, cplx = self._features.push(spec)
         self._fifo = np.concatenate([self._fifo, self._advance(spec, erb, cplx)])
@@ -791,6 +812,8 @@ class FrameDenoiser(Protocol):
     delay_samples: int
 
     def process_frame(self, pcm: bytes) -> bytes: ...
+
+    def process_frame_48k(self, pcm: bytes) -> bytes: ...
 
     def reset(self) -> None: ...
 
@@ -835,6 +858,12 @@ class DenoisedMicrophone:
         # Henüz çıktıya yansımamış (gecikme içindeki) ham kareler; hata anında ham olarak akıtılır.
         self._frame_samples = denoiser.frame_samples
         self._delay_samples = denoiser.delay_samples
+        # 48 kHz yakalamada yükseltici FIR olmadığından gecikme (16 kHz örnek) biraz kısadır.
+        self._delay_samples_48k = int(
+            getattr(denoiser, "delay_samples_48k", denoiser.delay_samples)
+        )
+        # Ham geçiş/akıtma 16 kHz kare üretmek zorunda: 48k kareler bu süzgeçle indirilir.
+        self._pt_down = Downsampler3()
         self._raw: deque[AudioFrame] = deque(
             maxlen=-(-denoiser.delay_samples // denoiser.frame_samples)
         )
@@ -847,7 +876,16 @@ class DenoisedMicrophone:
     def underruns(self) -> int:
         return int(getattr(self._denoiser, "underruns", 0))
 
-    def _process(self, pcm: bytes, generation: int) -> bytes | None:
+    def _to_16k(self, frame: AudioFrame) -> AudioFrame:
+        """48 kHz ham kareyi 16 kHz'e indirir (tüketiciler hep 16 kHz görür)."""
+        if frame.sample_rate == MODEL_SR:
+            np = _np()
+            samples = np.frombuffer(frame.pcm, dtype="<i2").astype("float32") / 32768.0
+            low = np.clip(np.rint(self._pt_down.process(samples) * 32768.0), -32768, 32767)
+            return AudioFrame(low.astype("<i2").tobytes(), frame.timestamp)
+        return frame
+
+    def _process(self, pcm: bytes, generation: int, sample_rate: int = IN_SR) -> bytes | None:
         """İş parçacığında çalışır; bekleyen sıfırlama çıkarımdan önce uygulanır."""
         with self._lock:
             with self._state_lock:
@@ -856,13 +894,20 @@ class DenoisedMicrophone:
                 reset, self._reset_pending = self._reset_pending, False
             if reset:
                 self._denoiser.reset()
+            if sample_rate == MODEL_SR:
+                return self._denoiser.process_frame_48k(pcm)
             return self._denoiser.process_frame(pcm)
 
     def _unemitted_part(self, pending: AudioFrame, index: int) -> AudioFrame:
-        """Tampon doluysa ilk karenin çıktıya zaten yansımış başını (gecikme taşması) keser."""
+        """Tampon doluysa ilk karenin çıktıya zaten yansımış başını (gecikme taşması) keser.
+
+        ``pending`` 16 kHz'dir (48k ham kareler önce indirilir).
+        """
         if index or len(self._raw) < (self._raw.maxlen or 0):
             return pending
-        extra = len(self._raw) * self._frame_samples - self._delay_samples
+        is_48k = self._raw[0].sample_rate == MODEL_SR
+        delay = self._delay_samples_48k if is_48k else self._delay_samples
+        extra = len(self._raw) * self._frame_samples - delay
         return AudioFrame(pending.pcm[2 * extra :], pending.timestamp) if extra > 0 else pending
 
     def _fail(self, error: Exception) -> None:
@@ -892,23 +937,27 @@ class DenoisedMicrophone:
             if self._passthrough:
                 # Ham geçişte de sıfırlama öncesi kare atılır; iç mikrofonun süzgecine güvenilmez.
                 if frame.timestamp > reset_time:
-                    yield frame
+                    yield self._to_16k(frame)
                 continue
             if generation != self._seen_generation:
                 self._seen_generation = generation
                 self._stamps.clear()
                 self._raw.clear()
+                self._pt_down.reset()
             if frame.timestamp <= reset_time:
                 continue  # sıfırlamadan önce yakalanmış kare (iç kuyrukta kalmış olabilir)
             try:
-                pcm = await asyncio.to_thread(self._process, frame.pcm, generation)
+                pcm = await asyncio.to_thread(
+                    self._process, frame.pcm, generation, frame.sample_rate
+                )
             except _DENOISE_ERRORS as error:
                 self._fail(error)
                 if self._snapshot()[0] == generation:
                     # Gecikme içinde kalan ham sesi kaybetme: sırayla akıt, sonra bu kareyi.
+                    self._pt_down.reset()
                     for index, pending in enumerate(self._raw):
-                        yield self._unemitted_part(pending, index)
-                    yield frame
+                        yield self._unemitted_part(self._to_16k(pending), index)
+                    yield self._to_16k(frame)
                 self._raw.clear()
                 continue
             if pcm is None or self._snapshot()[0] != generation:

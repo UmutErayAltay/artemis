@@ -88,11 +88,23 @@ def _audio_exception_types(module: Any) -> tuple[type[Exception], ...]:
 
 
 class SoundDeviceMicrophone:
-    """sounddevice callback'i bounded queue'ya 16 kHz mono PCM16 taşır."""
+    """sounddevice callback'i bounded queue'ya mono PCM16 taşır (varsayılan 16 kHz).
 
-    def __init__(self, config: VoiceConfig, device: int | str | None = None) -> None:
+    ``capture_rate`` (ör. 48000) gürültü engelleme içindir: aygıt bu hızda açılır, kareler
+    ``AudioFrame.sample_rate`` ile işaretlenir ve ``DenoisedMicrophone`` 16 kHz'e indirir.
+    Aygıt bu hızı açamazsa tek Türkçe uyarıyla 16 kHz yakalamaya dönülür.
+    """
+
+    def __init__(
+        self,
+        config: VoiceConfig,
+        device: int | str | None = None,
+        capture_rate: int | None = None,
+    ) -> None:
         self.config = config
         self.device = device
+        self.capture_rate = capture_rate or config.sample_rate
+        self._rate = self.capture_rate
         self._queue: queue.Queue[AudioFrame | None] = queue.Queue(config.queue_frames)
         self._stream: Any = None
         self._paused = False
@@ -110,7 +122,7 @@ class SoundDeviceMicrophone:
                     self._queue.get_nowait()
                 self.dropped_frames += 1
             with suppress(queue.Full):
-                self._queue.put_nowait(AudioFrame(pcm, monotonic()))
+                self._queue.put_nowait(AudioFrame(pcm, monotonic(), self._rate))
 
     def _callback(self, data: bytes, _frames: int, _time_info: Any, status: Any) -> None:
         if status:
@@ -123,19 +135,22 @@ class SoundDeviceMicrophone:
         except ImportError as error:
             raise RuntimeError("Ses için `pip install .[voice]` kurulumu gerekli.") from error
         self._audio_errors = _audio_exception_types(sounddevice)
-        frame_samples = self.config.sample_rate * self.config.frame_ms // 1000
         try:
-            self._stream = sounddevice.RawInputStream(
-                samplerate=self.config.sample_rate,
-                blocksize=frame_samples,
-                channels=1,
-                dtype="int16",
-                device=self.device,
-                callback=self._callback,
-            )
-            self._stream.start()
+            self._open(sounddevice, self.capture_rate)
         except self._audio_errors as error:
-            raise RuntimeError("Mikrofon aygıtı açılamadı.") from error
+            if self.capture_rate == self.config.sample_rate:
+                raise RuntimeError("Mikrofon aygıtı açılamadı.") from error
+            logger.warning(
+                "Mikrofon %d Hz açılamadı (%s); gürültü engelleme için 16 kHz yakalamaya "
+                "dönüldü (>8 kHz bilgi olmadan daha düşük kalite).",
+                self.capture_rate, type(error).__name__,
+            )
+            self._close_failed_stream()
+            self.capture_rate = self.config.sample_rate
+            try:
+                self._open(sounddevice, self.capture_rate)
+            except self._audio_errors as retry_error:
+                raise RuntimeError("Mikrofon aygıtı açılamadı.") from retry_error
         while True:
             frame = await asyncio.to_thread(self._queue.get)
             if frame is None:
@@ -143,6 +158,25 @@ class SoundDeviceMicrophone:
             if frame.timestamp < self._discard_before:
                 continue
             yield frame
+
+    def _open(self, sounddevice: Any, rate: int) -> None:
+        self._rate = rate
+        self._stream = sounddevice.RawInputStream(
+            samplerate=rate,
+            blocksize=rate * self.config.frame_ms // 1000,
+            channels=1,
+            dtype="int16",
+            device=self.device,
+            callback=self._callback,
+        )
+        self._stream.start()
+
+    def _close_failed_stream(self) -> None:
+        stream, self._stream = self._stream, None
+        if stream is not None:
+            for action in (stream.stop, stream.close):
+                with suppress(*self._audio_errors, OSError, RuntimeError):
+                    action()
 
     def discard_pending(self) -> None:
         with self._queue_lock:

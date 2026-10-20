@@ -36,6 +36,9 @@ _CONTINUOUS_OFF = {
 class AudioFrame:
     pcm: bytes = field(repr=False)
     timestamp: float
+    # Mikrofon gürültü engelleme için 48 kHz yakalıyorsa 48000; DenoisedMicrophone bunu 16 kHz'e
+    # indirir, yani VAD/seviye/barge-in tüketicileri her zaman 16000 görür.
+    sample_rate: int = 16000
 
 
 @dataclass(frozen=True)

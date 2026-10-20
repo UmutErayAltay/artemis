@@ -34,9 +34,17 @@ def _patch_voice_deps(monkeypatch, mic):
                         lambda _config: SimpleNamespace(prepare=lambda: None))
     monkeypatch.setattr(factory, "PiperSynthesizer",
                         lambda _config: SimpleNamespace(prepare=lambda: None))
-    monkeypatch.setattr(factory, "SoundDeviceMicrophone", lambda *_args, **_kwargs: mic)
+    opened: list[dict] = []
+
+    def make_mic(*_args, **kwargs):
+        opened.append(kwargs)
+        return mic
+
+    monkeypatch.setattr(factory, "SoundDeviceMicrophone", make_mic)
+
     monkeypatch.setattr(factory, "SoundDeviceSink", lambda: object())
     monkeypatch.setattr(factory, "WebRTCVAD", lambda _config: object())
+    return opened
 
 
 def _runtime(config):
@@ -132,3 +140,20 @@ async def test_missing_dependencies_are_reported_as_deps_not_model(monkeypatch):
         _runtime(VoiceConfig(noise_suppression=True)), lambda _: None, states.append
     )
     assert any(s.startswith("denoise:unavailable:deps:") for s in states)
+
+
+async def test_denoise_on_captures_microphone_at_48k_and_off_stays_16k(monkeypatch):
+    pytest.importorskip("onnxruntime")
+    opened = _patch_voice_deps(monkeypatch, object())
+    await factory.build_voice_controller(
+        _runtime(VoiceConfig(noise_suppression=True)), lambda _: None, lambda _: None
+    )
+    assert opened[-1]["capture_rate"] == 48000
+    await factory.build_voice_controller(_runtime(VoiceConfig()), lambda _: None, lambda _: None)
+    assert opened[-1]["capture_rate"] is None
+    # Gürültü engelleme açılamazsa mikrofon 16 kHz kalır.
+    await factory.build_voice_controller(
+        _runtime(VoiceConfig(noise_suppression=True, noise_model_dir=Path("/yok/yok"))),
+        lambda _: None, lambda _: None,
+    )
+    assert opened[-1]["capture_rate"] is None

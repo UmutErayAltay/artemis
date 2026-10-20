@@ -654,3 +654,85 @@ async def test_edge_cancel_does_not_cancel_windows_pipe_closed_future(monkeypatc
     await asyncio.wait_for(stream.aclose(), 1)
     assert closed.done() and not closed.cancelled()
     assert synth._process is None
+
+
+def _fake_sounddevice(monkeypatch, fail_rates=()):
+    class PortAudioError(Exception):
+        pass
+
+    opened = []
+
+    class Stream:
+        def __init__(self, **kwargs):
+            self.kwargs = kwargs
+            self.closed = False
+            opened.append(self)
+
+        def start(self):
+            if self.kwargs["samplerate"] in fail_rates:
+                raise PortAudioError("Invalid sample rate")
+
+        def stop(self):
+            pass
+
+        def close(self):
+            self.closed = True
+
+    fake_module = ModuleType("sounddevice")
+    fake_module.PortAudioError = PortAudioError
+    fake_module.RawInputStream = Stream
+    monkeypatch.setitem(__import__("sys").modules, "sounddevice", fake_module)
+    return opened
+
+
+async def test_capture_rate_48k_opens_native_rate_and_tags_frames(monkeypatch):
+    opened = _fake_sounddevice(monkeypatch)
+    microphone = SoundDeviceMicrophone(VoiceConfig(), capture_rate=48000)
+    frames = microphone.frames()
+    pending = asyncio.ensure_future(anext(frames))
+    await asyncio.sleep(0.05)
+    assert opened[0].kwargs["samplerate"] == 48000 and opened[0].kwargs["blocksize"] == 960
+    microphone._offer(b"x" * 1920)
+    frame = await pending
+    assert frame.sample_rate == 48000 and len(frame.pcm) == 1920
+    await frames.aclose()
+    await microphone.close()
+
+
+async def test_default_capture_stays_16k_with_untagged_default(monkeypatch):
+    opened = _fake_sounddevice(monkeypatch)
+    microphone = SoundDeviceMicrophone(VoiceConfig())
+    frames = microphone.frames()
+    pending = asyncio.ensure_future(anext(frames))
+    await asyncio.sleep(0.05)
+    assert opened[0].kwargs["samplerate"] == 16000 and opened[0].kwargs["blocksize"] == 320
+    microphone._offer(b"y" * 640)
+    assert (await pending).sample_rate == 16000
+    await frames.aclose()
+    await microphone.close()
+
+
+async def test_48k_open_failure_falls_back_to_16k_with_one_warning(monkeypatch, caplog):
+    opened = _fake_sounddevice(monkeypatch, fail_rates=(48000,))
+    microphone = SoundDeviceMicrophone(VoiceConfig(), capture_rate=48000)
+    frames = microphone.frames()
+    with caplog.at_level("WARNING"):
+        pending = asyncio.ensure_future(anext(frames))
+        await asyncio.sleep(0.05)
+    assert [s.kwargs["samplerate"] for s in opened] == [48000, 16000]
+    assert opened[0].closed  # başarısız akış kapatıldı
+    warnings = [r for r in caplog.records if "48000 Hz açılamadı" in r.getMessage()]
+    assert len(warnings) == 1 and "16 kHz" in warnings[0].getMessage()
+    microphone._offer(b"z" * 640)
+    frame = await pending
+    assert frame.sample_rate == 16000 and microphone.capture_rate == 16000
+    await frames.aclose()
+    await microphone.close()
+
+
+async def test_open_failure_at_both_rates_still_reports_runtime_error(monkeypatch):
+    _fake_sounddevice(monkeypatch, fail_rates=(48000, 16000))
+    microphone = SoundDeviceMicrophone(VoiceConfig(), capture_rate=48000)
+    with pytest.raises(RuntimeError, match="Mikrofon aygıtı açılamadı"):
+        await anext(microphone.frames())
+    await microphone.close()

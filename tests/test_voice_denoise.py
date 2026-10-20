@@ -264,12 +264,12 @@ def test_official_full_sequence_hash_mismatch_still_raises(tmp_path: Path) -> No
 # --- Gerçek adım modeli (pakete dahil; sentetik sinyal, CI'da da koşar) ----------------
 
 
-def _speechlike(seconds: float) -> Any:
-    """Gürültülü konuşma benzeri sinyal (16 kHz, tam ölçekli değil): armonikler + gürültü."""
+def _speechlike(seconds: float, rate: int = 16000) -> Any:
+    """Gürültülü konuşma benzeri sinyal (tam ölçekli değil): armonikler + gürültü."""
     rng = np.random.default_rng(7)
-    t = np.arange(int(seconds * 16000)) / 16000
+    t = np.arange(int(seconds * rate)) / rate
     pitch = 130 + 25 * np.sin(2 * np.pi * 0.6 * t)
-    phase = 2 * np.pi * np.cumsum(pitch) / 16000
+    phase = 2 * np.pi * np.cumsum(pitch) / rate
     envelope = 0.5 + 0.5 * np.sin(2 * np.pi * 1.3 * t)
     voiced = sum(np.sin(h * phase) / h for h in range(1, 20)) * envelope
     noise = rng.standard_normal(t.size) * 0.08
@@ -297,6 +297,51 @@ def test_stateful_streaming_matches_offline_exactly_after_delay_alignment(
     snr = _streaming_vs_offline_snr(vendored, _speechlike(4.0))
     print(f"\nSENTETİK AKIŞ vs ÇEVRİMDIŞI: {snr:.2f} dB SNR")
     assert snr >= 40  # fark yalnız akışın int16 nicemlemesidir
+
+
+def _stream48(den: dn.DeepFilterNetDenoiser, x48: Any) -> Any:
+    """48 kHz girdiyi 960 örneklik karelerle verir; 16 kHz kareler döner."""
+    pcm = np.clip(np.rint(x48 * 32768), -32768, 32767).astype("<i2")
+    step = den.frame_samples * 3
+    out = []
+    for i in range(0, pcm.size - step + 1, step):
+        chunk = den.process_frame_48k(pcm[i : i + step].tobytes())
+        assert len(chunk) == den.frame_samples * 2
+        out.append(np.frombuffer(chunk, "<i2"))
+    return np.concatenate(out).astype(np.float32) / 32768
+
+
+def _stream48_vs_offline_snr(den: dn.DeepFilterNetDenoiser, x48: Any) -> float:
+    offline = dn.Downsampler3().process(den.enhance_48k(x48))
+    den.reset()
+    streamed = _stream48(den, x48)
+    a = streamed[den.delay_hops * 160 :]  # ikisi de indirici FIR gecikmeli; akış +3 hop geç
+    b = offline[: a.size]
+    n = min(a.size, b.size)
+    return _snr(b[200 : n - 200], a[200 : n - 200])
+
+
+def test_native_48k_streaming_matches_offline_48k(vendored: dn.DeepFilterNetDenoiser) -> None:
+    snr = _stream48_vs_offline_snr(vendored, _speechlike(3.0, 48000))
+    print(f"\nSENTETİK 48k AKIŞ vs ÇEVRİMDIŞI 48k: {snr:.2f} dB SNR")
+    assert snr >= 40
+
+
+def test_48k_identity_delay_has_no_upsampler_fir() -> None:
+    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner())
+    assert den.delay_samples_48k == 512 and den.delay_samples == 544
+    x16 = _tone(2.0, 16000, (400.0, 1800.0, 5000.0))
+    x48 = dn.Upsampler3().process(x16)
+    out = _stream48(den, x48)
+    d = den.delay_samples_48k + dn.RESAMPLE_DELAY_16K // 2  # model gecikmesi + yükseltici FIR
+    # x48 zaten yükseltilmiş (32 örnek gecikmeli): girdiye göre toplam 512 + 32.
+    assert _snr(x16[300 : out.size - d - 300], out[d + 300 : out.size - 300]) > 55
+
+
+def test_process_frame_48k_rejects_wrong_length() -> None:
+    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner())
+    with pytest.raises(ValueError, match="960"):
+        den.process_frame_48k(b"\0\0" * 320)
 
 
 def test_stateful_output_does_not_depend_on_frame_chunking(
@@ -629,6 +674,87 @@ async def test_wrapper_does_not_block_event_loop_during_processing() -> None:
     assert ticks >= 10
 
 
+# --- 48 kHz yakalama: DenoisedMicrophone ------------------------------------------------
+
+
+class Fake48Denoiser:
+    """Sessiz 16 kHz kare döndürür; 48k çağrılarını sayar, istenen çağrıda çöker."""
+
+    frame_samples = 160
+    delay_samples = 320
+    delay_samples_48k = 288
+
+    def __init__(self, fail_at: int | None = None) -> None:
+        self.calls = 0
+        self.fail_at = fail_at
+
+    def process_frame(self, pcm: bytes) -> bytes:  # pragma: no cover - 48k testlerinde çağrılmaz
+        raise AssertionError("16k yolu çağrılmamalı")
+
+    def process_frame_48k(self, pcm: bytes) -> bytes:
+        self.calls += 1
+        if self.fail_at is not None and self.calls == self.fail_at:
+            raise RuntimeError("model çöktü")
+        assert len(pcm) == 960
+        return bytes(2 * 160)
+
+    def reset(self) -> None:
+        pass
+
+
+class Inner48(FakeInner):
+    async def frames(self) -> AsyncIterator[AudioFrame]:
+        for index in range(self.count):
+            samples = np.full(480, index + 1, dtype="<i2")
+            frame = AudioFrame(samples.tobytes(), float(index), 48000)
+            self.sent.append(frame)
+            yield frame
+
+
+async def test_48k_frames_yield_16k_frames_one_to_one_with_monotonic_stamps() -> None:
+    fake = Fake48Denoiser()
+    out = await _collect(dn.DenoisedMicrophone(Inner48(6), fake))
+    assert len(out) == 6 and fake.calls == 6
+    assert all(f.sample_rate == 16000 and len(f.pcm) == 320 for f in out)
+    assert [f.timestamp for f in out] == sorted(f.timestamp for f in out)
+
+
+async def test_48k_failure_flushes_ring_and_passthrough_is_16k(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    inner, fake = Inner48(6), Fake48Denoiser(fail_at=3)
+    states: list[str] = []
+    mic = dn.DenoisedMicrophone(inner, fake, states.append)
+    with caplog.at_level(logging.WARNING, logger=dn.logger.name):
+        out = await _collect(mic)
+    assert mic.passthrough and states == ["denoise:off"] and fake.calls == 3
+    assert all(f.sample_rate == 16000 and len(f.pcm) in range(1, 321) for f in out)
+    # 2 işlenmiş kare + ham halka (2 kare, gecikme taşması kesilmiş olabilir) + hatalı kare
+    # + 3 geçiş karesi; sıra ve damgalar korunur.
+    stamps = [f.timestamp for f in out]
+    assert stamps == sorted(stamps)
+    tail = out[-4:]  # hatalı kare dahil son 4 ham kare 16 kHz'e inmiş olarak akar
+    assert all(len(f.pcm) == 320 for f in tail[1:])
+    levels = [int(np.frombuffer(f.pcm, "<i2")[100:200].mean()) for f in tail[1:]]
+    assert levels == [4, 5, 6]  # geçiş karelerinin DC değeri (FIR DC kazancı 1) korunur
+    assert sum(r.levelno == logging.WARNING for r in caplog.records) == 1
+
+
+async def test_48k_mixed_with_reset_drops_stale_frames() -> None:
+    fake = Fake48Denoiser()
+
+    class Late(Inner48):
+        async def frames(self) -> AsyncIterator[AudioFrame]:
+            yield AudioFrame(b"\x01\x00" * 480, 9.0, 48000)
+            yield AudioFrame(b"\x02\x00" * 480, 11.0, 48000)
+
+    mic = dn.DenoisedMicrophone(Late(0), fake, clock=lambda: 10.0)
+    mic.pause()
+    mic.resume()
+    out = await _collect(mic)
+    assert fake.calls == 1 and [f.timestamp for f in out] == [11.0]
+
+
 # --- Resmi varlıklar ve tam dizi referans (env ile; yoksa atlanır) ----------------------
 
 MODEL_DIR = os.environ.get("JARVIS_DFN_MODEL_DIR")
@@ -708,3 +834,22 @@ def test_noise_reduction_improves_si_sdr_against_clean(
     after = _si_sdr(clean[1000 : n - 1000], enhanced[1000 : n - 1000])
     print(f"\nSI-SDR vs temiz: gürültülü {before:.2f} dB -> iyileştirilmiş {after:.2f} dB")
     assert after - before > 3
+
+
+def test_real_speech_native_48k_streaming_si_sdr_at_16k_output(
+    vendored: dn.DeepFilterNetDenoiser,
+) -> None:
+    noisy, clean = _assets()
+    size = min(noisy.size, clean.size) // 960 * 960
+    snr = _stream48_vs_offline_snr(vendored, noisy[:size])
+    print(f"\n48k AKIŞ vs ÇEVRİMDIŞI (gerçek konuşma): {snr:.2f} dB SNR")
+    assert snr >= 40
+    vendored.reset()
+    streamed = _stream48(vendored, noisy[:size])[vendored.delay_hops * 160 :]
+    clean16 = dn.Downsampler3().process(clean[:size])  # indirici FIR gecikmesi akışta da var
+    noisy16 = dn.Downsampler3().process(noisy[:size])
+    n = min(streamed.size, clean16.size) - 2000
+    stream_sdr = _si_sdr(clean16[1000:n], streamed[1000:n])
+    before = _si_sdr(clean16[1000:n], noisy16[1000:n])
+    print(f"SI-SDR vs temiz (16 kHz çıktı, 48k yakalama): {before:.2f} -> {stream_sdr:.2f} dB")
+    assert stream_sdr > 19

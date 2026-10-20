@@ -19,6 +19,7 @@ from jarvis.channels.voice.adapters import (
 )
 from jarvis.channels.voice.core import Microphone, SpeechSynthesizer, VoiceController
 from jarvis.channels.voice.denoise import (
+    MODEL_SR,
     NOISE_LEVEL_ATTEN_DB,
     DeepFilterNetDenoiser,
     DenoiseDependencyError,
@@ -54,9 +55,7 @@ async def build_voice_controller(
     burada bağlanmaz; onay yalnız ``create_runtime``'a verilen ekran onayıdır.
     """
     settings = runtime.settings
-    microphone: Microphone = SoundDeviceMicrophone(
-        settings.voice, device=settings.voice.input_device
-    )
+    denoiser: DeepFilterNetDenoiser | None = None
     if settings.voice.noise_suppression:
         # Gürültü engelleme isteğe bağlı bir iyileştirmedir: kurulamazsa ses hattı ham
         # mikrofonla sürer, ama durum görünür olur (sessizce çalışıyormuş gibi davranılmaz).
@@ -71,8 +70,15 @@ async def build_voice_controller(
         except (OSError, ValueError, RuntimeError, ImportError) as error:
             logger.warning("Gürültü engelleme açılamadı, ham mikrofonla sürülüyor: %s", error)
             on_state("denoise:unavailable:" + _denoise_reason(error))
-        else:
-            microphone = DenoisedMicrophone(microphone, denoiser, on_state)
+    # Gürültü engelleme açıksa mikrofon yerel 48 kHz yakalanır (modelin doğal hızı, >8 kHz bilgi
+    # korunur); açılamazsa adaptör uyarıyla 16 kHz'e döner. Aşağı akış hep 16 kHz görür.
+    microphone: Microphone = SoundDeviceMicrophone(
+        settings.voice,
+        device=settings.voice.input_device,
+        capture_rate=MODEL_SR if denoiser is not None else None,
+    )
+    if denoiser is not None:
+        microphone = DenoisedMicrophone(microphone, denoiser, on_state)
     sink = SoundDeviceSink()
     recognizer = FasterWhisperRecognizer(settings.voice)
     await asyncio.to_thread(recognizer.prepare)

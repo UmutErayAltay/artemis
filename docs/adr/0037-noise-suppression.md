@@ -44,6 +44,19 @@ mutasyon bu doğrulamada hatayı 0.04–26 mertebesine çıkarır. Çıktı dete
 çalıştırıldığında aynı sha256), `dfn3_step.json` manifesti kaynak sha256'ları, sürümleri ve
 parite sayılarını taşır; `NOTICE` MIT/Apache-2.0 ve Hendrik Schröter'i belirtir (türev çalışma).
 
+**48 kHz yakalama:** Mikrofon 16 kHz açılınca model 8 kHz üstünü hiç görmez (SI-SDR 16.21 dB;
+48 kHz çevrimdışı 20.01 dB). Bu yüzden gürültü engelleme açıkken fabrika mikrofonu yerel 48 kHz
+yakalar (`SoundDeviceMicrophone(capture_rate=48000)`, 960 örnek/20 ms; yeni config alanı yok).
+Kareler `AudioFrame.sample_rate=48000` ile işaretlenir; `DenoisedMicrophone`
+`process_frame_48k`'yı çağırır (yükseltici FIR atlanır) ve 16 kHz/20 ms kare çıkarır:
+VAD/seviye/barge-in/STT hep 16 kHz görür, `VoiceConfig.sample_rate` 16000 kalır. Aygıt 48 kHz
+açılamazsa (`PortAudioError`) tek Türkçe uyarıyla 16 kHz yakalama + yükseltici yola dönülür.
+Hata durumunda ham geçiş ve halka tamponu akıtımı 48k kareleri 16 kHz'e indirerek verir.
+Gecikme 48k modunda 32 ms (3 hop + 2 ms indirici FIR). Ölçüm: 48k akış ↔ 48k çevrimdışı
+75.73 dB (gerçek konuşma), 75.76 dB (sentetik); SI-SDR 16 kHz çıktıda 6.31 → **20.01 dB**
+(16 kHz yakalamada 16.21). Bench: 48k modunda ort. 2.03–2.26 ms, en kötü 3.5–4.6 ms, CPU
+%10.1–11.2 (16k modu 2.08–2.29 ms, 5.1–5.8 ms, %10.2–11.3): maliyet farkı yok.
+
 **Hizalama ve eşikler:** İleri bakış (2 hop) modelin DIŞINDADIR: t. çıktı spektrumun t-2. karesine
 aittir (resmi grafiklerle aynı sözleşme), bu yüzden t. hop gelince t-2. kare tamamlanır; ilk iki
 çıktı atılır. libDF (`tract.rs`) kodlayıcıyı her karede çalıştırır, ERB/DF kod çözücüyü yalnız
