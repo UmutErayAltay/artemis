@@ -39,6 +39,9 @@ class AudioFrame:
     # Mikrofon gürültü engelleme için 48 kHz yakalıyorsa 48000; DenoisedMicrophone bunu 16 kHz'e
     # indirir, yani VAD/seviye/barge-in tüketicileri her zaman 16000 görür.
     sample_rate: int = 16000
+    # Gürültü engelleme açıkken: pcm temizlenmiş (algılama için), raw_pcm aynı aralığın ham sesi
+    # (STT için, pcm ile aynı uzunluk ve hizada). None ise STT de pcm'i kullanır.
+    raw_pcm: bytes | None = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -116,8 +119,12 @@ class AudioSegmenter:
     def active(self) -> bool:
         return bool(self._active) or self._discarding
 
-    def push(self, pcm: bytes, timestamp: float) -> AudioSegment | None:
+    def push(
+        self, pcm: bytes, timestamp: float, stt_pcm: bytes | None = None
+    ) -> AudioSegment | None:
+        """VAD ``pcm`` (temizlenmiş olabilir) üzerinde çalışır; segmentte ``stt_pcm`` taşınır."""
         speech = self.vad.is_speech(pcm)
+        keep = pcm if stt_pcm is None else stt_pcm
         self.voiced_frames = self.voiced_frames + 1 if speech else 0
         if self._discarding:
             self._silence = 0 if speech else self._silence + 1
@@ -127,7 +134,7 @@ class AudioSegmenter:
                 self._pre.clear()
             return None
         if not self._active:
-            self._pre.append(pcm)
+            self._pre.append(keep)
             if not speech:
                 return None
             self._active = [*self._pre]
@@ -136,7 +143,7 @@ class AudioSegmenter:
             self._speech_start = timestamp
             self._speech_end = timestamp
             return None
-        self._active.append(pcm)
+        self._active.append(keep)
         if speech:
             self._speech_end = timestamp
         self._silence = 0 if speech else self._silence + 1
@@ -264,7 +271,7 @@ class VoiceController:
                 if self._awaiting_followup and self.clock() > self._followup_until:
                     self._awaiting_followup = False
                     self._emit_state("listening")
-                utterance = self.segmenter.push(frame.pcm, frame.timestamp)
+                utterance = self.segmenter.push(frame.pcm, frame.timestamp, frame.raw_pcm)
                 if (
                     self._playback is not None
                     and not self._playback.done()

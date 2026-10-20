@@ -311,7 +311,8 @@ def make_golden(net: Any) -> dict[str, Any]:
     erb_in = torch.cat([feat_erb[:, :, la:], torch.zeros_like(feat_erb[:, :, :la])], dim=2)
     spec_in = torch.cat([feat_spec[:, :, la:], torch.zeros_like(feat_spec[:, :, :la])], dim=2)
     return {
-        "feat_erb": erb_in.numpy().astype("float32"), "feat_spec": spec_in.numpy().astype("float32"),
+        "feat_erb": erb_in.numpy().astype("float32"),
+        "feat_spec": spec_in.numpy().astype("float32"),
         "m": m.numpy().astype("float32"),
         "coefs": coefs.permute(0, 2, 3, 1, 4).reshape(1, n, p.nb_df, 2 * p.df_order).numpy(),
         "lsnr": lsnr.numpy().astype("float32"),

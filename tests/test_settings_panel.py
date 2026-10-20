@@ -118,6 +118,11 @@ def test_noise_suppression_defaults_off_and_choices_are_saved(tmp_path: Path) ->
     save_choices(path, None, noise_suppression=False)
     voice = load_settings(path).voice
     assert (voice.noise_suppression, voice.noise_suppression_level) == (False, "guclu")
+    assert voice.noise_suppression_stt is False  # varsayılan: STT ham sesi alır
+    save_choices(path, None, noise_suppression_stt=True)
+    assert load_settings(path).voice.noise_suppression_stt is True
+    save_choices(path, None)  # verilmeyen anahtar korunur
+    assert load_settings(path).voice.noise_suppression_stt is True
 
 
 def test_noise_model_dir_is_resolved_relative_to_config(tmp_path: Path) -> None:

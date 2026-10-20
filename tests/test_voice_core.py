@@ -698,3 +698,27 @@ async def test_continuous_still_ignores_assistant_echo():
         assert runner.commands == []
     finally:
         await controller.close()
+
+
+def test_segmenter_detects_on_denoised_but_keeps_raw_audio_for_stt():
+    from jarvis.channels.voice.core import AudioSegmenter
+    from jarvis.config.settings import VoiceConfig
+
+    config = VoiceConfig()
+    voiced = [False] * 3 + [True] * 4 + [False] * (config.end_silence_ms // config.frame_ms)
+    segmenter = AudioSegmenter(config, FakeVAD(voiced))
+    segment = None
+    for index in range(len(voiced)):
+        denoised, raw = bytes([index]) * 4, bytes([100 + index]) * 4
+        segment = segmenter.push(denoised, float(index), raw) or segment
+        if index == 4:
+            assert segmenter.snapshot().startswith(bytes([100]) * 4)  # önyuvarlanma ham
+            assert bytes([index]) * 4 not in segmenter.snapshot()
+    assert segment is not None
+    assert segment.pcm.startswith(bytes([100]) * 4)  # konuşma öncesi (pre-roll) de ham
+    assert all(chunk >= 100 for chunk in segment.pcm)  # temizlenmiş bayt yok
+    # Ham verilmezse (gürültü engelleme kapalı) davranış değişmez.
+    plain = AudioSegmenter(config, FakeVAD(voiced))
+    for index in range(len(voiced)):
+        result = plain.push(bytes([index]) * 4, float(index))
+    assert result is not None and result.pcm.startswith(bytes([0]) * 4)

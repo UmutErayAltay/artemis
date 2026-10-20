@@ -39,6 +39,7 @@ def save_choices(
     continuous_mode: bool | None = None,
     noise_suppression: bool | None = None,
     noise_suppression_level: str | None = None,
+    noise_suppression_stt: bool | None = None,
 ) -> None:
     """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir."""
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
@@ -50,6 +51,8 @@ def save_choices(
         raw["voice"]["noise_suppression"] = noise_suppression
     if noise_suppression_level is not None:
         raw["voice"]["noise_suppression_level"] = noise_suppression_level
+    if noise_suppression_stt is not None:
+        raw["voice"]["noise_suppression_stt"] = noise_suppression_stt
     if applications is not None:
         raw["applications"] = applications
         raw["close_without_confirmation"] = [
@@ -227,11 +230,20 @@ class SettingsPanel(QWidget):
             self.noise_level.addItem(label, key)
         self.noise_level.setAccessibleName("Gürültü engelleme düzeyi")
         self.noise_level.setToolTip(
-            "Güçlü bastırma konuşma tanıma doğruluğunu düşürebilir; Orta önerilir."
+            "Düzey bastırma sınırıdır; algılamayı etkiler. Tanıma varsayılan olarak ham sesi alır."
         )
         self.noise_level.setEnabled(False)
         self.noise_suppression.toggled.connect(self.noise_level.setEnabled)
         layout.addWidget(self.noise_level)
+        self.noise_stt = QCheckBox("Tanımaya da temizlenmiş ses ver")
+        self.noise_stt.setToolTip(
+            "Kapalıyken (önerilen) temizlenmiş ses yalnız konuşma algılamaya, cümle bitişine ve "
+            "söz kesmeye gider; konuşma tanıma aynı aralığın ham sesini alır. Ölçümlerde Whisper "
+            "temizlenmiş sesle çoğunlukla daha kötü sonuç verdi."
+        )
+        self.noise_stt.setEnabled(False)
+        self.noise_suppression.toggled.connect(self.noise_stt.setEnabled)
+        layout.addWidget(self.noise_stt)
         self.advanced_devices = QCheckBox("Sanal ve diğer ses girişlerini göster")
         self.advanced_devices.toggled.connect(self._toggle_device_detail)
         layout.addWidget(self.advanced_devices)
@@ -318,6 +330,7 @@ class SettingsPanel(QWidget):
             self.advanced_devices.setEnabled(False)
             self.continuous_mode.setEnabled(False)
             self.noise_suppression.setEnabled(False)
+            self.noise_stt.setEnabled(False)
             self.all_applications.setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
                            self.github_auto, self.github_button):
@@ -339,6 +352,8 @@ class SettingsPanel(QWidget):
                 max(0, self.noise_level.findData(settings.voice.noise_suppression_level))
             )
             self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
+            self.noise_stt.setChecked(settings.voice.noise_suppression_stt)
+            self.noise_stt.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self.applications = dict(settings.applications)
             self._refresh_applications()
             self.all_applications.setChecked(settings.allow_all_applications)

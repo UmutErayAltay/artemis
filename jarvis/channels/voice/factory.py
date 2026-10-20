@@ -78,7 +78,9 @@ async def build_voice_controller(
         capture_rate=MODEL_SR if denoiser is not None else None,
     )
     if denoiser is not None:
-        microphone = DenoisedMicrophone(microphone, denoiser, on_state)
+        microphone = DenoisedMicrophone(
+            microphone, denoiser, on_state, raw_for_stt=not settings.voice.noise_suppression_stt
+        )
     sink = SoundDeviceSink()
     recognizer = FasterWhisperRecognizer(settings.voice)
     await asyncio.to_thread(recognizer.prepare)

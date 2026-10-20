@@ -80,6 +80,15 @@ async def test_noise_suppression_wraps_microphone_with_level_mapping(monkeypatch
     )
     assert isinstance(controller.microphone, factory.DenoisedMicrophone)
     assert seen == {"model_dir": tmp_path, "atten_lim_db": 12.0, "frame_samples": 320}
+    assert controller.microphone._raw_for_stt is True  # varsayılan: STT ham ses
+
+    config = VoiceConfig(
+        noise_suppression=True, noise_suppression_stt=True, noise_model_dir=tmp_path
+    )
+    controller = await factory.build_voice_controller(
+        _runtime(config), lambda _: None, lambda _: None
+    )
+    assert controller.microphone._raw_for_stt is False
 
 
 async def test_noise_suppression_works_out_of_the_box_with_vendored_model(monkeypatch):

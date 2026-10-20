@@ -112,7 +112,10 @@ kullanın ya da mevcut yankı korumalarına (ADR 0022) güvenin.
 Gürültü engelleme açıkken mikrofon yerel 48 kHz yakalanır (modelin doğal hızı; 8 kHz üstü
 bilgi korunduğundan kalite 16 kHz yakalamaya göre daha yüksektir) ve 16 kHz'e indirilerek
 sonraki aşamalara verilir. Aygıt 48 kHz'i açamazsa günlüğe tek uyarı yazılır ve 16 kHz'e
-dönülür. Gecikme yaklaşık 32–34 ms'dir (30 ms STFT+ileri bakış, 2–4 ms yeniden örnekleme). Model eksik,
+dönülür. Varsayılan olarak temizlenmiş ses yalnız konuşma algılamaya (VAD, cümle bitişi, söz kesme,
+seviye göstergesi) gider; konuşma tanıma (Whisper) aynı aralığın ham sesini alır, çünkü ölçümlerde
+temizlenmiş ses Whisper'ı çoğunlukla kötüleştirdi (ADR 0037). `voice.noise_suppression_stt: true`
+(panelde "Tanımaya da temizlenmiş ses ver") tanımaya da temizlenmiş ses verir. Gecikme yaklaşık 32–34 ms'dir (30 ms STFT+ileri bakış, 2–4 ms yeniden örnekleme). Model eksik,
 bozuk veya onnxruntime yoksa ses hattı düşmez: sohbette "Gürültü engelleme açılamadı: <neden>" iletisi çıkar ve ham mikrofonla sürülür. Çalışma sırasında model hata verirse
 oturum boyunca ham sese dönülür ve sohbette görünür bir ileti çıkar. Ölçüm:
 `python -m bench.denoise_rtf`. Geliştirme: modeli yeniden üretmek için

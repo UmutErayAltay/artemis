@@ -495,8 +495,10 @@ def test_noise_suppression_controls_load_enable_and_save(
     panel = SettingsPanel(path)
     assert not panel.noise_suppression.isChecked() and not panel.noise_level.isEnabled()
     assert panel.noise_level.currentData() == "orta"
+    assert not panel.noise_stt.isChecked() and not panel.noise_stt.isEnabled()
     panel.noise_suppression.setChecked(True)
-    assert panel.noise_level.isEnabled()
+    assert panel.noise_level.isEnabled() and panel.noise_stt.isEnabled()
+    panel.noise_stt.setChecked(True)
     panel.noise_level.setCurrentIndex(panel.noise_level.findData("guclu"))
     from jarvis.channels.desktop.settings_panel import save_choices
 
@@ -504,13 +506,15 @@ def test_noise_suppression_controls_load_enable_and_save(
         path, None,
         noise_suppression=panel.noise_suppression.isChecked(),
         noise_suppression_level=str(panel.noise_level.currentData()),
+        noise_suppression_stt=panel.noise_stt.isChecked(),
     )
     panel.refresh()
     voice = load_settings(path).voice
     assert voice.noise_suppression and voice.noise_suppression_level == "guclu"
+    assert voice.noise_suppression_stt and panel.noise_stt.isChecked()
     assert panel.noise_suppression.isChecked() and panel.noise_level.currentData() == "guclu"
     panel.noise_suppression.setChecked(False)
-    assert not panel.noise_level.isEnabled()
+    assert not panel.noise_level.isEnabled() and not panel.noise_stt.isEnabled()
 
 
 def test_step_block_is_wide_enough_for_its_longest_visible_line(app: QApplication) -> None:

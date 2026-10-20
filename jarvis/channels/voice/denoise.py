@@ -839,8 +839,14 @@ class DenoisedMicrophone:
         denoiser: FrameDenoiser,
         on_state: Callable[[str], None] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        raw_for_stt: bool = True,
     ) -> None:
         self._inner = inner
+        # True: çıktı karesi ``raw_pcm`` ile aynı aralığın (gecikme hizalı) HAM sesini de taşır;
+        # STT bunu kullanır, algılama temizlenmiş ``pcm``'i kullanır.
+        self._raw_for_stt = raw_for_stt
+        self._hist = bytearray()
+        self._hist_total = 0
         self._denoiser = denoiser
         self._on_state = on_state or (lambda _state: None)
         self._clock = clock  # AudioFrame.timestamp ile aynı saat (monotonic)
@@ -876,6 +882,31 @@ class DenoisedMicrophone:
     @property
     def underruns(self) -> int:
         return int(getattr(self._denoiser, "underruns", 0))
+
+    def _aligned_raw(self, low: AudioFrame, frame_rate: int) -> bytes:
+        """``low`` (ham, 16 kHz) geçmişe eklenir; çıktı karesiyle hizalı ham aralık döner.
+
+        Çıktı karesi k, girdinin gecikme kadar önceki sesini taşır. 16 kHz yakalamada kayma
+        ``delay_samples``; 48 kHz'de ham yol zaten indirici FIR gecikmeli olduğundan kayma
+        ``delay_samples_48k`` eksi bu gecikme. Ön ısınmada eksik kısım sıfırdır (çıktı da sessiz).
+        """
+        shift = self._delay_samples
+        if frame_rate == MODEL_SR:
+            shift = self._delay_samples_48k - RESAMPLE_DELAY_16K // 2
+        size = len(low.pcm)
+        self._hist += low.pcm
+        self._hist_total += size
+        end = self._hist_total - 2 * shift
+        start = end - size
+        base = self._hist_total - len(self._hist)
+        if end <= 0:
+            chunk = bytes(size)
+        else:
+            chunk = bytes(max(0, -start)) + bytes(self._hist[max(start, 0) - base : end - base])
+        keep = 2 * shift + size
+        if len(self._hist) > keep:
+            del self._hist[: len(self._hist) - keep]
+        return chunk
 
     def _to_16k(self, frame: AudioFrame) -> AudioFrame:
         """48 kHz ham kareyi 16 kHz'e indirir (tüketiciler hep 16 kHz görür)."""
@@ -943,6 +974,8 @@ class DenoisedMicrophone:
                 self._seen_generation = generation
                 self._stamps.clear()
                 self._raw.clear()
+                self._hist.clear()
+                self._hist_total = 0
                 self._pt_down.reset()
             if frame.timestamp <= reset_time:
                 continue  # sıfırlamadan önce yakalanmış kare (iç kuyrukta kalmış olabilir)
@@ -974,7 +1007,8 @@ class DenoisedMicrophone:
             # gitmez. max(), sıfırlama sonrası saat farkına karşı ek güvencedir.
             stamp = max(self._stamps[0], self._last_stamp)
             self._last_stamp = stamp
-            yield AudioFrame(pcm, stamp)
+            raw = self._aligned_raw(low, frame.sample_rate) if self._raw_for_stt else None
+            yield AudioFrame(pcm, stamp, raw_pcm=raw)
 
     def discard_pending(self) -> None:
         self._inner.discard_pending()

@@ -79,6 +79,9 @@ class VoiceConfig(BaseModel):
     # hafif 12, orta 24, güçlü sınırsız; güçlü bastırma Whisper doğruluğunu düşürebilir.
     noise_suppression: bool = False
     noise_suppression_level: Literal["hafif", "orta", "guclu"] = "orta"
+    # false: temizlenmiş ses yalnız algılamaya (VAD, bitiş, barge-in, seviye) gider; STT aynı
+    # aralığın HAM sesini alır (ölçüm: Whisper temizlenmiş sesle çoğunlukla kötüleşir, ADR 0037).
+    noise_suppression_stt: bool = False
     # Verilmezse pakete dahil durumlu adım modeli (jarvis/channels/voice/models/dfn3).
     noise_model_dir: Path | None = None
     pre_roll_ms: int = Field(default=300, ge=0, le=1000)

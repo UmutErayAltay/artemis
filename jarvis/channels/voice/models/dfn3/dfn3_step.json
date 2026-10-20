@@ -4,7 +4,7 @@
  "checkpoint": "DeepFilterNet3/checkpoints/model_120.ckpt.best",
  "checkpoint_epoch": 120,
  "upstream_commit": "d375b2d8309e0935d165700c91da9de862a99c31",
- "export_script_sha256": "479020d0fc115d0c0d93748f7fd96285a676ecf01542558a3bab742c02fc52c3",
+ "export_script_sha256": "5242ac551d28318ffec852b67fab381ecae2d851d5d7d2a298ab4a29037d605d",
  "versions": {
   "python": "3.11.15",
   "torch": "2.3.1+cpu",
@@ -118,5 +118,12 @@
   }
  },
  "tolerance": 0.0001,
- "onnx_sha256": "a76b89869279b483c639bb437a3bcdbf6bfb0192c1115ecdcf87402f2b1d4f70"
+ "onnx_sha256": "a76b89869279b483c639bb437a3bcdbf6bfb0192c1115ecdcf87402f2b1d4f70",
+ "golden": {
+  "file": "tests/data/dfn3_step_golden.npz",
+  "sha256": "b3a560574008184354c4573f2d7da45edf98ca175080eec9ce11727d3d4435aa",
+  "frames": 52,
+  "tolerance": 0.0001,
+  "source": "torch DfNet.forward (tam dizi), sentetik konuşma+gürültü, ilk 52 kare"
+ }
 }

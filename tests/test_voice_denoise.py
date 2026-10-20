@@ -381,6 +381,36 @@ def test_state_actually_carries_across_hops() -> None:
     assert np.abs(carried.coefs - fresh.coefs).max() > 1e-3
 
 
+GOLDEN_NPZ = Path(__file__).parent / "data" / "dfn3_step_golden.npz"
+
+
+def test_step_model_matches_torch_full_sequence_golden_vector() -> None:
+    """Bağımsız referans: torch tam dizi modelin ürettiği 52 karelik altın vektör (CI'da env'siz).
+
+    Her GRU satırı ve her evrişim geçmişi bozulursa bu test kırılır (durum kablolama hatası).
+    """
+    import hashlib
+    import json
+
+    manifest = json.loads((VENDORED / "dfn3_step.json").read_text(encoding="utf-8"))
+    assert hashlib.sha256(GOLDEN_NPZ.read_bytes()).hexdigest() == manifest["golden"]["sha256"]
+    data = np.load(GOLDEN_NPZ)
+    runner = dn.StatefulOnnxRunner(VENDORED)
+    frames = data["m"].shape[2]
+    assert frames == manifest["golden"]["frames"] == 52
+    worst = 0.0
+    for t in range(frames):
+        out = runner.step(data["feat_erb"][0, 0, t], data["feat_spec"][0, :, t])
+        worst = max(
+            worst,
+            float(np.abs(out.mask - data["m"][0, 0, t]).max()),
+            float(np.abs(out.coefs.reshape(dn.NB_DF, 10) - data["coefs"][0, t]).max()),
+            abs(out.lsnr - float(data["lsnr"][0, t, 0])),
+        )
+    print(f"\nALTIN VEKTÖR en büyük mutlak hata: {worst:.2e}")
+    assert worst <= 1e-4
+
+
 def test_step_runner_state_is_exactly_the_documented_layout() -> None:
     runner = dn.StatefulOnnxRunner(VENDORED)
     assert {k: v.shape for k, v in runner._state.items()} == dn.STATE_SHAPES
@@ -751,6 +781,46 @@ async def test_48k_failure_flush_continues_raw_downsampler_without_warmup_transi
     assert flushed.size > 320 * 3
     tail = expected[expected.size - flushed.size :]
     assert np.abs(flushed.astype(int) - tail.astype(int)).max() <= 1
+
+
+class ToneInner(FakeInner):
+    def __init__(self, count: int, rate: int) -> None:
+        super().__init__(count)
+        self.rate = rate
+
+    async def frames(self) -> AsyncIterator[AudioFrame]:
+        step = self.rate // 50
+        t = np.arange(self.count * step) / self.rate
+        wave_ = 0.2 * np.sin(2 * np.pi * 440 * t) + 0.1 * np.sin(2 * np.pi * 1700 * t + 1)
+        pcm = np.rint(wave_ * 32768).astype("<i2")
+        for index in range(self.count):
+            yield AudioFrame(pcm[index * step : (index + 1) * step].tobytes(), float(index),
+                             self.rate)
+
+
+async def _raw_vs_denoised(rate: int, denoiser: Any, **kwargs: Any) -> tuple[Any, Any]:
+    out = await _collect(dn.DenoisedMicrophone(ToneInner(100, rate), denoiser, **kwargs))
+    assert all(f.sample_rate == 16000 for f in out)
+    clean = np.concatenate([np.frombuffer(f.pcm, "<i2") for f in out]).astype(np.float64)
+    raw = np.concatenate([np.frombuffer(f.raw_pcm or b"", "<i2") for f in out]).astype(np.float64)
+    return clean, raw
+
+
+@pytest.mark.parametrize("rate", [16000, 48000])
+async def test_frames_carry_delay_aligned_raw_pcm_for_stt(rate: int) -> None:
+    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner())
+    clean, raw = await _raw_vs_denoised(rate, den)
+    assert raw.size == clean.size
+    # Kimlik "model": temizlenmiş ses = ham sesin aynısı; hizalıysa SNR yüksek olmalı.
+    assert _snr(raw[3000:-300], clean[3000:-300]) > 40
+    # Hizasız (örn. bir kare kaymış) ham ses bunu sağlayamazdı.
+    assert _snr(raw[3000 + 320 : -300], clean[3000 : -300 - 320]) < 20
+
+
+async def test_raw_pcm_omitted_when_stt_uses_denoised_audio() -> None:
+    den = dn.DeepFilterNetDenoiser(runner=IdentityRunner())
+    out = await _collect(dn.DenoisedMicrophone(ToneInner(10, 16000), den, raw_for_stt=False))
+    assert all(f.raw_pcm is None for f in out)
 
 
 async def test_48k_mixed_with_reset_drops_stale_frames() -> None:

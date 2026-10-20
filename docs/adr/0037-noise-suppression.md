@@ -57,6 +57,25 @@ Gecikme 48k modunda 32 ms (3 hop + 2 ms indirici FIR). Ölçüm: 48k akış ↔ 
 (16 kHz yakalamada 16.21). Bench: 48k modunda ort. 2.03–2.26 ms, en kötü 3.5–4.6 ms, CPU
 %10.1–11.2 (16k modu 2.08–2.29 ms, 5.1–5.8 ms, %10.2–11.3): maliyet farkı yok.
 
+**ASR bulgusu ve tasarım (temizlenmiş ses algılar, STT ham ses alır):** Whisper small, tr, 20 Piper
+cümlesi x 2 gürültü, WER (%) SNR 0/5/10/20: ham 49.1/40.2/31.3/23.4; d12 51.9/41.1/29.4/25.2;
+d24 56.1/45.8/35.5/28.0; d100 64.5/49.5/39.7/27.1. Temizlenmiş ses Whisper'ı çoğunlukla
+İYİLEŞTİRMEZ, kötüleştirir. Yine de VAD/cümle bitişi için yararlıdır (vendored model, WebRTC VAD
+agresiflik 2, 20 ms kareler, 48k yakalama; iki gürültü dosyası x RMS 0.01/0.02/0.05/0.1, 8 koşul
+ortalaması): yalnız gürültüde kareleri "konuşma" sayma oranı ham **0.714**, d12 **0.364**, d24 **0.275**,
+d100 **0.213**. `AudioSegmenter` (varsayılan end_silence 600 ms, ~8.2 sn konuşma + 2 sn önce/3 sn
+sonra gürültü, iki gürültü x SNR 0/5/10 = 6 koşul): konuşma bitişi (gerçek bitişe ±1 sn, en geç 1.5 sn
+sonra kapanan segment) ham sesle **1/6**, d12 3/6, d24 5/6, d100 6/6. Ham sesle VAD gürültüde hiç
+sessizlik görmediği için çoğu koşulda segment 15 sn sınırına kadar kapanmaz (atılır, 0 segment).
+Segment sayısı (gerçek: 1): d12 1,1,1,0,0,1; d24 1,1,1,1,2,2; d100 3,2,2,2,1,3 (güçlü bastırma
+başta kısa gürültü patlaması segmentleri üretir). Bu yüzden: temizlenmiş `pcm` algılama (VAD,
+cümle bitişi, söz kesme, seviye ölçer), aynı aralığın gecikme hizalı HAM sesi `AudioFrame.raw_pcm`
+ile STT'ye gider (`AudioSegmenter` ham baytları, ön yuvarlanma dahil, biriktirir; 48k yakalamada ham
+yol kesintisiz 48k->16k indirilmiştir). `voice.noise_suppression_stt: true` STT'ye de temizlenmiş ses
+verir (varsayılan false; panelde "Tanımaya da temizlenmiş ses ver"). Gürültü engelleme kapalıyken
+hiçbir şey değişmez. Düzey eşlemesi (12/24/100 dB) değiştirilmedi: d24 dengelidir (5/6 bitiş, d12'den
+az yanlış alarm), d100 en iyi bitiş/yanlış alarm verir ama kısa sahte segmentler üretir.
+
 **Hizalama ve eşikler:** İleri bakış (2 hop) modelin DIŞINDADIR: t. çıktı spektrumun t-2. karesine
 aittir (resmi grafiklerle aynı sözleşme), bu yüzden t. hop gelince t-2. kare tamamlanır; ilk iki
 çıktı atılır. libDF (`tract.rs`) kodlayıcıyı her karede çalıştırır, ERB/DF kod çözücüyü yalnız
