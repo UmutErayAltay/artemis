@@ -444,6 +444,9 @@ def load_settings(path: Path) -> Settings:
             voice_updates[field] = (
                 path_value if path_value.is_absolute() else (base / path_value).resolve()
             )
+    if settings.voice.noise_model_dir is None:
+        # fetch_noise_model.py varsayılanı (repo/models/deepfilternet3); cwd'den bağımsız.
+        voice_updates["noise_model_dir"] = (base / "../models/deepfilternet3").resolve()
     if voice_updates:
         updates["voice"] = settings.voice.model_copy(update=voice_updates)
     memory_updates: dict[str, Path] = {}

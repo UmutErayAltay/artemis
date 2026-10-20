@@ -108,13 +108,13 @@ kullanın ya da mevcut yankı korumalarına (ADR 0022) güvenin.
    voice:
      noise_suppression: true
      noise_suppression_level: orta   # hafif (12 dB) | orta (24 dB) | guclu (sınırsız)
-     noise_model_dir: ../models/deepfilternet3
+     noise_model_dir: ../models/deepfilternet3   # verilmezse bu varsayılan kullanılır
    ```
 
    Ya da ayarlar panelinde **Gürültü engelleme** kutusunu işaretleyip düzeyi seçin;
    **Uygula** sesi yeniden başlatır ve değişiklik o zaman geçerli olur.
 
-Model eksik veya bozuksa ses "açılamadı" hatası verir. Çalışma sırasında model hata verirse
+Model eksik, bozuk veya onnxruntime yoksa ses hattı düşmez: sohbette "Gürültü engelleme açılamadı: <neden>" iletisi çıkar ve ham mikrofonla sürülür. Çalışma sırasında model hata verirse
 oturum boyunca ham sese dönülür ve sohbette görünür bir ileti çıkar. Ölçüm:
 `python -m bench.denoise_rtf --model-dir models/deepfilternet3`.
 

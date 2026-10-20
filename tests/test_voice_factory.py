@@ -1,8 +1,6 @@
 from pathlib import Path
 from types import SimpleNamespace
 
-import pytest
-
 from jarvis.channels.voice import factory
 from jarvis.config.settings import VoiceConfig
 
@@ -74,14 +72,33 @@ async def test_noise_suppression_wraps_microphone_with_level_mapping(monkeypatch
     assert seen == {"model_dir": tmp_path, "atten_lim_db": 12.0, "frame_samples": 320}
 
 
-async def test_noise_suppression_without_model_dir_or_files_fails_actionably(
-    monkeypatch, tmp_path: Path
+async def test_noise_suppression_failure_degrades_to_raw_mic_with_visible_state(
+    monkeypatch, tmp_path: Path, caplog
 ):
-    _patch_voice_deps(monkeypatch, object())
-    with pytest.raises(ValueError, match="fetch_noise_model"):
-        await factory.build_voice_controller(
-            _runtime(VoiceConfig(noise_suppression=True)), lambda _: None, lambda _: None
+    mic = object()
+    _patch_voice_deps(monkeypatch, mic)
+    cases = [
+        (VoiceConfig(noise_suppression=True), "dizin ayarlı değil"),
+        (VoiceConfig(noise_suppression=True, noise_model_dir=tmp_path / "yok"), "bulunamadı"),
+    ]
+    for config, reason in cases:
+        states: list[str] = []
+        caplog.clear()
+        controller = await factory.build_voice_controller(
+            _runtime(config), lambda _: None, states.append
         )
-    config = VoiceConfig(noise_suppression=True, noise_model_dir=tmp_path / "yok")
-    with pytest.raises(OSError, match="fetch_noise_model"):
-        await factory.build_voice_controller(_runtime(config), lambda _: None, lambda _: None)
+        assert controller.microphone is mic
+        unavailable = [s for s in states if s.startswith("denoise:unavailable:")]
+        assert len(unavailable) == 1 and reason in unavailable[0]
+        assert sum(r.levelno >= 30 for r in caplog.records if "Gürültü" in r.getMessage()) == 1
+    # sha256 uyuşmazlığı da düşürmez
+    (tmp_path / "bad").mkdir()
+    for name in ("enc.onnx", "erb_dec.onnx", "df_dec.onnx"):
+        (tmp_path / "bad" / name).write_bytes(b"x")
+    states = []
+    controller = await factory.build_voice_controller(
+        _runtime(VoiceConfig(noise_suppression=True, noise_model_dir=tmp_path / "bad")),
+        lambda _: None, states.append,
+    )
+    assert controller.microphone is mic
+    assert any("doğrulanamadı" in s for s in states)

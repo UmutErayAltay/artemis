@@ -107,7 +107,7 @@ def test_noise_suppression_defaults_off_and_choices_are_saved(tmp_path: Path) ->
     path = config(tmp_path)
     voice = load_settings(path).voice
     assert (voice.noise_suppression, voice.noise_suppression_level) == (False, "orta")
-    assert voice.noise_model_dir is None
+    assert voice.noise_model_dir == (tmp_path / "../models/deepfilternet3").resolve()
     save_choices(path, None, noise_suppression=True, noise_suppression_level="guclu")
     voice = load_settings(path).voice
     assert (voice.noise_suppression, voice.noise_suppression_level) == (True, "guclu")

@@ -24,6 +24,7 @@ import asyncio
 import hashlib
 import importlib
 import logging
+import threading
 from collections import deque
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
@@ -596,6 +597,8 @@ class DeepFilterNetDenoiser:
             self._fifo = np.concatenate([self._fifo, np.zeros(need - self._fifo.size, "float32")])
         chunk, self._fifo = self._fifo[:need], self._fifo[need:]
         out16 = self._down.process(chunk)
+        if not np.isfinite(out16).all():
+            raise ValueError("Gürültü engelleme sonlu olmayan (NaN/inf) örnek üretti")
         pcm_out: bytes = np.clip(np.rint(out16 * 32768.0), -32768, 32767).astype("<i2").tobytes()
         return pcm_out
 
@@ -673,6 +676,9 @@ class DenoisedMicrophone:
         self._passthrough = False
         self._generation = 0
         self._reset_pending = False
+        # İptal edilen frames()'in uçuştaki çağrısı ile yenisi çakışmasın.
+        self._lock = threading.Lock()
+        self._last_stamp = float("-inf")
         delay_frames = round(denoiser.delay_samples / denoiser.frame_samples)
         self._stamps: deque[float] = deque(maxlen=delay_frames + 1)
 
@@ -682,10 +688,11 @@ class DenoisedMicrophone:
 
     def _process(self, pcm: bytes) -> bytes:
         """İş parçacığında çalışır; bekleyen sıfırlama, çıkarımdan önce uygulanır."""
-        if self._reset_pending:
-            self._reset_pending = False
-            self._denoiser.reset()
-        return self._denoiser.process_frame(pcm)
+        with self._lock:
+            if self._reset_pending:
+                self._reset_pending = False
+                self._denoiser.reset()
+            return self._denoiser.process_frame(pcm)
 
     def _fail(self, error: Exception) -> None:
         if self._passthrough:
@@ -720,7 +727,10 @@ class DenoisedMicrophone:
                 continue  # işlenirken discard_pending/resume geldi; bayat çıktı atılır
             self._stamps.append(frame.timestamp)
             # Çıktı, gecikme kadar önce yakalanan sesi taşır; zaman damgası da onunki olur.
-            stamp = self._stamps[0] if len(self._stamps) == self._stamps.maxlen else frame.timestamp
+            # Isınmada (sıfırlamadan sonra) en eski bekleyen damga kullanılır; böylece damgalar
+            # hiç geriye gitmez. max(), sıfırlama sonrası saat farkına karşı ek güvencedir.
+            stamp = max(self._stamps[0], self._last_stamp)
+            self._last_stamp = stamp
             yield AudioFrame(pcm, stamp)
 
     def discard_pending(self) -> None:

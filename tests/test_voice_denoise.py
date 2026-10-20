@@ -269,7 +269,7 @@ async def test_wrapper_keeps_frame_count_and_aligns_timestamps_with_delay() -> N
     out = await _collect(dn.DenoisedMicrophone(inner, fake))
     assert len(out) == 6 and fake.calls == 6
     # Gecikme 2 kare: ısınma karelerinin damgası kendi girdisinin; sonra 2 kare geriden gelir.
-    assert [frame.timestamp for frame in out] == [0.0, 1.0, 0.0, 1.0, 2.0, 3.0]
+    assert [frame.timestamp for frame in out] == [0.0, 0.0, 0.0, 1.0, 2.0, 3.0]
     assert out[3].pcm == inner.sent[3].pcm[::-1]
 
 
@@ -314,6 +314,75 @@ async def test_wrapper_failure_switches_to_passthrough_with_one_warning_and_stat
     assert states == ["denoise:off"]
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1 and "kapatıldı" in warnings[0].getMessage()
+
+
+async def test_wrapper_timestamps_never_go_backwards_across_resets() -> None:
+    inner = FakeInner(12)
+    mic = dn.DenoisedMicrophone(inner, FakeDenoiser())
+    stamps: list[float] = []
+    async for frame in mic.frames():
+        stamps.append(frame.timestamp)
+        index = len(stamps)
+        if index == 4:
+            mic.discard_pending()
+        elif index == 6:
+            mic.pause()
+            mic.resume()
+    assert len(stamps) >= 8
+    assert stamps == sorted(stamps)
+
+
+async def test_non_finite_output_takes_failure_path(caplog: pytest.LogCaptureFixture) -> None:
+    class NanRunner(IdentityRunner):
+        def infer(self, feat_erb: Any, feat_spec: Any) -> dn.GraphOutputs:
+            out = super().infer(feat_erb, feat_spec)
+            return dn.GraphOutputs(out.mask * np.float32("nan"), out.coefs, out.lsnr)
+
+    den = dn.DeepFilterNetDenoiser(runner=NanRunner(), block_frames=2)
+    with pytest.raises(ValueError, match="sonlu"):
+        for _ in range(20):
+            den.process_frame(b"\0\0" * 320)
+
+    class Inner(FakeInner):
+        async def frames(self) -> AsyncIterator[AudioFrame]:
+            for index in range(20):
+                yield AudioFrame(b"\x01\x00" * 320, float(index))
+
+    states: list[str] = []
+    mic = dn.DenoisedMicrophone(
+        Inner(0), dn.DeepFilterNetDenoiser(runner=NanRunner(), block_frames=2), states.append
+    )
+    with caplog.at_level(logging.WARNING, logger=dn.logger.name):
+        out = await _collect(mic)
+    assert len(out) == 20 and mic.passthrough and states == ["denoise:off"]
+    assert sum(r.levelno == logging.WARNING for r in caplog.records) == 1
+
+
+async def test_cancelled_frames_does_not_race_with_new_frames() -> None:
+    import threading
+    import time
+
+    active = 0
+    overlap = False
+    guard = threading.Lock()
+
+    class Probe(FakeDenoiser):
+        def process_frame(self, pcm: bytes) -> bytes:
+            nonlocal active, overlap
+            with guard:
+                active += 1
+                overlap = overlap or active > 1
+            time.sleep(0.05)
+            with guard:
+                active -= 1
+            return pcm
+
+    mic = dn.DenoisedMicrophone(FakeInner(3), Probe())
+    first = asyncio.create_task(_collect(mic))
+    await asyncio.sleep(0.02)  # çağrı iş parçacığında uçuşta
+    first.cancel()
+    await _collect(mic)
+    assert not overlap
 
 
 async def test_wrapper_does_not_block_event_loop_during_processing() -> None:
@@ -383,17 +452,18 @@ def test_streaming_matches_offline_at_16k(real_denoiser: dn.DeepFilterNetDenoise
     noisy, _ = _assets()
     size = noisy.size // 3 * 3
     x16 = dn.Downsampler3().process(noisy[:size])
-    up = dn.Upsampler3().process(x16)
-    offline = dn.Downsampler3().process(real_denoiser.enhance_48k(up)[: up.size // 3 * 3])
-    den = dn.DeepFilterNetDenoiser(Path(MODEL_DIR or ""), context_frames=100)
+    # Referans: 48 kHz girdinin çevrimdışı çıktısı, aynı FIR ile 16 kHz'e indirilmiş
+    # (x16 da bu FIR'dan geçtiği için ikisi de 32 örnek geç; akış çıktısı delay_samples sonra
+    # hizalıdır).
+    offline = dn.Downsampler3().process(real_denoiser.enhance_48k(noisy)[:size])
+    den = dn.DeepFilterNetDenoiser(Path(MODEL_DIR or ""))  # varsayılan bağlam 100, blok 10
     streamed = _stream(den, x16)
-    shift = den.delay_samples - dn.RESAMPLE_DELAY_16K  # çevrimdışı yol da FIR gecikmeli
     a = streamed[den.delay_samples :]
-    b = offline[dn.RESAMPLE_DELAY_16K :][: a.size]
+    b = offline[: a.size]
     n = min(a.size, b.size)
     snr = _snr(b[200 : n - 200], a[200 : n - 200])
-    print(f"\nAKIŞ vs ÇEVRİMDIŞI (bağlam 100, blok 10): {snr:.2f} dB SNR (kayma {shift})")
-    assert snr >= 15
+    print(f"\nAKIŞ vs ÇEVRİMDIŞI (bağlam {den.context_frames}, blok 10): {snr:.2f} dB SNR")
+    assert snr >= 18
 
 
 @real_model

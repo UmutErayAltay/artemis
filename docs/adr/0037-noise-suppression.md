@@ -13,6 +13,9 @@ ISTFT `libDF` (Rust) kaynağından numpy'a taşındı (`jarvis/channels/voice/de
 config alanlarıdır; panelde onay kutusu + düzey kutusu vardır. Model dosyaları
 `scripts/fetch_noise_model.py` ile bir kez indirilir; arşiv ve her dosya sha256'ya sabitlidir
 (çalışma anında indirme yok, yükleme öncesi her açılışta yeniden doğrulanır).
+`noise_model_dir` verilmezse `config/../models/deepfilternet3` kullanılır (betiğin varsayılanıyla aynı, cwd'den bağımsız).
+Model kurulamazsa (eksik dizin, sha256 uyuşmazlığı, onnxruntime yok) ses hattı DÜŞMEZ: tek uyarı
+kaydı + `denoise:unavailable:<neden>` durumu (sohbette görünür) ile ham mikrofonla sürülür.
 Çalışma anında hata olursa `DenoisedMicrophone` TEK uyarı kaydı yazar, oturum boyunca ham
 sese döner ve `denoise:off` durumu sohbette görünür; sessizce çalışıyormuş gibi davranmaz.
 

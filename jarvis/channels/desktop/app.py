@@ -1336,7 +1336,15 @@ class DesktopWindow(QMainWindow):
                 self.settings_panel.last_heard.setText(event.message)
                 self.pet.heard(event.message)
             elif event.state == "voice_denoise":
-                if event.message == "off":
+                if event.message.startswith("unavailable:"):
+                    reason = event.message.removeprefix("unavailable:")
+                    self._append_chat(
+                        "Jarvis",
+                        f"Gürültü engelleme açılamadı: {reason}. Modeli "
+                        "`python scripts/fetch_noise_model.py` ile indirin; "
+                        "ses işlenmeden sürüyor.",
+                    )
+                elif event.message == "off":
                     self._append_chat(
                         "Jarvis",
                         "Gürültü engelleme hata verdi ve bu oturumda kapatıldı; "

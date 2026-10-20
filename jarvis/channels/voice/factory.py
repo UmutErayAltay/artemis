@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Awaitable, Callable
 
 from jarvis.brain.agent_loop import RunResult
@@ -23,6 +24,17 @@ from jarvis.channels.voice.denoise import (
     DenoisedMicrophone,
 )
 
+logger = logging.getLogger(__name__)
+
+
+def _denoise_reason(error: Exception) -> str:
+    if isinstance(error, OSError):
+        return "model dosyaları bulunamadı veya okunamadı"
+    if isinstance(error, ValueError):
+        return "model dosyası doğrulanamadı veya dizin ayarlı değil"
+    return "onnxruntime/numpy eksik ya da model yüklenemedi"
+
+
 RunCommand = Callable[[str], Awaitable[RunResult]]
 StateCallback = Callable[[str], None]
 
@@ -41,19 +53,23 @@ async def build_voice_controller(
         settings.voice, device=settings.voice.input_device
     )
     if settings.voice.noise_suppression:
-        model_dir = settings.voice.noise_model_dir
-        if model_dir is None:
-            raise ValueError(
-                "voice.noise_model_dir için DeepFilterNet3 modeli gerekli; "
-                "`python scripts/fetch_noise_model.py` ile indirin."
+        # Gürültü engelleme isteğe bağlı bir iyileştirmedir: kurulamazsa ses hattı ham
+        # mikrofonla sürer, ama durum görünür olur (sessizce çalışıyormuş gibi davranılmaz).
+        try:
+            model_dir = settings.voice.noise_model_dir
+            if model_dir is None:
+                raise ValueError("model dizini ayarlı değil")
+            denoiser = await asyncio.to_thread(
+                DeepFilterNetDenoiser,
+                model_dir,
+                atten_lim_db=NOISE_LEVEL_ATTEN_DB[settings.voice.noise_suppression_level],
+                frame_samples=settings.voice.sample_rate * settings.voice.frame_ms // 1000,
             )
-        denoiser = await asyncio.to_thread(
-            DeepFilterNetDenoiser,
-            model_dir,
-            atten_lim_db=NOISE_LEVEL_ATTEN_DB[settings.voice.noise_suppression_level],
-            frame_samples=settings.voice.sample_rate * settings.voice.frame_ms // 1000,
-        )
-        microphone = DenoisedMicrophone(microphone, denoiser, on_state)
+        except (OSError, ValueError, RuntimeError, ImportError) as error:
+            logger.warning("Gürültü engelleme açılamadı, ham mikrofonla sürülüyor: %s", error)
+            on_state("denoise:unavailable:" + _denoise_reason(error))
+        else:
+            microphone = DenoisedMicrophone(microphone, denoiser, on_state)
     sink = SoundDeviceSink()
     recognizer = FasterWhisperRecognizer(settings.voice)
     await asyncio.to_thread(recognizer.prepare)
