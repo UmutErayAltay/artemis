@@ -42,6 +42,13 @@ def test_save_microphone_preserves_settings_and_never_touches_model(tmp_path: Pa
     assert load_settings(path).voice.input_device is None
 
 
+def test_stt_model_path_is_saved(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    model = tmp_path / "m"
+    save_choices(path, None, stt_model=model)
+    assert load_settings(path).voice.stt_model == model
+
+
 def test_settings_panel_has_no_model_combo_or_inventory(tmp_path: Path) -> None:
     from PySide6.QtWidgets import QApplication
 

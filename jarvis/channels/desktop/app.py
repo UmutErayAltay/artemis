@@ -1026,6 +1026,7 @@ class DesktopWindow(QMainWindow):
                 noise_suppression_level=str(self.settings_panel.noise_level.currentData()),
                 noise_suppression_stt=self.settings_panel.noise_stt.isChecked(),
                 echo_cancellation=self.settings_panel.echo_cancellation.isChecked(),
+                stt_model=self.settings_panel.stt_model_path(),
             )
         except (OSError, ValueError, KeyError, TypeError):
             self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from jarvis.channels.desktop.provider_section import ProviderSection
+from jarvis.channels.voice import stt_catalog
 from jarvis.config.settings import GITHUB_OWNER_RE, Settings, load_settings
 from jarvis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
@@ -45,6 +46,7 @@ def save_choices(
     noise_suppression_level: str | None = None,
     noise_suppression_stt: bool | None = None,
     echo_cancellation: bool | None = None,
+    stt_model: Path | None = None,
 ) -> None:
     """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir."""
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
@@ -60,6 +62,8 @@ def save_choices(
         raw["voice"]["noise_suppression_stt"] = noise_suppression_stt
     if echo_cancellation is not None:
         raw["voice"]["echo_cancellation"] = echo_cancellation
+    if stt_model is not None:
+        raw["voice"]["stt_model"] = str(stt_model)
     if applications is not None:
         raw["applications"] = applications
         raw["close_without_confirmation"] = [
@@ -176,6 +180,26 @@ class GitHubSync(QThread):
             self.failed.emit(str(error))
 
 
+class SttDownload(QThread):
+    """Whisper modelini GUI olay döngüsünü kilitlemeden indirir."""
+
+    done = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, name: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.name = name
+
+    def run(self) -> None:
+        try:
+            path = stt_catalog.download(self.name)
+        except Exception as error:
+            # Hata iletisi yol veya belirteç taşıyabilir; yalnız sınıf adı gösterilir.
+            self.failed.emit(type(error).__name__)
+        else:
+            self.done.emit(path)
+
+
 def default_repos_dir() -> str:
     return str(Path(os.environ.get("USERPROFILE") or Path.home()) / "Desktop" / "Projeler")
 
@@ -194,7 +218,11 @@ class SettingsPanel(QWidget):
     ) -> None:
         super().__init__()
         self.config_path = config_path
+        self._demo = demo
+        self._gpu_mb = stt_catalog.gpu_memory_mb()
+        self._recommended_stt = stt_catalog.recommended(self._gpu_mb)
         self.github: GitHubSync | None = None
+        self.stt_download_thread: SttDownload | None = None
         self._github_sync = github_sync
         self._github_auto = False
         self.applications: dict[str, str] = {}
@@ -242,6 +270,25 @@ class SettingsPanel(QWidget):
         self.last_heard.setTextFormat(Qt.TextFormat.PlainText)
         self.last_heard.setWordWrap(True)
         form.addRow("Son duyulan", self.last_heard)
+        stt_box = QWidget()
+        stt_layout = QVBoxLayout(stt_box)
+        stt_layout.setContentsMargins(0, 0, 0, 0)
+        stt_controls = QHBoxLayout()
+        stt_controls.setContentsMargins(0, 0, 0, 0)
+        self.stt_combo = QComboBox()
+        self.stt_combo.setAccessibleName("Tanıma modeli")
+        self.stt_download = QPushButton("İndir")
+        stt_controls.addWidget(self.stt_combo, 1)
+        stt_controls.addWidget(self.stt_download)
+        stt_layout.addLayout(stt_controls)
+        self.stt_status = QLabel()
+        self.stt_status.setWordWrap(True)
+        self.stt_status.setTextFormat(Qt.TextFormat.PlainText)
+        stt_layout.addWidget(self.stt_status)
+        form.addRow("Tanıma modeli", stt_box)
+        self.stt_combo.currentIndexChanged.connect(self._stt_selection_changed)
+        self.stt_download.clicked.connect(self._download_stt)
+        self._populate_stt_choices(None)
         voice_layout.addLayout(form)
         self.continuous_mode = QCheckBox("Kesintisiz sohbet (Artemis demeden dinle)")
         voice_layout.addWidget(self.continuous_mode)
@@ -378,7 +425,6 @@ class SettingsPanel(QWidget):
         self.apply_button.setObjectName("primary")
         self.apply_button.clicked.connect(self._apply)
         layout.addWidget(self.apply_button)
-        self._demo = demo
         if demo:
             self.notice.setText("Demo modunda ayarlar değiştirilmez.")
             self.refresh_button.setEnabled(False)
@@ -390,6 +436,8 @@ class SettingsPanel(QWidget):
             self.noise_suppression.setEnabled(False)
             self.noise_stt.setEnabled(False)
             self.echo_cancellation.setEnabled(False)
+            self.stt_combo.setEnabled(False)
+            self.stt_download.setEnabled(False)
             self.all_applications.setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
                            self.github_auto, self.github_button):
@@ -404,11 +452,120 @@ class SettingsPanel(QWidget):
             Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
         )
 
+    @staticmethod
+    def _stt_size_text(choice: stt_catalog.WhisperChoice) -> str:
+        if choice.size_mb < 1000:
+            return f"{choice.size_mb} MB"
+        return f"{choice.size_mb / 1000:.1f} GB"
+
+    def _populate_stt_choices(self, selected_name: str | None) -> None:
+        was_blocked = self.stt_combo.blockSignals(True)
+        try:
+            self.stt_combo.clear()
+            if selected_name is None:
+                self.stt_combo.addItem("Özel model (config'teki yol)", None)
+            for choice in stt_catalog.CATALOG:
+                text = f"{choice.label} · {self._stt_size_text(choice)}"
+                if choice.name == self._recommended_stt:
+                    text += " · önerilen"
+                if stt_catalog.installed_path(choice.name) is not None:
+                    text += " · kurulu"
+                self.stt_combo.addItem(text, choice.name)
+                index = self.stt_combo.count() - 1
+                self.stt_combo.setItemData(
+                    index, choice.note, Qt.ItemDataRole.ToolTipRole
+                )
+            if selected_name is None:
+                self.stt_combo.setCurrentIndex(0)
+            else:
+                index = self.stt_combo.findData(selected_name)
+                if index >= 0:
+                    self.stt_combo.setCurrentIndex(index)
+        finally:
+            self.stt_combo.blockSignals(was_blocked)
+        self._stt_selection_changed()
+
+    def _selected_stt_choice(self) -> stt_catalog.WhisperChoice | None:
+        name = self.stt_combo.currentData()
+        if not isinstance(name, str):
+            return None
+        return next(
+            (choice for choice in stt_catalog.CATALOG if choice.name == name),
+            None,
+        )
+
+    def _stt_selection_changed(self, *_args: object) -> None:
+        choice = self._selected_stt_choice()
+        if choice is None:
+            self.stt_status.setText("Config'teki özel model yolu kullanılıyor.")
+        else:
+            self.stt_status.setText(choice.note)
+        self._update_stt_download_button()
+
+    def _update_stt_download_button(self) -> None:
+        choice = self._selected_stt_choice()
+        running = (
+            self.stt_download_thread is not None
+            and self.stt_download_thread.isRunning()
+        )
+        self.stt_download.setEnabled(
+            not self._demo
+            and choice is not None
+            and not running
+            and stt_catalog.installed_path(choice.name) is None
+        )
+
+    def stt_model_path(self) -> Path | None:
+        """Seçili katalog modelinin kullanılabilir yerel yolunu döndürür."""
+        choice = self._selected_stt_choice()
+        if choice is None:
+            return None
+        return stt_catalog.installed_path(choice.name)
+
+    def _download_stt(self, *_args: object) -> None:
+        if self._demo or self.stt_download_thread is not None:
+            return
+        choice = self._selected_stt_choice()
+        if choice is None:
+            return
+        if stt_catalog.installed_path(choice.name) is not None:
+            self._stt_selection_changed()
+            return
+
+        thread = SttDownload(choice.name, self)
+        thread.done.connect(self._stt_download_done)
+        thread.failed.connect(self._stt_download_failed)
+        thread.finished.connect(self._stt_download_finished)
+        thread.finished.connect(thread.deleteLater)
+        self.stt_download_thread = thread
+        self.stt_combo.setEnabled(False)
+        self.stt_download.setEnabled(False)
+        self.stt_status.setText(
+            f"İndiriliyor… ({self._stt_size_text(choice)})"
+        )
+        thread.start()
+
+    def _stt_download_done(self, _path: Path) -> None:
+        choice = self._selected_stt_choice()
+        self._populate_stt_choices(choice.name if choice is not None else None)
+        self.stt_status.setText("İndirildi; Uygula'ya bas.")
+
+    def _stt_download_failed(self, error_type: str) -> None:
+        self.stt_status.setText(f"İndirilemedi: {error_type}")
+
+    def _stt_download_finished(self) -> None:
+        self.stt_download_thread = None
+        self.stt_combo.setEnabled(not self._demo)
+        self._update_stt_download_button()
+
     def refresh(self) -> None:
         try:
             settings = load_settings(self.config_path)
             self.providers.reload()
             self._refresh_devices(settings)
+            self._populate_stt_choices(
+                stt_catalog.choice_for_path(settings.voice.stt_model)
+            )
             # Yenileme kaydedilmiş değeri gösterir; canlı ses kipini değiştirmemeli.
             self.continuous_mode.blockSignals(True)
             self.continuous_mode.setChecked(settings.voice.continuous_mode)
