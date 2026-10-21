@@ -13,7 +13,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ValidationError
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QBrush,
@@ -62,6 +62,7 @@ from jarvis.channels.desktop.bridge import (
     ToolFinished,
     VoiceCommand,
 )
+from jarvis.channels.desktop.hotkey import GlobalHotkey
 from jarvis.channels.desktop.instance import InstanceServer, claim_instance, instance_name
 from jarvis.channels.desktop.pet import TEAL, PetWidget, level_from_message
 from jarvis.channels.desktop.projects_panel import ProjectsPanel
@@ -690,6 +691,9 @@ class QuickOverlay(QWidget):
 
 
 class DesktopWindow(QMainWindow):
+    # Kısayol kendi iş parçacığından yayar; Qt bunu ana iş parçacığına sıraya alır.
+    _hotkey_pressed = Signal()
+
     def __init__(
         self,
         config_path: Path,
@@ -752,6 +756,9 @@ class DesktopWindow(QMainWindow):
         self._build_ui()
         self._build_overlay()
         self._build_tray()
+        self._hotkey: GlobalHotkey | None = None
+        if not demo:
+            self._start_hotkey()
         self.pet.start()
         self._timer = QTimer(self)
         self._timer.setInterval(60)
@@ -767,6 +774,30 @@ class DesktopWindow(QMainWindow):
             on_approval=self._focus_approval,
             on_quit=self._request_exit,
         )
+
+    def _start_hotkey(self) -> None:
+        try:
+            text = load_settings(self._config_path).voice.listening_hotkey.strip()
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
+            return
+        if not text:
+            return
+        try:
+            hotkey = GlobalHotkey(text, self._hotkey_pressed.emit)
+        except ValueError:
+            self._hotkey_problem(f"Ses kısayolu tanınmadı: {text}")
+            return
+        self._hotkey_pressed.connect(self.voice_button_click)
+        if hotkey.start():
+            self._hotkey = hotkey
+        elif sys.platform == "win32":
+            self._hotkey_problem(f"Ses kısayolu ({text}) başka bir programda kayıtlı.")
+
+    def _hotkey_problem(self, message: str) -> None:
+        if self._tray is not None:
+            self._tray.showMessage("Jarvis", message)
+        else:
+            self._set_status(message, "error")
 
     def voice_button_click(self) -> None:
         """Pet tıkı: panelin "Ses" düğmesiyle aynı yol (_toggle_voice); düğme kapalıysa işlemez."""
@@ -1586,6 +1617,9 @@ class DesktopWindow(QMainWindow):
         if not self._exiting:
             return
         self._timer.stop()
+        if self._hotkey is not None:
+            self._hotkey.stop()
+            self._hotkey = None
         self.settings_panel.finish_inventory()
         if self._tray is not None:
             self._tray.hide()

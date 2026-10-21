@@ -75,6 +75,9 @@ class VoiceConfig(BaseModel):
     barge_in_ms: int = Field(default=180, ge=100, le=1000)
     require_wake_during_output: bool = True
     continuous_mode: bool = False
+    # Masaüstünde sesi açıp kapatan Windows genel kısayolu ("Ses" düğmesiyle aynı yol);
+    # tek elle basılabilsin diye ctrl+space. Boş dize kısayolu kapatır.
+    listening_hotkey: str = Field(default="ctrl+space", max_length=40)
     # ADR 0037: DeepFilterNet3 gürültü engelleme (CPU). Düzey bastırma sınırını (dB) belirler:
     # hafif 12, orta 24, güçlü sınırsız; güçlü bastırma Whisper doğruluğunu düşürebilir.
     noise_suppression: bool = False

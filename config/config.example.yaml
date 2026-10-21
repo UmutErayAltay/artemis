@@ -55,6 +55,7 @@ voice:
   barge_in_ms: 180 # Seslendirme sırasında bu kadar sürekli konuşma sesi susturur.
   require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
   continuous_mode: false # true: "artemis" demeden dinler (ADR 0024).
+  listening_hotkey: ctrl+space # Masaüstünde sesi aç/kapat (Windows); boş: kapalı.
   # Gürültü engelleme (ADR 0037): DeepFilterNet3, işlemcide çalışır, ekran kartı gerekmez.
   # Model pakete dahildir (indirme yok), yaklaşık 34 ms gecikme ekler. Yankı giderme DEĞİLDİR.
   noise_suppression: false

@@ -381,6 +381,7 @@ class VoiceController:
         if self._is_spoken_echo(transcript, segment.speech_start):
             self.on_transcript("Asistan sesinin yankısı yok sayıldı.")
             return
+        transcript = self._strip_spoken_prefix(transcript, segment.speech_start)
         if (
             self.config.require_wake_during_output
             and self._output_requires_wake
@@ -469,15 +470,34 @@ class VoiceController:
                     return True
         return False
 
+    def _strip_spoken_prefix(self, text: str, speech_start: float) -> str:
+        """Söz kendi sesimizle üst üste bindiyse baştaki o sözcükleri atar.
+
+        "Dinliyorum" sırasında mikrofon açık; Whisper "Dinliyorum saat kaç" yazabilir.
+        """
+        if not self._spoken_text or speech_start > self._spoken_until:
+            return text
+        spoken = [_fold(word) for word in self._speech_words(self._spoken_text)]
+        tokens = list(re.finditer(r"\w+", text))
+        if len(tokens) <= len(spoken) or [
+            _fold(token.group()) for token in tokens[: len(spoken)]
+        ] != spoken:
+            return text
+        return text[tokens[len(spoken) - 1].end():].lstrip(" \t,.;:!?-")
+
     def _mark_spoken(self, text: str, *, requires_wake: bool = True) -> None:
         self._spoken_text = text
         self._spoken_until = math.inf
         self._output_requires_wake = requires_wake
 
     async def _acknowledge_wake(self, text: str = "Dinliyorum.") -> None:
-        """Tek başına uyandırmada (ve kip değişiminde) LLM çağırmadan kısa karşılık verir."""
+        """Tek başına uyandırmada (ve kip değişiminde) LLM çağırmadan kısa karşılık verir.
+
+        Mikrofon durdurulmaz: kullanıcı "Artemis" deyip duraksamadan sürdürünce komutun başı
+        "Dinliyorum" sırasında kayboluyordu. Kendi sesimiz yankı filtresiyle (_is_spoken_echo)
+        elenir, başa yapışırsa _strip_spoken_prefix ayıklar.
+        """
         cancelled = asyncio.Event()
-        self.microphone.pause()
         self._emit_state("awaiting_command")
         try:
             await self.sink.play(
@@ -490,8 +510,6 @@ class VoiceController:
             cancelled.set()
             self._spoken_until = self.clock() + 1.2
             if not self._closed:
-                self.microphone.discard_pending()
-                self.microphone.resume()
                 self._followup_until = self.clock() + self.config.followup_seconds
                 self._awaiting_followup = True
                 self._emit_state("awaiting_command")

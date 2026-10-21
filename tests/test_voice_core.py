@@ -765,3 +765,29 @@ def test_segmenter_detects_on_denoised_but_keeps_raw_audio_for_stt():
     for index in range(len(voiced)):
         result = plain.push(bytes([index]) * 4, float(index))
     assert result is not None and result.pcm.startswith(bytes([0]) * 4)
+
+
+async def test_wake_ack_keeps_microphone_open_and_strips_own_words():
+    class CountingMic(FakeMic):
+        paused = 0
+
+        def pause(self):
+            self.paused += 1
+
+    mic = CountingMic()
+    runner = FakeRunner()
+    controller = VoiceController(
+        runner, VoiceConfig(), mic, FakeVAD([]),
+        FakeRecognizer(["Artemis", "Dinliyorum, saat kaç"]),
+        FakeTTS(), FakeSink(), clock=lambda: 12.0,
+    )
+    try:
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 10, 11))
+        await controller._settle_active()
+        assert mic.paused == 0
+        # Konuşma "Dinliyorum" ile üst üste bindi; yalnız kullanıcının sözü komut olur.
+        await controller._handle_utterance(AudioSegment(b"\x00\x00", 12.1, 13))
+        await controller._settle_active()
+        assert runner.commands == ["saat kaç"]
+    finally:
+        await controller.close()
