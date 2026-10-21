@@ -354,6 +354,9 @@ def test_plain_keys_stay_non_sensitive() -> None:
         "StartMenuExperienceHost.exe",
         "mshta.exe",
         "rundll32.exe",
+        r"C:\Program Files\Git\usr\bin\mintty.exe",
+        "wsl.exe",
+        r"C:\Python312\python.exe",
         r"C:\Users\x\AppData\Local\Programs\Microsoft VS Code\Code.exe",
     ],
 )

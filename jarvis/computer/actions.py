@@ -228,6 +228,14 @@ BLOCKED_PROCESSES: frozenset[str] = frozenset(
         "rundll32.exe",
         "msiexec.exe",
         "control.exe",
+        # Unix kabukları ve yorumlayıcı pencereleri (Git Bash = mintty). Jarvis'in kendi
+        # pythonw süreci pid ile ayrıca engellidir.
+        "wsl.exe",
+        "bash.exe",
+        "mintty.exe",
+        "python.exe",
+        "pythonw.exe",
+        "py.exe",
         # Gömülü terminali olan editörler.
         "code.exe",
         "cursor.exe",

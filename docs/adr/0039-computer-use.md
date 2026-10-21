@@ -32,7 +32,8 @@ başlar, sonra kendi başına çalışır; riski sınırlar ve görünürlük ta
    - Ön plandaki pencere ya da tıklama noktasındaki pencere Jarvis'in kendi süreci, bir
      kabuk/terminal (`cmd`, `powershell`, `pwsh`, `WindowsTerminal`, `conhost`), bir başlatıcı
      (`explorer`, Başlat/arama süreçleri, `mshta`, `wscript`, `cscript`, `rundll32`, `msiexec`,
-     `control`), gömülü terminalli editör (VS Code, Cursor), `regedit`, `mmc`, `taskmgr` ya da
+     `control`), Unix kabuğu ve yorumlayıcı (`wsl`, `bash`, Git Bash `mintty`, `python`),
+     gömülü terminalli editör (VS Code, Cursor), `regedit`, `mmc`, `taskmgr` ya da
      parola yöneticisi ise eylem çalışmaz, oturum durur. Hassas onaydan sonra yeniden denetlenir.
      Model Jarvis'in onay penceresine tıklayamaz. Uygulama açmak ana döngünün
      `open_application` aracıyla olur, Dosya Gezgini'nden değil.
