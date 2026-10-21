@@ -18,6 +18,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from jarvis.brain.agent_loop import RunResult
+from jarvis.channels.desktop.computer_host import ComputerHost
 from jarvis.channels.runtime import (
     Approval as ApprovalCallback,
 )
@@ -559,6 +560,10 @@ class DesktopBridge:
             else:
                 self._runtime = factory(self._config_path, self._approve, self._on_record)
             self._labels = _tool_labels(self._runtime)
+            # Esc ve hassas adım onayı yalnız masaüstünde var; computer_use başka yerde reddeder.
+            self._runtime.context.services["computer_host"] = ComputerHost(
+                self._approve, lambda text: self._events.put(State("computer", text))
+            )
         except Exception as error:  # İşçi sınırında traceback/sır sızdırmadan arızayı GUI'ye taşır.
             self._events.put(
                 Failed(

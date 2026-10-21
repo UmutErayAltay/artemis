@@ -14,7 +14,7 @@ from collections.abc import Callable
 _MODIFIERS = {"alt": 0x0001, "ctrl": 0x0002, "shift": 0x0004, "win": 0x0008}
 _MOD_NOREPEAT = 0x4000  # Basılı tutmak art arda aç/kapa yapmasın.
 _KEYS = {
-    "space": 0x20, "pause": 0x13, "capslock": 0x14,
+    "space": 0x20, "pause": 0x13, "capslock": 0x14, "escape": 0x1B,
     **{f"f{number}": 0x6F + number for number in range(1, 25)},
 }
 _WM_HOTKEY = 0x0312

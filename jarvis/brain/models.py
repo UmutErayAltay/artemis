@@ -22,6 +22,9 @@ class Message(BaseModel):
     tool_calls: list[ToolCall] = Field(default_factory=list)
     tool_call_id: str | None = None
     private: bool = False
+    # Bilgisayar kullanımı oturumunun ekran görüntüsü (ADR 0039). exclude=True: model_dump/
+    # model_dump_json (hafıza, denetim) görüntüyü asla yazmaz; repr=False: log'a baytlar sızmaz.
+    image_png: bytes | None = Field(default=None, repr=False, exclude=True)
 
 
 class Usage(BaseModel):

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import os
 import re
@@ -52,6 +53,7 @@ def _cloud_messages(messages: list[Message]) -> list[Message]:
         message.model_copy(
             update={
                 "content": _PRIVATE_PLACEHOLDER,
+                "image_png": None,  # gizli turun ekran görüntüsü de buluta gitmez
                 "tool_calls": [
                     call.model_copy(update={"arguments": {}}) for call in message.tool_calls
                 ],
@@ -93,6 +95,18 @@ def _chat_messages(
     }
     for message in messages:
         item: dict[str, Any] = {"role": message.role, "content": message.content}
+        if message.image_png is not None:
+            encoded = base64.b64encode(message.image_png).decode("ascii")
+            if ollama:
+                item["images"] = [encoded]  # Ollama görüntüyü ayrı alanda, ham base64 bekler
+            else:
+                parts: list[dict[str, Any]] = (
+                    [{"type": "text", "text": message.content}] if message.content else []
+                )
+                parts.append(
+                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded}"}}
+                )
+                item["content"] = parts
         if message.tool_call_id:
             if ollama:
                 # Ollama'nın chat message sözleşmesi tool yanıtını adla eşler.
@@ -442,6 +456,17 @@ class AnthropicProvider:
                     }
                 )
             else:
+                if message.image_png is not None:
+                    blocks.append(
+                        {
+                            "type": "image",
+                            "source": {
+                                "type": "base64",
+                                "media_type": "image/png",
+                                "data": base64.b64encode(message.image_png).decode("ascii"),
+                            },
+                        }
+                    )
                 if message.content:
                     blocks.append({"type": "text", "text": message.content})
                 blocks.extend(
@@ -574,6 +599,11 @@ class ClaudeCliProvider:
         *,
         timeout: float,
     ) -> Completion:
+        if any(m.image_png is not None for m in _cloud_messages(messages)):
+            # Transkript düz metindir; görüntüyü sessizce düşürmek modeli kör bırakır.
+            raise ProviderError(
+                "Claude Code CLI ekran görüntüsü taşıyamaz; görüntü destekleyen bir model seçin."
+            )
         executable = shutil.which("claude")
         if executable is None:
             raise ProviderError(_CLI_MISSING)

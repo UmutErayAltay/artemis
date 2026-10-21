@@ -367,6 +367,20 @@ class PerceptionConfig(BaseModel):
     timeout_seconds: float = Field(default=20.0, ge=1, le=120)
 
 
+class ComputerUseConfig(BaseModel):
+    """Bilgisayar kullanımı (ADR 0039); varsayılan kapalı, görsel model açıkça seçilir."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    # `Settings.models` anahtarı; ekran görüntüsünü kabul eden bir model olmalı.
+    model: str = ""
+    max_steps: int = Field(default=25, ge=1, le=100)
+    max_minutes: float = Field(default=5.0, ge=0.5, le=30)
+    screenshot_width: int = Field(default=1280, ge=640, le=2560)
+    step_delay_seconds: float = Field(default=0.6, ge=0, le=3)
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -404,6 +418,7 @@ class Settings(BaseModel):
     mcp: MCPConfig = Field(default_factory=MCPConfig)
     perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
     system_control: SystemControlConfig = Field(default_factory=SystemControlConfig)
+    computer_use: ComputerUseConfig = Field(default_factory=ComputerUseConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -435,6 +450,8 @@ class Settings(BaseModel):
             fallback = self.models.get(self.fallback_model)
             if fallback is None or fallback.provider != "ollama":
                 raise ValueError("Yedek model tanımlı bir Ollama modeli olmalı")
+        if self.computer_use.enabled and self.computer_use.model not in self.models:
+            raise ValueError("computer_use.model models içinde tanımlanmalı")
         return self
 
 

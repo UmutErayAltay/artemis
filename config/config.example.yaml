@@ -212,6 +212,20 @@ voice:
 #   shutdown_delay_seconds: 60
 #   timeout_seconds: 15
 
+# Bilgisayar kullanımı (ADR 0039). KAPALI gelir; Jarvis'in en riskli yeteneğidir. Açıkken
+# computer_use(hedef) aracı tek onayla bir oturum başlatır: her adımda birincil ekranın
+# görüntüsü `model`e gider, model fare/klavye eylemi döner. Hassas adımlar (gönder, sil, öde,
+# alt+f4) ayrıca sorulur; Esc oturumu durdurur. `model` models içinde tanımlı olmalı ve
+# GÖRÜNTÜ KABUL ETMELİ (Claude CLI etmez). Ekran görüntüsü buluta yalnız
+# perception.allow_cloud_screen: true iken gider; Ollama modeli yerel kalır.
+# computer_use:
+#   enabled: true
+#   model: vision            # models altındaki bir anahtar
+#   max_steps: 25            # 1-100
+#   max_minutes: 5           # 0.5-30
+#   screenshot_width: 1280   # 640-2560
+#   step_delay_seconds: 0.6  # 0-3
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

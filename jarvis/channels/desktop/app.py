@@ -1355,6 +1355,18 @@ class DesktopWindow(QMainWindow):
                 self._set_status("Çalışıyor…", "running")
                 self._set_controls()
                 self.overlay.set_busy(True)
+            elif event.state == "computer":
+                # Bilgisayar kullanımı oturumu (ADR 0039): ne yaptığı ve nasıl durdurulacağı
+                # hep görünür; boş metin oturum bitti demektir, normal duruma dönülür.
+                if event.message:
+                    line = f"Bilgisayarı kullanıyorum · {event.message} · durdurmak için Esc"
+                    self._set_status(line, "running")
+                    self.overlay.set_busy(True, line)
+                elif self._busy:
+                    self._set_status("Çalışıyor…", "running")
+                    self.overlay.set_busy(True)
+                else:
+                    self._set_status("Hazır", "ready")
             elif event.state == "cleanup_pending":
                 self._busy = True
                 self._set_status("Önceki işlem temizleniyor…", "running")

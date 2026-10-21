@@ -637,4 +637,5 @@ def test_only_network_tools_declare_outbound() -> None:
             outbound.add(definition.name)
     # notify_telegram metni makine dışına taşır; alıcı sabit olsa da ADR 0013 geçerli (ADR 0016).
     # open_url outbound kalır ama yalnız lekeli turda veri taşıyan adreste sorar (ADR 0036).
-    assert outbound == {"open_url", "web_search", "notify_telegram"}
+    # computer_use ekran görüntüsünü buluta gönderebilir (ADR 0039).
+    assert outbound == {"open_url", "web_search", "notify_telegram", "computer_use"}

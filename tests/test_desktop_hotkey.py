@@ -10,6 +10,7 @@ def test_parse_hotkey_maps_modifiers_and_keys():
     assert parse_hotkey("Ctrl + Shift + M") == (0x0002 | 0x0004 | 0x4000, ord("M"))
     assert parse_hotkey("f12") == (0x4000, 0x7B)
     assert parse_hotkey("pause") == (0x4000, 0x13)
+    assert parse_hotkey("escape") == (0x4000, 0x1B)  # computer_use durdurma tuşu (ADR 0039)
 
 
 @pytest.mark.parametrize("text", ["", "ctrl+", "ctrl+ctrl+a", "hyper+a", "ctrl+f25", "<f12>"])
