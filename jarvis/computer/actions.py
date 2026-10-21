@@ -290,6 +290,9 @@ def parse_action(raw: str) -> Action:
 
     if not isinstance(payload, dict):
         raise _invalid_model_output("JSON nesnesi değil.")
+    # Canlı denemede Haiku türü "action" anahtarına yazdı; ikisi birden varsa hata kalır.
+    if "type" not in payload and "action" in payload:
+        payload["type"] = payload.pop("action")
 
     try:
         return Action.model_validate(payload)
@@ -300,6 +303,11 @@ def parse_action(raw: str) -> Action:
 SYSTEM_PROMPT: str = """
 You control the user's Windows PC through one action per step. Reply with exactly one
 JSON object and nothing else. Coordinates are pixels of the given screenshot.
+
+The action kind goes in the key "type" (not "action"). Examples:
+{"type": "click", "x": 412, "y": 230, "reason": "Arama kutusuna tıklıyorum", "sensitive": false}
+{"type": "type", "text": "merhaba", "reason": "Metni yazıyorum", "sensitive": false}
+{"type": "done", "text": "Metin yazıldı.", "reason": "Hedef tamamlandı", "sensitive": false}
 
 Required fields by action type:
 - "click": x and y are required non-negative pixel coordinates. Optional "button" is

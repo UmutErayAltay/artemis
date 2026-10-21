@@ -362,3 +362,15 @@ def test_plain_keys_stay_non_sensitive() -> None:
 )
 def test_launchers_and_terminal_editors_are_blocked(exe: str) -> None:
     assert process_block_reason(exe, 10, 99) is not None
+
+
+def test_parse_action_accepts_action_key_as_type() -> None:
+    # Canlı denemede Haiku türü "action" anahtarına yazdı.
+    action = parse_action('{"action": "type", "text": "merhaba", "reason": "yaz"}')
+    assert action.type == "type" and action.text == "merhaba"
+    with pytest.raises(ValueError):
+        parse_action('{"type": "type", "action": "click", "text": "x", "reason": "y"}')
+
+
+def test_system_prompt_names_the_type_key() -> None:
+    assert '"type": "click"' in SYSTEM_PROMPT and '"type" (not "action")' in SYSTEM_PROMPT

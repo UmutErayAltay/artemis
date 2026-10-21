@@ -177,11 +177,12 @@ class ComputerSession:
             completion = await self._provider.complete(messages, [], timeout=timeout)
             try:
                 return parse_action(completion.content)
-            except ValueError:
+            except ValueError as error:
                 if attempt:
                     return None
                 messages.append(Message(role="assistant", content=completion.content))
-                messages.append(Message(role="user", content=_RETRY_PROMPT))
+                # Neden geçersiz olduğunu söylemezsek model aynı hatayı tekrarlıyor.
+                messages.append(Message(role="user", content=f"{error}\n{_RETRY_PROMPT}"))
         return None
 
     async def _act(

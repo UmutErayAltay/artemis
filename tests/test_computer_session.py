@@ -205,7 +205,9 @@ async def test_invalid_twice_ends_invalid_with_one_capture() -> None:
     retry = env.provider.seen[1]
     assert [m.role for m in retry] == ["system", "user", "assistant", "user"]
     assert retry[2].content == "bu JSON değil"
-    assert retry[3].content == "Yalnız tek bir geçerli JSON eylem döndür."
+    # Neden + talimat: model hatasını görmeden aynı biçimi tekrarlıyordu.
+    assert retry[3].content.startswith("Model geçerli bir eylem döndürmedi")
+    assert retry[3].content.endswith("Yalnız tek bir geçerli JSON eylem döndür.")
     assert retry[1].image_png is not None  # yeniden istek aynı görüntüyü kullanır
 
 
