@@ -966,6 +966,8 @@ class DesktopWindow(QMainWindow):
         self.settings_panel.providers.show_problem(reason)
         if reason and open_settings:
             self.tabs.setCurrentWidget(self.settings_scroll)
+            # Sağlayıcı eksikse Ayarlar doğrudan Model sekmesinde açılır.
+            self.settings_panel.sections.setCurrentIndex(1)
             QTimer.singleShot(
                 0, lambda: self.settings_scroll.ensureWidgetVisible(self.settings_panel.providers)
             )

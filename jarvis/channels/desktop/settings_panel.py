@@ -16,12 +16,16 @@ from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QProgressBar,
     QPushButton,
+    QScrollArea,
+    QTabWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -200,8 +204,28 @@ class SettingsPanel(QWidget):
         title = QLabel("Ayarlar")
         title.setObjectName("title")
         layout.addWidget(title)
+        self.sections = QTabWidget()
+        layout.addWidget(self.sections, 1)
+
+        def tab_page() -> tuple[QScrollArea, QVBoxLayout]:
+            """Her bölümü kendi kaydırılabilir sayfasına yerleştirir."""
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            content = QWidget()
+            page_layout = QVBoxLayout(content)
+            page_layout.setContentsMargins(0, 12, 0, 0)
+            page_layout.setSpacing(10)
+            scroll.setWidget(content)
+            return scroll, page_layout
+
+        voice_scroll, voice_layout = tab_page()
+        self.sections.addTab(voice_scroll, "Ses")
+        model_scroll, model_layout = tab_page()
+        self.sections.addTab(model_scroll, "Model")
         self.providers = ProviderSection(config_path, demo=demo)
-        layout.addWidget(self.providers)
+        model_layout.addWidget(self.providers)
+        model_layout.addStretch(1)
         form = QFormLayout()
         self.device_combo = QComboBox()
         self.device_combo.setAccessibleName("Mikrofon girişi")
@@ -218,16 +242,40 @@ class SettingsPanel(QWidget):
         self.last_heard.setTextFormat(Qt.TextFormat.PlainText)
         self.last_heard.setWordWrap(True)
         form.addRow("Son duyulan", self.last_heard)
-        layout.addLayout(form)
+        voice_layout.addLayout(form)
         self.continuous_mode = QCheckBox("Kesintisiz sohbet (Artemis demeden dinle)")
-        layout.addWidget(self.continuous_mode)
+        voice_layout.addWidget(self.continuous_mode)
         self.noise_suppression = QCheckBox("Gürültü engelleme")
         self.noise_suppression.setToolTip(
             "DeepFilterNet3; işlemcide çalışır, ekran kartı gerekmez. Yankı gidermez. "
             "Model pakete dahildir; indirme gerekmez. "
             "Değişiklik ses yeniden başlayınca uygulanır."
         )
-        layout.addWidget(self.noise_suppression)
+        voice_layout.addWidget(self.noise_suppression)
+        self.echo_cancellation = QCheckBox("Yankı engelleme (hoparlörle kullanırken)")
+        self.echo_cancellation.setToolTip(
+            "WebRTC yankı giderici; Jarvis'in hoparlörden çıkan kendi sesini mikrofondan "
+            "siler, böylece konuşurken araya girmek ve kendi sesini komut sanmamak güvenilir "
+            "olur. Yerelde çalışır. Kulaklıkla gerekmez. Değişiklik ses yeniden başlayınca "
+            "uygulanır."
+        )
+        voice_layout.addWidget(self.echo_cancellation)
+        self.advanced_toggle = QToolButton()
+        self.advanced_toggle.setText("Gelişmiş ses ayarları")
+        self.advanced_toggle.setCheckable(True)
+        self.advanced_toggle.setChecked(False)
+        self.advanced_toggle.setToolButtonStyle(
+            Qt.ToolButtonStyle.ToolButtonTextBesideIcon
+        )
+        self.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        voice_layout.addWidget(self.advanced_toggle)
+        self.advanced_box = QWidget()
+        advanced_layout = QVBoxLayout(self.advanced_box)
+        advanced_layout.setContentsMargins(0, 0, 0, 0)
+        advanced_layout.setSpacing(10)
+        noise_level_label = QLabel("Gürültü engelleme düzeyi")
+        noise_level_label.setObjectName("muted")
+        noise_level_label.setStyleSheet("font-size: 12px;")
         self.noise_level = QComboBox()
         for label, key in (("Hafif", "hafif"), ("Orta", "orta"), ("Güçlü", "guclu")):
             self.noise_level.addItem(label, key)
@@ -237,7 +285,10 @@ class SettingsPanel(QWidget):
         )
         self.noise_level.setEnabled(False)
         self.noise_suppression.toggled.connect(self.noise_level.setEnabled)
-        layout.addWidget(self.noise_level)
+        level_row = QHBoxLayout()
+        level_row.addWidget(noise_level_label)
+        level_row.addWidget(self.noise_level, 1)
+        advanced_layout.addLayout(level_row)
         self.noise_stt = QCheckBox("Tanımaya da temizlenmiş ses ver")
         self.noise_stt.setToolTip(
             "Kapalıyken (önerilen) temizlenmiş ses yalnız konuşma algılamaya, cümle bitişine ve "
@@ -246,28 +297,26 @@ class SettingsPanel(QWidget):
         )
         self.noise_stt.setEnabled(False)
         self.noise_suppression.toggled.connect(self.noise_stt.setEnabled)
-        layout.addWidget(self.noise_stt)
-        self.echo_cancellation = QCheckBox("Yankı engelleme (hoparlörle kullanırken)")
-        self.echo_cancellation.setToolTip(
-            "WebRTC yankı giderici; Jarvis'in hoparlörden çıkan kendi sesini mikrofondan "
-            "siler, böylece konuşurken araya girmek ve kendi sesini komut sanmamak güvenilir "
-            "olur. Yerelde çalışır. Kulaklıkla gerekmez. Değişiklik ses yeniden başlayınca "
-            "uygulanır."
-        )
-        layout.addWidget(self.echo_cancellation)
+        advanced_layout.addWidget(self.noise_stt)
         self.advanced_devices = QCheckBox("Sanal ve diğer ses girişlerini göster")
         self.advanced_devices.toggled.connect(self._toggle_device_detail)
-        layout.addWidget(self.advanced_devices)
-        app_title = QLabel("Açılabilecek uygulamalar")
-        app_title.setObjectName("section")
-        layout.addWidget(app_title)
+        advanced_layout.addWidget(self.advanced_devices)
+        self.refresh_button = QPushButton("Mikrofon listesini yenile")
+        self.refresh_button.clicked.connect(self.refresh)
+        advanced_layout.addWidget(self.refresh_button)
+        voice_layout.addWidget(self.advanced_box)
+        self.advanced_box.setVisible(False)
+        voice_layout.addStretch(1)
+        self.advanced_toggle.toggled.connect(self._toggle_advanced)
+        app_scroll, app_layout = tab_page()
+        self.sections.addTab(app_scroll, "Uygulamalar")
         self.all_applications = QCheckBox("Bütün kurulu uygulamalara erişim")
         self.all_applications.toggled.connect(self._sync_application_access)
-        layout.addWidget(self.all_applications)
+        app_layout.addWidget(self.all_applications)
         self.application_list = QListWidget()
         self.application_list.setMaximumHeight(140)
         self.application_list.setAccessibleName("İzinli uygulamalar")
-        layout.addWidget(self.application_list)
+        app_layout.addWidget(self.application_list)
         app_actions = QHBoxLayout()
         self.add_application_button = QPushButton("Uygulama ekle")
         self.add_application_button.clicked.connect(self._add_application)
@@ -275,15 +324,15 @@ class SettingsPanel(QWidget):
         self.remove_application_button.clicked.connect(self._remove_application)
         app_actions.addWidget(self.add_application_button)
         app_actions.addWidget(self.remove_application_button)
-        layout.addLayout(app_actions)
+        app_layout.addLayout(app_actions)
         self.application_hint = QLabel(
             "Jarvis listedeki uygulamaları açabilir. Yeni uygulama ekleyip Uygula'ya bas."
         )
         self.application_hint.setWordWrap(True)
-        layout.addWidget(self.application_hint)
-        github_title = QLabel("GitHub")
-        github_title.setObjectName("section")
-        layout.addWidget(github_title)
+        app_layout.addWidget(self.application_hint)
+        app_layout.addStretch(1)
+        github_scroll, github_layout = tab_page()
+        self.sections.addTab(github_scroll, "GitHub")
         github_form = QFormLayout()
         self.github_owner = QLineEdit()
         self.github_owner.setAccessibleName("GitHub kullanıcı adı")
@@ -298,27 +347,26 @@ class SettingsPanel(QWidget):
         folder_row.addWidget(self.repos_browse)
         github_form.addRow("Kullanıcı adı", self.github_owner)
         github_form.addRow("Repo klasörü", folder_row)
-        layout.addLayout(github_form)
+        github_layout.addLayout(github_form)
         self.github_auto = QCheckBox("Otomatik eşitle")
         self.github_auto.setChecked(True)
-        layout.addWidget(self.github_auto)
+        github_layout.addWidget(self.github_auto)
         self.github_button = QPushButton("Bağla ve repoları çek")
         self.github_button.clicked.connect(self._bind_github)
-        layout.addWidget(self.github_button)
+        github_layout.addWidget(self.github_button)
         self.github_status = QLabel(
             "Kendi repoların (fork ve arşivlenmişler hariç) kod ajanının erişimine girer. "
             "Kimlik doğrulamayı gh yapar; Jarvis token görmez."
         )
         self.github_status.setWordWrap(True)
         self.github_status.setTextFormat(Qt.TextFormat.PlainText)
-        layout.addWidget(self.github_status)
+        github_layout.addWidget(self.github_status)
         self.github_list = QListWidget()
         self.github_list.setMaximumHeight(120)
         self.github_list.setAccessibleName("GitHub eşitleme sonuçları")
-        layout.addWidget(self.github_list)
-        self.refresh_button = QPushButton("Mikrofon listesini yenile")
-        self.refresh_button.clicked.connect(self.refresh)
-        layout.addWidget(self.refresh_button)
+        github_layout.addWidget(self.github_list)
+        github_layout.addStretch(1)
+        self.sections.setCurrentIndex(0)
         self.notice = QLabel(
             "Uygula mikrofon, uygulama ve GitHub ayarlarını kaydeder; yeni sohbet başlar."
         )
@@ -330,7 +378,6 @@ class SettingsPanel(QWidget):
         self.apply_button.setObjectName("primary")
         self.apply_button.clicked.connect(self._apply)
         layout.addWidget(self.apply_button)
-        layout.addStretch(1)
         self._demo = demo
         if demo:
             self.notice.setText("Demo modunda ayarlar değiştirilmez.")
@@ -349,6 +396,13 @@ class SettingsPanel(QWidget):
                 widget.setEnabled(False)
         else:
             self.refresh()
+
+    def _toggle_advanced(self, checked: bool) -> None:
+        """Gelişmiş ses ayarlarını açar ve ok yönünü duruma göre değiştirir."""
+        self.advanced_box.setVisible(checked)
+        self.advanced_toggle.setArrowType(
+            Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
+        )
 
     def refresh(self) -> None:
         try:

@@ -152,3 +152,64 @@ def test_invalid_noise_level_is_rejected(tmp_path: Path) -> None:
     path = config(tmp_path)
     with pytest.raises(ValueError):
         save_choices(path, None, noise_suppression_level="cok-guclu")
+
+
+@pytest.fixture(scope="module")
+def qt_app():
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+def test_settings_panel_tabs_are_grouped_by_topic(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtWidgets import QFrame, QScrollArea
+
+    from jarvis.channels.desktop import settings_panel
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    assert [
+        panel.sections.tabText(index) for index in range(panel.sections.count())
+    ] == ["Ses", "Model", "Uygulamalar", "GitHub"]
+    assert panel.sections.currentIndex() == 0
+    for index in range(panel.sections.count()):
+        page = panel.sections.widget(index)
+        assert isinstance(page, QScrollArea)
+        assert page.widgetResizable()
+        assert page.frameShape() == QFrame.Shape.NoFrame
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_advanced_voice_settings_are_collapsed_by_default(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtCore import Qt
+
+    from jarvis.channels.desktop import settings_panel
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    assert panel.advanced_box.isHidden()
+    assert not panel.advanced_box.isVisibleTo(panel)
+    assert panel.advanced_toggle.arrowType() == Qt.ArrowType.RightArrow
+
+    panel.advanced_toggle.setChecked(True)
+    assert not panel.advanced_box.isHidden()
+    assert panel.advanced_box.isVisibleTo(panel)
+    assert panel.advanced_toggle.arrowType() == Qt.ArrowType.DownArrow
+
+    panel.advanced_toggle.setChecked(False)
+    assert panel.advanced_box.isHidden()
+    assert panel.advanced_toggle.arrowType() == Qt.ArrowType.RightArrow
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_noise_controls_are_grouped_in_advanced_voice_settings(
+    tmp_path: Path, qt_app
+) -> None:
+    from jarvis.channels.desktop import settings_panel
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    assert panel.advanced_box.isAncestorOf(panel.noise_stt)
+    assert panel.advanced_box.isAncestorOf(panel.noise_level)
+    assert not panel.advanced_box.isAncestorOf(panel.noise_suppression)
+    panel.deleteLater()
+    qt_app.processEvents()
