@@ -21,13 +21,16 @@ from jarvis.config.settings import VoiceConfig
 
 logger = logging.getLogger(__name__)
 
-# Kip cümlesi: en çok 4 sözcük, "kesintisiz"/"sürekli" ve tek yönlü bir fiil. STT ve kullanıcı
-# farklı sözcükler kullanır ("kesintisiz sohbete geç"); uzun komut içindekiler yine kaçırılır.
-_CONTINUOUS_MAX_WORDS = 4
-_CONTINUOUS_KEYS = {"kesintisiz", "sürekli"}
-_CONTINUOUS_ON_VERBS = {"geç", "aç", "başlat", "gir", "dinle"}
-_CONTINUOUS_OFF_VERBS = {"kapat", "çık", "bitir", "durdur"}
-_CONTINUOUS_OFF = {("normal", "moda", "geç"), ("normal", "moda", "dön")}
+# Kip cümlesi: en çok 5 sözcük, "kesintisiz"/"sürekli" ve tek yönlü bir fiil. Sözcükler katlanmış
+# (_fold) karşılaştırılır. Anahtar bir harf farkla da tutar: Whisper "kesintisiz"i "gezintisiz"
+# yazdı ve kip açılmadı. Fiil kök + izinli ek olmalı ("geç", "geçelim", "açsana"); "geçmeyi",
+# "açıkla" fiil sayılmaz. Uzun komut içindekiler yine kaçırılır.
+_CONTINUOUS_MAX_WORDS = 5
+_CONTINUOUS_KEYS = ("kesintisis", "surekli")
+_CONTINUOUS_ON_VERBS = ("gec", "ac", "baslat", "gir", "dinle")
+_CONTINUOUS_OFF_VERBS = ("kapat", "cik", "bitir", "durdur")
+_VERB_SUFFIXES = {"", "in", "un", "yin", "elim", "alim", "yelim", "sene", "sana", "er", "ar"}
+_CONTINUOUS_OFF = {("normal", "moda", "gec"), ("normal", "moda", "don")}
 
 
 _FOLD = str.maketrans("ışçğöü", "iscgou")
@@ -428,13 +431,24 @@ class VoiceController:
         span = find_wake_word(transcript, self.config.wake_word)
         if span is not None and not self._speech_words(transcript[: span[0]]):
             transcript = transcript[span[1]:]
-        words = self._speech_words(transcript)
+        words = [_fold(word) for word in self._speech_words(transcript)]
         if tuple(words) in _CONTINUOUS_OFF:
             return False
-        if len(words) > _CONTINUOUS_MAX_WORDS or not _CONTINUOUS_KEYS & set(words):
+        if len(words) > _CONTINUOUS_MAX_WORDS or not any(
+            # z/s her konumda eşit: "gezintisiz" ile "kesintisiz" yalnız g/k farkıyla eşleşir.
+            _edit_distance(word.replace("z", "s"), key, 1) <= 1
+            for word in words for key in _CONTINUOUS_KEYS
+        ):
             return None
-        on = bool(_CONTINUOUS_ON_VERBS & set(words))
-        off = bool(_CONTINUOUS_OFF_VERBS & set(words))
+
+        def has_verb(stems: tuple[str, ...]) -> bool:
+            return any(
+                word.startswith(stem) and word[len(stem):] in _VERB_SUFFIXES
+                for word in words for stem in stems
+            )
+
+        on = has_verb(_CONTINUOUS_ON_VERBS)
+        off = has_verb(_CONTINUOUS_OFF_VERBS)
         return on if on != off else None
 
     def _is_spoken_echo(self, text: str, speech_start: float) -> bool:
