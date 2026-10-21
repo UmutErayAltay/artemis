@@ -598,6 +598,90 @@ class PiperSynthesizer:
         return None
 
 
+class EmaSynthesizer:
+    """EMA Lightning ile yerel Türkçe PCM blokları üretir."""
+
+    def __init__(self, config: VoiceConfig) -> None:
+        self.config = config
+        self._tts: Any = None
+        self._inference_lock = threading.Lock()
+
+    def _load(self) -> Any:
+        if self._tts is None:
+            try:
+                ema_module = importlib.import_module("ema_lightning")
+            except ImportError as error:
+                raise RuntimeError(
+                    "EMA TTS kurulu değil; `pip install .[ema]`."
+                ) from error
+            self._tts = ema_module.EMA()
+        return self._tts
+
+    def prepare(self) -> None:
+        """EMA modelini yükler; ilk gerçek yanıt hızlansın diye bir kez ısınır."""
+        self._load()
+        with self._inference_lock:
+            self._tts.say("Merhaba.")
+
+    async def stream(self, text: str, cancelled: asyncio.Event) -> AsyncIterator[PCMChunk]:
+        if not text.strip():
+            return
+        chunks: queue.Queue[PCMChunk | None] = queue.Queue(maxsize=4)
+        failure: list[BaseException] = []
+
+        def produce() -> None:
+            with self._inference_lock:
+                try:
+                    if cancelled.is_set():
+                        return
+                    numpy = importlib.import_module("numpy")
+                    for chunk in self._load().stream(text, sample_rate=24000):
+                        if cancelled.is_set():
+                            break
+                        x = numpy.clip(chunk, -1.0, 1.0)
+                        pcm = (x * 32767).astype("<i2").tobytes()
+                        item = PCMChunk(pcm, 24000, 1, 2)
+                        while not cancelled.is_set():
+                            try:
+                                chunks.put(item, timeout=0.1)
+                                break
+                            except queue.Full:
+                                continue
+                except (OSError, RuntimeError, ValueError) as error:
+                    failure.append(error)
+                finally:
+                    with suppress(queue.Full):
+                        chunks.put_nowait(None)
+
+        worker = asyncio.create_task(asyncio.to_thread(produce))
+        try:
+            while True:
+                try:
+                    item = await asyncio.to_thread(chunks.get, True, 0.1)
+                except queue.Empty:
+                    if worker.done():
+                        break
+                    if cancelled.is_set():
+                        break
+                    continue
+                if item is None:
+                    break
+                if not cancelled.is_set():
+                    yield item
+            await asyncio.shield(worker)
+            if failure:
+                raise RuntimeError("EMA sesi üretilemedi.") from failure[0]
+        finally:
+            if not worker.done():
+                # Generator kapanınca üreticiye iptal aktar; yerel inference
+                # bittiği ve thread lock bırakıldığı doğrulanana kadar bekle.
+                cancelled.set()
+                await asyncio.shield(worker)
+
+    async def close(self) -> None:
+        return None
+
+
 class EdgeTTSynthesizer:
     """Edge MP3 akışını sabit ffmpeg argv ile PCM'e çevirir."""
 

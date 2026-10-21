@@ -2,13 +2,16 @@
 
 import asyncio
 import json
+import sys
 from types import ModuleType
 
+import numpy as np
 import pytest
 
 import jarvis.channels.voice.adapters as voice_adapters
 from jarvis.channels.voice.adapters import (
     EdgeTTSynthesizer,
+    EmaSynthesizer,
     FallbackSynthesizer,
     FasterWhisperRecognizer,
     PiperSynthesizer,
@@ -548,6 +551,59 @@ async def test_piper_uses_local_model_and_yields_api_pcm(monkeypatch, tmp_path):
     assert loaded["model"].endswith("voice.onnx")
     assert loaded["kwargs"]["config_path"] == tmp_path / "voice.json"
     assert loaded["kwargs"]["use_cuda"] is False
+
+
+async def test_ema_prepares_and_converts_float_chunks(monkeypatch):
+    created = []
+
+    class FakeEMA:
+        def __init__(self):
+            self.say_calls = []
+            self.stream_calls = []
+            created.append(self)
+
+        def say(self, text):
+            self.say_calls.append(text)
+
+        def stream(self, text, sample_rate):
+            self.stream_calls.append((text, sample_rate))
+            yield np.array([0.0, 0.5], dtype=np.float32)
+            yield np.array([-1.5], dtype=np.float32)
+
+    fake_module = ModuleType("ema_lightning")
+    fake_module.EMA = FakeEMA
+    monkeypatch.setitem(sys.modules, "ema_lightning", fake_module)
+
+    synth = EmaSynthesizer(VoiceConfig(tts_backend="ema"))
+    synth.prepare()
+    chunks = [chunk async for chunk in synth.stream("merhaba", asyncio.Event())]
+
+    assert created[0].say_calls == ["Merhaba."]
+    assert created[0].stream_calls == [("merhaba", 24000)]
+    assert len(chunks) == 2
+    assert all(chunk.sample_rate == 24000 for chunk in chunks)
+    assert all((chunk.channels, chunk.sample_width) == (1, 2) for chunk in chunks)
+    assert np.frombuffer(chunks[1].pcm, dtype="<i2").tolist() == [-32767]
+
+    cancelled = asyncio.Event()
+    cancelled.set()
+    assert [chunk async for chunk in synth.stream("iptal", cancelled)] == []
+
+
+def test_ema_missing_module_reports_install_hint(monkeypatch):
+    original_import = voice_adapters.importlib.import_module
+
+    def missing_import(name):
+        if name == "ema_lightning":
+            raise ImportError("missing")
+        return original_import(name)
+
+    monkeypatch.setattr(voice_adapters.importlib, "import_module", missing_import)
+    synth = EmaSynthesizer(VoiceConfig(tts_backend="ema"))
+
+    with pytest.raises(RuntimeError) as error:
+        synth.prepare()
+    assert str(error.value) == "EMA TTS kurulu değil; `pip install .[ema]`."
 
 
 class FailingSpeech:

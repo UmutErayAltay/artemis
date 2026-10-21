@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import importlib.util
 import os
 import tempfile
 from collections.abc import Callable
@@ -47,6 +48,7 @@ def save_choices(
     noise_suppression_stt: bool | None = None,
     echo_cancellation: bool | None = None,
     stt_model: Path | None = None,
+    tts_backend: str | None = None,
 ) -> None:
     """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir."""
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
@@ -64,6 +66,8 @@ def save_choices(
         raw["voice"]["echo_cancellation"] = echo_cancellation
     if stt_model is not None:
         raw["voice"]["stt_model"] = str(stt_model)
+    if tts_backend is not None:
+        raw["voice"]["tts_backend"] = tts_backend
     if applications is not None:
         raw["applications"] = applications
         raw["close_without_confirmation"] = [
@@ -286,6 +290,20 @@ class SettingsPanel(QWidget):
         self.stt_status.setTextFormat(Qt.TextFormat.PlainText)
         stt_layout.addWidget(self.stt_status)
         form.addRow("Tanıma modeli", stt_box)
+        self.tts_combo = QComboBox()
+        self.tts_combo.setAccessibleName("Konuşma sesi")
+        self.tts_combo.setToolTip("Değişiklik ses yeniden başlayınca uygulanır.")
+        self.tts_combo.addItem("Edge · Emel (bulut, internet gerekir)", "edge")
+        self.tts_combo.addItem("Piper (yerel)", "piper")
+        ema_missing = importlib.util.find_spec("ema_lightning") is None
+        ema_text = "EMA (yerel, Türkçe)"
+        if ema_missing:
+            ema_text += " · kurulu değil"
+        self.tts_combo.addItem(ema_text, "ema")
+        if ema_missing:
+            ema_index = self.tts_combo.count() - 1
+            self.tts_combo.model().item(ema_index).setEnabled(False)  # type: ignore[attr-defined]
+        form.addRow("Konuşma sesi", self.tts_combo)
         self.stt_combo.currentIndexChanged.connect(self._stt_selection_changed)
         self.stt_download.clicked.connect(self._download_stt)
         self._populate_stt_choices(None)
@@ -437,6 +455,7 @@ class SettingsPanel(QWidget):
             self.noise_stt.setEnabled(False)
             self.echo_cancellation.setEnabled(False)
             self.stt_combo.setEnabled(False)
+            self.tts_combo.setEnabled(False)
             self.stt_download.setEnabled(False)
             self.all_applications.setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
@@ -566,6 +585,9 @@ class SettingsPanel(QWidget):
             self._populate_stt_choices(
                 stt_catalog.choice_for_path(settings.voice.stt_model)
             )
+            tts_index = self.tts_combo.findData(settings.voice.tts_backend)
+            if tts_index >= 0:
+                self.tts_combo.setCurrentIndex(tts_index)
             # Yenileme kaydedilmiş değeri gösterir; canlı ses kipini değiştirmemeli.
             self.continuous_mode.blockSignals(True)
             self.continuous_mode.setChecked(settings.voice.continuous_mode)

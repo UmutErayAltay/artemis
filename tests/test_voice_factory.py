@@ -51,6 +51,45 @@ def _runtime(config):
     return SimpleNamespace(settings=SimpleNamespace(voice=config), audit=object(), runner=object())
 
 
+async def test_ema_backend_uses_ema_synthesizer(monkeypatch):
+    _patch_voice_deps(monkeypatch, object())
+    created = []
+
+    class FakeEma:
+        def __init__(self, config):
+            self.config = config
+            self.prepared = False
+            created.append(self)
+
+        def prepare(self):
+            self.prepared = True
+
+    monkeypatch.setattr(factory, "EmaSynthesizer", FakeEma)
+    config = VoiceConfig(tts_backend="ema")
+    controller = await factory.build_voice_controller(
+        _runtime(config), lambda _: None, lambda _: None
+    )
+
+    assert controller.synthesizer is created[0]
+    assert created[0].prepared
+
+
+async def test_ema_backend_uses_piper_fallback_when_model_is_set(monkeypatch, tmp_path):
+    _patch_voice_deps(monkeypatch, object())
+    ema = SimpleNamespace(prepare=lambda: None)
+    piper = SimpleNamespace(prepare=lambda: None)
+    monkeypatch.setattr(factory, "EmaSynthesizer", lambda _config: ema)
+    monkeypatch.setattr(factory, "PiperSynthesizer", lambda _config: piper)
+    config = VoiceConfig(tts_backend="ema", piper_model=tmp_path / "voice.onnx")
+    controller = await factory.build_voice_controller(
+        _runtime(config), lambda _: None, lambda _: None
+    )
+
+    assert isinstance(controller.synthesizer, factory.FallbackSynthesizer)
+    assert controller.synthesizer.primary is ema
+    assert controller.synthesizer.local is piper
+
+
 async def test_noise_suppression_off_keeps_raw_microphone(monkeypatch):
     mic = object()
     _patch_voice_deps(monkeypatch, mic)

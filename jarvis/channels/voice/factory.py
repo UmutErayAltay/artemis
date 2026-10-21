@@ -10,6 +10,7 @@ from jarvis.brain.agent_loop import RunResult
 from jarvis.channels.runtime import Runtime
 from jarvis.channels.voice.adapters import (
     EdgeTTSynthesizer,
+    EmaSynthesizer,
     FallbackSynthesizer,
     FasterWhisperRecognizer,
     PiperSynthesizer,
@@ -119,8 +120,17 @@ async def build_voice_controller(
     await asyncio.to_thread(recognizer.prepare)
     synthesizer: SpeechSynthesizer
     if settings.voice.tts_backend == "edge":
-        primary_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
+        edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
         if settings.voice.tts_local_fallback:
+            local_tts = PiperSynthesizer(settings.voice)
+            await asyncio.to_thread(local_tts.prepare)
+            synthesizer = FallbackSynthesizer(edge_tts, local_tts)
+        else:
+            synthesizer = edge_tts
+    elif settings.voice.tts_backend == "ema":
+        primary_tts = EmaSynthesizer(settings.voice)
+        await asyncio.to_thread(primary_tts.prepare)
+        if settings.voice.tts_local_fallback and settings.voice.piper_model:
             local_tts = PiperSynthesizer(settings.voice)
             await asyncio.to_thread(local_tts.prepare)
             synthesizer = FallbackSynthesizer(primary_tts, local_tts)

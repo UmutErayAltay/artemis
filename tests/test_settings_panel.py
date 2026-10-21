@@ -49,6 +49,12 @@ def test_stt_model_path_is_saved(tmp_path: Path) -> None:
     assert load_settings(path).voice.stt_model == model
 
 
+def test_tts_backend_choice_is_saved(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    save_choices(path, None, tts_backend="ema")
+    assert load_settings(path).voice.tts_backend == "ema"
+
+
 def test_settings_panel_has_no_model_combo_or_inventory(tmp_path: Path) -> None:
     from PySide6.QtWidgets import QApplication
 
