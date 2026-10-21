@@ -278,7 +278,8 @@ def test_scale_point_rejects_out_of_range_coordinates(x: int, y: int) -> None:
         scale_point(x, y, (100, 200), (1920, 1080))
 
 
-def test_blocked_processes_are_exact() -> None:
+def test_blocked_processes_cover_shells_and_password_managers() -> None:
+    # Liste büyüyebilir (ADR 0039); bu çekirdek küme hiçbir zaman düşmemeli.
     assert frozenset(
         {
             "cmd.exe",
@@ -296,7 +297,7 @@ def test_blocked_processes_are_exact() -> None:
             "keepass.exe",
             "keepassxc.exe",
         }
-    ) == BLOCKED_PROCESSES
+    ) <= BLOCKED_PROCESSES
 
 
 def test_process_block_reason_blocks_own_pid() -> None:
@@ -327,3 +328,34 @@ def test_process_block_reason_allows_other_process() -> None:
 )
 def test_system_prompt_mentions_every_action_type(action_type: str) -> None:
     assert f'"{action_type}"' in SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize("combo", ["ctrl+esc", "ctrl+escape", "ctrl+shift+esc", "ctrl+alt+escape"])
+def test_start_menu_and_task_manager_combos_are_blocked(combo: str) -> None:
+    assert key_block_reason(parse_keys(combo)) is not None
+
+
+@pytest.mark.parametrize("combo", ["enter", "ctrl+enter", "shift+enter", "alt+f4"])
+def test_enter_and_alt_f4_are_sensitive_regardless_of_model_flag(combo: str) -> None:
+    action = Action(type="key", keys=combo, reason="deneme", sensitive=False)
+    assert is_sensitive(action)
+
+
+def test_plain_keys_stay_non_sensitive() -> None:
+    assert not is_sensitive(Action(type="key", keys="ctrl+l", reason="adres çubuğu"))
+    assert not is_sensitive(Action(type="key", keys="tab", reason="sonraki alan"))
+
+
+@pytest.mark.parametrize(
+    "exe",
+    [
+        r"C:\Windows\explorer.exe",
+        r"C:\Windows\SystemApps\MicrosoftWindows.Client.CBS_cw5n1h2txyewy\SearchHost.exe",
+        "StartMenuExperienceHost.exe",
+        "mshta.exe",
+        "rundll32.exe",
+        r"C:\Users\x\AppData\Local\Programs\Microsoft VS Code\Code.exe",
+    ],
+)
+def test_launchers_and_terminal_editors_are_blocked(exe: str) -> None:
+    assert process_block_reason(exe, 10, 99) is not None

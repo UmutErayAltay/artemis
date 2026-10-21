@@ -29,11 +29,16 @@ başlar, sonra kendi başına çalışır; riski sınırlar ve görünürlük ta
    Eylemler: `click`, `type`, `key`, `scroll`, `wait`, `done`, `ask_user`. Her eylem `reason`
    ve `sensitive` taşır.
 4. **Kodla zorlanan sınırlar** (modelin beyanına güvenilmez):
-   - Ön plandaki pencere Jarvis'in kendi süreci, bir kabuk/terminal (`cmd`, `powershell`,
-     `pwsh`, `WindowsTerminal`, `conhost`), `regedit`, `mmc`, `taskmgr` ya da parola yöneticisi
-     ise eylem çalışmaz, oturum durur. Model Jarvis'in onay penceresine tıklayamaz.
-   - Engelli tuşlar: Win tuşu içeren her kombinasyon, `ctrl+alt+delete`, `ctrl+shift+esc`.
-     `alt+f4` her zaman hassas sayılır.
+   - Ön plandaki pencere ya da tıklama noktasındaki pencere Jarvis'in kendi süreci, bir
+     kabuk/terminal (`cmd`, `powershell`, `pwsh`, `WindowsTerminal`, `conhost`), bir başlatıcı
+     (`explorer`, Başlat/arama süreçleri, `mshta`, `wscript`, `cscript`, `rundll32`, `msiexec`,
+     `control`), gömülü terminalli editör (VS Code, Cursor), `regedit`, `mmc`, `taskmgr` ya da
+     parola yöneticisi ise eylem çalışmaz, oturum durur. Hassas onaydan sonra yeniden denetlenir.
+     Model Jarvis'in onay penceresine tıklayamaz. Uygulama açmak ana döngünün
+     `open_application` aracıyla olur, Dosya Gezgini'nden değil.
+   - Engelli tuşlar: Win tuşu içeren her kombinasyon, `ctrl+alt+delete`, Ctrl+Esc içeren her
+     kombinasyon (Başlat menüsü, Görev Yöneticisi). `alt+f4` ve Enter içeren her tuş kodla
+     hassastır (5. madde).
    - `type` en çok 500 karakter, satır sonu içeremez (Enter ayrı `key` eylemidir).
    - `max_steps` (varsayılan 25), `max_minutes` (varsayılan 5) aşılırsa oturum durur.
 5. **Hassas adım onayı.** Model `sensitive: true` derse (gönder, satın al, sil, öde, paylaş)
@@ -53,9 +58,12 @@ başlar, sonra kendi başına çalışır; riski sınırlar ve görünürlük ta
 
 ## Sonuçlar
 
-- Tek onaydan sonra ekrandaki bir enjeksiyon, kısıtların izin verdiği her şeyi yapabilir
-  (örneğin açık bir sohbet uygulamasına yazıp Enter'a basmak). Bunu hassas adım onayı,
-  adım sınırı ve Esc azaltır, tamamen önlemez. Bu yüzden özellik varsayılan kapalıdır.
+- Engel listesi eksik kalabilir (yeni bir başlatıcı, terminali olan başka bir uygulama).
+  Enter'ın kodla onaylı olması komut çalıştırma ve klavyeyle gönderme yollarını kapatır;
+  tıklamayla yapılan gönderim (ör. "Gönder" düğmesi) yine modelin `sensitive` beyanına kalır.
+  Bunu adım sınırı ve Esc azaltır, tamamen önlemez; özellik bu yüzden varsayılan kapalıdır.
+- v2 adayı: oturum başında kullanıcının seçtiği hedef uygulamalar için izin listesi
+  (engel listesi yerine).
 - Görüntü gönderebilmek için sağlayıcı mesajları görüntü parçası taşır (`Message.image_png`).
   Gizli (private) mesajda görüntü de maskelenir; görüntüyü desteklemeyen sağlayıcı
   (Claude CLI) dürüstçe hata verir.

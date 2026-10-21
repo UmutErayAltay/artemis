@@ -164,8 +164,10 @@ def key_block_reason(keys: tuple[str, ...]) -> str | None:
     key_set = set(keys)
     if {"ctrl", "alt", "delete"} <= key_set:
         return "Ctrl+Alt+Delete kombinasyonu engellendi."
-    if {"ctrl", "shift", "escape"} <= key_set:
-        return "Ctrl+Shift+Escape kombinasyonu engellendi."
+    # Ctrl+Esc Başlat menüsünü açar (Win ile aynı yol: "powershell" yaz + Enter). Ctrl+Shift+Esc
+    # (Görev Yöneticisi) de bu kümeye girer.
+    if {"ctrl", "escape"} <= key_set:
+        return "Ctrl+Esc içeren kombinasyonlar engellendi (Başlat menüsü / Görev Yöneticisi)."
     return None
 
 
@@ -176,7 +178,10 @@ def is_sensitive(action: Action) -> bool:
         return True
     if action.type != "key" or action.keys is None:
         return False
-    return set(parse_keys(action.keys)) == {"alt", "f4"}
+    keys = set(parse_keys(action.keys))
+    # Enter kodla hassastır, modelin beyanına bakılmaz: "type" satır sonu taşıyamadığı için
+    # yazılan bir komut ya da gönderilen bir form yalnız bu onaydan geçerek çalışabilir.
+    return keys == {"alt", "f4"} or "enter" in keys
 
 
 def scale_point(
@@ -210,6 +215,22 @@ BLOCKED_PROCESSES: frozenset[str] = frozenset(
         "regedit.exe",
         "mmc.exe",
         "taskmgr.exe",
+        # Başlatıcılar: adres çubuğu, arama ya da betik çalıştırıcıyla komut çalıştırılabilir.
+        "explorer.exe",
+        "searchhost.exe",
+        "searchapp.exe",
+        "searchui.exe",
+        "startmenuexperiencehost.exe",
+        "shellexperiencehost.exe",
+        "mshta.exe",
+        "wscript.exe",
+        "cscript.exe",
+        "rundll32.exe",
+        "msiexec.exe",
+        "control.exe",
+        # Gömülü terminali olan editörler.
+        "code.exe",
+        "cursor.exe",
         "1password.exe",
         "bitwarden.exe",
         "keepass.exe",
