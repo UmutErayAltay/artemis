@@ -16,7 +16,7 @@ from jarvis.computer.session import ComputerSession, SessionResult
 from jarvis.config.settings import ComputerUseConfig
 
 OWN_PID = 4242
-SECRET = "gizli-parola-123"
+TYPED_TEXT = "yazilan-ornek-metin-123"  # denetime sızmaması gereken yazılan metin
 
 
 class FakeBackend:
@@ -343,12 +343,12 @@ async def test_backend_error_is_reported() -> None:
 
 
 async def test_audit_never_holds_typed_text_or_bytes() -> None:
-    env = Env(act(type="type", text=SECRET, reason="Alana yaz"), DONE)
+    env = Env(act(type="type", text=TYPED_TEXT, reason="Alana yaz"), DONE)
     await env.run()
-    assert env.backend.calls == [("type", SECRET)]
+    assert env.backend.calls == [("type", TYPED_TEXT)]
     step = env.audit.named("computer_step")[0]
-    assert step["text_length"] == len(SECRET) and step["action"] == "type"
-    assert SECRET not in repr(env.audit.events)
+    assert step["text_length"] == len(TYPED_TEXT) and step["action"] == "type"
+    assert TYPED_TEXT not in repr(env.audit.events)
     for _, fields in env.audit.events:
         assert not any(isinstance(value, (bytes, bytearray)) for value in fields.values())
         assert "png" not in repr(fields).lower()
