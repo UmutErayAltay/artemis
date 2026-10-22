@@ -374,6 +374,7 @@ class ComputerUseConfig(BaseModel):
 
     enabled: bool = False
     # `Settings.models` anahtarı; ekran görüntüsünü kabul eden bir model olmalı.
+    # Boşsa Jarvis'in o anki ana modeli (Settings.primary_model) kullanılır.
     model: str = ""
     max_steps: int = Field(default=25, ge=1, le=100)
     max_minutes: float = Field(default=5.0, ge=0.5, le=30)
@@ -455,7 +456,9 @@ class Settings(BaseModel):
             fallback = self.models.get(self.fallback_model)
             if fallback is None or fallback.provider != "ollama":
                 raise ValueError("Yedek model tanımlı bir Ollama modeli olmalı")
-        if self.computer_use.enabled and self.computer_use.model not in self.models:
+        # Boş model "ana beyni kullan" demektir; o zaman ana modelin kendisi doğrulanır.
+        vision_model = self.computer_use.model or self.primary_model
+        if self.computer_use.enabled and vision_model not in self.models:
             raise ValueError("computer_use.model models içinde tanımlanmalı")
         for name in self.computer_use.fallback_models:
             if name not in self.models:

@@ -118,6 +118,9 @@ class WindowControl(BaseTool):
     )
     args_model = WindowControlArguments
     risk = Risk.SIDE_EFFECT
+    # Otomatik kip pencereyi ekrana taşımayı/tam ekranı da kapsar (ADR 0039 ek karar):
+    # ekran adımı dış içerik ürettiği için pencere işlemi aksi hâlde her seferinde sorardı.
+    auto_mode_ok = True
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(WindowControlArguments, arguments)

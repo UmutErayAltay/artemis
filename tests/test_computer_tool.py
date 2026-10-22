@@ -119,11 +119,21 @@ async def test_auto_mode_does_not_relax_other_tools(tmp_path: Path) -> None:
         asked.append(name)
         return False
 
-    call = ToolCall(
-        id="w", name="window_control", arguments={"window_id": 5, "action": "focus"}
-    )
-    await gate.dispatch(call, context, TurnState(tainted=True), refuse)
-    assert asked == ["window_control"]
+    # Otomatik kipin kapsamı bilgisayarını kontrol eden iki araçtır; diğerleri kural 4'te.
+    for name, arguments in (
+        ("volume_set", {"level": 10}),
+        ("window_list", {}),
+    ):
+        gate, context, *_ = env(tmp_path, mode="auto")
+        asked.clear()
+        await gate.dispatch(
+            ToolCall(id="t", name=name, arguments=arguments),
+            context,
+            TurnState(tainted=True),
+            refuse,
+        )
+        if arguments:  # window_list READ_ONLY: onay sorulmaz, yalnız yan etkililer sorar
+            assert asked == [name]
 
 
 @pytest.mark.parametrize("goal", ["", "x" * 501])
@@ -341,3 +351,47 @@ async def test_model_chain_skips_a_rate_limited_model_for_a_while() -> None:
     for _ in range(3):
         assert (await chain.complete([], [], timeout=1)).content == "b"
     assert slow.calls == 1 and fast.calls == 3
+
+
+async def test_auto_mode_skips_window_move_on_tainted_turn(tmp_path: Path) -> None:
+    # "2. ekrana taşı" / tam ekran adımları da otomatik kipte sorulmaz.
+    gate, context, *_ = env(tmp_path, mode="auto")
+    call = ToolCall(
+        id="m",
+        name="window_control",
+        arguments={"window_id": 5, "action": "move_to_screen", "screen": 2},
+    )
+    result = await gate.dispatch(call, context, TurnState(tainted=True), never)
+    assert result.status != "denied"
+    import json
+
+    events = [
+        json.loads(line)["event"]
+        for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert "approval_skipped" in events and "approval" not in events
+
+
+def test_empty_computer_model_uses_the_main_brain(tmp_path: Path) -> None:
+    # Boş `computer_use.model` = ana beyin: görüntü o an seçili ana modele gider.
+    from jarvis.tools.plugins.computer import vision_models
+
+    base = Settings(
+        workspace=tmp_path,
+        models={"main": model("ollama"), "other": model("ollama")},
+        primary_model="main",
+    )
+    follow = base.model_copy(
+        update={"computer_use": ComputerUseConfig(enabled=True, model="")}
+    )
+    assert vision_models(follow) == ("main",)
+
+    pinned = base.model_copy(
+        update={
+            "computer_use": ComputerUseConfig(
+                enabled=True, model="other", fallback_models=("main", "other")
+            )
+        }
+    )
+    # Sabit model seçilirse o önce gelir; yedekler yinelenmeden eklenir.
+    assert vision_models(pinned) == ("other", "main")

@@ -21,6 +21,7 @@ from jarvis.brain.models import Completion, Message
 from jarvis.brain.providers import Provider
 from jarvis.brain.router import ProviderRouter
 from jarvis.computer.session import ComputerSession, SessionResult
+from jarvis.config.settings import Settings
 from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from jarvis.tools.registry import register_tool
 
@@ -88,7 +89,8 @@ class ComputerUse(BaseTool):
                 message="Bilgisayar kullanımı yalnız masaüstü uygulamasında çalışır; "
                 "Esc ile durdurma ve adım onayı burada yok."
             )
-        model = settings.models[config.model]
+        names = vision_models(settings)
+        model = settings.models[names[0]]
         # Görüntüyü yakalamadan ÖNCE reddedilir: ekran buluta yalnız açık izinle gider.
         if model.provider != "ollama" and not settings.perception.allow_cloud_screen:
             return ToolResult(
@@ -105,7 +107,7 @@ class ComputerUse(BaseTool):
                         ),
                         context.audit,
                     )
-                    for name in (config.model, *config.fallback_models)
+                    for name in names
                 ]
             )
         backend = context.services.get("computer_backend")
@@ -137,6 +139,15 @@ class ComputerUse(BaseTool):
 
 # 429 sonrası model bu süre boyunca atlanır; oturum genelde bundan kısa sürer.
 _COOLDOWN_SECONDS = 120.0
+
+
+def vision_models(settings: Settings) -> tuple[str, ...]:
+    """Bilgisayar kullanımının deneyeceği model adları, sırasıyla.
+
+    Boş `computer_use.model` "ana beyni kullan" demektir: o an seçili ana model görüntüyü alır.
+    """
+    config = settings.computer_use
+    return tuple(dict.fromkeys((config.model or settings.primary_model, *config.fallback_models)))
 
 
 class _ModelChain:
