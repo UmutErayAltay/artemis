@@ -226,3 +226,22 @@ def test_noise_controls_are_grouped_in_advanced_voice_settings(
     assert not panel.advanced_box.isAncestorOf(panel.noise_suppression)
     panel.deleteLater()
     qt_app.processEvents()
+
+
+def test_save_computer_mode_writes_only_the_mode(tmp_path: Path) -> None:
+    from jarvis.channels.desktop.settings_panel import save_computer_mode
+
+    path = config(tmp_path)
+    path.write_text(
+        path.read_text(encoding="utf-8")
+        + "computer_use:\n  enabled: true\n  model: first\n",
+        encoding="utf-8",
+    )
+    save_computer_mode(path, "auto")
+    settings = load_settings(path)
+    assert settings.computer_use.mode == "auto"
+    assert settings.computer_use.enabled is True  # komşu alanlar korunur
+
+    with pytest.raises(ValueError):
+        save_computer_mode(path, "yolo")
+    assert load_settings(path).computer_use.mode == "auto"

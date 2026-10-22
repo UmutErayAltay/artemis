@@ -288,3 +288,26 @@ async def test_model_chain_falls_through_only_on_retryable_errors() -> None:
     chain = _ModelChain([Fixed("a", ProviderError("401")), Fixed("b")])
     with pytest.raises(ProviderError, match="401"):
         await chain.complete([], [], timeout=1)
+
+
+async def test_runtime_mode_switch_reaches_the_tool_context(tmp_path: Path) -> None:
+    # Üst çubuktaki düğme tur başlamadan runtime ayarını değiştirir: sonraki araç çağrısı
+    # otomatik kipte çalışmalı, Uygula beklememeli.
+    settings = Settings(
+        workspace=tmp_path,
+        models={"vision": model("ollama")},
+        computer_use=ComputerUseConfig(
+            enabled=True, model="vision", step_delay_seconds=0, mode="accept"
+        ),
+    )
+    context = ToolContext(tmp_path, settings, AuditLog(tmp_path / "audit.jsonl"), turn_id="t")
+    tool = discover_tools().get("computer_use")
+    assert tool is not None
+    args = tool.args_model(goal="x")
+    assert tool.risk_for(args, context) is Risk.CONFIRM_REQUIRED
+
+    computer_use = settings.computer_use.model_copy(update={"mode": "auto"})
+    context.settings = settings.model_copy(update={"computer_use": computer_use})
+
+    assert tool.risk_for(args, context) is Risk.SIDE_EFFECT
+    assert context.settings.computer_use.mode == "auto"

@@ -66,7 +66,11 @@ from jarvis.channels.desktop.hotkey import GlobalHotkey
 from jarvis.channels.desktop.instance import InstanceServer, claim_instance, instance_name
 from jarvis.channels.desktop.pet import TEAL, PetWidget, level_from_message
 from jarvis.channels.desktop.projects_panel import ProjectsPanel
-from jarvis.channels.desktop.settings_panel import SettingsPanel, save_choices
+from jarvis.channels.desktop.settings_panel import (
+    SettingsPanel,
+    save_choices,
+    save_computer_mode,
+)
 from jarvis.channels.desktop.steps import StepLine, step_line
 from jarvis.channels.runtime import Runtime, create_runtime
 from jarvis.config.settings import load_settings
@@ -867,6 +871,16 @@ class DesktopWindow(QMainWindow):
         voice_chip = self._chip(self.voice_dot, self.voice_state)
         header_layout.addWidget(voice_chip, 0, Qt.AlignmentFlag.AlignVCenter)
         header_layout.addWidget(self.voice_button)
+        self.auto_button = QPushButton("Oto onay: kapalı")
+        self.auto_button.setCheckable(True)
+        self.auto_button.setObjectName("voiceToggle")
+        self.auto_button.setAccessibleName("Bilgisayar kullanımında otomatik onayı aç veya kapat")
+        self.auto_button.setToolTip(
+            "Açıkken bilgisayar kullanımı adımları sormadan çalışır; Esc yine durdurur. "
+            "Değişiklik hemen geçerli, Uygula gerekmez."
+        )
+        self.auto_button.toggled.connect(self._toggle_auto_mode)
+        header_layout.addWidget(self.auto_button)
         self.status_dot = QLabel("●")
         self.status_dot.setObjectName("statusDot")
         self.status_label = QLabel("")
@@ -967,7 +981,15 @@ class DesktopWindow(QMainWindow):
         self._projects_timer.start()
         self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
         self.settings_panel.apply_requested.connect(self._apply_settings)
+        # Üst çubuktaki düğme açılışta config'teki kipi gösterir; sinyal kapalı ki açılış
+        # kendiliğinden config yazmasın.
+        on = self.settings_panel.computer_auto.isChecked()
+        self.auto_button.blockSignals(True)
+        self.auto_button.setChecked(on)
+        self.auto_button.blockSignals(False)
+        self.auto_button.setText(f"Oto onay: {'açık' if on else 'kapalı'}")
         self.settings_panel.continuous_mode.toggled.connect(self._live_continuous)
+        self.settings_panel.computer_auto.toggled.connect(self._toggle_auto_mode)
         self.settings_panel.github_synced.connect(self._github_synced)
         self.settings_panel.providers.changed.connect(self._providers_changed)
         self.settings_scroll = QScrollArea()
@@ -1260,6 +1282,30 @@ class DesktopWindow(QMainWindow):
         elif not self.bridge.stop_voice():
             self.voice_button.setChecked(False)
 
+    def _toggle_auto_mode(self, checked: bool) -> None:
+        """Üst çubuktaki düğme: kip anında değişir ve config'e yazılır.
+
+        Kip oturum içi onayı belirler; tarayıcıdan sonra "Uygula" beklemek istenmeyen
+        sürpriz olurdu, bu yüzden düğme hem runtime'a hem config'e anında yazar.
+        """
+        mode = "auto" if checked else "accept"
+        box = self.settings_panel.computer_auto
+        box.blockSignals(True)
+        box.setChecked(checked)
+        box.blockSignals(False)
+        self.auto_button.setText(f"Oto onay: {'açık' if checked else 'kapalı'}")
+        if self._demo:
+            return
+        if not self.bridge.set_computer_mode(mode):
+            # Runtime hazır değilse yalnız config yazılır; bir sonraki açılışta geçerli olur.
+            self._set_status("Kip kaydedilecek", "running")
+        try:
+            save_computer_mode(self._config_path, mode)
+        except (OSError, ValueError):
+            self._set_status("Kip kaydedilemedi", "error")
+            return
+        self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
+
     def _live_continuous(self, checked: bool) -> None:
         # Kayıt Uygula ile olur; ses açıksa kip hemen uygulanır.
         self.bridge.set_continuous(checked)
@@ -1298,6 +1344,8 @@ class DesktopWindow(QMainWindow):
         enabled = self._worker_ready and not self._busy and not self._exiting
         self.settings_panel.apply_button.setEnabled(enabled and not self._demo)
         self.voice_button.setEnabled(self._worker_ready and not self._exiting and not self._demo)
+        # Kip değişimi çalışan turu kesmez; yalnız bitişte kapanmasın diye korunur.
+        self.auto_button.setEnabled(not self._exiting and not self._demo)
         self.projects_panel.set_busy(not enabled)
         self.prompt.setEnabled(enabled)
         self.send_button.setEnabled(enabled)

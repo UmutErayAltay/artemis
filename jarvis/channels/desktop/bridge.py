@@ -836,6 +836,34 @@ class DesktopBridge:
         if controller is not None:
             controller.set_continuous(enabled)
 
+    def set_computer_mode(self, mode: str) -> bool:
+        """Bilgisayar kullanımı kipini çalışan runtime'da değiştirir; Uygula beklemez.
+
+        Kip yalnız araç bağlamının ayarında tutulur: sonraki her tur yeni bağlam kurar,
+        dolayısıyla değişiklik config'e yazılana kadar da geçerlidir. Kabul edilen değerler
+        `ComputerUseConfig.mode` ile aynıdır (accept | auto); başka değer reddedilir.
+        """
+        if mode not in {"accept", "auto"}:
+            return False
+        loop = self._loop
+        if loop is None or self._runtime is None:
+            return False
+        try:
+            loop.call_soon_threadsafe(self._set_computer_mode_on_worker, mode)
+        except RuntimeError:
+            return False
+        return True
+
+    def _set_computer_mode_on_worker(self, mode: str) -> None:
+        runtime = self._runtime
+        if runtime is None:
+            return
+        # Tek gerçek kaynak araç bağlamıdır: araçlar ayarı oradan okur (kural 10).
+        computer_use = runtime.context.settings.computer_use.model_copy(update={"mode": mode})
+        runtime.context.settings = runtime.context.settings.model_copy(
+            update={"computer_use": computer_use}
+        )
+
     def _stop_voice_on_worker(self) -> None:
         controller = self._voice_controller
         if controller is not None:

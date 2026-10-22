@@ -83,6 +83,16 @@ def save_choices(
     _write_validated(path, raw)
 
 
+def save_computer_mode(path: Path, mode: str) -> None:
+    """Yalnız bilgisayar kullanımı kipini yazar; üst çubuktaki düğme Uygula beklemez."""
+    if mode not in {"accept", "auto"}:
+        raise ValueError(f"Geçersiz bilgisayar kullanımı kipi: {mode!r}")
+    load_settings(path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw.setdefault("computer_use", {})["mode"] = mode
+    _write_validated(path, raw)
+
+
 def save_code_agent(path: Path, code_agent: dict[str, Any]) -> None:
     """Yalnız code_agent alanları; model/cihaz seçimine bağlı değil (GitHub bağı hemen kalıcı)."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
