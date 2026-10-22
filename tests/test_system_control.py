@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 
 from jarvis.tools.platform import child_environment
+from jarvis.tools.plugins.system import WindowControlArguments
 from jarvis.tools.system_control import (
     BRIGHTNESS_SCRIPT,
     LOCK_SCRIPT,
@@ -112,6 +113,7 @@ def test_powershell_argv_is_fixed_and_values_only_in_env() -> None:
     assert "left" not in " ".join(args[:6])
     assert kwargs["env"]["JARVIS_WINDOW_ID"] == "987654"
     assert kwargs["env"]["JARVIS_WINDOW_ACTION"] == "left"
+    assert "JARVIS_WINDOW_SCREEN" not in kwargs["env"]
     assert set(child_environment()).issubset(kwargs["env"])
 
 
@@ -330,7 +332,10 @@ def test_list_windows_errors() -> None:
 # --- pencere kontrolü ----------------------------------------------------------------------
 
 
-@pytest.mark.parametrize("action", ["focus", "maximize", "minimize", "restore", "left", "right"])
+@pytest.mark.parametrize(
+    "action",
+    ["focus", "maximize", "minimize", "restore", "left", "right"],
+)
 def test_control_window_success_for_every_action(action: str) -> None:
     runner = FakeRunner(stdout='{"ok":true}')
     outcome = make(runner).control_window(10, action)  # type: ignore[arg-type]
@@ -366,6 +371,86 @@ def test_control_window_invalid_action_raises() -> None:
     with pytest.raises(ValueError):
         make(runner).control_window(5, "close")  # type: ignore[arg-type]
     assert runner.calls == []
+
+
+def test_control_window_move_to_screen_passes_screen_in_env() -> None:
+    runner = FakeRunner(stdout='{"ok":true}')
+    outcome = make(runner).control_window(10, "move_to_screen", 2)
+    assert outcome.status == "ok"
+    args, kwargs = runner.calls[0]
+    # Neden: Ekran değeri kullanıcı girdisidir; argv sabit kalır, değer ortamda taşınır.
+    assert kwargs["env"]["JARVIS_WINDOW_SCREEN"] == "2"
+    assert script_of(args) == WINDOW_CONTROL_SCRIPT
+    assert args[:6] == [
+        "powershell.exe",
+        "-NoProfile",
+        "-NonInteractive",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-EncodedCommand",
+    ]
+    assert len(args) == 7
+    assert "2" not in args
+
+
+def test_control_window_move_to_screen_missing_monitor_is_error() -> None:
+    outcome = make(FakeRunner(returncode=8)).control_window(10, "move_to_screen", 2)
+    assert outcome == SystemOutcome("error", "Böyle bir ekran yok.")
+
+
+@pytest.mark.parametrize(
+    ("action", "screen"),
+    [
+        ("move_to_screen", None),
+        ("focus", 2),
+        ("move_to_screen", 0),
+        ("move_to_screen", 9),
+        ("move_to_screen", True),
+    ],
+)
+def test_control_window_screen_validation_raises_before_runner(
+    action: str, screen: int | None
+) -> None:
+    runner = FakeRunner()
+    with pytest.raises(ValueError):
+        make(runner).control_window(10, action, screen)  # type: ignore[arg-type]
+    assert runner.calls == []
+
+
+def test_window_control_script_supports_move_to_screen() -> None:
+    assert "'move_to_screen'" in WINDOW_CONTROL_SCRIPT
+    assert "JARVIS_WINDOW_SCREEN" in WINDOW_CONTROL_SCRIPT
+    assert "[int]::TryParse($env:JARVIS_WINDOW_SCREEN, [ref]$screenNumber)" in (
+        WINDOW_CONTROL_SCRIPT
+    )
+    assert "Add-Type -AssemblyName System.Windows.Forms" in WINDOW_CONTROL_SCRIPT
+    assert "[System.Windows.Forms.Screen]::AllScreens" in WINDOW_CONTROL_SCRIPT
+    assert (
+        "Sort-Object @{Expression={-not $_.Primary}}, @{Expression={$_.Bounds.Left}}, "
+        "@{Expression={$_.Bounds.Top}}"
+    ) in WINDOW_CONTROL_SCRIPT
+    assert "[void][JarvisWin]::ShowWindow($h, 9)" in WINDOW_CONTROL_SCRIPT
+    assert "[void][JarvisWin]::ShowWindow($h, 3)" in WINDOW_CONTROL_SCRIPT
+    assert "0x0044" in WINDOW_CONTROL_SCRIPT
+    assert "[JarvisWin]::MonitorFromWindow($h, 2)" in WINDOW_CONTROL_SCRIPT
+
+    dpi_aware = WINDOW_CONTROL_SCRIPT.index("[void][JarvisWin]::SetProcessDPIAware()")
+    all_screens = WINDOW_CONTROL_SCRIPT.index("[System.Windows.Forms.Screen]::AllScreens")
+    assert dpi_aware < all_screens
+    assert WINDOW_CONTROL_SCRIPT.index("'move_to_screen' {") < WINDOW_CONTROL_SCRIPT.index(
+        "default {"
+    )
+
+
+def test_window_control_arguments_require_screen_only_for_move_to_screen() -> None:
+    with pytest.raises(ValueError):
+        WindowControlArguments(window_id=10, action="move_to_screen")
+    with pytest.raises(ValueError):
+        WindowControlArguments(window_id=10, action="focus", screen=2)
+    with pytest.raises(ValueError):
+        WindowControlArguments(window_id=10, action="move_to_screen", screen=True)
+    arguments = WindowControlArguments(window_id=10, action="move_to_screen", screen=2)
+    assert arguments.screen == 2
 
 
 # --- ses -----------------------------------------------------------------------------------

@@ -11,9 +11,32 @@ from jarvis.computer import windows as w
 
 
 def test_normalize_corners() -> None:
-    assert w._normalize(0, 0, 1920, 1080) == (0, 0)
-    assert w._normalize(1919, 1079, 1920, 1080) == (65535, 65535)
-    assert w._normalize(5, 5, 1, 1) == (65535, 65535)
+    assert w._normalize(0, 0, 0, 0, 1920, 1080) == (0, 0)
+    assert w._normalize(1919, 1079, 0, 0, 1920, 1080) == (65535, 65535)
+    assert w._normalize(5, 5, 0, 0, 1, 1) == (65535, 65535)
+
+
+def test_normalize_uses_virtual_desktop_origin() -> None:
+    assert w._normalize(-1920, -1080, -1920, -1080, 3840, 2160) == (0, 0)
+    assert w._normalize(1919, 1079, -1920, -1080, 3840, 2160) == (65535, 65535)
+    assert w._normalize(-1920, 0, -1920, 0, 3840, 1080) == (0, 0)
+    assert w._normalize(1919, 0, -1920, 0, 3840, 1080) == (65535, 65535)
+
+
+def test_order_monitors_puts_primary_first_then_sorts_by_position() -> None:
+    items = [
+        (0, 0, 1920, 1080, False),
+        (100, 200, 1920, 1080, True),
+        (-100, 50, 1920, 1080, False),
+        (-100, 0, 1920, 1080, False),
+    ]
+
+    assert w._order_monitors(items) == [
+        (100, 200, 1920, 1080),
+        (-100, 0, 1920, 1080),
+        (-100, 50, 1920, 1080),
+        (0, 0, 1920, 1080),
+    ]
 
 
 def test_key_order_and_extended() -> None:
@@ -48,10 +71,11 @@ def test_input_struct_size() -> None:
 @pytest.mark.skipif(sys.platform == "win32", reason="Windows dışı")
 def test_non_windows_raises() -> None:
     with pytest.raises(RuntimeError):
-        w.capture_primary()
+        w.capture(0, 0, 1, 1)
 
 
 @pytest.mark.disruptive
-def test_capture_primary_length() -> None:
-    data, width, height = w.capture_primary()
+def test_capture_monitor_length() -> None:
+    rect = w.monitors()[0]
+    data, width, height = w.capture(*rect)
     assert len(data) == width * height * 4

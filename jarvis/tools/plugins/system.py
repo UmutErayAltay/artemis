@@ -75,7 +75,35 @@ class WindowControlArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     window_id: int = Field(gt=0, description="window_list'ten gelen pencere kimliği")
-    action: Literal["focus", "maximize", "minimize", "restore", "left", "right"]
+    action: Literal[
+        "focus",
+        "maximize",
+        "minimize",
+        "restore",
+        "left",
+        "right",
+        "move_to_screen",
+    ]
+    # Neden: Pydantic lax modunda True değerini 1'e dönüştürebilir; yanlışlıkla birincil
+    # ekranın hedeflenmesini engellemek için ekran numarası gerçek bir tam sayı olmalıdır.
+    screen: int | None = Field(
+        default=None,
+        ge=1,
+        le=8,
+        strict=True,
+        description="move_to_screen için hedef ekran (1 birincil)",
+    )
+
+    # Neden: Yanlış ekran seçimini yok saymak yerine şemayı reddetmek, hedef monitörün
+    # belirsizleşmesini ve istenmeyen taşımayı engeller.
+    @model_validator(mode="after")
+    def _screen_matches_action(self) -> WindowControlArguments:
+        if self.action == "move_to_screen":
+            if self.screen is None:
+                raise ValueError("move_to_screen için screen verilmeli")
+        elif self.screen is not None:
+            raise ValueError("screen yalnız move_to_screen işleminde kullanılabilir")
+        return self
 
 
 @register_tool
@@ -85,7 +113,8 @@ class WindowControl(BaseTool):
     done_label = "Pencere düzenlendi"
     description = (
         "Bir pencereyi öne getirir (focus), büyütür, simge durumuna küçültür, eski boyutuna "
-        "döndürür ya da ekranın sol/sağ yarısına yerleştirir. window_id window_list'ten gelir."
+        "döndürür, ekranın sol/sağ yarısına yerleştirir veya pencereyi başka ekrana taşır "
+        "(move_to_screen + screen). window_id window_list'ten gelir."
     )
     args_model = WindowControlArguments
     risk = Risk.SIDE_EFFECT
@@ -93,9 +122,15 @@ class WindowControl(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(WindowControlArguments, arguments)
         outcome = await asyncio.to_thread(
-            _service(context).control_window, args.window_id, args.action
+            _service(context).control_window,
+            args.window_id,
+            args.action,
+            screen=args.screen,
         )
-        return _result(outcome, {"window_id": args.window_id, "action": args.action})
+        data: dict[str, object] = {"window_id": args.window_id, "action": args.action}
+        if args.screen is not None:
+            data["screen"] = args.screen
+        return _result(outcome, data)
 
 
 class VolumeArguments(BaseModel):

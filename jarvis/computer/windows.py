@@ -1,10 +1,13 @@
-"""Windows arka ucu (ADR 0039, dalga 4): ekran görüntüsü, fare/klavye, ön plan süreci.
+"""Windows arka ucu (ADR 0039, dalga 4): çoklu ekran görüntüsü, fare/klavye, ön plan süreci.
+
+Fare ve ekran koordinatları sanal masaüstünün fiziksel pikselidir; bu nedenle çoklu
+ekranlarda monitör köşesi de hesaba katılır.
 
 Yalnız ctypes kullanılır; pywin32/pyautogui/mss/PIL bağımlılığı eklenmez. Her Windows
 çağrısı `sys.platform == "win32"` koruması arkasındadır (mypy strict her platformda
 geçsin diye) ve Windows dışında işlevler RuntimeError verir. Saf yardımcılar
-(`_normalize`, `_key_inputs`, `_unicode_units`, `_vk`) platformdan bağımsızdır, bu yüzden
-testler fareye ve klavyeye hiç dokunmadan onları doğrular.
+(`_normalize`, `_order_monitors`, `_key_inputs`, `_unicode_units`, `_vk`) platformdan
+bağımsızdır, bu yüzden testler fareye ve klavyeye hiç dokunmadan onları doğrular.
 """
 
 from __future__ import annotations
@@ -19,19 +22,23 @@ from typing import Any
 _NOT_WINDOWS = "Bilgisayar kullanımı yalnız Windows'ta çalışır."
 
 _PER_MONITOR_AWARE_V2 = -4
-_SM_CXSCREEN = 0
-_SM_CYSCREEN = 1
+_SM_XVIRTUALSCREEN = 76
+_SM_YVIRTUALSCREEN = 77
+_SM_CXVIRTUALSCREEN = 78
+_SM_CYVIRTUALSCREEN = 79
 _SRCCOPY = 0x00CC0020
 _CAPTUREBLT = 0x40000000
 _BI_RGB = 0
 _DIB_RGB_COLORS = 0
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _GA_ROOT = 2
+_MONITORINFOF_PRIMARY = 1
 
 _INPUT_MOUSE = 0
 _INPUT_KEYBOARD = 1
 _MOUSEEVENTF_MOVE = 0x0001
 _MOUSEEVENTF_ABSOLUTE = 0x8000
+_MOUSEEVENTF_VIRTUALDESK = 0x4000
 _MOUSEEVENTF_WHEEL = 0x0800
 _BUTTON_FLAGS = {  # düğme -> (aşağı, yukarı)
     "left": (0x0002, 0x0004),
@@ -102,17 +109,63 @@ class _BITMAPINFOHEADER(ctypes.Structure):
     ]  # fmt: skip
 
 
+class _MONITORINFO(ctypes.Structure):
+    _fields_ = [
+        ("cbSize", wintypes.DWORD),
+        ("rcMonitor", wintypes.RECT),
+        ("rcWork", wintypes.RECT),
+        ("dwFlags", wintypes.DWORD),
+    ]
+
+
+# Windows'ta stdcall çağrı düzeni şarttır; diğer platformlarda yalnız içe aktarım güvenli kalsın.
+_MONITOR_PROC: Any
+if sys.platform == "win32":
+    _MONITOR_PROC = ctypes.WINFUNCTYPE(
+        wintypes.BOOL,
+        ctypes.c_void_p,  # HMONITOR
+        ctypes.c_void_p,  # HDC
+        ctypes.POINTER(wintypes.RECT),
+        wintypes.LPARAM,
+    )
+else:
+    _MONITOR_PROC = ctypes.CFUNCTYPE(
+        wintypes.BOOL,
+        ctypes.c_void_p,
+        ctypes.c_void_p,
+        ctypes.POINTER(wintypes.RECT),
+        wintypes.LPARAM,
+    )
+
+
 # --- Saf yardımcılar (platformdan bağımsız, testli) ---------------------------------
 
 
-def _normalize(x: int, y: int, width: int, height: int) -> tuple[int, int]:
+def _normalize(
+    x: int,
+    y: int,
+    origin_x: int,
+    origin_y: int,
+    width: int,
+    height: int,
+) -> tuple[int, int]:
     """Piksel koordinatını SendInput'un 0..65535 mutlak aralığına çevirir.
 
-    `width - 1` paydadır: son piksel (width-1) tam 65535'e düşer, ekran dışına taşmaz.
+    Sanal masaüstünün sol-üst köşesi sıfır olmayabilir; bu yüzden önce monitör köşesi
+    çıkarılır. `width - 1` paydası son pikseli tam 65535'e düşürür.
     """
-    nx = round(x * 65535 / max(width - 1, 1))
-    ny = round(y * 65535 / max(height - 1, 1))
+    nx = round((x - origin_x) * 65535 / max(width - 1, 1))
+    ny = round((y - origin_y) * 65535 / max(height - 1, 1))
     return min(max(nx, 0), 65535), min(max(ny, 0), 65535)
+
+
+def _order_monitors(
+    items: list[tuple[int, int, int, int, bool]],
+) -> list[tuple[int, int, int, int]]:
+    """Ana monitörü öne alır; diğerlerini masaüstü konumuna göre kararlı sıralar."""
+
+    ordered = sorted(items, key=lambda item: (not item[4], item[0], item[1]))
+    return [(left, top, width, height) for left, top, width, height, _ in ordered]
 
 
 def _vk(name: str) -> int:
@@ -162,6 +215,12 @@ def _libs() -> tuple[Any, Any, Any]:
     user32.GetDC.argtypes = [vp]
     user32.GetDC.restype = vp
     user32.ReleaseDC.argtypes = [vp, vp]
+    user32.GetSystemMetrics.argtypes = [ctypes.c_int]
+    user32.GetSystemMetrics.restype = ctypes.c_int
+    user32.EnumDisplayMonitors.argtypes = [vp, vp, _MONITOR_PROC, wintypes.LPARAM]
+    user32.EnumDisplayMonitors.restype = wintypes.BOOL
+    user32.GetMonitorInfoW.argtypes = [vp, ctypes.POINTER(_MONITORINFO)]
+    user32.GetMonitorInfoW.restype = wintypes.BOOL
     user32.GetForegroundWindow.restype = vp
     user32.WindowFromPoint.argtypes = [wintypes.POINT]
     user32.WindowFromPoint.restype = vp
@@ -212,20 +271,47 @@ def set_dpi_aware() -> None:
     user32.SetProcessDPIAware()
 
 
-def primary_screen_size() -> tuple[int, int]:
-    """Birincil monitörün fiziksel piksel boyutu."""
+def monitors() -> list[tuple[int, int, int, int]]:
+    """Her monitörü (sol, üst, genişlik, yükseklik) fiziksel sanal masaüstü pikseliyle verir."""
     _require_windows()
     set_dpi_aware()
     user32 = _libs()[0]
-    return int(user32.GetSystemMetrics(_SM_CXSCREEN)), int(user32.GetSystemMetrics(_SM_CYSCREEN))
+    items: list[tuple[int, int, int, int, bool]] = []
+
+    def collect(monitor: Any, _hdc: Any, _rect: Any, _data: Any) -> bool:
+        info = _MONITORINFO()
+        info.cbSize = ctypes.sizeof(_MONITORINFO)
+        # Tek monitörün bilgisi okunamazsa numaralandırmayı bitirmeyiz: o ekran atlanır, geri
+        # kalanlar kullanılır (False dönersek EnumDisplayMonitors komple hata verirdi).
+        if not user32.GetMonitorInfoW(monitor, ctypes.byref(info)):
+            return True
+        rect = info.rcMonitor
+        items.append(
+            (
+                int(rect.left),
+                int(rect.top),
+                int(rect.right - rect.left),
+                int(rect.bottom - rect.top),
+                bool(info.dwFlags & _MONITORINFOF_PRIMARY),
+            )
+        )
+        return True
+
+    callback = _MONITOR_PROC(collect)
+    if not user32.EnumDisplayMonitors(None, None, callback, 0):
+        raise OSError("Monitörler okunamadı (EnumDisplayMonitors).")
+    if not items:
+        raise OSError("Monitör bulunamadı.")
+    return _order_monitors(items)
 
 
-def capture_primary() -> tuple[bytes, int, int]:
-    """Birincil ekranı (BGRA, üstten alta) döndürür; diske yazılmaz (ADR 0039/3)."""
+def capture(left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
+    """Sanal masaüstündeki verilen dikdörtgeni (BGRA, üstten alta) döndürür; diske yazılmaz
+    (ADR 0039/3)."""
     _require_windows()
-    width, height = primary_screen_size()
     if width <= 0 or height <= 0:
-        raise OSError("Ekran boyutu okunamadı.")
+        raise OSError("Ekran genişliği ve yüksekliği pozitif olmalıdır.")
+    set_dpi_aware()
     user32, gdi32, _ = _libs()
     screen_dc = mem_dc = bitmap = old = None
     try:
@@ -242,7 +328,9 @@ def capture_primary() -> tuple[bytes, int, int]:
         if not old:
             raise OSError("Bitmap bellek bağlamına seçilemedi (SelectObject).")
         # CAPTUREBLT: katmanlı (layered) pencereler de görüntüye girsin.
-        if not gdi32.BitBlt(mem_dc, 0, 0, width, height, screen_dc, 0, 0, _SRCCOPY | _CAPTUREBLT):
+        if not gdi32.BitBlt(
+            mem_dc, 0, 0, width, height, screen_dc, left, top, _SRCCOPY | _CAPTUREBLT
+        ):
             raise OSError("Ekran kopyalanamadı (BitBlt başarısız).")
         header = _BITMAPINFOHEADER()
         header.biSize = ctypes.sizeof(_BITMAPINFOHEADER)
@@ -337,9 +425,15 @@ def _key(vk: int, scan: int, flags: int) -> _INPUT:
 
 
 def _move_event(x: int, y: int) -> _INPUT:
-    width, height = primary_screen_size()
-    nx, ny = _normalize(x, y, width, height)
-    return _mouse(nx, ny, 0, _MOUSEEVENTF_MOVE | _MOUSEEVENTF_ABSOLUTE)
+    set_dpi_aware()
+    user32 = _libs()[0]
+    origin_x = int(user32.GetSystemMetrics(_SM_XVIRTUALSCREEN))
+    origin_y = int(user32.GetSystemMetrics(_SM_YVIRTUALSCREEN))
+    width = int(user32.GetSystemMetrics(_SM_CXVIRTUALSCREEN))
+    height = int(user32.GetSystemMetrics(_SM_CYVIRTUALSCREEN))
+    nx, ny = _normalize(x, y, origin_x, origin_y, width, height)
+    flags = _MOUSEEVENTF_VIRTUALDESK | _MOUSEEVENTF_MOVE | _MOUSEEVENTF_ABSOLUTE
+    return _mouse(nx, ny, 0, flags)
 
 
 def click(x: int, y: int, button: str = "left", double: bool = False) -> None:

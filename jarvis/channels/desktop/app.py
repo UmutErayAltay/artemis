@@ -1059,6 +1059,8 @@ class DesktopWindow(QMainWindow):
                 echo_cancellation=self.settings_panel.echo_cancellation.isChecked(),
                 stt_model=self.settings_panel.stt_model_path(),
                 tts_backend=str(self.settings_panel.tts_combo.currentData()),
+                computer_use_mode="auto" if self.settings_panel.computer_auto.isChecked()
+                else "accept",
             )
         except (OSError, ValueError, KeyError, TypeError):
             self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")

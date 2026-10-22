@@ -24,20 +24,29 @@ class FakeBackend:
         self,
         size: tuple[int, int] = (8, 4),
         foreground: tuple[str, int] = ("C:\\Program Files\\App\\app.exe", 100),
+        monitor_rects: list[tuple[int, int, int, int]] | None = None,
     ) -> None:
         self.size = size
         self.foreground = foreground
+        self.monitor_rects = (
+            monitor_rects
+            if monitor_rects is not None
+            else [(0, 0, size[0], size[1])]
+        )
         self.at: tuple[str, int] | None = None  # None: noktadaki pencere = ön plan
         self.calls: list[tuple[Any, ...]] = []
+        self.captured_rects: list[tuple[int, int, int, int]] = []
         self.captures = 0
         self.fail: Exception | None = None
 
-    def primary_screen_size(self) -> tuple[int, int]:
-        return self.size
+    def monitors(self) -> list[tuple[int, int, int, int]]:
+        return list(self.monitor_rects)
 
-    def capture_primary(self) -> tuple[bytes, int, int]:
+    def capture(
+        self, left: int, top: int, width: int, height: int
+    ) -> tuple[bytes, int, int]:
         self.captures += 1
-        width, height = self.size
+        self.captured_rects.append((left, top, width, height))
         return bytes(width * height * 4), width, height
 
     def foreground_process(self) -> tuple[str, int]:
@@ -192,9 +201,101 @@ async def test_click_then_done_sends_only_latest_image_on_user_message() -> None
         assert len(with_image) == 1 and with_image[0] is call[-1] and with_image[0].role == "user"
         assert with_image[0].image_png.startswith(b"\x89PNG")  # type: ignore[union-attr]
         assert call[0].role == "system"
-    first, second = (call[-1].content for call in env.provider.seen)
-    assert "Hedef: dosyayı aç" in first and "8x4 piksel" in first and "Önceki adımlar:\n-" in first
+    first, second = (call[1].content for call in env.provider.seen)
+    assert "Hedef: dosyayı aç" in first
+    assert "Ekran sayısı: 1" in first
+    assert "8x4 piksel" in first
+    assert "Önceki adımlar:\n-" in first
     assert "Adım 1: click - deneme" in second
+    assert env.provider.seen[0][-1].content == "Ekran 1 (8x4 piksel)"
+
+
+async def test_click_uses_selected_monitor_and_provider_receives_each_screen() -> None:
+    backend = FakeBackend(monitor_rects=[(0, 0, 8, 4), (8, 0, 8, 4)])
+    config = ComputerUseConfig(
+        # En küçük izinli genişlik; 8x4 görüntü küçültülmez → ölçek 1:1.
+        enabled=True, model="m", screenshot_width=640, step_delay_seconds=0
+    )
+    env = Env(click(1, 1, screen=2), DONE, backend=backend, config=config)
+
+    result = await env.run()
+
+    assert result.reason == "done"
+    assert backend.calls == [("click", 9, 1, "left", False)]
+    assert backend.captured_rects[:2] == [(0, 0, 8, 4), (8, 0, 8, 4)]
+    messages = env.provider.seen[0]
+    images = [message for message in messages if message.image_png is not None]
+    assert len(images) == 2
+    assert [message.content for message in images] == [
+        "Ekran 1 (8x4 piksel)",
+        "Ekran 2 (8x4 piksel)",
+    ]
+
+
+async def test_invalid_screen_is_rejected_without_backend_input() -> None:
+    backend = FakeBackend(monitor_rects=[(0, 0, 8, 4), (8, 0, 8, 4)])
+    env = Env(click(screen=3), DONE, backend=backend)
+
+    result = await env.run()
+
+    assert result.reason == "invalid"
+    assert backend.calls == []
+
+
+async def test_auto_mode_executes_sensitive_action_without_approval() -> None:
+    config = ComputerUseConfig(enabled=True, model="m", mode="auto")
+    env = Env(click(sensitive=True), DONE, config=config)
+
+    result = await env.run()
+
+    assert result.reason == "done"
+    assert env.approvals == []
+    assert env.backend.calls == [("click", 2, 1, "left", False)]
+    step = env.audit.named("computer_step")[0]
+    assert step["auto_approved"] is True
+    assert step["approved"] is None  # kimse sorulmadı; uydurma onay yazılmaz
+
+
+async def test_esc_during_approval_prevents_the_action() -> None:
+    env = Env(click(sensitive=True), DONE)
+    original = env._approve
+
+    def approve_then_esc(name: str, arguments: dict[str, Any]) -> bool:
+        env.stop.set()  # onay penceresi açıkken Esc'e basılmış gibi
+        return original(name, arguments)
+
+    env._approve = approve_then_esc  # type: ignore[method-assign]
+    result = await env.run()
+
+    assert result.reason == "stopped"
+    assert env.backend.calls == []
+
+
+async def test_auto_mode_still_blocks_key_without_approval() -> None:
+    config = ComputerUseConfig(enabled=True, model="m", mode="auto")
+    env = Env(act(type="key", keys="win+r"), config=config)
+
+    result = await env.run()
+
+    assert result.reason == "blocked"
+    assert env.approvals == []
+    assert env.backend.calls == []
+
+
+async def test_auto_mode_still_blocks_process_without_approval() -> None:
+    blocked = (r"C:\Windows\System32\cmd.exe", 7)
+    backend = FakeBackend(foreground=blocked)
+    backend.at = blocked  # tıklama cmd.exe penceresine düşer
+    config = ComputerUseConfig(enabled=True, model="m", mode="auto")
+    # Engel modele söylenir; model inatla tekrarlarsa üçüncü engelde oturum biter.
+    env = Env(click(sensitive=True), click(sensitive=True), click(sensitive=True),
+              DONE, backend=backend, config=config)
+
+    result = await env.run()
+
+    assert result.reason == "blocked"
+    assert env.approvals == []
+    assert env.backend.calls == []
 
 
 async def test_invalid_twice_ends_invalid_with_one_capture() -> None:
@@ -203,12 +304,12 @@ async def test_invalid_twice_ends_invalid_with_one_capture() -> None:
     assert result.reason == "invalid" and result.steps == 0
     assert env.backend.captures == 1 and len(env.provider.seen) == 2
     retry = env.provider.seen[1]
-    assert [m.role for m in retry] == ["system", "user", "assistant", "user"]
-    assert retry[2].content == "bu JSON değil"
+    assert [m.role for m in retry] == ["system", "user", "user", "assistant", "user"]
+    assert retry[3].content == "bu JSON değil"
     # Neden + talimat: model hatasını görmeden aynı biçimi tekrarlıyordu.
-    assert retry[3].content.startswith("Model geçerli bir eylem döndürmedi")
-    assert retry[3].content.endswith("Yalnız tek bir geçerli JSON eylem döndür.")
-    assert retry[1].image_png is not None  # yeniden istek aynı görüntüyü kullanır
+    assert retry[4].content.startswith("Model geçerli bir eylem döndürmedi")
+    assert retry[4].content.endswith("Yalnız tek bir geçerli JSON eylem döndür.")
+    assert retry[2].image_png is not None  # yeniden istek aynı görüntüyü kullanır
 
 
 async def test_invalid_once_then_ok() -> None:
@@ -237,7 +338,8 @@ async def test_single_block_is_reported_to_model_and_session_continues() -> None
     env = Env(click(), DONE, backend=backend)
     result = await env.run()
     assert result.reason == "done" and backend.calls == []
-    second_prompt = env.provider.seen[1][-1].content
+    # Son ileti ekran görüntüsüdür; metin istemi görüntülerden önce gelir.
+    second_prompt = env.provider.seen[1][1].content
     assert "ENGELLENDİ (click)" in second_prompt
 
 
@@ -293,6 +395,7 @@ async def test_sensitive_approved_executes_and_audits() -> None:
     assert env.backend.calls == [("click", 2, 1, "left", False)]
     step = env.audit.named("computer_step")[0]
     assert step["sensitive"] is True and step["approved"] is True
+    assert step["auto_approved"] is False
 
 
 async def test_alt_f4_is_always_sensitive() -> None:

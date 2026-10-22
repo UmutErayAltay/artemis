@@ -50,6 +50,7 @@ class Action(BaseModel):
     type: Literal["click", "type", "key", "scroll", "wait", "done", "ask_user"]
     x: int | None = None
     y: int | None = None
+    screen: int = Field(default=1, ge=1, le=8)
     button: Literal["left", "right", "middle"] = "left"
     double: bool = False
     text: str | None = None
@@ -302,20 +303,25 @@ def parse_action(raw: str) -> Action:
 
 SYSTEM_PROMPT: str = """
 You control the user's Windows PC through one action per step. Reply with exactly one
-JSON object and nothing else. Coordinates are pixels of the given screenshot.
+JSON object and nothing else. There is one screenshot per monitor, labelled "Ekran 1",
+"Ekran 2", ... . Coordinates are pixels of the chosen screen's screenshot. Put "screen": N
+in click/scroll actions (default 1). "screen" is the 1-based monitor number.
 
 The action kind goes in the key "type" (not "action"). Examples:
-{"type": "click", "x": 412, "y": 230, "reason": "Arama kutusuna tıklıyorum", "sensitive": false}
+{"type": "click", "screen": 2, "x": 412, "y": 230, "reason": "Tıklıyorum",
+ "sensitive": false}
 {"type": "type", "text": "merhaba", "reason": "Metni yazıyorum", "sensitive": false}
 {"type": "done", "text": "Metin yazıldı.", "reason": "Hedef tamamlandı", "sensitive": false}
 
 Required fields by action type:
-- "click": x and y are required non-negative pixel coordinates. Optional "button" is
+- "click": x and y are required non-negative pixel coordinates of the selected screen.
+  Optional "screen" is the 1-based monitor number (default 1); optional "button" is
   "left", "right", or "middle", and optional "double" is a boolean.
 - "type": text is required, 1-500 characters, and must not contain a newline.
 - "key": keys is required and must be a valid combination such as "ctrl+l".
-- "scroll": x, y, and dy are required; dy is mouse-wheel notches from -20 to 20, not zero;
-  positive dy scrolls down, negative scrolls up.
+- "scroll": x and y are selected-screen screenshot coordinates, dy is mouse-wheel notches
+  from -20 to 20, not zero; positive dy scrolls down, negative scrolls up. Optional
+  "screen" is the 1-based monitor number (default 1).
 - "wait": seconds is required and must be greater than 0 and at most 5.
 - "done": text is required, 1-1000 characters, and is a short Turkish summary.
 - "ask_user": text is required, 1-1000 characters, and is a question for the user.

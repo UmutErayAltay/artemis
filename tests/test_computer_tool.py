@@ -10,7 +10,7 @@ import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 from pydantic import ValidationError
@@ -58,12 +58,13 @@ def env(
     allow_cloud: bool = False,
     host: bool = True,
     replies: tuple[str, ...] = (click(), DONE),
+    mode: Literal["accept", "auto"] = "accept",
 ) -> tuple[SafetyGate, ToolContext, FakeHost, FakeBackend, ScriptedVision]:
     settings = Settings(
         workspace=tmp_path,
         models={"vision": model(provider)},
         computer_use=ComputerUseConfig(
-            enabled=enabled, model="vision" if enabled else "", step_delay_seconds=0
+            enabled=enabled, model="vision" if enabled else "", step_delay_seconds=0, mode=mode
         ),
         perception=PerceptionConfig(allow_cloud_screen=allow_cloud),
     )
@@ -95,6 +96,28 @@ def test_risk_follows_enabled_flag(tmp_path: Path) -> None:
     assert tool.risk_for(args, context) is Risk.READ_ONLY
     gate, context, *_ = env(tmp_path, enabled=True)
     assert tool.risk_for(args, context) is Risk.CONFIRM_REQUIRED
+    gate, context, *_ = env(tmp_path, enabled=True, mode="auto")
+    assert tool.risk_for(args, context) is Risk.SIDE_EFFECT
+
+
+async def test_auto_mode_skips_start_only_on_clean_turn(tmp_path: Path) -> None:
+    gate, context, *_ = env(tmp_path, mode="auto")
+    result = await gate.dispatch(CALL, context, TurnState(), never)
+    assert result.status == "sent"
+    # Kapı kuralları otomatik kipte de geçerli: dış içerik sonrası ve önceki turlarda dış
+    # içerik varken (ADR 0013) başlangıç yine sorulur; ret çağrıyı çalıştırmaz.
+    asked: list[str] = []
+
+    def refuse(name: str, arguments: dict[str, Any]) -> bool:
+        asked.append(name)
+        return False
+
+    for state in (TurnState(tainted=True), TurnState(history_external=True)):
+        gate, context, _, backend, _ = env(tmp_path, mode="auto")
+        asked.clear()
+        await gate.dispatch(CALL, context, state, refuse)
+        assert asked == ["computer_use"]
+        assert backend.calls == []
 
 
 @pytest.mark.parametrize("goal", ["", "x" * 501])

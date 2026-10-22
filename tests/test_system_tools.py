@@ -35,7 +35,9 @@ class FakeService:
             ),
         )
 
-    def control_window(self, window_id: int, action: str) -> SystemOutcome:
+    def control_window(
+        self, window_id: int, action: str, screen: int | None = None
+    ) -> SystemOutcome:
         self.calls.append(("window", window_id, action))
         return self.outcome
 

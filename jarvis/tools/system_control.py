@@ -25,7 +25,15 @@ from typing import Literal, get_args
 
 from jarvis.tools.platform import child_environment
 
-WindowAction = Literal["focus", "maximize", "minimize", "restore", "left", "right"]
+WindowAction = Literal[
+    "focus",
+    "maximize",
+    "minimize",
+    "restore",
+    "left",
+    "right",
+    "move_to_screen",
+]
 PowerAction = Literal["lock", "sleep", "shutdown", "restart", "cancel_shutdown"]
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -167,8 +175,9 @@ WINDOW_LIST_SCRIPT = "\n".join(
 )
 
 # Çıkış kodları: 2 geçersiz girdi, 5 pencere yok/görünmez, 6 Windows odağı engelledi,
-# 7 geri okuma tutmadı, 4 beklenmeyen hata. DPI farkındalığı olmadan yüksek DPI'da çalışma
-# alanı ile pencere koordinatları uyuşmaz ve yarım ekran yanlış hesaplanır.
+# 7 geri okuma tutmadı, 8 istenen ekran yok, 4 beklenmeyen hata. DPI farkındalığı olmadan
+# yüksek DPI'da çalışma alanı ile pencere koordinatları uyuşmaz ve yarım ekran yanlış
+# hesaplanır.
 WINDOW_CONTROL_SCRIPT = "\n".join(
     [
         "$ErrorActionPreference = 'Stop'",
@@ -178,8 +187,18 @@ WINDOW_CONTROL_SCRIPT = "\n".join(
         "  $action = $env:JARVIS_WINDOW_ACTION",
         "  $idValue = [long]0",
         "  if (-not [long]::TryParse($rawId, [ref]$idValue) -or $idValue -le 0) { exit 2 }",
-        "  if (@('focus','maximize','minimize','restore','left','right') -notcontains $action) {",
+        "  $allowedActions = @(",
+        "    'focus', 'maximize', 'minimize', 'restore', 'left', 'right', 'move_to_screen'",
+        "  )",
+        "  if ($allowedActions -notcontains $action) {",
         "    exit 2",
+        "  }",
+        "  if ($action -eq 'move_to_screen') {",
+        "    $screenNumber = 0",
+        "    if (-not [int]::TryParse($env:JARVIS_WINDOW_SCREEN, [ref]$screenNumber)) {",
+        "      exit 2",
+        "    }",
+        "    if ($screenNumber -lt 1 -or $screenNumber -gt 8) { exit 2 }",
         "  }",
         "  [void][JarvisWin]::SetProcessDPIAware()",
         "  $h = [IntPtr]$idValue",
@@ -209,6 +228,33 @@ WINDOW_CONTROL_SCRIPT = "\n".join(
         "      [void][JarvisWin]::ShowWindow($h, 9)",
         "      Start-Sleep -Milliseconds 150",
         "      if ([JarvisWin]::IsIconic($h) -or [JarvisWin]::IsZoomed($h)) { exit 7 }",
+        "    }",
+        "    'move_to_screen' {",
+        "      # Neden: 1 her zaman birincil ekran olmalı; diğerleri soldan sağa ve yukarıdan",
+        "      # aşağıya doğru sıralanır. Bu sıra computer-use ile aynıdır.",
+        "      Add-Type -AssemblyName System.Windows.Forms",
+        "      $screens = @([System.Windows.Forms.Screen]::AllScreens | Sort-Object "
+        "@{Expression={-not $_.Primary}}, @{Expression={$_.Bounds.Left}}, "
+        "@{Expression={$_.Bounds.Top}})",
+        "      if ($screenNumber -gt $screens.Count) { exit 8 }",
+        "      $target = $screens[$screenNumber - 1]",
+        "      $work = $target.WorkingArea",
+        "      $bounds = $target.Bounds",
+        "      # Neden: Büyütülmüş pencere hedef monitöre taşınmayabilir; önce eski",
+        "      # boyutuna döndürüp çalışma alanına yerleştiriyor, sonra hedefte büyütüyoruz.",
+        "      [void][JarvisWin]::ShowWindow($h, 9)",
+        "      [void][JarvisWin]::SetWindowPos($h, [IntPtr]::Zero, $work.Left, $work.Top, "
+        "$work.Width, $work.Height, 0x0044)",
+        "      Start-Sleep -Milliseconds 150",
+        "      [void][JarvisWin]::ShowWindow($h, 3)",
+        "      Start-Sleep -Milliseconds 150",
+        "      # Neden: Konum doğrulanmadan pencere işlemi başarılı sayılmaz.",
+        "      $monitor = [JarvisWin]::MonitorFromWindow($h, 2)",
+        "      $info = New-Object JarvisWin+MONITORINFO",
+        "      $info.cbSize = [System.Runtime.InteropServices.Marshal]::SizeOf($info)",
+        "      if (-not [JarvisWin]::GetMonitorInfo($monitor, [ref]$info)) { exit 7 }",
+        "      $actual = $info.rcMonitor",
+        "      if ($actual.Left -ne $bounds.Left -or $actual.Top -ne $bounds.Top) { exit 7 }",
         "    }",
         "    default {",
         "      [void][JarvisWin]::ShowWindow($h, 9)",
@@ -576,14 +622,27 @@ class SystemControl:
             message = f"{len(windows)} pencere gösteriliyor (liste kısaltıldı)."
         return SystemOutcome("ok", message, windows=windows, truncated=truncated)
 
-    def control_window(self, window_id: int, action: WindowAction) -> SystemOutcome:
+    def control_window(
+        self, window_id: int, action: WindowAction, screen: int | None = None
+    ) -> SystemOutcome:
         if not _is_int(window_id) or window_id <= 0:
             raise ValueError(f"Geçersiz pencere kimliği: {window_id!r}")
         if action not in _WINDOW_ACTIONS:
             raise ValueError(f"Geçersiz pencere işlemi: {action!r}")
+        # Neden: Yanlış ekran hedefi pencereyi beklenmedik bir monitöre taşıyabilir.
+        # Sınırı Python'da doğrulayarak betiğe yalnızca güvenli hedef iletiyoruz.
+        if action == "move_to_screen":
+            if screen is None or not _is_int(screen) or not (1 <= screen <= 8):
+                raise ValueError(f"Geçersiz ekran numarası: {screen!r}")
+        elif screen is not None:
+            raise ValueError("Ekran numarası yalnız move_to_screen işleminde verilebilir.")
         if not self._available():
             return self._unavailable()
         env = {"JARVIS_WINDOW_ID": str(window_id), "JARVIS_WINDOW_ACTION": action}
+        if action == "move_to_screen" and screen is not None:
+            # Neden: Ekran hedefi özel kullanıcı girdisidir; argv sabit kalmalı, değer
+            # yalnızca doğrulanmış olarak ortam değişkeninde taşınmalıdır.
+            env["JARVIS_WINDOW_SCREEN"] = str(screen)
         completed = self._run_script(WINDOW_CONTROL_SCRIPT, env, "Pencere işlemi")
         if isinstance(completed, SystemOutcome):
             return completed
@@ -594,6 +653,8 @@ class SystemControl:
             return SystemOutcome("error", "Windows odağı engelledi; pencere öne getirilemedi.")
         if code == 7:
             return SystemOutcome("error", "Pencere işlemi uygulandı ama sonuç doğrulanamadı.")
+        if code == 8:
+            return SystemOutcome("error", "Böyle bir ekran yok.")
         if code != 0:
             return SystemOutcome("error", f"Pencere işlemi başarısız (çıkış kodu {code}).")
         payload = _parse_payload(completed.stdout or "")

@@ -1,8 +1,9 @@
 """Bilgisayar kullanımı oturum döngüsü (ADR 0039, dalga 5).
 
-Döngü: ekran görüntüsü al -> görsel modelden tek JSON eylem iste -> kodla denetle -> (hassassa
-sor) -> uygula. Sınırların hepsi burada KODLA zorlanır; modelin beyanına güvenilmez. Görüntü
-yalnız bellekte kalır, ne diske ne denetime yazılır; yazılan metnin de yalnız uzunluğu loglanır.
+Döngü: her monitörün görüntüsünü al -> görsel modelden tek JSON eylem iste -> kodla denetle ->
+(hassasaksa sor; `mode: auto` ise sorma) -> uygula. Sınırların hepsi burada KODLA zorlanır;
+modelin beyanına güvenilmez. Görüntü yalnız bellekte kalır, ne diske ne denetime yazılır;
+yazılan metnin de yalnız uzunluğu loglanır.
 Arka uç, onay ve saat enjekte edilir, bu yüzden testler gerçek fareye/klavyeye dokunmaz.
 """
 
@@ -48,8 +49,8 @@ _DEADLINE_MARGIN = 2.0
 class ComputerBackend(Protocol):
     """`jarvis.computer.windows` modülünün kullanılan yüzeyi; testler sahtesini verir."""
 
-    def primary_screen_size(self) -> tuple[int, int]: ...
-    def capture_primary(self) -> tuple[bytes, int, int]: ...
+    def monitors(self) -> list[tuple[int, int, int, int]]: ...
+    def capture(self, left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]: ...
     def foreground_process(self) -> tuple[str, int]: ...
     def process_at(self, x: int, y: int) -> tuple[str, int]: ...
     def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None: ...
@@ -67,6 +68,16 @@ class SessionResult:
     reason: Reason
     summary: str
     steps: int
+
+
+@dataclass(frozen=True)
+class _Screen:
+    """Bir monitör: sanal masaüstü köşesi, gerçek boyut, küçültülmüş görüntü boyutu ve PNG."""
+
+    origin: tuple[int, int]
+    size: tuple[int, int]
+    shot: tuple[int, int]
+    png: bytes
 
 
 class ComputerSession:
@@ -133,28 +144,50 @@ class ComputerSession:
                 # keşfi bu modülü içe aktardığı için üstte yüklense temel kurulum çökerdi.
                 from jarvis.computer.png import screenshot_png
 
-                buffer, width, height = await asyncio.to_thread(self._backend.capture_primary)
-                png, shot_size = screenshot_png(
-                    buffer, width, height, self._config.screenshot_width
-                )
+                # Her monitör ayrı görüntü: sanal masaüstünü tek görüntüye küçültmek
+                # yazıyı okunmaz yapardı (ADR 0039 ek karar).
+                screens: list[_Screen] = []
+                monitor_rects = await asyncio.to_thread(self._backend.monitors)
+                for left, top, width, height in monitor_rects:
+                    buffer, width, height = await asyncio.to_thread(
+                        self._backend.capture, left, top, width, height
+                    )
+                    png, shot_size = screenshot_png(
+                        buffer, width, height, self._config.screenshot_width
+                    )
+                    screens.append(_Screen((left, top), (width, height), shot_size, png))
             except ImportError:
                 return self._result(
                     "error", "Ekran görüntüsü için numpy gerekli (`pip install numpy`)."
                 )
             except (OSError, RuntimeError, ValueError) as error:
                 return self._result("error", f"Ekran görüntüsü alınamadı: {error}")
-            screen_size = (width, height)
+            if not screens:
+                return self._result("error", "Ekran bulunamadı.")
 
             lines = "\n".join(history[-_HISTORY_LINES:]) or "-"
+            # Görüntüler ayrı kullanıcı iletilerinde, etiketleriyle: sağlayıcılar ardışık
+            # kullanıcı iletilerini birleştirir ve "Ekran N" eşlemesi korunur.
+            listing = ", ".join(
+                f"Ekran {number}: {item.shot[0]}x{item.shot[1]} piksel"
+                for number, item in enumerate(screens, start=1)
+            )
             messages = [
                 Message(role="system", content=SYSTEM_PROMPT),
                 Message(
                     role="user",
                     content=(
-                        f"Hedef: {goal}\nEkran görüntüsü {shot_size[0]}x{shot_size[1]} piksel.\n"
+                        f"Hedef: {goal}\nEkran sayısı: {len(screens)}. {listing}.\n"
                         f"Önceki adımlar:\n{lines}"
                     ),
-                    image_png=png,
+                ),
+                *(
+                    Message(
+                        role="user",
+                        content=f"Ekran {number} ({item.shot[0]}x{item.shot[1]} piksel)",
+                        image_png=item.png,
+                    )
+                    for number, item in enumerate(screens, start=1)
                 ),
             ]
             try:
@@ -169,7 +202,7 @@ class ComputerSession:
             if action.type == "ask_user":
                 return self._result("ask_user", action.text or "")
 
-            outcome = await self._act(action, turn_id, shot_size, screen_size)
+            outcome = await self._act(action, turn_id, screens)
             if isinstance(outcome, SessionResult):
                 return outcome
             if outcome is not None:
@@ -208,13 +241,18 @@ class ComputerSession:
         self,
         action: Action,
         turn_id: str,
-        shot_size: tuple[int, int],
-        screen_size: tuple[int, int],
+        screens: list[_Screen],
     ) -> SessionResult | str | None:
         """Eylemi denetler ve uygular. Oturum bitecekse sonucu, adım engellendiyse nedeni
         (modele geri bildirilir), adım uygulandıysa None döner."""
         point: tuple[int, int] | None = None
         window: str | None = None
+        # Modelin koordinatı seçtiği ekranın görüntüsüne göredir; fare ise sanal masaüstü.
+        if action.screen > len(screens):
+            return self._result(
+                "invalid", f"Ekran {action.screen} yok; {len(screens)} ekran görülüyor."
+            )
+        screen = screens[action.screen - 1]
         if action.type == "wait":
             await self._sleep(action.seconds or 0.0)  # arka uca dokunmaz
         else:
@@ -224,7 +262,8 @@ class ComputerSession:
                     return key_blocked
             if action.x is not None and action.y is not None:
                 try:
-                    point = scale_point(action.x, action.y, shot_size, screen_size)
+                    scaled = scale_point(action.x, action.y, screen.shot, screen.size)
+                    point = (scaled[0] + screen.origin[0], scaled[1] + screen.origin[1])
                 except ValueError as error:
                     return self._result("invalid", str(error))
             blocked, window = await self._target(action.type, point)
@@ -233,7 +272,14 @@ class ComputerSession:
 
         sensitive = is_sensitive(action)
         approved: bool | None = None
-        if sensitive:
+        auto_approved = False
+        # Otomatik kip (ADR 0039 ek karar): oturum içi hassas adım sorulmaz. Kodla zorlanan
+        # engeller yukarıda zaten işledi; Esc denetimi ve sınırlar iki kipte de aynı.
+        if sensitive and self._config.mode == "auto":
+            # Denetimde "approved" kullanıcının cevabıdır: kimse sorulmadı, None kalır;
+            # atlamanın kendisi auto_approved ile görünür.
+            auto_approved = True
+        elif sensitive:
             approved = await asyncio.to_thread(
                 self._approve,
                 "computer_action",
@@ -277,6 +323,8 @@ class ComputerSession:
             reason=action.reason,
             sensitive=sensitive,
             approved=approved,
+            auto_approved=auto_approved,
+            screen=action.screen,
         )
         return None
 

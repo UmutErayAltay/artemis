@@ -71,6 +71,27 @@ başlar, sonra kendi başına çalışır; riski sınırlar ve görünürlük ta
   Gizli (private) mesajda görüntü de maskelenir; görüntüyü desteklemeyen sağlayıcı
   (Claude CLI) dürüstçe hata verir.
 
+## Ek karar (2026-10-22): çoklu ekran ve kipler
+
+Kullanıcı ilk canlı denemelerden sonra iki şey istedi: oturum ikinci ekranı da görsün ve
+Claude Code'daki gibi bir otomatik kip olsun ("kontrol bende, gerekirse Esc ile durdururum").
+
+1. **Çoklu ekran.** Her monitör ayrı görüntü olarak modele gider (aynı mesajda, sırayla
+   "Ekran 1", "Ekran 2"); sanal masaüstünü tek görüntüye küçültmek metni okunmaz yapardı.
+   Eylem `screen` (varsayılan 1) taşır, koordinat o ekranın görüntüsüne göredir. Ekran 1
+   birincil monitördür. Fare koordinatları sanal masaüstü üzerinden verilir.
+2. **Pencereyi ekrana taşıma.** `window_control` yeni `move_to_screen` eylemi ve `screen`
+   argümanı alır; pencere hedef monitörde ekranı kaplar. Risk SIDE_EFFECT kalır (ADR 0031).
+3. **Kipler.** `computer_use.mode: accept | auto` (varsayılan `accept`), Ayarlar'da seçilir.
+   - `accept`: bu ADR'nin 1. ve 5. maddeleri aynen.
+   - `auto`: oturum içindeki hassas adım ve Enter onayları sorulmaz (denetime
+     `auto_approved=true` yazılır); temiz turda oturum başlangıcı da sorulmaz (risk
+     SIDE_EFFECT). Kapının kendi kuralları DEĞİŞMEZ: dış içerikten sonraki turda ve önceki
+     turlarda dış içerik varken (ADR 0013, araç `outbound`) başlangıç yine sorulur.
+   - Kodla zorlanan engeller (4. madde), adım/süre sınırı ve Esc iki kipte de aynıdır.
+   - Bedel: ekrandaki bir enjeksiyon `auto` kipte sorulmadan mesaj gönderebilir ya da form
+     onaylayabilir. Bu kullanıcının bilerek seçtiği bir takastır; varsayılan `accept` kalır.
+
 ## Uygulama dalgaları
 
 1. `jarvis/computer/actions.py`: eylem modeli, JSON ayrıştırma, koordinat ölçekleme,

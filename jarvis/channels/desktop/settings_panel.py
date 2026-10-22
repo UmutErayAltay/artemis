@@ -49,6 +49,7 @@ def save_choices(
     echo_cancellation: bool | None = None,
     stt_model: Path | None = None,
     tts_backend: str | None = None,
+    computer_use_mode: str | None = None,
 ) -> None:
     """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir."""
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
@@ -77,6 +78,8 @@ def save_choices(
         raw["allow_all_applications"] = allow_all_applications
     if code_agent is not None:
         _merge_code_agent(raw, code_agent)
+    if computer_use_mode is not None:
+        raw.setdefault("computer_use", {})["mode"] = computer_use_mode
     _write_validated(path, raw)
 
 
@@ -378,6 +381,12 @@ class SettingsPanel(QWidget):
         self.all_applications = QCheckBox("Bütün kurulu uygulamalara erişim")
         self.all_applications.toggled.connect(self._sync_application_access)
         app_layout.addWidget(self.all_applications)
+        self.computer_auto = QCheckBox("Bilgisayar kullanımında otomatik kip (adımları sormaz)")
+        self.computer_auto.setToolTip(
+            "Hassas adımlar ve temiz turda başlangıç sorulmaz; Esc her an durdurur. Terminal, "
+            "Jarvis ve parola yöneticisi engeli ile dış içerikten sonraki onay yine geçerlidir."
+        )
+        app_layout.addWidget(self.computer_auto)
         self.application_list = QListWidget()
         self.application_list.setMaximumHeight(140)
         self.application_list.setAccessibleName("İzinli uygulamalar")
@@ -458,6 +467,7 @@ class SettingsPanel(QWidget):
             self.tts_combo.setEnabled(False)
             self.stt_download.setEnabled(False)
             self.all_applications.setEnabled(False)
+            self.computer_auto.setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
                            self.github_auto, self.github_button):
                 widget.setEnabled(False)
@@ -603,6 +613,7 @@ class SettingsPanel(QWidget):
             self.applications = dict(settings.applications)
             self._refresh_applications()
             self.all_applications.setChecked(settings.allow_all_applications)
+            self.computer_auto.setChecked(settings.computer_use.mode == "auto")
             self._sync_application_access()
             agent = settings.code_agent
             self.github_owner.setText(agent.github_owner or "")

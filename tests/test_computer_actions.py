@@ -38,6 +38,35 @@ def test_valid_action_for_each_type(payload: dict[str, object]) -> None:
     assert action.type == payload["type"]
 
 
+def test_action_screen_defaults_to_first_monitor() -> None:
+    action = Action.model_validate(
+        {"type": "click", "x": 0, "y": 0, "reason": "Düğmeye tıkla"}
+    )
+
+    assert action.screen == 1
+
+
+def test_system_prompt_describes_monitor_screens() -> None:
+    assert "one screenshot per monitor" in SYSTEM_PROMPT
+    assert '"screen": 2' in SYSTEM_PROMPT
+    assert "chosen screen's screenshot" in SYSTEM_PROMPT
+    assert "1-based monitor number" in SYSTEM_PROMPT
+
+
+@pytest.mark.parametrize("screen", [0, 9])
+def test_action_screen_rejects_out_of_range_monitor(screen: int) -> None:
+    with pytest.raises(ValidationError):
+        Action.model_validate(
+            {
+                "type": "click",
+                "x": 0,
+                "y": 0,
+                "screen": screen,
+                "reason": "Düğmeye tıkla",
+            }
+        )
+
+
 @pytest.mark.parametrize(
     "payload",
     [

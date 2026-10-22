@@ -63,6 +63,11 @@ class ComputerUse(BaseTool):
         # Kapalıyken araç hiçbir şey yapmaz, yalnız "kapalı" der (screen_read ile aynı).
         if not context.settings.computer_use.enabled:
             return Risk.READ_ONLY
+        # Otomatik kip (ADR 0039 ek karar): temiz turda başlangıç sorulmaz. Kapı kuralları aynen
+        # işler: dış içerikten sonra ve `outbound` olduğu için önceki turlarda dış içerik
+        # varken (ADR 0013) yine onay istenir.
+        if context.settings.computer_use.mode == "auto":
+            return Risk.SIDE_EFFECT
         return Risk.CONFIRM_REQUIRED
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
