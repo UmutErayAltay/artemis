@@ -13,7 +13,7 @@ import pytest
 from jarvis.brain.fake import ScriptedProvider
 from jarvis.brain.models import Completion, ToolCall
 from jarvis.channels.runtime import create_runtime
-from jarvis.config.settings import PerceptionConfig, Settings
+from jarvis.config.settings import ComputerUseConfig, PerceptionConfig, Settings
 from jarvis.perception.screen import ScreenOutcome
 from jarvis.safety.audit import AuditLog
 from jarvis.safety.gate import SafetyGate, TurnState
@@ -34,8 +34,14 @@ class Reader:
         return self.outcome
 
 
-def env(tmp_path: Path, reader: Reader, *, enabled: bool = True) -> tuple[SafetyGate, ToolContext]:
-    settings = Settings(workspace=tmp_path, perception=PerceptionConfig(screen_enabled=enabled))
+def env(
+    tmp_path: Path, reader: Reader, *, enabled: bool = True, auto: bool = False
+) -> tuple[SafetyGate, ToolContext]:
+    settings = Settings(
+        workspace=tmp_path,
+        perception=PerceptionConfig(screen_enabled=enabled),
+        computer_use=ComputerUseConfig(mode="auto" if auto else "accept"),
+    )
     context = ToolContext(tmp_path, settings, AuditLog(tmp_path / "audit.jsonl"))
     context.services["screen_reader"] = reader
     return SafetyGate(discover_tools()), context
@@ -131,3 +137,26 @@ async def test_screen_text_is_private_for_cloud_unless_allowed(
     assert result.record is not None
     assert result.record.answer_private is private
     assert result.record.tainted is True
+
+
+async def test_auto_mode_reads_without_asking_even_on_tainted_turn(tmp_path: Path) -> None:
+    import json
+
+    reader = Reader()
+    gate, context = env(tmp_path, reader, auto=True)
+    result = await gate.dispatch(ToolCall(id="c", name="screen_read", arguments={}), context,
+                                 TurnState(tainted=True), never)
+    assert result.success is True and reader.calls == ["active_window"]
+    events = [
+        json.loads(line)["event"]
+        for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert "approval_skipped" in events and "approval" not in events
+
+
+async def test_auto_mode_still_refuses_unattended_read(tmp_path: Path) -> None:
+    reader = Reader()
+    gate, context = env(tmp_path, reader, auto=True)
+    result = await gate.dispatch(ToolCall(id="c", name="screen_read", arguments={}), context,
+                                 TurnState(unattended=True), never)
+    assert result.status == "denied" and reader.calls == []

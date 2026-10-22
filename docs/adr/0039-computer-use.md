@@ -90,7 +90,10 @@ Claude Code'daki gibi bir otomatik kip olsun ("kontrol bende, gerekirse Esc ile 
      `auto_approved=true` yazılır); temiz turda oturum başlangıcı da sorulmaz (risk
      SIDE_EFFECT). `computer_use` ve `window_control` (`auto_mode_ok`) ekran adımları
      her turu lekeliyor, bu yüzden `auto` kipinde lekeli turda bile onaylanmaz;
-     atlama `approval_skipped` olarak denetime yazılır. Diğer araçlar kural 4'le
+     atlama `approval_skipped` olarak denetime yazılır. `screen_read` de `auto_mode_ok`
+     taşır (2026-10-22, kullanıcı isteği): bu kipte computer_use ekran görüntüsünü zaten
+     sormadan modele verirken yerel OCR daha azını açar. Gözetimsiz tur yine okuyamaz,
+     buluta gönderim `allow_cloud_screen`'e bağlı kalır. Diğer araçlar kural 4'le
      dış içerikten sonra onay beklemeye devam eder.
    - Kodla zorlanan engeller (4. madde), adım/süre sınırı ve Esc iki kipte de aynıdır.
    - Bedel: ekrandaki bir enjeksiyon `auto` kipte sorulmadan mesaj gönderebilir ya da form

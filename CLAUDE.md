@@ -33,7 +33,7 @@ Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Tü
    yalnız dış içerik varken `?`/`#` taşıyan adreste sorar, gerisi sorulmaz; `url` alan dış okuma (tarayıcı MCP) her zaman sorulur, kullanıcının
    "bir daha sorma" dediği host (`state_dir/trusted_sites.json`, `fill` adımı yoksa) sorulmaz.
    ADR 0039 istisnası: `computer_use.mode: auto` iken `auto_mode_ok` bildiren araçlar
-   (yalnız `computer_use`, `window_control`) lekeli turda da onay atlar; atlama
+   (yalnız `computer_use`, `window_control`, `screen_read`) lekeli turda da onay atlar; atlama
    `approval_skipped` olarak denetime yazılır. `auto_mode_ok` başka bir araca ADR
    olmadan eklenmez.
 5. Alttaki işlemin başarısı doğrulanmadan `success=True` dönülmez. Yalnız komutun
@@ -140,7 +140,8 @@ taze süreçtir, tüm beklemeler sınırlıdır ve süreç ağacı her yolda kap
 `tests/mcp_fake_server.py` sahte stdio sunucusunu kullanır.
 
 Ekran algısı (Faz 6c, ADR 0029) varsayılan kapalıdır. `screen_read` açıkken
-CONFIRM_REQUIRED kalmalıdır (kullanıcının açıkça başlattığı okuma; gözetimsiz tur okuyamaz).
+CONFIRM_REQUIRED kalmalıdır (kullanıcının açıkça başlattığı okuma; gözetimsiz tur okuyamaz);
+tek istisna `computer_use.mode: auto` iken onayın atlanmasıdır (ADR 0039, kural 4).
 Görüntü diske yazılmaz, saklanmaz, modele gönderilmez; yalnız yerel OCR metni döner. Ekran
 metni `external=True` ve `content_kind="screen"`'dir; `allow_cloud_screen` kapalıyken gizli
 sayılır. Betik sabittir, kapsam yalnız ortam değişkeniyle gider; testler PowerShell

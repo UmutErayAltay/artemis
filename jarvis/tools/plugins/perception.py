@@ -37,6 +37,9 @@ class ScreenRead(BaseTool):
     risk = Risk.CONFIRM_REQUIRED
     external = True
     content_kind = "screen"
+    # Oto kipte computer_use ekran görüntüsünü zaten sormadan modele verir; yerel OCR daha
+    # azını açar (ADR 0039 ek karar). Gözetimsiz tur yine okuyamaz: o kural kapıda önce gelir.
+    auto_mode_ok = True
 
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
         # Kapalıyken araç hiçbir şey okumaz ve yalnız "kapalı" der; kullanıcıya boşuna onay
