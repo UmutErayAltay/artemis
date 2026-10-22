@@ -240,6 +240,15 @@ def test_host_esc_sets_stop_and_status_is_cleared(fake_hotkey: type[FakeHotkey])
     assert hotkey.stopped and statuses == ["Adım 1: x", ""]
 
 
+def test_host_esc_also_cancels_turn(fake_hotkey: type[FakeHotkey]) -> None:
+    calls: list[bool] = []
+    host = ComputerHost(lambda *_: True, lambda _: None, on_escape=lambda: calls.append(True))
+    with host.session() as (stop, _, _):
+        fake_hotkey.instances[0].on_press()
+        # Bayrak önce kalkar: tur iptali yetişmese de sıradaki eylem çalışmaz.
+        assert stop.is_set() and calls == [True]
+
+
 def test_host_reports_missing_esc_and_still_runs(fake_hotkey: type[FakeHotkey]) -> None:
     fake_hotkey.registered = False
     statuses: list[str] = []

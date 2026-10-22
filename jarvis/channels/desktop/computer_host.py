@@ -27,9 +27,11 @@ class ComputerHost:
         self,
         approve: Callable[[str, dict[str, Any]], bool],
         emit_status: Callable[[str], None],
+        on_escape: Callable[[], object] | None = None,
     ) -> None:
         self._approve = approve
         self._emit_status = emit_status
+        self._on_escape = on_escape
         self._lock = threading.Lock()
         self._active = False
 
@@ -40,7 +42,15 @@ class ComputerHost:
                 raise RuntimeError("Zaten bir bilgisayar kullanımı oturumu sürüyor.")
             self._active = True
         stop = threading.Event()
-        hotkey = GlobalHotkey("escape", stop.set)
+
+        def escape() -> None:
+            # Bayrak tek başına adım arasında bakılır; süren model çağrısını ve beklemeyi
+            # kesmek için tur da İptal düğmesiyle aynı yoldan iptal edilir.
+            stop.set()
+            if self._on_escape is not None:
+                self._on_escape()
+
+        hotkey = GlobalHotkey("escape", escape)
         try:
             # Kayıt başarısızsa oturum yine çalışır ama kullanıcı bunu bilmelidir.
             if not hotkey.start():

@@ -737,3 +737,54 @@ def test_remember_site_choice_persists_and_skips_next_read(tmp_path):
     finally:
         bridge.shutdown()
         assert bridge._stopped.wait(2)
+
+
+def test_esc_hotkey_cancels_running_turn_immediately(tmp_path, monkeypatch):
+    import jarvis.channels.desktop.computer_host as host_module
+
+    started = threading.Event()
+    release = threading.Event()
+    pressed: list[Any] = []
+
+    class Hangs:
+        async def complete(self, *_args: Any, **_kwargs: Any) -> Completion:
+            started.set()
+            await asyncio.to_thread(release.wait, 5)
+            return Completion(content="geç kaldı")
+
+    class FakeHotkey:
+        def __init__(self, _text: str, on_press: Any) -> None:
+            pressed.append(on_press)
+
+        def start(self) -> bool:
+            return True
+
+        def stop(self) -> None:
+            pass
+
+    monkeypatch.setattr(host_module, "GlobalHotkey", FakeHotkey)
+    bridge = _fixture(tmp_path, [], provider_override=Hangs())
+    try:
+        request_id = bridge.submit("bekle")
+        assert request_id is not None
+        assert started.wait(2)
+        assert bridge._runtime is not None
+        host = bridge._runtime.context.services["computer_host"]
+        with host.session() as (stop, _, _):
+            pressed[0]()
+            assert stop.is_set()
+            # Model çağrısı hâlâ askıda: iptal onu beklemeden turu bitirmeli.
+            events = _collect_until(
+                bridge,
+                lambda events: any(isinstance(event, Finished) for event in events),
+                timeout=2,
+            )
+        finished = next(event for event in events if isinstance(event, Finished))
+        assert finished.request_id == request_id
+        assert finished.result.stop_reason == "cancelled"
+        assert not release.is_set()
+        assert bridge.cancel_active() is False  # etkin istek kalmadı
+    finally:
+        release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)

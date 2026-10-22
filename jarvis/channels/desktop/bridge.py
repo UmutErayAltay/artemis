@@ -439,6 +439,12 @@ class DesktopBridge:
         loop.call_soon_threadsafe(self._cancel_on_worker, request_id)
         return True
 
+    def cancel_active(self) -> bool:
+        """Kimliği bilmeyen çağıran (Esc kısayolu) için o an yürüyen isteği iptal eder."""
+        with self._lock:
+            request_id = self._active_request
+        return request_id is not None and self.cancel(request_id)
+
     def reset_conversation(self) -> bool:
         """Yeni sohbeti başlatır; runner'a yalnız işçi loop'u dokunur (GUI thread'i değil)."""
         with self._lock:
@@ -562,7 +568,9 @@ class DesktopBridge:
             self._labels = _tool_labels(self._runtime)
             # Esc ve hassas adım onayı yalnız masaüstünde var; computer_use başka yerde reddeder.
             self._runtime.context.services["computer_host"] = ComputerHost(
-                self._approve, lambda text: self._events.put(State("computer", text))
+                self._approve,
+                lambda text: self._events.put(State("computer", text)),
+                on_escape=self.cancel_active,
             )
         except Exception as error:  # İşçi sınırında traceback/sır sızdırmadan arızayı GUI'ye taşır.
             self._events.put(

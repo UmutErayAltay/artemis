@@ -48,7 +48,9 @@ başlar, sonra kendi başına çalışır; riski sınırlar ve görünürlük ta
    ya da 4'teki hassas kural tutarsa adım çalışmadan önce ekrandaki onay penceresinde
    eylem, koordinat ve gerekçe gösterilir; varsayılan hayırdır, ret oturumu bitirir.
 6. **Durdurma ve görünürlük.** Oturum boyunca Esc genel kısayolu kaydedilir (ADR'deki
-   RegisterHotKey yolu); basınca o anki eylemden sonra hiçbir eylem çalışmaz. Panel ve pet
+   RegisterHotKey yolu); basınca o anki eylemden sonra hiçbir eylem çalışmaz ve tur İptal
+   düğmesiyle aynı yoldan iptal edilir: süren model çağrısı ve bekleme hemen kesilir, model
+   aracı yeniden çağıramaz. OS'ye gönderilmiş eylem geri alınmaz. Panel ve pet
    "Bilgisayarı kullanıyorum · adım n: gerekçe" gösterir.
 7. **Gizlilik.** Görüntü buluta yalnız `perception.allow_cloud_screen: true` iken gider;
    model Ollama ise yerel kalır. Denetime her adımın eylem türü, koordinatı, gerekçesi,
