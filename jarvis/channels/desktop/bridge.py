@@ -799,6 +799,8 @@ class DesktopBridge:
             abandoned = self._voice_stop_requested or self._shutdown
             if not abandoned:
                 self._voice_controller = controller
+                # Model `voice_continuous` aracıyla kipi değiştirebilsin; yalnız ses çalışırken var.
+                runtime.context.services["voice_controller"] = controller
                 self._voice_task = asyncio.create_task(self._run_voice(controller))
                 self._voice_starting = False
         if abandoned:
@@ -817,6 +819,8 @@ class DesktopBridge:
             with self._lock:
                 self._voice_task = None
                 self._voice_controller = None
+                if self._runtime is not None:
+                    self._runtime.context.services.pop("voice_controller", None)
                 self._voice_stop_requested = False
             self._emit_voice_state("off")
 
