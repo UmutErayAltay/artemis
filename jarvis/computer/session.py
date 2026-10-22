@@ -39,6 +39,8 @@ _HISTORY_LINES = 10
 # Engellenen adım oturumu hemen bitirmez, modele söylenir (ör. panelden komut verilince
 # Jarvis penceresi görüntüde durur); bu kadar engelden sonra oturum biter.
 _MAX_BLOCKS = 3
+# Girdisi noktadaki pencereye düşen eylemler; geri kalan her girdi (type, key) ön plana gider.
+_POINTER_ACTIONS = frozenset({"click", "scroll"})
 # Deadline'a yaklaşırken son modelin ve ana döngünün yanıt verebilmesi için bırakılan pay.
 _DEADLINE_MARGIN = 2.0
 
@@ -225,7 +227,7 @@ class ComputerSession:
                     point = scale_point(action.x, action.y, shot_size, screen_size)
                 except ValueError as error:
                     return self._result("invalid", str(error))
-            blocked, window = await self._target(point)
+            blocked, window = await self._target(action.type, point)
             if blocked:
                 return blocked
 
@@ -248,7 +250,7 @@ class ComputerSession:
                 return self._result("rejected", "Hassas adım kullanıcı tarafından reddedildi.")
             # Onay penceresi kapanınca odak çoğu kez Jarvis paneline geçer: hedef yeniden
             # denetlenmezse onaylanan metin Jarvis'in kendi penceresine yazılabilirdi.
-            blocked, _ = await self._target(point)
+            blocked, _ = await self._target(action.type, point)
             if blocked:
                 return blocked
         # Onay beklerken Esc'ye basılmış olabilir: sıradaki eylem çalışmamalı.
@@ -278,14 +280,21 @@ class ComputerSession:
         )
         return None
 
-    async def _target(self, point: tuple[int, int] | None) -> tuple[str | None, str | None]:
+    async def _target(
+        self, action_type: str, point: tuple[int, int] | None
+    ) -> tuple[str | None, str | None]:
         """(engel nedeni, pencere adı): girdinin gerçekten düşeceği pencere denetlenir.
 
         Tıklama/kaydırma noktadaki pencereye gider (ve onu öne getirir); yazma/tuş ön plana.
         Tıklamada ön plana bakmak yanlıştı: panelden komut verilince ön plan hep Jarvis'ti ve
         ilk tıklama Brave'e olsa da oturum engelleniyordu.
         """
-        if point is not None:
+        # Seçim eylem türüne göredir, koordinatın varlığına göre değil: doğrulayıcı type/key
+        # eyleminde x/y'yi reddetmiyor; modelin verdiği zararsız bir nokta yazmanın gittiği
+        # ön planı (ör. terminal) denetimden kaçırmasın.
+        if action_type in _POINTER_ACTIONS:
+            if point is None:
+                return "İşaretçi eyleminde konum yok.", None
             exe, pid = await asyncio.to_thread(self._backend.process_at, point[0], point[1])
         else:
             exe, pid = await asyncio.to_thread(self._backend.foreground_process)

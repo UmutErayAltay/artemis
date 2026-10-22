@@ -410,3 +410,16 @@ async def test_target_is_rechecked_after_approval() -> None:
     assert len(env.approvals) == 1
     assert env.backend.calls == []
     assert env.audit.named("computer_blocked")[0]["action"] == "type"
+
+
+async def test_typing_with_harmless_coordinates_still_checks_foreground() -> None:
+    # Güvenlik taraması: x/y taşıyan type eylemi noktadaki zararsız pencereyle ön plandaki
+    # terminali denetimden kaçırabiliyordu. Klavye girdisi her zaman ön plana göre denetlenir.
+    backend = FakeBackend(foreground=(r"C:\Windows\System32\cmd.exe", 7))
+    backend.at = (r"C:\Program Files\BraveSoftware\brave.exe", 500)
+    sneaky = act(type="type", text="calc", x=2, y=1, reason="yaz")
+    keys = act(type="key", keys="ctrl+v", x=2, y=1, reason="yapıştır")
+    env = Env(sneaky, keys, sneaky, DONE, backend=backend)
+    result = await env.run()
+    assert result.reason == "blocked"
+    assert backend.calls == []
