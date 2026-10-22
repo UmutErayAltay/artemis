@@ -526,3 +526,35 @@ async def test_typing_with_harmless_coordinates_still_checks_foreground() -> Non
     result = await env.run()
     assert result.reason == "blocked"
     assert backend.calls == []
+
+
+async def test_zero_monitors_ends_error_without_backend_input() -> None:
+    # Gap 1: hiç monitör yoksa oturum "error" ile biter, backend girdi almaz.
+    env = Env(DONE, backend=FakeBackend(monitor_rects=[]))
+    result = await env.run()
+    assert result.reason == "error" and "Ekran" in result.summary
+    assert env.backend.calls == []
+
+
+class _CaptureFailingBackend(FakeBackend):
+    """İkinci monitörün capture'ı OSError fırlatan sahte arka uç (Gap 2)."""
+
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        super().__init__(*args, **kwargs)
+        self._capture_count = 0
+
+    def capture(self, left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
+        self._capture_count += 1
+        if self._capture_count == 2:
+            raise OSError("alım başarısız")
+        return super().capture(left, top, width, height)
+
+
+async def test_capture_failure_on_second_monitor_is_honest_error() -> None:
+    # Gap 2: ikinci monitörde görüntü alınamazsa oturum "error" ile biter.
+    backend = _CaptureFailingBackend(monitor_rects=[(0, 0, 8, 4), (8, 0, 8, 4)])
+    env = Env(DONE, backend=backend)
+    result = await env.run()
+    assert result.reason == "error"
+    assert "Ekran görüntüsü alınamadı" in result.summary
+    assert env.backend.calls == []

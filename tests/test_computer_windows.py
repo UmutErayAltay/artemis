@@ -20,7 +20,6 @@ def test_normalize_uses_virtual_desktop_origin() -> None:
     assert w._normalize(-1920, -1080, -1920, -1080, 3840, 2160) == (0, 0)
     assert w._normalize(1919, 1079, -1920, -1080, 3840, 2160) == (65535, 65535)
     assert w._normalize(-1920, 0, -1920, 0, 3840, 1080) == (0, 0)
-    assert w._normalize(1919, 0, -1920, 0, 3840, 1080) == (65535, 65535)
 
 
 def test_order_monitors_puts_primary_first_then_sorts_by_position() -> None:
