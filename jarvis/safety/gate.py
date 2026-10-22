@@ -171,13 +171,32 @@ class SafetyGate:
             and not ((state.tainted or state.history_external) and carries_data)
             and site in load_trusted_sites(trusted_sites_path(context.settings.state_dir))
         )
-        requires_approval = not trusted_site and (
+        # Otomatik kipte yalnız `auto_mode_ok` aracın onayı atlanır (ADR 0039 ek karar):
+        # ekran adımları her tur yeni dış içerik ürettiği için aksi hâlde kip hiç işe
+        # yaramazdı. Diğer her araç kural 4'e aynen uyar.
+        auto_skipped = (
+            tool.auto_mode_ok
+            and context.settings.computer_use.mode == "auto"
+            and site is None
+        )
+        requires_approval = not auto_skipped and not trusted_site and (
             site is not None
             or risk is Risk.CONFIRM_REQUIRED
             or (state.tainted and risk is not Risk.READ_ONLY)
             or (history_outbound and risk is not Risk.READ_ONLY)
         )
         approved: bool | None = None
+        if auto_skipped:
+            # Onay sorulmadı; "evet" diye kaydetmek uydurma olurdu.
+            context.audit.emit(
+                "approval_skipped",
+                turn_id=state.turn_id,
+                tool=call.name,
+                arguments=normalized,
+                auto_mode=True,
+                tainted=state.tainted,
+                history_external=state.history_external,
+            )
         if requires_approval:
             if site is not None and not fills:
                 self.pending_site = site

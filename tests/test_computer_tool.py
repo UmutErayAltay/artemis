@@ -100,24 +100,30 @@ def test_risk_follows_enabled_flag(tmp_path: Path) -> None:
     assert tool.risk_for(args, context) is Risk.SIDE_EFFECT
 
 
-async def test_auto_mode_skips_start_only_on_clean_turn(tmp_path: Path) -> None:
+async def test_auto_mode_skips_the_start_and_its_taint(tmp_path: Path) -> None:
+    # Kullanıcının bilerek açtığı kipte bilgisayar kullanımı başlangıcı sorulmaz. Ekran
+    # adımları her tur dış içerik ürettiği için tur içi/önceki tur lekesi de bu aracı
+    # durdurmaz (ADR 0039 ek karar); başka araçların kuralı değişmez.
+    for state in (TurnState(), TurnState(tainted=True), TurnState(history_external=True)):
+        gate, context, *_ = env(tmp_path, mode="auto")
+        result = await gate.dispatch(CALL, context, state, never)
+        assert result.status == "sent"
+
+
+async def test_auto_mode_does_not_relax_other_tools(tmp_path: Path) -> None:
+    # Aynı kipte başka bir yan etkili araç dış içerikten sonra yine sorulur.
     gate, context, *_ = env(tmp_path, mode="auto")
-    result = await gate.dispatch(CALL, context, TurnState(), never)
-    assert result.status == "sent"
-    # Kapı kuralları otomatik kipte de geçerli: dış içerik sonrası ve önceki turlarda dış
-    # içerik varken (ADR 0013) başlangıç yine sorulur; ret çağrıyı çalıştırmaz.
     asked: list[str] = []
 
     def refuse(name: str, arguments: dict[str, Any]) -> bool:
         asked.append(name)
         return False
 
-    for state in (TurnState(tainted=True), TurnState(history_external=True)):
-        gate, context, _, backend, _ = env(tmp_path, mode="auto")
-        asked.clear()
-        await gate.dispatch(CALL, context, state, refuse)
-        assert asked == ["computer_use"]
-        assert backend.calls == []
+    call = ToolCall(
+        id="w", name="window_control", arguments={"window_id": 5, "action": "focus"}
+    )
+    await gate.dispatch(call, context, TurnState(tainted=True), refuse)
+    assert asked == ["window_control"]
 
 
 @pytest.mark.parametrize("goal", ["", "x" * 501])
@@ -311,3 +317,27 @@ async def test_runtime_mode_switch_reaches_the_tool_context(tmp_path: Path) -> N
 
     assert tool.risk_for(args, context) is Risk.SIDE_EFFECT
     assert context.settings.computer_use.mode == "auto"
+
+
+async def test_model_chain_skips_a_rate_limited_model_for_a_while() -> None:
+    # Ölçüldü: haiku dakikalarca 429 verirken her adımda denemek boşa istek harcıyordu.
+    from jarvis.brain.errors import ProviderError, RetryableProviderError
+    from jarvis.brain.models import Completion
+    from jarvis.tools.plugins.computer import _ModelChain
+
+    class Fixed:
+        def __init__(self, name: str, error: ProviderError | None = None) -> None:
+            self.name, self.error, self.calls = name, error, 0
+
+        async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Completion:
+            self.calls += 1
+            if self.error is not None:
+                raise self.error
+            return Completion(content=self.name)
+
+    slow = Fixed("a", RetryableProviderError("429"))
+    fast = Fixed("b")
+    chain = _ModelChain([slow, fast])  # type: ignore[list-item]
+    for _ in range(3):
+        assert (await chain.complete([], [], timeout=1)).content == "b"
+    assert slow.calls == 1 and fast.calls == 3

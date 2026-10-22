@@ -94,6 +94,10 @@ class BaseTool(ABC):
     # kalmışsa kapı bu araçlara yeni turda da onay sorar (ADR 0013): injection metni
     # URL veya sorgu üzerinden dışarı sızdırılamasın. Kapıda araç adı listesi tutulmaz.
     outbound: ClassVar[bool] = False
+    # Bilgisayar kullanımı otomatik kipindeyken (`computer_use.mode: auto`) bu aracın tur
+    # içi/dış içerik kaynaklı onayı atlanır. Yalnız kullanıcının bilerek açtığı tek araçta
+    # True (ADR 0039 ek karar); diğer araçların kural 4 davranışı değişmez.
+    auto_mode_ok: ClassVar[bool] = False
     # Kullanıcıya gösterilen okunur ad (onay başlığı) ve başarı satırı (ADR 0014).
     # Boşsa arayüz ham adı gösterir; ayrı bir ad tablosu tutulmaz.
     label: ClassVar[str] = ""

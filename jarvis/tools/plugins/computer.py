@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+from time import monotonic
 from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -60,6 +61,7 @@ class ComputerUse(BaseTool):
     external = True
     content_kind = "screen"
     outbound = True
+    auto_mode_ok = True
 
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
         # Kapalıyken araç hiçbir şey yapmaz, yalnız "kapalı" der (screen_read ile aynı).
@@ -133,6 +135,10 @@ class ComputerUse(BaseTool):
         return _to_tool_result(result)
 
 
+# 429 sonrası model bu süre boyunca atlanır; oturum genelde bundan kısa sürer.
+_COOLDOWN_SECONDS = 120.0
+
+
 class _ModelChain:
     """Görsel modelleri sırayla dener: biri hız sınırına (429) takılırsa sıradakine geçer.
 
@@ -143,19 +149,28 @@ class _ModelChain:
 
     def __init__(self, providers: list[Provider]) -> None:
         self._providers = providers
+        self._skip_until: list[float] = [0.0] * len(providers)
 
     async def complete(
         self, messages: list[Message], tools: list[Any], *, timeout: float
     ) -> Completion:
         last: RetryableProviderError | None = None
-        for provider in self._providers:
+        now = monotonic()
+        for index, provider in enumerate(self._providers):
+            # Hız sınırına takılan model bir süre denenmez: aksi hâlde her adımda boşa bir
+            # istek atılıp yedeğe düşülür (ve kota dakikada bir tazelenir, ölçüldü).
+            if now < self._skip_until[index]:
+                continue
             try:
                 return await provider.complete(messages, tools, timeout=timeout)
             except RetryableProviderError as error:
+                self._skip_until[index] = now + _COOLDOWN_SECONDS
                 last = error
         if last is not None:
             raise last
-        raise ProviderError("Bilgisayar kullanımı için görsel model tanımlı değil.")
+        raise ProviderError(
+            "Görsel modellerin hepsi hız sınırında; birkaç dakika sonra yeniden deneyin."
+        )
 
 
 async def _relay_cancel(cancelled: asyncio.Event, stop: threading.Event) -> None:
