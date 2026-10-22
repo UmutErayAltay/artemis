@@ -221,15 +221,47 @@ async def test_invalid_once_then_ok() -> None:
     "foreground",
     [("C:\\Windows\\System32\\cmd.exe", 7), ("C:\\x\\jarvis.exe", OWN_PID), ("", 0)],
 )
-async def test_blocked_foreground_stops_before_input(foreground: tuple[str, int]) -> None:
-    env = Env(click(), DONE, backend=FakeBackend(foreground=foreground))
+async def test_blocked_window_never_gets_input_and_third_block_ends(
+    foreground: tuple[str, int],
+) -> None:
+    # Noktadaki pencere varsayılan olarak ön planla aynı (FakeBackend.at = None).
+    env = Env(click(), click(), click(), DONE, backend=FakeBackend(foreground=foreground))
     result = await env.run()
     assert result.reason == "blocked" and result.steps == 0
     assert env.backend.calls == [] and env.approvals == []
+    assert len(env.audit.named("computer_blocked")) == 3
+
+
+async def test_single_block_is_reported_to_model_and_session_continues() -> None:
+    backend = FakeBackend(foreground=(r"C:\Windows\System32\cmd.exe", 7))
+    env = Env(click(), DONE, backend=backend)
+    result = await env.run()
+    assert result.reason == "done" and backend.calls == []
+    second_prompt = env.provider.seen[1][-1].content
+    assert "ENGELLENDİ (click)" in second_prompt
+
+
+async def test_click_on_app_runs_even_when_jarvis_is_foreground() -> None:
+    # Canlı hata: komut panelden verilince ön plan Jarvis'ti, Brave'e tıklama engelleniyordu.
+    backend = FakeBackend(foreground=(r"C:\Jarvis\pythonw.exe", OWN_PID))
+    backend.at = (r"C:\Program Files\BraveSoftware\brave.exe", 500)
+    env = Env(click(), DONE, backend=backend)
+    assert (await env.run()).reason == "done"
+    assert backend.calls == [("click", 2, 1, "left", False)]
+
+
+async def test_typing_goes_to_foreground_so_jarvis_foreground_blocks_it() -> None:
+    backend = FakeBackend(foreground=(r"C:\Jarvis\pythonw.exe", OWN_PID))
+    backend.at = (r"C:\Program Files\BraveSoftware\brave.exe", 500)
+    env = Env(act(type="type", text="merhaba", reason="yaz"), DONE, backend=backend)
+    assert (await env.run()).reason == "done"
+    assert backend.calls == []
+    assert env.audit.named("computer_blocked")[0]["action"] == "type"
 
 
 async def test_blocked_key_combo() -> None:
-    env = Env(act(type="key", keys="win+r"), DONE)
+    keys = act(type="key", keys="win+r")
+    env = Env(keys, keys, keys, DONE)
     result = await env.run()
     assert result.reason == "blocked" and "Windows" in result.summary
     assert env.backend.calls == []
@@ -359,9 +391,9 @@ async def test_click_on_blocked_window_under_point_is_blocked_even_if_foreground
     backend = FakeBackend()
     backend.at = (r"C:\Windows\System32\WindowsTerminal.exe", 300)
     env = Env(click(), DONE, backend=backend)
-    result = await env.run()
-    assert result.reason == "blocked"
+    await env.run()
     assert backend.calls == []
+    assert "windowsterminal" in env.audit.named("computer_blocked")[0]["reason"]
 
 
 async def test_target_is_rechecked_after_approval() -> None:
@@ -374,7 +406,7 @@ async def test_target_is_rechecked_after_approval() -> None:
         return True
 
     env._approve = approve_and_focus_jarvis  # type: ignore[method-assign]
-    result = await env.run()
+    await env.run()
     assert len(env.approvals) == 1
-    assert result.reason == "blocked"
     assert env.backend.calls == []
+    assert env.audit.named("computer_blocked")[0]["action"] == "type"

@@ -28,7 +28,10 @@ _REASON_TEXT = {
     "timeout": "Süre doldu",
     "rejected": "Hassas adım reddedildi, oturum bitti",
     "stopped": "Oturum durduruldu",
-    "blocked": "Güvenlik kuralı eylemi engelledi",
+    # Engel kullanıcı reddi değildir: model bunu "reddedildi, tekrarlama" diye okuyup kullanıcı
+    # açıkça isteyince bile yeniden denemiyordu.
+    "blocked": "Kod kuralı adımı engelledi (kullanıcı reddi değil; pencere değişince yeniden "
+    "denenebilir)",
     "invalid": "Model geçerli bir eylem döndürmedi",
     "error": "Oturum hata ile bitti",
 }

@@ -36,6 +36,9 @@ Reason = Literal[
 
 _RETRY_PROMPT = "Yalnız tek bir geçerli JSON eylem döndür."
 _HISTORY_LINES = 10
+# Engellenen adım oturumu hemen bitirmez, modele söylenir (ör. panelden komut verilince
+# Jarvis penceresi görüntüde durur); bu kadar engelden sonra oturum biter.
+_MAX_BLOCKS = 3
 # Deadline'a yaklaşırken son modelin ve ana döngünün yanıt verebilmesi için bırakılan pay.
 _DEADLINE_MARGIN = 2.0
 
@@ -113,6 +116,7 @@ class ComputerSession:
 
     async def _loop(self, goal: str, turn_id: str, limit: float) -> SessionResult:
         history: list[str] = []
+        blocks = 0
         while True:
             if self._stop.is_set():
                 return self._result("stopped", "Kullanıcı oturumu durdurdu.")
@@ -164,8 +168,21 @@ class ComputerSession:
                 return self._result("ask_user", action.text or "")
 
             outcome = await self._act(action, turn_id, shot_size, screen_size)
-            if outcome is not None:
+            if isinstance(outcome, SessionResult):
                 return outcome
+            if outcome is not None:
+                blocks += 1
+                self._audit.emit(
+                    "computer_blocked", turn_id=turn_id, action=action.type, reason=outcome
+                )
+                if blocks >= _MAX_BLOCKS:
+                    return self._result("blocked", outcome)
+                history.append(
+                    f"ENGELLENDİ ({action.type}): {outcome}. Bu pencereye girdi gönderilemez; "
+                    "başka bir yol dene ya da ask_user kullan."
+                )
+                await self._sleep(self._config.step_delay_seconds)
+                continue
             history.append(f"Adım {self._steps}: {action.type} - {action.reason}")
 
             await self._sleep(self._config.step_delay_seconds)
@@ -191,8 +208,9 @@ class ComputerSession:
         turn_id: str,
         shot_size: tuple[int, int],
         screen_size: tuple[int, int],
-    ) -> SessionResult | None:
-        """Eylemi denetler ve uygular; oturum bitecekse sonucu, sürecekse None döner."""
+    ) -> SessionResult | str | None:
+        """Eylemi denetler ve uygular. Oturum bitecekse sonucu, adım engellendiyse nedeni
+        (modele geri bildirilir), adım uygulandıysa None döner."""
         point: tuple[int, int] | None = None
         window: str | None = None
         if action.type == "wait":
@@ -201,7 +219,7 @@ class ComputerSession:
             if action.type == "key":
                 key_blocked = key_block_reason(parse_keys(action.keys or ""))
                 if key_blocked:
-                    return self._result("blocked", key_blocked)
+                    return key_blocked
             if action.x is not None and action.y is not None:
                 try:
                     point = scale_point(action.x, action.y, shot_size, screen_size)
@@ -209,7 +227,7 @@ class ComputerSession:
                     return self._result("invalid", str(error))
             blocked, window = await self._target(point)
             if blocked:
-                return self._result("blocked", blocked)
+                return blocked
 
         sensitive = is_sensitive(action)
         approved: bool | None = None
@@ -232,7 +250,7 @@ class ComputerSession:
             # denetlenmezse onaylanan metin Jarvis'in kendi penceresine yazılabilirdi.
             blocked, _ = await self._target(point)
             if blocked:
-                return self._result("blocked", blocked)
+                return blocked
         # Onay beklerken Esc'ye basılmış olabilir: sıradaki eylem çalışmamalı.
         if self._stop.is_set():
             return self._result("stopped", "Kullanıcı oturumu durdurdu.")
@@ -261,21 +279,22 @@ class ComputerSession:
         return None
 
     async def _target(self, point: tuple[int, int] | None) -> tuple[str | None, str | None]:
-        """(engel nedeni, pencere adı). Ön plan her girdi eyleminde, tıklama/kaydırma
-        noktasındaki pencere de ayrıca denetlenir: girdi ön plana değil o pencereye düşer."""
-        checks = [self._backend.foreground_process]
+        """(engel nedeni, pencere adı): girdinin gerçekten düşeceği pencere denetlenir.
+
+        Tıklama/kaydırma noktadaki pencereye gider (ve onu öne getirir); yazma/tuş ön plana.
+        Tıklamada ön plana bakmak yanlıştı: panelden komut verilince ön plan hep Jarvis'ti ve
+        ilk tıklama Brave'e olsa da oturum engelleniyordu.
+        """
         if point is not None:
-            checks.append(lambda: self._backend.process_at(point[0], point[1]))
-        window: str | None = None
-        for check in checks:
-            exe, pid = await asyncio.to_thread(check)
-            if not exe:
-                return "Hedef pencere belirlenemedi.", None
-            blocked = process_block_reason(exe, pid, self._own_pid)
-            if blocked:
-                return blocked, None
-            window = exe.replace("\\", "/").rsplit("/", 1)[-1]
-        return None, window
+            exe, pid = await asyncio.to_thread(self._backend.process_at, point[0], point[1])
+        else:
+            exe, pid = await asyncio.to_thread(self._backend.foreground_process)
+        if not exe:
+            return "Hedef pencere belirlenemedi.", None
+        blocked = process_block_reason(exe, pid, self._own_pid)
+        if blocked:
+            return blocked, None
+        return None, exe.replace("\\", "/").rsplit("/", 1)[-1]
 
     async def _execute(self, action: Action, point: tuple[int, int] | None) -> None:
         backend = self._backend

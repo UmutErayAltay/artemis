@@ -29,12 +29,14 @@ başlar, sonra kendi başına çalışır; riski sınırlar ve görünürlük ta
    Eylemler: `click`, `type`, `key`, `scroll`, `wait`, `done`, `ask_user`. Her eylem `reason`
    ve `sensitive` taşır.
 4. **Kodla zorlanan sınırlar** (modelin beyanına güvenilmez):
-   - Ön plandaki pencere ya da tıklama noktasındaki pencere Jarvis'in kendi süreci, bir
+   - Girdinin düşeceği pencere (tıklama/kaydırmada noktadaki pencere, yazma/tuşta ön plan)
+     Jarvis'in kendi süreci, bir
      kabuk/terminal (`cmd`, `powershell`, `pwsh`, `WindowsTerminal`, `conhost`), bir başlatıcı
      (`explorer`, Başlat/arama süreçleri, `mshta`, `wscript`, `cscript`, `rundll32`, `msiexec`,
      `control`), Unix kabuğu ve yorumlayıcı (`wsl`, `bash`, Git Bash `mintty`, `python`),
      gömülü terminalli editör (VS Code, Cursor), `regedit`, `mmc`, `taskmgr` ya da
-     parola yöneticisi ise eylem çalışmaz, oturum durur. Hassas onaydan sonra yeniden denetlenir.
+     parola yöneticisi ise eylem çalışmaz. Engel modele bildirilir, üçüncü engelde oturum
+     biter; engel kullanıcı reddi sayılmaz. Hassas onaydan sonra yeniden denetlenir.
      Model Jarvis'in onay penceresine tıklayamaz. Uygulama açmak ana döngünün
      `open_application` aracıyla olur, Dosya Gezgini'nden değil.
    - Engelli tuşlar: Win tuşu içeren her kombinasyon, `ctrl+alt+delete`, Ctrl+Esc içeren her
