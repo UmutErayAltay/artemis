@@ -8,7 +8,12 @@ from collections.abc import Callable
 from decimal import Decimal
 
 from jarvis.brain.budget import BudgetLedger
-from jarvis.brain.errors import BudgetExceeded, ProviderError, RetryableProviderError
+from jarvis.brain.errors import (
+    BudgetExceeded,
+    ProviderError,
+    RateLimitedError,
+    RetryableProviderError,
+)
 from jarvis.brain.models import Completion, Message
 from jarvis.brain.providers import (
     AnthropicProvider,
@@ -207,7 +212,7 @@ class ProviderRouter:
                 timeout=attempt_timeout,
                 local_fallback=False,
             )
-        except RetryableProviderError:
+        except RetryableProviderError as error:
             if fallback is None or fallback == self.settings.primary_model:
                 raise
             self._fallback_until = self._clock() + self.settings.fallback_seconds
@@ -216,7 +221,11 @@ class ProviderRouter:
                 primary=self.settings.primary_model,
                 fallback=fallback,
                 seconds=self.settings.fallback_seconds,
-                reason="connection_timeout_or_server_error",
+                reason=(
+                    "rate_limit"
+                    if isinstance(error, RateLimitedError)
+                    else "connection_timeout_or_server_error"
+                ),
             )
             remaining = min(
                 timeout - (self._clock() - started), self.settings.provider_timeout_seconds

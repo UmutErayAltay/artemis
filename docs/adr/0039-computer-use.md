@@ -86,8 +86,10 @@ Claude Code'daki gibi bir otomatik kip olsun ("kontrol bende, gerekirse Esc ile 
    - `accept`: bu ADR'nin 1. ve 5. maddeleri aynen.
    - `auto`: oturum içindeki hassas adım ve Enter onayları sorulmaz (denetime
      `auto_approved=true` yazılır); temiz turda oturum başlangıcı da sorulmaz (risk
-     SIDE_EFFECT). Kapının kendi kuralları DEĞİŞMEZ: dış içerikten sonraki turda ve önceki
-     turlarda dış içerik varken (ADR 0013, araç `outbound`) başlangıç yine sorulur.
+     SIDE_EFFECT). `computer_use` ve `window_control` (`auto_mode_ok`) ekran adımları
+     her turu lekeliyor, bu yüzden `auto` kipinde lekeli turda bile onaylanmaz;
+     atlama `approval_skipped` olarak denetime yazılır. Diğer araçlar kural 4'le
+     dış içerikten sonra onay beklemeye devam eder.
    - Kodla zorlanan engeller (4. madde), adım/süre sınırı ve Esc iki kipte de aynıdır.
    - Bedel: ekrandaki bir enjeksiyon `auto` kipte sorulmadan mesaj gönderebilir ya da form
      onaylayabilir. Bu kullanıcının bilerek seçtiği bir takastır; varsayılan `accept` kalır.

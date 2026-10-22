@@ -119,23 +119,13 @@ class _MONITORINFO(ctypes.Structure):
 
 
 # Windows'ta stdcall çağrı düzeni şarttır; diğer platformlarda yalnız içe aktarım güvenli kalsın.
-_MONITOR_PROC: Any
-if sys.platform == "win32":
-    _MONITOR_PROC = ctypes.WINFUNCTYPE(
-        wintypes.BOOL,
-        ctypes.c_void_p,  # HMONITOR
-        ctypes.c_void_p,  # HDC
-        ctypes.POINTER(wintypes.RECT),
-        wintypes.LPARAM,
-    )
-else:
-    _MONITOR_PROC = ctypes.CFUNCTYPE(
-        wintypes.BOOL,
-        ctypes.c_void_p,
-        ctypes.c_void_p,
-        ctypes.POINTER(wintypes.RECT),
-        wintypes.LPARAM,
-    )
+_MONITOR_PROC: Any = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(
+    wintypes.BOOL,
+    ctypes.c_void_p,  # HMONITOR
+    ctypes.c_void_p,  # HDC
+    ctypes.POINTER(wintypes.RECT),
+    wintypes.LPARAM,
+)
 
 
 # --- Saf yardımcılar (platformdan bağımsız, testli) ---------------------------------

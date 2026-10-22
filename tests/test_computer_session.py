@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from typing import Any
 
 import pytest
@@ -132,8 +133,10 @@ class Env:
         config: ComputerUseConfig | None = None,
         deadline: float | None = None,
         esc_after_step: bool = False,
+        mode: Callable[[], str] | None = None,
     ) -> None:
         self.esc_after_step = esc_after_step
+        self.mode = mode
         self.backend = backend or FakeBackend()
         self.provider = ScriptedVision(*contents)
         self.audit = Audit()
@@ -167,6 +170,7 @@ class Env:
             stop=self.stop,
             on_step=self._on_step,
             provider_timeout=15.0,
+            mode=self.mode,
             clock=self.clock,
             sleep=self.clock.sleep,
         )
@@ -232,14 +236,57 @@ async def test_click_uses_selected_monitor_and_provider_receives_each_screen() -
     ]
 
 
-async def test_invalid_screen_is_rejected_without_backend_input() -> None:
+async def test_invalid_screen_is_fed_back_as_block_not_session_end() -> None:
     backend = FakeBackend(monitor_rects=[(0, 0, 8, 4), (8, 0, 8, 4)])
     env = Env(click(screen=3), DONE, backend=backend)
 
     result = await env.run()
 
-    assert result.reason == "invalid"
+    assert result.reason == "done"
     assert backend.calls == []
+    blocked = env.audit.named("computer_blocked")
+    assert len(blocked) == 1 and "Ekran 3 yok" in blocked[0]["reason"]
+    assert "Ekran 3 yok" in env.provider.seen[1][1].content  # model geri bildirimi gördü
+
+
+async def test_screen_out_of_range_does_not_block_type_action() -> None:
+    env = Env(act(type="type", text="merhaba", screen=3), DONE)
+
+    result = await env.run()
+
+    assert result.reason == "done"
+    assert env.backend.calls == [("type", "merhaba")]
+
+
+async def test_max_blocks_ends_session_only_on_third_block() -> None:
+    blocked = (r"C:\Windows\System32\cmd.exe", 7)
+    backend = FakeBackend(foreground=blocked)
+    backend.at = blocked
+    two = Env(click(), click(), DONE, backend=backend)
+    assert (await two.run()).reason == "done"  # iki engel oturumu bitirmez
+    assert len(two.audit.named("computer_blocked")) == 2
+
+    three = Env(click(), click(), click(), DONE, backend=backend)
+    assert (await three.run()).reason == "blocked"  # üçüncüde biter
+    assert len(three.audit.named("computer_blocked")) == 3
+
+
+async def test_mode_is_read_live_each_sensitive_step() -> None:
+    mode = ["auto"]
+    env = Env(click(sensitive=True), click(sensitive=True), DONE, approve_result=False,
+              mode=lambda: mode[0])
+    original = env._on_step
+
+    def step_then_switch(text: str) -> None:
+        original(text)
+        mode[0] = "accept"  # panelden oto onay oturum sürerken kapatıldı
+
+    env._on_step = step_then_switch  # type: ignore[method-assign]
+    result = await env.run()
+
+    assert result.reason == "rejected"  # ikinci hassas adım artık soruldu
+    assert len(env.approvals) == 1
+    assert len(env.backend.calls) == 1
 
 
 async def test_auto_mode_executes_sensitive_action_without_approval() -> None:

@@ -114,7 +114,7 @@ class WindowControl(BaseTool):
     description = (
         "Bir pencereyi öne getirir (focus), büyütür, simge durumuna küçültür, eski boyutuna "
         "döndürür, ekranın sol/sağ yarısına yerleştirir veya pencereyi başka ekrana taşır "
-        "(move_to_screen + screen). window_id window_list'ten gelir."
+        "(move_to_screen + screen; hedef ekranda büyütür). window_id window_list'ten gelir."
     )
     args_model = WindowControlArguments
     risk = Risk.SIDE_EFFECT

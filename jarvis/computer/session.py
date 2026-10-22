@@ -93,6 +93,7 @@ class ComputerSession:
         stop: threading.Event,
         on_step: Callable[[str], None],
         provider_timeout: float,
+        mode: Callable[[], str] | None = None,
         clock: Callable[[], float] = monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
     ) -> None:
@@ -101,6 +102,9 @@ class ComputerSession:
         self._approve = approve
         self._audit = audit
         self._config = config
+        # Kip her hassas adımda canlı okunur: panelden oto onay kapatılınca süren oturum da
+        # sormaya başlamalı; başlangıçtaki config kopyası bunu göremezdi.
+        self._mode = mode or (lambda: config.mode)
         self._own_pid = own_pid
         self._stop = stop
         self._on_step = on_step
@@ -248,11 +252,11 @@ class ComputerSession:
         point: tuple[int, int] | None = None
         window: str | None = None
         # Modelin koordinatı seçtiği ekranın görüntüsüne göredir; fare ise sanal masaüstü.
-        if action.screen > len(screens):
-            return self._result(
-                "invalid", f"Ekran {action.screen} yok; {len(screens)} ekran görülüyor."
-            )
-        screen = screens[action.screen - 1]
+        # Yalnız işaretçi eyleminde anlamlı (type/key/wait koordinat kullanmaz); geçersiz
+        # ekran oturumu bitirmez, model düzeltsin diye engel olarak geri bildirilir.
+        if action.type in _POINTER_ACTIONS and action.screen > len(screens):
+            return f"Ekran {action.screen} yok; {len(screens)} ekran görülüyor"
+        screen = screens[min(action.screen, len(screens)) - 1]
         if action.type == "wait":
             await self._sleep(action.seconds or 0.0)  # arka uca dokunmaz
         else:
@@ -275,7 +279,7 @@ class ComputerSession:
         auto_approved = False
         # Otomatik kip (ADR 0039 ek karar): oturum içi hassas adım sorulmaz. Kodla zorlanan
         # engeller yukarıda zaten işledi; Esc denetimi ve sınırlar iki kipte de aynı.
-        if sensitive and self._config.mode == "auto":
+        if sensitive and self._mode() == "auto":
             # Denetimde "approved" kullanıcının cevabıdır: kimse sorulmadı, None kalır;
             # atlamanın kendisi auto_approved ile görünür.
             auto_approved = True

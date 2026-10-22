@@ -23,7 +23,7 @@ from jarvis.brain.errors import (
 from jarvis.brain.errors import (
     ProviderError as ProviderError,
 )
-from jarvis.brain.errors import RetryableProviderError
+from jarvis.brain.errors import RateLimitedError, RetryableProviderError
 from jarvis.brain.models import Completion, Message, ToolCall, Usage
 from jarvis.config.settings import ModelConfig, Settings
 from jarvis.mcp.client import MCPError, validate_command_arguments
@@ -248,7 +248,7 @@ async def _post(
     # 429 geçicidir (kota/hız sınırı): yedek model ve oturum içi yeniden deneme bu sınıfla
     # devreye girer. Önceden kalıcı hataydı ve bilgisayar kullanımı oturumu tek 429'da biterdi.
     if response.status_code == 429:
-        raise RetryableProviderError("Sağlayıcı hız sınırına takıldı (HTTP 429).")
+        raise RateLimitedError("Sağlayıcı hız sınırına takıldı (HTTP 429).")
     if response.status_code in {401, 403}:
         raise ProviderError(
             f"Sağlayıcı API anahtarını reddetti (HTTP {response.status_code}). "

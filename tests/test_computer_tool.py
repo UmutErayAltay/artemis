@@ -331,7 +331,7 @@ async def test_runtime_mode_switch_reaches_the_tool_context(tmp_path: Path) -> N
 
 async def test_model_chain_skips_a_rate_limited_model_for_a_while() -> None:
     # Ölçüldü: haiku dakikalarca 429 verirken her adımda denemek boşa istek harcıyordu.
-    from jarvis.brain.errors import ProviderError, RetryableProviderError
+    from jarvis.brain.errors import ProviderError, RateLimitedError
     from jarvis.brain.models import Completion
     from jarvis.tools.plugins.computer import _ModelChain
 
@@ -345,7 +345,7 @@ async def test_model_chain_skips_a_rate_limited_model_for_a_while() -> None:
                 raise self.error
             return Completion(content=self.name)
 
-    slow = Fixed("a", RetryableProviderError("429"))
+    slow = Fixed("a", RateLimitedError("429"))
     fast = Fixed("b")
     chain = _ModelChain([slow, fast])  # type: ignore[list-item]
     for _ in range(3):
@@ -395,3 +395,155 @@ def test_empty_computer_model_uses_the_main_brain(tmp_path: Path) -> None:
     )
     # Sabit model seçilirse o önce gelir; yedekler yinelenmeden eklenir.
     assert vision_models(pinned) == ("other", "main")
+
+
+class _Fixed:
+    """Zincir testleri için: her çağrıda verilen hatayı atar ya da adını döndürür."""
+
+    def __init__(self, name: str, error: Exception | None = None) -> None:
+        self.name, self.error, self.calls = name, error, 0
+
+    async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Any:
+        from jarvis.brain.models import Completion
+
+        self.calls += 1
+        if self.error is not None:
+            raise self.error
+        return Completion(content=self.name)
+
+
+async def test_model_chain_does_not_cool_down_on_non_429_retryable_errors() -> None:
+    from jarvis.brain.errors import RetryableProviderError
+    from jarvis.tools.plugins.computer import _ModelChain
+
+    flaky = _Fixed("a", RetryableProviderError("5xx"))
+    chain = _ModelChain([flaky, _Fixed("b")])  # type: ignore[list-item]
+    for _ in range(3):
+        assert (await chain.complete([], [], timeout=1)).content == "b"
+    assert flaky.calls == 3  # bekleme yok: her adımda yeniden denenir
+
+
+async def test_model_chain_all_rate_limited_then_cooled_down_says_so(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from jarvis.brain.errors import ProviderError, RateLimitedError
+    from jarvis.tools.plugins import computer as module
+
+    now = [1000.0]
+    monkeypatch.setattr(module, "monotonic", lambda: now[0])
+    first, second = _Fixed("a", RateLimitedError("429")), _Fixed("b", RateLimitedError("429"))
+    chain = module._ModelChain([first, second])  # type: ignore[list-item]
+
+    with pytest.raises(RateLimitedError):  # ilk tur: gerçek son hata yükselir
+        await chain.complete([], [], timeout=1)
+    with pytest.raises(ProviderError, match="hız sınırında") as info:  # sonra hiç istek yok
+        await chain.complete([], [], timeout=1)
+    assert not isinstance(info.value, RateLimitedError)
+    assert (first.calls, second.calls) == (1, 1)
+
+    now[0] += module._COOLDOWN_SECONDS + 1  # bekleme bitince yeniden denenir
+    with pytest.raises(RateLimitedError):
+        await chain.complete([], [], timeout=1)
+    assert (first.calls, second.calls) == (2, 2)
+
+
+async def test_model_chain_cooldown_counts_from_the_failure_not_the_loop_start(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from jarvis.brain.errors import RateLimitedError
+    from jarvis.tools.plugins import computer as module
+
+    now = [0.0]
+    monkeypatch.setattr(module, "monotonic", lambda: now[0])
+
+    class Slow(_Fixed):
+        async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Any:
+            now[0] += 50.0  # yavaş istek, sonra 429
+            return await super().complete(messages, tools, timeout=timeout)
+
+    slow = Slow("a", RateLimitedError("429"))
+    chain = module._ModelChain([slow, _Fixed("b")])  # type: ignore[list-item]
+    await chain.complete([], [], timeout=1)  # hata t=50'de
+    now[0] = module._COOLDOWN_SECONDS + 10  # döngü başından 130, hatadan 80 sn
+    await chain.complete([], [], timeout=1)
+    assert slow.calls == 1  # hâlâ beklemede
+
+
+def _chain_env(
+    tmp_path: Path, providers: dict[str, str], allow_cloud: bool
+) -> tuple[SafetyGate, ToolContext, FakeHost, FakeBackend]:
+    names = tuple(providers)
+    settings = Settings(
+        workspace=tmp_path,
+        models={name: model(kind) for name, kind in providers.items()},
+        primary_model=names[0],
+        computer_use=ComputerUseConfig(
+            enabled=True, model=names[0], fallback_models=names[1:], step_delay_seconds=0
+        ),
+        perception=PerceptionConfig(allow_cloud_screen=allow_cloud),
+    )
+    context = ToolContext(tmp_path, settings, AuditLog(tmp_path / "audit.jsonl"), turn_id="t1")
+    host, backend = FakeHost(), FakeBackend()
+    context.services["computer_host"] = host
+    context.services["computer_backend"] = backend
+    return SafetyGate(discover_tools()), context, host, backend
+
+
+async def test_cloud_fallback_is_dropped_from_chain_without_permission(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Yalnız ilk model denetlenseydi yerel ilk + bulut yedek izinsiz görüntü alırdı.
+    from jarvis.tools.plugins import computer as module
+
+    gate, context, host, _ = _chain_env(
+        tmp_path, {"local": "ollama", "cloud": "openrouter"}, allow_cloud=False
+    )
+    built: list[str] = []
+
+    class Recording:
+        def __init__(self, settings: Settings, audit: Any) -> None:
+            built.append(settings.primary_model)
+
+        async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Any:
+            from jarvis.brain.models import Completion
+
+            return Completion(content=DONE)
+
+    monkeypatch.setattr(module, "ProviderRouter", Recording)
+    tool = gate.registry.get("computer_use")
+    assert tool is not None
+    result = await tool.execute(tool.args_model(goal="x"), context)
+    assert built == ["local"]  # bulut model zincire hiç girmedi
+    assert host.sessions == 1 and result.data["reason"] == "done"
+
+
+async def test_all_cloud_models_without_permission_refuse_before_capture(tmp_path: Path) -> None:
+    gate, context, host, backend = _chain_env(
+        tmp_path, {"a": "openrouter", "b": "openrouter"}, allow_cloud=False
+    )
+    tool = gate.registry.get("computer_use")
+    assert tool is not None
+    result = await tool.execute(tool.args_model(goal="x"), context)
+    assert "allow_cloud_screen" in result.message
+    assert host.sessions == 0 and backend.captures == 0
+
+
+async def test_approval_skipped_only_when_approval_was_actually_needed(tmp_path: Path) -> None:
+    import json
+
+    def events() -> list[str]:
+        path = tmp_path / "audit.jsonl"
+        if not path.exists():
+            return []
+        return [json.loads(line)["event"] for line in path.read_text("utf-8").splitlines()]
+
+    # Temiz turda computer_use otomatik kipte zaten SIDE_EFFECT: sorulacak onay yoktu.
+    gate, context, *_ = env(tmp_path, mode="auto")
+    result = await gate.dispatch(CALL, context, TurnState(), never)
+    assert result.status == "sent"
+    assert "approval_skipped" not in events()
+
+    # Lekeli turda onay gerekirdi: atlama denetime yazılır.
+    gate, context, *_ = env(tmp_path, mode="auto")
+    await gate.dispatch(CALL, context, TurnState(tainted=True), never)
+    assert "approval_skipped" in events()

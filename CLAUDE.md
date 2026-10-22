@@ -32,6 +32,10 @@ Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Tü
    `open_url`, `web_search`, `notify_telegram`) yeni turda da onay ister (ADR 0013). ADR 0036: `open_url`
    yalnız dış içerik varken `?`/`#` taşıyan adreste sorar, gerisi sorulmaz; `url` alan dış okuma (tarayıcı MCP) her zaman sorulur, kullanıcının
    "bir daha sorma" dediği host (`state_dir/trusted_sites.json`, `fill` adımı yoksa) sorulmaz.
+   ADR 0039 istisnası: `computer_use.mode: auto` iken `auto_mode_ok` bildiren araçlar
+   (yalnız `computer_use`, `window_control`) lekeli turda da onay atlar; atlama
+   `approval_skipped` olarak denetime yazılır. `auto_mode_ok` başka bir araca ADR
+   olmadan eklenmez.
 5. Alttaki işlemin başarısı doğrulanmadan `success=True` dönülmez. Yalnız komutun
    gönderildiği biliniyorsa `status="sent"`, `success=False` ve dürüst bir mesaj
    kullanılır. API/subprocess/dosya hatası başarı gibi sunulmaz.

@@ -247,9 +247,7 @@ class PlaywrightBackend:
         self, request: BrowseRequest, allow: Callable[[str], bool], *, collect_body: bool
     ) -> PageState:
         try:
-            from playwright.sync_api import (  # type: ignore[import-not-found]
-                Error as PlaywrightError,
-            )
+            from playwright.sync_api import Error as PlaywrightError
             from playwright.sync_api import sync_playwright
         except ImportError as exc:
             raise BackendUnavailable(INSTALL_HINT) from exc

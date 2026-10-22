@@ -1289,22 +1289,28 @@ class DesktopWindow(QMainWindow):
         sürpriz olurdu, bu yüzden düğme hem runtime'a hem config'e anında yazar.
         """
         mode = "auto" if checked else "accept"
-        box = self.settings_panel.computer_auto
-        box.blockSignals(True)
-        box.setChecked(checked)
-        box.blockSignals(False)
-        self.auto_button.setText(f"Oto onay: {'açık' if checked else 'kapalı'}")
-        if self._demo:
-            return
-        if not self.bridge.set_computer_mode(mode):
-            # Runtime hazır değilse yalnız config yazılır; bir sonraki açılışta geçerli olur.
-            self._set_status("Kip kaydedilecek", "running")
-        try:
-            save_computer_mode(self._config_path, mode)
-        except (OSError, ValueError):
-            self._set_status("Kip kaydedilemedi", "error")
-            return
-        self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
+        saved = True
+        if not self._demo:
+            # Önce config: yazılamayan kip runtime'a uygulanırsa güvenlik ayarı sessizce
+            # diskten ayrışırdı (yeniden açılışta eski kip döner).
+            try:
+                save_computer_mode(self._config_path, mode)
+            except (OSError, ValueError):
+                saved = False
+                self._set_status("Kip kaydedilemedi", "error")
+            else:
+                if not self.bridge.set_computer_mode(mode):
+                    # Runtime hazır değilse yalnız config yazılmıştır; açılışta geçerli olur.
+                    self._set_status("Kip kaydedilecek", "running")
+        shown = checked if saved else not checked
+        # İki denetim de sinyalsiz eşitlenir: düğme ve ayar kutusu aynı kipi göstermeli.
+        for control in (self.settings_panel.computer_auto, self.auto_button):
+            control.blockSignals(True)
+            control.setChecked(shown)
+            control.blockSignals(False)
+        self.auto_button.setText(f"Oto onay: {'açık' if shown else 'kapalı'}")
+        if saved and not self._demo:
+            self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
 
     def _live_continuous(self, checked: bool) -> None:
         # Kayıt Uygula ile olur; ses açıksa kip hemen uygulanır.

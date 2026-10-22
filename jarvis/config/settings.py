@@ -380,8 +380,10 @@ class ComputerUseConfig(BaseModel):
     max_minutes: float = Field(default=5.0, ge=0.5, le=30)
     screenshot_width: int = Field(default=1280, ge=640, le=2560)
     step_delay_seconds: float = Field(default=0.6, ge=0, le=3)
-    # ADR 0039 ek karar: "auto" oturum içi hassas adımları ve temiz turda başlangıcı sormaz;
-    # kodla zorlanan engeller, sınırlar ve Esc iki kipte de aynıdır.
+    # ADR 0039 ek karar: "auto" oturum içi hassas adımları ve başlangıcı sormaz
+    # (`computer_use`, `window_control` `auto_mode_ok` ile lekeli turda da onaylanmaz,
+    # atlama `approval_skipped` olarak denetime yazılır); kodla zorlanan engeller,
+    # sınırlar ve Esc iki kipte de aynıdır.
     mode: Literal["accept", "auto"] = "accept"
     # Kotaya takılan görsel model için sırayla denenecek diğer görüntü kabul eden modeller.
     fallback_models: tuple[str, ...] = ()

@@ -179,14 +179,17 @@ class SafetyGate:
             and context.settings.computer_use.mode == "auto"
             and site is None
         )
-        requires_approval = not auto_skipped and not trusted_site and (
+        would_require_approval = not trusted_site and (
             site is not None
             or risk is Risk.CONFIRM_REQUIRED
             or (state.tainted and risk is not Risk.READ_ONLY)
             or (history_outbound and risk is not Risk.READ_ONLY)
         )
+        requires_approval = not auto_skipped and would_require_approval
         approved: bool | None = None
-        if auto_skipped:
+        # Yalnız onay gerçekten istenecekken atlandıysa yazılır: aksi hâlde SIDE_EFFECT temiz
+        # tur gibi hiç sorulmayacak çağrılar da "atlandı" diye denetimi kirletirdi.
+        if auto_skipped and would_require_approval:
             # Onay sorulmadı; "evet" diye kaydetmek uydurma olurdu.
             context.audit.emit(
                 "approval_skipped",

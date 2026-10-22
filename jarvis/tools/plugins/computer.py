@@ -16,7 +16,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from jarvis.brain.errors import ProviderError, RetryableProviderError
+from jarvis.brain.errors import ProviderError, RateLimitedError, RetryableProviderError
 from jarvis.brain.models import Completion, Message
 from jarvis.brain.providers import Provider
 from jarvis.brain.router import ProviderRouter
@@ -68,9 +68,10 @@ class ComputerUse(BaseTool):
         # Kapalıyken araç hiçbir şey yapmaz, yalnız "kapalı" der (screen_read ile aynı).
         if not context.settings.computer_use.enabled:
             return Risk.READ_ONLY
-        # Otomatik kip (ADR 0039 ek karar): temiz turda başlangıç sorulmaz. Kapı kuralları aynen
-        # işler: dış içerikten sonra ve `outbound` olduğu için önceki turlarda dış içerik
-        # varken (ADR 0013) yine onay istenir.
+        # Otomatik kip (ADR 0039 ek karar): ekran adımı her turu lekeliyor, bu yüzden
+        # `computer_use` ve `window_control` (`auto_mode_ok`) lekeli turda bile onaylanmaz;
+        # atlama `approval_skipped` olarak denetime yazılır. Diğer araçlar kural 4'le
+        # dış içerikten sonra onay beklemeye devam eder.
         if context.settings.computer_use.mode == "auto":
             return Risk.SIDE_EFFECT
         return Risk.CONFIRM_REQUIRED
@@ -90,9 +91,11 @@ class ComputerUse(BaseTool):
                 "Esc ile durdurma ve adım onayı burada yok."
             )
         names = vision_models(settings)
-        model = settings.models[names[0]]
-        # Görüntüyü yakalamadan ÖNCE reddedilir: ekran buluta yalnız açık izinle gider.
-        if model.provider != "ollama" and not settings.perception.allow_cloud_screen:
+        # Görüntüyü yakalamadan ÖNCE reddedilir: ekran buluta yalnız açık izinle gider. Yedek
+        # modeller de sayılır; yoksa ilk model yerel olunca bulut yedeği izinsiz görüntü alırdı.
+        if not settings.perception.allow_cloud_screen:
+            names = tuple(name for name in names if settings.models[name].provider == "ollama")
+        if not names:
             return ToolResult(
                 message="Ekran görüntüsü bulut modele gönderilemez: yerel (ollama) model seçin "
                 "ya da perception.allow_cloud_screen: true yapın."
@@ -123,6 +126,8 @@ class ComputerUse(BaseTool):
                 approve=approve,
                 audit=context.audit,
                 config=config,
+                # Köprü context.settings'i değiştirir; kip oradan canlı okunur.
+                mode=lambda: context.settings.computer_use.mode,
                 own_pid=os.getpid(),
                 stop=stop,
                 on_step=on_step,
@@ -166,16 +171,19 @@ class _ModelChain:
         self, messages: list[Message], tools: list[Any], *, timeout: float
     ) -> Completion:
         last: RetryableProviderError | None = None
-        now = monotonic()
         for index, provider in enumerate(self._providers):
             # Hız sınırına takılan model bir süre denenmez: aksi hâlde her adımda boşa bir
             # istek atılıp yedeğe düşülür (ve kota dakikada bir tazelenir, ölçüldü).
-            if now < self._skip_until[index]:
+            if monotonic() < self._skip_until[index]:
                 continue
             try:
                 return await provider.complete(messages, tools, timeout=timeout)
             except RetryableProviderError as error:
-                self._skip_until[index] = now + _COOLDOWN_SECONDS
+                # Bekleme yalnız 429'da: bağlantı/5xx tek seferlik olabilir, modeli 2 dk
+                # dışlamak sağlam bir modeli boşuna elerdi. Saat hata anında alınır; yavaş
+                # bir istekten sonra bekleme süresi eksik kalmasın.
+                if isinstance(error, RateLimitedError):
+                    self._skip_until[index] = monotonic() + _COOLDOWN_SECONDS
                 last = error
         if last is not None:
             raise last
