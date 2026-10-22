@@ -11,10 +11,12 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
-from typing import cast
+from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from jarvis.brain.errors import ProviderError, RetryableProviderError
+from jarvis.brain.models import Completion, Message
 from jarvis.brain.providers import Provider
 from jarvis.brain.router import ProviderRouter
 from jarvis.computer.session import ComputerSession, SessionResult
@@ -93,11 +95,16 @@ class ComputerUse(BaseTool):
             )
         provider = context.services.get("computer_provider")
         if provider is None:
-            provider = ProviderRouter(
-                settings.model_copy(
-                    update={"primary_model": config.model, "fallback_model": None}
-                ),
-                context.audit,
+            provider = _ModelChain(
+                [
+                    ProviderRouter(
+                        settings.model_copy(
+                            update={"primary_model": name, "fallback_model": None}
+                        ),
+                        context.audit,
+                    )
+                    for name in (config.model, *config.fallback_models)
+                ]
             )
         backend = context.services.get("computer_backend")
         if backend is None:
@@ -124,6 +131,31 @@ class ComputerUse(BaseTool):
             finally:
                 watcher.cancel()
         return _to_tool_result(result)
+
+
+class _ModelChain:
+    """Görsel modelleri sırayla dener: biri hız sınırına (429) takılırsa sıradakine geçer.
+
+    Aynı oturumda görüntü ve istem yeniden kullanılır, bu yüzden ikinci modelin cevabı
+    geçerlidir. Kalıcı hata (401, 404, bozuk yanıt) zinciri durdurur: yedeğe geçmek onu
+    gizlemez.
+    """
+
+    def __init__(self, providers: list[Provider]) -> None:
+        self._providers = providers
+
+    async def complete(
+        self, messages: list[Message], tools: list[Any], *, timeout: float
+    ) -> Completion:
+        last: RetryableProviderError | None = None
+        for provider in self._providers:
+            try:
+                return await provider.complete(messages, tools, timeout=timeout)
+            except RetryableProviderError as error:
+                last = error
+        if last is not None:
+            raise last
+        raise ProviderError("Bilgisayar kullanımı için görsel model tanımlı değil.")
 
 
 async def _relay_cancel(cancelled: asyncio.Event, stop: threading.Event) -> None:

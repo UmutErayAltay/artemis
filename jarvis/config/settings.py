@@ -382,6 +382,8 @@ class ComputerUseConfig(BaseModel):
     # ADR 0039 ek karar: "auto" oturum içi hassas adımları ve temiz turda başlangıcı sormaz;
     # kodla zorlanan engeller, sınırlar ve Esc iki kipte de aynıdır.
     mode: Literal["accept", "auto"] = "accept"
+    # Kotaya takılan görsel model için sırayla denenecek diğer görüntü kabul eden modeller.
+    fallback_models: tuple[str, ...] = ()
 
 
 class Settings(BaseModel):
@@ -455,6 +457,9 @@ class Settings(BaseModel):
                 raise ValueError("Yedek model tanımlı bir Ollama modeli olmalı")
         if self.computer_use.enabled and self.computer_use.model not in self.models:
             raise ValueError("computer_use.model models içinde tanımlanmalı")
+        for name in self.computer_use.fallback_models:
+            if name not in self.models:
+                raise ValueError("computer_use.fallback_models models içinde tanımlanmalı")
         return self
 
 

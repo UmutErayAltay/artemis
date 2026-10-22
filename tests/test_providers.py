@@ -262,7 +262,7 @@ async def test_private_content_and_arguments_only_reach_local_provider(
 
 
 @pytest.mark.parametrize("name", PROVIDERS)
-@pytest.mark.parametrize("status", [400, 401, 429, 503])
+@pytest.mark.parametrize("status", [400, 401, 503])
 async def test_http_errors_do_not_expose_body_headers_or_chained_exception(
     name: ProviderName, status: int, http_server: HTTPState, tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -281,6 +281,24 @@ async def test_http_errors_do_not_expose_body_headers_or_chained_exception(
     assert sentinel not in repr(failure.value)
     assert sentinel not in repr(provider)
     assert failure.value.__context__ is None
+    assert failure.value.__cause__ is None
+
+
+@pytest.mark.parametrize("name", PROVIDERS)
+async def test_rate_limit_is_retryable_so_fallback_model_runs(
+    name: ProviderName, http_server: HTTPState, tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 429 geçicidir: kalıcı hata sayılınca bilgisayar kullanımı oturumu ilk 429'da bitiyordu.
+    monkeypatch.setenv("OPENROUTER_API_KEY", token_urlsafe())
+    monkeypatch.setenv("ANTHROPIC_API_KEY", token_urlsafe())
+    http_server.status = 429
+    http_server.body = {"error": "hız sınırı"}
+    with pytest.raises(RetryableProviderError) as failure:
+        await provider_for(name, http_server, tmp_path).complete(
+            [Message(role="user", content="Merhaba")], [], timeout=2
+        )
+    assert "429" in str(failure.value)
     assert failure.value.__cause__ is None
 
 

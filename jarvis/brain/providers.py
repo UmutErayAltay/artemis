@@ -245,6 +245,10 @@ async def _post(
         raise RetryableProviderError(
             f"Sağlayıcı sunucu hatası verdi (HTTP {response.status_code})."
         )
+    # 429 geçicidir (kota/hız sınırı): yedek model ve oturum içi yeniden deneme bu sınıfla
+    # devreye girer. Önceden kalıcı hataydı ve bilgisayar kullanımı oturumu tek 429'da biterdi.
+    if response.status_code == 429:
+        raise RetryableProviderError("Sağlayıcı hız sınırına takıldı (HTTP 429).")
     if response.status_code in {401, 403}:
         raise ProviderError(
             f"Sağlayıcı API anahtarını reddetti (HTTP {response.status_code}). "

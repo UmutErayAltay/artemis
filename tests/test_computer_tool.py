@@ -264,3 +264,27 @@ def test_settings_enabled_requires_known_model() -> None:
 def test_config_bounds(field: str, value: float) -> None:
     with pytest.raises(ValidationError):
         ComputerUseConfig(**{field: value})
+
+
+async def test_model_chain_falls_through_only_on_retryable_errors() -> None:
+    # 429/hız sınırı geçicidir: ilk görsel model takılınca ikincisi aynı görüntüyle çalışır.
+    from jarvis.brain.errors import ProviderError, RetryableProviderError
+    from jarvis.brain.models import Completion
+    from jarvis.tools.plugins.computer import _ModelChain
+
+    class Fixed:
+        def __init__(self, name: str, error: ProviderError | None = None) -> None:
+            self.name, self.error = name, error
+
+        async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Completion:
+            if self.error is not None:
+                raise self.error
+            return Completion(content=self.name)
+
+    chain = _ModelChain([Fixed("a", RetryableProviderError("429")), Fixed("b")])  # type: ignore[list-item]
+    assert (await chain.complete([], [], timeout=1)).content == "b"
+
+    # Kalıcı hata zinciri durdurur: yedek model onu gizlemez.
+    chain = _ModelChain([Fixed("a", ProviderError("401")), Fixed("b")])
+    with pytest.raises(ProviderError, match="401"):
+        await chain.complete([], [], timeout=1)
