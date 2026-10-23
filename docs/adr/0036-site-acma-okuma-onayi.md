@@ -18,6 +18,9 @@ onay istesin, onay kısmında bu site için bir daha sorma seçeneği de olsun".
   `trusted_site=true` yazılır ve bench değişmezi bunu kabul eder.
 - Güven yalnız `click`/`read_text`/`wait_for` adımlı çağrıyı kapsar (`fill` form verisi taşır); dış içerik bağlamdayken sorgu ya da parça (`?`, `#`) taşıyan adres yine sorulur (güvenilen sitedeki açık yönlendirme veriyi başka siteye taşıyabilir). İzin listesi dışı adımlı çağrıda "bir daha
   sorma" sunulmaz. Gözetimsiz turda güvenilen site de okunmaz (ADR 0027 önce gelir).
+- Ayrıştırıcıların ayrıştığı adres (`\`, userinfo `@`, boşluk/kontrol karakteri) hiçbir host'a güvenilmiş
+  sayılmaz: `https://kotu.com\@iyi.com` Python'da `iyi.com`, Chromium'da `kotu.com`'dur. Kapı onayda ham
+  netloc'u gösterir (2026-10-23).
 - Onay imzası `(tool_name, arguments) -> bool` kalır: hatırlama kanal tarafında, kapının
   `pending_site` değeriyle yapılır; politika yalnız `SafetyGate`'tedir. Telegram ve CLI
   hatırlama sunmaz. Liste dosyadan elle düzenlenir/silinir.

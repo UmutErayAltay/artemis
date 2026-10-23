@@ -145,7 +145,10 @@ def _fixture(
         )
 
     bridge = DesktopBridge(tmp_path / "unused.yaml", factory, voice_factory=voice_factory)
-    assert _wait_for(bridge, State).state == "ready"
+    # İşçinin açılışı (runtime, SQLite, denetim dosyası) yüklü Windows CI'da 2 sn'yi aşabiliyor
+    # (run 75). Süre yalnız başarı yolunun bütçesidir: hazır olunca hemen döner, hiçbir test
+    # zaman aşımına güvenmez; bu yüzden uzun bütçe hiçbir doğrulamayı gevşetmez.
+    assert _wait_for(bridge, State, timeout=10.0).state == "ready"
     return bridge
 
 
