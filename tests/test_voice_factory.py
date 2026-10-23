@@ -29,6 +29,29 @@ async def test_edge_without_fallback_does_not_load_local_male_voice(monkeypatch)
     assert controller.synthesizer is primary
 
 
+async def test_edge_with_default_fallback_but_no_piper_model_still_builds(monkeypatch):
+    """Varsayılan `tts_local_fallback=True` iken Piper modeli yoksa Edge sesi tek başına açılır.
+
+    Gerçek PiperSynthesizer kullanılır: kurucusu model yokken ValueError fırlatır ve eskiden
+    bu, Edge çalışabilecekken ses kanalını tamamen kapatıyordu (EMA dalı bunu zaten denetliyordu).
+    """
+    config = VoiceConfig(
+        tts_backend="edge", allow_cloud_tts_text=True, edge_voice="tr-TR-EmelNeural"
+    )
+    assert config.tts_local_fallback and config.piper_model is None
+    primary = object()
+    monkeypatch.setattr(factory, "FasterWhisperRecognizer",
+                        lambda _config: SimpleNamespace(prepare=lambda: None))
+    monkeypatch.setattr(factory, "EdgeTTSynthesizer", lambda *_args: primary)
+    monkeypatch.setattr(factory, "SoundDeviceMicrophone", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(factory, "SoundDeviceSink", lambda: object())
+    monkeypatch.setattr(factory, "WebRTCVAD", lambda _config: object())
+    controller = await factory.build_voice_controller(
+        _runtime(config), lambda _: None, lambda _: None
+    )
+    assert controller.synthesizer is primary
+
+
 def _patch_voice_deps(monkeypatch, mic):
     monkeypatch.setattr(factory, "FasterWhisperRecognizer",
                         lambda _config: SimpleNamespace(prepare=lambda: None))

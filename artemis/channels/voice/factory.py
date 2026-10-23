@@ -121,7 +121,9 @@ async def build_voice_controller(
     synthesizer: SpeechSynthesizer
     if settings.voice.tts_backend == "edge":
         edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
-        if settings.voice.tts_local_fallback:
+        # Yedek yalnız Piper modeli varken kurulur: `tts_local_fallback` varsayılan açıktır ve
+        # model yokken PiperSynthesizer ValueError fırlatıp çalışabilecek Edge sesini de kapatırdı.
+        if settings.voice.tts_local_fallback and settings.voice.piper_model:
             local_tts = PiperSynthesizer(settings.voice)
             await asyncio.to_thread(local_tts.prepare)
             synthesizer = FallbackSynthesizer(edge_tts, local_tts)
