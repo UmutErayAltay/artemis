@@ -24,7 +24,8 @@ içerik uyarısını gösterir; varsayılan seçim **Hayır**'dır.
 
 Görüntüler Linux'ta gerçek Qt pencerelerinden **demo modunda** alınmıştır.
 Demo, sahte sağlayıcı ve geçici bellek verisi kullanır; ağ çağrısı yapmaz,
-kullanıcının dosyalarına veya uygulamalarına erişmez.
+kullanıcının dosyalarına veya uygulamalarına erişmez. Aşağıdaki görüntüleri
+`python scripts/capture_screenshots.py` (Qt offscreen, demo penceresi) yeniden üretir.
 
 ### Sohbet ve işlem adımları
 
