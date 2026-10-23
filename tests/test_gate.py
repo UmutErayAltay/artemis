@@ -483,6 +483,30 @@ async def test_trust_is_per_host_and_never_covers_form_filling(
     assert sites == ["evil.example", ""]
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://evil.example\\@tr.wikipedia.org/",  # Chromium: evil.example; urlsplit: wikipedia
+        "https://evil.example@tr.wikipedia.org/",
+        "https://evil.example\t@tr.wikipedia.org/",
+    ],
+)
+async def test_ambiguous_url_never_counts_as_trusted_site(
+    site_gate: tuple[SafetyGate, ToolContext], url: str
+) -> None:
+    gate, context = site_gate
+    remember_site(trusted_sites_path(context.settings.state_dir), "tr.wikipedia.org")
+    sites: list[str] = []
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        sites.append(gate.pending_site)
+        return False
+
+    result = await gate.dispatch(call("site_read_test", url=url), context, TurnState(), reject)
+    assert result.status == "denied"
+    assert sites and sites[0] != "tr.wikipedia.org"
+
+
 async def test_tainted_trusted_site_with_query_still_asks(
     site_gate: tuple[SafetyGate, ToolContext],
 ) -> None:

@@ -55,7 +55,13 @@ def site_of(external: bool, arguments: dict[str, Any]) -> str | None:
     url = arguments.get("url")
     if not external or not isinstance(url, str):
         return None
-    host = (urlsplit(url).hostname or "").rstrip(".").lower()
+    parts = urlsplit(url)
+    if "\\" in url or "@" in parts.netloc or any(ord(ch) <= 0x20 or ord(ch) == 0x7F for ch in url):
+        # Python ile tarayıcı (WHATWG) bu adresleri farklı host'a çözer:
+        # `https://kotu.com\@iyi.com` Python'da `iyi.com`, Chromium'da `kotu.com`'dur. Ham netloc
+        # döner: onayda gerçek belirsizlik görünür, güvenilen listedeki temiz adla asla eşleşmez.
+        return parts.netloc.lower() or url
+    host = (parts.hostname or "").rstrip(".").lower()
     return host or None
 
 
