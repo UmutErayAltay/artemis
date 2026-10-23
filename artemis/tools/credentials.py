@@ -72,14 +72,15 @@ def _legacy_target(target: str) -> str | None:
 
 def read_secret(target: str = TARGET) -> str | None:
     """Önce `Artemis/<ad>`, yoksa eski `Jarvis/<ad>` kaydı (veri kaybı olmasın diye)."""
-    # Windows gövdesi platform bloğunda tanımlı; mypy Linux'ta bu dalı hiç analiz etmez.
-    if sys.platform != "win32":
-        return None
-    value = _read_secret_windows(target)
-    legacy = _legacy_target(target)
-    if value is None and legacy is not None:
-        value = _read_secret_windows(legacy)
-    return value
+    # Windows gövdesi platform bloğunda tanımlı. mypy yalnız `== "win32"` bloğunu platform dalı
+    # sayar; `!= "win32": return` erken çıkışından sonrasını Linux'ta da analiz edip hata verir.
+    if sys.platform == "win32":
+        value = _read_secret_windows(target)
+        legacy = _legacy_target(target)
+        if value is None and legacy is not None:
+            value = _read_secret_windows(legacy)
+        return value
+    return None
 
 
 def write_secret(secret: str, target: str = TARGET) -> None:
