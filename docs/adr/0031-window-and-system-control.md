@@ -1,9 +1,9 @@
 # ADR 0031 — Pencere ve sistem kontrolü
 
-**Bağlam:** Faz 7b, Artemis'in `windows.*` araçlarından taşınmamış olanları ekler: açık
-pencereleri listeleme, öne getirme, büyütme/küçültme/yarım ekrana yerleştirme, ses ve
-parlaklık ayarı, kilitleme, uyku, kapatma ve yeniden başlatma. Artemis'te kilit ve uyku
-SAFE'ti, ses/parlaklık sonucu çoğu yerde doğrulanmıyordu ve pywin32'ye dayanıyordu.
+**Bağlam:** Faz 7b şu araçları ekler: açık pencereleri listeleme, öne getirme,
+büyütme/küçültme/yarım ekrana yerleştirme, ses ve parlaklık ayarı, kilitleme, uyku, kapatma
+ve yeniden başlatma. Kaçınılan hatalar: kilit ve uykuyu SAFE saymak, ses/parlaklık sonucunu
+doğrulamamak ve pywin32'ye dayanmak.
 Jarvis pywin32 kullanmaz; Windows'a özgü işler ya `ctypes` (pano) ya da sabit PowerShell
 betiği (toast, ekran OCR) ile yapılır. Mevcut kurallar: kapatma onay gerektirir (CLAUDE.md
 3), başarı doğrulanmadan bildirilmez (5), gözetimsiz turda yalnız READ_ONLY çalışır (ADR

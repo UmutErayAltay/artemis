@@ -1,9 +1,8 @@
 # ADR 0028 — MCP istemcisi: stdio, tek köprü, varsayılan yan etkili
 
 **Bağlam:** Faz 6b, kullanıcının yapılandırdığı MCP (Model Context Protocol) sunucularının
-araçlarını Jarvis'e bağlar. Artemis'te stdio v1 vardı (`plugins/mcp_plugin.py`). Oradan üç
-ders taşınır: (1) `mcp` SDK'sı 2.0'da Python alan adlarını değiştirdi ve üst sınırsız
-bağımlılık köprünün tamamını sessizce kırdı; (2) yanıt vermeyen bir sunucu uygulamanın
+araçlarını Jarvis'e bağlar. Tasarımda üç risk gözetilir: (1) `mcp` SDK'sı 2.0'da Python
+alan adlarını değiştirdi; üst sınırsız bağımlılık köprünün tamamını sessizce kırabilir; (2) yanıt vermeyen bir sunucu uygulamanın
 açılışını kilitlememeli; (3) MCP sunucusu üçüncü taraf koddur, araçlarının kendini
 tanımlaması güvenilir değildir. Jarvis'te ek kısıtlar var: araç kaydı tek yoldan yapılır
 (CLAUDE.md 9), MCP sonucu turu lekeler (4), risk bildirmeyen araç yan etkilidir (3), sır

@@ -1,6 +1,6 @@
 # ADR 0037 — İsteğe bağlı mikrofon gürültü engelleme (DeepFilterNet3)
 
-**Bağlam:** Artemis'in ölçülen oda gürültüsü 0.019–0.075 (tam ölçekli RMS) aralığındaydı;
+**Bağlam:** Ölçülen oda gürültüsü 0.019–0.075 (tam ölçekli RMS) aralığındaydı;
 VAD ve Whisper bu seviyede boş/yanlış parça üretebiliyor. Mikrofon yolunda yankı giderme
 (AEC) YOKTUR: asistanın kendi sesi mikrofona girerse bu özellik onu temizlemez (yankı
 korumaları ADR 0022'dedir). (Sonradan ADR 0038 ile isteğe bağlı yankı engelleme eklendi.)

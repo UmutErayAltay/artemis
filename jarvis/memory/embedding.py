@@ -1,6 +1,6 @@
 """Vault notları için isteğe bağlı anlamsal (embedding) arama.
 
-Artemis ölçümünde sözcük araması paraphrase ağırlıklı sorularda hit@4 0.43, e5-large
+Ön ölçümde sözcük araması paraphrase ağırlıklı sorularda hit@4 0.43, e5-large
 0.73 verdi (ADR 0015). Bu modül notları vektöre çevirip kosinüs benzerliğiyle sıralar.
 KAPALI gelir: `memory.embedding_model` verilmedikçe plugin bu modülü hiç çağırmaz.
 

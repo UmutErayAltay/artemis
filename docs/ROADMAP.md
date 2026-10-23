@@ -1,18 +1,14 @@
 # Jarvis yol haritası
 
-Jarvis, Windows 11 için Türkçe tek kullanıcılı masaüstü asistanıdır. Eski proje Artemis
-(UmutErayAltay/artemis-ai-assistant) donmuştur; Jarvis onu yalnızca kaynak olarak okur,
-o depoya değişiklik yapılmaz ve oraya commit atılmaz. Çalışan Artemis özellikleri Jarvis'e
-taşınır. Mimari için [ARCHITECTURE.md](ARCHITECTURE.md) ve [ADR'ler](adr/) geçerlidir.
+Jarvis, Windows 11 için Türkçe tek kullanıcılı masaüstü asistanıdır. Mimari için
+[ARCHITECTURE.md](ARCHITECTURE.md) ve [ADR'ler](adr/) geçerlidir.
 
-## Taşıma kuralı
+## Özellik ekleme kuralı
 
-- Dosyalar kopyalanmaz. Davranış ve test senaryoları okunup Jarvis kurallarına uyarlanarak
-  yeniden yazılır.
-- Taşınan her özellik tek `SafetyGate` üzerinden çağrılır, `Risk` bildirir, yol argümanlarını
+- Her özellik tek `SafetyGate` üzerinden çağrılır, `Risk` bildirir, yol argümanlarını
   `safe_join`'dan geçirir, denetim kaydına (audit) yazılır ve dış içerik varsa `taint`
   kuralına uyar.
-- Şu Artemis hataları taşınmaz: onaysız üzerine yazma (move/copy), şifrelerin düz metin
+- Şu hatalara izin verilmez: onaysız üzerine yazma (move/copy), şifrelerin düz metin
   saklanması, kodlayıcıda sınırsız `process.wait()`.
 
 ## Çalışma biçimi
@@ -88,7 +84,7 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 001
 Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 0015](adr/0015-vault-memory.md).
 
 **Kapsam**
-- Artemis'in vault köprüsü ve isteğe bağlı (varsayılan kapalı) embedding araması taşınır.
+- Vault köprüsü ve isteğe bağlı (varsayılan kapalı) embedding araması eklenir.
   Model yoksa bunu kullanıcıya bildirir; sessizce başka kaynağa düşmez.
 - Vault yalnız ekleme kipiyle (`append`) yazılır; mevcut not yeniden yazılmaz.
 - Vault okuması dış dosya okuması sayılır: içerik modele VERİDİR çerçevesi ve taint
@@ -126,7 +122,7 @@ yaptığını bildirdi ([F5 doğrulama raporu](F5_WORKFLOW_REPORT.md)). Karar:
 [ADR 0026](adr/0026-background-project-workflow.md).
 
 **Kapsam**
-- Artemis'in proje atölyesi taşınır: görüşme, spec, ardından ayrı süreçte çalışan kodlayıcı.
+- Proje atölyesi eklenir: görüşme, spec, ardından ayrı süreçte çalışan kodlayıcı.
   İş yalnız sonuç olayı başarılı ve çıkış kodu sıfır ise tamamlanır.
 - İş durumu, soru/cevap, durdurma ve Projeler sekmesi.
 - Her iş zaman aşımına tabidir; sınırsız `process.wait()` yoktur. Alt süreç yalnız izinli
@@ -160,7 +156,7 @@ CLAUDE.md 12. kural) taşır ve yalnız Windows'ta anlamlıdır; en sona kalır.
 **Kapsam**
 - 6a: kullanıcının kurduğu hatırlatmalar ve config'te tanımlı sabah brifingi; gözetimsiz
   tur kuralı (ADR 0027).
-- 6b: Artemis'teki stdio MCP v1'in taşınması; araçlar `@register_tool` yerine tek bir
+- 6b: stdio MCP istemcisi; araçlar `@register_tool` yerine tek bir
   MCP köprüsü üzerinden kayda girer, ad kuralı (9. kural) korunur.
 - 6c: kullanıcının açıkça başlattığı ekran görüntüsü/metin okuma; varsayılan kapalı.
 
@@ -174,7 +170,7 @@ CLAUDE.md 12. kural) taşır ve yalnız Windows'ta anlamlıdır; en sona kalır.
 ### Faz 7 — Windows'ta yaşayan Jarvis
 
 Durum: başladı (2026-10-15, kullanıcı kararı). Amaç: Jarvis'i bilgisayar açıkken hep hazır
-ve Windows'u yönetebilir hale getirmek; Artemis'te kalan masaüstü araçlarını taşımak.
+ve Windows'u yönetebilir hale getirmek; masaüstü araçlarını tamamlamak.
 Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla) yapılır.
 
 | Sıra | Kalem | Durum | Karar |
@@ -184,10 +180,10 @@ Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla)
 | 7c | Tarayıcı otomasyonu (MCP üzerinden) | kodlandı ve Linux'ta doğrulandı (sahte arka uç); gerçek Chromium ve Windows'ta denenmedi | [ADR 0032](adr/0032-browser-automation-mcp.md) |
 
 Sıranın gerekçesi: 7a, 6a hatırlatmalarının gerçekten çalışmasının ön koşuludur (Jarvis
-kapalıyken hatırlatma gelmez) ve yeni araç yüzeyi açmaz. 7b Artemis'in `windows.*`
-araçlarını taşır; yerel ve geri alınabilir işlerden geri alınamayanlara (kapatma, yeniden
-başlatma) doğru risk sınıfı belirlenir. 7c, 6b MCP istemcisini kullanır; Artemis'teki
-Playwright sunucusu yeni araç yazılmadan bağlanır ve URL doğrulaması korunur.
+kapalıyken hatırlatma gelmez) ve yeni araç yüzeyi açmaz. 7b pencere ve sistem
+araçlarını ekler; yerel ve geri alınabilir işlerden geri alınamayanlara (kapatma, yeniden
+başlatma) doğru risk sınıfı belirlenir. 7c, 6b MCP istemcisini kullanır; Playwright
+sunucusu yeni araç yazılmadan bağlanır ve URL doğrulaması her isteğe uygulanır.
 
 **Kapsam dışı (ayrı faz ve ADR):** fare/klavye kontrolü, görsel modelle ekran anlama,
 gözetimsiz onay kanalı, kurulum paketi.

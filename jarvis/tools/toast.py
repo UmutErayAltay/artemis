@@ -1,8 +1,7 @@
 """Windows toast bildirimi: sabit PowerShell betiği, metin yalnız ortam değişkeniyle gider.
 
-Davranış Artemis'in `projects/notify.py` toast kanalından taşındı; fark: alt sürecin ortamı
-`os.environ` değil `child_environment()`'dır (bot/sağlayıcı token'ı toast sürecine gitmez)
-ve sonuç bool değil dürüst bir `ToastOutcome`'dur. Windows'a özgü hiçbir şey import
+Alt sürecin ortamı `os.environ` değil `child_environment()`'dır (bot/sağlayıcı token'ı
+toast sürecine gitmez) ve sonuç bool değil dürüst bir `ToastOutcome`'dur. Windows'a özgü hiçbir şey import
 edilmez; toast bir `powershell.exe` alt sürecidir, bu yüzden Linux'ta da içe aktarılabilir.
 """
 
@@ -26,7 +25,7 @@ TOAST_BODY_LIMIT = 300
 # `&` içeren metin toast XML'ini bozar.
 #
 # Windows PowerShell 5.1 (`powershell.exe`) gerekir: PowerShell 7 WinRT tiplerini yükleyemez.
-# `$appId` PowerShell'in kendi kayıtlı uygulama kimliğidir (Artemis ile aynı); kayıtsız
+# `$appId` PowerShell'in kendi kayıtlı uygulama kimliğidir; kayıtsız
 # kimlikle gösterilen toast sessizce yutulur. `Setting` Enabled değilse (odak yardımı, kapalı
 # bildirimler) Show() hata vermeden hiçbir şey göstermez; bu yüzden önce sınanır ve çıkış
 # kodu 3 ile ayrı bildirilir: "gösterildi" demek ancak bundan sonra doğrudur.

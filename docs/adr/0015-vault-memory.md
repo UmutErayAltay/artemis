@@ -1,10 +1,10 @@
 # ADR 0015 — Obsidian vault hafızası
 
-**Bağlam:** Faz 3 Artemis'in vault köprüsünü ve isteğe bağlı embedding aramasını
-taşır. Artemis vault'ta `beyin.py context` alt sürecini çağırıyor, `Core.md`
-tercihlerini görüşmeye kendiliğinden ekliyor ve proje notlarına kendiliğinden
-yazıyordu. Ölçümünde (Artemis ARCHITECTURE §45) sözcük araması hit@4 0.43,
-MiniLM 0.57, e5-large 0.73 verdi. Vault kullanıcının notlarıdır ve git deposudur;
+**Bağlam:** Faz 3 vault köprüsünü ve isteğe bağlı embedding aramasını ekler.
+Kolay ama riskli yol, vault'ta `beyin.py context` alt sürecini çağırmak, `Core.md`
+tercihlerini görüşmeye kendiliğinden eklemek ve proje notlarına kendiliğinden
+yazmaktır. Ön ölçümde sözcük araması hit@4 0.43, MiniLM 0.57, e5-large 0.73
+verdi. Vault kullanıcının notlarıdır ve git deposudur;
 içinde web'den kırpılmış metinler de olabilir.
 
 **Karar:**
@@ -33,6 +33,6 @@ içinde web'den kırpılmış metinler de olabilir.
 
 **Sonuçlar:** Hafıza her okumada turu lekeler: aynı turdaki yan etkiler onay
 ister. Vault'a her yazma bir onay penceresi açar; sık kullanımda bu yük ölçülüp
-gerekirse ayrı ADR ile gevşetilir. Sözcük araması Artemis'teki CLI aramasından daha
-iyi sayılmaz; kalite yalnız canlı ölçümle bilinir. Embedding için `pip install
+gerekirse ayrı ADR ile gevşetilir. Sözcük aramasının kalitesi yalnız canlı ölçümle
+bilinir. Embedding için `pip install
 'jarvis-tr[memory]'` ve ilk indekslemede model indirmesi gerekir.

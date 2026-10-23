@@ -2,18 +2,16 @@
 
 **Bağlam:** Faz 7c, "şu sayfayı aç, şu düğmeye bas, şu tablodaki değeri oku" gibi
 istekler için sayfanın DOM'una erişen bir araç ister. `open_url` yalnız tarayıcıyı açar,
-`web_search` yalnız arama sonucu getirir. Artemis bunu Playwright + MCP SDK ile ayrı bir
-sunucu olarak yapıyordu; `file://` ile SSH anahtarı okunabildiği ölçülmüş, sonra
-`_validate_url` eklenmişti. Ancak bu doğrulama yalnız ilk adrese bakıyordu: genel bir
-sayfanın yönlendirmesi veya alt isteği yerel ağa gidebiliyordu. Jarvis'te MCP istemcisi
+`web_search` yalnız arama sonucu getirir. Playwright tabanlı bir sunucuda bilinen iki risk
+var: `file://` ile SSH anahtarı okunabilir; yalnız ilk adrese bakan URL doğrulaması da
+yetmez, çünkü genel bir sayfanın yönlendirmesi veya alt isteği yerel ağa gidebilir. Jarvis'te MCP istemcisi
 hazırdır (ADR 0028): her çağrı taze süreç, varsayılan SIDE_EFFECT + outbound + external.
 
 **Karar:**
 
 - **Sunucu Jarvis deposundadır, ayrı süreçtir.** `jarvis/mcp_servers/browser.py`, SDK'sız
   küçük bir stdio JSON-RPC sunucusudur (`initialize`, `tools/list`, `tools/call`).
-  Taşıma kuralı gereği Artemis dosyası kopyalanmaz, davranışı yeniden yazılır. Playwright
-  isteğe bağlı `browser` ekidir (`pip install -e ".[browser]"` ve bir kez
+  Playwright isteğe bağlı `browser` ekidir (`pip install -e ".[browser]"` ve bir kez
   `python -m playwright install chromium`); yoksa sunucu çökmeden dürüst hata döner.
   Kurulmadıkça ve config'e eklenmedikçe hiçbir şey çalışmaz.
 

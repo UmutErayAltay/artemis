@@ -13,6 +13,7 @@ build/
 .env.*
 !.env.example
 config/config.yaml
+config/config.yaml.bak*
 *.log
 *.jsonl
 *.sqlite*

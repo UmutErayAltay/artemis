@@ -2,9 +2,8 @@
 
 **Bağlam:** Faz 4 iki şey ekler: Telegram ve Windows toast ile giden bildirim, ve Telegram'dan
 komut alıp onayı düğmeyle soran iki yönlü kanal. CLAUDE.md 3. kural "dışarı mesaj" gönderen
-işlemlerin onay istemesini ister. Artemis'te bildirim taşıması vardı (`projects/notify.py`):
-token yalnız ortamdan okunuyor, toast betiği sabit tutulup metin ortam değişkeniyle
-veriliyordu. Artemis'te iki yönlü Telegram yoktu.
+işlemlerin onay istemesini ister. Bildirimde iki ilke esastır: token yalnız ortamdan
+okunur, toast betiği sabit tutulur ve metin ortam değişkeniyle verilir.
 
 **Karar:**
 - **Alıcı sabittir.** Telegram yalnız config'teki `telegram.chat_id`'ye, yani kullanıcının
