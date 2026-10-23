@@ -6,7 +6,8 @@ import importlib
 import importlib.util
 import os
 import tempfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -36,50 +37,103 @@ from artemis.channels.voice import stt_catalog
 from artemis.config.settings import GITHUB_OWNER_RE, Settings, load_settings
 from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
+SettingPath = tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class PanelBinding:
+    """Paneldeki bir widget ile config'teki tek bir alan arasındaki iki yönlü bağ.
+
+    Yenileme (`write`) ve kaydetme (`read`) aynı satırdan beslenir: bir ayarı yalnız birinde
+    unutmak, eskiden panelin varsayılanı gösterip "Uygula"da kayıtlı değeri ezmesine yol
+    açabiliyordu. Widget'ın kendisi (etiket, ipucu, yerleşim) yine elle kurulur.
+    """
+
+    path: SettingPath
+    widget: str  # SettingsPanel öznitelik adı
+    read: Callable[[Any], Any]
+    write: Callable[[Any, Any], None]
+    # Yenilemede sinyal yayılmaz; ör. kesintisiz kip kutusu canlı ses kipini değiştirmemeli.
+    quiet: bool = False
+
+
+def _checkbox(path: SettingPath, widget: str, *, quiet: bool = False) -> PanelBinding:
+    return PanelBinding(
+        path, widget, lambda box: box.isChecked(), lambda box, value: box.setChecked(bool(value)),
+        quiet=quiet,
+    )
+
+
+def _combo(path: SettingPath, widget: str, *, fallback_first: bool) -> PanelBinding:
+    """`fallback_first`: kayıtlı değer listede yoksa ilk seçenek gösterilir, yoksa seçim kalır."""
+
+    def write(combo: Any, value: Any) -> None:
+        index = combo.findData(value)
+        if index >= 0 or fallback_first:
+            combo.setCurrentIndex(max(0, index))
+
+    return PanelBinding(path, widget, lambda combo: str(combo.currentData()), write)
+
+
+# Panelin "Uygula" ile yazdığı ve "yenile" ile okuduğu sade alanlar. Özel mantığı olanlar
+# (mikrofon aygıtı, STT model yolu, uygulama listesi, code_agent) save_choices'ta açık kalır.
+PANEL_BINDINGS: tuple[PanelBinding, ...] = (
+    _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
+    _checkbox(("voice", "continuous_mode"), "continuous_mode", quiet=True),
+    _checkbox(("voice", "noise_suppression"), "noise_suppression"),
+    _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
+    _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
+    _checkbox(("voice", "echo_cancellation"), "echo_cancellation"),
+    _checkbox(("allow_all_applications",), "all_applications"),
+    PanelBinding(
+        ("computer_use", "mode"),
+        "computer_auto",
+        lambda box: "auto" if box.isChecked() else "accept",
+        lambda box, value: box.setChecked(value == "auto"),
+    ),
+)
+_BOUND_PATHS = frozenset(binding.path for binding in PANEL_BINDINGS)
+
+
+def setting_value(settings: Settings, path: SettingPath) -> Any:
+    value: Any = settings
+    for key in path:
+        value = getattr(value, key)
+    return value
+
 
 def save_choices(
     path: Path, device: int | str | None,
-    *, applications: dict[str, str] | None = None,
-    allow_all_applications: bool | None = None,
+    *, values: Mapping[SettingPath, Any] | None = None,
+    applications: dict[str, str] | None = None,
     code_agent: dict[str, Any] | None = None,
-    continuous_mode: bool | None = None,
-    noise_suppression: bool | None = None,
-    noise_suppression_level: str | None = None,
-    noise_suppression_stt: bool | None = None,
-    echo_cancellation: bool | None = None,
     stt_model: Path | None = None,
-    tts_backend: str | None = None,
-    computer_use_mode: str | None = None,
 ) -> None:
-    """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir."""
+    """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir.
+
+    `values` yalnız PANEL_BINDINGS yollarını kabul eder (yazım hatası sessizce yeni alan
+    açmasın diye KeyError); verilmeyen yolun kayıtlı değeri korunur.
+    """
+    unknown = set(values or {}) - _BOUND_PATHS
+    if unknown:
+        raise KeyError(f"Panel bağı olmayan ayar yolu: {sorted(unknown)}")
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     raw.setdefault("voice", {})["input_device"] = device
-    if continuous_mode is not None:
-        raw["voice"]["continuous_mode"] = continuous_mode
-    if noise_suppression is not None:
-        raw["voice"]["noise_suppression"] = noise_suppression
-    if noise_suppression_level is not None:
-        raw["voice"]["noise_suppression_level"] = noise_suppression_level
-    if noise_suppression_stt is not None:
-        raw["voice"]["noise_suppression_stt"] = noise_suppression_stt
-    if echo_cancellation is not None:
-        raw["voice"]["echo_cancellation"] = echo_cancellation
+    for setting_path, value in (values or {}).items():
+        section = raw
+        for key in setting_path[:-1]:
+            section = section.setdefault(key, {})
+        section[setting_path[-1]] = value
     if stt_model is not None:
         raw["voice"]["stt_model"] = str(stt_model)
-    if tts_backend is not None:
-        raw["voice"]["tts_backend"] = tts_backend
     if applications is not None:
         raw["applications"] = applications
         raw["close_without_confirmation"] = [
             name for name in raw.get("close_without_confirmation", []) if name in applications
         ]
-    if allow_all_applications is not None:
-        raw["allow_all_applications"] = allow_all_applications
     if code_agent is not None:
         _merge_code_agent(raw, code_agent)
-    if computer_use_mode is not None:
-        raw.setdefault("computer_use", {})["mode"] = computer_use_mode
     _write_validated(path, raw)
 
 
@@ -469,15 +523,10 @@ class SettingsPanel(QWidget):
             self.add_application_button.setEnabled(False)
             self.remove_application_button.setEnabled(False)
             self.advanced_devices.setEnabled(False)
-            self.continuous_mode.setEnabled(False)
-            self.noise_suppression.setEnabled(False)
-            self.noise_stt.setEnabled(False)
-            self.echo_cancellation.setEnabled(False)
             self.stt_combo.setEnabled(False)
-            self.tts_combo.setEnabled(False)
             self.stt_download.setEnabled(False)
-            self.all_applications.setEnabled(False)
-            self.computer_auto.setEnabled(False)
+            for binding in PANEL_BINDINGS:
+                getattr(self, binding.widget).setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
                            self.github_auto, self.github_button):
                 widget.setEnabled(False)
@@ -605,25 +654,18 @@ class SettingsPanel(QWidget):
             self._populate_stt_choices(
                 stt_catalog.choice_for_path(settings.voice.stt_model)
             )
-            tts_index = self.tts_combo.findData(settings.voice.tts_backend)
-            if tts_index >= 0:
-                self.tts_combo.setCurrentIndex(tts_index)
-            # Yenileme kaydedilmiş değeri gösterir; canlı ses kipini değiştirmemeli.
-            self.continuous_mode.blockSignals(True)
-            self.continuous_mode.setChecked(settings.voice.continuous_mode)
-            self.continuous_mode.blockSignals(False)
-            self.noise_suppression.setChecked(settings.voice.noise_suppression)
-            self.noise_level.setCurrentIndex(
-                max(0, self.noise_level.findData(settings.voice.noise_suppression_level))
-            )
-            self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
-            self.noise_stt.setChecked(settings.voice.noise_suppression_stt)
-            self.noise_stt.setEnabled(self.noise_suppression.isChecked() and not self._demo)
-            self.echo_cancellation.setChecked(settings.voice.echo_cancellation)
             self.applications = dict(settings.applications)
             self._refresh_applications()
-            self.all_applications.setChecked(settings.allow_all_applications)
-            self.computer_auto.setChecked(settings.computer_use.mode == "auto")
+            # Yenileme kaydedilmiş değeri gösterir; `quiet` bağ canlı durumu değiştirmez.
+            for binding in PANEL_BINDINGS:
+                widget = getattr(self, binding.widget)
+                if binding.quiet:
+                    widget.blockSignals(True)
+                binding.write(widget, setting_value(settings, binding.path))
+                if binding.quiet:
+                    widget.blockSignals(False)
+            self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
+            self.noise_stt.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self._sync_application_access()
             agent = settings.code_agent
             self.github_owner.setText(agent.github_owner or "")
@@ -722,6 +764,12 @@ class SettingsPanel(QWidget):
 
     def _apply(self) -> None:
         self.apply_requested.emit(self.device_combo.currentData())
+
+    def values(self) -> dict[SettingPath, Any]:
+        """PANEL_BINDINGS alanlarının panelde görünen değeri; save_choices(values=...) için."""
+        return {
+            binding.path: binding.read(getattr(self, binding.widget)) for binding in PANEL_BINDINGS
+        }
 
     def github_values(self) -> dict[str, Any]:
         """save_choices(code_agent=...) için; boş alan None olur ve kaydı siler."""
