@@ -34,24 +34,24 @@ from telegram_fake import (
     sent_bodies,
 )
 
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, ToolCall
-from jarvis.channels import cli
-from jarvis.channels.telegram.api import (
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, ToolCall
+from artemis.channels import cli
+from artemis.channels.telegram.api import (
     TELEGRAM_TEXT_LIMIT,
     TelegramClient,
     TelegramError,
     build_telegram_client,
 )
-from jarvis.channels.telegram.channel import TelegramChannel, check_message
-from jarvis.config.settings import Settings, TelegramConfig, load_settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import TAINT_NOTICE
-from jarvis.safety.paths import safe_join
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
-from jarvis.tools.platform import child_environment
-from jarvis.tools.plugins.filesystem import ReadFile
-from jarvis.tools.registry import ToolRegistry
+from artemis.channels.telegram.channel import TelegramChannel, check_message
+from artemis.config.settings import Settings, TelegramConfig, load_settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import TAINT_NOTICE
+from artemis.safety.paths import safe_join
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.platform import child_environment
+from artemis.tools.plugins.filesystem import ReadFile
+from artemis.tools.registry import ToolRegistry
 
 NOW = 1_800_000_000.0  # check_message testlerinde sabit saat (tam saniye, sınır kesin)
 TOKEN_FRAGMENT = "TEST-not-a-real"
@@ -746,9 +746,9 @@ async def test_audit_never_contains_the_token(make_harness) -> None:
 
 
 def test_child_environment_excludes_bot_token(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("JARVIS_TELEGRAM_BOT_TOKEN", FAKE_TOKEN)
+    monkeypatch.setenv("ARTEMIS_TELEGRAM_BOT_TOKEN", FAKE_TOKEN)
     env = child_environment()
-    assert "JARVIS_TELEGRAM_BOT_TOKEN" not in env
+    assert "ARTEMIS_TELEGRAM_BOT_TOKEN" not in env
     assert FAKE_TOKEN not in env.values()
 
 
@@ -762,7 +762,7 @@ def test_settings_refuse_any_token_field(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "token_env", ["TELEGRAM_BOT", "JARVIS_TELEGRAM_BOT", "jarvis_telegram_token", "JARVIS-TOKEN"]
+    "token_env", ["TELEGRAM_BOT", "ARTEMIS_TELEGRAM_BOT", "artemis_telegram_token", "ARTEMIS-TOKEN"]
 )
 def test_token_env_must_be_an_upper_case_token_name(token_env: str) -> None:
     with pytest.raises(ValidationError):
@@ -770,7 +770,7 @@ def test_token_env_must_be_an_upper_case_token_name(token_env: str) -> None:
 
 
 def test_token_env_default_and_valid_name_are_accepted() -> None:
-    assert TelegramConfig().token_env == "JARVIS_TELEGRAM_BOT_TOKEN"
+    assert TelegramConfig().token_env == "ARTEMIS_TELEGRAM_BOT_TOKEN"
     assert TelegramConfig(token_env="MY_BOT_TOKEN").token_env == "MY_BOT_TOKEN"
     assert TelegramConfig().chat_id is None
 
@@ -797,8 +797,8 @@ def test_api_base_is_normalized_for_loopback() -> None:
     ("chat_id", "env"),
     [
         (42, {}),
-        (42, {"JARVIS_TELEGRAM_BOT_TOKEN": "   "}),
-        (None, {"JARVIS_TELEGRAM_BOT_TOKEN": FAKE_TOKEN}),
+        (42, {"ARTEMIS_TELEGRAM_BOT_TOKEN": "   "}),
+        (None, {"ARTEMIS_TELEGRAM_BOT_TOKEN": FAKE_TOKEN}),
     ],
 )
 def test_build_client_is_none_when_telegram_is_off(
@@ -818,7 +818,7 @@ def test_build_client_with_token_hides_it(tmp_path: Path) -> None:
         telegram=TelegramConfig(chat_id=42, api_base="http://127.0.0.1:9"),
     )
     audit = AuditLog(tmp_path / "audit.jsonl")
-    client = build_telegram_client(settings, audit, env={"JARVIS_TELEGRAM_BOT_TOKEN": FAKE_TOKEN})
+    client = build_telegram_client(settings, audit, env={"ARTEMIS_TELEGRAM_BOT_TOKEN": FAKE_TOKEN})
     assert isinstance(client, TelegramClient)
     try:
         assert FAKE_TOKEN not in repr(client)
@@ -857,7 +857,7 @@ async def test_every_outbound_call_is_audited(make_harness) -> None:
 
 
 def _run_telegram_cli(monkeypatch: pytest.MonkeyPatch, config: Path) -> int | None:
-    monkeypatch.setattr(sys, "argv", ["jarvis", "telegram", "--config", str(config)])
+    monkeypatch.setattr(sys, "argv", ["artemis", "telegram", "--config", str(config)])
     with pytest.raises(SystemExit) as exit_info:
         cli.main()
     return exit_info.value.code
@@ -878,10 +878,10 @@ def test_telegram_command_names_missing_token_variable_only(
 ) -> None:
     config = tmp_path / "config.yaml"
     config.write_text("workspace: desktop\ntelegram:\n  chat_id: 42\n", encoding="utf-8")
-    monkeypatch.delenv("JARVIS_TELEGRAM_BOT_TOKEN", raising=False)
+    monkeypatch.delenv("ARTEMIS_TELEGRAM_BOT_TOKEN", raising=False)
     assert _run_telegram_cli(monkeypatch, config) == 2
     captured = capsys.readouterr()
     output = captured.out + captured.err
-    assert "JARVIS_TELEGRAM_BOT_TOKEN" in output
+    assert "ARTEMIS_TELEGRAM_BOT_TOKEN" in output
     assert FAKE_TOKEN not in output and TOKEN_FRAGMENT not in output
 

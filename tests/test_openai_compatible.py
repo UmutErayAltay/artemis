@@ -7,11 +7,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from jarvis.brain import providers
-from jarvis.brain.errors import ProviderError
-from jarvis.brain.models import Message
-from jarvis.brain.providers import OpenAICompatibleProvider, OpenRouterProvider
-from jarvis.config.settings import EndpointConfig, ModelConfig, Settings
+from artemis.brain import providers
+from artemis.brain.errors import ProviderError
+from artemis.brain.models import Message
+from artemis.brain.providers import OpenAICompatibleProvider, OpenRouterProvider
+from artemis.config.settings import EndpointConfig, ModelConfig, Settings
 from tests.test_providers import HTTPState, http_server, response_for  # noqa: F401, F811
 
 
@@ -46,7 +46,7 @@ def _provider(state: HTTPState, tmp_path: Path, **kw: object) -> OpenAICompatibl
 
 @pytest.fixture(autouse=True)
 def _no_vault(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.delenv("JARVIS_YEREL_1_API_KEY", raising=False)
+    monkeypatch.delenv("ARTEMIS_YEREL_1_API_KEY", raising=False)
     monkeypatch.setattr(providers, "read_secret", lambda target: None)
 
 
@@ -85,14 +85,14 @@ def test_key_order_env_then_vault(monkeypatch: pytest.MonkeyPatch, tmp_path: Pat
 
     monkeypatch.setattr(providers, "read_secret", vault)
     assert providers._endpoint_key(settings, model) == "kasa"
-    assert seen == ["Jarvis/yerel-1"]
-    monkeypatch.setenv("JARVIS_YEREL_1_API_KEY", "ortam")
+    assert seen == ["Artemis/yerel-1"]
+    monkeypatch.setenv("ARTEMIS_YEREL_1_API_KEY", "ortam")
     assert providers._endpoint_key(settings, model) == "ortam"
-    assert seen == ["Jarvis/yerel-1"]
+    assert seen == ["Artemis/yerel-1"]
 
 
 def test_missing_key_message(tmp_path: Path) -> None:
-    with pytest.raises(ProviderError, match="JARVIS_YEREL_1_API_KEY"):
+    with pytest.raises(ProviderError, match="ARTEMIS_YEREL_1_API_KEY"):
         providers._endpoint_key(_settings("https://x.com/v1", tmp_path), _model(endpoint="yerel-1"))
 
 
@@ -115,7 +115,7 @@ async def test_key_sent_as_bearer(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("JARVIS_YEREL_1_API_KEY", "gizli-test")
+    monkeypatch.setenv("ARTEMIS_YEREL_1_API_KEY", "gizli-test")
     http_server.body = response_for("openrouter")
     await _provider(http_server, tmp_path).complete([], [], timeout=2)
     assert http_server.requests[0][2]["Authorization"] == "Bearer gizli-test"

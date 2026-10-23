@@ -8,7 +8,7 @@ Kullanıcı "ekranımı gör, şunu şöyle yap" diyebilmek istiyor. Var olanlar
 `screen_read` yalnız OCR metni döner (ADR 0029), `window_control` pencerenin içine dokunmaz
 (ADR 0031), tarayıcı MCP'si ayrı ve girişsiz bir Chromium'dur (ADR 0032).
 
-Bu, Jarvis'in en riskli yeteneğidir: ekranda görünen her şey (mesaj, parola alanı, belge)
+Bu, Artemis'in en riskli yeteneğidir: ekranda görünen her şey (mesaj, parola alanı, belge)
 modele gider ve ekrandaki bir metin (web sayfası, e-posta) modeli yönlendirmeye çalışabilir.
 Kural 4 dış içerikten sonra her yan etkiye onay ister; oturumun her adımı ekran görüntüsünden
 doğduğu için adım adım onay kullanılamaz hâle gelir. Emsal ADR 0023'tür: kod ajanı tek onayla
@@ -30,14 +30,14 @@ başlar, sonra kendi başına çalışır; riski sınırlar ve görünürlük ta
    ve `sensitive` taşır.
 4. **Kodla zorlanan sınırlar** (modelin beyanına güvenilmez):
    - Girdinin düşeceği pencere (tıklama/kaydırmada noktadaki pencere, yazma/tuşta ön plan)
-     Jarvis'in kendi süreci, bir
+     Artemis'in kendi süreci, bir
      kabuk/terminal (`cmd`, `powershell`, `pwsh`, `WindowsTerminal`, `conhost`), bir başlatıcı
      (`explorer`, Başlat/arama süreçleri, `mshta`, `wscript`, `cscript`, `rundll32`, `msiexec`,
      `control`), Unix kabuğu ve yorumlayıcı (`wsl`, `bash`, Git Bash `mintty`, `python`),
      gömülü terminalli editör (VS Code, Cursor), `regedit`, `mmc`, `taskmgr` ya da
      parola yöneticisi ise eylem çalışmaz. Engel modele bildirilir, üçüncü engelde oturum
      biter; engel kullanıcı reddi sayılmaz. Hassas onaydan sonra yeniden denetlenir.
-     Model Jarvis'in onay penceresine tıklayamaz. Uygulama açmak ana döngünün
+     Model Artemis'in onay penceresine tıklayamaz. Uygulama açmak ana döngünün
      `open_application` aracıyla olur, Dosya Gezgini'nden değil.
    - Engelli tuşlar: Win tuşu içeren her kombinasyon, `ctrl+alt+delete`, Ctrl+Esc içeren her
      kombinasyon (Başlat menüsü, Görev Yöneticisi). `alt+f4` ve Enter içeren her tuş kodla
@@ -101,9 +101,9 @@ Claude Code'daki gibi bir otomatik kip olsun ("kontrol bende, gerekirse Esc ile 
 
 ## Uygulama dalgaları
 
-1. `jarvis/computer/actions.py`: eylem modeli, JSON ayrıştırma, koordinat ölçekleme,
+1. `artemis/computer/actions.py`: eylem modeli, JSON ayrıştırma, koordinat ölçekleme,
    tuş/metin kuralları, hassaslık (saf Python, testli).
-2. `jarvis/computer/png.py`: BGRA ekran tamponundan küçültülmüş PNG (numpy + zlib).
+2. `artemis/computer/png.py`: BGRA ekran tamponundan küçültülmüş PNG (numpy + zlib).
 3. Sağlayıcılarda görüntü parçası (OpenRouter/OpenAI uyumlu/Anthropic/Ollama).
-4. `jarvis/computer/windows.py`: ekran görüntüsü (GDI), SendInput, ön plan süreç adı, DPI.
-5. `jarvis/computer/session.py` + `computer_use` aracı + masaüstü bağlantısı (Esc, onay, durum).
+4. `artemis/computer/windows.py`: ekran görüntüsü (GDI), SendInput, ön plan süreç adı, DPI.
+5. `artemis/computer/session.py` + `computer_use` aracı + masaüstü bağlantısı (Esc, onay, durum).

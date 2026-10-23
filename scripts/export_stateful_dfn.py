@@ -1,8 +1,8 @@
 """DeepFilterNet3 için DURUMLU (kare kare) ONNX adım modelini dışa aktarır (ADR 0037).
 
 GELİŞTİRME ARACI: yalnız torch venv'inde çalışır (torch, deepfilternet, onnx, onnxruntime,
-numpy); Jarvis çalışma anında bunlara BAĞIMLI DEĞİLDİR. Çıktı (`dfn3_step.onnx`,
-`dfn3_step.json`, `NOTICE`) depoya `jarvis/channels/voice/models/dfn3/` altında konur.
+numpy); Artemis çalışma anında bunlara BAĞIMLI DEĞİLDİR. Çıktı (`dfn3_step.onnx`,
+`dfn3_step.json`, `NOTICE`) depoya `artemis/channels/voice/models/dfn3/` altında konur.
 
 Neden: resmi ONNX dışa aktarımı tam dizi çalışır, GRU durumu grafiğin içinde kalır. Akışta
 bu, son 110 hop'u her 10 hop'ta yeniden çalıştırmayı (yaklaşık 11 kat gereksiz iş) ve gizli
@@ -42,7 +42,7 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_OUT = ROOT / "jarvis" / "channels" / "voice" / "models" / "dfn3"
+DEFAULT_OUT = ROOT / "artemis" / "channels" / "voice" / "models" / "dfn3"
 DEFAULT_ARCHIVE = Path("/home/user/rikorose/deepfilternet/models/DeepFilterNet3.zip")
 ARCHIVE_SHA256 = "49c52edc8947ae1f9bf50d81530beaf3a2c3245aeaf34b6f31ff535cd22284d2"
 UPSTREAM_COMMIT = "d375b2d8309e0935d165700c91da9de862a99c31"

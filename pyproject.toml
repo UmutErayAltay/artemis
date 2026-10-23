@@ -3,7 +3,7 @@ requires = ["hatchling==1.27.0"]
 build-backend = "hatchling.build"
 
 [project]
-name = "jarvis-tr"
+name = "artemis-tr"
 version = "0.1.0"
 description = "Türkçe, güvenlik kapılı kişisel masaüstü asistanı"
 requires-python = ">=3.12"
@@ -44,10 +44,10 @@ memory = ["fastembed==0.8.1", "numpy==2.5.3"]
 browser = ["playwright==1.63.0"]
 
 [project.scripts]
-jarvis = "jarvis.channels.cli:main"
+artemis = "artemis.channels.cli:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["jarvis", "bench"]
+packages = ["artemis", "bench"]
 
 [tool.ruff]
 target-version = "py312"
@@ -65,7 +65,7 @@ markers = ["disruptive: Gerçek makinede görünür yan etki; varsayılan çalı
 [tool.mypy]
 python_version = "3.12"
 strict = true
-files = ["jarvis", "bench"]
+files = ["artemis", "bench"]
 
 [[tool.mypy.overrides]]
 module = ["send2trash.*"]
@@ -95,12 +95,12 @@ ignore_missing_imports = true
 # QWidget/QThread alt sınıfları `misc` hatası verir.
 [[tool.mypy.overrides]]
 module = [
-  "jarvis.channels.desktop.app",
-  "jarvis.channels.desktop.pet",
-  "jarvis.channels.desktop.settings_panel",
-  "jarvis.channels.desktop.projects_panel",
-  "jarvis.channels.desktop.instance",
-  "jarvis.channels.desktop.provider_section",
+  "artemis.channels.desktop.app",
+  "artemis.channels.desktop.pet",
+  "artemis.channels.desktop.settings_panel",
+  "artemis.channels.desktop.projects_panel",
+  "artemis.channels.desktop.instance",
+  "artemis.channels.desktop.provider_section",
 ]
 # Qt yokken Any olan ifadelerdeki ignore'lar `unused-ignore` olur; Qt varken gerekir.
 disable_error_code = ["misc", "no-any-return", "unused-ignore"]

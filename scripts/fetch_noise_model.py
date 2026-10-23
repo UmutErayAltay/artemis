@@ -1,8 +1,8 @@
 """Resmi DeepFilterNet3 ONNX grafiklerini indirir ve doğrular (ADR 0037); yalnız standart kütüphane.
 
-GELİŞTİRME ARACI: Jarvis çalışma anında bu dosyalara ihtiyaç duymaz (durumlu adım modeli pakete
+GELİŞTİRME ARACI: Artemis çalışma anında bu dosyalara ihtiyaç duymaz (durumlu adım modeli pakete
 dahildir). Resmi tam dizi grafikler yalnız parite testi içindir: akış yolunun çevrimdışı resmi
-yola uyduğunu ölçmek için `JARVIS_DFN_MODEL_DIR` bu dizini göstermelidir.
+yola uyduğunu ölçmek için `ARTEMIS_DFN_MODEL_DIR` bu dizini göstermelidir.
 
 Kullanım: python scripts/fetch_noise_model.py [--dest models/deepfilternet3]
 """
@@ -40,7 +40,7 @@ Yazar: Hendrik Schröter. Lisans: MIT veya Apache-2.0 (çift lisans).
 Kaynak: https://github.com/Rikorose/DeepFilterNet (models/DeepFilterNet3_onnx.tar.gz)
 İndirilen adres: {url}
 Arşiv sha256: {digest}
-Jarvis bu dosyaları değiştirmez; bütünlük denoise.py'de her yüklemede sha256 ile doğrulanır.
+Artemis bu dosyaları değiştirmez; bütünlük denoise.py'de her yüklemede sha256 ile doğrulanır.
 """
 
 

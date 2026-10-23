@@ -1,7 +1,7 @@
 # ADR 0025 — Kalıcı öz hafıza
 
-**Bağlam:** Konuşma geçmişi yalnız bellekteydi (ADR 0012); yeniden başlatınca Jarvis
-kullanıcıyı unutuyordu. Obsidian vault (ADR 0015) kullanıcının notlarıdır, Jarvis'in
+**Bağlam:** Konuşma geçmişi yalnız bellekteydi (ADR 0012); yeniden başlatınca Artemis
+kullanıcıyı unutuyordu. Obsidian vault (ADR 0015) kullanıcının notlarıdır, Artemis'in
 çalışma belleği değildir ve ona kendiliğinden yazılmaz.
 
 **Karar:** Tek SQLite deposu, `state_dir/memory.sqlite3` (vault dışında, stdlib `sqlite3`).
@@ -27,7 +27,7 @@ turdan dönen `conversation_search` sonucu `external=True` taşır, taint sürer
 `done_label` ("Hafızaya yazıldı") kullanıcıya görünen bildirimdir.
 
 **Yapılmadı:** embedding araması (sözcük sıralaması ölçülür biçimde yetmezse
-`jarvis/memory/embedding.py` ile eklenir), LLM özetleri / otomatik konsolidasyon, eski
+`artemis/memory/embedding.py` ile eklenir), LLM özetleri / otomatik konsolidasyon, eski
 turların budanması, depo şifrelemesi, notların kullanıcı arayüzünde düzenlenmesi.
 Arama son 2000 turu bellekte tarar. SQLite dosyası düz metindir; gizli turların ham JSON'u
 (araç çıktısı dahil) diskte durur.

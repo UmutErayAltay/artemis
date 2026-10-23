@@ -5,12 +5,12 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from jarvis.brain.models import ToolCall
-from jarvis.config.settings import Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate, TurnState
-from jarvis.tools.base import ToolContext
-from jarvis.tools.registry import discover_tools
+from artemis.brain.models import ToolCall
+from artemis.config.settings import Settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate, TurnState
+from artemis.tools.base import ToolContext
+from artemis.tools.registry import discover_tools
 
 
 class Desktop:

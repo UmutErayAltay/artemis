@@ -6,7 +6,7 @@
 CommandRunner'ı kullandığından bağlamın tek yeri orasıdır; kanal başına kopya,
 kanallar arasında farklı geçmiş ve farklı güvenlik davranışı demektir.
 
-**Karar:** `jarvis/brain/conversation.py` içindeki `ConversationContext`,
+**Karar:** `artemis/brain/conversation.py` içindeki `ConversationContext`,
 CommandRunner'ın sahip olduğu tek oturum geçmişidir. Runtime bir tane kurar; kanal
 yalnız `runner.reset_context()` çağırabilir (panelde "Yeni sohbet", CLI'da `/yeni`).
 Sıfırlama aktif tur sürerken yapılmaz ve denetime `context_reset` olarak yazılır.

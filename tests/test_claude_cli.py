@@ -8,14 +8,14 @@ from typing import Any
 
 import pytest
 
-from jarvis.brain import providers
-from jarvis.brain.errors import ProviderError, RetryableProviderError
-from jarvis.brain.models import Message, ToolCall
-from jarvis.brain.providers import ClaudeCliProvider, provider_problem
-from jarvis.brain.router import ProviderRouter
-from jarvis.config.settings import ModelConfig, Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.tools.base import Risk, ToolDefinition
+from artemis.brain import providers
+from artemis.brain.errors import ProviderError, RetryableProviderError
+from artemis.brain.models import Message, ToolCall
+from artemis.brain.providers import ClaudeCliProvider, provider_problem
+from artemis.brain.router import ProviderRouter
+from artemis.config.settings import ModelConfig, Settings
+from artemis.safety.audit import AuditLog
+from artemis.tools.base import Risk, ToolDefinition
 
 TOOL = ToolDefinition(
     name="echo", description="Yansıtır.", parameters={"type": "object"}, risk=Risk.READ_ONLY

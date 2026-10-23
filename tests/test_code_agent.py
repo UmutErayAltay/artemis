@@ -16,13 +16,13 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.channels.runtime import create_runtime
-from jarvis.config.settings import CodeAgentConfig, Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.tools.base import Risk, ToolContext
-from jarvis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
-from jarvis.tools.plugins.code_agent import (
+from artemis.brain.fake import ScriptedProvider
+from artemis.channels.runtime import create_runtime
+from artemis.config.settings import CodeAgentConfig, Settings
+from artemis.safety.audit import AuditLog
+from artemis.tools.base import Risk, ToolContext
+from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
+from artemis.tools.plugins.code_agent import (
     CodeAgentAnswer,
     CodeAgentCancel,
     CodeAgentPrepare,
@@ -31,8 +31,8 @@ from jarvis.tools.plugins.code_agent import (
     StartArguments,
     StatusArguments,
 )
-from jarvis.tools.project_spec import AUTHORITY_BOUNDARY, ProjectSpec
-from jarvis.tools.registry import discover_tools
+from artemis.tools.project_spec import AUTHORITY_BOUNDARY, ProjectSpec
+from artemis.tools.registry import discover_tools
 
 SESSION = str(uuid.uuid4())
 TERMINAL = {"done", "error", "cancelled", "timeout", "cleanup_pending", "interrupted"}
@@ -305,7 +305,7 @@ def test_monotonic_total_deadline_survives_wall_clock_rollback(
     jobs, _ = make_jobs(tmp_path, reply(payload("question")))
     job_id = jobs.start("proj", repo, "görev", command=sys.executable, max_minutes=0.006)
     wait_job(jobs, job_id, {"waiting"})
-    monkeypatch.setattr("jarvis.tools.code_agent_jobs.time.time", lambda: 0)
+    monkeypatch.setattr("artemis.tools.code_agent_jobs.time.time", lambda: 0)
     assert wait_job(jobs, job_id)["status"] == "timeout"
     jobs.shutdown()
 
@@ -361,7 +361,7 @@ def test_normal_exit_cleans_child_with_closed_stdio(tmp_path: Path, repo: Path) 
 def test_cleanup_failure_retains_repo_lock(
     tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from jarvis.tools.code_agent_process import ProcessCapture
+    from artemis.tools.code_agent_process import ProcessCapture
 
     jobs, factory = make_jobs(tmp_path, reply())
     original_finish = ProcessCapture.finish
@@ -383,7 +383,7 @@ def test_cleanup_failure_retains_repo_lock(
 def test_git_error_never_clean_or_done(
     tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import jarvis.tools.code_agent_jobs as module
+    import artemis.tools.code_agent_jobs as module
 
     jobs, factory = make_jobs(tmp_path, reply())
     original = module._git
@@ -402,7 +402,7 @@ def test_git_error_never_clean_or_done(
 def test_git_failure_at_start_and_dirty_tree_rejected(
     tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import jarvis.tools.code_agent_jobs as module
+    import artemis.tools.code_agent_jobs as module
 
     jobs, factory = make_jobs(tmp_path, reply())
     (repo / "dirty").write_text("x")

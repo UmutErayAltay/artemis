@@ -15,14 +15,14 @@ from typing import Any, Literal
 import pytest
 from pydantic import ValidationError
 
-import jarvis.channels.desktop.computer_host as host_module
-from jarvis.brain.models import ToolCall
-from jarvis.channels.desktop.computer_host import ComputerHost, SessionHandles
-from jarvis.config.settings import ComputerUseConfig, ModelConfig, PerceptionConfig, Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate, TurnState
-from jarvis.tools.base import Risk, ToolContext
-from jarvis.tools.registry import discover_tools
+import artemis.channels.desktop.computer_host as host_module
+from artemis.brain.models import ToolCall
+from artemis.channels.desktop.computer_host import ComputerHost, SessionHandles
+from artemis.config.settings import ComputerUseConfig, ModelConfig, PerceptionConfig, Settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate, TurnState
+from artemis.tools.base import Risk, ToolContext
+from artemis.tools.registry import discover_tools
 from tests.test_computer_session import DONE, FakeBackend, ScriptedVision, click
 
 CALL = ToolCall(id="c", name="computer_use", arguments={"goal": "Not Defteri'ni aç"})
@@ -293,9 +293,9 @@ def test_config_bounds(field: str, value: float) -> None:
 
 async def test_model_chain_falls_through_only_on_retryable_errors() -> None:
     # 429/hız sınırı geçicidir: ilk görsel model takılınca ikincisi aynı görüntüyle çalışır.
-    from jarvis.brain.errors import ProviderError, RetryableProviderError
-    from jarvis.brain.models import Completion
-    from jarvis.tools.plugins.computer import _ModelChain
+    from artemis.brain.errors import ProviderError, RetryableProviderError
+    from artemis.brain.models import Completion
+    from artemis.tools.plugins.computer import _ModelChain
 
     class Fixed:
         def __init__(self, name: str, error: ProviderError | None = None) -> None:
@@ -340,9 +340,9 @@ async def test_runtime_mode_switch_reaches_the_tool_context(tmp_path: Path) -> N
 
 async def test_model_chain_skips_a_rate_limited_model_for_a_while() -> None:
     # Ölçüldü: haiku dakikalarca 429 verirken her adımda denemek boşa istek harcıyordu.
-    from jarvis.brain.errors import ProviderError, RateLimitedError
-    from jarvis.brain.models import Completion
-    from jarvis.tools.plugins.computer import _ModelChain
+    from artemis.brain.errors import ProviderError, RateLimitedError
+    from artemis.brain.models import Completion
+    from artemis.tools.plugins.computer import _ModelChain
 
     class Fixed:
         def __init__(self, name: str, error: ProviderError | None = None) -> None:
@@ -383,7 +383,7 @@ async def test_auto_mode_skips_window_move_on_tainted_turn(tmp_path: Path) -> No
 
 def test_empty_computer_model_uses_the_main_brain(tmp_path: Path) -> None:
     # Boş `computer_use.model` = ana beyin: görüntü o an seçili ana modele gider.
-    from jarvis.tools.plugins.computer import vision_models
+    from artemis.tools.plugins.computer import vision_models
 
     base = Settings(
         workspace=tmp_path,
@@ -413,7 +413,7 @@ class _Fixed:
         self.name, self.error, self.calls = name, error, 0
 
     async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Any:
-        from jarvis.brain.models import Completion
+        from artemis.brain.models import Completion
 
         self.calls += 1
         if self.error is not None:
@@ -422,8 +422,8 @@ class _Fixed:
 
 
 async def test_model_chain_does_not_cool_down_on_non_429_retryable_errors() -> None:
-    from jarvis.brain.errors import RetryableProviderError
-    from jarvis.tools.plugins.computer import _ModelChain
+    from artemis.brain.errors import RetryableProviderError
+    from artemis.tools.plugins.computer import _ModelChain
 
     flaky = _Fixed("a", RetryableProviderError("5xx"))
     chain = _ModelChain([flaky, _Fixed("b")])  # type: ignore[list-item]
@@ -435,8 +435,8 @@ async def test_model_chain_does_not_cool_down_on_non_429_retryable_errors() -> N
 async def test_model_chain_all_rate_limited_then_cooled_down_says_so(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from jarvis.brain.errors import ProviderError, RateLimitedError
-    from jarvis.tools.plugins import computer as module
+    from artemis.brain.errors import ProviderError, RateLimitedError
+    from artemis.tools.plugins import computer as module
 
     now = [1000.0]
     monkeypatch.setattr(module, "monotonic", lambda: now[0])
@@ -459,8 +459,8 @@ async def test_model_chain_all_rate_limited_then_cooled_down_says_so(
 async def test_model_chain_cooldown_counts_from_the_failure_not_the_loop_start(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from jarvis.brain.errors import RateLimitedError
-    from jarvis.tools.plugins import computer as module
+    from artemis.brain.errors import RateLimitedError
+    from artemis.tools.plugins import computer as module
 
     now = [0.0]
     monkeypatch.setattr(module, "monotonic", lambda: now[0])
@@ -502,7 +502,7 @@ async def test_cloud_fallback_is_dropped_from_chain_without_permission(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     # Yalnız ilk model denetlenseydi yerel ilk + bulut yedek izinsiz görüntü alırdı.
-    from jarvis.tools.plugins import computer as module
+    from artemis.tools.plugins import computer as module
 
     gate, context, host, _ = _chain_env(
         tmp_path, {"local": "ollama", "cloud": "openrouter"}, allow_cloud=False
@@ -514,7 +514,7 @@ async def test_cloud_fallback_is_dropped_from_chain_without_permission(
             built.append(settings.primary_model)
 
         async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Any:
-            from jarvis.brain.models import Completion
+            from artemis.brain.models import Completion
 
             return Completion(content=DONE)
 

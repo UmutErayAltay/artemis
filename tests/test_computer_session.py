@@ -1,6 +1,6 @@
 """Bilgisayar kullanımı oturum döngüsü (ADR 0039): yalnız sahte arka uç/sağlayıcı/onay.
 
-Gerçek fare, klavye, ekran ya da `jarvis.computer.windows` girdi işlevleri hiç çağrılmaz.
+Gerçek fare, klavye, ekran ya da `artemis.computer.windows` girdi işlevleri hiç çağrılmaz.
 """
 
 from __future__ import annotations
@@ -12,9 +12,9 @@ from typing import Any
 
 import pytest
 
-from jarvis.brain.models import Completion, Message
-from jarvis.computer.session import ComputerSession, SessionResult
-from jarvis.config.settings import ComputerUseConfig
+from artemis.brain.models import Completion, Message
+from artemis.computer.session import ComputerSession, SessionResult
+from artemis.config.settings import ComputerUseConfig
 
 OWN_PID = 4242
 TYPED_TEXT = "yazilan-ornek-metin-123"  # denetime sızmaması gereken yazılan metin
@@ -367,7 +367,7 @@ async def test_invalid_once_then_ok() -> None:
 
 @pytest.mark.parametrize(
     "foreground",
-    [("C:\\Windows\\System32\\cmd.exe", 7), ("C:\\x\\jarvis.exe", OWN_PID), ("", 0)],
+    [("C:\\Windows\\System32\\cmd.exe", 7), ("C:\\x\\artemis.exe", OWN_PID), ("", 0)],
 )
 async def test_blocked_window_never_gets_input_and_third_block_ends(
     foreground: tuple[str, int],
@@ -390,17 +390,17 @@ async def test_single_block_is_reported_to_model_and_session_continues() -> None
     assert "ENGELLENDİ (click)" in second_prompt
 
 
-async def test_click_on_app_runs_even_when_jarvis_is_foreground() -> None:
-    # Canlı hata: komut panelden verilince ön plan Jarvis'ti, Brave'e tıklama engelleniyordu.
-    backend = FakeBackend(foreground=(r"C:\Jarvis\pythonw.exe", OWN_PID))
+async def test_click_on_app_runs_even_when_artemis_is_foreground() -> None:
+    # Canlı hata: komut panelden verilince ön plan Artemis'ti, Brave'e tıklama engelleniyordu.
+    backend = FakeBackend(foreground=(r"C:\Artemis\pythonw.exe", OWN_PID))
     backend.at = (r"C:\Program Files\BraveSoftware\brave.exe", 500)
     env = Env(click(), DONE, backend=backend)
     assert (await env.run()).reason == "done"
     assert backend.calls == [("click", 2, 1, "left", False)]
 
 
-async def test_typing_goes_to_foreground_so_jarvis_foreground_blocks_it() -> None:
-    backend = FakeBackend(foreground=(r"C:\Jarvis\pythonw.exe", OWN_PID))
+async def test_typing_goes_to_foreground_so_artemis_foreground_blocks_it() -> None:
+    backend = FakeBackend(foreground=(r"C:\Artemis\pythonw.exe", OWN_PID))
     backend.at = (r"C:\Program Files\BraveSoftware\brave.exe", 500)
     env = Env(act(type="type", text="merhaba", reason="yaz"), DONE, backend=backend)
     assert (await env.run()).reason == "done"
@@ -547,15 +547,15 @@ async def test_click_on_blocked_window_under_point_is_blocked_even_if_foreground
 
 
 async def test_target_is_rechecked_after_approval() -> None:
-    # Onay penceresi kapanınca odak Jarvis'e geçti: onaylanmış adım bile çalışmamalı.
+    # Onay penceresi kapanınca odak Artemis'e geçti: onaylanmış adım bile çalışmamalı.
     env = Env(act(type="type", text="merhaba", sensitive=True), DONE)
 
-    def approve_and_focus_jarvis(name: str, arguments: dict[str, Any]) -> bool:
+    def approve_and_focus_artemis(name: str, arguments: dict[str, Any]) -> bool:
         env.approvals.append((name, arguments))
-        env.backend.foreground = (r"C:\Jarvis\pythonw.exe", OWN_PID)
+        env.backend.foreground = (r"C:\Artemis\pythonw.exe", OWN_PID)
         return True
 
-    env._approve = approve_and_focus_jarvis  # type: ignore[method-assign]
+    env._approve = approve_and_focus_artemis  # type: ignore[method-assign]
     await env.run()
     assert len(env.approvals) == 1
     assert env.backend.calls == []

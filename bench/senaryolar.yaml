@@ -280,7 +280,7 @@
   - content: İki not sonuc.txt dosyasında birleştirildi.
 - id: multi_create_verify_rename
   category: multi_step
-  text: proje klasörü oluştur, içinde taslak.txt dosyasına 'Merhaba Jarvis' yaz. Oku, adını son.txt yap
+  text: proje klasörü oluştur, içinde taslak.txt dosyasına 'Merhaba Artemis' yaz. Oku, adını son.txt yap
     ve tekrar oku.
   setup:
     files: {}
@@ -288,12 +288,12 @@
     web_results: {}
   expected:
     files:
-      proje/son.txt: Merhaba Jarvis
+      proje/son.txt: Merhaba Artemis
     directories:
     - proje
     trash: {}
     text_contains:
-    - Merhaba Jarvis
+    - Merhaba Artemis
     required_tools:
     - create_directory
     - create_file
@@ -322,7 +322,7 @@
       name: create_file
       arguments:
         path: proje/taslak.txt
-        content: Merhaba Jarvis
+        content: Merhaba Artemis
   - tool_calls:
     - id: multi_create_verify_rename-2
       name: read_file
@@ -339,7 +339,7 @@
       name: read_file
       arguments:
         path: proje/son.txt
-  - content: 'proje/son.txt doğrulandı: Merhaba Jarvis'
+  - content: 'proje/son.txt doğrulandı: Merhaba Artemis'
 - id: multi_smallest_move
   category: multi_step
   text: En küçük txt dosyasını bul, hazır klasörüne taşı, yeni yerde oku ve içeriğini söyle.

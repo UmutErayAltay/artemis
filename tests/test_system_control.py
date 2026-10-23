@@ -9,9 +9,9 @@ from typing import Any
 
 import pytest
 
-from jarvis.tools.platform import child_environment
-from jarvis.tools.plugins.system import WindowControlArguments
-from jarvis.tools.system_control import (
+from artemis.tools.platform import child_environment
+from artemis.tools.plugins.system import WindowControlArguments
+from artemis.tools.system_control import (
     BRIGHTNESS_SCRIPT,
     LOCK_SCRIPT,
     SLEEP_SCRIPT,
@@ -111,9 +111,9 @@ def test_powershell_argv_is_fixed_and_values_only_in_env() -> None:
     assert script_of(args) == WINDOW_CONTROL_SCRIPT
     assert "987654" not in " ".join(args)
     assert "left" not in " ".join(args[:6])
-    assert kwargs["env"]["JARVIS_WINDOW_ID"] == "987654"
-    assert kwargs["env"]["JARVIS_WINDOW_ACTION"] == "left"
-    assert "JARVIS_WINDOW_SCREEN" not in kwargs["env"]
+    assert kwargs["env"]["ARTEMIS_WINDOW_ID"] == "987654"
+    assert kwargs["env"]["ARTEMIS_WINDOW_ACTION"] == "left"
+    assert "ARTEMIS_WINDOW_SCREEN" not in kwargs["env"]
     assert set(child_environment()).issubset(kwargs["env"])
 
 
@@ -147,13 +147,13 @@ def test_volume_values_travel_in_env_including_empty() -> None:
     runner = FakeRunner(stdout='{"level":40,"muted":true}')
     make(runner).set_volume(40, True)
     env = runner.calls[0][1]["env"]
-    assert env["JARVIS_VOLUME_LEVEL"] == "40"
-    assert env["JARVIS_VOLUME_MUTE"] == "1"
+    assert env["ARTEMIS_VOLUME_LEVEL"] == "40"
+    assert env["ARTEMIS_VOLUME_MUTE"] == "1"
     runner = FakeRunner(stdout='{"level":40,"muted":false}')
     make(runner).set_volume(None, False)
     env = runner.calls[0][1]["env"]
-    assert env["JARVIS_VOLUME_LEVEL"] == ""
-    assert env["JARVIS_VOLUME_MUTE"] == "0"
+    assert env["ARTEMIS_VOLUME_LEVEL"] == ""
+    assert env["ARTEMIS_VOLUME_MUTE"] == "0"
 
 
 def test_scripts_use_stop_error_preference_and_catch() -> None:
@@ -178,7 +178,7 @@ def test_shutdown_argv_is_exact_and_bypasses_powershell() -> None:
     args, _ = runner.calls[0]
     assert args[:5] == ["shutdown.exe", "/s", "/t", "90", "/c"]
     assert len(args) == 6
-    assert args[5].startswith("Jarvis: ")
+    assert args[5].startswith("Artemis: ")
     assert "90" in args[5]
     assert "shutdown /a" in args[5]
     assert outcome.status == "sent"
@@ -340,7 +340,7 @@ def test_control_window_success_for_every_action(action: str) -> None:
     runner = FakeRunner(stdout='{"ok":true}')
     outcome = make(runner).control_window(10, action)  # type: ignore[arg-type]
     assert outcome.status == "ok"
-    assert runner.calls[0][1]["env"]["JARVIS_WINDOW_ACTION"] == action
+    assert runner.calls[0][1]["env"]["ARTEMIS_WINDOW_ACTION"] == action
 
 
 @pytest.mark.parametrize(
@@ -379,7 +379,7 @@ def test_control_window_move_to_screen_passes_screen_in_env() -> None:
     assert outcome.status == "ok"
     args, kwargs = runner.calls[0]
     # Neden: Ekran değeri kullanıcı girdisidir; argv sabit kalır, değer ortamda taşınır.
-    assert kwargs["env"]["JARVIS_WINDOW_SCREEN"] == "2"
+    assert kwargs["env"]["ARTEMIS_WINDOW_SCREEN"] == "2"
     assert script_of(args) == WINDOW_CONTROL_SCRIPT
     assert args[:6] == [
         "powershell.exe",
@@ -419,8 +419,8 @@ def test_control_window_screen_validation_raises_before_runner(
 
 def test_window_control_script_supports_move_to_screen() -> None:
     assert "'move_to_screen'" in WINDOW_CONTROL_SCRIPT
-    assert "JARVIS_WINDOW_SCREEN" in WINDOW_CONTROL_SCRIPT
-    assert "[int]::TryParse($env:JARVIS_WINDOW_SCREEN, [ref]$screenNumber)" in (
+    assert "ARTEMIS_WINDOW_SCREEN" in WINDOW_CONTROL_SCRIPT
+    assert "[int]::TryParse($env:ARTEMIS_WINDOW_SCREEN, [ref]$screenNumber)" in (
         WINDOW_CONTROL_SCRIPT
     )
     assert "Add-Type -AssemblyName System.Windows.Forms" in WINDOW_CONTROL_SCRIPT
@@ -429,12 +429,12 @@ def test_window_control_script_supports_move_to_screen() -> None:
         "Sort-Object @{Expression={-not $_.Primary}}, @{Expression={$_.Bounds.Left}}, "
         "@{Expression={$_.Bounds.Top}}"
     ) in WINDOW_CONTROL_SCRIPT
-    assert "[void][JarvisWin]::ShowWindow($h, 9)" in WINDOW_CONTROL_SCRIPT
-    assert "[void][JarvisWin]::ShowWindow($h, 3)" in WINDOW_CONTROL_SCRIPT
+    assert "[void][ArtemisWin]::ShowWindow($h, 9)" in WINDOW_CONTROL_SCRIPT
+    assert "[void][ArtemisWin]::ShowWindow($h, 3)" in WINDOW_CONTROL_SCRIPT
     assert "0x0044" in WINDOW_CONTROL_SCRIPT
-    assert "[JarvisWin]::MonitorFromWindow($h, 2)" in WINDOW_CONTROL_SCRIPT
+    assert "[ArtemisWin]::MonitorFromWindow($h, 2)" in WINDOW_CONTROL_SCRIPT
 
-    dpi_aware = WINDOW_CONTROL_SCRIPT.index("[void][JarvisWin]::SetProcessDPIAware()")
+    dpi_aware = WINDOW_CONTROL_SCRIPT.index("[void][ArtemisWin]::SetProcessDPIAware()")
     all_screens = WINDOW_CONTROL_SCRIPT.index("[System.Windows.Forms.Screen]::AllScreens")
     assert dpi_aware < all_screens
     assert WINDOW_CONTROL_SCRIPT.index("'move_to_screen' {") < WINDOW_CONTROL_SCRIPT.index(
@@ -569,7 +569,7 @@ def test_stderr_never_reaches_message() -> None:
 
 
 def test_payload_survives_line_separators_and_bom() -> None:
-    from jarvis.tools.system_control import _parse_payload
+    from artemis.tools.system_control import _parse_payload
 
     title = "Sekme başlığı\u0085son"
     stdout = "﻿" + json.dumps({"title": title}, ensure_ascii=False) + "\n"
@@ -577,12 +577,12 @@ def test_payload_survives_line_separators_and_bom() -> None:
 
 
 def test_window_titles_drop_bidi_and_separator_characters() -> None:
-    from jarvis.tools.system_control import _clean_line
+    from artemis.tools.system_control import _clean_line
 
     assert _clean_line("a\u202eb\u2028c\u200bd", 50) == "ab cd"
 
 
 def test_window_control_uses_the_same_filter_as_the_list() -> None:
-    from jarvis.tools import system_control
+    from artemis.tools import system_control
 
-    assert "[JarvisWin]::Listed($h)" in system_control.WINDOW_CONTROL_SCRIPT
+    assert "[ArtemisWin]::Listed($h)" in system_control.WINDOW_CONTROL_SCRIPT

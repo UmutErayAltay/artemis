@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.safety.audit import AuditLog, redact
+from artemis.safety.audit import AuditLog, redact
 
 
 def test_nested_secrets_and_environment_values_are_redacted(

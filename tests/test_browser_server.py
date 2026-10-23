@@ -1,6 +1,6 @@
 """Tarayıcı MCP sunucusu (ADR 0032): saf URL politikası + gerçek istemciyle uçtan uca.
 
-Uçtan uca testler sahte arka ucu (`JARVIS_BROWSER_FAKE`) kullanır; gerçek ağa veya
+Uçtan uca testler sahte arka ucu (`ARTEMIS_BROWSER_FAKE`) kullanır; gerçek ağa veya
 Chromium'a çıkılmaz. Gerçek Chromium testi yalnız Playwright kuruluysa ve elle çalışır.
 """
 
@@ -17,10 +17,10 @@ from typing import Any
 
 import pytest
 
-from jarvis.mcp.client import MCPCallResult, StdioMCPClient
-from jarvis.mcp_servers import browser
-from jarvis.mcp_servers.browser import check_url
-from jarvis.tools.platform import child_environment
+from artemis.mcp.client import MCPCallResult, StdioMCPClient
+from artemis.mcp_servers import browser
+from artemis.mcp_servers.browser import check_url
+from artemis.tools.platform import child_environment
 
 ROOT = Path(__file__).resolve().parent.parent
 PUBLIC = "93.184.216.34"
@@ -159,9 +159,9 @@ def test_text_is_truncated_to_budget() -> None:
 def make_client(tmp_path: Path, spec: dict[str, Any]) -> StdioMCPClient:
     fake = tmp_path / "fake.json"
     fake.write_text(json.dumps(spec), encoding="utf-8")
-    env = {**child_environment(), "JARVIS_BROWSER_FAKE": str(fake), "PYTHONPATH": str(ROOT)}
+    env = {**child_environment(), "ARTEMIS_BROWSER_FAKE": str(fake), "PYTHONPATH": str(ROOT)}
     return StdioMCPClient(
-        [sys.executable, "-m", "jarvis.mcp_servers.browser"], env=env, cwd=ROOT, timeout=20
+        [sys.executable, "-m", "artemis.mcp_servers.browser"], env=env, cwd=ROOT, timeout=20
     )
 
 
@@ -289,7 +289,7 @@ def test_missing_playwright_gives_honest_install_hint(tmp_path: Path) -> None:
         pytest.skip("Playwright kurulu")
     env = {**child_environment(), "PYTHONPATH": str(ROOT)}
     client = StdioMCPClient(
-        [sys.executable, "-m", "jarvis.mcp_servers.browser"], env=env, cwd=ROOT, timeout=20
+        [sys.executable, "-m", "artemis.mcp_servers.browser"], env=env, cwd=ROOT, timeout=20
     )
     # Kamusal ad gerçek DNS gerektirir; IP literal çözümleme istemez.
     result = call(client, {"url": "http://93.184.216.34/"})
@@ -323,7 +323,7 @@ def test_protocol_edge_cases() -> None:
     ]
     env = {**child_environment(), "PYTHONPATH": str(ROOT)}
     done = subprocess.run(
-        [sys.executable, "-m", "jarvis.mcp_servers.browser"],
+        [sys.executable, "-m", "artemis.mcp_servers.browser"],
         input=("\n".join(lines) + "\n").encode(),
         capture_output=True,
         cwd=ROOT,
@@ -334,7 +334,7 @@ def test_protocol_edge_cases() -> None:
     replies = [json.loads(line) for line in done.stdout.decode("utf-8").splitlines()]
     assert [r["id"] for r in replies] == [1, 2, 3]
     assert replies[0]["result"]["protocolVersion"] == "2024-11-05"
-    assert replies[0]["result"]["serverInfo"]["name"] == "jarvis-browser"
+    assert replies[0]["result"]["serverInfo"]["name"] == "artemis-browser"
     assert replies[1]["result"]["protocolVersion"] == "2025-06-18"
     assert replies[2]["error"]["code"] == -32601
 
@@ -370,11 +370,11 @@ def test_real_chromium_fill_click_read(tmp_path: Path) -> None:
         env = {
             **child_environment(),
             "PYTHONPATH": str(ROOT),
-            "JARVIS_BROWSER_ALLOW_LOCAL": "1",
+            "ARTEMIS_BROWSER_ALLOW_LOCAL": "1",
         }
-        env.pop("JARVIS_BROWSER_FAKE", None)
+        env.pop("ARTEMIS_BROWSER_FAKE", None)
         client = StdioMCPClient(
-            [sys.executable, "-m", "jarvis.mcp_servers.browser"], env=env, cwd=ROOT, timeout=60
+            [sys.executable, "-m", "artemis.mcp_servers.browser"], env=env, cwd=ROOT, timeout=60
         )
         steps = [
             {"action": "fill", "selector": "#i", "value": "merhaba"},

@@ -14,8 +14,8 @@ import wave
 from pathlib import Path
 from typing import Any
 
-from jarvis.channels.voice.denoise import DeepFilterNetDenoiser
-from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
+from artemis.channels.voice.denoise import DeepFilterNetDenoiser
+from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 
 FRAME = 320  # 20 ms, 16 kHz
 
@@ -49,7 +49,7 @@ def main(argv: list[str] | None = None) -> int:
     delay = denoiser.delay_samples
     if args.rate == 48000:
         # 16 kHz kaynak sinyal 48 kHz'e yükseltilip 960 örneklik karelere bölünür (yalnız bench).
-        up: Any = importlib.import_module("jarvis.channels.voice.denoise").Upsampler3()
+        up: Any = importlib.import_module("artemis.channels.voice.denoise").Upsampler3()
         np: Any = importlib.import_module("numpy")
         samples = np.frombuffer(data, dtype="<i2").astype("float32") / 32768.0
         wide = np.clip(np.rint(up.process(samples) * 32768.0), -32768, 32767).astype("<i2")

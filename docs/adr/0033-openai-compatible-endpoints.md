@@ -10,8 +10,8 @@ sağlayıcı hataları sabit bir cümlenin arkasında kayboluyordu.
   `provider: openai_compatible` ve `endpoint: <id>` ile bağlanır. Adres kuralları mevcut
   sağlayıcı adresleriyle aynıdır (http yalnız localhost; query/fragment/userinfo yasak).
   Eski sağlayıcı ayarları değişmez, config taşıması yoktur.
-- Anahtar YAML'da durmaz: önce `JARVIS_<ID>_API_KEY` ortam değişkeni, sonra Kimlik Bilgisi
-  Yöneticisi `Jarvis/<id>`. Anahtar `os.environ`'a yazılmaz. `api_key: false` uçta
+- Anahtar YAML'da durmaz: önce `ARTEMIS_<ID>_API_KEY` ortam değişkeni, sonra Kimlik Bilgisi
+  Yöneticisi `Artemis/<id>`. Anahtar `os.environ`'a yazılmaz. `api_key: false` uçta
   `Authorization` başlığı gönderilmez.
 - İstek gövdesine OpenRouter'a özel `usage`/`provider` alanları konmaz (OpenAI bilinmeyen
   parametreyi 400 ile reddeder). Maliyet token × config fiyatıdır; yanıtta `usage` yoksa

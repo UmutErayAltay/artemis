@@ -7,12 +7,12 @@ from uuid import uuid4
 
 import pytest
 
-from jarvis.brain.errors import ProviderError
-from jarvis.brain.models import Completion, Message
-from jarvis.brain.router import ProviderRouter
-from jarvis.config.settings import ModelConfig, Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.tools.base import ToolDefinition
+from artemis.brain.errors import ProviderError
+from artemis.brain.models import Completion, Message
+from artemis.brain.router import ProviderRouter
+from artemis.config.settings import ModelConfig, Settings
+from artemis.safety.audit import AuditLog
+from artemis.tools.base import ToolDefinition
 
 
 class RecordingProvider:
@@ -73,7 +73,7 @@ async def test_budget_disk_error_blocks_provider_without_exposing_sqlite_error(
     def locked_database(*args: object, **kwargs: object) -> sqlite3.Connection:
         raise sqlite3.OperationalError("database is locked: secret-path")
 
-    monkeypatch.setattr("jarvis.brain.budget.sqlite3.connect", locked_database)
+    monkeypatch.setattr("artemis.brain.budget.sqlite3.connect", locked_database)
 
     with pytest.raises(ProviderError, match="Günlük bütçe kaydı") as failure:
         await router.complete([], [], timeout=5)

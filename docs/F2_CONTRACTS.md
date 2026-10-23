@@ -17,8 +17,8 @@ değerlerini context'e taşır. Süre temizleme için işçi kısa sabit grace k
 
 ## Masaüstü süreç alanı
 
-Yeni `jarvis.tools.processes` içinde async sabit işçi çağrısı yardımcıları.
-Yeni `jarvis.tools.desktop_worker` yalnız `open_application`, `close_application`,
+Yeni `artemis.tools.processes` içinde async sabit işçi çağrısı yardımcıları.
+Yeni `artemis.tools.desktop_worker` yalnız `open_application`, `close_application`,
 `read_clipboard`, `write_clipboard`, `open_browser` çağrılarına izin verir; stdin
 JSON isteği, stdout tek JSON sonucu. Argüman/çıktı boyutu sınırlıdır; ham hata
 gövdeleri/sırlar stderr veya repr'e yazılmaz. Worker mevcut WindowsDesktop sync
@@ -29,7 +29,7 @@ wait ile temizlenir; başka kullanıcı uygulamaları öldürülmez.
 
 ## Geri alma alanı
 
-`jarvis.safety.undo` SQLite UndoJournal + typed kayıtlar. Dosya
+`artemis.safety.undo` SQLite UndoJournal + typed kayıtlar. Dosya
 `settings.state_dir / 'undo.sqlite3'`; testler tmp_path state_dir kullanır.
 `plugins/filesystem.py` DeleteFile kayıt → trash → doğrula → kayıt sonucu sırasını
 uygular. Hazırlık, tamamlandı, başarısız, belirsiz durumları ayırt edilir.

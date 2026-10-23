@@ -5,10 +5,10 @@ from typing import Any, ClassVar
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
-from jarvis.brain.models import ToolCall
-from jarvis.config.settings import Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import (
+from artemis.brain.models import ToolCall
+from artemis.config.settings import Settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import (
     HISTORY_TAINT_NOTICE,
     SITE_NOTICE,
     TAINT_NOTICE,
@@ -18,9 +18,9 @@ from jarvis.safety.gate import (
     remember_site,
     trusted_sites_path,
 )
-from jarvis.safety.paths import safe_join
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
-from jarvis.tools.registry import ToolRegistry
+from artemis.safety.paths import safe_join
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.registry import ToolRegistry
 
 
 class FileArgs(BaseModel):
@@ -540,7 +540,7 @@ def test_trusted_sites_store_survives_corruption(tmp_path: Path) -> None:
 async def test_open_url_asks_only_for_data_bearing_url_after_external_content(
     tmp_path: Path, url: str, state: TurnState, asks: bool
 ) -> None:
-    from jarvis.tools.plugins.desktop import OpenURL
+    from artemis.tools.plugins.desktop import OpenURL
 
     opened: list[str] = []
     settings = Settings(workspace=tmp_path, state_dir=tmp_path / "state")

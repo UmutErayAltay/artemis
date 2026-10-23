@@ -5,7 +5,7 @@ import json
 import pytest
 from pydantic import ValidationError
 
-from jarvis.computer.actions import (
+from artemis.computer.actions import (
     BLOCKED_PROCESSES,
     MODIFIERS,
     NAMED_KEYS,
@@ -332,7 +332,7 @@ def test_blocked_processes_cover_shells_and_password_managers() -> None:
 def test_process_block_reason_blocks_own_pid() -> None:
     assert (
         process_block_reason("brave.exe", 1234, 1234)
-        == "Jarvis'in kendi penceresi"
+        == "Artemis'in kendi penceresi"
     )
 
 

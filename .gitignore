@@ -19,10 +19,11 @@ config/config.yaml.bak*
 *.sqlite*
 *.db
 .jarvis/
+.artemis/
 state/
 reports/
 models/
-!jarvis/channels/voice/models/
+!artemis/channels/voice/models/
 bench/audio/
 .DS_Store
 /desktop/

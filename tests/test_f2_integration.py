@@ -10,17 +10,17 @@ from uuid import uuid4
 
 from pydantic import BaseModel, ConfigDict
 
-from jarvis.brain.agent_loop import AgentLoop
-from jarvis.brain.models import Completion, ToolCall
-from jarvis.brain.router import ProviderRouter
-from jarvis.channels.runner import CommandRunner
-from jarvis.config.settings import ModelConfig, Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate, TurnState
-from jarvis.safety.undo import UndoJournal
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
-from jarvis.tools.plugins.filesystem import DeleteFile, ReadFile
-from jarvis.tools.registry import ToolRegistry
+from artemis.brain.agent_loop import AgentLoop
+from artemis.brain.models import Completion, ToolCall
+from artemis.brain.router import ProviderRouter
+from artemis.channels.runner import CommandRunner
+from artemis.config.settings import ModelConfig, Settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate, TurnState
+from artemis.safety.undo import UndoJournal
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.plugins.filesystem import DeleteFile, ReadFile
+from artemis.tools.registry import ToolRegistry
 
 
 class EmptyArgs(BaseModel):

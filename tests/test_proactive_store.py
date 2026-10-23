@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.proactive.store import (
+from artemis.proactive.store import (
     ProactiveStore,
     ProactiveStoreError,
     Reminder,

@@ -6,10 +6,10 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.brain.conversation import TurnRecord
-from jarvis.brain.errors import ProviderError
-from jarvis.brain.models import Message
-from jarvis.brain.providers import ClaudeCliProvider, _chat_messages, _cloud_messages
+from artemis.brain.conversation import TurnRecord
+from artemis.brain.errors import ProviderError
+from artemis.brain.models import Message
+from artemis.brain.providers import ClaudeCliProvider, _chat_messages, _cloud_messages
 from tests.test_claude_cli import provider as cli_provider
 from tests.test_providers import (  # noqa: F401
     HTTPState,

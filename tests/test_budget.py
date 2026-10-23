@@ -8,8 +8,8 @@ from threading import Barrier
 
 import pytest
 
-from jarvis.brain.budget import BudgetLedger
-from jarvis.brain.errors import BudgetExceeded, ProviderError
+from artemis.brain.budget import BudgetLedger
+from artemis.brain.errors import BudgetExceeded, ProviderError
 
 
 def test_reservation_checks_spending_and_outstanding_amounts(tmp_path: Path) -> None:

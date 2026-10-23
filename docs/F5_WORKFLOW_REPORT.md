@@ -13,7 +13,7 @@ Aşağıdaki tablo otomatik doğrulamanın kaydıdır; elle kabulün ayrıntıs�
 | Ruff | `All checks passed!` |
 | Mypy, Linux | 71 kaynak dosyası geçti |
 | Mypy, win32 hedefi | 71 kaynak dosyası geçti; Windows çalışma zamanı testi değildir |
-| CI run 38532547547, `bec6b8d` | [Dört Ubuntu/Windows işi de geçti](https://github.com/UmutErayAltay/jarvis/actions/runs/38532547547) |
+| CI run 38532547547, `bec6b8d` | [Dört Ubuntu/Windows işi de geçti](https://github.com/UmutErayAltay/artemis/actions/runs/38532547547) |
 | F5 güvenlik mutasyonu | Onay riski SIDE_EFFECT'e indirilince hedef test kırıldı |
 | Tüm güvenlik mutasyonları | 4/4 yakalandı; geçici kopyalar dışında kaynak özeti değişmedi |
 | Mevcut genel sahte kabul bench'i | 39/39 geçti; tehlikeli hata 0, onaysız yan etki 0 |
@@ -43,7 +43,7 @@ göstermez: [ekran görüntüsü](assets/desktop/projects.png).
 ## Bilinçli sınırlamalar
 
 Yerel kod ajanı OS sandbox değildir. Claude Code Bash ve alt ajan çağrıları
-Jarvis SafetyGate tarafından tek tek denetlenmez. Profil ayarları model seçimine
+Artemis SafetyGate tarafından tek tek denetlenmez. Profil ayarları model seçimine
 yön verir; gerçek model dağılımı ya da harcama üst sınırı değildir. Windows Job
 Object süreç yolu Windows CI'da sınandı; bu kullanıcı Windows 11 kabulü değildir.
 Claude Code oturum açma, gerçek kullanıcı aboneliği ve

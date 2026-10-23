@@ -10,13 +10,13 @@ from typing import Any
 
 import pytest
 
-from jarvis.brain.models import ToolCall
-from jarvis.config.settings import PerceptionConfig, Settings, SystemControlConfig
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate, TurnState
-from jarvis.tools.base import ToolContext
-from jarvis.tools.registry import discover_tools
-from jarvis.tools.system_control import SystemOutcome, WindowInfo
+from artemis.brain.models import ToolCall
+from artemis.config.settings import PerceptionConfig, Settings, SystemControlConfig
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate, TurnState
+from artemis.tools.base import ToolContext
+from artemis.tools.registry import discover_tools
+from artemis.tools.system_control import SystemOutcome, WindowInfo
 
 
 class FakeService:

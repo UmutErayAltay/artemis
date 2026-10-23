@@ -7,31 +7,41 @@ from typing import Any
 
 import pytest
 
-from jarvis.channels.autostart import Autostart, autostart_command, gui_python
-from jarvis.channels.cli import autostart as autostart_cli
-from jarvis.tools.registry import discover_tools
+from artemis.channels.autostart import (
+    LEGACY_VALUE_NAME,
+    VALUE_NAME,
+    Autostart,
+    autostart_command,
+    gui_python,
+)
+from artemis.channels.cli import autostart as autostart_cli
+from artemis.tools.registry import discover_tools
 
 
 class FakeStore:
-    def __init__(self, value: str | None = None) -> None:
+    def __init__(self, value: str | None = None, legacy: str | None = None) -> None:
         self.value = value
+        self.legacy = legacy
         self.calls: list[str] = []
 
-    def read(self) -> str | None:
+    def read(self, name: str = VALUE_NAME) -> str | None:
         self.calls.append("read")
-        return self.value
+        return self.legacy if name == LEGACY_VALUE_NAME else self.value
 
     def write(self, command: str) -> None:
         self.calls.append("write")
         self.value = command
 
-    def delete(self) -> None:
+    def delete(self, name: str = VALUE_NAME) -> None:
         self.calls.append("delete")
-        self.value = None
+        if name == LEGACY_VALUE_NAME:
+            self.legacy = None
+        else:
+            self.value = None
 
 
 class ForbiddenStore(FakeStore):
-    def read(self) -> str | None:
+    def read(self, name: str = VALUE_NAME) -> str | None:
         raise AssertionError("Windows dışında kayıt deposu çağrılmamalı")
 
     write = delete = read  # type: ignore[assignment]
@@ -58,7 +68,7 @@ def _manager(
 def test_command_is_fixed_quoted_absolute_and_never_opens_microphone(tmp_path: Path) -> None:
     config = tmp_path / "boşluklu klasör" / "config.yaml"
     command = autostart_command(config, python=r"C:\Program Files\Py\pythonw.exe")
-    assert command.startswith('"C:\\Program Files\\Py\\pythonw.exe" -m jarvis desktop --arka-plan')
+    assert command.startswith('"C:\\Program Files\\Py\\pythonw.exe" -m artemis desktop --arka-plan')
     assert f'--config "{config.resolve()}"' in command
     assert "--ses" not in command
     assert "voice" not in command
@@ -78,7 +88,7 @@ def test_enable_writes_reads_back_and_audits(tmp_path: Path) -> None:
     result = manager.enable()
     assert result.success and result.state == "on"
     assert store.value == manager.expected
-    assert store.calls == ["write", "read"]
+    assert store.calls == ["write", "delete", "read"]
     assert events == [{"event": "autostart", "action": "enable", "success": True, "state": "on"}]
     assert manager.status().state == "on"
 
@@ -94,7 +104,7 @@ def test_disable_removes_value(tmp_path: Path) -> None:
 
 
 def test_status_reports_stale_entry_from_another_installation(tmp_path: Path) -> None:
-    manager = _manager(tmp_path, FakeStore(r'"C:\eski\pythonw.exe" -m jarvis desktop'))
+    manager = _manager(tmp_path, FakeStore(r'"C:\eski\pythonw.exe" -m artemis desktop'))
     assert manager.status().state == "stale"
 
 
@@ -114,7 +124,7 @@ def test_registry_errors_are_reported_not_raised(tmp_path: Path) -> None:
         def write(self, command: str) -> None:
             raise PermissionError("erişim")
 
-        def delete(self) -> None:
+        def delete(self, name: str = VALUE_NAME) -> None:
             raise PermissionError("erişim")
 
     assert not _manager(tmp_path, Broken()).enable().success
@@ -131,7 +141,7 @@ def test_non_windows_is_honest_and_never_touches_store(tmp_path: Path) -> None:
 def test_cli_status_on_linux_reports_windows_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    monkeypatch.setattr("jarvis.channels.autostart.sys.platform", "linux")
+    monkeypatch.setattr("artemis.channels.autostart.sys.platform", "linux")
     config = tmp_path / "config.yaml"
     config.write_text(Path("config/config.example.yaml").read_text(encoding="utf-8"), "utf-8")
     assert autostart_cli(config, "ac") == 1
@@ -166,8 +176,30 @@ def test_model_has_no_tool_that_touches_autostart_or_registry() -> None:
     names = [definition.name for definition in discover_tools().definitions()]
     assert names
     assert not [name for name in names if "autostart" in name or "registry" in name]
-    plugins = Path("jarvis/tools/plugins")
+    plugins = Path("artemis/tools/plugins")
     for source in plugins.glob("*.py"):
         text = source.read_text(encoding="utf-8")
-        assert "jarvis.channels.autostart" not in text, source
+        assert "artemis.channels.autostart" not in text, source
         assert "winreg" not in text, source
+
+
+def test_enable_removes_legacy_value(tmp_path: Path) -> None:
+    store = FakeStore(legacy=r'"C:\eski\pythonw.exe" -m jarvis desktop')
+    result = _manager(tmp_path, store).enable()
+    assert result.success and result.state == "on"
+    assert store.legacy is None
+
+
+def test_status_flags_legacy_value_as_stale(tmp_path: Path) -> None:
+    manager = _manager(tmp_path, FakeStore(legacy="eski"))
+    status = manager.status()
+    assert status.state == "stale" and "yeniden" in status.message
+    manager.enable()
+    assert manager.status().state == "on"
+
+
+def test_disable_removes_both_values(tmp_path: Path) -> None:
+    store = FakeStore("yeni", legacy="eski")
+    result = _manager(tmp_path, store).disable()
+    assert result.success and result.state == "off"
+    assert store.value is None and store.legacy is None

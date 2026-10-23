@@ -30,15 +30,15 @@ onaylanabilir bir taslak ve izlenebilir bir kodlama işi üretmelidir.
   tool.execute veya jobs.start/cancel çağırmaz; ortak runner/dispatcher'dan geçer.
 
 **Yetki sınırı:** ADR 0023'teki kullanıcının güvenilen yerel repo kararı korunur;
-VM/container kurulmaz. Claude Code'un kendi Bash/alt ajan araçları Jarvis
+VM/container kurulmaz. Claude Code'un kendi Bash/alt ajan araçları Artemis
 SafetyGate'iyle tek tek denetlenmez. Push yasağı izin deseni ve talimattır, OS
 izolasyonu garantisi değildir. Onay kapsamı bu sınırı gösterir. Kimlik bilgileri
-Claude'un resmi girişinde kalır; Jarvis anahtar/token okumaz veya alt sürece aktarmaz.
+Claude'un resmi girişinde kalır; Artemis anahtar/token okumaz veya alt sürece aktarmaz.
 Başkasının reposu, otomatik ücretli API yedeği ve kontrolsüz yeniden başlatma eklenmez.
 
 **Sonuçlar:** Windows ve gerçek Claude Code kabulü ayrı elle yapılır. Sahte CLI
 testleri abonelik erişimini, görev gecikmesini veya gerçek model dağılımını kanıtlamaz.
-Bu karar Jarvis'in mevcut ses sağlayıcısını ve CPA bağlantısını değiştirmez.
+Bu karar Artemis'in mevcut ses sağlayıcısını ve CPA bağlantısını değiştirmez.
 
 Kaynaklar: [headless çıktı ve resume](https://code.claude.com/docs/en/headless),
 [alt ajanlar](https://code.claude.com/docs/en/sub-agents), ADR 0023.

@@ -35,4 +35,4 @@ içinde web'den kırpılmış metinler de olabilir.
 ister. Vault'a her yazma bir onay penceresi açar; sık kullanımda bu yük ölçülüp
 gerekirse ayrı ADR ile gevşetilir. Sözcük aramasının kalitesi yalnız canlı ölçümle
 bilinir. Embedding için `pip install
-'jarvis-tr[memory]'` ve ilk indekslemede model indirmesi gerekir.
+'artemis-tr[memory]'` ve ilk indekslemede model indirmesi gerekir.

@@ -3,8 +3,8 @@ from typing import ClassVar
 import pytest
 from pydantic import BaseModel, Field, ValidationError
 
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolDefinition, ToolResult
-from jarvis.tools.registry import ToolRegistry, decode_tool_name, encode_tool_name
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolDefinition, ToolResult
+from artemis.tools.registry import ToolRegistry, decode_tool_name, encode_tool_name
 
 
 class ExampleArgs(BaseModel):

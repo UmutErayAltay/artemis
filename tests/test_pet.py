@@ -18,7 +18,7 @@ from PySide6.QtGui import QImage
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
-from jarvis.channels.desktop.pet import (
+from artemis.channels.desktop.pet import (
     BODY,
     PetWidget,
     clamp_anchor,
@@ -184,9 +184,9 @@ def test_truncate_and_summaries() -> None:
     assert truncate("a  b\n c") == "a b c"
     long = truncate("x" * 500)
     assert len(long) == 140 and long.endswith("…")
-    assert job_summary("jarvis", "done", ["a", "b"]) == "jarvis: bitti, 2 commit"
-    assert job_summary("jarvis", "done", 0) == "jarvis: bitti, commit yok"
-    assert job_summary("jarvis", "timeout", ["a"]) == "jarvis: hata"
+    assert job_summary("artemis", "done", ["a", "b"]) == "artemis: bitti, 2 commit"
+    assert job_summary("artemis", "done", 0) == "artemis: bitti, commit yok"
+    assert job_summary("artemis", "timeout", ["a"]) == "artemis: hata"
 
 
 def test_bubble_heard_answer_and_autohide(made: Any) -> None:
@@ -344,7 +344,7 @@ def test_timer_runs_only_while_visible(made: Any) -> None:
 
 def test_accessibility_follows_state(made: Any) -> None:
     pet, _ = made()
-    assert pet.accessibleName() == "Jarvis pet"
+    assert pet.accessibleName() == "Artemis pet"
     assert "ses kapalı" in pet.accessibleDescription()
     pet.set_approval(True)
     assert "Onay" in pet.accessibleDescription()

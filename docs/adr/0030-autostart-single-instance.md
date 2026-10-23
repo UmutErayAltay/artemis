@@ -1,8 +1,8 @@
 # ADR 0030 — Windows açılışında başlama ve tek örnek
 
-**Bağlam:** Faz 6a hatırlatma ve brifingleri yalnız Jarvis açıkken teslim eder; kullanıcı
+**Bağlam:** Faz 6a hatırlatma ve brifingleri yalnız Artemis açıkken teslim eder; kullanıcı
 paneli her açılışta elle başlatmazsa kaçan hatırlatma birikir. Tepsi simgesi zaten var
-(pencere kapanınca tepsiye iner), fakat Windows açılışında başlama ve "Jarvis zaten açık mı"
+(pencere kapanınca tepsiye iner), fakat Windows açılışında başlama ve "Artemis zaten açık mı"
 denetimi yok. İki masaüstü örneği aynı `state_dir` üzerinde çalışırsa aynı SQLite
 depolarını, aynı hatırlatma zamanlayıcısını ve mikrofonu paylaşmaya çalışır. Mevcut kurallar:
 kayıt defteri değişikliği onay gerektirir (CLAUDE.md 3), mikrofon yalnız kullanıcı açınca
@@ -11,17 +11,17 @@ açılır (ses kanalı kuralı), başarı doğrulanmadan bildirilmez (5).
 **Karar:**
 
 - **Açılışta başlama yalnız kullanıcı eylemiyle kurulur, model araçla kuramaz.** Giriş
-  noktaları `jarvis autostart ac|kapat|durum` komutu ve tepsi menüsündeki "Windows
+  noktaları `artemis autostart ac|kapat|durum` komutu ve tepsi menüsündeki "Windows
   açılışında başlat" seçeneğidir. Her ikisi de kullanıcının doğrudan tıklaması/komutudur;
   bu, kayıt defteri değişikliği için açık onaydır. Bir LLM aracı EKLENMEZ: model kendi
   kendini kalıcı hale getiremez (kalıcılık, saldırganın ilk hedefidir).
 
 - **Yalnız kullanıcı kovanı.** Kayıt `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`
-  altında `Jarvis` değeridir; yönetici izni istemez, başka kullanıcıyı etkilemez. Görev
+  altında `Artemis` değeridir; yönetici izni istemez, başka kullanıcıyı etkilemez. Görev
   zamanlayıcısı ya da Başlangıç klasörü kısayolu kullanılmaz (biri daha fazla izin, öteki
   COM/kısayol üretimi ister).
 
-- **Komut sabittir ve geri okunur.** Değer `pythonw.exe -m jarvis desktop --arka-plan
+- **Komut sabittir ve geri okunur.** Değer `pythonw.exe -m artemis desktop --arka-plan
   --config <mutlak yol>` biçimindedir; `pythonw.exe` yoksa `sys.executable` kullanılır.
   Argümanlar `subprocess.list2cmdline` ile tırnaklanır. Yazdıktan sonra değer geri okunur;
   beklenenle aynı değilse işlem başarısız sayılır. `--ses` asla eklenmez: mikrofon
@@ -44,10 +44,10 @@ açılır (ses kanalı kuralı), başarı doğrulanmadan bildirilmez (5).
   yanıt vermiyorsa kaldırılır. Bekleyen bağlantı sayısı sınırlıdır (8), 1 sn içinde ileti
   göndermeyen bağlantı kapatılır.
 
-- **Geç gelen tepsi.** Oturum açılışında Explorer tepsisi Jarvis'ten sonra hazır olabilir;
+- **Geç gelen tepsi.** Oturum açılışında Explorer tepsisi Artemis'ten sonra hazır olabilir;
   `--arka-plan` tepsiyi yaklaşık 30 sn yeniden dener, ancak yine yoksa paneli gösterir.
 
-- **Kurulum varsayımı.** Run değeri `-m jarvis` ile başlar ve çalışma dizini System32
+- **Kurulum varsayımı.** Run değeri `-m artemis` ile başlar ve çalışma dizini System32
   olur; bu yüzden paket aynı ortamda kurulu olmalıdır (`pip install -e .`). `durum`,
   kayıttaki yorumlayıcı silinmişse kaydı "eşleşmiyor" sayar.
 
@@ -60,8 +60,8 @@ açılır (ses kanalı kuralı), başarı doğrulanmadan bildirilmez (5).
 - Gerçek kayıt defteri testi yoktur; yalnız Windows'ta elle doğrulanır.
 
 **Sonuçlar:**
-- Jarvis Windows oturumu açılınca tepside başlar; hatırlatma ve brifingler kaçmaz.
+- Artemis Windows oturumu açılınca tepside başlar; hatırlatma ve brifingler kaçmaz.
 - Telegram kanalı ayrı süreçtir ve tek örnek kuralının dışındadır; çift teslimi 6a'daki
   SQLite talep kaydı zaten önler.
 - Kurulum paketi ve imzalı ikili yoktur; kayıt, kullanıcının Python ortamına bağlıdır. Ortam
-  taşınırsa `jarvis autostart ac` yeniden çalıştırılır (`durum` bunu gösterir).
+  taşınırsa `artemis autostart ac` yeniden çalıştırılır (`durum` bunu gösterir).

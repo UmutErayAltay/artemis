@@ -5,7 +5,7 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from jarvis.computer.png import (  # noqa: E402
+from artemis.computer.png import (  # noqa: E402
     bgra_to_rgb,
     downscale,
     encode_png,

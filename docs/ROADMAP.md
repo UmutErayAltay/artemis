@@ -1,6 +1,6 @@
-# Jarvis yol haritası
+# Artemis yol haritası
 
-Jarvis, Windows 11 için Türkçe tek kullanıcılı masaüstü asistanıdır. Mimari için
+Artemis, Windows 11 için Türkçe tek kullanıcılı masaüstü asistanıdır. Mimari için
 [ARCHITECTURE.md](ARCHITECTURE.md) ve [ADR'ler](adr/) geçerlidir.
 
 ## Özellik ekleme kuralı
@@ -30,8 +30,8 @@ olmayan fazlar planlanmıştır.
 Durum: kullanıcının işi. Bir oturum bu fazı "yapıldı" diye işaretlemez.
 
 **Kapsam**
-- Ses: `python -m jarvis voice --config config/config.yaml` ile gerçek mikrofon ve hoparlör.
-- Masaüstü paneli: `python -m jarvis desktop --config config/config.yaml`.
+- Ses: `python -m artemis voice --config config/config.yaml` ile gerçek mikrofon ve hoparlör.
+- Masaüstü paneli: `python -m artemis desktop --config config/config.yaml`.
 - Canlı ölçüm: `python -m bench.run --canli --model MODEL_KIMLIGI`, en az iki ücretsiz
   OpenRouter modeliyle.
 - Bulunan hatalar bu fazdan sonraki tüm işlerden önce ele alınır.
@@ -167,9 +167,9 @@ CLAUDE.md 12. kural) taşır ve yalnız Windows'ta anlamlıdır; en sona kalır.
 - Risk sınıfı bildirilmeyen MCP aracı SIDE_EFFECT sayılır (testle).
 - Her kalemin Windows kabulü kullanıcı tarafından yapılır.
 
-### Faz 7 — Windows'ta yaşayan Jarvis
+### Faz 7 — Windows'ta yaşayan Artemis
 
-Durum: başladı (2026-10-15, kullanıcı kararı). Amaç: Jarvis'i bilgisayar açıkken hep hazır
+Durum: başladı (2026-10-15, kullanıcı kararı). Amaç: Artemis'i bilgisayar açıkken hep hazır
 ve Windows'u yönetebilir hale getirmek; masaüstü araçlarını tamamlamak.
 Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla) yapılır.
 
@@ -179,7 +179,7 @@ Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla)
 | 7b | Pencere ve sistem kontrolü | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0031](adr/0031-window-and-system-control.md) |
 | 7c | Tarayıcı otomasyonu (MCP üzerinden) | kodlandı ve Linux'ta doğrulandı (sahte arka uç); gerçek Chromium ve Windows'ta denenmedi | [ADR 0032](adr/0032-browser-automation-mcp.md) |
 
-Sıranın gerekçesi: 7a, 6a hatırlatmalarının gerçekten çalışmasının ön koşuludur (Jarvis
+Sıranın gerekçesi: 7a, 6a hatırlatmalarının gerçekten çalışmasının ön koşuludur (Artemis
 kapalıyken hatırlatma gelmez) ve yeni araç yüzeyi açmaz. 7b pencere ve sistem
 araçlarını ekler; yerel ve geri alınabilir işlerden geri alınamayanlara (kapatma, yeniden
 başlatma) doğru risk sınıfı belirlenir. 7c, 6b MCP istemcisini kullanır; Playwright

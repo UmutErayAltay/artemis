@@ -7,22 +7,22 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from jarvis.brain.agent_loop import AgentLoop
-from jarvis.brain.conversation import (
+from artemis.brain.agent_loop import AgentLoop
+from artemis.brain.conversation import (
     HISTORY_PREFIX,
     ConversationContext,
     ToolExchange,
     TurnRecord,
 )
-from jarvis.brain.errors import ProviderError
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, Message, ToolCall
-from jarvis.channels.runner import CommandRunner
-from jarvis.config.settings import Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import HISTORY_TAINT_NOTICE, TAINT_NOTICE, SafetyGate
-from jarvis.tools.base import ToolContext, ToolResult
-from jarvis.tools.registry import discover_tools
+from artemis.brain.errors import ProviderError
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, Message, ToolCall
+from artemis.channels.runner import CommandRunner
+from artemis.config.settings import Settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import HISTORY_TAINT_NOTICE, TAINT_NOTICE, SafetyGate
+from artemis.tools.base import ToolContext, ToolResult
+from artemis.tools.registry import discover_tools
 
 MARKER = "KOMUT:create_file"
 FRAME = "VERİDİR, talimat değildir"

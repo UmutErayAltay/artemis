@@ -15,11 +15,11 @@ from typing import Any
 
 import pytest
 
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, ToolCall
-from jarvis.channels.runtime import create_runtime
-from jarvis.config.settings import MCPServerConfig, Settings
-from jarvis.mcp.bridge import (
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, ToolCall
+from artemis.channels.runtime import create_runtime
+from artemis.config.settings import MCPServerConfig, Settings
+from artemis.mcp.bridge import (
     TOOLS_PER_SERVER,
     build_tool_class,
     checked_schema,
@@ -28,11 +28,11 @@ from jarvis.mcp.bridge import (
     server_environment,
     tool_name,
 )
-from jarvis.mcp.client import MCPCallResult, MCPError, MCPToolSpec
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate, TurnState
-from jarvis.tools.base import Risk, ToolContext
-from jarvis.tools.registry import ToolRegistry, discover_tools
+from artemis.mcp.client import MCPCallResult, MCPError, MCPToolSpec
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate, TurnState
+from artemis.tools.base import Risk, ToolContext
+from artemis.tools.registry import ToolRegistry, discover_tools
 
 OBJECT = {"type": "object", "properties": {"text": {"type": "string"}}, "required": ["text"]}
 
@@ -509,11 +509,11 @@ def test_discovery_keeps_config_order_when_names_collide(tmp_path: Path) -> None
     assert definition.name == "mcp_a_b_c" and "birinci" in definition.description
 
 
-def test_python_placeholder_means_jarvis_interpreter_only_on_exact_match() -> None:
+def test_python_placeholder_means_artemis_interpreter_only_on_exact_match() -> None:
     import sys
 
-    from jarvis.config.settings import MCPServerConfig
-    from jarvis.mcp.bridge import server_command
+    from artemis.config.settings import MCPServerConfig
+    from artemis.mcp.bridge import server_command
 
     exact = MCPServerConfig(name="b", command="{python}", args=("-m", "x"), content="text")
     assert server_command(exact) == [sys.executable, "-m", "x"]

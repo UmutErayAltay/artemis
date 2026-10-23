@@ -1,4 +1,4 @@
-"""`jarvis voice` ve `jarvis desktop --ses` masaüstünü ses açık başlatır (ADR 0014)."""
+"""`artemis voice` ve `artemis desktop --ses` masaüstünü ses açık başlatır (ADR 0014)."""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ import pytest
 
 pytest.importorskip("PySide6")
 
-from jarvis.channels import cli  # noqa: E402
+from artemis.channels import cli  # noqa: E402
 
 
 @pytest.fixture
 def desktop_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
     # Gerçek pencere açılmaz; yalnız run_desktop'a giden argümanlar yakalanır.
-    app_module = importlib.import_module("jarvis.channels.desktop.app")
+    app_module = importlib.import_module("artemis.channels.desktop.app")
     calls: list[dict[str, Any]] = []
 
     def fake_run_desktop(
@@ -33,7 +33,7 @@ def desktop_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, Any]]:
 
 
 def _run_cli(monkeypatch: pytest.MonkeyPatch, *argv: str) -> int | None:
-    monkeypatch.setattr(sys, "argv", ["jarvis", *argv])
+    monkeypatch.setattr(sys, "argv", ["artemis", *argv])
     with pytest.raises(SystemExit) as exit_info:
         cli.main()
     return exit_info.value.code

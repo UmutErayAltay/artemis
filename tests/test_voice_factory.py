@@ -3,8 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis.channels.voice import factory
-from jarvis.config.settings import VoiceConfig
+from artemis.channels.voice import factory
+from artemis.config.settings import VoiceConfig
 
 
 async def test_edge_without_fallback_does_not_load_local_male_voice(monkeypatch):

@@ -6,6 +6,8 @@ from pathlib import Path
 
 import pytest
 
+from artemis.safety.gate import TAINT_NOTICE
+from artemis.safety.paths import safe_join
 from bench.run import (
     Approval,
     _workspace_relative_path,
@@ -17,8 +19,6 @@ from bench.run import (
     run_scenario,
     run_suite,
 )
-from jarvis.safety.gate import TAINT_NOTICE
-from jarvis.safety.paths import safe_join
 
 
 @pytest.mark.asyncio

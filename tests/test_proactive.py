@@ -16,19 +16,19 @@ import pytest
 from pydantic import BaseModel, ConfigDict, ValidationError
 from telegram_fake import Harness, build_harness, sent_bodies
 
-from jarvis.brain.errors import BudgetExceeded
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, Message, ToolCall
-from jarvis.channels.runtime import Runtime, create_runtime
-from jarvis.channels.telegram.api import build_telegram_client
-from jarvis.config.settings import BriefingConfig, ProactiveConfig, Settings
-from jarvis.proactive.delivery import PRIVATE_WITHHELD, Deliverer
-from jarvis.proactive.scheduler import BRIEFING_PREFIX, ProactiveScheduler
-from jarvis.proactive.store import ProactiveStore, reminder_event_id
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import UNATTENDED_NOTICE, SafetyGate, TurnState
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolDefinition, ToolResult
-from jarvis.tools.registry import ToolRegistry, discover_tools
+from artemis.brain.errors import BudgetExceeded
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, Message, ToolCall
+from artemis.channels.runtime import Runtime, create_runtime
+from artemis.channels.telegram.api import build_telegram_client
+from artemis.config.settings import BriefingConfig, ProactiveConfig, Settings
+from artemis.proactive.delivery import PRIVATE_WITHHELD, Deliverer
+from artemis.proactive.scheduler import BRIEFING_PREFIX, ProactiveScheduler
+from artemis.proactive.store import ProactiveStore, reminder_event_id
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import UNATTENDED_NOTICE, SafetyGate, TurnState
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolDefinition, ToolResult
+from artemis.tools.registry import ToolRegistry, discover_tools
 
 # 2026-10-15 Perşembe 09:00 İstanbul = 06:00 UTC.
 NOW = datetime(2026, 10, 15, 6, 0, tzinfo=UTC)
@@ -674,7 +674,7 @@ async def test_scheduler_survives_unexpected_error_and_audits_it(tmp_path: Path)
 
 
 def test_telegram_privacy_record_survives_interleaved_briefing_turn(tmp_path: Path) -> None:
-    from jarvis.channels.telegram.channel import TelegramChannel
+    from artemis.channels.telegram.channel import TelegramChannel
 
     channel = TelegramChannel(
         object(),  # type: ignore[arg-type]

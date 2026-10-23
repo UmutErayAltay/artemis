@@ -1,6 +1,6 @@
 # CLIProxyAPI yerel denemesi — 2026-10-13
 
-Umut EasyCLIProxyAPI'yi kendisi kurdu. Jarvis `a69f27d` kaynakları GitHub'dan
+Umut EasyCLIProxyAPI'yi kendisi kurdu. Artemis `a69f27d` kaynakları GitHub'dan
 indirildi; Python 3.12.9 proje ortamında dev ve desktop paketleri kuruldu.
 Yerel OpenAI uyumlu adres `http://127.0.0.1:8317/v1`; `/models` 33 kayıt döndürdü.
 Bir modelin listelenmesi çalışabildiği anlamına gelmiyor.
@@ -19,7 +19,7 @@ bu sayı sağlayıcının azami bağlam kapasitesini doğrulayan bir ölçüm de
 
 ## Doğrulama
 
-Gerçek Jarvis CommandRunner/ProviderRouter/SafetyGate zinciri ve gerçek CPA
+Gerçek Artemis CommandRunner/ProviderRouter/SafetyGate zinciri ve gerçek CPA
 üzerinden, geçici sentetik klasörde `reports/cpa_smoke.py` çalıştırıldı:
 
 | Deneme | Sonuç | Süre |
@@ -40,7 +40,7 @@ onaysız yan etki 0. Sahte kabul canlı model başarısı olarak sayılmaz.
 Masaüstü süreci başlatıldı, başlangıç hata günlüğü boş. Görsel, mikrofon,
 Piper/STT ve Claude bağlantısının Windows kabulü yapılmadı.
 
-Yeniden başlatma: `powershell -ExecutionPolicy Bypass -File .\start-jarvis.ps1`.
+Yeniden başlatma: `powershell -ExecutionPolicy Bypass -File .\start-artemis.ps1`.
 Başlatıcı anahtarı gizli sorar; diske veya kullanıcı ortamına kaydetmez.
 
 ## Brave, ses ve Ayarlar sekmesi — aynı oturumdaki devam

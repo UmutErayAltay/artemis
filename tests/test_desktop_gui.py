@@ -17,18 +17,18 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QLabel
 
-import jarvis.channels.desktop.bridge as bridge_module
-from jarvis.brain.agent_loop import RunResult
-from jarvis.channels.desktop.app import (
+import artemis.channels.desktop.bridge as bridge_module
+from artemis.brain.agent_loop import RunResult
+from artemis.channels.desktop.app import (
     _STYLE,
     ApprovalDialog,
     DesktopWindow,
     StepBlock,
     build_window,
 )
-from jarvis.channels.desktop.bridge import Activity, Finished, State, VoiceCommand
-from jarvis.channels.desktop.demo import DemoReadTool, DemoWriteTool
-from jarvis.channels.runtime import Runtime
+from artemis.channels.desktop.bridge import Activity, Finished, State, VoiceCommand
+from artemis.channels.desktop.demo import DemoReadTool, DemoWriteTool
+from artemis.channels.runtime import Runtime
 
 
 @pytest.fixture
@@ -88,9 +88,9 @@ def test_message_bubbles_expand_and_follow_the_available_chat_width(
 ) -> None:
     window = _window(app, tmp_path)
     try:
-        window.chat.append("Jarvis", "Yanıt " + "uzun bir metin " * 12)
+        window.chat.append("Artemis", "Yanıt " + "uzun bir metin " * 12)
         bubble, speaker, text = window.chat._bubbles[-1]
-        assert speaker == "Jarvis"
+        assert speaker == "Artemis"
         assert len(text) > 100
         assert 320 <= bubble.width() <= 520
         window.resize(720, 650)
@@ -341,7 +341,7 @@ def test_step_block_shows_verified_lines_and_hides_internal_until_details(
 
         # Adım bloğu yanıt balonunun hemen üstünde, aynı satırda durur.
         bubble, speaker, _text = window.chat._bubbles[-1]
-        assert speaker == "Jarvis"
+        assert speaker == "Artemis"
         bubble_row = bubble.parentWidget()
         block_parent = block.parentWidget()
         assert bubble_row is not None and block_parent is not None
@@ -450,10 +450,10 @@ def test_demo_mode_never_builds_or_starts_the_voice_controller(
 def test_settings_apply_restarts_runtime_with_selected_device_and_keeps_model(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from jarvis.brain.fake import ScriptedProvider
-    from jarvis.channels.desktop.settings_panel import SettingsPanel
-    from jarvis.channels.runtime import create_runtime
-    from jarvis.config.settings import load_settings
+    from artemis.brain.fake import ScriptedProvider
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+    from artemis.channels.runtime import create_runtime
+    from artemis.config.settings import load_settings
     from tests.test_settings_panel import config
 
     path = config(tmp_path)
@@ -486,8 +486,8 @@ def test_settings_apply_restarts_runtime_with_selected_device_and_keeps_model(
 def test_noise_suppression_controls_load_enable_and_save(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from jarvis.channels.desktop.settings_panel import SettingsPanel
-    from jarvis.config.settings import load_settings
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+    from artemis.config.settings import load_settings
     from tests.test_settings_panel import config
 
     path = config(tmp_path)
@@ -500,7 +500,7 @@ def test_noise_suppression_controls_load_enable_and_save(
     assert panel.noise_level.isEnabled() and panel.noise_stt.isEnabled()
     panel.noise_stt.setChecked(True)
     panel.noise_level.setCurrentIndex(panel.noise_level.findData("guclu"))
-    from jarvis.channels.desktop.settings_panel import save_choices
+    from artemis.channels.desktop.settings_panel import save_choices
 
     save_choices(
         path, None,
@@ -519,7 +519,7 @@ def test_noise_suppression_controls_load_enable_and_save(
 
 def test_step_block_is_wide_enough_for_its_longest_visible_line(app: QApplication) -> None:
     # Sola hizalı blok, sarılan etiketin küçük ipucuna sıkışınca satırlar üst üste biniyordu.
-    from jarvis.channels.desktop.steps import StepLine
+    from artemis.channels.desktop.steps import StepLine
 
     block = StepBlock()
     activity = Activity("r", "t", 1, "tool_result", {"tool": "x"})
@@ -542,7 +542,7 @@ def test_step_block_is_wide_enough_for_its_longest_visible_line(app: QApplicatio
 
 from PySide6.QtNetwork import QLocalSocket  # noqa: E402
 
-from jarvis.channels.desktop.instance import (  # noqa: E402
+from artemis.channels.desktop.instance import (  # noqa: E402
     InstanceServer,
     instance_name,
     notify_running,
@@ -562,7 +562,7 @@ def test_instance_name_is_per_user_and_state_dir(tmp_path: Path) -> None:
     assert first == instance_name(tmp_path / "a", user="umut")
     assert first != instance_name(tmp_path / "b", user="umut")
     assert first != instance_name(tmp_path / "a", user="baska")
-    assert first.startswith("jarvis-") and len(first) == len("jarvis-") + 16
+    assert first.startswith("artemis-") and len(first) == len("artemis-") + 16
 
 
 def test_second_instance_asks_first_to_show_panel(app: QApplication, tmp_path: Path) -> None:
@@ -575,7 +575,7 @@ def test_second_instance_asks_first_to_show_panel(app: QApplication, tmp_path: P
     script = (
         "import sys\n"
         "from PySide6.QtCore import QCoreApplication\n"
-        "from jarvis.channels.desktop.instance import notify_running\n"
+        "from artemis.channels.desktop.instance import notify_running\n"
         "app = QCoreApplication([])\n"
         "sys.exit(0 if notify_running(sys.argv[1], show=True) else 3)\n"
     )
@@ -646,7 +646,7 @@ def test_background_start_stays_in_tray_and_instance_message_shows_panel(
 def test_claim_returns_none_when_another_instance_listens(
     app: QApplication, tmp_path: Path
 ) -> None:
-    from jarvis.channels.desktop.instance import claim_instance
+    from artemis.channels.desktop.instance import claim_instance
 
     first = claim_instance(instance_name(tmp_path, user="yaris"), show=False)
     assert first is not None and first.is_listening()
@@ -657,7 +657,7 @@ def test_claim_returns_none_when_another_instance_listens(
 
 
 def test_pending_connections_are_capped(app: QApplication, tmp_path: Path) -> None:
-    from jarvis.channels.desktop import instance as instance_module
+    from artemis.channels.desktop import instance as instance_module
 
     server, _shown = _server(tmp_path)
     sockets = []
@@ -680,7 +680,7 @@ def test_pending_connections_are_capped(app: QApplication, tmp_path: Path) -> No
 def test_background_start_waits_for_late_tray_then_shows_panel(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import jarvis.channels.desktop.app as app_module
+    import artemis.channels.desktop.app as app_module
 
     monkeypatch.setattr(app_module, "TRAY_RETRY_MS", 10)
     monkeypatch.setattr(app_module, "TRAY_RETRY_ATTEMPTS", 3)
@@ -714,3 +714,14 @@ def test_failed_autostart_toggle_restores_checkbox(
     finally:
         _wait(app, lambda: window.status_label.text() == "Hazır", timeout=10.0)
         _close_cleanly(app, window)
+
+
+def test_app_icon_file_exists_and_loads() -> None:
+    from pathlib import Path
+
+    from artemis.channels.desktop import app as desktop_app
+
+    assert (Path(desktop_app.__file__).with_name("artemis.ico")).is_file()
+    icon = desktop_app.app_icon()
+    assert not icon.isNull()
+    assert 256 in {size.width() for size in icon.availableSizes()}

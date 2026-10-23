@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from artemis.config.settings import VoiceConfig
 from bench.speech_accuracy import (
     Corpus,
     CorpusItem,
@@ -16,7 +17,6 @@ from bench.speech_accuracy import (
     normalize,
     read_audio,
 )
-from jarvis.config.settings import VoiceConfig
 
 
 class FakeRecognizer:

@@ -4,14 +4,14 @@
 büyütme/küçültme/yarım ekrana yerleştirme, ses ve parlaklık ayarı, kilitleme, uyku, kapatma
 ve yeniden başlatma. Kaçınılan hatalar: kilit ve uykuyu SAFE saymak, ses/parlaklık sonucunu
 doğrulamamak ve pywin32'ye dayanmak.
-Jarvis pywin32 kullanmaz; Windows'a özgü işler ya `ctypes` (pano) ya da sabit PowerShell
+Artemis pywin32 kullanmaz; Windows'a özgü işler ya `ctypes` (pano) ya da sabit PowerShell
 betiği (toast, ekran OCR) ile yapılır. Mevcut kurallar: kapatma onay gerektirir (CLAUDE.md
 3), başarı doğrulanmadan bildirilmez (5), gözetimsiz turda yalnız READ_ONLY çalışır (ADR
 0027), ekran içeriği gizlidir (ADR 0029).
 
 **Karar:**
 
-- **Tek servis, sabit betikler.** `jarvis/tools/system_control.py` her işlemi sabit bir
+- **Tek servis, sabit betikler.** `artemis/tools/system_control.py` her işlemi sabit bir
   PowerShell betiğiyle (`-EncodedCommand`) yapar; parametreler argv'ye değil ortam
   değişkenlerine, yalnız doğrulanmış değerler olarak gider. Kapatma/yeniden başlatma
   `shutdown.exe`'nin sabit bayraklarıyla çalışır. Alt süreç `child_environment()` alır,

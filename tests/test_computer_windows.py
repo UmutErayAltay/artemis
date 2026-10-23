@@ -7,7 +7,7 @@ import sys
 
 import pytest
 
-from jarvis.computer import windows as w
+from artemis.computer import windows as w
 
 
 def test_normalize_corners() -> None:

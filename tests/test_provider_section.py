@@ -13,16 +13,16 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtWidgets import QApplication
 
-from jarvis.brain import providers
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.providers import provider_problem
-from jarvis.channels.desktop import bridge as bridge_module
-from jarvis.channels.desktop import provider_section as section_module
-from jarvis.channels.desktop.app import build_window
-from jarvis.channels.desktop.provider_section import PRESETS, ProviderSection, probe_models
-from jarvis.channels.desktop.settings_panel import SettingsPanel
-from jarvis.channels.runtime import create_runtime
-from jarvis.config.settings import load_settings
+from artemis.brain import providers
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.providers import provider_problem
+from artemis.channels.desktop import bridge as bridge_module
+from artemis.channels.desktop import provider_section as section_module
+from artemis.channels.desktop.app import build_window
+from artemis.channels.desktop.provider_section import PRESETS, ProviderSection, probe_models
+from artemis.channels.desktop.settings_panel import SettingsPanel
+from artemis.channels.runtime import create_runtime
+from artemis.config.settings import load_settings
 from tests.test_desktop_gui import _close_cleanly, _wait
 from tests.test_settings_panel import config
 
@@ -42,7 +42,7 @@ def _vault(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
     monkeypatch.setattr(section_module, "write_secret", lambda s, t: store.__setitem__(t, s))
     monkeypatch.setattr(section_module, "delete_secret", lambda t: store.pop(t, None))
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
-    monkeypatch.delenv("JARVIS_YEREL_API_KEY", raising=False)
+    monkeypatch.delenv("ARTEMIS_YEREL_API_KEY", raising=False)
     return store
 
 
@@ -83,7 +83,7 @@ def test_save_writes_endpoint_without_key(
     section.changed.connect(lambda: emitted.append(1))
     _fill(section, "yerel", "https://x.example/v1/", SECRET)
     section._save()
-    assert _vault == {"Jarvis/yerel": SECRET}
+    assert _vault == {"Artemis/yerel": SECRET}
     assert SECRET not in path.read_text(encoding="utf-8")
     assert load_settings(path).endpoints["yerel"].base_url == "https://x.example/v1"
     assert section.key.text() == "" and emitted == [1]
@@ -100,7 +100,7 @@ def test_save_without_vault_points_to_env(
     section = ProviderSection(config(tmp_path))
     _fill(section, "yerel", "https://x.example/v1", SECRET)
     section._save()
-    assert "JARVIS_YEREL_API_KEY" in section.status.text()
+    assert "ARTEMIS_YEREL_API_KEY" in section.status.text()
     assert SECRET not in section.status.text()
 
 
@@ -262,11 +262,11 @@ def test_provider_problem_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch)
         }
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     settings = load_settings(path)
-    assert "JARVIS_YEREL_API_KEY" in str(
+    assert "ARTEMIS_YEREL_API_KEY" in str(
         provider_problem(settings.model_copy(update={"primary_model": "k"}))
     )
     assert provider_problem(settings.model_copy(update={"primary_model": "b"})) is None
-    monkeypatch.setenv("JARVIS_YEREL_API_KEY", "x")
+    monkeypatch.setenv("ARTEMIS_YEREL_API_KEY", "x")
     assert provider_problem(settings.model_copy(update={"primary_model": "k"})) is None
 
 

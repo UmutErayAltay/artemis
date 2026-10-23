@@ -1,6 +1,6 @@
 # ADR 0029 — Ekran algısı: onaylı, yerel OCR, görüntü saklanmaz
 
-**Bağlam:** Faz 6c, "ekranda ne yazıyor", "bu hatayı oku" gibi istekler için Jarvis'e ekranı
+**Bağlam:** Faz 6c, "ekranda ne yazıyor", "bu hatayı oku" gibi istekler için Artemis'e ekranı
 okuma yeteneği ekler. Ekran en hassas veridir: parola, mesaj, banka, iş belgesi aynı anda
 görünebilir. Ekran içeriği ayrıca dış içeriktir (web sayfası, mail) ve prompt injection
 taşıyabilir. Mevcut kurallar: gizlilik izni olmadan dosya/pano içeriği buluta verilmez
@@ -24,7 +24,7 @@ dokunmaz (8), ham ses saklanmaz (ses kanalı kuralı).
 
 - **Kapsam varsayılanı etkin pencere.** `scope: active_window` (varsayılan) ya da
   `scope: screen`. Daha dar kapsam, onaylanmamış bilgilerin okunma olasılığını azaltır.
-  Etkin pencere Jarvis'in kendi paneliyse bu belirtilir.
+  Etkin pencere Artemis'in kendi paneliyse bu belirtilir.
 
 - **Gizlilik: yeni içerik türü `screen`.** Ekran metni `content_kind="screen"` taşır ve
   `perception.allow_cloud_screen: true` olmadıkça dosya/pano gibi gizli sayılır: bulut

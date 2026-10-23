@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from jarvis.channels.desktop.bridge import DesktopBridge
-from jarvis.config.settings import Settings
+from artemis.channels.desktop.bridge import DesktopBridge
+from artemis.config.settings import Settings
 
 
 class FakeLoop:
@@ -85,7 +85,7 @@ def window(tmp_path: Path) -> Any:
 def test_toggle_writes_config_first_then_applies_runtime(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import jarvis.channels.desktop.app as app_module
+    import artemis.channels.desktop.app as app_module
 
     order: list[str] = []
     monkeypatch.setattr(app_module, "save_computer_mode", lambda path, mode: order.append("save"))
@@ -103,7 +103,7 @@ def test_toggle_writes_config_first_then_applies_runtime(
 def test_failed_save_leaves_runtime_untouched_and_restores_both_controls(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import jarvis.channels.desktop.app as app_module
+    import artemis.channels.desktop.app as app_module
 
     def broken(path: Path, mode: str) -> None:
         raise OSError("disk dolu")
@@ -121,7 +121,7 @@ def test_failed_save_leaves_runtime_untouched_and_restores_both_controls(
 def test_settings_checkbox_keeps_header_button_in_sync(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import jarvis.channels.desktop.app as app_module
+    import artemis.channels.desktop.app as app_module
 
     monkeypatch.setattr(app_module, "save_computer_mode", lambda path, mode: None)
 

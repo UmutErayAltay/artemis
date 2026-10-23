@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Jarvis Faz 5 doğrulama raporu</title>
+  <title>Artemis Faz 5 doğrulama raporu</title>
   <style>
     :root { color-scheme: dark; font: 16px/1.55 system-ui, sans-serif; background: #0b1220; color: #e6edf5; }
     body { max-width: 920px; margin: 3rem auto; padding: 0 1.25rem 4rem; }
@@ -31,24 +31,24 @@
         <tr><th>F5, süreç ve CLI testleri</th><td>44 geçti · 4.12 sn</td></tr>
         <tr><th>Ruff</th><td><code>All checks passed!</code></td></tr>
         <tr><th>Mypy</th><td>Linux ve win32 hedeflerinde 71 kaynak dosyası geçti</td></tr>
-        <tr><th>CI run 38532547547 · <code>bec6b8d</code></th><td><a href="https://github.com/UmutErayAltay/jarvis/actions/runs/38532547547">Dört Ubuntu/Windows işi de geçti</a></td></tr>
+        <tr><th>CI run 38532547547 · <code>bec6b8d</code></th><td><a href="https://github.com/UmutErayAltay/artemis/actions/runs/38532547547">Dört Ubuntu/Windows işi de geçti</a></td></tr>
         <tr><th>Güvenlik mutasyonları</th><td>4/4 yakalandı; kaynak özeti değişmedi</td></tr>
         <tr><th>Genel sahte kabul bench'i</th><td>39/39 geçti; tehlikeli hata 0, onaysız yan etki 0</td></tr>
         <tr><th>Sahte kullanım</th><td>0 token, $0</td></tr>
       </tbody>
     </table>
 
-    <p>Önceki CI koşusu Windows GUI teardown'ında açık <code>code_agent.sqlite3</code> bağlantısını ve Windows çekirdek testinde POSIX <code>kill_tree</code> yamasına bağlı fault-injection hatasını yakaladı. Bağlantılar artık açıkça kapatılıyor; test Windows Job Object sürecini kullanıyor. Sonraki <a href="https://github.com/UmutErayAltay/jarvis/actions/runs/38532547547">CI koşusundaki dört Ubuntu/Windows işi geçti</a>. Sahte CLI ve Job Object testleri gerçek kullanıcı Windows kabulü veya Claude Code oturumu değildir.</p>
+    <p>Önceki CI koşusu Windows GUI teardown'ında açık <code>code_agent.sqlite3</code> bağlantısını ve Windows çekirdek testinde POSIX <code>kill_tree</code> yamasına bağlı fault-injection hatasını yakaladı. Bağlantılar artık açıkça kapatılıyor; test Windows Job Object sürecini kullanıyor. Sonraki <a href="https://github.com/UmutErayAltay/artemis/actions/runs/38532547547">CI koşusundaki dört Ubuntu/Windows işi geçti</a>. Sahte CLI ve Job Object testleri gerçek kullanıcı Windows kabulü veya Claude Code oturumu değildir.</p>
 
     <p>Faz 5 taslak, SafetyGate onayı, sahte CLI soru/cevap, iptal, zaman aşımı, şema doğrulama ve süreç sahipliği testleriyle doğrulandı. Sahte LLM diyaloğu taslak hazırlar, reddi ve onayı işler, CLI sorusunu alır ve aynı session UUID'siyle devam eder. Genel sahte bench Faz 5 işlerini içermez; bunlar pytest hedeflerinde sınandı.</p>
 
     <h2>Projeler paneli</h2>
     <p>Görüntü, Qt paneline sentetik taslak ve sahte durum verisi verilerek üretildi. Gerçek Claude Code işi veya Windows kabulü göstermez.</p>
-    <img src="assets/desktop/projects.png" alt="Sentetik taslak içeren Jarvis Projeler paneli">
+    <img src="assets/desktop/projects.png" alt="Sentetik taslak içeren Artemis Projeler paneli">
 
     <h2>Bilinçli sınırlamalar</h2>
     <ul>
-      <li>Kod ajanı yerel kullanıcının yetkileriyle çalışır; OS sandbox yoktur. Claude Code Bash ve alt ajan çağrıları Jarvis SafetyGate tarafından tek tek denetlenmez.</li>
+      <li>Kod ajanı yerel kullanıcının yetkileriyle çalışır; OS sandbox yoktur. Claude Code Bash ve alt ajan çağrıları Artemis SafetyGate tarafından tek tek denetlenmez.</li>
       <li>Model profili gerçek model dağılımını veya harcama üst sınırını garanti etmez.</li>
       <li>Windows Job Object yolu CI'da sınandı; bu kullanıcının Windows 11 kabulü değildir. Gerçek Claude Code oturumu kullanıcının Windows 11 elle kabulünde sınandı.</li>
       <li>Gerçek kullanıcı deposu, ücretli model çağrısı ve abonelik erişimi kullanılmadı.</li>

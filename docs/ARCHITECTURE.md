@@ -1,6 +1,6 @@
-# Jarvis: F0–F6 mimarisi
+# Artemis: F0–F6 mimarisi
 
-Jarvis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
+Artemis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. CLI ve isteğe bağlı PySide6
 masaüstü arayüzü aynı runtime, ajan döngüsü, sağlayıcılar, güvenlik kapısı ve
 araçları kullanır. Telegram ve bildirimler F4; proje taslağı, onaylı kod ajanı işleri
@@ -35,7 +35,7 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
 
 ## Masaüstü kanalı
 
-`jarvis desktop` komutu PySide6'yı yalnız masaüstü komutu seçildiğinde yükler;
+`artemis desktop` komutu PySide6'yı yalnız masaüstü komutu seçildiğinde yükler;
 çekirdek ve CLI kurulumu Qt bağımlılığı gerektirmez. Worker thread kendi asyncio
 döngüsünü ve tek runtime'ı sahiplenir. Qt tarafı sınırlı, kayıpsız kontrol/istek
 kanalıyla gönderir, audit olaylarını sınırlı kuyruktan okur ve UI thread'inden
@@ -49,7 +49,7 @@ Escape ve Enter onayı reddeder. Tepsi simgesi varsa pencere gizlenebilir; tepsi
 kapatma worker temizliğinden sonra uygulamadan çıkar.
 
 Ses de bu worker'ın asyncio döngüsünde çalışır (ADR 0014): ikinci runtime veya süreç
-yoktur. Başlıktaki "Ses" düğmesi (ya da `jarvis desktop --ses` / `jarvis voice`)
+yoktur. Başlıktaki "Ses" düğmesi (ya da `artemis desktop --ses` / `artemis voice`)
 mikrofonu açan tek yoldur; varsayılan kapalıdır ve durum (kapalı, hazırlanıyor,
 dinliyor, düşünüyor, konuşuyor) ekranda görünür. Sesli komut köprünün istek
 modelinden geçer: her komut bir `request_id` alır, yazılı istekle aynı anda yürümez
@@ -99,7 +99,7 @@ yalnız ortam değişkeniyle gider ve ağa çıkmaz.
 Kod ajanı ([ADR 0023](adr/0023-code-agent-and-desktop-pet.md)): `code_agent_start`
 (CONFIRM_REQUIRED, takma adla izinli proje), `code_agent_status` (READ_ONLY, `external`) ve
 `code_agent_cancel` (SIDE_EFFECT). İş turdan bağımsız thread'de `claude -p` olarak koşar
-(`jarvis/tools/code_agent_jobs.py`), yerel commit atabilir, push edemez; sonuç git'ten
+(`artemis/tools/code_agent_jobs.py`), yerel commit atabilir, push edemez; sonuç git'ten
 doğrulanır ve `code_agent_started`/`code_agent_done` denetim olaylarıyla bildirilir.
 
 Faz 5 ([ADR 0026](adr/0026-background-project-workflow.md)) bu işi aşamalı hale
@@ -113,12 +113,12 @@ Süreç ve alt süreç temizliği doğrulanmadan iş `done` olmaz. Projeler sekm
 durumu sunar; eylemler ortak bridge ve SafetyGate üzerinden geçer.
 
 Yetki sınırı yerel kullanıcı hesabıdır; container/VM veya OS sandbox yoktur.
-Claude Code'un kendi Bash ve alt ajan çağrıları Jarvis SafetyGate'inden geçmez.
+Claude Code'un kendi Bash ve alt ajan çağrıları Artemis SafetyGate'inden geçmez.
 Model profilleri CLI'ye yön verir, gerçek model dağılımını veya harcama üst sınırını
 garanti etmez. Windows Job Object davranışı ve gerçek Claude Code oturumu ayrıca
 Windows 11'de elle kabul edilmelidir.
 
-`jarvis telegram` ayrı bir süreçtir; `persist_memory` açıkken masaüstü ve CLI ile aynı
+`artemis telegram` ayrı bir süreçtir; `persist_memory` açıkken masaüstü ve CLI ile aynı
 `state_dir/memory.sqlite3` geçmiş deposunu paylaşır (ADR 0025), kapalıyken geçmişi süreç içinde kalır. Bir mesaj yalnız
 özel sohbetten (`chat.id == from.id == telegram.chat_id`), iletilmemiş, düz metin ve
 `max_message_age_seconds` içinde gelirse çalıştırılır. Başlangıçtaki eski güncellemeler atılır.
@@ -137,7 +137,7 @@ Telegram çağrısı `telegram_out`, her toast `desktop_notification` denetim ol
 ## Proaktif olaylar
 
 Karar [ADR 0027](adr/0027-proactive-events.md) içindedir. `proactive.enabled` açıkken
-`jarvis desktop` ve `jarvis telegram` süreçleri `ProactiveScheduler` çalıştırır; CLI ve ses
+`artemis desktop` ve `artemis telegram` süreçleri `ProactiveScheduler` çalıştırır; CLI ve ses
 yalnız hatırlatma kurar. İki tür vardır: hatırlatma (`reminder_create`/`list`/`cancel`)
 model çağrılmadan teslim edilen sabit metindir; brifing config'teki sabit istemle başlayan,
 kendi AgentLoop'unda boş geçmişle çalışan gözetimsiz bir model turudur.

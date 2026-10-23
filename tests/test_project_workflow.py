@@ -13,16 +13,16 @@ import pytest
 from test_code_agent import SESSION, make_jobs, payload, reply, wait_job
 from test_code_agent import repo as _repo_fixture
 
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, ToolCall
-from jarvis.brain.providers import _cloud_messages
-from jarvis.brain.router import ProviderRouter
-from jarvis.channels.desktop.bridge import Approval, DesktopBridge, State, ToolFinished
-from jarvis.channels.runtime import create_runtime
-from jarvis.config.settings import CodeAgentConfig, ModelConfig, Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.tools.plugins.code_agent import PrepareArguments, StartArguments, StatusArguments
-from jarvis.tools.project_spec import ProjectSpec
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, ToolCall
+from artemis.brain.providers import _cloud_messages
+from artemis.brain.router import ProviderRouter
+from artemis.channels.desktop.bridge import Approval, DesktopBridge, State, ToolFinished
+from artemis.channels.runtime import create_runtime
+from artemis.config.settings import CodeAgentConfig, ModelConfig, Settings
+from artemis.safety.audit import AuditLog
+from artemis.tools.plugins.code_agent import PrepareArguments, StartArguments, StatusArguments
+from artemis.tools.project_spec import ProjectSpec
 
 repo = _repo_fixture
 
@@ -299,7 +299,7 @@ def test_projects_buttons_approve_gate_and_qt_heartbeat(tmp_path: Path, repo: Pa
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication
 
-    from jarvis.channels.desktop.projects_panel import ProjectsPanel
+    from artemis.channels.desktop.projects_panel import ProjectsPanel
 
     application = QApplication.instance() or QApplication([])
     jobs, cli = make_jobs(tmp_path, reply(payload("question")))

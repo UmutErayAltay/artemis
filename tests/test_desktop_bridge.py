@@ -14,9 +14,9 @@ from typing import Any
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, ToolCall
-from jarvis.channels.desktop.bridge import (
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, ToolCall
+from artemis.channels.desktop.bridge import (
     Activity,
     ActivityGap,
     Approval,
@@ -26,11 +26,11 @@ from jarvis.channels.desktop.bridge import (
     State,
     VoiceCommand,
 )
-from jarvis.channels.runtime import AuditObserver, Runtime, create_runtime
-from jarvis.config.settings import ModelConfig, Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
-from jarvis.tools.registry import ToolRegistry
+from artemis.channels.runtime import AuditObserver, Runtime, create_runtime
+from artemis.config.settings import ModelConfig, Settings
+from artemis.safety.audit import AuditLog
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.registry import ToolRegistry
 
 
 class EmptyArgs(BaseModel):
@@ -459,7 +459,7 @@ def test_runtime_failure_is_sanitized_and_worker_recovers(tmp_path):
 def test_audit_view_is_redacted_bounded_and_reports_gaps(tmp_path, monkeypatch):
     bridge = _fixture(tmp_path, [Completion(content="bitti")])
     try:
-        monkeypatch.setenv("JARVIS_TEST_SECRET", "synthetic-secret")
+        monkeypatch.setenv("ARTEMIS_TEST_SECRET", "synthetic-secret")
         assert bridge._runtime is not None
         for index in range(300):
             bridge._runtime.audit.emit("inspection", value=f"synthetic-secret-{index}")
@@ -702,7 +702,7 @@ def test_approval_carries_tool_label_and_labels_are_a_copy(tmp_path):
 def test_ignore_reset_on_close_only_swallows_proactor_reset() -> None:
     from unittest.mock import MagicMock
 
-    from jarvis.channels.desktop.bridge import _ignore_reset_on_close
+    from artemis.channels.desktop.bridge import _ignore_reset_on_close
 
     loop = MagicMock()
     handle = "<Handle _ProactorBasePipeTransport._call_connection_lost(SSLError(1))>"
@@ -740,7 +740,7 @@ def test_remember_site_choice_persists_and_skips_next_read(tmp_path):
 
 
 def test_esc_hotkey_cancels_running_turn_immediately(tmp_path, monkeypatch):
-    import jarvis.channels.desktop.computer_host as host_module
+    import artemis.channels.desktop.computer_host as host_module
 
     started = threading.Event()
     release = threading.Event()

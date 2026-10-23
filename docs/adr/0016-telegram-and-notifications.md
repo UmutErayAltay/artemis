@@ -17,7 +17,7 @@ okunur, toast betiği sabit tutulur ve metin ortam değişkeniyle verilir.
     kaçırılır. Alt sürecin ortamı `child_environment()` ile kurulur, yani token taşımaz.
   - Başarı ancak Windows bildirim ayarı `Enabled` ve `Show()` hatasız ise bildirilir.
     Windows dışında araç dürüstçe başarısız olur.
-- **İki yönlü kanal** `jarvis telegram` ile ayrı bir süreçte çalışır. Masaüstüyle aynı runtime
+- **İki yönlü kanal** `artemis telegram` ile ayrı bir süreçte çalışır. Masaüstüyle aynı runtime
   fabrikasını ve aynı `SafetyGate`'i kullanır. Geçmişi kendi `CommandRunner`'ındadır; bu ayrı bir
   oturumdur, bir kanal kopyası değildir. Bir mesaj ancak şu koşulların hepsini sağlarsa
   çalıştırılır:

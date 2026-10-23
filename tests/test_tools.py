@@ -9,14 +9,14 @@ from typing import Any
 import httpx
 import pytest
 
-from jarvis.brain.models import ToolCall
-from jarvis.config.settings import Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import TAINT_NOTICE, SafetyGate, TurnState
-from jarvis.tools.base import ToolContext, ToolResult
-from jarvis.tools.platform import WindowsDesktop, child_environment
-from jarvis.tools.plugins.information import SearchParser
-from jarvis.tools.registry import discover_tools
+from artemis.brain.models import ToolCall
+from artemis.config.settings import Settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import TAINT_NOTICE, SafetyGate, TurnState
+from artemis.tools.base import ToolContext, ToolResult
+from artemis.tools.platform import WindowsDesktop, child_environment
+from artemis.tools.plugins.information import SearchParser
+from artemis.tools.registry import discover_tools
 
 
 @pytest.fixture
@@ -267,7 +267,7 @@ async def test_linux_returns_honest_unsupported(
     tool: str,
     arguments: dict[str, str],
 ) -> None:
-    monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Linux")
+    monkeypatch.setattr("artemis.tools.platform.platform.system", lambda: "Linux")
     # Varsayılan yol işçi sürecinde çalışır; testte gerçek GUI etkisini önlemek için
     # platform kontrolünü aynı süreçte uygulayan adaptörü kullan.
     tool_context.services["desktop"] = WindowsDesktop()
@@ -311,11 +311,11 @@ async def test_default_browser_launcher_uses_fixed_worker_action(
         action: str, arguments: dict[str, object], context: ToolContext
     ) -> Any:
         calls.append((action, arguments))
-        from jarvis.tools.processes import DesktopProcessResult
+        from artemis.tools.processes import DesktopProcessResult
 
         return DesktopProcessResult("sent", "Tarayıcı isteği gönderildi.")
 
-    monkeypatch.setattr("jarvis.tools.plugins.desktop.run_default_action", fake_action)
+    monkeypatch.setattr("artemis.tools.plugins.desktop.run_default_action", fake_action)
     result = await invoke(tool_context, "open_url", url="https://example.org/path")
     assert result.status == "sent" and not result.success
     assert calls == [("open_browser", {"url": "https://example.org/path"})]
@@ -408,7 +408,7 @@ def test_search_parser_handles_nested_title_and_redirect() -> None:
 
 def test_child_environment_excludes_provider_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("UNRELATED_TEST_VALUE", "should-not-propagate")
-    monkeypatch.setenv("JARVIS_TEST_TOKEN", "synthetic-sentinel")
+    monkeypatch.setenv("ARTEMIS_TEST_TOKEN", "synthetic-sentinel")
     monkeypatch.setenv("DISPLAY", ":77")
     monkeypatch.setenv("XDG_RUNTIME_DIR", "/run/user/test")
     monkeypatch.setenv("USERPROFILE", r"C:\Users\test")
@@ -417,7 +417,7 @@ def test_child_environment_excludes_provider_credentials(monkeypatch: pytest.Mon
     # Eksik SystemDrive Brave profilini bozuyordu; GUI uygulamaları bunu almalı.
     assert environment["SYSTEMDRIVE"] == "C:"
     assert "UNRELATED_TEST_VALUE" not in environment
-    assert "JARVIS_TEST_TOKEN" not in environment
+    assert "ARTEMIS_TEST_TOKEN" not in environment
     assert environment["DISPLAY"] == ":77"
     assert environment["XDG_RUNTIME_DIR"] == "/run/user/test"
     assert environment["USERPROFILE"] == r"C:\Users\test"
@@ -476,8 +476,8 @@ def test_child_environment_excludes_provider_credentials(monkeypatch: pytest.Mon
 def test_close_checks_exit_status_and_process_absence(
     monkeypatch: pytest.MonkeyPatch, exit_code: int, remaining: bool, expected: bool
 ) -> None:
-    monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Windows")
-    monkeypatch.setattr("jarvis.tools.platform.time.sleep", lambda _: None)
+    monkeypatch.setattr("artemis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("artemis.tools.platform.time.sleep", lambda _: None)
     output = b'"notepad.exe","1234"\r\n' if remaining else b""
     replies: Iterator[subprocess.CompletedProcess[bytes]] = iter(
         [
@@ -494,7 +494,7 @@ def test_close_checks_exit_status_and_process_absence(
         calls.append(args[0])
         return next(replies, subprocess.CompletedProcess([], 0, output, b""))
 
-    monkeypatch.setattr("jarvis.tools.platform.subprocess.run", fake_run)
+    monkeypatch.setattr("artemis.tools.platform.subprocess.run", fake_run)
     assert WindowsDesktop().close_application(r"C:\Windows\notepad.exe") is expected
     assert calls[0][-2:] == ["/IM", "notepad.exe"]
     assert "/F" not in calls[0]
@@ -512,7 +512,7 @@ def test_close_description_warns_that_all_matching_processes_are_closed() -> Non
 def test_worker_reports_verified_window_closure_separately(
     monkeypatch: pytest.MonkeyPatch, windows_open: bool, status: str
 ) -> None:
-    from jarvis.tools.desktop_worker import _dispatch
+    from artemis.tools.desktop_worker import _dispatch
 
     monkeypatch.setattr(WindowsDesktop, "close_application", lambda *_: False)
     monkeypatch.setattr(WindowsDesktop, "application_windows_open", lambda *_: windows_open)
@@ -524,12 +524,12 @@ def test_worker_reports_verified_window_closure_separately(
 
 
 def test_close_rechecks_until_processes_exit(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Windows")
-    monkeypatch.setattr("jarvis.tools.platform.time.sleep", lambda _: None)
+    monkeypatch.setattr("artemis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("artemis.tools.platform.time.sleep", lambda _: None)
     remaining: Iterator[set[int]] = iter([{42}, set()])
     monkeypatch.setattr(WindowsDesktop, "_application_pids", lambda *_: next(remaining))
     monkeypatch.setattr(
-        "jarvis.tools.platform.subprocess.run",
+        "artemis.tools.platform.subprocess.run",
         lambda *args, **kwargs: subprocess.CompletedProcess([], 0, b"", b""),
     )
     assert WindowsDesktop().close_application("brave.exe")
@@ -539,7 +539,7 @@ def test_close_rechecks_until_processes_exit(monkeypatch: pytest.MonkeyPatch) ->
 def test_open_worker_verifies_window_before_claiming_success(
     monkeypatch: pytest.MonkeyPatch, visible: bool, expected: str
 ) -> None:
-    from jarvis.tools.desktop_worker import _dispatch
+    from artemis.tools.desktop_worker import _dispatch
 
     monkeypatch.setattr(WindowsDesktop, "open_application", lambda *_: None)
     monkeypatch.setattr(WindowsDesktop, "wait_for_application_window", lambda *_: visible)
@@ -561,7 +561,7 @@ async def test_open_notepad_file_rejects_workspace_escape(tool_context: ToolCont
 def test_worker_document_arguments_are_explicit_and_extra_fields_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from jarvis.tools.desktop_worker import _dispatch
+    from artemis.tools.desktop_worker import _dispatch
 
     opened: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -600,7 +600,7 @@ def test_packaged_window_child_is_matched_and_unknown_pid_is_not_success(
         IsWindowVisible=Function(lambda hwnd: True), GetWindowThreadProcessId=Function(get_pid),
         GetClassNameW=Function(lambda *args: 0),
     )
-    monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("artemis.tools.platform.platform.system", lambda: "Windows")
     monkeypatch.setattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE, raising=False)
     monkeypatch.setattr(WindowsDesktop, "_application_pids", lambda *_: {88})
     monkeypatch.setattr(WindowsDesktop, "_win_dll", lambda *_: api)
@@ -612,13 +612,13 @@ def test_packaged_window_child_is_matched_and_unknown_pid_is_not_success(
 
 
 def test_open_uses_no_shell_and_an_environment_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("jarvis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("artemis.tools.platform.platform.system", lambda: "Windows")
     calls = []
 
     def fake_popen(*args: Any, **kwargs: Any) -> None:
         calls.append((args, kwargs))
 
-    monkeypatch.setattr("jarvis.tools.platform.subprocess.Popen", fake_popen)
+    monkeypatch.setattr("artemis.tools.platform.subprocess.Popen", fake_popen)
     WindowsDesktop().open_application(r"C:\Windows\notepad.exe")
     args, kwargs = calls[0]
     assert args == ([r"C:\Windows\notepad.exe"],)

@@ -29,28 +29,28 @@ class Mutation:
 MUTATIONS = (
     Mutation(
         name="taint_protection_removed",
-        source="jarvis/safety/gate.py",
+        source="artemis/safety/gate.py",
         test="tests/test_gate.py::test_external_read_taints_turn_and_blocks_unapproved_side_effect",
         before="state.tainted and risk is not Risk.READ_ONLY",
         after="False and risk is not Risk.READ_ONLY",
     ),
     Mutation(
         name="approval_denial_bypassed",
-        source="jarvis/safety/gate.py",
+        source="artemis/safety/gate.py",
         test="tests/test_gate.py::test_confirm_required_cannot_bypass_approval",
         before="if not approved:",
         after="if False:",
     ),
     Mutation(
         name="tool_failure_reported_as_success",
-        source="jarvis/tools/plugins/filesystem.py",
+        source="artemis/tools/plugins/filesystem.py",
         test="tests/test_tools.py::test_trash_error_does_not_destroy_file",
         before='return ToolResult(status="error", message=f"Dosya işlemi başarısız: {detail}")',
         after='return ToolResult(success=True, status="ok", message="Dosya işlemi başarılı.")',
     ),
     Mutation(
         name="f5_start_approval_removed",
-        source="jarvis/tools/plugins/code_agent.py",
+        source="artemis/tools/plugins/code_agent.py",
         test=(
             "tests/test_code_agent.py::"
             "test_prepare_never_spawns_and_start_approves_entire_immutable_spec"
@@ -64,7 +64,7 @@ MUTATIONS = (
 def source_hashes(root: Path) -> dict[str, str]:
     """Kopyalanan Python kaynaklarını ve pyproject ayarını içerik özetiyle döndürür."""
     files = [root / "pyproject.toml"]
-    for directory in (root / "jarvis", root / "tests"):
+    for directory in (root / "artemis", root / "tests"):
         files.extend(
             path for path in directory.rglob("*")
             if path.is_file() and path.suffix == ".py" and "__pycache__" not in path.parts
@@ -76,7 +76,7 @@ def source_hashes(root: Path) -> dict[str, str]:
 
 
 def copy_project(destination: Path) -> None:
-    for name in ("jarvis", "tests"):
+    for name in ("artemis", "tests"):
         shutil.copytree(
             ROOT / name,
             destination / name,
@@ -145,7 +145,7 @@ def is_assertion_failure(result: subprocess.CompletedProcess[str]) -> bool:
 
 
 def check_mutation(mutation: Mutation) -> dict[str, Any]:
-    with tempfile.TemporaryDirectory(prefix=f"jarvis-mutation-{mutation.name}-") as temporary:
+    with tempfile.TemporaryDirectory(prefix=f"artemis-mutation-{mutation.name}-") as temporary:
         workspace = Path(temporary)
         project = workspace / "project"
         project.mkdir()

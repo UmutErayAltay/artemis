@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from jarvis.tools.code_agent_windows import WindowsProcessTree
+from artemis.tools.code_agent_windows import WindowsProcessTree
 
 
 class FakeCall:
@@ -52,7 +52,7 @@ class FakeKernel:
 def test_windows_suspended_creation_assign_before_resume_then_verify_empty(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import jarvis.tools.code_agent_process as module
+    import artemis.tools.code_agent_process as module
 
     monkeypatch.setattr(module, "os", SimpleNamespace(name="nt"))
     assert module.process_options()["creationflags"] & 0x4
@@ -67,7 +67,7 @@ def test_windows_suspended_creation_assign_before_resume_then_verify_empty(
 def test_windows_active_processes_never_report_cleanup_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("jarvis.tools.code_agent_windows.CLEANUP_SECONDS", 0.02)
+    monkeypatch.setattr("artemis.tools.code_agent_windows.CLEANUP_SECONDS", 0.02)
     tree = WindowsProcessTree(SimpleNamespace(pid=7, _handle=123), kernel=FakeKernel(active=[1]))
     assert not tree.kill()
 

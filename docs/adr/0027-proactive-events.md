@@ -1,6 +1,6 @@
 # ADR 0027 — Proaktif olaylar: hatırlatma, sabah brifingi ve gözetimsiz tur
 
-**Bağlam:** Faz 6a, kullanıcı bir şey yazmadan Jarvis'in kendiliğinden konuşmasını
+**Bağlam:** Faz 6a, kullanıcı bir şey yazmadan Artemis'in kendiliğinden konuşmasını
 ekler: kurulan bir hatırlatmanın zamanı gelince bildirilmesi ve belirli saatte sabah
 brifingi. Bu şimdiye kadarki her turdan farklıdır: turu kullanıcı başlatmaz ve tur
 sırasında karşısında onay verecek biri olmayabilir. Mevcut kurallar (CLAUDE.md 1, 2,
@@ -59,8 +59,8 @@ harcama defteri ve tek giriş `CommandRunner`.
     `zoneinfo` kullanılır. Windows'ta sistem IANA veritabanı olmadığı için `tzdata`
     bağımlılığı eklenir. Yaz saati geçişinde var olmayan yerel saat bir sonraki geçerli
     dakikaya, iki kez yaşanan saat ilkine çözülür.
-  - Zamanlayıcı yalnız uzun yaşayan süreçte çalışır: `jarvis desktop` (tepsi) ve
-    `jarvis telegram`. v1'de Windows Görev Zamanlayıcısı, otomatik başlangıç veya
+  - Zamanlayıcı yalnız uzun yaşayan süreçte çalışır: `artemis desktop` (tepsi) ve
+    `artemis telegram`. v1'de Windows Görev Zamanlayıcısı, otomatik başlangıç veya
     yeni servis eklenmez.
   - Her olay oluşumu SQLite'ta `(event_id, scheduled_for)` benzersiz anahtarıyla
     *önce talep edilir* (`claimed`), sonra işlenir. İki süreç aynı anda çalışsa da bir
@@ -83,12 +83,12 @@ harcama defteri ve tek giriş `CommandRunner`.
   boş bir `ConversationContext` ile çalışır. Kullanıcının panel geçmişine eklenmez ve
   oradaki dış içerikli turları devralmaz (ADR 0013'ün `history_external` durumu
   brifinge taşınmaz). Kullanıcının yürüyen turunu kilitlemez veya iptal etmez; panelde
-  ayrı bir "Jarvis kendiliğinden" mesajı olarak görünür. Kullanıcı ona cevap verirse
+  ayrı bir "Artemis kendiliğinden" mesajı olarak görünür. Kullanıcı ona cevap verirse
   bu, brifing metni bağlama eklenmemiş yeni bir turdur.
 
-- **Kod yerleşimi.** `jarvis/proactive/` zamanlayıcı, SQLite deposu ve teslimi taşır;
+- **Kod yerleşimi.** `artemis/proactive/` zamanlayıcı, SQLite deposu ve teslimi taşır;
   Qt'siz çekirdektir ve saat/uyku enjekte edilebilir. Hatırlatma araçları
-  `jarvis/tools/plugins/reminders.py` içinde `@register_tool` ile kaydolur (9. kural).
+  `artemis/tools/plugins/reminders.py` içinde `@register_tool` ile kaydolur (9. kural).
   Bekleme döngüsü sınırlıdır ve kapanışta iptal sinyaliyle biter; sınırsız `sleep` yoktur.
 
 **Bitiş şartı (testle):**
@@ -105,7 +105,7 @@ harcama defteri ve tek giriş `CommandRunner`.
 **Sonuçlar:**
 - v1 yan etki yapan bir otomasyon değildir: "her sabah 9'da X'i aç" kurulamaz. Bu
   bilinçli bir sınırdır; gözetimsiz onay kanalıyla birlikte ayrı ADR'de açılır.
-- Jarvis kapalıyken hiçbir şey çalışmaz; kaçırılan olaylar dürüstçe raporlanır.
+- Artemis kapalıyken hiçbir şey çalışmaz; kaçırılan olaylar dürüstçe raporlanır.
 - Kullanıcıdan onay beklenirken (masaüstü penceresi ya da Telegram düğmesi) onay geri
   çağrısı senkron olduğu için o sürecin döngüsü durur; zamanlayıcı o süre tarama yapmaz.
   Hatırlatma gecikir ve pencere içindeyse "gecikmeli" teslim edilir, kaybolmaz. Uzun bir

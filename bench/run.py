@@ -25,23 +25,23 @@ from pydantic import BaseModel, ConfigDict, Field
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from jarvis.brain.agent_loop import AgentLoop
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion
-from jarvis.brain.providers import Provider, build_provider
-from jarvis.channels.runner import CommandRunner
-from jarvis.config.settings import (
+from artemis.brain.agent_loop import AgentLoop
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion
+from artemis.brain.providers import Provider, build_provider
+from artemis.channels.runner import CommandRunner
+from artemis.config.settings import (
     MemoryConfig,
     ModelConfig,
     Settings,
     TelegramConfig,
     load_settings,
 )
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import TAINT_NOTICE, SafetyGate
-from jarvis.safety.paths import safe_join
-from jarvis.tools.base import ToolContext
-from jarvis.tools.registry import ToolRegistry, discover_tools
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import TAINT_NOTICE, SafetyGate
+from artemis.safety.paths import safe_join
+from artemis.tools.base import ToolContext
+from artemis.tools.registry import ToolRegistry, discover_tools
 
 SCENARIOS_PATH = Path(__file__).with_name("senaryolar.yaml")
 CATALOG_URL = "https://openrouter.ai/api/v1/models"
@@ -299,7 +299,7 @@ def evaluate(
 
 
 async def run_scenario(scenario: Scenario, model: ModelConfig | None = None) -> ScenarioResult:
-    with tempfile.TemporaryDirectory(prefix="jarvis-bench-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="artemis-bench-") as temporary:
         root = Path(temporary)
         desktop = root / "desktop"
         trash = root / "trash"

@@ -1,15 +1,15 @@
-# ADR 0032 — Tarayıcı otomasyonu: Jarvis'e ait MCP sunucusu
+# ADR 0032 — Tarayıcı otomasyonu: Artemis'e ait MCP sunucusu
 
 **Bağlam:** Faz 7c, "şu sayfayı aç, şu düğmeye bas, şu tablodaki değeri oku" gibi
 istekler için sayfanın DOM'una erişen bir araç ister. `open_url` yalnız tarayıcıyı açar,
 `web_search` yalnız arama sonucu getirir. Playwright tabanlı bir sunucuda bilinen iki risk
 var: `file://` ile SSH anahtarı okunabilir; yalnız ilk adrese bakan URL doğrulaması da
-yetmez, çünkü genel bir sayfanın yönlendirmesi veya alt isteği yerel ağa gidebilir. Jarvis'te MCP istemcisi
+yetmez, çünkü genel bir sayfanın yönlendirmesi veya alt isteği yerel ağa gidebilir. Artemis'te MCP istemcisi
 hazırdır (ADR 0028): her çağrı taze süreç, varsayılan SIDE_EFFECT + outbound + external.
 
 **Karar:**
 
-- **Sunucu Jarvis deposundadır, ayrı süreçtir.** `jarvis/mcp_servers/browser.py`, SDK'sız
+- **Sunucu Artemis deposundadır, ayrı süreçtir.** `artemis/mcp_servers/browser.py`, SDK'sız
   küçük bir stdio JSON-RPC sunucusudur (`initialize`, `tools/list`, `tools/call`).
   Playwright isteğe bağlı `browser` ekidir (`pip install -e ".[browser]"` ve bir kez
   `python -m playwright install chromium`); yoksa sunucu çökmeden dürüst hata döner.
@@ -41,7 +41,7 @@ hazırdır (ADR 0028): her çağrı taze süreç, varsayılan SIDE_EFFECT + outb
   yan etki onay ister. Config örneği `read_only_tools` ÖNERMEZ: `fill` ve `click`
   form gönderebilir.
 
-- **`{python}` komutu.** MCP `command` değeri tam olarak `{python}` ise Jarvis'in kendi
+- **`{python}` komutu.** MCP `command` değeri tam olarak `{python}` ise Artemis'in kendi
   yorumlayıcısıyla (`sys.executable`) değiştirilir. Böylece açılışta (ADR 0030, etkin
   sanal ortam yokken) da doğru ortam kullanılır; başka hiçbir yer tutucu yoktur.
 

@@ -57,7 +57,7 @@ korundu; ayrıca iki platformda Qt offscreen testleri ve Qt tip kontrolü eklend
 
 ## Bilinçli sınırlar ve mekanik kararlar
 
-Ses hâlâ `python -m jarvis voice` ile ayrı kullanılır; panelde çalışan mikrofon
+Ses hâlâ `python -m artemis voice` ile ayrı kullanılır; panelde çalışan mikrofon
 gösterilmez. Görünen sohbet geçmişi modelin sonraki turuna eklenmez. Ayar
 editörü, model seçici, küresel kısayol, otomatik başlangıç ve kurulum paketi yoktur.
 F5'in gerçek Windows elle kabulü bekler; sahte/offscreen testle tamamlandı denmez.

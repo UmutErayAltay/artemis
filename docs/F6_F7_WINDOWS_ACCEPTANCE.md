@@ -7,7 +7,7 @@ tabloya yazın; bir madde kalırsa düzeltmeyi bulut oturumuna değil önce bura
 
 **Yerel Claude Code için kurallar:** Testler gerçek makineye dokunmaz kuralı bu listede
 bilerek esnetilir, çünkü amaç gerçek davranışı görmektir. Ama: kapatma/yeniden başlatma
-denemesinden önce açık işler kaydedilir; her adımda Jarvis'in onay penceresi kullanıcıya
+denemesinden önce açık işler kaydedilir; her adımda Artemis'in onay penceresi kullanıcıya
 gösterilir, Claude Code onu kendi tıklamaz. Sır (token, anahtar) ekrana veya dosyaya
 yazılmaz.
 
@@ -28,7 +28,7 @@ pytest -q                      # Windows'ta da yeşil olmalı
 
 1. `proactive.enabled: true`. Panelde "2 dakika sonra su içmeyi hatırlat" → 2 dk sonra panelde
    ve toast'ta hatırlatma görünür; denetimde `proactive_delivery` `delivered`.
-2. Jarvis'i kapatın, kapalıyken bir hatırlatmanın zamanı geçsin, yeniden açın → kaçan
+2. Artemis'i kapatın, kapalıyken bir hatırlatmanın zamanı geçsin, yeniden açın → kaçan
    hatırlatma bir kez teslim edilir (iki kez değil).
 3. Sabah brifingi için `briefings` altına 3 dk sonrası bir saat yazın → brifing gelir; brifing
    sırasında yan etkili hiçbir araç çalışmaz (denetimde `unattended=True` red).
@@ -50,11 +50,11 @@ pytest -q                      # Windows'ta da yeşil olmalı
 
 ## 7a — Açılışta başlama ve tek örnek (ADR 0030)
 
-10. `python -m jarvis autostart ac --config config/config.yaml` → "açık"; `durum` → "açık".
-    `regedit`'te `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Jarvis` değeri
+10. `python -m artemis autostart ac --config config/config.yaml` → "açık"; `durum` → "açık".
+    `regedit`'te `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Artemis` değeri
     `pythonw.exe ... desktop --arka-plan --config "<mutlak yol>"` ve `--ses` YOK.
-11. Oturumu kapatıp açın → Jarvis konsol penceresi açmadan tepside başlar; mikrofon kapalıdır.
-12. Jarvis açıkken ikinci kez `python -m jarvis desktop` → yeni pencere açılmaz, mevcut panel
+11. Oturumu kapatıp açın → Artemis konsol penceresi açmadan tepside başlar; mikrofon kapalıdır.
+12. Artemis açıkken ikinci kez `python -m artemis desktop` → yeni pencere açılmaz, mevcut panel
     öne gelir. Tepsideyken de aynı.
 13. Tepsi menüsündeki "Windows açılışında başlat" işaretini kaldırın → `durum` "kapalı";
     kayıt silinmiştir.
@@ -70,7 +70,7 @@ pytest -q                      # Windows'ta da yeşil olmalı
 18. "Bilgisayarı kilitle" → kilit ekranı; yanıt "gönderildi" der (başarı değil).
 19. "Bilgisayarı kapat" → onay penceresi; onayla → Windows 60 sn uyarısı; "kapatmayı iptal et"
     → iptal edilir. **Önce açık işleri kaydedin.**
-20. "Uyku moduna al" → onay ister; onaylayınca 2–3 sn içinde uyur, uyanınca Jarvis çalışır.
+20. "Uyku moduna al" → onay ister; onaylayınca 2–3 sn içinde uyur, uyanınca Artemis çalışır.
 
 ## 7c — Tarayıcı otomasyonu (ADR 0032)
 
@@ -91,16 +91,16 @@ pytest -q                      # Windows'ta da yeşil olmalı
 | 4 | geçti | `mcp_ready` notlar + browser; test klasörü listesi a.txt, b.txt doğru. |
 | 5 | geçti | `write_file` onay penceresi açtı, Hayır → `denied`, dosya oluşmadı. |
 | 6 | geçti | Çağrı sonrası `server-filesystem` node süreci yok. |
-| 7 | kaldı | `active_window`: onay penceresi kapanınca odak Jarvis paneline dönüyor, hep Jarvis'in kendi penceresi okunuyor (Not Defteri öndeyken onaylansa da). Düzeltme önerisi: hedef pencereyi onaydan önce yakala veya Jarvis'in kendi süreç pencerelerini atla. `screen` kapsamında Türkçe OCR: "Merhaba dünya ğüşiöç" → "Merhaba dünya ğğş»ç" (ü/i/ö kayıyor). 2026-10-19 düzeltildi: odak Jarvis sürecindeyse z-sırasında arkadaki ilk kullanıcı penceresi okunur (`JARVIS_OWN_PID`); canlıda Not Defteri öndeyken doğru, Jarvis-PID benzetiminde arkadaki Brave okundu. OCR harf kayması Windows OCR'ın kendisi, kodla çözülmez. |
+| 7 | kaldı | `active_window`: onay penceresi kapanınca odak Artemis paneline dönüyor, hep Artemis'in kendi penceresi okunuyor (Not Defteri öndeyken onaylansa da). Düzeltme önerisi: hedef pencereyi onaydan önce yakala veya Artemis'in kendi süreç pencerelerini atla. `screen` kapsamında Türkçe OCR: "Merhaba dünya ğüşiöç" → "Merhaba dünya ğğş»ç" (ü/i/ö kayıyor). 2026-10-19 düzeltildi: odak Artemis sürecindeyse z-sırasında arkadaki ilk kullanıcı penceresi okunur (`ARTEMIS_OWN_PID`); canlıda Not Defteri öndeyken doğru, Artemis-PID benzetiminde arkadaki Brave okundu. OCR harf kayması Windows OCR'ın kendisi, kodla çözülmez. |
 | 8 | yapılmadı | Ekran ölçeğini değiştirmeyi gerektiriyor; kullanıcıyla. |
 | 9 | uygulanamaz | Türkçe OCR dil paketi kurulu (`language: tr`), "paket yok" yolu tetiklenemez. |
-| 10 | geçti | `autostart ac` → açık, `durum` → açık; Run değeri `pythonw.exe -m jarvis desktop --arka-plan --config <mutlak yol>`, `--ses` yok. Not: Run girdisi OPENROUTER_API_KEY taşımaz → açılışta başlayan Jarvis modele bağlanamaz (anahtar yalnız start-jarvis.ps1'de elle giriliyor). 2026-10-19: uç anahtarları Kimlik Bilgisi Yöneticisi'nden çağrı anında okunuyor (ADR 0034), Run girdisinin anahtar taşıması gerekmiyor. |
+| 10 | geçti | `autostart ac` → açık, `durum` → açık; Run değeri `pythonw.exe -m artemis desktop --arka-plan --config <mutlak yol>`, `--ses` yok. Not: Run girdisi OPENROUTER_API_KEY taşımaz → açılışta başlayan Artemis modele bağlanamaz (anahtar yalnız start-artemis.ps1'de elle giriliyor). 2026-10-19: uç anahtarları Kimlik Bilgisi Yöneticisi'nden çağrı anında okunuyor (ADR 0034), Run girdisinin anahtar taşıması gerekmiyor. |
 | 11 | yapılmadı | Oturum kapatma yerel Claude Code oturumunu da kapatır; kullanıcı yapmalı. |
-| 12 | geçti (kısmen) | İkinci `desktop` → "Jarvis zaten açık; panel öne getirildi", süreç sayısı değişmedi. Tepsideyken varyantı denenmedi. |
+| 12 | geçti (kısmen) | İkinci `desktop` → "Artemis zaten açık; panel öne getirildi", süreç sayısı değişmedi. Tepsideyken varyantı denenmedi. |
 | 13 | yapılmadı | Tepsi menüsü UI otomasyonuyla erişilemedi; kullanıcı işareti kaldırmalı. |
 | 14 | geçti (kısmen) | Başlıklar/süreç adları gerçek pencerelerle eşleşiyor. Listede "Program Manager" (explorer masaüstü penceresi) var; görünmez/araç penceresi sayılıp elenmeli. 2026-10-19 düzeltildi: `Progman`/`WorkerW` sınıfı elenir; canlı listede Program Manager yok. |
 | 15 | kaldı | Büyüt/küçült/öne getir gerçekten oldu. "Sol yarıya al" her seferinde çıkış kodu 4: Windows PowerShell 5.1'de `[Marshal]::SizeOf($infoType)` `SizeOf(object)` aşırı yüklemesine düşüp "System.RuntimeType yapı olarak sıralanamıyor" hatası veriyor. `SizeOf($info)` ile denendi → ok, konum doğrulaması geçti. Çoklu monitör denenmedi (tek ekran). 2026-10-19 düzeltildi: `SizeOf($info)`; canlıda Not Defteri sol/sağ yarı çıkış 0, konum doğrulaması geçti. |
-| 16 | kaldı | Ses düzeyi/kapat/aç hepsi çıkış kodu 4: `[System.__ComObject]` üzerinde `SetMasterVolumeLevelScalar` metodu yok (PowerShell COM arayüzü üzerinden çağıramıyor). Çağrılar C# yardımcı statik metoduna taşınmalı. Ses değişmedi. 2026-10-19 düzeltildi: COM çağrıları C# `JarvisAudio.Apply`'a taşındı; canlıda 90 → geri okuma 90, 100 → 100. |
+| 16 | kaldı | Ses düzeyi/kapat/aç hepsi çıkış kodu 4: `[System.__ComObject]` üzerinde `SetMasterVolumeLevelScalar` metodu yok (PowerShell COM arayüzü üzerinden çağıramıyor). Çağrılar C# yardımcı statik metoduna taşınmalı. Ses değişmedi. 2026-10-19 düzeltildi: COM çağrıları C# `ArtemisAudio.Apply`'a taşındı; canlıda 90 → geri okuma 90, 100 → 100. |
 | 17 | geçti | "Parlaklığı 40 yap" → WMI geri okuması 40 (dizüstü panel). Sonra 100'e geri alındı. |
 | 18 | bekliyor |  |
 | 19 | kaldı | Onay penceresi çıktı, "Evet, onayla"ya basıldı; `shutdown.exe /s` ve `/a` ikisi de çıkış kodu 203 (ERROR_ENVVAR_NOT_FOUND), kapatma planlanmadı. Kök neden: `platform.child_environment()` izin listesinde `COMPUTERNAME` yok; shutdown.exe onsuz 203 veriyor. Dışarıda üretildi: aynı ortamla `shutdown /a` → 203, `COMPUTERNAME` eklenince → 1116 (beklenen). Öneri: izin listesine `COMPUTERNAME` ekle. 60 sn uyarısı ve iptal bu yüzden denenemedi. 2026-10-16: `COMPUTERNAME` izin listesine eklendi (09e5e47); 60 sn uyarı + iptal yeniden denenmeli (kullanıcıyla). |

@@ -1,4 +1,4 @@
-# Jarvis masaüstü — ilk sürüm planı
+# Artemis masaüstü — ilk sürüm planı
 
 Uygulama öncesi plan; [ADR 0011](adr/0011-desktop-ui.md). Kullanıcı F0–F3 üzerine
 GUI'yi şimdi istedi: F4 hafıza beklenmez; F3'ü büyütmeme kuralına bu çalışma için
@@ -6,18 +6,18 @@ istisnadır. Windows 11 hedeflenir, Linux çekirdeği Qt olmadan çalışır.
 
 ## Kapsam ve görsel yön
 
-`jarvis desktop --config config/config.yaml`: tek QApplication, ana panel,
+`artemis desktop --config config/config.yaml`: tek QApplication, ana panel,
 yüzen hızlı komut penceresi, sistem tepsisi. Metin komutları mevcut runner'dan
 geçer. Ses bağlantısı, kalıcı hafıza, Telegram, otomatik başlangıç, küresel
 kısayol, ayar editörü ve model seçici kapsam dışıdır. F3 ses CLI'sı korunur;
 GUI'de çalışan mikrofon/dinleme animasyonu yoktur. Bilgi gerekirse “Ses bu
-masaüstü sürümünde bağlı değil.” olur. Marka Jarvis; artemis uyandırma sözcüğüdür.
+masaüstü sürümünde bağlı değil.” olur. Marka Artemis; artemis uyandırma sözcüğüdür.
 
 - Zemin `#0B1220`, panel `#111C2D`, yükseltilmiş yüzey `#17263A`, metin
   `#E6EDF5`, ikincil metin `#A9B8C9`, vurgu `#53D6C7`; vurgu üstünde koyu metin.
   Amber onay, kırmızı hata içindir; durumlar renk yanında metin taşır. 8 px
   aralık sistemi, 24 px panel boşluğu, 12–16 px köşeler, ince sınırlar kullanılır.
-- Yaklaşık 1180×780 mantıksal px: Jarvis başlığı, gerçek durum, yapılandırılmış
+- Yaklaşık 1180×780 mantıksal px: Artemis başlığı, gerçek durum, yapılandırılmış
   model adı; %65 sohbet / %35 “İşlem adımları” yeniden boyutlanabilir bölmesi.
   900 px altında adımlar açılır panel olur. Altta çok satırlı komut, “Gönder”,
   çalışırken “İptal et”. Hazır durumu yalnız runtime kurulunca gösterilir;
@@ -43,7 +43,7 @@ masaüstü sürümünde bağlı değil.” olur. Marka Jarvis; artemis uyandırm
 | `channels/desktop/demo.py` | Açık demo için izole fake provider/araçlar |
 | `safety/audit.py` | İsteğe bağlı temizlenmiş kayıt gözlemcisi |
 
-Yollar `jarvis/` altındadır. `desktop` extra: `PySide6-Essentials==6.12.0`; paket __init__
+Yollar `artemis/` altındadır. `desktop` extra: `PySide6-Essentials==6.12.0`; paket __init__
 Qt import etmez. CLI yalnız desktop dalında Qt yükler; eksikse Türkçe kurulum
 mesajı verir. Chat/voice kurulum tekrarı ortak fabrikaya çıkarılır: settings,
 workspace, audit, registry, gate, context, build_provider, AgentLoop, runner.
@@ -103,7 +103,7 @@ Tool requested/dispatch/result ve approval olayları gerçek durumlarına çevri
 nihai tur sonucudur, bütün araçların başarısı değildir. Token akışı uydurulmaz.
 Anahtar alanı yoktur; sırlar config/argv/repr/loga taşınmaz, ücretli çağrı yapılmaz.
 
-`jarvis desktop --demo`: kalıcı “DEMO · Gerçek işlem yapılmaz”; TemporaryDirectory,
+`artemis desktop --demo`: kalıcı “DEMO · Gerçek işlem yapılmaz”; TemporaryDirectory,
 fake provider, özel ToolRegistry ve gerçek runner/loop/gate. Gerçek config,
 anahtar, sağlayıcı ve plugin keşfi kullanılmaz. Demo araçları yalnız bellek içi
 örnek veri okur/değiştirir: external okuma ardından taint nedeniyle onay isteyen

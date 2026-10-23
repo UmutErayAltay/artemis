@@ -12,13 +12,13 @@ from typing import Any
 
 import pytest
 
-from jarvis.perception.screen import (
+from artemis.perception.screen import (
     SCREEN_SCRIPT,
     SCREEN_TEXT_LIMIT,
     ScreenOutcome,
     read_screen,
 )
-from jarvis.tools.platform import child_environment
+from artemis.tools.platform import child_environment
 
 
 class FakeRunner:
@@ -82,17 +82,17 @@ def test_argv_has_encoded_command_and_no_scope_or_text() -> None:
 def test_env_carries_scope_and_no_secrets(
     scope: str, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("JARVIS_TELEGRAM_BOT_TOKEN", "123:fake-token")
+    monkeypatch.setenv("ARTEMIS_TELEGRAM_BOT_TOKEN", "123:fake-token")
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
-    monkeypatch.setenv("JARVIS_UNLISTED_SETTING", "1")
+    monkeypatch.setenv("ARTEMIS_UNLISTED_SETTING", "1")
     runner = FakeRunner(stdout=ok_stdout())
     read_screen(scope, runner=runner, platform="win32")  # type: ignore[arg-type]
     env = runner.calls[0][1]["env"]
-    assert env["JARVIS_SCREEN_SCOPE"] == scope
-    for key in ("JARVIS_TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY", "JARVIS_UNLISTED_SETTING"):
+    assert env["ARTEMIS_SCREEN_SCOPE"] == scope
+    for key in ("ARTEMIS_TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY", "ARTEMIS_UNLISTED_SETTING"):
         assert key not in env
-    assert env["JARVIS_OWN_PID"] == str(os.getpid())
-    assert set(env) <= set(child_environment()) | {"JARVIS_SCREEN_SCOPE", "JARVIS_OWN_PID"}
+    assert env["ARTEMIS_OWN_PID"] == str(os.getpid())
+    assert set(env) <= set(child_environment()) | {"ARTEMIS_SCREEN_SCOPE", "ARTEMIS_OWN_PID"}
 
 
 def test_script_contract_and_nothing_written_to_disk() -> None:
@@ -100,7 +100,7 @@ def test_script_contract_and_nothing_written_to_disk() -> None:
         "CopyFromScreen",
         "OcrEngine",
         "SetProcessDPIAware",
-        "JARVIS_SCREEN_SCOPE",
+        "ARTEMIS_SCREEN_SCOPE",
         "MemoryStream",
         "TryCreateFromLanguage",
         "TryCreateFromUserProfileLanguages",
@@ -116,7 +116,7 @@ def test_script_contract_and_nothing_written_to_disk() -> None:
         assert forbidden not in SCREEN_SCRIPT
     assert "System.IO.File" not in SCREEN_SCRIPT
     # Sabit betik: kullanıcı verisi gömülmez, yalnız ortamdan okunur.
-    assert "$env:JARVIS_SCREEN_SCOPE" in SCREEN_SCRIPT
+    assert "$env:ARTEMIS_SCREEN_SCOPE" in SCREEN_SCRIPT
 
 
 def test_ok_path_returns_turkish_text_language_and_title() -> None:

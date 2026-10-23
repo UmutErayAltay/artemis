@@ -6,19 +6,19 @@ from typing import Any
 
 import pytest
 
-from jarvis.brain.agent_loop import NOTES_HEADER, AgentLoop
-from jarvis.brain.conversation import ConversationContext, TurnRecord
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, ToolCall
-from jarvis.channels.runner import CommandRunner
-from jarvis.channels.runtime import create_runtime
-from jarvis.config.settings import Settings
-from jarvis.memory.store import MemoryStore
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate, TurnState
-from jarvis.tools.base import ToolContext
-from jarvis.tools.plugins.self_memory import MAX_NOTES
-from jarvis.tools.registry import discover_tools
+from artemis.brain.agent_loop import NOTES_HEADER, AgentLoop
+from artemis.brain.conversation import ConversationContext, TurnRecord
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, ToolCall
+from artemis.channels.runner import CommandRunner
+from artemis.channels.runtime import create_runtime
+from artemis.config.settings import Settings
+from artemis.memory.store import MemoryStore
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate, TurnState
+from artemis.tools.base import ToolContext
+from artemis.tools.plugins.self_memory import MAX_NOTES
+from artemis.tools.registry import discover_tools
 
 
 def turn(user: str, answer: str = "tamam", *, tainted: bool = False, private: bool = False):

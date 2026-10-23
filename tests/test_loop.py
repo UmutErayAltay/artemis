@@ -7,16 +7,16 @@ from decimal import Decimal
 import pytest
 from pydantic import BaseModel, ConfigDict
 
-from jarvis.brain.agent_loop import AgentLoop, frame_result
-from jarvis.brain.errors import BudgetExceeded, ProviderError
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, ToolCall, Usage
-from jarvis.channels.runner import CommandRunner
-from jarvis.config.settings import Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
-from jarvis.tools.registry import ToolRegistry
+from artemis.brain.agent_loop import AgentLoop, frame_result
+from artemis.brain.errors import BudgetExceeded, ProviderError
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, ToolCall, Usage
+from artemis.channels.runner import CommandRunner
+from artemis.config.settings import Settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.registry import ToolRegistry
 
 
 class Args(BaseModel):

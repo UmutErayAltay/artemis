@@ -9,8 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.tools.platform import child_environment
-from jarvis.tools.processes import run_desktop_action
+from artemis.tools.platform import child_environment
+from artemis.tools.processes import run_desktop_action
 
 
 def install_python_worker(monkeypatch: pytest.MonkeyPatch, code: str) -> None:
@@ -25,7 +25,7 @@ def install_python_worker(monkeypatch: pytest.MonkeyPatch, code: str) -> None:
             env=child_environment(),
         )
 
-    monkeypatch.setattr("jarvis.tools.processes._create_worker", spawn)
+    monkeypatch.setattr("artemis.tools.processes._create_worker", spawn)
 
 
 async def test_rejects_malformed_worker_protocol(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -130,7 +130,7 @@ async def test_fragmented_worker_json_is_read_through_eof(
 
 
 def test_worker_rejects_unhashable_action(monkeypatch: pytest.MonkeyPatch) -> None:
-    from jarvis.tools import desktop_worker
+    from artemis.tools import desktop_worker
 
     class Input:
         buffer = io.BytesIO(b'{"action":[],"arguments":{}}')
@@ -149,7 +149,7 @@ def test_worker_rejects_unhashable_action(monkeypatch: pytest.MonkeyPatch) -> No
     ],
 )
 def test_worker_rejects_unsafe_browser_urls(monkeypatch: pytest.MonkeyPatch, url: str) -> None:
-    from jarvis.tools import desktop_worker
+    from artemis.tools import desktop_worker
 
     class Desktop:
         def open_browser(self, value: str) -> None:

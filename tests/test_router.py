@@ -8,13 +8,13 @@ from uuid import uuid4
 
 import pytest
 
-from jarvis.brain.errors import BudgetExceeded, ProviderError, RetryableProviderError
-from jarvis.brain.models import Completion, Message, Usage
-from jarvis.brain.providers import build_provider
-from jarvis.brain.router import ProviderRouter
-from jarvis.config.settings import ModelConfig, Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.tools.base import ToolDefinition
+from artemis.brain.errors import BudgetExceeded, ProviderError, RetryableProviderError
+from artemis.brain.models import Completion, Message, Usage
+from artemis.brain.providers import build_provider
+from artemis.brain.router import ProviderRouter
+from artemis.config.settings import ModelConfig, Settings
+from artemis.safety.audit import AuditLog
+from artemis.tools.base import ToolDefinition
 
 
 class Responses:

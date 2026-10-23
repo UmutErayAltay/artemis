@@ -8,11 +8,11 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from jarvis.brain.models import Completion
-from jarvis.channels import cli
-from jarvis.channels.cli import request_approval
-from jarvis.config.settings import ModelConfig, Settings, load_settings
-from jarvis.tools.registry import ToolRegistry
+from artemis.brain.models import Completion
+from artemis.channels import cli
+from artemis.channels.cli import request_approval
+from artemis.config.settings import ModelConfig, Settings, load_settings
+from artemis.tools.registry import ToolRegistry
 
 
 def test_secrets_are_not_config_fields():

@@ -6,15 +6,15 @@ from time import monotonic
 
 import pytest
 
-from bench.voice_latency import group_live_events
-from jarvis.channels.voice.core import (
+from artemis.channels.voice.core import (
     AudioFrame,
     AudioSegment,
     PCMChunk,
     VoiceController,
     find_wake_word,
 )
-from jarvis.config.settings import VoiceConfig
+from artemis.config.settings import VoiceConfig
+from bench.voice_latency import group_live_events
 
 
 class FakeMic:
@@ -194,8 +194,8 @@ def test_wake_word_rejects_other_words(transcript: str):
 
 
 def test_short_wake_word_needs_exact_match():
-    assert find_wake_word("jarvis aç", "jarvis") == (0, 6)
-    assert find_wake_word("jarviz aç", "jarvis") == (0, 6)
+    assert find_wake_word("artemis aç", "artemis") == (0, 7)
+    assert find_wake_word("artemiz aç", "artemis") == (0, 7)
     assert find_wake_word("ev aç", "eva") is None
     assert find_wake_word("eva aç", "eva") == (0, 3)
 
@@ -744,8 +744,8 @@ async def test_continuous_still_ignores_assistant_echo():
 
 
 def test_segmenter_detects_on_denoised_but_keeps_raw_audio_for_stt():
-    from jarvis.channels.voice.core import AudioSegmenter
-    from jarvis.config.settings import VoiceConfig
+    from artemis.channels.voice.core import AudioSegmenter
+    from artemis.config.settings import VoiceConfig
 
     config = VoiceConfig()
     voiced = [False] * 3 + [True] * 4 + [False] * (config.end_silence_ms // config.frame_ms)

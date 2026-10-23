@@ -1,7 +1,7 @@
 # Yollar bu dosyanın bulunduğu dizine göre çözülür.
 workspace: ../desktop
-state_dir: ../.jarvis
-audit_path: ../.jarvis/audit.jsonl
+state_dir: ../.artemis
+audit_path: ../.artemis/audit.jsonl
 max_steps: 8
 max_seconds: 60
 provider_timeout_seconds: 15
@@ -22,7 +22,7 @@ primary_model: ''
 fallback_model: null
 models: {}
 # Kendi OpenAI uyumlu ucunuz (ADR 0033): adres + isteğe bağlı anahtar. Anahtar YAML'a yazılmaz;
-# ortamda JARVIS_<UC_ID>_API_KEY ya da Kimlik Bilgisi Yöneticisi'nde Jarvis/<uc-id> olarak tutulur.
+# ortamda ARTEMIS_<UC_ID>_API_KEY ya da Kimlik Bilgisi Yöneticisi'nde Artemis/<uc-id> olarak tutulur.
 # endpoints:
 #   yerel-proxy:
 #     base_url: http://127.0.0.1:8317/v1   # http yalnız localhost için; uzak uç https olmalı
@@ -42,7 +42,7 @@ allow_all_applications: false # Windows Başlat menüsündeki tüm kurulu uygula
 # Dış içerik okunduktan sonraki kapatma yine onay ister.
 close_without_confirmation: []
 
-# Ses modelleri önceden ayrıca kurulmalıdır; Jarvis çalışma anında indirme yapmaz.
+# Ses modelleri önceden ayrıca kurulmalıdır; Artemis çalışma anında indirme yapmaz.
 # faster-whisper CUDA/float16 başlangıç profili; CPU için stt_device: cpu,
 # stt_compute_type: int8 seçin.
 voice:
@@ -63,9 +63,9 @@ voice:
   # false (önerilen): temizlenmiş ses yalnız algılamaya (VAD, cümle bitişi, söz kesme, seviye)
   # gider; STT aynı aralığın HAM sesini alır. true: STT de temizlenmiş sesi alır (ADR 0037).
   noise_suppression_stt: false
-  echo_cancellation: false # ADR 0038: hoparlörle kullanırken Jarvis'in kendi sesini mikrofondan siler.
+  echo_cancellation: false # ADR 0038: hoparlörle kullanırken Artemis'in kendi sesini mikrofondan siler.
   echo_delay_ms: 50 # Hoparlör→mikrofon gecikme tahmini; AEC3 kendisi de ayarlar.
-  # Verilmezse pakete dahil model (jarvis/channels/voice/models/dfn3) kullanılır. Başka bir dizin
+  # Verilmezse pakete dahil model (artemis/channels/voice/models/dfn3) kullanılır. Başka bir dizin
   # verilirse içinde aynı sha256'lı dfn3_step.onnx bulunmalıdır; farklı dosya reddedilir.
   # noise_model_dir: ../models/dfn3
   pre_roll_ms: 300
@@ -101,7 +101,7 @@ voice:
 #   exclude: [daily/, receipts/, knowledge/index.md, knowledge/log.md, 850-Companion/]
 #   max_results: 5
 #   max_note_chars: 20000
-#   # Anlamsal arama için: pip install 'jarvis-tr[memory]'; ilk aramada model iner.
+#   # Anlamsal arama için: pip install 'artemis-tr[memory]'; ilk aramada model iner.
 #   # Paket veya model yoksa sözcük aramasına dönülür ve sonuçta bu yazılır.
 #   embedding_model: null
 #   embedding_cache_dir: null        # varsayılan: state_dir/embedding (vault DIŞINDA)
@@ -110,15 +110,15 @@ voice:
 # Bot token'ı BURAYA YAZILMAZ ve YAML'da `token:` alanı yoktur (eklenirse doğrulama
 # reddeder). Token yalnız ortam değişkeninden okunur; adını token_env belirler ve
 # _TOKEN ile bitmek zorundadır (denetim kaydı değeri bu sayede gizler).
-#   Windows: setx JARVIS_TELEGRAM_BOT_TOKEN "<BotFather'dan aldığınız token>"
+#   Windows: setx ARTEMIS_TELEGRAM_BOT_TOKEN "<BotFather'dan aldığınız token>"
 # Chat id'nizi @userinfobot'tan ya da bota mesaj yazdıktan sonra
 # https://api.telegram.org/bot<TOKEN>/getUpdates çıktısındaki message.chat.id'den bulun.
 # Yalnız bu kimliğe sahip ÖZEL sohbetten gelen mesaj çalıştırılır; grup, başka kullanıcı,
 # iletilmiş (forward) ve max_message_age_seconds'tan eski mesajlar çalıştırılmaz.
-# Onaylar düğmeyle sorulur; süre dolarsa cevap hayırdır. `jarvis telegram` ile başlatılır.
+# Onaylar düğmeyle sorulur; süre dolarsa cevap hayırdır. `artemis telegram` ile başlatılır.
 # telegram:
 #   chat_id: 123456789
-#   token_env: JARVIS_TELEGRAM_BOT_TOKEN
+#   token_env: ARTEMIS_TELEGRAM_BOT_TOKEN
 #   api_base: https://api.telegram.org
 #   request_timeout_seconds: 10
 #   poll_timeout_seconds: 25
@@ -130,7 +130,7 @@ voice:
 # atabilir. Claude Bash/alt ajan araçları SafetyGate dışındadır; OS sandbox yoktur.
 # code_agent:
 #   projects:
-#     jarvis: C:/Users/siz/Projects/jarvis   # göreli yol bu dosyaya göre çözülür
+#     artemis: C:/Users/siz/Projects/artemis   # göreli yol bu dosyaya göre çözülür
 #   command: claude
 #   max_minutes: 20
 #   model: null                              # doluysa --model olarak geçilir
@@ -142,8 +142,8 @@ voice:
 #   auto_sync: true                          # açılışta klonla/fetch et
 
 # Proaktif olaylar (ADR 0027). KAPALI gelir. Açıkken hatırlatma araçları çalışır ve
-# `jarvis desktop` ile `jarvis telegram` süreçleri zamanlayıcıyı çalıştırır (ikisi aynı anda
-# açıksa da her olay bir kez teslim edilir). Jarvis kapalıyken hiçbir şey çalışmaz.
+# `artemis desktop` ile `artemis telegram` süreçleri zamanlayıcıyı çalıştırır (ikisi aynı anda
+# açıksa da her olay bir kez teslim edilir). Artemis kapalıyken hiçbir şey çalışmaz.
 # Brifing istemini model kuramaz veya değiştiremez; yalnız buradan tanımlanır. Brifing
 # gözetimsiz bir model turudur: yalnız okuma araçları çalışır, yan etkili her işlem
 # sorulmadan reddedilir. Brifing tanımlamak ücretli model çağrısına izin vermektir;
@@ -187,11 +187,11 @@ voice:
 #       read_only_tools: [read_text_file, list_directory, search_files]
 #       confirm_tools: [write_file, move_file]
 #       env_passthrough: []
-#     # Jarvis'in tarayıcı sunucusu (ADR 0032). Önce: pip install -e ".[browser]" ve
+#     # Artemis'in tarayıcı sunucusu (ADR 0032). Önce: pip install -e ".[browser]" ve
 #     # python -m playwright install chromium. read_only_tools ÖNERİLMEZ: browse form doldurabilir.
 #     - name: browser
-#       command: "{python}"              # tam olarak bu: Jarvis'in kendi Python'u
-#       args: ["-m", "jarvis.mcp_servers.browser"]
+#       command: "{python}"              # tam olarak bu: Artemis'in kendi Python'u
+#       args: ["-m", "artemis.mcp_servers.browser"]
 #       content: text
 #       timeout_seconds: 90
 
@@ -212,7 +212,7 @@ voice:
 #   shutdown_delay_seconds: 60
 #   timeout_seconds: 15
 
-# Bilgisayar kullanımı (ADR 0039). KAPALI gelir; Jarvis'in en riskli yeteneğidir. Açıkken
+# Bilgisayar kullanımı (ADR 0039). KAPALI gelir; Artemis'in en riskli yeteneğidir. Açıkken
 # computer_use(hedef) aracı tek onayla bir oturum başlatır: her adımda birincil ekranın
 # görüntüsü `model`e gider, model fare/klavye eylemi döner. Hassas adımlar (gönder, sil, öde,
 # alt+f4) ayrıca sorulur; Esc oturumu durdurur. `model` models içinde tanımlı olmalı ve

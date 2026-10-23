@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.mcp import client as mcp_client
-from jarvis.mcp.client import MCPError, StdioMCPClient
+from artemis.mcp import client as mcp_client
+from artemis.mcp.client import MCPError, StdioMCPClient
 
 SERVER = Path(__file__).with_name("mcp_fake_server.py")
 
@@ -52,14 +52,14 @@ def test_echo_returns_text_and_structured() -> None:
 
 
 def test_child_env_has_only_given_variables(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("JARVIS_TEST_SECRET_TOKEN", "gizli")
-    env = {"PATH": os.environ.get("PATH", ""), "JARVIS_TEST_PASS": "1"}
+    monkeypatch.setenv("ARTEMIS_TEST_SECRET_TOKEN", "gizli")
+    env = {"PATH": os.environ.get("PATH", ""), "ARTEMIS_TEST_PASS": "1"}
     if os.name == "nt":
         env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
     result = make_client("ok", env=env).call_tool("env", {})
     keys = set(result.text.split(","))
-    assert "JARVIS_TEST_PASS" in keys
-    assert "JARVIS_TEST_SECRET_TOKEN" not in keys
+    assert "ARTEMIS_TEST_PASS" in keys
+    assert "ARTEMIS_TEST_SECRET_TOKEN" not in keys
     assert "gizli" not in result.text
 
 
@@ -139,12 +139,12 @@ def test_notifications_and_foreign_ids_are_ignored() -> None:
 
 def test_missing_command_is_process_error() -> None:
     client = StdioMCPClient(
-        ["jarvis-olmayan-komut-xyz"], env={"PATH": os.environ.get("PATH", "")}, timeout=1.0
+        ["artemis-olmayan-komut-xyz"], env={"PATH": os.environ.get("PATH", "")}, timeout=1.0
     )
     with pytest.raises(MCPError) as info:
         client.list_tools()
     assert info.value.error_type == "process"
-    assert "jarvis-olmayan" not in str(info.value)
+    assert "artemis-olmayan" not in str(info.value)
 
 
 def pid_alive(pid: int) -> bool:

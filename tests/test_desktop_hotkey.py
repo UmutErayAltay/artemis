@@ -2,7 +2,7 @@
 
 import pytest
 
-from jarvis.channels.desktop.hotkey import parse_hotkey
+from artemis.channels.desktop.hotkey import parse_hotkey
 
 
 def test_parse_hotkey_maps_modifiers_and_keys():

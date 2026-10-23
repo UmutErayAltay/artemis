@@ -1,4 +1,4 @@
-# Jarvis geliştirme sözleşmesi
+# Artemis geliştirme sözleşmesi
 
 Bu depo Türkçe, tek kullanıcılı Windows 11 asistanıdır. Python 3.12 çekirdeği Linux
 üzerinde de çalışır. PySide6 masaüstü UI aynı Qt'siz runtime ve SafetyGate'i kullanır;
@@ -130,7 +130,7 @@ yazılmaz. Her oluşum SQLite'ta önce talep edilir; ölen sürecin talebi `unce
 otomatik tekrar çalışmaz. Testler sahte saat enjekte eder, toast'ı kapatır.
 
 MCP (Faz 6b, ADR 0028) `mcp.servers` boşken hiçbir süreç başlatmaz ve köprüyü yüklemez.
-`@register_tool` kuralının tek istisnası `jarvis/mcp/bridge.py`'dir: MCP araçları
+`@register_tool` kuralının tek istisnası `artemis/mcp/bridge.py`'dir: MCP araçları
 runtime'a özel registry kopyasına eklenir, global registry'ye değil; çakışan ad asla
 üzerine yazılmaz. MCP aracı varsayılan SIDE_EFFECT + `outbound` + `external`'dır; sunucunun
 `readOnlyHint`'i riski DÜŞÜRMEZ (yalnız kullanıcının `read_only_tools` listesi), bu kuralı
@@ -147,35 +147,35 @@ metni `external=True` ve `content_kind="screen"`'dir; `allow_cloud_screen` kapal
 sayılır. Betik sabittir, kapsam yalnız ortam değişkeniyle gider; testler PowerShell
 çalıştırmaz (sahte runner/okuyucu).
 
-Açılışta başlama (Faz 7a, ADR 0030) yalnız `jarvis autostart` komutu ve tepsi menüsüyle
+Açılışta başlama (Faz 7a, ADR 0030) yalnız `artemis autostart` komutu ve tepsi menüsüyle
 değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt
 yalnız HKCU `Run` değeridir, yazılınca geri okunur; komut `--ses` taşımaz. Tek örnek yerel
 sokette yalnız sabit `show` iletisini tanır; sokete komut eklemeyin. Testler gerçek kayıt
 defterine dokunmaz (sahte depo).
 
-Pencere ve sistem kontrolü (Faz 7b, ADR 0031) `jarvis/tools/system_control.py`'deki sabit
+Pencere ve sistem kontrolü (Faz 7b, ADR 0031) `artemis/tools/system_control.py`'deki sabit
 PowerShell betikleriyle çalışır; değerler argv'ye değil ortama gider, `shutdown.exe` argv'si
 sabit bayraklardır. `power` aracında `sleep`/`shutdown`/`restart` CONFIRM_REQUIRED kalmalıdır;
 kapatma gecikmesi 30 sn altına inemez. Kilit, uyku ve kapatma `sent` döner, başarı denmez.
 `window_list` başlıkları `content_kind="screen"`'dir. Testler PowerShell çalıştırmaz.
 
-Tarayıcı MCP sunucusu (Faz 7c, ADR 0032) `jarvis/mcp_servers/browser.py` ayrı süreçtir.
+Tarayıcı MCP sunucusu (Faz 7c, ADR 0032) `artemis/mcp_servers/browser.py` ayrı süreçtir.
 `check_url` her isteğe (`context.route`) ve WebSocket'e (`context.route_web_socket`)
-uygulanır; yalnız ilk adresi denetlemeye geri dönmeyin. `JARVIS_BROWSER_ALLOW_LOCAL` şema
+uygulanır; yalnız ilk adresi denetlemeye geri dönmeyin. `ARTEMIS_BROWSER_ALLOW_LOCAL` şema
 kuralını asla gevşetmez. Bağlam çerezsiz ve indirmesizdir. Testler gerçek Chromium ya da ağ
-kullanmaz (`JARVIS_BROWSER_FAKE`); MCP `command: "{python}"` yalnız tam eşleşmede
+kullanmaz (`ARTEMIS_BROWSER_FAKE`); MCP `command: "{python}"` yalnız tam eşleşmede
 `sys.executable` olur.
 
 ## Yeni araç eklemek
 
-`jarvis/tools/plugins/` altında tek Python dosyası oluşturun. Argümanları pydantic
+`artemis/tools/plugins/` altında tek Python dosyası oluşturun. Argümanları pydantic
 ile doğrulayın; bilinmeyen alanları reddedin. Basit, makineyi değiştirmeyen örnek:
 
 ```python
 from pydantic import BaseModel, ConfigDict, Field
 
-from jarvis.tools.base import BaseTool, Risk, ToolContext, ToolResult
-from jarvis.tools.registry import register_tool
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.registry import register_tool
 
 
 class CountArguments(BaseModel):
@@ -229,6 +229,6 @@ geçici kaldırınca, ya da başarısız işlemi başarı diye döndürünce ilg
 kırıldığını doğrulayın ve mutasyonu geri alın. Bunu geçici kopyada yapmak paralel
 geliştirmeyi etkilemez.
 
-Anlamlı adımlarda commit atılabilir. Kullanıcı daha sonra private
-`UmutErayAltay/jarvis` deposuna push için izin verdi. Windows veya canlı model doğrulaması
+Anlamlı adımlarda commit atılabilir. Depo public `UmutErayAltay/artemis`; push yalnız
+kullanıcı isterse yapılır. Windows veya canlı model doğrulaması
 yapılmadıysa tamamlandı demeyin; anahtar yoksa sonuç uydurmayın.

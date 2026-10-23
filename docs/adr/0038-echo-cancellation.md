@@ -1,6 +1,6 @@
 # ADR 0038 — İsteğe bağlı akustik yankı engelleme (WebRTC AEC3)
 
-**Bağlam:** Jarvis, kendi TTS çıktısını hoparlörden duyduğunda mikrofon yolunda
+**Bağlam:** Artemis, kendi TTS çıktısını hoparlörden duyduğunda mikrofon yolunda
 akustik yankı oluşur. O ana kadar yankıyı yalnız metin düzeyinde ele alan korumalar
 (ADR 0022) ve `require_wake_during_output` ayarı vardı. Bunlar asistanın kendi
 sesini kullanıcı komutu sanmayı azaltır; ancak söz kesme ve kesintisiz mod bu

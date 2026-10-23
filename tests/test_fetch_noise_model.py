@@ -116,7 +116,7 @@ def test_rejects_missing_member(fetch: ModuleType, tmp_path: Path) -> None:
 
 
 def test_default_dest_is_dev_reference_dir_not_the_runtime_model_dir(fetch: ModuleType) -> None:
-    from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
+    from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 
     # Resmi tam dizi grafikler yalnız parite içindir; pakete dahil modelin üstüne yazılmaz.
     assert fetch.DEFAULT_DEST.is_absolute()
@@ -145,7 +145,7 @@ def test_main_prints_resolved_absolute_path(
 def test_pinned_hashes_match_denoiser_and_main_reports_failure(
     fetch: ModuleType, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    from jarvis.channels.voice.denoise import MODEL_SHA256
+    from artemis.channels.voice.denoise import MODEL_SHA256
 
     assert {k: v for k, v in fetch.MEMBER_SHA256.items() if k.endswith(".onnx")} == MODEL_SHA256
     local = tmp_path / "a.tar.gz"

@@ -8,8 +8,8 @@ from types import ModuleType
 import numpy as np
 import pytest
 
-import jarvis.channels.voice.adapters as voice_adapters
-from jarvis.channels.voice.adapters import (
+import artemis.channels.voice.adapters as voice_adapters
+from artemis.channels.voice.adapters import (
     EdgeTTSynthesizer,
     EmaSynthesizer,
     FallbackSynthesizer,
@@ -18,9 +18,9 @@ from jarvis.channels.voice.adapters import (
     SoundDeviceMicrophone,
     SoundDeviceSink,
 )
-from jarvis.channels.voice.core import AudioFrame, PCMChunk
-from jarvis.config.settings import VoiceConfig
-from jarvis.safety.audit import AuditLog
+from artemis.channels.voice.core import AudioFrame, PCMChunk
+from artemis.config.settings import VoiceConfig
+from artemis.safety.audit import AuditLog
 
 
 async def test_faster_whisper_uses_configured_final_and_partial_profiles(monkeypatch, tmp_path):
@@ -61,7 +61,7 @@ async def test_faster_whisper_uses_configured_final_and_partial_profiles(monkeyp
             return WhisperModule
         return original_import(name)
 
-    monkeypatch.setattr("jarvis.channels.voice.adapters.importlib.import_module", fake_import)
+    monkeypatch.setattr("artemis.channels.voice.adapters.importlib.import_module", fake_import)
     config = VoiceConfig(
         stt_model=tmp_path,
         stt_language="auto",
@@ -539,7 +539,7 @@ async def test_piper_uses_local_model_and_yields_api_pcm(monkeypatch, tmp_path):
     module = ModuleType("piper")
     module.PiperVoice = PiperVoice
     monkeypatch.setattr(
-        "jarvis.channels.voice.adapters.importlib.import_module",
+        "artemis.channels.voice.adapters.importlib.import_module",
         lambda name: module if name == "piper" else None,
     )
     config = VoiceConfig(piper_model=tmp_path / "voice.onnx", piper_config=tmp_path / "voice.json")
@@ -715,7 +715,7 @@ async def test_edge_stream_yields_pcm_before_remote_stream_finishes(monkeypatch,
     edge_module = ModuleType("edge_tts")
     edge_module.Communicate = Communicate
     monkeypatch.setattr(
-        "jarvis.channels.voice.adapters.importlib.import_module",
+        "artemis.channels.voice.adapters.importlib.import_module",
         lambda name: edge_module if name == "edge_tts" else None,
     )
     audit_path = tmp_path / "audit.jsonl"
@@ -789,7 +789,7 @@ async def test_edge_exception_family_normalizes_for_local_fallback(monkeypatch, 
     edge_module.Communicate = Communicate
     edge_module.exceptions = type("Exceptions", (), {"EdgeTTSException": EdgeServiceError})
     monkeypatch.setattr(
-        "jarvis.channels.voice.adapters.importlib.import_module",
+        "artemis.channels.voice.adapters.importlib.import_module",
         lambda name: edge_module if name == "edge_tts" else (_ for _ in ()).throw(ImportError()),
     )
     local = CountingSpeech()

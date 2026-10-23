@@ -13,8 +13,8 @@ from test_code_agent import make_jobs, reply, wait_job
 from test_code_agent import repo as _repo_fixture
 from test_code_agent_windows import FakeKernel
 
-from jarvis.tools.code_agent_jobs import CodeAgentError
-from jarvis.tools.code_agent_windows import WindowsProcessTree
+from artemis.tools.code_agent_jobs import CodeAgentError
+from artemis.tools.code_agent_windows import WindowsProcessTree
 
 repo = _repo_fixture
 
@@ -68,10 +68,10 @@ def test_shutdown_bounds_all_workers_and_releases_store_owner(tmp_path: Path, re
 def test_incomplete_runtime_construction_releases_job_store(tmp_path: Path) -> None:
     from decimal import Decimal
 
-    from jarvis.channels.runtime import create_runtime
-    from jarvis.config.settings import ModelConfig, Settings
-    from jarvis.safety.audit import AuditLog
-    from jarvis.tools.code_agent_jobs import CodeAgentJobs
+    from artemis.channels.runtime import create_runtime
+    from artemis.config.settings import ModelConfig, Settings
+    from artemis.safety.audit import AuditLog
+    from artemis.tools.code_agent_jobs import CodeAgentJobs
 
     settings = Settings(
         workspace=tmp_path / "workspace",
@@ -109,8 +109,8 @@ def test_job_store_connections_close_after_every_transaction_and_keep_owner(
 ) -> None:
     import sqlite3
 
-    from jarvis.safety.audit import AuditLog
-    from jarvis.tools.code_agent_jobs import CodeAgentJobs
+    from artemis.safety.audit import AuditLog
+    from artemis.tools.code_agent_jobs import CodeAgentJobs
 
     real_connect = sqlite3.connect
     opened: list[Any] = []
@@ -177,8 +177,8 @@ def test_job_store_initialization_failure_closes_connection_and_owner(
 ) -> None:
     import sqlite3
 
-    from jarvis.safety.audit import AuditLog
-    from jarvis.tools.code_agent_jobs import CodeAgentJobs
+    from artemis.safety.audit import AuditLog
+    from artemis.tools.code_agent_jobs import CodeAgentJobs
 
     real_connect = sqlite3.connect
     opened: list[Any] = []

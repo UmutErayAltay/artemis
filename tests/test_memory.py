@@ -15,23 +15,23 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from jarvis.brain.agent_loop import AgentLoop
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, ToolCall
-from jarvis.config.settings import MemoryConfig, Settings
-from jarvis.memory.embedding import EmbeddingIndex, EmbeddingUnavailable
-from jarvis.memory.vault import is_excluded, iter_notes, turkish_fold
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import TAINT_NOTICE, SafetyGate, TurnState
-from jarvis.tools.base import Risk, ToolContext, ToolResult
-from jarvis.tools.registry import discover_tools
+from artemis.brain.agent_loop import AgentLoop
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, ToolCall
+from artemis.config.settings import MemoryConfig, Settings
+from artemis.memory.embedding import EmbeddingIndex, EmbeddingUnavailable
+from artemis.memory.vault import is_excluded, iter_notes, turkish_fold
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import TAINT_NOTICE, SafetyGate, TurnState
+from artemis.tools.base import Risk, ToolContext, ToolResult
+from artemis.tools.registry import discover_tools
 
 EXCLUDE = MemoryConfig().exclude
 UNAVAILABLE_NOTICE = "Embedding kullanılamadı; sözcük araması yapıldı."
 
 VAULT_FILES = {
-    "Projeler/jarvis.md": (
-        "---\ntitle: Jarvis planı\n---\n\nSes komutları ve onay akışı burada planlanır.\n"
+    "Projeler/artemis.md": (
+        "---\ntitle: Artemis planı\n---\n\nSes komutları ve onay akışı burada planlanır.\n"
     ),
     "Kişisel/tercihler.md": "Sabah kahve: filtre, şekersiz.\n",
     "daily/2026-10-13.md": "Bugün kahve içtim.\n",
@@ -176,8 +176,8 @@ async def test_memory_tools_are_disabled_without_existing_vault(tmp_path: Path) 
         context = make_context(tmp_path / label, memory)
         results = [
             await invoke(context, "vault_search", query="kahve"),
-            await invoke(context, "vault_read_note", path="Projeler/jarvis.md"),
-            await invoke(context, "vault_append", path="Projeler/jarvis.md", text="Not"),
+            await invoke(context, "vault_read_note", path="Projeler/artemis.md"),
+            await invoke(context, "vault_append", path="Projeler/artemis.md", text="Not"),
         ]
         for result in results:
             assert result.success is False and result.status == "error", label
@@ -235,8 +235,8 @@ async def test_results_are_sorted_by_score_and_title_is_extracted(
     result = await invoke(context, "vault_search", query="ses onay")
     results = result.data["results"]
     scores = [item["score"] for item in results]
-    assert results[0]["path"] == "Projeler/jarvis.md"
-    assert results[0]["title"] == "Jarvis planı"
+    assert results[0]["path"] == "Projeler/artemis.md"
+    assert results[0]["title"] == "Artemis planı"
     assert scores == sorted(scores, reverse=True)
     assert all(len(item["excerpt"]) <= 300 and "\n" not in item["excerpt"] for item in results)
 
@@ -286,7 +286,7 @@ async def test_vault_read_taints_turn_through_real_gate(
     assert state.tainted is True
 
     # Lekeli turda yazma, onay penceresini dış içerik uyarısıyla açar ve reddedilirse yazmaz.
-    note = vault / "Projeler/jarvis.md"
+    note = vault / "Projeler/artemis.md"
     before = note.read_bytes()
     asked: list[tuple[str, dict[str, Any]]] = []
 
@@ -298,14 +298,14 @@ async def test_vault_read_taints_turn_through_real_gate(
         ToolCall(
             id="w1",
             name="vault_append",
-            arguments={"path": "Projeler/jarvis.md", "text": "Yeni satır."},
+            arguments={"path": "Projeler/artemis.md", "text": "Yeni satır."},
         ),
         context,
         state,
         decline,
     )
     assert appended.status == "denied" and appended.success is False
-    assert asked == [("vault_append", {"path": "Projeler/jarvis.md", "text": "Yeni satır."})]
+    assert asked == [("vault_append", {"path": "Projeler/artemis.md", "text": "Yeni satır."})]
     assert gate.pending_notice.startswith(TAINT_NOTICE)
     assert note.read_bytes() == before
 
@@ -331,7 +331,7 @@ async def test_invalid_search_arguments_are_rejected_by_gate_without_taint(
 
 async def test_read_returns_note_body_as_external_file(tmp_path: Path, vault: Path) -> None:
     context = make_context(tmp_path, MemoryConfig(vault_path=vault))
-    result = await invoke(context, "vault_read_note", path="Projeler/jarvis.md")
+    result = await invoke(context, "vault_read_note", path="Projeler/artemis.md")
     assert result.success and result.status == "ok"
     assert result.external is True and result.content_kind == "file"
     assert "Ses komutları ve onay akışı" in result.data["content"]
@@ -368,7 +368,7 @@ async def test_read_rejects_traversal(tmp_path: Path, vault: Path, path: str) ->
 async def test_read_rejects_absolute_path_inside_vault(tmp_path: Path, vault: Path) -> None:
     context = make_context(tmp_path, MemoryConfig(vault_path=vault))
     result = await invoke(
-        context, "vault_read_note", path=str(vault / "Projeler" / "jarvis.md")
+        context, "vault_read_note", path=str(vault / "Projeler" / "artemis.md")
     )
     assert result.success is False and result.status == "error"
     assert str(vault) not in result.message
@@ -476,7 +476,7 @@ async def test_append_rejects_excluded_hidden_and_non_markdown_targets(
 async def test_append_rejects_symlinked_note_even_when_target_is_inside_vault(
     tmp_path: Path, vault: Path
 ) -> None:
-    target = vault / "Projeler/jarvis.md"
+    target = vault / "Projeler/artemis.md"
     link = vault / "Projeler/baglanti.md"
     try:
         link.symlink_to(target)
@@ -531,7 +531,7 @@ async def test_append_is_confirm_required_and_declined_write_leaves_note_untouch
 
 def test_append_plugin_source_never_rewrites_notes() -> None:
     """Yazma yalnız ekleme ("a") ve yeni dosya ("x") kipinde olmalı; "w" ve write_text yasak."""
-    source = Path(__file__).resolve().parents[1] / "jarvis" / "tools" / "plugins" / "memory.py"
+    source = Path(__file__).resolve().parents[1] / "artemis" / "tools" / "plugins" / "memory.py"
     tree = ast.parse(source.read_text(encoding="utf-8"))
     offenders: list[str] = []
     modes: set[str] = set()
@@ -694,8 +694,8 @@ async def test_disabled_memory_error_is_not_masked_even_without_cloud_file_permi
 @pytest.mark.parametrize(
     ("relative", "excluded"),
     [
-        ("Projeler/jarvis.md", False),
-        ("Projeler\\jarvis.md", False),
+        ("Projeler/artemis.md", False),
+        ("Projeler\\artemis.md", False),
         ("daily/2026-10-13.md", True),
         ("x/daily/not.md", True),
         ("850-Companion/Core.md", True),
@@ -731,4 +731,4 @@ async def test_iter_notes_skips_excluded_hidden_and_escaping_links(
         for path in iter_notes(vault, EXCLUDE)
     ]
     assert found == sorted(found)
-    assert set(found) == {"Projeler/jarvis.md", "Kişisel/tercihler.md", "İstanbul.md"}
+    assert set(found) == {"Projeler/artemis.md", "Kişisel/tercihler.md", "İstanbul.md"}

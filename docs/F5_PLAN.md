@@ -8,7 +8,7 @@ Karar: [ADR 0026](adr/0026-background-project-workflow.md).
 Ses veya yazı → mevcut CommandRunner → netleştirme → proje taslağı → SafetyGate
 onayı → Claude Code yönetici → rol profiline göre alt ajanlar → sonuç veya soru.
 Soru → kullanıcı cevabı + onay → aynı Claude oturumuna devam. Kullanıcı diğer
-Jarvis konuşmalarını sürdürebilir; kod işi konuşma turunun süre sınırından bağımsızdır.
+Artemis konuşmalarını sürdürebilir; kod işi konuşma turunun süre sınırından bağımsızdır.
 
 ## Kabul ölçütleri
 

@@ -13,8 +13,8 @@ from typing import Any
 
 import pytest
 
-from jarvis.channels.voice.core import AudioFrame
-from jarvis.channels.voice.echo import (
+from artemis.channels.voice.core import AudioFrame
+from artemis.channels.voice.echo import (
     EchoCancelledMicrophone,
     EchoCanceller,
     EchoReference,

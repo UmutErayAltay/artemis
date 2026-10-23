@@ -7,7 +7,7 @@ yetkisi kullanıcı kararıyla **yerel commit**'tir; push yoktur.
 **Bağlam:** Bir kod görevi dakikalar sürer, tur ise `max_seconds` (varsayılan 60 sn) ile
 sınırlıdır. Ajan, kullanıcının projelerinde dosya düzenler ve commit atar; bu yüzden
 yetki sınırı, geri alınabilirlik ve dürüst sonuç bildirimi gerekir. Ajanın çıktısı repo
-içeriğinden üretilir, Jarvis için dış veridir.
+içeriğinden üretilir, Artemis için dış veridir.
 
 **Karar — kod ajanı:**
 
@@ -47,7 +47,7 @@ Tamamlanma sesle okunmaz, bildirim ve balonla gösterilir. Gerçek Windows ve ge
 `claude` kabulü sahte süreç testinden ayrıdır.
 
 **Ek — GitHub bölümü (2026-10-14):** Ayarlar'da GitHub kullanıcı adı, repo klasörü ve
-"Otomatik eşitle" seçilir. Kimlik doğrulamayı `gh` yönetir (keyring); Jarvis token okumaz,
+"Otomatik eşitle" seçilir. Kimlik doğrulamayı `gh` yönetir (keyring); Artemis token okumaz,
 saklamaz, yalnız `gh`/`git` çalıştırır (`child_environment()`, shell yok, zaman aşımı).
 Yalnız kullanıcının kendi repoları listelenir: fork'lar (başkasının kodu) ve arşivlenmişler
 hariçtir; repo adları klasör adı olacağından sıkı doğrulanır. Eksik repo klonlanır, mevcut

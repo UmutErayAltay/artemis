@@ -7,15 +7,15 @@ korumaları ADR 0022'dedir). (Sonradan ADR 0038 ile isteğe bağlı yankı engel
 Kullanıcı Krisp benzeri, RTX gerektirmeyen, ayardan açılıp kapanan bir çözüm istedi.
 
 **Karar:** DeepFilterNet3, resmi checkpoint'ten türetilmiş DURUMLU bir ONNX adım modeliyle
-(`jarvis/channels/voice/models/dfn3/dfn3_step.onnx`, yaklaşık 8 MB, pakete dahil) onnxruntime CPU
+(`artemis/channels/voice/models/dfn3/dfn3_step.onnx`, yaklaşık 8 MB, pakete dahil) onnxruntime CPU
 (tek iş parçacığı) üzerinde çalışır: her 10 ms'lik hop için model bir kez çalışır, GRU gizli
 durumları ve nedensel evrişim geçmişi açık girdi/çıktıdır. STFT, ERB bantları, özellik
 normalizasyonu, derin filtre ve ISTFT `libDF` (Rust) kaynağından numpy'a taşındı
-(`jarvis/channels/voice/denoise.py`). `voice.noise_suppression` (varsayılan kapalı),
+(`artemis/channels/voice/denoise.py`). `voice.noise_suppression` (varsayılan kapalı),
 `noise_suppression_level` ve `noise_model_dir` config alanlarıdır; panelde onay kutusu + düzey
 kutusu vardır. Model depoda durur, İNDİRME YOKTUR; kodda sabitlenmiş sha256 ile her açılışta
 doğrulanır. `noise_model_dir` verilmezse paket içi dizin kullanılır (tek sabit:
-`jarvis/config/model_paths.py`; cwd ve config konumundan bağımsız); verilirse aynı hash'li
+`artemis/config/model_paths.py`; cwd ve config konumundan bağımsız); verilirse aynı hash'li
 `dfn3_step.onnx` aranır, farklı dosya ValueError ile reddedilir.
 Model kurulamazsa (eksik dosya, sha256 uyuşmazlığı, onnxruntime yok) ses hattı DÜŞMEZ: tek uyarı
 kaydı + `denoise:unavailable:<neden>` durumu (sohbette görünür) ile ham mikrofonla sürülür.

@@ -3,7 +3,7 @@
 Sunucu gerçek HTTP ve JSON kullanır, ama yalnız 127.0.0.1 üzerinde dinler. `getUpdates`
 uzun bekleme yapmaz: kuyrukta güncelleme yoksa hemen `[]` döner. Kuyruk FIFO'dur ve her
 çağrıda en çok bir güncelleme verir. Onay düğmesi basımı (`queue_press`) gerçek
-düğme verisini, ancak Jarvis onay mesajını gönderdikten sonra üretilir.
+düğme verisini, ancak Artemis onay mesajını gönderdikten sonra üretilir.
 """
 
 from __future__ import annotations
@@ -18,12 +18,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
 
-from jarvis.channels.runtime import Runtime, create_runtime
-from jarvis.channels.telegram.api import TelegramClient
-from jarvis.channels.telegram.channel import TelegramChannel
-from jarvis.config.settings import Settings, TelegramConfig
-from jarvis.safety.audit import AuditLog
-from jarvis.tools.registry import ToolRegistry
+from artemis.channels.runtime import Runtime, create_runtime
+from artemis.channels.telegram.api import TelegramClient
+from artemis.channels.telegram.channel import TelegramChannel
+from artemis.config.settings import Settings, TelegramConfig
+from artemis.safety.audit import AuditLog
+from artemis.tools.registry import ToolRegistry
 
 # Sahte değer: yalnız bu sunucunun kabul ettiği biçimde, gerçek bir bota ait değildir.
 FAKE_TOKEN = "123456:TEST-not-a-real-token-abcdefghijklmn"
@@ -412,7 +412,7 @@ def build_harness(
     """Loopback sunucu, sahte token ortamı ve gerçek AuditLog ile kurulum yapar."""
     monkeypatch.setenv("NO_PROXY", _LOOPBACK_NO_PROXY)
     monkeypatch.setenv("no_proxy", _LOOPBACK_NO_PROXY)
-    monkeypatch.setenv("JARVIS_TELEGRAM_BOT_TOKEN", FAKE_TOKEN)
+    monkeypatch.setenv("ARTEMIS_TELEGRAM_BOT_TOKEN", FAKE_TOKEN)
     root.mkdir(parents=True, exist_ok=True)
     fake = FakeTelegram()
     fake.start()

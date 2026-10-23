@@ -16,12 +16,12 @@ değildir. Bu kontrolde hiçbir model tamamlama çağrısı yapılmadı.
 `/docs/api/api-reference/chat/create-a-chat-completion` idi. İstek
 `POST /api/v1/chat/completions` adresine `tools` listesi gönderir; yanıtın
 `message.tool_calls` alanı çağrı kimliği, işlev adı ve argümanları taşır.
-Jarvis'in pydantic JSON şeması sağlayıcının işlev `parameters` alanına çevrilir.
+Artemis'in pydantic JSON şeması sağlayıcının işlev `parameters` alanına çevrilir.
 
 Güncel [sağlayıcı yönlendirme belgesi](https://openrouter.ai/docs/guides/routing/provider-selection#max-price)
 `provider.max_price.prompt` ve `completion` değerlerini **milyon token başına USD**
 olarak tanımlar (örneğin `1`, prompt için en çok $1/m token kabul eder). Bu birim
-Jarvis'in `ModelConfig` fiyat birimiyle aynıdır; isteğe config değerleri doğrudan
+Artemis'in `ModelConfig` fiyat birimiyle aynıdır; isteğe config değerleri doğrudan
 aktarılır. Böylece sıfır fiyatlı config, ücretli sağlayıcı rotalarını dışarıda tutar.
 
 Katalogda **458 model** bulundu. `supported_parameters` içinde `tools` bulunan,
@@ -35,7 +35,7 @@ Katalogda **458 model** bulundu. `supported_parameters` içinde `tools` bulunan,
 | `dots-studio/dots-3-note-preview:free` | 0 | 0 |
 
 Bunlar öneri veya kabul ölçümü sonucu değildir; yalnız katalog gözlemidir. Katalog
-fiyatları **token başına**, Jarvis config fiyatları **milyon token başına** USD'dir:
+fiyatları **token başına**, Artemis config fiyatları **milyon token başına** USD'dir:
 `config_fiyati = katalog_fiyati × 1_000_000`. Model adında `free` geçmesi tek başına
 ücretsizliğin kanıtı değildir. Canlı koşucu çağrı öncesinde güncel katalogdaki
 fiyatı ve araç desteğini doğrular; katalogdaki ek fiyat alanlarından herhangi biri
@@ -55,7 +55,7 @@ sıfır değilse de çağrıyı reddeder.
 Bu kaynaklar yönlendirmeler takip edilerek HTTP 200 ile okundu. Araç tanımında
 `name`, `description`, `input_schema` kullanılır. Modelin `tool_use` blokları ortak
 `ToolCall` modeline, yanıtlar `tool_result` bloklarına çevrilir. Araç adı için
-Jarvis bütün sağlayıcılarda aynı 64 karakter sınırını korur; bir sağlayıcının daha
+Artemis bütün sağlayıcılarda aynı 64 karakter sınırını korur; bir sağlayıcının daha
 geniş sınırı ortak sözleşmeyi büyütmez.
 
 Model karşılaştırma tablosunda o an `claude-opus-5-5` için girdi **4 USD/MTok**,

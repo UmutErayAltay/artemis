@@ -5,7 +5,7 @@ tipleri kaynak otoritesidir; sözleşme değişirse bütün tüketiciler güncel
 
 ## Ayarlar (root sorumluluğu)
 
-`jarvis.config.settings`: `ModelConfig(provider: Literal[openrouter,anthropic,ollama],
+`artemis.config.settings`: `ModelConfig(provider: Literal[openrouter,anthropic,ollama],
 model: str, input_per_million: Decimal, output_per_million: Decimal,
 context_window: int=32768)`. `Settings`: `workspace: Path`, `state_dir: Path`,
 `audit_path: Path`, `models: dict[str,ModelConfig]`, `primary_model: str`,
@@ -18,7 +18,7 @@ context_window: int=32768)`. `Settings`: `workspace: Path`, `state_dir: Path`,
 
 ## Araç ve kapı (safety geliştiricisi)
 
-`jarvis.tools.base`: `Risk` str Enum READ_ONLY, SIDE_EFFECT, CONFIRM_REQUIRED.
+`artemis.tools.base`: `Risk` str Enum READ_ONLY, SIDE_EFFECT, CONFIRM_REQUIRED.
 `ToolResult` pydantic: `success: bool=False`, `status: Literal[ok,error,denied,sent]`,
 `message: str`, `data: dict[str,Any]`, `external: bool=False`,
 `content_kind: Literal[text,file,clipboard,web]=text`.
@@ -29,32 +29,32 @@ context_window: int=32768)`. `Settings`: `workspace: Path`, `state_dir: Path`,
 `ToolContext` dataclass: `workspace: Path`, `settings: Settings`, `audit: AuditLog`,
 `cancelled: asyncio.Event` (default factory), `services: dict[str,Any]` (default).
 
-`jarvis.tools.registry`: `ToolRegistry.register(cls)`, `.get(name) -> BaseTool|None`,
+`artemis.tools.registry`: `ToolRegistry.register(cls)`, `.get(name) -> BaseTool|None`,
 `.definitions() -> list[ToolDefinition]`; `register_tool` global dekoratör;
 `discover_tools() -> ToolRegistry` (plugins paketini otomatik keşfeder).
 İsim sağlayıcı formatıyla zaten uyumludur; kodlama eşlemesi identity + doğrulama.
 
-`jarvis.safety.gate`: `TurnState(turn_id=str UUID default, tainted=False)`;
+`artemis.safety.gate`: `TurnState(turn_id=str UUID default, tainted=False)`;
 `SafetyGate(registry)`, `.pending_notice: str`,
 `async dispatch(call: ToolCall, context: ToolContext, state: TurnState,
 approve: Callable[[str,dict[str,Any]],bool]) -> ToolResult`.
 Reddedilen çağrı sonucu status=denied; tur tekrar denetimi AgentLoop'tadır.
-`jarvis.safety.paths.safe_join(base: Path,target: str, *, allow_symlinks: bool=True) -> Path`.
+`artemis.safety.paths.safe_join(base: Path,target: str, *, allow_symlinks: bool=True) -> Path`.
 Okuma/listeleme iç kök symlink'lerini çözümleyebilir; dosya değiştiren araçlar
 `allow_symlinks=False` geçirerek yolun hiçbir bileşeninde symlink varsa reddeder.
-`jarvis.safety.audit.AuditLog(path: Path)`, `.emit(event: str, **fields: Any) -> None`.
+`artemis.safety.audit.AuditLog(path: Path)`, `.emit(event: str, **fields: Any) -> None`.
 Sır temizleme AuditLog içinde; secret değerleri ortamdan okunur ve repr edilmez.
 
 ## Beyin modelleri ve sağlayıcılar (provider geliştiricisi)
 
-`jarvis.brain.models`: pydantic `ToolCall(id:str,name:str,arguments:dict[str,Any])`;
+`artemis.brain.models`: pydantic `ToolCall(id:str,name:str,arguments:dict[str,Any])`;
 `Message(role: Literal[system,user,assistant,tool], content:str='',
 tool_calls:list[ToolCall]=[], tool_call_id:str|None=None, private:bool=False)`;
 `Usage(input_tokens:int=0,output_tokens:int=0,cost_usd:Decimal=0)`;
 `Completion(content:str='',tool_calls:list[ToolCall]=[],usage:Usage=Usage(),
 provider:str='',model:str='',local_fallback:bool=False)`.
 
-`jarvis.brain.providers`: `Provider` Protocol:
+`artemis.brain.providers`: `Provider` Protocol:
 `async complete(messages:list[Message],tools:list[ToolDefinition],*,timeout:float)
 -> Completion`.
 `ProviderError` (mesajında ham response/token bulunmaz),
@@ -66,7 +66,7 @@ Router model başına kullanım/maliyet loglar, SQLite günlük bütçe rezervas
 uygular; maliyet ön kontrolünde güvenli context_window + max_output_tokens sınırı
 kullanır. Bulut mesajları private ise içerik maskelenir. Ollama tam içeriği alır.
 Yedek dönüşünde Completion.local_fallback=True, AgentLoop bir araç sınırı uygular.
-`jarvis.brain.fake.ScriptedProvider(responses:list[Completion])` root yazacak.
+`artemis.brain.fake.ScriptedProvider(responses:list[Completion])` root yazacak.
 
 ## Döngü ve koşucu (root)
 

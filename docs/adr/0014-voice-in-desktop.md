@@ -9,7 +9,7 @@ gösteriyordu.
 **Karar:**
 - `VoiceController` masaüstü işçisinin asyncio döngüsünde çalışır; ikinci runtime
   veya ikinci süreç yoktur. Mikrofon yalnız paneldeki "Ses" düğmesiyle ya da
-  `jarvis desktop --ses` ile açılır; varsayılan kapalıdır, açıkken durum ekranda
+  `artemis desktop --ses` ile açılır; varsayılan kapalıdır, açıkken durum ekranda
   görünür. STT/TTS hazırlığı işçide yapılır; model yoksa ses dürüst bir hatayla
   kapalı kalır, uygulama çalışmaya devam eder.
 - Sesli komut da köprünün istek modelinden geçer: her komut bir `request_id` alır,
@@ -18,8 +18,8 @@ gösteriyordu.
   biriken ses atılır; sesli "evet" yine onay değildir.
 - `VoiceController` durumunu bildirir: kapalı, dinliyor, düşünüyor, konuşuyor.
   Overlay ve panel bu durumu gösterir.
-- `jarvis voice` komutu masaüstünü ses açık başlatır; terminal onayı ses için
-  kalkar. Yazılı CLI (`jarvis chat`) terminal onayını korur.
+- `artemis voice` komutu masaüstünü ses açık başlatır; terminal onayı ses için
+  kalkar. Yazılı CLI (`artemis chat`) terminal onayını korur.
 - Araç sınıfı okunur Türkçe ad bildirir: `label` (onay başlığı, ör. "Dosya silme")
   ve `done_label` (adım satırı, ör. "Dosya okundu"). Ayrı ad tablosu tutulmaz;
   bildirmeyen araçta ham ad görünür. İşlem adımları tur başına sonuç satırlarıdır

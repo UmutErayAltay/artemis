@@ -2,9 +2,10 @@
 
 Pakete dahil durumlu adım modeli (``models/dfn3``) her zaman vardır; onunla çalışan testler
 sentetik sinyalle CI'da da koşar. Resmi tam dizi grafiklerle parite testleri
-``JARVIS_DFN_MODEL_DIR`` (enc/erb_dec/df_dec.onnx) olmadan atlanır.
-``JARVIS_DFN_ASSETS`` DeepFilterNet ``assets`` dizinini (noisy_snr0.wav, clean_freesound_33711.wav),
-``JARVIS_DFN_GOLDEN_WAV`` resmi ``deep-filter -D`` çıktısını gösterir; yoksa ilgili test atlanır.
+``ARTEMIS_DFN_MODEL_DIR`` (enc/erb_dec/df_dec.onnx) olmadan atlanır.
+``ARTEMIS_DFN_ASSETS`` DeepFilterNet ``assets`` dizinini (noisy_snr0.wav,
+clean_freesound_33711.wav),
+``ARTEMIS_DFN_GOLDEN_WAV`` resmi ``deep-filter -D`` çıktısını gösterir; yoksa ilgili test atlanır.
 """
 
 from __future__ import annotations
@@ -22,9 +23,9 @@ import pytest
 np = pytest.importorskip("numpy")
 pytest.importorskip("onnxruntime")
 
-from jarvis.channels.voice import denoise as dn  # noqa: E402
-from jarvis.channels.voice.core import AudioFrame  # noqa: E402
-from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR  # noqa: E402
+from artemis.channels.voice import denoise as dn  # noqa: E402
+from artemis.channels.voice.core import AudioFrame  # noqa: E402
+from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR  # noqa: E402
 
 
 class IdentityGraphRunner:
@@ -840,10 +841,10 @@ async def test_48k_mixed_with_reset_drops_stale_frames() -> None:
 
 # --- Resmi varlıklar ve tam dizi referans (env ile; yoksa atlanır) ----------------------
 
-MODEL_DIR = os.environ.get("JARVIS_DFN_MODEL_DIR")
-ASSETS = Path(os.environ.get("JARVIS_DFN_ASSETS", "/home/user/rikorose/deepfilternet/assets"))
-GOLDEN = os.environ.get("JARVIS_DFN_GOLDEN_WAV")
-official_graphs = pytest.mark.skipif(not MODEL_DIR, reason="JARVIS_DFN_MODEL_DIR yok")
+MODEL_DIR = os.environ.get("ARTEMIS_DFN_MODEL_DIR")
+ASSETS = Path(os.environ.get("ARTEMIS_DFN_ASSETS", "/home/user/rikorose/deepfilternet/assets"))
+GOLDEN = os.environ.get("ARTEMIS_DFN_GOLDEN_WAV")
+official_graphs = pytest.mark.skipif(not MODEL_DIR, reason="ARTEMIS_DFN_MODEL_DIR yok")
 
 
 def _read_wav(path: Path) -> Any:
@@ -856,7 +857,7 @@ def _read_wav(path: Path) -> Any:
 def _assets() -> tuple[Any, Any]:
     noisy, clean = ASSETS / "noisy_snr0.wav", ASSETS / "clean_freesound_33711.wav"
     if not (noisy.is_file() and clean.is_file()):
-        pytest.skip("DeepFilterNet assets dizini yok (JARVIS_DFN_ASSETS)")
+        pytest.skip("DeepFilterNet assets dizini yok (ARTEMIS_DFN_ASSETS)")
     return _read_wav(noisy), _read_wav(clean)
 
 
@@ -872,7 +873,7 @@ def test_stateful_offline_matches_official_full_sequence_graphs() -> None:
 
 
 @official_graphs
-@pytest.mark.skipif(not GOLDEN, reason="JARVIS_DFN_GOLDEN_WAV (deep-filter -D çıktısı) yok")
+@pytest.mark.skipif(not GOLDEN, reason="ARTEMIS_DFN_GOLDEN_WAV (deep-filter -D çıktısı) yok")
 def test_stateful_offline_matches_rust_golden(vendored: dn.DeepFilterNetDenoiser) -> None:
     noisy, _ = _assets()
     assert GOLDEN

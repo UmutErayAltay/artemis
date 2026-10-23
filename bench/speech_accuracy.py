@@ -23,9 +23,9 @@ from pydantic import BaseModel, ConfigDict, Field
 if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from jarvis.channels.voice.adapters import FasterWhisperRecognizer
-from jarvis.config.settings import Settings, load_settings
-from jarvis.safety.paths import safe_join
+from artemis.channels.voice.adapters import FasterWhisperRecognizer
+from artemis.config.settings import Settings, load_settings
+from artemis.safety.paths import safe_join
 
 
 class CorpusItem(BaseModel):

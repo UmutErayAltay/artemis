@@ -9,8 +9,8 @@ from typing import Any
 
 import pytest
 
-from jarvis.channels.desktop.steps import StepLine, step_line
-from jarvis.tools.registry import discover_tools
+from artemis.channels.desktop.steps import StepLine, step_line
+from artemis.tools.registry import discover_tools
 
 LABELS: dict[str, tuple[str, str]] = {
     "read_file": ("Dosya okuma", "Dosya okundu"),
@@ -220,14 +220,14 @@ def test_declared_labels_match_turkish_table() -> None:
 
 
 def test_steps_module_does_not_import_pyside6() -> None:
-    module_path = Path(__file__).resolve().parents[1] / "jarvis" / "channels" / "desktop"
+    module_path = Path(__file__).resolve().parents[1] / "artemis" / "channels" / "desktop"
     source = (module_path / "steps.py").read_text(encoding="utf-8")
     assert "PySide6" not in source
     # Kaynak metni yetmez: modülü temiz bir süreçte içe aktarıp Qt'nin yüklenmediğini
     # de doğrularız.
     probe = (
         "import sys\n"
-        "import jarvis.channels.desktop.steps\n"
+        "import artemis.channels.desktop.steps\n"
         "loaded = [name for name in sys.modules if name.split('.')[0] == 'PySide6']\n"
         "raise SystemExit(1 if loaded else 0)\n"
     )

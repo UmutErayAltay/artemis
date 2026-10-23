@@ -10,15 +10,15 @@ from typing import Any
 
 import pytest
 
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion, ToolCall
-from jarvis.channels.runtime import create_runtime
-from jarvis.config.settings import ComputerUseConfig, PerceptionConfig, Settings
-from jarvis.perception.screen import ScreenOutcome
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate, TurnState
-from jarvis.tools.base import ToolContext
-from jarvis.tools.registry import discover_tools
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion, ToolCall
+from artemis.channels.runtime import create_runtime
+from artemis.config.settings import ComputerUseConfig, PerceptionConfig, Settings
+from artemis.perception.screen import ScreenOutcome
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate, TurnState
+from artemis.tools.base import ToolContext
+from artemis.tools.registry import discover_tools
 
 
 class Reader:

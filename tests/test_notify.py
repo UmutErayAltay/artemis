@@ -16,12 +16,12 @@ from typing import Any
 import pytest
 from telegram_fake import CHAT_ID, FAKE_TOKEN, Harness, build_harness, sent_bodies
 
-from jarvis.brain.models import ToolCall
-from jarvis.safety.gate import HISTORY_TAINT_NOTICE, TAINT_NOTICE, SafetyGate, TurnState
-from jarvis.tools.base import Risk, ToolContext
-from jarvis.tools.platform import child_environment
-from jarvis.tools.registry import discover_tools
-from jarvis.tools.toast import (
+from artemis.brain.models import ToolCall
+from artemis.safety.gate import HISTORY_TAINT_NOTICE, TAINT_NOTICE, SafetyGate, TurnState
+from artemis.tools.base import Risk, ToolContext
+from artemis.tools.platform import child_environment
+from artemis.tools.registry import discover_tools
+from artemis.tools.toast import (
     TOAST_BODY_LIMIT,
     TOAST_SCRIPT,
     TOAST_TITLE_LIMIT,
@@ -199,7 +199,7 @@ async def test_unconfigured_telegram_fails_without_network(
 ) -> None:
     harness = make_harness(chat_id=chat_id)
     if drop_token:
-        monkeypatch.delenv("JARVIS_TELEGRAM_BOT_TOKEN", raising=False)
+        monkeypatch.delenv("ARTEMIS_TELEGRAM_BOT_TOKEN", raising=False)
 
     result = await gate().dispatch(
         call("notify_telegram", text="Merhaba"), dispatch_context(harness), TurnState(), refuse
@@ -293,8 +293,8 @@ def test_toast_argv_carries_the_fixed_script_only() -> None:
     assert decoded == TOAST_SCRIPT
     assert "Başlık-ÖZEL-42" not in decoded and "Gövde-ÖZEL-42" not in decoded
     assert "Başlık-ÖZEL-42" not in " ".join(args)
-    assert "$env:JARVIS_TOAST_TITLE" in TOAST_SCRIPT
-    assert "$env:JARVIS_TOAST_BODY" in TOAST_SCRIPT
+    assert "$env:ARTEMIS_TOAST_TITLE" in TOAST_SCRIPT
+    assert "$env:ARTEMIS_TOAST_BODY" in TOAST_SCRIPT
     assert kwargs["timeout"] == 15.0
     assert kwargs["encoding"] == "utf-8"
 
@@ -302,25 +302,25 @@ def test_toast_argv_carries_the_fixed_script_only() -> None:
 def test_toast_environment_is_cleaned_and_carries_no_secrets(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("JARVIS_TELEGRAM_BOT_TOKEN", FAKE_TOKEN)
+    monkeypatch.setenv("ARTEMIS_TELEGRAM_BOT_TOKEN", FAKE_TOKEN)
     monkeypatch.setenv("OPENROUTER_API_KEY", "sk-test-not-real")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-real")
-    monkeypatch.setenv("JARVIS_UNLISTED_SETTING", "1")
+    monkeypatch.setenv("ARTEMIS_UNLISTED_SETTING", "1")
     runner = FakeRunner()
 
     show_toast("A\x00" + "t" * 150, "B\x07" + "g" * 400, runner=runner, platform="win32")
 
     env = runner.calls[0][1]["env"]
-    title = env["JARVIS_TOAST_TITLE"]
-    body = env["JARVIS_TOAST_BODY"]
+    title = env["ARTEMIS_TOAST_TITLE"]
+    body = env["ARTEMIS_TOAST_BODY"]
     assert len(title) <= TOAST_TITLE_LIMIT and title.endswith("…")
     assert len(body) <= TOAST_BODY_LIMIT and body.endswith("…")
     assert "\x00" not in title and "\x07" not in body
-    for key in ("JARVIS_TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"):
+    for key in ("ARTEMIS_TELEGRAM_BOT_TOKEN", "OPENROUTER_API_KEY", "ANTHROPIC_API_KEY"):
         assert key not in env
-    assert "JARVIS_UNLISTED_SETTING" not in env
+    assert "ARTEMIS_UNLISTED_SETTING" not in env
     assert FAKE_TOKEN not in env.values()
-    assert set(env) <= set(child_environment()) | {"JARVIS_TOAST_TITLE", "JARVIS_TOAST_BODY"}
+    assert set(env) <= set(child_environment()) | {"ARTEMIS_TOAST_TITLE", "ARTEMIS_TOAST_BODY"}
 
 
 @pytest.mark.parametrize(
@@ -424,5 +424,5 @@ async def test_notify_desktop_without_windows_fails_honestly(make_harness) -> No
 @pytest.mark.skipif(sys.platform != "win32", reason="Gerçek bildirim yalnız Windows'ta gösterilir")
 def test_real_windows_toast_shows_notification() -> None:
     # Gerçek masaüstünde bir bildirim gösterir; yalnız `pytest -m disruptive` ile çalışır.
-    outcome = show_toast("Jarvis testi", "Bu bir gerçek bildirim denemesidir.")
+    outcome = show_toast("Artemis testi", "Bu bir gerçek bildirim denemesidir.")
     assert outcome.status == "ok", outcome.message

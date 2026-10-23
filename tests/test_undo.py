@@ -7,13 +7,13 @@ from typing import Any, Literal
 
 import pytest
 
-from jarvis.brain.models import ToolCall
-from jarvis.config.settings import Settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate, TurnState
-from jarvis.safety.undo import UndoJournal, UndoJournalError
-from jarvis.tools.base import ToolContext, ToolResult
-from jarvis.tools.registry import discover_tools
+from artemis.brain.models import ToolCall
+from artemis.config.settings import Settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate, TurnState
+from artemis.safety.undo import UndoJournal, UndoJournalError
+from artemis.tools.base import ToolContext, ToolResult
+from artemis.tools.registry import discover_tools
 
 
 @pytest.fixture
@@ -173,7 +173,7 @@ async def test_list_is_external_tainted_and_workspace_private(context: ToolConte
 def test_metadata_is_redacted_and_workspace_filter_uses_original_root(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("JARVIS_TEST_SECRET", "sentinel")
+    monkeypatch.setenv("ARTEMIS_TEST_SECRET", "sentinel")
     root = tmp_path / "workspace-sentinel"
     root.mkdir()
     journal = UndoJournal(tmp_path / "state")

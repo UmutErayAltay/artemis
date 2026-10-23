@@ -1,11 +1,11 @@
-# Jarvis
+# Artemis
 
 Windows 11 için Türkçe kişisel masaüstü asistanı. CLI ve isteğe bağlı masaüstü
 paneli, sağlayıcıdan bağımsız ajan döngüsünü, tek güvenlik kapısını ve araçları
 paylaşır. F3 ses kanalı kodu hazırdır; biçimsel Windows ses kabulü bekler.
 Vault hafızası, Telegram, bildirimler ve kod ajanı isteğe bağlıdır, varsayılan kapalıdır.
 
-Konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012). Jarvis'in kendi kalıcı hafızası
+Konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012). Artemis'in kendi kalıcı hafızası
 (geçmiş, öz notlar, konuşma araması) varsayılan açıktır ve `state_dir/memory.sqlite3`'te
 durur ([ADR 0025](docs/adr/0025-persistent-self-memory.md)); kullanıcının Obsidian vault'u
 bundan ayrıdır ve isteğe bağlı vault araçlarıyla okunur.
@@ -28,7 +28,7 @@ kullanıcının dosyalarına veya uygulamalarına erişmez.
 
 ### Sohbet ve işlem adımları
 
-![Jarvis sohbet paneli ve gerçek demo işlem adımları](docs/assets/desktop/panel.png)
+![Artemis sohbet paneli ve gerçek demo işlem adımları](docs/assets/desktop/panel.png)
 
 [Karşılama ekranını da görüntüleyin.](docs/assets/desktop/welcome.png)
 
@@ -44,7 +44,7 @@ kullanıcının dosyalarına veya uygulamalarına erişmez.
 
 ![Masaüstü petinin hazır, dinliyor, düşünüyor, onay bekliyor durumları ve yanıt balonu](docs/assets/desktop/pet.png)
 
-Pet ekranın köşesinde durur ve Jarvis'in o an ne yaptığını gösterir: hazır, dinliyor,
+Pet ekranın köşesinde durur ve Artemis'in o an ne yaptığını gösterir: hazır, dinliyor,
 düşünüyor ya da onayını bekliyor. Yanıtlar ve iş bitişleri kısa bir balonla görünür
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)).
 
@@ -52,7 +52,7 @@ Python 3.12 ortamında arayüzü kurup ücretsiz, ağsız demoyu açın:
 
 ```powershell
 python -m pip install -e ".[desktop]"
-python -m jarvis desktop --demo
+python -m artemis desktop --demo
 ```
 
 Ubuntu'da PySide6 için gereken Qt grafik kitaplıklarını önce kurun:
@@ -66,7 +66,7 @@ Demoda `örnek akış` yazıp Gönder'e basınca onay sürecini deneyebilirsiniz
 Gerçek kullanım için aşağıdaki kurulum ve sağlayıcı ayarlarını tamamlayın:
 
 ```powershell
-python -m jarvis desktop --config config/config.yaml
+python -m artemis desktop --config config/config.yaml
 ```
 
 Tepsi varsa pencereyi kapatmak paneli gizler; tepsi menüsünden **Çıkış** tüm
@@ -101,8 +101,8 @@ hazırlanır. RTX 4050 için CUDA/float16 başlangıç profili ve CPU alternatif
 
 ```powershell
 python -m pip install -e ".[dev,desktop,voice]"
-python -m jarvis desktop --ses --config config/config.yaml
-# kısayol: python -m jarvis voice --config config/config.yaml (aynı komut)
+python -m artemis desktop --ses --config config/config.yaml
+# kısayol: python -m artemis voice --config config/config.yaml (aynı komut)
 ```
 
 Önce model dosyalarını, beyin modelini ve ses aygıtını rehbere göre hazırlayın.
@@ -122,7 +122,7 @@ tekrar eden STT parçaları komut sayılmaz.
 `voice.noise_suppression` mikrofonu DeepFilterNet3 ile işlemcide temizler, ekran kartı gerekmez;
 yankı gidermez, model pakete dahildir (indirme yok) ve yaklaşık 34 ms gecikme ekler ([ADR 0037](docs/adr/0037-noise-suppression.md),
 kurulum: [ses rehberi](docs/VOICE_SETUP.md)).
-İsteğe bağlı **yankı engelleme**, Jarvis'in hoparlörden çalan kendi sesinin mikrofon
+İsteğe bağlı **yankı engelleme**, Artemis'in hoparlörden çalan kendi sesinin mikrofon
 yolunda oluşturduğu yankıyı azaltır; işlem yereldir ve varsayılan kapalıdır
 ([ADR 0038](docs/adr/0038-echo-cancellation.md)).
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
@@ -197,18 +197,18 @@ kullanımı ayrıca açık kullanıcı izni ve `allow_paid: true` gerektirir.
 Kendi OpenAI uyumlu ucunuz (LM Studio, vLLM, OpenAI, CPA vb.) için config'te `endpoints:` altında
 `base_url` ve isteğe bağlı `api_key: false` tanımlayıp modelde `provider: openai_compatible` ile
 `endpoint: <id>` verin (örnek: `config/config.example.yaml`). Anahtar ortamda
-`JARVIS_<ID>_API_KEY` (id büyük harf, `-` yerine `_`) ya da Kimlik Bilgisi Yöneticisi'nde
-`Jarvis/<id>` olarak aranır (ADR 0033).
+`ARTEMIS_<ID>_API_KEY` (id büyük harf, `-` yerine `_`) ya da Kimlik Bilgisi Yöneticisi'nde
+`Artemis/<id>` olarak aranır (ADR 0033).
 
 Terminalsiz yol: masaüstünde **Ayarlar > Model sağlayıcıları** bölümünden şablon seçip adresi
 ve API anahtarını girin, **Bağlantıyı test et** ile doğrulayın, modeli ekleyip **Birincil model
 yap** deyin. Anahtar yalnız Kimlik Bilgisi Yöneticisi'ne yazılır, YAML'a girmez. Çalışan bir
-sağlayıcı yoksa Jarvis açılışta Ayarlar'ı bu bölümde açar (ADR 0034).
+sağlayıcı yoksa Artemis açılışta Ayarlar'ı bu bölümde açar (ADR 0034).
 
 Claude Pro/Max aboneliğiniz varsa API anahtarı olmadan kullanabilirsiniz: Claude Code CLI'yi
 kurup `claude` ile giriş yapın, sonra Ayarlar > Model sağlayıcıları > **Abonelik: Claude
 (Claude Code CLI)** ile modeli (`haiku`, `sonnet`, `opus`) ekleyin; ya da config'te
-`provider: claude_cli`, `model: sonnet` ve iki fiyat için `0` verin. Jarvis giriş belirteci görmez; CLI araçları
+`provider: claude_cli`, `model: sonnet` ve iki fiyat için `0` verin. Artemis giriş belirteci görmez; CLI araçları
 kapalı, yalnız metin üretici olarak çalıştırılır (ADR 0035). Her istek yeni süreçtir, API'den
 yavaştır.
 
@@ -225,13 +225,13 @@ yerele geçer ve olayı kaydeder. Yerel yedek basit, en fazla bir araçlı işle
 Kimlik doğrulama ve geçersiz istek hataları bağlantı kesintisi diye gizlenmez.
 
 `openrouter_base_url` yerel, OpenAI uyumlu bir proxy'ye (ör. CPA) çevrilebilir; şifresiz
-`http` yalnız localhost'a izinlidir. Windows'ta yerel kurulum ve `start-jarvis.ps1`
+`http` yalnız localhost'a izinlidir. Windows'ta yerel kurulum ve `start-artemis.ps1`
 başlatıcısı [CPA yerel test belgesinde](docs/CPA_LOCAL_TEST.md) anlatılır.
 
 ## İlk çalıştırma
 
 ```bash
-python -m jarvis chat --config config/config.yaml
+python -m artemis chat --config config/config.yaml
 ```
 
 Çıkmak için `/çık`, `/cik` veya `/exit` yazın. `/yeni` yeni sohbet başlatır
@@ -382,7 +382,7 @@ Kurulum:
 
    ```powershell
    $t = Read-Host "Telegram bot token"
-   [Environment]::SetEnvironmentVariable("JARVIS_TELEGRAM_BOT_TOKEN", $t, "User")
+   [Environment]::SetEnvironmentVariable("ARTEMIS_TELEGRAM_BOT_TOKEN", $t, "User")
    Remove-Variable t
    ```
 
@@ -401,10 +401,10 @@ Kurulum:
 5. Kanalı başlatın:
 
    ```powershell
-   python -m jarvis telegram --config config/config.yaml
+   python -m artemis telegram --config config/config.yaml
    ```
 
-   Açılınca bota "Jarvis Telegram kanalı açık" mesajı gider. Kanal kapalıyken birikmiş
+   Açılınca bota "Artemis Telegram kanalı açık" mesajı gider. Kanal kapalıyken birikmiş
    mesajlar açılışta çalıştırılmaz. Durdurmak için Ctrl+C.
 
 Davranış:
@@ -453,7 +453,7 @@ Masaüstündeki **Projeler** sekmesi, izinli proje için görev, kapsam ve kabul
 inceleyip SafetyGate onayını verdikten sonra kodlama işi arka planda başlar.
 Claude Code'un `question` çıktısı işi beklemeye alır; Projeler sekmesinde soruyu
 yanıtlayıp ayrıca onaylayarak aynı CLI oturumunu sürdürebilirsiniz. İptal, durum,
-sonuç ve doğrulanan yerel commit'ler aynı sekmede görünür. `jarvis desktop`
+sonuç ve doğrulanan yerel commit'ler aynı sekmede görünür. `artemis desktop`
 gereklidir; demo kipinde bu eylemler kapalıdır.
 
 Yönetici, kodlayıcı ve mekanik/test alt ajanı için model profilleri isteğe bağlı
@@ -468,16 +468,16 @@ code_agent:
 ```
 
 Bu yalnızca örnektir; takma adlar Claude CLI kurulumunuzun güncel resmi model
-kimlikleriyle eşleşmelidir. Bunlar Jarvis'in model kimliği veya fiyat listesi
+kimlikleriyle eşleşmelidir. Bunlar Artemis'in model kimliği veya fiyat listesi
 değildir. Claude Code oturum açma ve
-abonelik erişimini kullanıcı kendi CLI kurulumu üzerinden sağlar; Jarvis anahtar
+abonelik erişimini kullanıcı kendi CLI kurulumu üzerinden sağlar; Artemis anahtar
 okumaz veya kopyalamaz. Profil, gerçek alt ajan kullanımını ya da toplam harcamayı
 zorlamaz. Tekrar bakın: [ADR 0026](docs/adr/0026-background-project-workflow.md).
 
 İş metaverisi `state_dir/code_agent.sqlite3` içinde tutulur; uygulama yeniden
 başlatıldığında yarım kalan işler kesinti olarak gösterilir ve kendiliğinden
 yeniden çalıştırılmaz. Bu depo yerel kullanıcının yetkileriyle çalışır; Claude
-Code'un Bash ve alt ajan araçları Jarvis SafetyGate tarafından tek tek
+Code'un Bash ve alt ajan araçları Artemis SafetyGate tarafından tek tek
 denetlenmez, OS sandbox'ı yoktur. Aynı veritabanını kullanan ikinci runtime proje
 eylemlerini sahiplik kilidi nedeniyle kapalı tutar. Sınırda süreç temizliği
 doğrulanamazsa iş başarıya çevrilmez ve kilit korunur; uygulama kapanışında
@@ -501,12 +501,12 @@ istek `reminder_create` ile yerel bir kayıt kurar; zamanı gelince metin model 
 panelde, Windows bildiriminde ve yapılandırılmışsa kendi Telegram sohbetinizde görünür.
 `reminder_list` ve `reminder_cancel` bekleyenleri gösterir ve iptal eder.
 
-Brifingler yalnız config'te tanımlanır; Jarvis bir brifing istemini kendisi kuramaz veya
+Brifingler yalnız config'te tanımlanır; Artemis bir brifing istemini kendisi kuramaz veya
 değiştiremez. Brifing turu gözetimsizdir: yalnız okuma araçları çalışır, dosya oluşturma
 veya mesaj gönderme gibi her yan etki sorulmadan reddedilir ve denetime yazılır. Gizli
 içerik (dosya/pano) kullanan brifing Telegram'a gönderilmez.
 
-Zamanlayıcı yalnız `jarvis desktop` veya `jarvis telegram` açıkken çalışır; ikisi birlikte
+Zamanlayıcı yalnız `artemis desktop` veya `artemis telegram` açıkken çalışır; ikisi birlikte
 açık olsa da her olay bir kez teslim edilir. Kapalıyken kaçan hatırlatmalar açılışta
 gecikmeli ya da tek bir özet olarak bildirilir. Gerekçe:
 [ADR 0027](docs/adr/0027-proactive-events.md).
@@ -514,7 +514,7 @@ gecikmeli ya da tek bir özet olarak bildirilir. Gerekçe:
 ### MCP sunucuları (Faz 6b)
 
 Varsayılan kapalıdır; `mcp.servers` altına stdio sunucusu eklenince araçları
-`mcp_<sunucu>_<araç>` adıyla modele görünür (örnek: `config/config.example.yaml`). Jarvis
+`mcp_<sunucu>_<araç>` adıyla modele görünür (örnek: `config/config.example.yaml`). Artemis
 kendi küçük istemcisini kullanır, ayrıca `mcp` paketi gerekmez. Her çağrıda sunucu kısa
 ömürlü bir süreç olarak başlatılır ve süreç ağacı iş bitince kapatılır.
 
@@ -540,11 +540,11 @@ Windows'ta Türkçe dil paketi gerekir. Gerekçe: [ADR 0029](docs/adr/0029-scree
 
 ### Windows açılışında başlama (Faz 7a)
 
-`jarvis autostart ac` (ya da tepsi menüsünde **Windows açılışında başlat**) Jarvis'i Windows
+`artemis autostart ac` (ya da tepsi menüsünde **Windows açılışında başlat**) Artemis'i Windows
 oturumu açılınca paneli göstermeden tepside başlatır; hatırlatma ve brifingler böylece
 kaçmaz. Kayıt yalnız sizin kullanıcınızın `Run` anahtarına yazılır, yönetici izni
-gerekmez; `jarvis autostart durum` kaydın bu kurulumla eşleşip eşleşmediğini, `kapat`
-kaldırmayı gösterir. Mikrofon açılışta kendiliğinden açılmaz. Jarvis'i ikinci kez
+gerekmez; `artemis autostart durum` kaydın bu kurulumla eşleşip eşleşmediğini, `kapat`
+kaldırmayı gösterir. Mikrofon açılışta kendiliğinden açılmaz. Artemis'i ikinci kez
 başlatmak yeni pencere açmaz, çalışan panel öne gelir. Model bu ayarı değiştiremez.
 Gerekçe: [ADR 0030](docs/adr/0030-autostart-single-instance.md).
 
@@ -561,7 +561,7 @@ dizüstü dahili ekranda çalışır. Gerekçe: [ADR 0031](docs/adr/0031-window-
 
 ### Tarayıcı otomasyonu (Faz 7c)
 
-Jarvis'in kendi MCP sunucusu bir sayfayı görünmez Chromium'da açar, düğmeye tıklar, forma
+Artemis'in kendi MCP sunucusu bir sayfayı görünmez Chromium'da açar, düğmeye tıklar, forma
 yazar ve metin okur (`browse` aracı, MCP adıyla `mcp_browser_browse`). Kurulum bir kez:
 
 ```powershell
@@ -580,7 +580,7 @@ Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **
 çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
 repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,
 varsayılan açık) bunu her açılışta tekrarlar. Klasördeki depolar kod ajanına otomatik
-eklenir. Kimlik doğrulama `gh auth login` ile yapılır; Jarvis token okumaz. Config anahtarları:
+eklenir. Kimlik doğrulama `gh auth login` ile yapılır; Artemis token okumaz. Config anahtarları:
 `code_agent.github_owner`, `code_agent.repos_dir`, `code_agent.auto_sync`.
 
 ## Doğrulama ve ölçüm
@@ -628,7 +628,7 @@ geçmez; CI de gerçek Windows ses/masaüstü kabulünün yerine geçmez.
 
 ## Geliştirme
 
-Yeni araç tek bir `jarvis/tools/plugins/` dosyasına argüman modeli ve
+Yeni araç tek bir `artemis/tools/plugins/` dosyasına argüman modeli ve
 `@register_tool` sınıfı ekleyerek keşfedilir. Şema ve sağlayıcı biçimleri otomatik
 üretilir. Onay mantığını araca eklemeyin; örnek ve kurallar
 [CLAUDE.md](CLAUDE.md) içindedir. Yeni davranış için izole test ve kabul senaryosu

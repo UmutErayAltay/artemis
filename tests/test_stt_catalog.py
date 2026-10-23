@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from jarvis.channels.voice import stt_catalog
+from artemis.channels.voice import stt_catalog
 
 
 @pytest.fixture(autouse=True)

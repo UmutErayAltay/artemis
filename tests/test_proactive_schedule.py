@@ -1,4 +1,4 @@
-"""`jarvis.proactive.schedule` modülü için testler.
+"""`artemis.proactive.schedule` modülü için testler.
 
 Tüm testler saf fonksiyonları doğrular; ağ, mock, uyku yoktur.
 """
@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from jarvis.proactive.schedule import (
+from artemis.proactive.schedule import (
     briefing_occurrence,
     classify_reminder,
     format_local,

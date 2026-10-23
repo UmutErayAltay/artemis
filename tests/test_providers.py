@@ -12,16 +12,16 @@ from typing import Any, Literal
 
 import pytest
 
-from jarvis.brain.errors import BudgetExceeded, ProviderError, RetryableProviderError
-from jarvis.brain.models import Message, ToolCall
-from jarvis.brain.providers import (
+from artemis.brain.errors import BudgetExceeded, ProviderError, RetryableProviderError
+from artemis.brain.models import Message, ToolCall
+from artemis.brain.providers import (
     AnthropicProvider,
     OllamaProvider,
     OpenRouterProvider,
     Provider,
 )
-from jarvis.config.settings import ModelConfig, Settings
-from jarvis.tools.base import Risk, ToolDefinition
+from artemis.config.settings import ModelConfig, Settings
+from artemis.tools.base import Risk, ToolDefinition
 
 ProviderName = Literal["openrouter", "anthropic", "ollama"]
 PROVIDERS: tuple[ProviderName, ...] = ("openrouter", "anthropic", "ollama")

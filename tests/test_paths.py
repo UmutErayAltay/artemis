@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from jarvis.safety.paths import safe_join
+from artemis.safety.paths import safe_join
 
 
 @pytest.mark.parametrize(

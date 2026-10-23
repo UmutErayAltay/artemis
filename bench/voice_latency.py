@@ -15,12 +15,12 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
-from jarvis.brain.agent_loop import AgentLoop
-from jarvis.brain.fake import ScriptedProvider
-from jarvis.brain.models import Completion
-from jarvis.brain.providers import build_provider
-from jarvis.channels.runner import CommandRunner
-from jarvis.channels.voice.adapters import (
+from artemis.brain.agent_loop import AgentLoop
+from artemis.brain.fake import ScriptedProvider
+from artemis.brain.models import Completion
+from artemis.brain.providers import build_provider
+from artemis.channels.runner import CommandRunner
+from artemis.channels.voice.adapters import (
     EdgeTTSynthesizer,
     FallbackSynthesizer,
     FasterWhisperRecognizer,
@@ -29,12 +29,12 @@ from jarvis.channels.voice.adapters import (
     SoundDeviceSink,
     WebRTCVAD,
 )
-from jarvis.channels.voice.core import AudioFrame, PCMChunk, VoiceController
-from jarvis.config.settings import Settings, VoiceConfig, load_settings
-from jarvis.safety.audit import AuditLog
-from jarvis.safety.gate import SafetyGate
-from jarvis.tools.base import ToolContext
-from jarvis.tools.registry import ToolRegistry, discover_tools
+from artemis.channels.voice.core import AudioFrame, PCMChunk, VoiceController
+from artemis.config.settings import Settings, VoiceConfig, load_settings
+from artemis.safety.audit import AuditLog
+from artemis.safety.gate import SafetyGate
+from artemis.tools.base import ToolContext
+from artemis.tools.registry import ToolRegistry, discover_tools
 
 
 class FakeMicrophone:
@@ -149,7 +149,7 @@ def group_live_events(
 
 
 async def _fake_once() -> dict[str, float] | None:
-    with tempfile.TemporaryDirectory(prefix="jarvis-voice-bench-") as directory:
+    with tempfile.TemporaryDirectory(prefix="artemis-voice-bench-") as directory:
         root = Path(directory)
         settings = Settings(
             workspace=root,
@@ -223,7 +223,7 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
     audit = AuditLog(settings.audit_path)
     gate = SafetyGate(discover_tools())
     context = ToolContext(settings.workspace, settings, audit)
-    from jarvis.channels.cli import request_approval
+    from artemis.channels.cli import request_approval
 
     approval_active = False
     runner: CommandRunner

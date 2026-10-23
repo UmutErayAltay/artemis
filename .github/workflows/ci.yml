@@ -21,7 +21,7 @@ jobs:
       # Embedding indeksi (npz önbellek, artımlı güncelleme) numpy ister; fastembed modeli indirmez.
       - run: python -m pip install numpy==2.5.3
       # Gürültü engelleme (ADR 0037): saf DSP ve sahte çalıştırıcı testleri onnxruntime ister;
-      # gerçek model testleri JARVIS_DFN_MODEL_DIR yoksa atlanır.
+      # gerçek model testleri ARTEMIS_DFN_MODEL_DIR yoksa atlanır.
       - run: python -m pip install onnxruntime==1.31.0
       # Yankı engelleme (ADR 0038): gerçek WebRTC AEC testi livekit ister; sunucuya bağlanılmaz.
       - run: python -m pip install livekit==1.1.20
@@ -52,4 +52,4 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libegl1 libopengl0
       - run: pytest -q tests/test_desktop_gui.py
-      - run: mypy jarvis/channels/desktop/app.py jarvis/channels/desktop/demo.py tests/test_desktop_gui.py
+      - run: mypy artemis/channels/desktop/app.py artemis/channels/desktop/demo.py tests/test_desktop_gui.py

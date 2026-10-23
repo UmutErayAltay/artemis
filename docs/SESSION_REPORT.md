@@ -1,6 +1,6 @@
 # İlk oturum raporu — F0 + F1
 
-Tarih: 12 Ekim 2026 UTC. Çalışma alanı: `/workspace/jarvis`.
+Tarih: 12 Ekim 2026 UTC. Çalışma alanı: `/workspace/artemis`.
 Teslimat yerel Git deposundadır; kullanıcının sonraki talebi gereği **push yapılmadı**.
 Mimari ve ilk dört ADR, uygulama kodundan önce yazılıp ayrı commit edildi.
 Kod bağımsız görevlerle ajanlara dağıtıldı; kullanıcının model tercihi sonrasında
@@ -22,7 +22,7 @@ bitiş şartının uzak çalıştırma kısmı açık kalır.
 Üç sağlayıcı, süreli Ollama yedeği, ajan durma koşulları, tek güvenlik kapısı,
 onay/taint, güvenli yollar, gizlilik maskesi, 15 temel araç ve Türkçe CLI hazır.
 Araç şemaları ve sağlayıcı dönüşümleri kayıt sisteminden otomatik üretilir.
-CLI `python -m jarvis chat --config config/config.yaml` ile başlar.
+CLI `python -m artemis chat --config config/config.yaml` ile başlar.
 Örnek config sır veya tahmin edilmiş model/fiyat içermez; gerçek kullanım için
 resmi kaynaktan doğrulanan model kaydı eklenmelidir.
 

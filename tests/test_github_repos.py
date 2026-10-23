@@ -12,10 +12,10 @@ import yaml
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from jarvis.channels.runtime import create_runtime
-from jarvis.config.settings import CodeAgentConfig, Settings, load_settings
-from jarvis.tools import github_repos
-from jarvis.tools.github_repos import (
+from artemis.channels.runtime import create_runtime
+from artemis.config.settings import CodeAgentConfig, Settings, load_settings
+from artemis.tools import github_repos
+from artemis.tools.github_repos import (
     GitHubError,
     SyncReport,
     discover_projects,
@@ -138,9 +138,9 @@ def test_discover_aliases_owner_forms_and_collisions(tmp_path: Path) -> None:
 
 
 async def test_projects_discovered_per_call_and_explicit_wins(tmp_path: Path) -> None:
-    from jarvis.tools.base import ToolContext
-    from jarvis.tools.code_agent_jobs import CodeAgentJobs
-    from jarvis.tools.plugins.code_agent import CodeAgentStatus, StatusArguments
+    from artemis.tools.base import ToolContext
+    from artemis.tools.code_agent_jobs import CodeAgentJobs
+    from artemis.tools.plugins.code_agent import CodeAgentStatus, StatusArguments
 
     repos = tmp_path / "repos"
     make_repo(repos / "alpha", "https://github.com/umut/alpha.git")
@@ -155,8 +155,8 @@ async def test_projects_discovered_per_call_and_explicit_wins(tmp_path: Path) ->
     runtime = create_runtime(
         tmp_path / "c.yaml", lambda *_: False, settings=settings, provider=object()  # type: ignore[arg-type]
     )
-    from jarvis.safety.audit import AuditLog
-    from jarvis.tools.plugins.code_agent import available_projects
+    from artemis.safety.audit import AuditLog
+    from artemis.tools.plugins.code_agent import available_projects
 
     # Çalışırken eşitlenen repo yeniden başlatmasız görünür (kullanıcı hatası: liste boştu).
     make_repo(repos / "beta", "https://github.com/umut/beta.git")
@@ -202,7 +202,7 @@ def test_settings_roundtrip(tmp_path: Path) -> None:
     # settings_panel modül başında PySide6 içe aktarır; CI'ın `checks` işi yalnız
     # `[dev]` kurar, bu yüzden Qt yoksa atlanır (doğrulama testi yine koşar).
     pytest.importorskip("PySide6")
-    from jarvis.channels.desktop.settings_panel import save_choices
+    from artemis.channels.desktop.settings_panel import save_choices
 
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump({
@@ -228,7 +228,7 @@ def test_panel_sync_runs_off_gui_thread(tmp_path: Path) -> None:
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
 
-    from jarvis.channels.desktop.settings_panel import SettingsPanel
+    from artemis.channels.desktop.settings_panel import SettingsPanel
 
     app = QApplication.instance() or QApplication([])
     config = tmp_path / "config.yaml"

@@ -78,8 +78,8 @@ sağlayıcı ortam değişkenlerini tamamlayın. Ses, masaüstü uygulamasının
 ya da şu komut açar:
 
 ```powershell
-python -m jarvis desktop --ses --config config/config.yaml
-# `python -m jarvis voice --config ...` aynı komutun kısayoludur
+python -m artemis desktop --ses --config config/config.yaml
+# `python -m artemis voice --config ...` aynı komutun kısayoludur
 ```
 
 Yerel modeller, aygıt ve sürücü hazır değilse bu komutun çalıştığını varsaymayın.
@@ -95,7 +95,7 @@ gitmeden temizler. Bu bölüm yalnız gürültü engeller; akustik yankı için
 [Yankı engelleme bölümüne](#yankı-engelleme-isteğe-bağlı-adr-0038) bakın.
 
 1. `pip install -e ".[voice]"` (onnxruntime ve numpy dahildir; torch gerekmez). Model
-   (`jarvis/channels/voice/models/dfn3/dfn3_step.onnx`, yaklaşık 8 MB) pakete dahildir:
+   (`artemis/channels/voice/models/dfn3/dfn3_step.onnx`, yaklaşık 8 MB) pakete dahildir:
    İNDİRME ADIMI YOKTUR. Dosya her açılışta koda sabitlenmiş sha256 ile doğrulanır.
 2. `config/config.yaml` içinde (göreli yol config dizinine göre çözülür):
 
@@ -121,7 +121,7 @@ oturum boyunca ham sese dönülür ve sohbette görünür bir ileti çıkar. Öl
 `python -m bench.denoise_rtf`. Geliştirme: modeli yeniden üretmek için
 `scripts/export_stateful_dfn.py` (torch venv'inde; çalışma anı bağımlılığı değildir), resmi
 tam dizi grafiklerle parite testi için `scripts/fetch_noise_model.py` ve
-`JARVIS_DFN_MODEL_DIR`.
+`ARTEMIS_DFN_MODEL_DIR`.
 
 ## Yankı engelleme (isteğe bağlı, ADR 0038)
 

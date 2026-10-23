@@ -9,8 +9,8 @@ import yaml
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from jarvis.channels.desktop.settings_panel import microphone_choices, save_choices
-from jarvis.config.settings import load_settings
+from artemis.channels.desktop.settings_panel import microphone_choices, save_choices
+from artemis.config.settings import load_settings
 
 
 def config(tmp_path: Path, *, local: bool = True) -> Path:
@@ -58,7 +58,7 @@ def test_tts_backend_choice_is_saved(tmp_path: Path) -> None:
 def test_settings_panel_has_no_model_combo_or_inventory(tmp_path: Path) -> None:
     from PySide6.QtWidgets import QApplication
 
-    from jarvis.channels.desktop import settings_panel
+    from artemis.channels.desktop import settings_panel
 
     app = QApplication.instance() or QApplication([])
     assert not hasattr(settings_panel, "ModelInventory")
@@ -120,7 +120,7 @@ def test_noise_suppression_defaults_off_and_choices_are_saved(tmp_path: Path) ->
     path = config(tmp_path)
     voice = load_settings(path).voice
     assert (voice.noise_suppression, voice.noise_suppression_level) == (False, "orta")
-    from jarvis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
+    from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 
     assert voice.noise_model_dir == DEFAULT_NOISE_MODEL_DIR  # config konumundan bağımsız
     save_choices(path, None, noise_suppression=True, noise_suppression_level="guclu")
@@ -177,7 +177,7 @@ def qt_app():
 def test_settings_panel_tabs_are_grouped_by_topic(tmp_path: Path, qt_app) -> None:
     from PySide6.QtWidgets import QFrame, QScrollArea
 
-    from jarvis.channels.desktop import settings_panel
+    from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
     assert [
@@ -196,7 +196,7 @@ def test_settings_panel_tabs_are_grouped_by_topic(tmp_path: Path, qt_app) -> Non
 def test_advanced_voice_settings_are_collapsed_by_default(tmp_path: Path, qt_app) -> None:
     from PySide6.QtCore import Qt
 
-    from jarvis.channels.desktop import settings_panel
+    from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
     assert panel.advanced_box.isHidden()
@@ -218,7 +218,7 @@ def test_advanced_voice_settings_are_collapsed_by_default(tmp_path: Path, qt_app
 def test_noise_controls_are_grouped_in_advanced_voice_settings(
     tmp_path: Path, qt_app
 ) -> None:
-    from jarvis.channels.desktop import settings_panel
+    from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
     assert panel.advanced_box.isAncestorOf(panel.noise_stt)
@@ -229,7 +229,7 @@ def test_noise_controls_are_grouped_in_advanced_voice_settings(
 
 
 def test_save_computer_mode_writes_only_the_mode(tmp_path: Path) -> None:
-    from jarvis.channels.desktop.settings_panel import save_computer_mode
+    from artemis.channels.desktop.settings_panel import save_computer_mode
 
     path = config(tmp_path)
     path.write_text(

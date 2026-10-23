@@ -1,17 +1,17 @@
 # ADR 0028 — MCP istemcisi: stdio, tek köprü, varsayılan yan etkili
 
 **Bağlam:** Faz 6b, kullanıcının yapılandırdığı MCP (Model Context Protocol) sunucularının
-araçlarını Jarvis'e bağlar. Tasarımda üç risk gözetilir: (1) `mcp` SDK'sı 2.0'da Python
+araçlarını Artemis'e bağlar. Tasarımda üç risk gözetilir: (1) `mcp` SDK'sı 2.0'da Python
 alan adlarını değiştirdi; üst sınırsız bağımlılık köprünün tamamını sessizce kırabilir; (2) yanıt vermeyen bir sunucu uygulamanın
 açılışını kilitlememeli; (3) MCP sunucusu üçüncü taraf koddur, araçlarının kendini
-tanımlaması güvenilir değildir. Jarvis'te ek kısıtlar var: araç kaydı tek yoldan yapılır
+tanımlaması güvenilir değildir. Artemis'te ek kısıtlar var: araç kaydı tek yoldan yapılır
 (CLAUDE.md 9), MCP sonucu turu lekeler (4), risk bildirmeyen araç yan etkilidir (3), sır
 alt sürece aktarılmaz.
 
 **Karar:**
 
-- **Taşıma yalnız stdio; SDK yok.** Jarvis kendi küçük JSON-RPC 2.0 istemcisini taşır
-  (`jarvis/mcp/client.py`): satır sınırlı JSON, `initialize` → `notifications/initialized`
+- **Taşıma yalnız stdio; SDK yok.** Artemis kendi küçük JSON-RPC 2.0 istemcisini taşır
+  (`artemis/mcp/client.py`): satır sınırlı JSON, `initialize` → `notifications/initialized`
   → `tools/list` (sayfalı) → `tools/call`. Bu dört mesaj sözleşmenin tamamıdır; bir SDK
   bağımlılığı ve sürüm kırılması yerine sabit, test edilen bir yüzey seçilir. HTTP/SSE
   taşıması kimlik doğrulama ve sır yönetimi ister; ihtiyaç doğunca ayrı ADR ile eklenir.
@@ -29,7 +29,7 @@ alt sürece aktarılmaz.
   `mcp_unavailable` denetimiyle atlanır, diğerleri ve uygulama açılışı etkilenmez.
 
 - **Tek köprü, kayıt kuralının tek istisnası.** MCP araçları çalışma zamanında bilinir;
-  bu yüzden `@register_tool` ile değil, `jarvis/mcp/bridge.py`'nin ürettiği `BaseTool`
+  bu yüzden `@register_tool` ile değil, `artemis/mcp/bridge.py`'nin ürettiği `BaseTool`
   alt sınıflarıyla runtime'a özel bir registry kopyasına eklenir (global registry
   değişmez, testler ve kanallar birbirini etkilemez). Ad `mcp_<sunucu>_<araç>` olur,
   `^[a-zA-Z0-9_-]{1,64}$` dışındaki karakterler `_` yapılır; sığmayan ya da mevcut bir
@@ -84,5 +84,5 @@ alt sürece aktarılmaz.
   kullanıcı isterse kalıcı oturum ayrı ADR ile eklenir.
 - Windows'ta `npx` gibi `.cmd` sarmalayıcılar `shutil.which` ile çözülür; kabuk (`shell=True`)
   kullanılmaz.
-- MCP sunucusunun kendi yaptıkları (ağ, dosya) Jarvis SafetyGate'inin dışındadır; kapı
+- MCP sunucusunun kendi yaptıkları (ağ, dosya) Artemis SafetyGate'inin dışındadır; kapı
   yalnız çağrıyı denetler. Bu sınır onay metninde ve README'de yazılıdır.
