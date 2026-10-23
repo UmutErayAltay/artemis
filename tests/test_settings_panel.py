@@ -51,7 +51,7 @@ def test_stt_model_path_is_saved(tmp_path: Path) -> None:
 
 def test_tts_backend_choice_is_saved(tmp_path: Path) -> None:
     path = config(tmp_path)
-    save_choices(path, None, tts_backend="ema")
+    save_choices(path, None, values={("voice", "tts_backend"): "ema"})
     assert load_settings(path).voice.tts_backend == "ema"
 
 
@@ -99,7 +99,7 @@ def test_application_list_save_preserves_model_and_removes_obsolete_exceptions(
 
 def test_global_app_access_is_saved_without_expanding_manual_list(tmp_path: Path) -> None:
     path = config(tmp_path)
-    save_choices(path, 2, allow_all_applications=True)
+    save_choices(path, 2, values={("allow_all_applications",): True})
     settings = load_settings(path)
     assert settings.allow_all_applications
     assert settings.applications == {"brave": "brave.exe"}
@@ -108,11 +108,11 @@ def test_global_app_access_is_saved_without_expanding_manual_list(tmp_path: Path
 def test_continuous_mode_choice_is_saved_and_defaults_off(tmp_path: Path) -> None:
     path = config(tmp_path)
     assert load_settings(path).voice.continuous_mode is False
-    save_choices(path, None, continuous_mode=True)
+    save_choices(path, None, values={("voice", "continuous_mode"): True})
     assert load_settings(path).voice.continuous_mode is True
     save_choices(path, None)
     assert load_settings(path).voice.continuous_mode is True
-    save_choices(path, None, continuous_mode=False)
+    save_choices(path, None, values={("voice", "continuous_mode"): False})
     assert load_settings(path).voice.continuous_mode is False
 
 
@@ -123,16 +123,18 @@ def test_noise_suppression_defaults_off_and_choices_are_saved(tmp_path: Path) ->
     from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 
     assert voice.noise_model_dir == DEFAULT_NOISE_MODEL_DIR  # config konumundan bağımsız
-    save_choices(path, None, noise_suppression=True, noise_suppression_level="guclu")
+    save_choices(path, None, values={
+        ("voice", "noise_suppression"): True, ("voice", "noise_suppression_level"): "guclu",
+    })
     voice = load_settings(path).voice
     assert (voice.noise_suppression, voice.noise_suppression_level) == (True, "guclu")
     save_choices(path, None)  # verilmeyen anahtarlar korunur
     assert load_settings(path).voice.noise_suppression is True
-    save_choices(path, None, noise_suppression=False)
+    save_choices(path, None, values={("voice", "noise_suppression"): False})
     voice = load_settings(path).voice
     assert (voice.noise_suppression, voice.noise_suppression_level) == (False, "guclu")
     assert voice.noise_suppression_stt is False  # varsayılan: STT ham sesi alır
-    save_choices(path, None, noise_suppression_stt=True)
+    save_choices(path, None, values={("voice", "noise_suppression_stt"): True})
     assert load_settings(path).voice.noise_suppression_stt is True
     save_choices(path, None)  # verilmeyen anahtar korunur
     assert load_settings(path).voice.noise_suppression_stt is True
@@ -142,13 +144,13 @@ def test_echo_cancellation_defaults_off_and_choice_is_saved(tmp_path: Path) -> N
     path = config(tmp_path)
     assert load_settings(path).voice.echo_cancellation is False
 
-    save_choices(path, None, echo_cancellation=True)
+    save_choices(path, None, values={("voice", "echo_cancellation"): True})
     assert load_settings(path).voice.echo_cancellation is True
 
     save_choices(path, None)
     assert load_settings(path).voice.echo_cancellation is True
 
-    save_choices(path, None, echo_cancellation=False)
+    save_choices(path, None, values={("voice", "echo_cancellation"): False})
     assert load_settings(path).voice.echo_cancellation is False
 
 
@@ -164,7 +166,7 @@ def test_noise_model_dir_is_resolved_relative_to_config(tmp_path: Path) -> None:
 def test_invalid_noise_level_is_rejected(tmp_path: Path) -> None:
     path = config(tmp_path)
     with pytest.raises(ValueError):
-        save_choices(path, None, noise_suppression_level="cok-guclu")
+        save_choices(path, None, values={("voice", "noise_suppression_level"): "cok-guclu"})
 
 
 @pytest.fixture(scope="module")
@@ -245,3 +247,98 @@ def test_save_computer_mode_writes_only_the_mode(tmp_path: Path) -> None:
     with pytest.raises(ValueError):
         save_computer_mode(path, "yolo")
     assert load_settings(path).computer_use.mode == "auto"
+
+
+# Bilinçli olarak PANEL_BINDINGS dışında kalan seçim widget'ları ve nedenleri. Yeni bir kutu ya da
+# liste eklenip bağlanmazsa aşağıdaki test kırılır: ya bağ ekleyin ya da buraya gerekçe yazın.
+_UNBOUND_WIDGETS = {
+    "device_combo": "input_device: aygıt listesi ve 'sistem varsayılanı' özel yenilenir",
+    "stt_combo": "stt_model: katalog seçimi yola çevrilir, indirme durumu taşır",
+    "github_auto": "code_agent.auto_sync: github_values ile birlikte, save_code_agent de yazar",
+    "advanced_devices": "yalnız görünüm; config'e yazılmaz",
+}
+
+
+def _panel(path: Path):  # type: ignore[no-untyped-def]
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+
+    QApplication.instance() or QApplication([])
+    return SettingsPanel(path)
+
+
+def _flip(widget) -> None:  # type: ignore[no-untyped-def]
+    """Widget'ı varsayılandan farklı, seçilebilir bir değere getirir."""
+    from PySide6.QtWidgets import QCheckBox, QComboBox
+
+    if isinstance(widget, QCheckBox):
+        widget.setChecked(not widget.isChecked())
+        return
+    assert isinstance(widget, QComboBox)
+    model = widget.model()
+    for index in range(widget.count()):
+        if index != widget.currentIndex() and model.item(index).isEnabled():  # type: ignore[attr-defined]
+            widget.setCurrentIndex(index)
+            return
+    raise AssertionError(f"{widget.accessibleName()} için başka seçenek yok")
+
+
+def test_every_panel_binding_names_a_real_setting_and_widget(tmp_path: Path) -> None:
+    from artemis.channels.desktop.settings_panel import PANEL_BINDINGS, setting_value
+
+    path = config(tmp_path)
+    settings = load_settings(path)
+    panel = _panel(path)
+    assert len({binding.path for binding in PANEL_BINDINGS}) == len(PANEL_BINDINGS)
+    for binding in PANEL_BINDINGS:
+        setting_value(settings, binding.path)  # yol yanlışsa AttributeError
+        assert hasattr(panel, binding.widget), binding.widget
+    panel.deleteLater()
+
+
+def test_every_choice_widget_is_bound_or_explicitly_unbound(tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QCheckBox, QComboBox
+
+    from artemis.channels.desktop.settings_panel import PANEL_BINDINGS
+
+    panel = _panel(config(tmp_path))
+    choices = {
+        name for name, value in vars(panel).items() if isinstance(value, QCheckBox | QComboBox)
+    }
+    bound = {binding.widget for binding in PANEL_BINDINGS}
+    assert choices - bound - set(_UNBOUND_WIDGETS) == set()
+    assert bound & set(_UNBOUND_WIDGETS) == set()
+    panel.deleteLater()
+
+
+def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
+    """Uygula → diske yaz → yeni panel: her bağ değeri aynı göstermeli (yenile/kaydet simetrisi)."""
+    from artemis.channels.desktop.settings_panel import PANEL_BINDINGS, setting_value
+
+    path = config(tmp_path)
+    first = _panel(path)
+    defaults = first.values()
+    assert set(defaults) == {binding.path for binding in PANEL_BINDINGS}
+    for binding in PANEL_BINDINGS:
+        _flip(getattr(first, binding.widget))
+    chosen = first.values()
+    changed = {key for key in chosen if chosen[key] != defaults[key]}
+    assert changed == set(chosen), "her bağ varsayılandan farklı bir değerle denenmeli"
+    save_choices(path, None, values=chosen)
+    saved = load_settings(path)
+    assert {key: setting_value(saved, key) for key in chosen} == chosen  # diske gerçekten yazıldı
+    second = _panel(path)
+    assert second.values() == chosen
+    second.refresh()  # ikinci yenileme de aynı değeri korur
+    assert second.values() == chosen
+    first.deleteLater()
+    second.deleteLater()
+
+
+def test_save_choices_rejects_paths_without_a_panel_binding(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    before = path.read_text(encoding="utf-8")
+    with pytest.raises(KeyError):
+        save_choices(path, None, values={("voice", "echo_cancelation"): True})  # yazım hatası
+    assert path.read_text(encoding="utf-8") == before

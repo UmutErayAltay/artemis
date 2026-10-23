@@ -502,12 +502,7 @@ def test_noise_suppression_controls_load_enable_and_save(
     panel.noise_level.setCurrentIndex(panel.noise_level.findData("guclu"))
     from artemis.channels.desktop.settings_panel import save_choices
 
-    save_choices(
-        path, None,
-        noise_suppression=panel.noise_suppression.isChecked(),
-        noise_suppression_level=str(panel.noise_level.currentData()),
-        noise_suppression_stt=panel.noise_stt.isChecked(),
-    )
+    save_choices(path, None, values=panel.values())
     panel.refresh()
     voice = load_settings(path).voice
     assert voice.noise_suppression and voice.noise_suppression_level == "guclu"
