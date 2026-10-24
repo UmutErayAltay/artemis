@@ -4,15 +4,15 @@
 
 Artemis'in `artemis` uyandırma sözcüğünden sonra Türkçe/İngilizce karışık gündelik
 konuşmayı genel kullanıcılar için doğru anlamasını geliştirmek. Hedef makine RTX
-4050 ve 32 GB RAM'dir. Bu belge bir uygulama planıdır; üretim kodu, yeni özellik
-veya kabul edilmiş mimari kararı değildir.
+4050 ve 32 GB RAM'dir. Bu belge uygulama planı ve ilerleme kaydıdır. İlk ölçüm alt adımı aşağıda
+belgelenmiştir; sonraki aşamalar tamamlanmış veya kabul edilmiş karar sayılmaz.
 
 Bugün [ses doğruluğu planındaki](SPEECH_ACCURACY_PLAN.md) 15 satır yer tutucu WAV
-planı gerçek sesle genel WER sağlamaz. Mevcut `bench/voice_latency.py` canlı
-raporu eski ve ayrı bir ses hattı kurar; EMA/AEC/DFN yolunu içermez ve Piper'ı
-her zaman hazırlar. Gerçek uygulama [factory](../artemis/channels/voice/factory.py)
-ile controller kurar ve işleme katmanlarını içerir, ancak `on_timing` dışarıdan
-bağlanmaz. [core.py](../artemis/channels/voice/core.py) `_run_and_speak` içinde
+planı gerçek sesle genel WER sağlamaz. `bench/voice_latency.py` canlı raporu artık gerçek uygulamanın
+[factory](../artemis/channels/voice/factory.py) ve Qt'siz runtime'ını kullanır;
+EMA/Edge/Piper seçimi ve AEC/DFN ayarları ortak zincirden geçer. Factory'nin
+isteğe bağlı yapılandırılmış olay hook'u ile eski `on_timing` hook'u dışarıdan
+bağlanabilir. [core.py](../artemis/channels/voice/core.py) `_run_and_speak` içinde
 `run_command` tamamlanana kadar bekler; sağlayıcı çağrıları streaming kapalıdır.
 Dolayısıyla ilk ses, bugün model/araç işi bittikten sonra başlar.
 
@@ -30,6 +30,57 @@ söz kesme nihai STT ve mevcut dinleme kurallarını bekliyor ([ADR 0040](adr/00
 Bu düzeltme aşağıdaki gerçek doğruluk ve gecikme ölçümlerinin yerini tutmaz.
 
 ### 1. Ortak canlı çalışma zamanı ölçümü
+
+**2026-10-25 — ilk alt adım uygulandı; aşamanın tamamı bitmedi.**
+[ADR 0041](adr/0041-common-voice-telemetry.md) ortak factory/runtime ve kimlikli
+olay kararını kaydeder. Rapor; VAD başlangıcı/son voiced frame, endpoint, nihai STT,
+komut başlangıcı, bütün runner tamamlanması, TTS ilk parça ve player ilk PCM'ini
+ölçer. Birbirine giren reddedilmiş sözler eski yanıtın olaylarını sahiplenmez.
+Wake/kip bildirimi ayrı `ack` sonucudur. Tamamlandı/reddedildi/iptal/hata/sessiz/
+yarım sözler, geçersiz zamanlar ve sınırlı tampon taşması açık sayılır. `completed`
+ses oynatma sonucudur; model/araç başarısı değildir. Aşama dağılımları, mevcut
+geçerli olay çiftlerini iptal/hata örneklerinde de kullanabilir; her metriğin
+örnek sayısı ve dışlama paydası vardır. p50 medyandır; p90 sıralanmış örneklerin
+`round((n-1)*0.9)` indeksidir. Ham ses ve transcript rapora yazılmaz.
+
+Canlı rapor onay/pause/cancel/kapanış ve timer/sinyal temizliğini aynı runtime
+üzerinden yapar; ücretli çağrı izni açık config reddedilir. `--rapor PATH` JSON
+artifaktı isteğe bağlıdır; stdout JSON, durum/onay çıktısı stderr'dir. Sahte yol
+izole adaptörler kullanır ve aynı şemayı sınar; gerçek gecikme iddiası değildir.
+Native model yüklemesi `to_thread` iptaliyle durmaz: döngü çalışıyorsa yükleme
+bitince kaynak temizlenir; süreç kapanışının native yüklemeyi anında kestiği veya
+kesin sürede bittiği iddia edilmez.
+
+**Ertelenen ölçümler:** model isteği/ilk token ve tool içi aşamalar, gerçek streaming,
+sohbet/araç sınıfları, stop isteği/oynatma durması olaylarını bağlamak, masaüstü
+telemetri dışa aktarımı, soğuk/ısınmış profil ayrımı, gerçek aygıt gecikmesi ve
+GPU/CPU/bellek/contention profili. Bunlar bilinmiyorsa null'dır; ayar profili
+`requested_*` ile etiketlidir (TTS fallback'in fiilî backend'i doğrulanmaz).
+Stop metriği gerçek olay çifti yokken null'dır. İlk PCM player yazım olayıdır,
+fiziksel duyulabilirlik ve Windows gerçek cihaz kabulü henüz ölçülmedi.
+`collection_complete` yalnız sınırlı olay tamponunun taşmadığını bildirir;
+setup/run hataları ile yarım/geçersiz örnekler ayrı alanlarda görünür.
+
+Doğrulama: donanımsız hedefli core/factory/rapor/bench kümesi 100 geçti,
+2 isteğe bağlı bağımlılık testi atlandı. Genel kontrol çıktıları:
+
+```text
+2 failed, 1673 passed, 6 skipped, 4 deselected in 72.55s (0:01:12)
+All checks passed!
+Success: no issues found in 104 source files
+```
+
+İki başarısız test `tests/test_mcp_client.py` içindeki alt süreç kapanış
+kontrolleridir. Bunlar önceki oturumda değişmemiş `765c5cb` ana dalında da
+yeniden üretildi: container'da kapanmış süreçlerin PID 1 altında zombi kalması
+([ADR 0040 doğrulaması](adr/0040-validated-playback-interruption.md)). MCP kodu
+bu adımda değişmedi. Sahte kabul senaryoları 39/39, tehlikeli hata ve onaysız
+yan etki 0; sahte ses ölçümü 3/3 tamamlandı, geçersiz zaman 0 ve dosya/stdout
+JSON çıktısı eşit. Sahte sonuçlar gerçek ses performansı değildir.
+Canlı mikrofon/hoparlör, model indirme ve ücretli çağrı yapılmadı. Ortak hattın
+kurulması 1.5 s veya stop hedefinin tuttuğunu göstermez.
+
+Aşamanın kalan hedef kapsamı:
 
 Tek rapor yolu gerçek `build_voice_controller`/uygulama runtime'ını kullanmalı;
 ayrı ve güncelliğini yitirebilecek bir zincir kurmamalı. `on_timing` factory ve

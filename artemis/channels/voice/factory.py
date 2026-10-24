@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Awaitable, Callable
+from contextlib import AsyncExitStack
+from typing import Protocol
 
 from artemis.brain.agent_loop import RunResult
 from artemis.channels.runtime import Runtime
@@ -31,6 +33,7 @@ from artemis.channels.voice.echo import (
     EchoCanceller,
     EchoReference,
 )
+from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 
 logger = logging.getLogger(__name__)
@@ -52,7 +55,9 @@ StateCallback = Callable[[str], None]
 
 
 async def build_voice_controller(
-    runtime: Runtime, run_command: RunCommand, on_state: StateCallback
+    runtime: Runtime, run_command: RunCommand, on_state: StateCallback,
+    *, on_timing: Callable[[str, float], None] | None = None,
+    on_event: Callable[[VoiceTimingEvent], None] | None = None,
 ) -> VoiceController:
     """STT/TTS modellerini hazırlar; eksik model OSError/RuntimeError/ValueError olarak çıkar.
 
@@ -78,80 +83,129 @@ async def build_voice_controller(
             on_state("denoise:unavailable:" + _denoise_reason(error))
     # Gürültü engelleme açıksa mikrofon yerel 48 kHz yakalanır (modelin doğal hızı, >8 kHz bilgi
     # korunur); açılamazsa adaptör uyarıyla 16 kHz'e döner. Aşağı akış hep 16 kHz görür.
-    microphone: Microphone = SoundDeviceMicrophone(
-        settings.voice,
-        device=settings.voice.input_device,
-        capture_rate=MODEL_SR if denoiser is not None else None,
-    )
-    echo_reference: EchoReference | None = None
-    if settings.voice.echo_cancellation:
-        reference = EchoReference(MODEL_SR if denoiser is not None else settings.voice.sample_rate)
-        echo_reference = reference
-
-        def make_canceller(rate: int) -> EchoCanceller:
-            reference.retarget(rate)
-            return EchoCanceller(rate, reference, delay_ms=settings.voice.echo_delay_ms)
-
-        echo_off_reported = False
-
-        def report_echo_state(state: str) -> None:
-            # Mikrofon sarmalayıcısı ve hoparlör beslemesi aynı arızayı ayrı ayrı görebilir
-            # (ör. livekit yok); kullanıcıya tek bildirim yeter.
-            nonlocal echo_off_reported
-            if state == "echo:off":
-                if echo_off_reported:
-                    return
-                echo_off_reported = True
-            on_state(state)
-
-        microphone = EchoCancelledMicrophone(microphone, make_canceller, report_echo_state)
-    if denoiser is not None:
-        microphone = DenoisedMicrophone(
-            microphone, denoiser, on_state, raw_for_stt=not settings.voice.noise_suppression_stt
+    async with AsyncExitStack() as cleanup:
+        microphone: Microphone = SoundDeviceMicrophone(
+            settings.voice,
+            device=settings.voice.input_device,
+            capture_rate=MODEL_SR if denoiser is not None else None,
         )
-    if echo_reference is None:
-        sink = SoundDeviceSink()
-    else:
-        sink = SoundDeviceSink(
-            echo_reference=echo_reference,
-            on_echo_failure=lambda: report_echo_state("echo:off"),
+        cleanup.push_async_callback(_close_optional, microphone)
+        echo_reference: EchoReference | None = None
+        if settings.voice.echo_cancellation:
+            reference = EchoReference(
+                MODEL_SR if denoiser is not None else settings.voice.sample_rate
+            )
+            echo_reference = reference
+
+            def make_canceller(rate: int) -> EchoCanceller:
+                reference.retarget(rate)
+                return EchoCanceller(rate, reference, delay_ms=settings.voice.echo_delay_ms)
+
+            echo_off_reported = False
+
+            def report_echo_state(state: str) -> None:
+                # Mikrofon sarmalayıcısı ve hoparlör beslemesi aynı arızayı ayrı ayrı görebilir
+                # (ör. livekit yok); kullanıcıya tek bildirim yeter.
+                nonlocal echo_off_reported
+                if state == "echo:off":
+                    if echo_off_reported:
+                        return
+                    echo_off_reported = True
+                on_state(state)
+
+            microphone = EchoCancelledMicrophone(microphone, make_canceller, report_echo_state)
+        if denoiser is not None:
+            microphone = DenoisedMicrophone(
+                microphone, denoiser, on_state, raw_for_stt=not settings.voice.noise_suppression_stt
+            )
+        if echo_reference is None:
+            sink = SoundDeviceSink()
+        else:
+            sink = SoundDeviceSink(
+                echo_reference=echo_reference,
+                on_echo_failure=lambda: report_echo_state("echo:off"),
+            )
+        cleanup.push_async_callback(_close_optional, sink)
+        recognizer = FasterWhisperRecognizer(settings.voice)
+        await _prepare(recognizer)
+        synthesizer: SpeechSynthesizer
+        if settings.voice.tts_backend == "edge":
+            edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
+            cleanup.push_async_callback(_close_optional, edge_tts)
+            # Yedek yalnız Piper modeli varken kurulur: `tts_local_fallback` varsayılan açıktır ve
+            # model yokken Piper kurucusu çalışabilecek Edge sesini de kapatırdı.
+            if settings.voice.tts_local_fallback and settings.voice.piper_model:
+                local_tts = PiperSynthesizer(settings.voice)
+                await _prepare(local_tts)
+                cleanup.push_async_callback(_close_optional, local_tts)
+                synthesizer = FallbackSynthesizer(edge_tts, local_tts)
+            else:
+                synthesizer = edge_tts
+        elif settings.voice.tts_backend == "ema":
+            primary_tts = EmaSynthesizer(settings.voice)
+            await _prepare(primary_tts)
+            cleanup.push_async_callback(_close_optional, primary_tts)
+            if settings.voice.tts_local_fallback and settings.voice.piper_model:
+                local_tts = PiperSynthesizer(settings.voice)
+                await _prepare(local_tts)
+                cleanup.push_async_callback(_close_optional, local_tts)
+                synthesizer = FallbackSynthesizer(primary_tts, local_tts)
+            else:
+                synthesizer = primary_tts
+        else:
+            local_tts = PiperSynthesizer(settings.voice)
+            await _prepare(local_tts)
+            cleanup.push_async_callback(_close_optional, local_tts)
+            synthesizer = local_tts
+        controller = VoiceController(
+            runtime.runner,
+            settings.voice,
+            microphone,
+            WebRTCVAD(settings.voice),
+            recognizer,
+            synthesizer,
+            sink,
+            run_command=run_command,
+            on_state=on_state,
+            on_timing=on_timing,
+            on_event=on_event,
+            on_input_level=lambda level: on_state(f"level:{level}"),
+            on_transcript=lambda text: on_state("heard:" + text[:200]),
         )
-    recognizer = FasterWhisperRecognizer(settings.voice)
-    await asyncio.to_thread(recognizer.prepare)
-    synthesizer: SpeechSynthesizer
-    if settings.voice.tts_backend == "edge":
-        edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
-        # Yedek yalnız Piper modeli varken kurulur: `tts_local_fallback` varsayılan açıktır ve
-        # model yokken PiperSynthesizer ValueError fırlatıp çalışabilecek Edge sesini de kapatırdı.
-        if settings.voice.tts_local_fallback and settings.voice.piper_model:
-            local_tts = PiperSynthesizer(settings.voice)
-            await asyncio.to_thread(local_tts.prepare)
-            synthesizer = FallbackSynthesizer(edge_tts, local_tts)
-        else:
-            synthesizer = edge_tts
-    elif settings.voice.tts_backend == "ema":
-        primary_tts = EmaSynthesizer(settings.voice)
-        await asyncio.to_thread(primary_tts.prepare)
-        if settings.voice.tts_local_fallback and settings.voice.piper_model:
-            local_tts = PiperSynthesizer(settings.voice)
-            await asyncio.to_thread(local_tts.prepare)
-            synthesizer = FallbackSynthesizer(primary_tts, local_tts)
-        else:
-            synthesizer = primary_tts
-    else:
-        local_tts = PiperSynthesizer(settings.voice)
-        await asyncio.to_thread(local_tts.prepare)
-        synthesizer = local_tts
-    return VoiceController(
-        runtime.runner,
-        settings.voice,
-        microphone,
-        WebRTCVAD(settings.voice),
-        recognizer,
-        synthesizer,
-        sink,
-        run_command=run_command,
-        on_state=on_state,
-        on_input_level=lambda level: on_state(f"level:{level}"),
-        on_transcript=lambda text: on_state("heard:" + text[:200]),
-    )
+        cleanup.pop_all()
+        return controller
+
+
+async def _close_optional(resource: object) -> None:
+    closer = getattr(resource, "close", None)
+    if closer is not None:
+        try:
+            await closer()
+        except (OSError, RuntimeError, ValueError) as error:
+            logger.warning("Ses kaynağı kapatılamadı (%s).", type(error).__name__)
+
+
+class PreparedResource(Protocol):
+    def prepare(self) -> None: ...
+
+
+async def _prepare(resource: PreparedResource) -> None:
+    """to_thread iptali yüklemeyi durdurmaz; bitince kapat, yarışarak dispose etme."""
+    task = asyncio.create_task(asyncio.to_thread(resource.prepare))
+    try:
+        await asyncio.shield(task)
+    except asyncio.CancelledError:
+        def finish_and_close(done: asyncio.Task[None]) -> None:
+            if done.cancelled():
+                # Döngü kapanıyorsa çalışan thread'e yarışarak dokunulmaz.
+                return
+            error = done.exception()
+            if error is not None:
+                logger.debug("İptal edilen hazırlık başarısız (%s).", type(error).__name__)
+            asyncio.create_task(_close_optional(resource))
+
+        task.add_done_callback(finish_and_close)
+        raise
+    except (OSError, RuntimeError, ValueError, ImportError):
+        await _close_optional(resource)
+        raise

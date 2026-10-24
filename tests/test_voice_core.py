@@ -878,3 +878,76 @@ async def test_wake_ack_keeps_microphone_open_and_strips_own_words():
         assert runner.commands == ["saat kaç"]
     finally:
         await controller.close()
+
+
+async def test_structured_telemetry_keeps_original_generation_after_rejected_noise():
+    ready, release = asyncio.Event(), asyncio.Event()
+
+    class DelayedTTS(FakeTTS):
+        async def stream(self, _text, _cancelled):
+            ready.set()
+            await release.wait()
+            yield PCMChunk(b"\x01\x00")
+
+    events = []
+    controller = VoiceController(
+        FakeRunner(), VoiceConfig(), FakeMic(), FakeVAD([]),
+        FakeRecognizer(["artemis saat kaç", ""]), DelayedTTS(), FakeSink(),
+        on_event=events.append,
+    )
+    try:
+        await controller._handle_utterance(AudioSegment(b"a", monotonic(), monotonic()))
+        await ready.wait()
+        await controller._handle_utterance(AudioSegment(b"b", monotonic(), monotonic()))
+        release.set()
+        await controller._settle_active()
+        pcm = [event for event in events if event.stage == "first_pcm"]
+        assert len(pcm) == 1 and pcm[0].utterance_id == pcm[0].generation_id == 1
+        rejected = [event for event in events if event.outcome == "rejected"]
+        assert rejected[0].utterance_id == 2 and rejected[0].reason == "empty_transcript"
+        assert not controller.runner.cancelled
+    finally:
+        await controller.close()
+
+
+async def test_ack_has_own_outcome_and_no_task_first_pcm():
+    events = []
+    legacy = []
+    controller = VoiceController(
+        FakeRunner(), VoiceConfig(), FakeMic(), FakeVAD([]), FakeRecognizer(["artemis"]),
+        FakeTTS(), FakeSink(), on_event=events.append,
+        on_timing=lambda stage, timestamp: legacy.append(stage),
+    )
+    try:
+        await controller._handle_utterance(AudioSegment(b"a", monotonic(), monotonic()))
+        await controller._settle_active()
+        assert events[-1].outcome == "ack" and events[-1].response_kind == "ack"
+        assert all(event.response_kind == "ack" for event in events if event.stage == "first_pcm")
+        assert "first_pcm" not in legacy and not controller.runner.commands
+    finally:
+        await controller.close()
+
+
+async def test_early_sink_return_closes_underlying_synthesizer_iterator():
+    finalized = asyncio.Event()
+
+    class TrackingTTS(FakeTTS):
+        async def stream(self, _text, _cancelled):
+            try:
+                yield PCMChunk(b"\x01\x00")
+                await asyncio.Event().wait()
+            finally:
+                finalized.set()
+
+    class EarlySink(FakeSink):
+        async def play(self, chunks, cancelled, on_first_pcm):
+            await anext(chunks)
+            on_first_pcm()
+
+    controller = VoiceController(FakeRunner(), VoiceConfig(), FakeMic(), FakeVAD([]),
+                                 FakeRecognizer([]), TrackingTTS(), EarlySink())
+    try:
+        await controller._run_and_speak("deneme")
+        assert finalized.is_set()
+    finally:
+        await controller.close()

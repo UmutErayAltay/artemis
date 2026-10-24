@@ -131,6 +131,27 @@ yolunda oluşturduğu yankıyı azaltır; işlem yereldir ve varsayılan kapalı
 ([ADR 0038](docs/adr/0038-echo-cancellation.md)).
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
+Ortak ses ölçümünün ilk adımı ([ADR 0041](docs/adr/0041-common-voice-telemetry.md)):
+`python -m bench.voice_latency --sahte --iterations 30 --rapor reports/voice-fake.json`
+sahte adaptörlerle rapor şemasını sınar. Kullanıcının açıkça başlattığı
+`python -m bench.voice_latency --canli --config config/config.yaml --duration 60 --rapor reports/voice-live.json`
+uygulamayla aynı runtime/factory'yi (EMA/Edge/Piper, AEC/DFN ayarları dahil) kullanır.
+Canlı kip mikrofon/hoparlör kullanır; `allow_paid: true` reddedilir. Ücretsiz sağlayıcı
+kotası ve Edge metin aktarımı mevcut ayarlara tabidir. Onaylar aynı SafetyGate ve
+terminal üzerinden alınır; durum/onay istemleri stderr'e, JSON stdout'a yazılır.
+
+Rapor içerik saklamadan yerel utterance/generation kimlikleriyle reddedilen, iptal,
+hatalı, sessiz ve yarım sözleri sayar. Wake bildirimi görev yanıtı metriklerine girmez.
+Aşama p50/p90 değerlerinin kendi geçerli örnek sayısı ve dışlama paydası vardır;
+`model_complete` tüm CommandRunner süresidir. `completed` ses oynatma sonucudur,
+araç başarısı değildir. İlk PCM, player yazım callback'idir; fiziksel duyulabilirlik
+ölçülmez. Stop olay çifti henüz bağlanmadığı için stop metriği null'dır. Model/token/
+araç içi zamanlar, komut sınıfları, masaüstü dışa aktarımı ve gerçek cihaz/bellek
+ölçümleri sonraki adımdır. Donanım profilindeki `requested_*` ayardır; bilinmeyen
+fiilî değerler null kalır. `collection_complete` yalnız olay tamponunun taşmadığını
+belirtir; başarısızlıklar ve yarım/geçersiz sözler ayrıca raporlanır. Model hazırlığı
+iptal edilince çalışan native yükleme thread'i durdurulmuş sayılmaz.
+
 `voice.stt_language` `tr` (kod varsayılanı), `tr_en` (örnek config) veya `auto` olabilir;
 Türkçe öncelikli dil seçimi ve Kiril çıktısının reddi
 [ADR 0019](docs/adr/0019-multilingual-stt-and-validated-interruption.md) ve

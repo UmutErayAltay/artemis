@@ -360,3 +360,75 @@ async def test_echo_cancellation_is_applied_before_denoising(monkeypatch, tmp_pa
     assert isinstance(sink._echo_reference, factory.EchoReference)
     assert canceller.reference is sink._echo_reference
     assert cancellers == [canceller]
+
+
+async def test_factory_forwards_optional_timing_hooks(monkeypatch):
+    _patch_voice_deps(monkeypatch, object())
+    timing, events = [], []
+    def on_timing(stage, timestamp):
+        timing.append((stage, timestamp))
+    controller = await factory.build_voice_controller(
+        _runtime(VoiceConfig()), lambda _: None, lambda _: None,
+        on_timing=on_timing, on_event=events.append,
+    )
+    assert controller.on_timing is on_timing
+    controller._event(1, "speech_start", timestamp=1.)
+    assert events[0].utterance_id == 1
+
+
+async def test_factory_cleans_partial_setup_after_model_failure(monkeypatch):
+    closed = []
+
+    class Resource:
+        def __init__(self, name):
+            self.name = name
+
+        async def close(self):
+            closed.append(self.name)
+
+    mic, sink, tts = Resource("mic"), Resource("sink"), Resource("tts")
+    _patch_voice_deps(monkeypatch, mic)
+    monkeypatch.setattr(factory, "SoundDeviceSink", lambda: sink)
+
+    def fail_prepare():
+        raise RuntimeError("secret model path")
+
+    tts.prepare = fail_prepare
+    monkeypatch.setattr(factory, "PiperSynthesizer", lambda _: tts)
+    with pytest.raises(RuntimeError):
+        await factory.build_voice_controller(
+            _runtime(VoiceConfig()), lambda _: None, lambda _: None,
+        )
+    assert closed == ["tts", "sink", "mic"]
+
+
+async def test_factory_cancelled_prepare_waits_to_dispose_model(monkeypatch):
+    import asyncio
+    import threading
+
+    started, release = threading.Event(), threading.Event()
+    disposed = asyncio.Event()
+
+    class LoadingModel:
+        def prepare(self):
+            started.set()
+            assert release.wait(5)
+
+        async def close(self):
+            assert release.is_set()
+            disposed.set()
+
+    _patch_voice_deps(monkeypatch, object())
+    monkeypatch.setattr(factory, "PiperSynthesizer", lambda _: LoadingModel())
+    task = asyncio.create_task(factory.build_voice_controller(
+        _runtime(VoiceConfig()), lambda _: None, lambda _: None,
+    ))
+    try:
+        assert await asyncio.to_thread(started.wait, 5)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert not disposed.is_set()
+    finally:
+        release.set()
+    await asyncio.wait_for(disposed.wait(), 5)

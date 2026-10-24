@@ -4,13 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import importlib
 import json
+import math
 import platform
 import signal
-import statistics
+import sys
 import tempfile
 from collections.abc import AsyncIterator
+from contextlib import redirect_stdout
+from dataclasses import replace
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -18,33 +20,31 @@ from typing import Any
 from artemis.brain.agent_loop import AgentLoop
 from artemis.brain.fake import ScriptedProvider
 from artemis.brain.models import Completion
-from artemis.brain.providers import build_provider
 from artemis.channels.runner import CommandRunner
-from artemis.channels.voice.adapters import (
-    EdgeTTSynthesizer,
-    FallbackSynthesizer,
-    FasterWhisperRecognizer,
-    PiperSynthesizer,
-    SoundDeviceMicrophone,
-    SoundDeviceSink,
-    WebRTCVAD,
-)
+from artemis.channels.runtime import Runtime, create_runtime
 from artemis.channels.voice.core import AudioFrame, PCMChunk, VoiceController
+from artemis.channels.voice.factory import build_voice_controller
+from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.settings import Settings, VoiceConfig, load_settings
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate
 from artemis.tools.base import ToolContext
-from artemis.tools.registry import ToolRegistry, discover_tools
+from artemis.tools.registry import ToolRegistry
+from bench.voice_metrics import EventCollector, timing_report
 
 
 class FakeMicrophone:
-    def __init__(self) -> None:
+    def __init__(self, completed: asyncio.Event | None = None) -> None:
         self._frames = 7
+        self.completed = completed
 
     async def frames(self) -> AsyncIterator[AudioFrame]:
         for _ in range(self._frames):
             await asyncio.sleep(0.02)
             yield AudioFrame(b"\x01\x00", monotonic())
+        if self.completed is not None:
+            # Sahte EOF yanıt görevini yarışarak iptal etmesin; gerçek EOF kuralı korunur.
+            await asyncio.wait_for(self.completed.wait(), 2)
 
     def discard_pending(self) -> None:
         return None
@@ -105,18 +105,10 @@ class FakeSink:
         return None
 
 
-def _percentile(values: list[float], fraction: float) -> float | None:
-    if not values:
-        return None
-    ordered = sorted(values)
-    index = max(0, min(len(ordered) - 1, round((len(ordered) - 1) * fraction)))
-    return ordered[index]
-
-
 def group_live_events(
     events: list[dict[str, Any]],
 ) -> tuple[list[dict[str, float]], int, int, int]:
-    """Zaman çizgisindeki her konuşmayı tamamlandı/iptal/sessiz/geçersiz sayar."""
+    """Eski kimliksiz kayıtlar için uyumluluk; yeni rapor bu gruplamayı kullanmaz."""
     sessions: list[dict[str, float]] = []
     current: dict[str, float] = {}
     for event in events:
@@ -148,7 +140,7 @@ def group_live_events(
     return completed, aborted, no_audio, invalid
 
 
-async def _fake_once() -> dict[str, float] | None:
+async def _fake_once() -> list[VoiceTimingEvent]:
     with tempfile.TemporaryDirectory(prefix="artemis-voice-bench-") as directory:
         root = Path(directory)
         settings = Settings(
@@ -163,196 +155,224 @@ async def _fake_once() -> dict[str, float] | None:
         runner = CommandRunner(
             AgentLoop(provider, SafetyGate(ToolRegistry()), context, lambda _n, _a: False)
         )
-        events: dict[str, float] = {}
+        events: list[VoiceTimingEvent] = []
+        completed = asyncio.Event()
+
+        def on_event(event: VoiceTimingEvent) -> None:
+            events.append(event)
+            if event.stage == "terminal":
+                completed.set()
+
         sink = FakeSink()
         controller = VoiceController(
             runner,
             settings.voice,
-            FakeMicrophone(),
+            FakeMicrophone(completed),
             FakeVAD(),
             FakeRecognizer(),
             FakeSynthesizer(),
             sink,
-            on_timing=lambda stage, timestamp: events.__setitem__(stage, timestamp),
+            on_event=on_event,
         )
         await controller.run()
-        if not sink.played or "first_pcm" not in events:
-            return None
         return events
 
 
 async def fake_report(iterations: int) -> dict[str, Any]:
-    samples: list[dict[str, float]] = []
-    no_audio = 0
-    aborted = 0
-    for _ in range(iterations):
+    collector = EventCollector()
+    failures: list[dict[str, str]] = []
+    for index in range(iterations):
         try:
-            result = await _fake_once()
-        except (OSError, RuntimeError, ValueError):
-            aborted += 1
-            continue
-        if result is None:
-            no_audio += 1
-        else:
-            samples.append(result)
-    delays = [item["first_pcm"] - item["speech_end"] for item in samples]
-    p90 = _percentile(delays, 0.90)
+            for event in await _fake_once():
+                collector(replace(event, utterance_id=event.utterance_id + index * 1_000))
+        except (OSError, RuntimeError, ValueError) as error:
+            failures.append({"phase": "fake_iteration", "error_type": type(error).__name__})
+    report = _report(collector, "sahte (gerçek gecikme ölçümü değildir)")
+    report["requested_iterations"] = iterations
+    report["session_failures"] = failures
+    report["failed_iterations"] = len(failures)
+    report["hardware"] = None
+    return report
+
+
+def _report(collector: EventCollector, mode: str) -> dict[str, Any]:
+    report = timing_report(collector.events)
+    report.update({
+        "mode": mode, "dropped_events": collector.dropped_events,
+        "overflow_utterances": collector.overflow_utterances,
+        "collection_complete": collector.dropped_events == 0,
+    })
+    report["total_utterances"] += collector.overflow_utterances
+    report["outcomes"]["overflow"] = collector.overflow_utterances
+    return report
+
+
+def _hardware(settings: Settings, states: set[str]) -> dict[str, Any]:
+    voice = settings.voice
     return {
-        "mode": "sahte (gerçek gecikme ölçümü değildir)",
-        "samples": len(samples),
-        "aborted": aborted,
-        "no_audio": no_audio,
-        "speech_end_to_first_pcm_ms": {
-            "median": statistics.median(delays) * 1000 if delays else None,
-            "p90": p90 * 1000 if p90 is not None else None,
+        "system": platform.platform(), "machine": platform.machine(),
+        "requested_input_device": voice.input_device,
+        "input_device": None, "output_device": None,
+        "input_sample_rate": None, "output_sample_rate": None,
+        "output_latency_seconds": None,
+        "requested_stt_model": str(voice.stt_model) if voice.stt_model is not None else None,
+        "requested_stt_device": voice.stt_device,
+        "requested_stt_compute_type": voice.stt_compute_type,
+        "requested_stt_beam_size": voice.stt_beam_size,
+        "requested_tts_backend": voice.tts_backend, "actual_tts_backend": None,
+        "requested_tts_model": (
+            str(voice.piper_model) if voice.tts_backend == "piper" and voice.piper_model
+            else None if voice.tts_backend == "piper"
+            else voice.edge_voice if voice.tts_backend == "edge" else "ema"
+        ),
+        "pipeline_sample_rate": voice.sample_rate,
+        "noise_suppression": {
+            "requested": voice.noise_suppression,
+            "actual": False if (not voice.noise_suppression or "denoise:off" in states
+                                or "denoise:unavailable" in states) else None,
+            "stt_requested": voice.noise_suppression_stt,
         },
-        "false_wake": None,
-        "missed_wake": None,
-        "false_approval": None,
-        "barge_in_latency_ms": None,
+        "echo_cancellation": {
+            "requested": voice.echo_cancellation,
+            "actual": False if not voice.echo_cancellation or "echo:off" in states else None,
+        },
+        "processing_states": sorted(states),
+        "cpu_peak_memory_bytes": None, "gpu_peak_memory_bytes": None,
+        "free_vram_bytes": None, "contention": None,
     }
 
 
 async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
+    if not math.isfinite(duration) or duration <= 0:
+        raise ValueError("duration sonlu ve pozitif olmalı")
     settings = load_settings(config_path)
-    if not settings.primary_model:
-        raise ValueError("Canlı ölçüm için config içinde primary_model gerekli.")
     if settings.allow_paid:
         raise ValueError("Canlı ses ölçümü allow_paid: false ister.")
-    settings.workspace.mkdir(parents=True, exist_ok=True)
-    audit = AuditLog(settings.audit_path)
-    gate = SafetyGate(discover_tools())
-    context = ToolContext(settings.workspace, settings, audit)
     from artemis.channels.cli import request_approval
 
-    approval_active = False
-    runner: CommandRunner
+    collector = EventCollector()
+    runtime: Runtime | None = None
     controller: VoiceController | None = None
+    approval_active = False
+    timer: asyncio.TimerHandle | None = None
+    previous: Any = None
+    signal_installed = False
+    states: set[str] = set()
+    failures: list[dict[str, str]] = []
+    loop = asyncio.get_running_loop()
+    phase = "runtime_setup"
+
+    def on_state(state: str) -> None:
+        # heard/level durumları kişisel içerik taşır; rapora yalnız sabit durumlar girer.
+        if state.startswith("denoise:unavailable:"):
+            states.add("denoise:unavailable")
+        elif state in {"denoise:off", "echo:off"}:
+            states.add(state)
 
     def approve(name: str, arguments: dict[str, Any]) -> bool:
         nonlocal approval_active
+        assert runtime is not None
         approval_active = True
-        if controller is not None:
-            controller.pause_for_approval()
         try:
-            return request_approval(
-                name,
-                arguments,
-                gate.pending_notice,
-                on_interrupt=runner.cancel_current,
-            )
+            if controller is not None:
+                controller.pause_for_approval()
+            # Terminal onay istemi de JSON stdout'unu bozmamalı.
+            with redirect_stdout(sys.stderr):
+                return request_approval(
+                    name, arguments, runtime.gate.pending_notice,
+                    on_interrupt=runtime.runner.cancel_current,
+                )
         finally:
             approval_active = False
             if controller is not None:
                 controller.resume_after_approval()
 
-    runner = CommandRunner(AgentLoop(build_provider(settings, audit), gate, context, approve))
-    sink = SoundDeviceSink()
-    local_tts = PiperSynthesizer(settings.voice)
-    recognizer = FasterWhisperRecognizer(settings.voice)
-    await asyncio.to_thread(recognizer.prepare)
-    await asyncio.to_thread(local_tts.prepare)
-    synthesizer = (
-        FallbackSynthesizer(EdgeTTSynthesizer(settings.voice, audit), local_tts)
-        if settings.voice.tts_backend == "edge"
-        else local_tts
-    )
-    events: list[dict[str, Any]] = []
-    controller = VoiceController(
-        runner,
-        settings.voice,
-        SoundDeviceMicrophone(settings.voice),
-        WebRTCVAD(settings.voice),
-        recognizer,
-        synthesizer,
-        sink,
-        on_timing=lambda stage, timestamp: events.append({"stage": stage, "timestamp": timestamp}),
-    )
-    loop = asyncio.get_running_loop()
-    loop.call_later(duration, controller.request_stop)
-    previous = signal.getsignal(signal.SIGINT)
-
     def stop(_signum: int, _frame: Any) -> None:
         if approval_active:
             raise KeyboardInterrupt
-        if runner.cancel_current():
-            loop.call_soon_threadsafe(context.cancelled.set)
-        loop.call_soon_threadsafe(controller.request_stop)
+        if runtime is not None:
+            runtime.runner.cancel_current()
+        if controller is not None:
+            loop.call_soon_threadsafe(controller.request_stop)
 
-    signal.signal(signal.SIGINT, stop)
     try:
-        print(f"Canlı ölçüm başladı ({duration:g} sn). Söylemek için 'artemis' deyin.")
+        runtime = create_runtime(config_path, approve, settings=settings)
+        phase = "voice_setup"
+        controller = await build_voice_controller(
+            runtime, runtime.runner.run, on_state, on_event=collector,
+        )
+        previous = signal.getsignal(signal.SIGINT)
+        signal.signal(signal.SIGINT, stop)
+        signal_installed = True
+        timer = loop.call_later(duration, controller.request_stop)
+        phase = "capture"
+        print(f"Canlı ölçüm başladı ({duration:g} sn). 'artemis' deyin.", file=sys.stderr)
         await controller.run()
+    except (OSError, RuntimeError, ValueError, ImportError) as error:
+        failures.append({"phase": phase, "error_type": type(error).__name__})
     finally:
-        signal.signal(signal.SIGINT, previous)
-
-    completed, aborted, no_audio, invalid = group_live_events(events)
-    delays = [session["first_pcm"] - session["speech_end"] for session in completed]
-    p90 = _percentile(delays, 0.90)
-    sounddevice = importlib.import_module("sounddevice")
-    default_devices = sounddevice.default.device
-    input_device = sounddevice.query_devices(default_devices[0], "input")
-    output_device = sounddevice.query_devices(default_devices[1], "output")
-    return {
-        "mode": "canli",
-        "samples": len(completed),
-        "aborted": aborted,
-        "no_audio": no_audio,
-        "invalid_timing": invalid,
-        "speech_end_to_first_pcm_ms": {
-            "median": statistics.median(delays) * 1000 if delays else None,
-            "p90": p90 * 1000 if p90 is not None else None,
-        },
-        "hardware": {
-            "system": platform.platform(),
-            "machine": platform.machine(),
-            "input_device": input_device.get("name"),
-            "output_device": output_device.get("name"),
-            "stt_model": str(settings.voice.stt_model),
-            "stt_device": settings.voice.stt_device,
-            "stt_compute_type": settings.voice.stt_compute_type,
-            "tts": settings.voice.tts_backend,
-            "tts_model": (
-                str(settings.voice.piper_model)
-                if settings.voice.tts_backend == "piper"
-                else settings.voice.edge_voice
-            ),
-            "sample_rate": settings.voice.sample_rate,
-        },
-        "false_wake": None,
-        "missed_wake": None,
-        "false_approval": None,
-        "barge_in_latency_ms": None,
-    }
+        if timer is not None:
+            timer.cancel()
+        try:
+            if signal_installed:
+                signal.signal(signal.SIGINT, previous)
+        except (OSError, RuntimeError, ValueError) as error:
+            failures.append({"phase": "signal_restore", "error_type": type(error).__name__})
+        try:
+            if controller is not None:
+                try:
+                    await controller.close()
+                except (OSError, RuntimeError, ValueError) as error:
+                    failures.append({"phase": "voice_close", "error_type": type(error).__name__})
+        finally:
+            if runtime is not None:
+                try:
+                    runtime.shutdown()
+                except (OSError, RuntimeError, ValueError) as error:
+                    failures.append({
+                        "phase": "runtime_shutdown", "error_type": type(error).__name__,
+                    })
+    report = _report(collector, "canli")
+    report["hardware"] = _hardware(settings, states)
+    report["session_failures"] = failures
+    return report
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="F3 ses gecikmesi ölçümü")
+    parser = argparse.ArgumentParser(description="Ses gecikmesi ölçümü")
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--sahte", action="store_true")
     mode.add_argument("--canli", action="store_true")
     parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--duration", type=float, default=60)
+    parser.add_argument("--rapor", type=Path, help="İsteğe bağlı JSON rapor dosyası")
     args = parser.parse_args()
-    if args.iterations < 1 or args.duration <= 0:
-        parser.error("iterations ve duration pozitif olmalı")
+    if args.iterations < 1 or not math.isfinite(args.duration) or args.duration <= 0:
+        parser.error("iterations pozitif, duration sonlu ve pozitif olmalı")
+    failed = False
     try:
         report = asyncio.run(
             fake_report(args.iterations) if args.sahte else live_report(args.config, args.duration)
         )
-    except (OSError, RuntimeError, ValueError) as error:
-        failure_report: dict[str, Any] = {
-            "mode": "canli" if args.canli else "sahte",
-            "samples": 0,
-            "aborted": 1,
-            "no_audio": 0,
-            "speech_end_to_first_pcm_ms": {"median": None, "p90": None},
-            "failure": type(error).__name__,
-        }
-        print(json.dumps(failure_report, ensure_ascii=False, indent=2))
-        raise SystemExit(1) from None
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    except (OSError, RuntimeError, ValueError, ImportError) as error:
+        report = _report(EventCollector(), "canli" if args.canli else "sahte")
+        report["session_failures"] = [{"phase": "setup", "error_type": type(error).__name__}]
+        failed = True
+    serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
+    if args.rapor is not None:
+        try:
+            args.rapor.parent.mkdir(parents=True, exist_ok=True)
+            args.rapor.write_text(serialized + "\n", encoding="utf-8")
+        except OSError as error:
+            report.setdefault("session_failures", []).append({
+                "phase": "report_write", "error_type": type(error).__name__,
+            })
+            serialized = json.dumps(report, ensure_ascii=False, indent=2, allow_nan=False)
+            failed = True
+    print(serialized)
+    if failed or report.get("session_failures"):
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":
