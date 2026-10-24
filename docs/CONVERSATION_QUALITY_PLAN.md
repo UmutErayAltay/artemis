@@ -25,6 +25,10 @@ konuşmacı başarısı ya da Windows gerçek cihaz kabulü olarak yorumlanmamal
 
 ## Aşamalar
 
+2026-10-24 öncelikli kullanıcı hatası: yalnız VAD ile sesin kesilmesi kaldırıldı;
+söz kesme nihai STT ve mevcut dinleme kurallarını bekliyor ([ADR 0040](adr/0040-validated-playback-interruption.md)).
+Bu düzeltme aşağıdaki gerçek doğruluk ve gecikme ölçümlerinin yerini tutmaz.
+
 ### 1. Ortak canlı çalışma zamanı ölçümü
 
 Tek rapor yolu gerçek `build_voice_controller`/uygulama runtime'ını kullanmalı;

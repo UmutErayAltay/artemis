@@ -333,19 +333,8 @@ class VoiceController:
                     self._awaiting_followup = False
                     self._emit_state("listening")
                 utterance = self.segmenter.push(frame.pcm, frame.timestamp, frame.raw_pcm)
-                if (
-                    self._playback is not None
-                    and not self._playback.done()
-                    and self._playback_cancelled is not None
-                    and not self._playback_cancelled.is_set()
-                    and self.segmenter.voiced_frames * self.config.frame_ms
-                    >= self.config.barge_in_ms
-                ):
-                    # Yalnız seslendirmeyi keser; VAD araç/model turunu iptal etmez.
-                    self._playback_cancelled.set()
-                    self._playback.cancel()
-                    self._followup_until = self.clock() + self.config.followup_seconds
-                    self._emit_state("listening")
+                # VAD gürültüyü/yankıyı da konuşma sanabilir. Oynatma yalnız nihai
+                # transcript kabul edilince _handle_utterance içinde kesilir (ADR 0040).
                 if self.segmenter.active and self.config.stt_partial_enabled:
                     self._partial_frames += 1
                     if self._partial_frames >= max(1, 1000 // self.config.frame_ms):
@@ -366,7 +355,7 @@ class VoiceController:
         self.on_state(state)
 
     async def _handle_utterance(self, segment: AudioSegment) -> None:
-        # VAD yalnız aday söz kesmesini gösterir; transcript kesinleşmeden komut yoktur.
+        # Kesin transcript ve dinleme kuralları doğrulanmadan oynatma da kesilmez.
         self.on_timing("speech_start", segment.speech_start)
         self.on_timing("speech_end", segment.speech_end)
         await self._settle_partial()
@@ -389,7 +378,7 @@ class VoiceController:
             and segment.speech_start <= self._spoken_until
             and find_wake_word(transcript, self.config.wake_word) is None
         ):
-            self.on_transcript("Ses kesildi; yeni komut için Artemis diyerek başla.")
+            self.on_transcript("Ses yok sayıldı; söz kesmek için Artemis diyerek başla.")
             return
         self.on_transcript(transcript)
         self.on_timing("stt_final", self.clock())

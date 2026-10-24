@@ -119,6 +119,9 @@ Asistan konuşurken söz kesmek yine “artemis” ister (`voice.require_wake_du
 [ADR 0022](docs/adr/0022-repetition-and-spoken-echo-guard.md),
 [ADR 0024](docs/adr/0024-continuous-voice-mode.md)). Asistanın kendi sesinin yankısı ve
 tekrar eden STT parçaları komut sayılmaz.
+Gürültü veya yalnız VAD etkinliği seslendirmeyi kesmez; söz kesme cümle sonu
+sessizliği ve nihai STT doğrulamasını bekler
+([ADR 0040](docs/adr/0040-validated-playback-interruption.md)).
 **Gürültü engelleme** (varsayılan kapalı): ayarlardaki "Gürültü engelleme" onay kutusu veya
 `voice.noise_suppression` mikrofonu DeepFilterNet3 ile işlemcide temizler, ekran kartı gerekmez;
 yankı gidermez, model pakete dahildir (indirme yok) ve yaklaşık 34 ms gecikme ekler ([ADR 0037](docs/adr/0037-noise-suppression.md),

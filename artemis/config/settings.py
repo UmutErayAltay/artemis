@@ -72,6 +72,7 @@ class VoiceConfig(BaseModel):
     frame_ms: Literal[20, 30] = 20
     vad_aggressiveness: int = Field(default=2, ge=0, le=3)
     end_silence_ms: int = Field(default=600, ge=100, le=3000)
+    # Eski config uyumluluğu; söz kesme artık nihai STT doğrulamasını bekler (ADR 0040).
     barge_in_ms: int = Field(default=180, ge=100, le=1000)
     require_wake_during_output: bool = True
     continuous_mode: bool = False

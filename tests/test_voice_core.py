@@ -426,7 +426,8 @@ class BlockingSink(FakeSink):
         self.started = asyncio.Event()
         self.aborted = False
 
-    async def play(self, _chunks, _cancelled, _on_first_pcm):
+    async def play(self, _chunks, _cancelled, on_first_pcm):
+        on_first_pcm()
         self.started.set()
         try:
             await asyncio.Future()
@@ -460,59 +461,145 @@ async def test_noise_does_not_interrupt_but_final_wake_command_does():
         await controller.close()
 
 
-async def test_sustained_speech_stops_playback_before_transcription_without_cancelling_runner():
+@pytest.mark.parametrize(
+    ("transcript", "config", "followup", "command"),
+    [
+        ("", {}, False, None),
+        ("background noise", {}, True, None),
+        ("background noise", {"continuous_mode": True}, False, None),
+        ("yanıt", {"continuous_mode": True, "require_wake_during_output": False}, False, None),
+        ("Artemis dur", {}, False, "dur"),
+        ("Artemis saat kaç", {"continuous_mode": True}, False, "saat kaç"),
+        ("dur", {"continuous_mode": True, "require_wake_during_output": False}, False, "dur"),
+        ("dur", {"require_wake_during_output": False}, True, "dur"),
+    ],
+)
+async def test_run_interrupts_playback_only_after_accepted_final_transcript(
+    transcript, config, followup, command,
+):
     runner = FakeRunner()
     sink = BlockingSink()
-    heard = asyncio.Event()
+    final_started = asyncio.Event()
+    allow_final = asyncio.Event()
+    processed = asyncio.Event()
+
+    class Recognizer(FakeRecognizer):
+        async def transcribe(self, pcm):
+            final_started.set()
+            await allow_final.wait()
+            return await super().transcribe(pcm)
 
     class Mic(FakeMic):
         async def frames(self):
             await sink.started.wait()
-            # Kısa tık sesi eşik altında kalır.
-            for _ in range(3):
+            # Eski 180 ms sınırından uzun gürültü ve sahte Artemis kısmi sonucu
+            # oynatmayı kesmemeli; yalnız kabul edilen nihai söz kesebilir.
+            for _ in range(60):
                 yield AudioFrame(b"\x01\x00", monotonic())
-            yield AudioFrame(b"\x00\x00", monotonic())
-            assert not sink.aborted
-            for _ in range(9):
-                yield AudioFrame(b"\x01\x00", monotonic())
-            await asyncio.sleep(0)
-            await asyncio.sleep(0)
-            assert sink.aborted
-            assert runner.cancelled == 0
-            # Konuşma henüz bitmedi; STT ve yeni araç çağrısı başlamadı.
-            assert recognizer.calls == 0
-            heard.set()
+            for _ in range(5):
+                yield AudioFrame(b"\x00\x00", monotonic())
+            processed.set()
+            # EOF ayrı kapatma nedeni; bu denetimler açık mikrofonla yapılır.
             await asyncio.Future()
 
-    recognizer = FakeRecognizer([])
+    recognizer = Recognizer([transcript])
     controller = VoiceController(
-        runner, VoiceConfig(barge_in_ms=180), Mic(),
-        FakeVAD([True] * 3 + [False] + [True] * 9), recognizer, FakeTTS(), sink,
+        runner, VoiceConfig(pre_roll_ms=0, end_silence_ms=100, **config), Mic(),
+        FakeVAD([True] * 60 + [False] * 5), recognizer, FakeTTS(), sink,
     )
+    if followup:
+        controller._followup_until = monotonic() + 60
+    followup_until = controller._followup_until
     controller._active = asyncio.create_task(controller._run_and_speak("first"))
+    original = controller._active
     listening = asyncio.create_task(controller.run())
     try:
-        await asyncio.wait_for(heard.wait(), 1)
-        assert controller._wake_command("Brave aç") == "Brave aç"
+        await asyncio.wait_for(final_started.wait(), 1)
+        assert recognizer.partial_calls >= 1
+        assert not sink.aborted
+        assert runner.cancelled == 0
+        assert runner.commands == ["first"]
+        assert controller._followup_until == followup_until
+        allow_final.set()
+        await asyncio.wait_for(processed.wait(), 1)
+        await asyncio.sleep(0)
+        if command is None:
+            assert not sink.aborted
+            assert runner.cancelled == 0
+            assert controller._active is original and not original.done()
+            assert runner.commands == ["first"]
+            assert controller._followup_until == followup_until
+        else:
+            assert sink.aborted
+            assert original.cancelled()
+            assert runner.cancelled == 1
+            assert runner.commands == ["first", command]
+    finally:
+        allow_final.set()
+        controller.request_stop()
+        await asyncio.wait_for(listening, 1)
+    assert original.done()
+    assert controller.microphone.closed and sink.closed and controller.synthesizer.closed
+
+
+async def test_run_accepts_followup_during_dinliyorum_without_repeating_wake():
+    runner = FakeRunner()
+    sink = BlockingSink()
+    processed = asyncio.Event()
+    acknowledgements = []
+
+    class Mic(FakeMic):
+        async def frames(self):
+            for _ in range(2 + 5):
+                yield AudioFrame(b"\x01\x00", monotonic())
+            await sink.started.wait()
+            acknowledgements.append(controller._active)
+            assert controller._spoken_text == "Dinliyorum."
+            for _ in range(60 + 5):
+                yield AudioFrame(b"\x01\x00", monotonic())
+            processed.set()
+            await asyncio.Future()
+
+    controller = VoiceController(
+        runner, VoiceConfig(pre_roll_ms=0, end_silence_ms=100), Mic(),
+        FakeVAD([True] * 2 + [False] * 5 + [True] * 60 + [False] * 5),
+        FakeRecognizer(["Artemis", "Dinliyorum, saat kaç"]), FakeTTS(), sink,
+    )
+    listening = asyncio.create_task(controller.run())
+    try:
+        await asyncio.wait_for(processed.wait(), 1)
+        await asyncio.sleep(0)
+        assert acknowledgements[0].cancelled()
+        assert sink.aborted
+        assert runner.commands == ["saat kaç"]
     finally:
         controller.request_stop()
-        await listening
+        await asyncio.wait_for(listening, 1)
 
 
 async def test_stream_eof_aborts_pending_playback_after_non_wake_noise():
     start = monotonic()
     frames = [
         *[AudioFrame(b"a", start + index * 0.02) for index in range(7)],
-        *[AudioFrame(b"b", start + 1 + index * 0.02) for index in range(7)],
+        *[AudioFrame(b"b", start + 1 + index * 0.02) for index in range(15)],
     ]
     recognizer = FakeRecognizer(["artemis do it", "noise"])
     runner = FakeRunner()
     sink = BlockingSink()
+
+    class Mic(FakeMic):
+        async def frames(self):
+            async for frame in super().frames():
+                yield frame
+            # Gürültü reddedildi; oynatma yalnız bundan sonraki EOF ile kapanır.
+            assert sink.started.is_set() and not sink.aborted
+            assert runner.cancelled == 0
+
     controller = VoiceController(
         runner,
         VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100),
-        FakeMic(frames, delay=0.01),
-        FakeVAD([True, True, *([False] * 5), True, True, *([False] * 5)]),
+        Mic(frames, delay=0.01),
+        FakeVAD([True, True, *([False] * 5), *([True] * 10), *([False] * 5)]),
         recognizer,
         FakeTTS(),
         sink,
