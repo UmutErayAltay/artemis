@@ -1070,18 +1070,10 @@ class DesktopWindow(QMainWindow):
             save_choices(
                 self._config_path,
                 device,
+                values=self.settings_panel.values(),
                 applications=self.settings_panel.applications,
-                allow_all_applications=self.settings_panel.all_applications.isChecked(),
                 code_agent=self.settings_panel.github_values(),
-                continuous_mode=self.settings_panel.continuous_mode.isChecked(),
-                noise_suppression=self.settings_panel.noise_suppression.isChecked(),
-                noise_suppression_level=str(self.settings_panel.noise_level.currentData()),
-                noise_suppression_stt=self.settings_panel.noise_stt.isChecked(),
-                echo_cancellation=self.settings_panel.echo_cancellation.isChecked(),
                 stt_model=self.settings_panel.stt_model_path(),
-                tts_backend=str(self.settings_panel.tts_combo.currentData()),
-                computer_use_mode="auto" if self.settings_panel.computer_auto.isChecked()
-                else "accept",
             )
         except (OSError, ValueError, KeyError, TypeError):
             self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
