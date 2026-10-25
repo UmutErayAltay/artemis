@@ -19,7 +19,8 @@ from pathlib import Path
 # Qt içe aktarılmadan önce: ekran/pencere sistemi gerekmez.
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 # Offscreen eklentisi sistem yazı tiplerini kendiliğinden görmez (Türkçe harfler kutu çıkar).
-os.environ.setdefault("QT_QPA_FONTDIR", os.environ.get("WINDIR", "C:/Windows") + "/Fonts")
+if sys.platform == "win32":
+    os.environ.setdefault("QT_QPA_FONTDIR", os.environ.get("SYSTEMROOT", r"C:\Windows") + r"\Fonts")
 
 from PySide6.QtCore import QPoint, QRect, QSettings, Qt  # noqa: E402
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPixmap  # noqa: E402
@@ -93,9 +94,7 @@ def capture_pet(app: QApplication, tmp: Path) -> None:
         pet = make_pet(app, tmp / f"pet{i}.ini", **state)
         shot = pet.grab()
         painter.drawPixmap(x, 24, shot)
-        painter.drawText(
-            QRect(x, 148, shot.width(), 20), Qt.AlignmentFlag.AlignHCenter, label
-        )
+        painter.drawText(QRect(x, 148, shot.width(), 20), Qt.AlignmentFlag.AlignHCenter, label)
         x += 144
         pet.close()
     painter.end()
@@ -103,7 +102,7 @@ def capture_pet(app: QApplication, tmp: Path) -> None:
 
 
 def capture_projects(app: QApplication) -> None:
-    panel = ProjectsPanel()
+    panel = ProjectsPanel(demo=True)
     spec = {
         "spec_id": str(uuid.UUID(int=1)),
         "project": "ornek-notlar",
