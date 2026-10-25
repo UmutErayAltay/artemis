@@ -40,5 +40,5 @@ phrases:
   - {id: near_wake_1, text: "Fiyatları biraz artırmış olabilirler.", wake: false, intent: none, category: near_wake}
   - {id: near_wake_2, text: "Arte kanalında güzel bir belgesel var.", wake: false, intent: none, category: near_wake}
   - {id: near_wake_3, text: "Temiz bir sayfa açıp baştan yazalım.", wake: false, intent: none, category: near_wake}
-  # Bilinen risk: uyandırma eşleştiricisi tek harf farkını kabul eder; "artmış" -> "artemis".
+  # Harf düşmesi: eski eşleştirici "artmış"ı "artemis" sayıyordu (ADR 0045, düzeltildi).
   - {id: near_wake_4, text: "Benzin fiyatları yine artmış.", wake: false, intent: none, category: near_wake}

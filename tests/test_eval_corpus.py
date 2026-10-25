@@ -178,10 +178,9 @@ def test_synthetic_build_and_measure_end_to_end(tmp_path: Path) -> None:
     report = asyncio.run(measure(corpus, root, Echo(), mode="sahte", model_metadata={}))
     totals = report["totals"]
     assert totals["wer"] == 0 and totals["missed_wake_rate"] == 0
-    # Referans metin bile "artmış"ı uyandırma sayar: üretim eşleştiricisinin bilinen riski,
-    # ölçüm onu görünür kılar (ADR 0045).
-    known = sum("near_wake_4" in item.id for item in corpus.items)
-    assert known and totals["false_wake"] == known and totals["target_accuracy"] == 1.0
+    # "artmış" eskiden referans metinde bile uyandırıyordu; eşleştirici düzeltildi (ADR 0045).
+    assert any("near_wake_4" in item.id for item in corpus.items)
+    assert totals["false_wake"] == 0 and totals["target_accuracy"] == 1.0
     assert totals["wrong_target"] == 0
     assert set(report["source_breakdown"]) == {"synthetic"}
     plan = report["plan_reports"]["synthetic"]

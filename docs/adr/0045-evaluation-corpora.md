@@ -52,9 +52,12 @@ sızıntısızdır, sentetik ve gerçek sonuçlar ayrı etiketlenir, ölçülmey
   sayısı 2–3'tür. Daha fazla ses için XTTS-v2 klonlama veya MMS-TTS sonraki adımdır.
 - **Common Voice:** okunmuş cümledir, gündelik komut değildir.
 
-**Bulgu:** üretimdeki uyandırma eşleştiricisi tek harf farkını kabul ettiği için
-"artmış" sözcüğünü "Artemis" sayıyor (yanlış uyanma riski). Sentetik sete `near_wake_4` ile
-eklendi; değişiklik kullanıcının kararına bırakıldı.
+**Bulgu ve düzeltme:** üretimdeki uyandırma eşleştiricisi (`find_wake_word`) tek harf
+farkını Levenshtein ile kabul ettiği için "artmış" sözcüğünü (harf düşmesi) "Artemis"
+sayıyordu. Sentetik ölçümde 4 yanlış uyanmanın hepsi "Benzin fiyatları yine artmış"
+cümlesiydi. Kullanıcı onayıyla kural daraltıldı: yalnız aynı uzunlukta tek harf
+**değişimi** kabul edilir. Whisper'ın önceden gözlenen biçimleri (Artemiz, Arteniz,
+Arkemiz, artemiş) hep değişimdir ve tanınmaya devam eder.
 
 **Doğrulama:** `tests/test_eval_corpus.py`: depo dışı çıktı, yeniden örnekleme ve koşulların
 belirlenimliliği ve SNR'ı, Common Voice konuşmacı ayrımı, dengeli seçim, reddedilen klip,

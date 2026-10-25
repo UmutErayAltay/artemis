@@ -70,15 +70,25 @@ def _edit_distance(a: str, b: str, limit: int) -> int:
     return previous[-1]
 
 
+def _substitutions(a: str, b: str, limit: int) -> int:
+    """Aynı uzunluktaki iki sözcükte farklı harf sayısı; uzunluk farklıysa ``limit + 1``."""
+    if len(a) != len(b):
+        return limit + 1
+    return sum(char_a != char_b for char_a, char_b in zip(a, b, strict=True))
+
+
 def find_wake_word(transcript: str, wake_word: str) -> tuple[int, int] | None:
     """Uyandırma sözcüğünün transcript'teki (başlangıç, bitiş) konumu; yoksa None.
 
     Tek sözcüklü uyandırmada yakın yazımlar da kabul edilir: uçtan uca denemede Whisper
     "Artemis"i çoğu kez "Artemiz", "Arteniz", "Ar temiz" yazdı ve komutlar kayboldu.
-    Katlamadan sonra 5+ harfli sözcükte en çok bir harf farkı kabul edilir (daha kısada tam
-    eşleşme); boşlukla bölünmüş iki parça birleşik de denenir. İki harf farkı fazla
-    gevşekti: "artırmış" da "artemis" sayılıyordu. Bu yalnız dinleme kapısıdır, onay değildir:
-    her araç yine SafetyGate'ten geçer. Çok sözcüklü uyandırma ifadesi tam eşleşme ister.
+    Katlamadan sonra 5+ harfli sözcükte en çok bir harf **değişimi** kabul edilir (daha kısada
+    tam eşleşme); boşlukla bölünmüş iki parça birleşik de denenir. İki harf farkı fazla
+    gevşekti: "artırmış" da "artemis" sayılıyordu. Harf düşmesi/eklenmesi de kabul edilmez:
+    "artmış" (fiyatlar artmış) gündelik sözcüktür ve uyandırıyordu (ADR 0045 ölçümü);
+    Whisper'ın gerçekte yazdığı biçimlerin hepsi aynı uzunlukta değişimdir. Bu yalnız dinleme
+    kapısıdır, onay değildir: her araç yine SafetyGate'ten geçer. Çok sözcüklü uyandırma
+    ifadesi tam eşleşme ister.
     """
     wake = _fold(wake_word)
     if not wake.isalnum():
@@ -91,11 +101,11 @@ def find_wake_word(transcript: str, wake_word: str) -> tuple[int, int] | None:
     tokens = list(re.finditer(r"\w+", transcript))
     for index, token in enumerate(tokens):
         word = _fold(token.group())
-        if _edit_distance(word, wake, limit) <= limit:
+        if _substitutions(word, wake, limit) <= limit:
             return token.span()
         if index + 1 < len(tokens) and transcript[token.end():tokens[index + 1].start()] == " ":
             joined = word + _fold(tokens[index + 1].group())
-            if len(word) >= 2 and _edit_distance(joined, wake, limit) <= limit:
+            if len(word) >= 2 and _substitutions(joined, wake, limit) <= limit:
                 return token.start(), tokens[index + 1].end()
     return None
 
