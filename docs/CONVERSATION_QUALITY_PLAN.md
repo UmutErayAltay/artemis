@@ -196,9 +196,12 @@ gecikme ve barge-in ölçümü aşama 1 ile aynı runtime'dan alınmalı.
 **2026-10-25 — başladı.** İlk adım [ADR 0044](adr/0044-spoken-application-names.md):
 söylenen uygulama adı okunuş iskeletiyle izinli katalogdan çözülür, yakın iki aday
 varsa sorulur, kullanıcı düzeltmesi `state_dir`'de takma ad olarak hatırlanır; lekeli
-turda ve kapatmada yakın eşleşme çalışmaz. Kalan: olumsuzluk/düzeltme/belirsiz hedef
-için etiketli niyet seti ve araç başarısı oranı raporu, STT hotword ölçümü, gerçek
-Windows kataloğu ve STT çıktısıyla eşik doğrulaması.
+turda ve kapatmada yakın eşleşme çalışmaz. İkinci adım: bench `intent` kategorisi
+(olumsuzluk, düzeltme, belirsiz hedef, komut olmayan anma, lekeli tur), raporda yanlış
+hedef sayısı, ayrı araç başarısı oranı ve doğrulanmamış `sent` sayısı; opt-in
+`voice.stt_alias_hotwords` ve `speech_accuracy --ek-hotword` A/B ölçümü. Kalan (kod dışı):
+gerçek Windows kataloğu, gerçek STT çıktısı ve canlı modelle doğrulama —
+[WINDOWS_CHECKLIST.md](WINDOWS_CHECKLIST.md) A4/A5.
 
 STT metninin doğruluğunu, niyet/hedef seçimini ayrı test katmanlarında ölçün.
 Olumsuzluk (“açma”), düzeltme (“onu değil”), belirsiz hedef ve soru sorma

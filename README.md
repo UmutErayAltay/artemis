@@ -352,7 +352,9 @@ ve pano işlevleri Linux'ta desteklenmediğini bildirir.
 Söylenen ad tam eşleşmezse okunuşa göre en yakın izinli uygulama açılır ("breyv" →
 Brave); iki aday yakınsa Artemis sorar, kapatma ve dış içerik okunan tur tahminle
 çalışmaz. "Hayır, Brave'i kastettim" gibi düzeltmeler `state_dir/app_aliases.json`'a
-takma ad olarak yazılır ([ADR 0044](docs/adr/0044-spoken-application-names.md)). Linux üzerinde çekirdek,
+takma ad olarak yazılır ([ADR 0044](docs/adr/0044-spoken-application-names.md)).
+Windows'ta yapılacak bütün elle doğrulamalar [docs/WINDOWS_CHECKLIST.md](docs/WINDOWS_CHECKLIST.md)
+içinde toplanır. Linux üzerinde çekirdek,
 dosyalar ve sahte platform adaptörleri test edilir.
 
 Günlük kullanımda seçili uygulamalar için tekrar kapatma onayını kaldırabilirsiniz:

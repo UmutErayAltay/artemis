@@ -174,3 +174,16 @@ def test_invalid_or_truncated_wav_is_rejected(tmp_path: Path) -> None:
     path.write_bytes(path.read_bytes()[:-20])
     with pytest.raises(ValueError, match="eksik veya bozuk"):
         read_audio(path)
+
+
+def test_extra_hotwords_are_validated_and_do_not_touch_config() -> None:
+    from artemis.config.settings import Settings
+    from bench.speech_accuracy import with_extra_hotwords
+
+    base = Settings(voice=VoiceConfig(stt_hotwords=("Artemis",)))
+    assert with_extra_hotwords(base, []) is base
+    extended = with_extra_hotwords(base, ["Brave", "Artemis"])
+    assert extended.voice.stt_hotwords == ("Artemis", "Brave")
+    assert base.voice.stt_hotwords == ("Artemis",)
+    with pytest.raises(ValidationError):
+        with_extra_hotwords(base, ["x" * 65])

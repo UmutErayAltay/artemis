@@ -87,6 +87,7 @@ voice:
   stt_partial_beam_size: 1
   stt_partial_enabled: true # Konuşurken ara tanıma; kısmi metin komut çalıştırmaz.
   stt_hotwords: [] # İsteğe bağlı yerel ipuçları; prompt veya transcript düzeltmesi değildir.
+  stt_alias_hotwords: false # Öğretilmiş uygulama takma adlarının hedefleri STT ipucuna eklenir (ADR 0044).
   tts_backend: piper
   tts_local_fallback: true # Edge hatasında yerel sese dön; false seçili sesi korur.
   piper_model: ../models/tr_TR-dfki-medium.onnx

@@ -35,8 +35,36 @@ from artemis.channels.voice.echo import (
 )
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
+from artemis.config.settings import Settings, VoiceConfig
+from artemis.tools.app_resolver import AliasStoreError, alias_store
 
 logger = logging.getLogger(__name__)
+
+
+def alias_hotword_config(settings: Settings) -> VoiceConfig:
+    """``stt_alias_hotwords`` açıksa öğretilmiş takma adların hedef adlarını ipucuna ekler.
+
+    Yalnız kullanıcının düzelterek öğrettiği uygulamalar eklenir, katalog değil: geniş
+    hotword listesi doğruluğu ve uyandırmayı bozabilir (ADR 0044). Ekleme ayarın sınırlarını
+    (100 sözcük, 2048 karakter) aşmaz; sığmayan ad atlanır. Takma ad dosyası okunamazsa ses
+    yine açılır, ipucu eklenmez.
+    """
+    voice = settings.voice
+    if not voice.stt_alias_hotwords or not settings.persist_memory:
+        return voice
+    try:
+        aliases = alias_store(settings.state_dir).load()
+    except AliasStoreError as error:
+        logger.warning("Takma ad ipuçları eklenemedi: %s", error)
+        return voice
+    words = list(voice.stt_hotwords)
+    for name in sorted(set(aliases.values())):
+        if name not in settings.applications or name in words:
+            continue
+        if len(words) >= 100 or sum(map(len, words)) + len(name) > 2048:
+            break
+        words.append(name)
+    return VoiceConfig.model_validate({**voice.model_dump(), "stt_hotwords": tuple(words)})
 
 
 def _denoise_reason(error: Exception) -> str:
@@ -126,7 +154,7 @@ async def build_voice_controller(
                 on_echo_failure=lambda: report_echo_state("echo:off"),
             )
         cleanup.push_async_callback(_close_optional, sink)
-        recognizer = FasterWhisperRecognizer(settings.voice)
+        recognizer = FasterWhisperRecognizer(alias_hotword_config(settings))
         await _prepare(recognizer)
         synthesizer: SpeechSynthesizer
         if settings.voice.tts_backend == "edge":

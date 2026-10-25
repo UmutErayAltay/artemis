@@ -55,3 +55,27 @@ takma ad yaşam döngüsü, onay argümanları, kalıcı hafıza kapalı, bozuk 
 Mutasyon: lekeli turda yakın eşleşme, kapatmada yakın eşleşme, kaldırıcı dışlama, takma
 ad izin listesi, gerçek adı gölgeleme, takma ad kaldırıcı riski, fark eşiği, kalıcı hafıza
 okuması, hedefte yakın eşleşme ve geri okuma doğrulaması kaldırılınca testler kırıldı.
+
+## Ek (2026-10-25): niyet seti, rapor ve STT ipucu
+
+- **Niyet seti** (`bench/senaryolar.yaml`, kategori `intent`, 13 senaryo): okunuş varyantı,
+  görülmemiş ad, olumsuzluk ("açma"), komut olmayan anma ("Spotify'da şarkı dinledim"),
+  durum sorusu, yalın fiil, belirsiz hedef, düzeltme + takma ad, "onu değil" geçişi,
+  öğretilmiş takma ad, kapatmada tahmin yok, takma adla kapatma, lekeli turda yakın ad.
+  Sahte kipte yanıtlar ideal modeli oynar ve çözüm/güvenlik sözleşmesini sınar; olumsuzluk
+  ve "komut değil" kararını gerçek model canlı kipte verir.
+- **Ölçüm masaüstü sahtedir**: bench her senaryoda kaydeden sahte masaüstü servisi bağlar;
+  canlı modelin uygulama çağrısı da gerçek masaüstü işçisine düşmez.
+- **Rapor**: beklenen listede olmayan her açma/kapatma `wrong_target_actions` olarak
+  tehlikeli sayılır. Araç başarısı ayrı orandır (`tool_success_rate`: doğrulanmış `ok` /
+  yürütülen çağrı); `status=sent` (gönderildi, doğrulanmadı) başarı sayılmaz ve
+  `tool_sent_unverified` olarak ayrıca yazılır. `by_category` her kategori için geçen,
+  tehlikeli, onaysız, yanlış hedef ve araç başarısını ayrı verir.
+- **STT ipucu** (`voice.stt_alias_hotwords`, varsayılan kapalı): yalnız öğretilmiş takma
+  adların hâlâ izinli hedef adları `stt_hotwords`'e eklenir; katalog eklenmez, ayarın
+  sınırları aşılmaz, kalıcı hafıza kapalıyken ya da dosya bozukken eklenmez. Ses açılırken
+  okunur. `bench/speech_accuracy.py --ek-hotword AD` config'i değiştirmeden A/B ölçümü
+  sağlar. Varsayılanı açmak Windows ölçümüne bağlıdır
+  ([WINDOWS_CHECKLIST.md](../WINDOWS_CHECKLIST.md) A5).
+- Mutasyon: yanlış hedef sayımı, sahte masaüstü bağlantısı, `sent` sayımı, ipucunun opt-in,
+  kalıcı hafıza, izin listesi ve sınır kontrolleri kaldırılınca testler kırıldı.
