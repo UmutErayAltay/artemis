@@ -168,6 +168,10 @@ eşikleri ölçülebilir; sentetik bulgulara dayanarak gerçek ses WER'i varsay�
 
 ### 3. Güvenli streaming yanıtı ve söz kesme
 
+**2026-10-25 — başladı.** Karar [ADR 0043](adr/0043-streaming-voice-response.md) (kabul
+edildi). İlk adım: Ollama ve OpenRouter/OpenAI uyumlu akış, cümle cümle seslendirme,
+başarı iddiası süzgeci, tek iptal akışı. Sırada `claude_cli`, Anthropic, Windows ölçümü.
+
 Streaming mimarisi için önce ayrı ADR önerisi hazırlanmalı; bu plan kararı kabul
 etmez. Sağlayıcı token'ları cümle/parça sınırlarında TTS'ye aktarılabilir, ancak
 tool-call argümanları tamamlanıp şema doğrulaması ve `SafetyGate` onayı bitmeden

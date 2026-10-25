@@ -427,6 +427,7 @@ class SoundDeviceSink:
         cleanup_errors = audio_errors + (OSError, RuntimeError)
         self._audio_errors = audio_errors
         stream: Any = None
+        stream_format: tuple[int, int, int] | None = None
         notified = False
         failed = False
         try:
@@ -441,7 +442,19 @@ class SoundDeviceSink:
                     or chunk.sample_width not in {1, 2, 4}
                 ):
                     raise ValueError("PCM akış biçimi desteklenmiyor.")
+                chunk_format = (chunk.sample_rate, chunk.channels, chunk.sample_width)
+                if stream is not None and chunk_format != stream_format:
+                    # Cümle cümle sentezde yedek TTS (ör. Edge -> Piper) farklı hızla
+                    # gelebilir; eski akışla çalmak sesi yanlış perdeden çalardı (ADR 0043).
+                    self._streams.discard(stream)
+                    try:
+                        await asyncio.to_thread(stream.stop)
+                        await asyncio.to_thread(stream.close)
+                    except cleanup_errors as error:
+                        logger.warning("Ses çıkışı kapatılamadı (%s).", type(error).__name__)
+                    stream = None
                 if stream is None:
+                    stream_format = chunk_format
                     stream = sounddevice.RawOutputStream(
                         samplerate=chunk.sample_rate,
                         channels=chunk.channels,

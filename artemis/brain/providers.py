@@ -9,6 +9,7 @@ import os
 import re
 import shutil
 import tempfile
+from collections.abc import Callable
 from contextlib import suppress
 from decimal import Decimal
 from pathlib import Path
@@ -25,6 +26,7 @@ from artemis.brain.errors import (
 )
 from artemis.brain.errors import RateLimitedError, RetryableProviderError
 from artemis.brain.models import Completion, Message, ToolCall, Usage
+from artemis.brain.streaming import TextStream
 from artemis.config.settings import ModelConfig, Settings
 from artemis.mcp.client import MCPError, validate_command_arguments
 from artemis.safety.audit import AuditLog
@@ -44,6 +46,7 @@ class Provider(Protocol):
         tools: list[ToolDefinition],
         *,
         timeout: float,
+        stream: TextStream | None = None,
     ) -> Completion: ...
 
 
@@ -241,6 +244,42 @@ async def _post(
         network_failed = True
     if network_failed or response is None:
         raise RetryableProviderError("Sağlayıcıya bağlanılamadı veya yanıt süresi doldu.")
+    _check_status(response)
+    try:
+        value = response.json()
+    except (json.JSONDecodeError, ValueError):
+        value = None
+    return _object(value)
+
+
+async def _post_lines(
+    url: str, payload: dict[str, Any], headers: dict[str, str], *, timeout: float,
+    on_line: Callable[[str], None],
+) -> None:
+    """Akışlı yanıtı satır satır verir (NDJSON/SSE). Hata sınıfları ``_post`` ile aynıdır.
+
+    Bağlantı akış ortasında koparsa ``RetryableProviderError`` çıkar; çağıranın ilk metin
+    dışarı çıktıktan sonra yedek modele geçmemesi router'ın işidir (ADR 0043).
+    """
+    if timeout <= 0:
+        raise RetryableProviderError("Sağlayıcı için ayrılan süre doldu.")
+    network_failed = False
+    try:
+        async with (
+            httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client,
+            client.stream("POST", url, json=payload, headers=headers) as response,
+        ):
+            _check_status(response)
+            async for line in response.aiter_lines():
+                if line:
+                    on_line(line)
+    except httpx.RequestError:
+        network_failed = True
+    if network_failed:
+        raise RetryableProviderError("Sağlayıcıya bağlanılamadı veya yanıt süresi doldu.")
+
+
+def _check_status(response: httpx.Response) -> None:
     if response.status_code >= 500:
         raise RetryableProviderError(
             f"Sağlayıcı sunucu hatası verdi (HTTP {response.status_code})."
@@ -260,11 +299,80 @@ async def _post(
         )
     if response.status_code >= 300:
         raise ProviderError(f"Sağlayıcı isteği kabul etmedi (HTTP {response.status_code}).")
+
+
+def _json_line(line: str) -> dict[str, Any]:
     try:
-        value = response.json()
+        value = json.loads(line)
     except (json.JSONDecodeError, ValueError):
         value = None
     return _object(value)
+
+
+class _ChatStreamAccumulator:
+    """OpenAI biçimli SSE parçalarını, ``_chat_completion``'ın beklediği tam yanıta çevirir.
+
+    Araç argüman parçaları yalnız burada birikir; akışa hiç verilmez. Doğrulama tam yanıt
+    üzerinde bugünkü ayrıştırıcıyla yapılır.
+    """
+
+    def __init__(self, stream: TextStream) -> None:
+        self.stream = stream
+        self.content: list[str] = []
+        self.calls: dict[int, dict[str, Any]] = {}
+        self.finish_reason: Any = None
+        self.usage: Any = None
+        self.done = False
+
+    def __call__(self, line: str) -> None:
+        if not line.startswith("data:"):
+            return  # SSE yorumu/olay adı (OpenRouter ": OPENROUTER PROCESSING" gönderir)
+        body = line[5:].strip()
+        if body == "[DONE]":
+            self.done = True
+            return
+        data = _json_line(body)
+        if data.get("usage") is not None:
+            self.usage = data["usage"]
+        for raw in _array(data.get("choices") or []):
+            choice = _object(raw)
+            if choice.get("finish_reason") is not None:
+                self.finish_reason = choice["finish_reason"]
+            delta = _object(choice.get("delta") or {})
+            for raw_call in _array(delta.get("tool_calls") or []):
+                call = _object(raw_call)
+                index = call.get("index", 0)
+                if isinstance(index, bool) or not isinstance(index, int):
+                    raise ProviderError("Sağlayıcı akışındaki araç çağrısı sırası geçersiz.")
+                if index not in self.calls:
+                    self.calls[index] = {"function": {"name": "", "arguments": ""}}
+                    self.stream.tool_call()
+                target = self.calls[index]
+                if "id" in call and call["id"] is not None:
+                    target["id"] = _string(call["id"])
+                function = _object(call.get("function") or {})
+                if function.get("name"):
+                    target["function"]["name"] += _string(function["name"])
+                if function.get("arguments"):
+                    target["function"]["arguments"] += _string(function["arguments"])
+            text = delta.get("content")
+            if text:
+                piece = _string(text)
+                self.content.append(piece)
+                self.stream.text(piece)
+
+    def response(self) -> dict[str, Any]:
+        if not self.done and self.finish_reason is None:
+            raise RetryableProviderError("Sağlayıcı akışı tamamlanmadan kesildi.")
+        message: dict[str, Any] = {"content": "".join(self.content)}
+        if self.calls:
+            message["tool_calls"] = [self.calls[index] for index in sorted(self.calls)]
+        result: dict[str, Any] = {
+            "choices": [{"message": message, "finish_reason": self.finish_reason}],
+        }
+        if self.usage is not None:
+            result["usage"] = self.usage
+        return result
 
 
 def _key(name: str) -> str:
@@ -343,24 +451,27 @@ class OpenRouterProvider:
         tools: list[ToolDefinition],
         *,
         timeout: float,
+        stream: TextStream | None = None,
     ) -> Completion:
         _check_paid(self.settings, self.model)
         payload: dict[str, Any] = {
             "model": self.model.model,
             "messages": _chat_messages(_cloud_messages(messages)),
             "max_tokens": self.settings.max_output_tokens,
-            "stream": False,
+            "stream": stream is not None,
             "usage": {"include": True},
             "provider": {"max_price": _openrouter_max_price(self.model)},
         }
         if tools:
             payload["tools"] = _tool_schemas(tools)
-        data = await _post(
-            f"{str(self.settings.openrouter_base_url).rstrip('/')}/chat/completions",
-            payload,
-            {"Authorization": f"Bearer {_key('OPENROUTER_API_KEY')}"},
-            timeout=timeout,
-        )
+        url = f"{str(self.settings.openrouter_base_url).rstrip('/')}/chat/completions"
+        headers = {"Authorization": f"Bearer {_key('OPENROUTER_API_KEY')}"}
+        if stream is None:
+            data = await _post(url, payload, headers, timeout=timeout)
+        else:
+            accumulator = _ChatStreamAccumulator(stream)
+            await _post_lines(url, payload, headers, timeout=timeout, on_line=accumulator)
+            data = accumulator.response()
         return _chat_completion(data, self.model, "openrouter", openrouter=True)
 
 
@@ -409,6 +520,7 @@ class OpenAICompatibleProvider:
         tools: list[ToolDefinition],
         *,
         timeout: float,
+        stream: TextStream | None = None,
     ) -> Completion:
         _check_paid(self.settings, self.model)
         endpoint = self.settings.endpoints[self.model.endpoint or ""]
@@ -417,16 +529,21 @@ class OpenAICompatibleProvider:
             "model": self.model.model,
             "messages": _chat_messages(_cloud_messages(messages)),
             "max_tokens": self.settings.max_output_tokens,
-            "stream": False,
+            "stream": stream is not None,
         }
+        if stream is not None:
+            # Standart OpenAI alanı: akışta usage yalnız bununla gelir (ücretli modelde şart).
+            payload["stream_options"] = {"include_usage": True}
         if tools:
             payload["tools"] = _tool_schemas(tools)
-        data = await _post(
-            f"{endpoint.base_url}/chat/completions",
-            payload,
-            {"Authorization": f"Bearer {key}"} if key else {},
-            timeout=timeout,
-        )
+        url = f"{endpoint.base_url}/chat/completions"
+        headers = {"Authorization": f"Bearer {key}"} if key else {}
+        if stream is None:
+            data = await _post(url, payload, headers, timeout=timeout)
+        else:
+            accumulator = _ChatStreamAccumulator(stream)
+            await _post_lines(url, payload, headers, timeout=timeout, on_line=accumulator)
+            data = accumulator.response()
         return _chat_completion(data, self.model, "openai_compatible", openrouter=False)
 
 
@@ -441,6 +558,7 @@ class AnthropicProvider:
         tools: list[ToolDefinition],
         *,
         timeout: float,
+        stream: TextStream | None = None,
     ) -> Completion:
         _check_paid(self.settings, self.model)
         system: list[str] = []
@@ -538,11 +656,12 @@ class OllamaProvider:
         tools: list[ToolDefinition],
         *,
         timeout: float,
+        stream: TextStream | None = None,
     ) -> Completion:
         payload: dict[str, Any] = {
             "model": self.model.model,
             "messages": _chat_messages(messages, native_arguments=True, ollama=True),
-            "stream": False,
+            "stream": stream is not None,
             "options": {
                 "num_predict": self.settings.max_output_tokens,
                 "num_ctx": self.model.context_window,
@@ -550,12 +669,11 @@ class OllamaProvider:
         }
         if tools:
             payload["tools"] = _tool_schemas(tools)
-        data = await _post(
-            f"{str(self.settings.ollama_base_url).rstrip('/')}/api/chat",
-            payload,
-            {},
-            timeout=timeout,
-        )
+        url = f"{str(self.settings.ollama_base_url).rstrip('/')}/api/chat"
+        if stream is None:
+            data = await _post(url, payload, {}, timeout=timeout)
+        else:
+            data = await self._streamed(url, payload, stream, timeout)
         if data.get("done") is not True:
             raise ProviderError("Yerel sağlayıcı tamamlanmış bir yanıt döndürmedi.")
         message = _object(data.get("message"))
@@ -568,6 +686,40 @@ class OllamaProvider:
             provider="ollama",
             model=self.model.model,
         )
+
+    @staticmethod
+    async def _streamed(
+        url: str, payload: dict[str, Any], stream: TextStream, timeout: float,
+    ) -> dict[str, Any]:
+        """NDJSON parçalarını tek tam yanıta toplar; son satırın sayaçları korunur."""
+        content: list[str] = []
+        calls: list[Any] = []
+        final: dict[str, Any] = {}
+
+        def on_line(line: str) -> None:
+            nonlocal final
+            data = _json_line(line)
+            message = _object(data.get("message") or {})
+            raw_calls = message.get("tool_calls")
+            if raw_calls:
+                if not calls:
+                    stream.tool_call()
+                calls.extend(_array(raw_calls))
+            text = message.get("content")
+            if text:
+                piece = _string(text)
+                content.append(piece)
+                stream.text(piece)
+            if data.get("done") is True:
+                final = data
+
+        await _post_lines(url, payload, {}, timeout=timeout, on_line=on_line)
+        if final.get("done") is not True:
+            raise RetryableProviderError("Yerel sağlayıcı akışı tamamlanmadan kesildi.")
+        message: dict[str, Any] = {"content": "".join(content)}
+        if calls:
+            message["tool_calls"] = calls
+        return {**final, "message": message}
 
 
 class ClaudeCliProvider:
@@ -602,6 +754,7 @@ class ClaudeCliProvider:
         tools: list[ToolDefinition],
         *,
         timeout: float,
+        stream: TextStream | None = None,
     ) -> Completion:
         if any(m.image_png is not None for m in _cloud_messages(messages)):
             # Transkript düz metindir; görüntüyü sessizce düşürmek modeli kör bırakır.

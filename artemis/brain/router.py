@@ -26,6 +26,7 @@ from artemis.brain.providers import (
     _endpoint_key,
     _key,
 )
+from artemis.brain.streaming import EmissionGuard, TextStream
 from artemis.config.settings import ModelConfig, Settings
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import ToolDefinition
@@ -86,6 +87,7 @@ class ProviderRouter:
         *,
         timeout: float,
         local_fallback: bool,
+        stream: TextStream | None = None,
     ) -> Completion:
         model = self.settings.models[alias]
         _check_paid(self.settings, model)
@@ -129,9 +131,15 @@ class ProviderRouter:
                 raise
         try:
             async with asyncio.timeout(timeout):
-                completion = await self._providers[alias].complete(
-                    messages, tools, timeout=timeout
-                )
+                # Akışsız çağrıda kw geçilmez: sağlayıcı sözleşmesi eski çağıranlarla aynı kalır.
+                if stream is None:
+                    completion = await self._providers[alias].complete(
+                        messages, tools, timeout=timeout
+                    )
+                else:
+                    completion = await self._providers[alias].complete(
+                        messages, tools, timeout=timeout, stream=stream
+                    )
         except TimeoutError:
             error = RetryableProviderError("Sağlayıcı denemesi zaman aşımına uğradı.")
             self._emit_audit(
@@ -196,13 +204,16 @@ class ProviderRouter:
         tools: list[ToolDefinition],
         *,
         timeout: float,
+        stream: TextStream | None = None,
     ) -> Completion:
         started = self._clock()
+        guard = EmissionGuard(stream) if stream is not None else None
         fallback = self.settings.fallback_model
         attempt_timeout = min(timeout, self.settings.provider_timeout_seconds)
         if fallback and started < self._fallback_until:
             return await self._call(
-                fallback, messages, tools, timeout=attempt_timeout, local_fallback=True
+                fallback, messages, tools, timeout=attempt_timeout, local_fallback=True,
+                stream=guard,
             )
         try:
             return await self._call(
@@ -211,9 +222,19 @@ class ProviderRouter:
                 tools,
                 timeout=attempt_timeout,
                 local_fallback=False,
+                stream=guard,
             )
         except RetryableProviderError as error:
             if fallback is None or fallback == self.settings.primary_model:
+                raise
+            # ADR 0043: metin kullanıcıya akmaya başladıysa yedek model ikinci, farklı bir
+            # yanıt üretirdi; tur sağlayıcı hatasıyla biter, yarım yanıt dürüstçe kalır.
+            if guard is not None and guard.emitted:
+                self._emit_audit(
+                    "provider_fallback_skipped",
+                    primary=self.settings.primary_model,
+                    reason="stream_started",
+                )
                 raise
             self._fallback_until = self._clock() + self.settings.fallback_seconds
             self._emit_audit(
@@ -231,5 +252,5 @@ class ProviderRouter:
                 timeout - (self._clock() - started), self.settings.provider_timeout_seconds
             )
             return await self._call(
-                fallback, messages, tools, timeout=remaining, local_fallback=True
+                fallback, messages, tools, timeout=remaining, local_fallback=True, stream=guard,
             )

@@ -20,12 +20,12 @@ from artemis.channels.voice.telemetry import VoiceTimingEvent
 
 STAGES = (
     "speech_start", "speech_end", "endpoint", "stt_final", "command_start",
-    "model_request", "model_response", "tool_start", "tool_end",
+    "model_request", "model_first_token", "model_response", "tool_start", "tool_end",
     "model_complete", "tts_first_chunk", "first_pcm", "terminal",
     "stop_requested", "playback_stopped",
 )
 # Çok adımlı turda model ve araç birden çok kez çağrılır; bu aşamalar tekrar edebilir.
-REPEATABLE = {"model_request", "model_response", "tool_start", "tool_end"}
+REPEATABLE = {"model_request", "model_first_token", "model_response", "tool_start", "tool_end"}
 OUTCOMES = (
     "completed", "rejected", "cancelled", "error", "no_audio", "ack", "interrupted",
     "unfinished",
@@ -49,9 +49,12 @@ PAIRS = {
     "speech_start_to_playback_stopped_ms": ("speech_start", "playback_stopped"),
 }
 # Aşama listelerinden türeyen metrikler; çiftler değil örnek başına hesaplanır.
-DERIVED = ("model_first_response_ms", "model_total_ms", "tool_total_ms")
+DERIVED = (
+    "model_first_token_ms", "model_first_response_ms", "model_total_ms", "tool_total_ms",
+)
 GROUP_METRICS = (
-    "speech_end_to_first_pcm_ms", "command_runner_ms", "model_first_response_ms",
+    "speech_end_to_first_pcm_ms", "command_runner_ms", "model_first_token_ms",
+    "model_first_response_ms",
     "model_total_ms", "tool_total_ms",
 )
 # Plan hedefleri; ilk ölçüm ve yeterli örnek olmadan "tuttu" denmez.
@@ -173,6 +176,10 @@ def _sample(uid: int, items: list[VoiceTimingEvent]) -> dict[str, Any]:
             required |= {"command_start", "model_complete"}
     invalid |= not required.issubset(times)
     derived: dict[str, float] = {}
+    if phases["model_first_token"] and "command_start" in times:
+        derived["model_first_token_ms"] = (
+            min(phases["model_first_token"]) - times["command_start"]
+        ) * 1000
     if model_spans and "command_start" in times:
         derived["model_first_response_ms"] = (model_spans[0][1] - times["command_start"]) * 1000
     if model_spans:
@@ -188,6 +195,7 @@ def _sample(uid: int, items: list[VoiceTimingEvent]) -> dict[str, Any]:
         "reason": reason if reason in REASONS else None,
         "invalid_timing": invalid, "timings": times,
         "model_calls": len(phases["model_request"]), "tool_calls": len(phases["tool_start"]),
+        "streamed": bool(phases["model_first_token"]),
         "derived_ms": derived,
     }
 
@@ -272,7 +280,8 @@ def timing_report(events: Iterable[VoiceTimingEvent]) -> dict[str, Any]:
         "speech_end_to_first_pcm_ms": {"median": latency["p50"], **latency},
         "stages": metrics, "by_command_class": by_class, "by_profile": by_profile,
         "targets": _targets(metrics, by_class),
-        "model_first_token_ms": None,
+        "model_first_token_ms": metrics["model_first_token_ms"],
+        "streamed_utterances": sum(sample["streamed"] for sample in tasks),
         "utterances": samples,
         "false_wake": None, "missed_wake": None, "false_approval": None,
         "barge_in_latency_ms": metrics["stop_to_playback_stopped_ms"]["p90"],
@@ -281,7 +290,7 @@ def timing_report(events: Iterable[VoiceTimingEvent]) -> dict[str, Any]:
             "completed": "ses oynatma tamamlandı; araç/model başarı iddiası değildir",
             "model_complete": "CommandRunner tamamı; saf LLM süresi değildir",
             "model_first_response_ms": "komut başlangıcından ilk tam model yanıtına",
-            "model_first_token_ms": "sağlayıcı streaming kullanmıyor; ilk token ölçülemez",
+            "model_first_token_ms": "akan ilk metin parçası; akışsız sağlayıcıda örnek yok",
             "tool_total_ms": "SafetyGate.dispatch süresi; onay bekleme süresi dahildir",
             "playback_stopped": "sink yazımının bittiği an; aygıt tamponu ölçülmez",
             "barge_in": "kesen sözün kimliğinde; speech_start'tan ölçüm algılamayı da içerir",

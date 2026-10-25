@@ -14,6 +14,7 @@ from artemis.brain.conversation import ContextWindow, ToolExchange, TurnRecord
 from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.brain.models import Message, ToolCall, Usage
 from artemis.brain.providers import Provider
+from artemis.brain.streaming import ResponseStream
 from artemis.safety.gate import SafetyGate, TurnState
 from artemis.tools.base import ToolContext, ToolResult
 
@@ -160,8 +161,30 @@ async def _wait_for_turn(
 class PhaseTiming(BaseModel):
     """İçeriksiz aşama damgası (ADR 0041 eki); ``time.monotonic`` saatidir, duvar saati değildir."""
 
-    stage: Literal["model_request", "model_response", "tool_start", "tool_end"]
+    stage: Literal[
+        "model_request", "model_first_token", "model_response", "tool_start", "tool_end",
+    ]
     timestamp: float
+
+
+class _StepStream:
+    """Bir model adımının akışı: ilk metin parçasını ölçer, gerisini kanala aktarır."""
+
+    def __init__(self, target: ResponseStream, phases: list[PhaseTiming]) -> None:
+        self.target = target
+        self.phases = phases
+        self.first = True
+
+    def text(self, delta: str) -> None:
+        if not delta:
+            return
+        if self.first:
+            self.first = False
+            self.phases.append(PhaseTiming(stage="model_first_token", timestamp=time.monotonic()))
+        self.target.text(delta)
+
+    def tool_call(self) -> None:
+        self.target.tool_call()
 
 
 class RunResult(BaseModel):
@@ -270,7 +293,8 @@ class AgentLoop:
         return bool(self._pending_cleanup)
 
     async def run(
-        self, text: str, history: ContextWindow | None = None, *, unattended: bool = False
+        self, text: str, history: ContextWindow | None = None, *, unattended: bool = False,
+        stream: ResponseStream | None = None,
     ) -> RunResult:
         # Gözetimsiz tur (ADR 0027): yan etki kararı kapıdadır, döngü yalnız bayrağı taşır.
         state = TurnState(unattended=unattended)
@@ -364,15 +388,26 @@ class AgentLoop:
                     return finish("timeout", TIMEOUT_MESSAGE)
                 steps += 1
                 phases.append(PhaseTiming(stage="model_request", timestamp=time.monotonic()))
+                definitions = self.gate.registry.definitions()
+                if stream is None:
+                    request = self.provider.complete(messages, definitions, timeout=remaining())
+                else:
+                    # ADR 0043: akışa yalnız metin gider; araç çağrısı yine tam Completion'dan
+                    # ayrıştırılır ve aşağıda SafetyGate'ten geçer.
+                    stream.step_start()
+                    request = self.provider.complete(
+                        messages, definitions, timeout=remaining(),
+                        stream=_StepStream(stream, phases),
+                    )
                 completion = await _wait_for_turn(
-                    self.provider.complete(
-                        messages, self.gate.registry.definitions(), timeout=remaining()
-                    ),
+                    request,
                     self.context.cancelled,
                     remaining(),
                     self._pending_cleanup,
                 )
                 phases.append(PhaseTiming(stage="model_response", timestamp=time.monotonic()))
+                if stream is not None:
+                    stream.step_end(bool(completion.tool_calls))
                 if self.context.cancelled.is_set():
                     return finish("cancelled", _cancelled_message())
                 usage.input_tokens += completion.usage.input_tokens

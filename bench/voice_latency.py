@@ -201,6 +201,8 @@ async def _fake_once(*, with_tool: bool = False) -> list[VoiceTimingEvent]:
             FakeSynthesizer(),
             sink,
             on_event=on_event,
+            # Üretimdeki factory gibi akışlı yanıt yolu sınanır (ADR 0043).
+            stream_responses=True,
         )
         await controller.run()
         return events

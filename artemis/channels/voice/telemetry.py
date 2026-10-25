@@ -5,7 +5,7 @@ from typing import Literal
 
 Stage = Literal[
     "speech_start", "speech_end", "endpoint", "stt_final", "command_start",
-    "model_request", "model_response", "tool_start", "tool_end",
+    "model_request", "model_first_token", "model_response", "tool_start", "tool_end",
     "model_complete", "tts_first_chunk", "first_pcm", "terminal",
     "stop_requested", "playback_stopped",
 ]

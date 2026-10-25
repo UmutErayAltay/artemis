@@ -13,14 +13,16 @@ from typing import Any, Literal
 import pytest
 
 from artemis.brain.errors import BudgetExceeded, ProviderError, RetryableProviderError
-from artemis.brain.models import Message, ToolCall
+from artemis.brain.models import Completion, Message, ToolCall
 from artemis.brain.providers import (
     AnthropicProvider,
     OllamaProvider,
     OpenRouterProvider,
     Provider,
 )
+from artemis.brain.router import ProviderRouter
 from artemis.config.settings import ModelConfig, Settings
+from artemis.safety.audit import AuditLog
 from artemis.tools.base import Risk, ToolDefinition
 
 ProviderName = Literal["openrouter", "anthropic", "ollama"]
@@ -462,3 +464,187 @@ async def test_length_cut_is_marked_not_silent(
         [Message(role="user", content="Merhaba")], [], timeout=2
     )
     assert "kesildi" not in normal.content
+
+
+# --- ADR 0043: akış yalnız metin taşır; araç çağrısı tam ve doğrulanmış biçimde döner ---
+
+STREAM_TOOLS = [ToolDefinition(
+    name="file-read_1", description="Okur.", risk=Risk.READ_ONLY,
+    parameters={"type": "object", "properties": {"path": {"type": "string"}}},
+)]
+STREAM_MESSAGES = [Message(role="user", content="selam")]
+
+
+class Recorder:
+    def __init__(self) -> None:
+        self.events: list[tuple[str, str]] = []
+
+    def text(self, delta: str) -> None:
+        self.events.append(("text", delta))
+
+    def tool_call(self) -> None:
+        self.events.append(("tool", ""))
+
+    @property
+    def joined(self) -> str:
+        return "".join(value for kind, value in self.events if kind == "text")
+
+
+def _sse(*chunks: Any, done: bool = True) -> bytes:
+    lines = [": OPENROUTER PROCESSING"]
+    lines += [f"data: {json.dumps(chunk, ensure_ascii=False)}" for chunk in chunks]
+    if done:
+        lines.append("data: [DONE]")
+    return ("\n\n".join(lines) + "\n\n").encode("utf-8")
+
+
+def _ndjson(*items: Any) -> bytes:
+    return ("\n".join(json.dumps(item, ensure_ascii=False) for item in items) + "\n").encode()
+
+
+def _delta(**delta: Any) -> dict[str, Any]:
+    return {"choices": [{"delta": delta, "finish_reason": None}]}
+
+
+async def test_openrouter_streams_text_and_assembles_tool_call_silently(http_server, tmp_path):
+    http_server.body = _sse(
+        _delta(content="Bakıyorum, "),
+        _delta(content="hemen."),
+        _delta(tool_calls=[{"index": 0, "id": "call_1",
+                            "function": {"name": "file-read_1", "arguments": "{\"pa"}}]),
+        _delta(tool_calls=[{"index": 0, "function": {"arguments": "th\": \"örnek.txt\"}"}}]),
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+         "usage": {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.001}},
+    )
+    recorder = Recorder()
+    completion = await provider_for("openrouter", http_server, tmp_path).complete(
+        STREAM_MESSAGES, STREAM_TOOLS, timeout=5, stream=recorder,
+    )
+    assert http_server.requests[0][1]["stream"] is True
+    assert recorder.joined == "Bakıyorum, hemen."
+    # Araç argüman parçaları akışa hiç girmez; yalnız "araç başladı" işareti gelir.
+    assert ("tool", "") in recorder.events
+    assert "örnek" not in recorder.joined and "path" not in recorder.joined
+    assert completion.content == "Bakıyorum, hemen."
+    assert [(call.name, call.arguments) for call in completion.tool_calls] == [
+        ("file-read_1", {"path": "örnek.txt"})
+    ]
+    assert completion.usage.cost_usd == Decimal("0.001")
+
+
+async def test_stream_cut_before_finish_is_retryable_not_success(http_server, tmp_path):
+    http_server.body = _sse(_delta(content="Yarım"), done=False)
+    with pytest.raises(RetryableProviderError):
+        await provider_for("openrouter", http_server, tmp_path).complete(
+            STREAM_MESSAGES, [], timeout=5, stream=Recorder(),
+        )
+
+
+async def test_streamed_tool_call_is_validated_like_full_response(http_server, tmp_path):
+    # Bozuk argüman JSON'u akışta da aynı ayrıştırıcıda reddedilir; kısmi argüman çalışmaz.
+    http_server.body = _sse(
+        _delta(tool_calls=[{"index": 0, "id": "c", "function": {"name": "file-read_1",
+                                                                 "arguments": "{\"path\": "}}]),
+        {"choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+         "usage": {"prompt_tokens": 1, "completion_tokens": 1}},
+    )
+    with pytest.raises(ProviderError):
+        await provider_for("openrouter", http_server, tmp_path).complete(
+            STREAM_MESSAGES, STREAM_TOOLS, timeout=5, stream=Recorder(),
+        )
+
+
+async def test_non_streaming_call_is_unchanged(http_server, tmp_path):
+    http_server.body = {"choices": [{"message": {"content": "Tamam."}}],
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1}}
+    completion = await provider_for("openrouter", http_server, tmp_path).complete(
+        STREAM_MESSAGES, [], timeout=5,
+    )
+    assert http_server.requests[0][1]["stream"] is False
+    assert completion.content == "Tamam."
+
+
+async def test_ollama_streams_ndjson_and_keeps_final_counters(http_server, tmp_path):
+    http_server.body = _ndjson(
+        {"message": {"content": "Merhaba, "}, "done": False},
+        {"message": {"content": "nasılsın?"}, "done": False},
+        {"message": {"content": "", "tool_calls": [
+            {"function": {"name": "file-read_1", "arguments": {"path": "a.txt"}}}]},
+         "done": False},
+        {"message": {"content": ""}, "done": True, "done_reason": "stop",
+         "prompt_eval_count": 12, "eval_count": 7},
+    )
+    recorder = Recorder()
+    completion = await provider_for("ollama", http_server, tmp_path).complete(
+        STREAM_MESSAGES, STREAM_TOOLS, timeout=5, stream=recorder,
+    )
+    assert recorder.joined == "Merhaba, nasılsın?" and ("tool", "") in recorder.events
+    assert completion.tool_calls[0].arguments == {"path": "a.txt"}
+    assert (completion.usage.input_tokens, completion.usage.output_tokens) == (12, 7)
+
+
+async def test_ollama_stream_without_done_is_not_success(http_server, tmp_path):
+    http_server.body = _ndjson({"message": {"content": "Yarım"}, "done": False})
+    with pytest.raises(RetryableProviderError):
+        await provider_for("ollama", http_server, tmp_path).complete(
+            STREAM_MESSAGES, [], timeout=5, stream=Recorder(),
+        )
+
+
+class StreamingFake:
+    def __init__(self, text: str, error: Exception | None = None) -> None:
+        self.text = text
+        self.error = error
+        self.calls = 0
+
+    async def complete(self, messages, tools, *, timeout, stream=None):
+        self.calls += 1
+        if stream is not None and self.text:
+            stream.text(self.text)
+        if self.error is not None:
+            raise self.error
+        return Completion(content=self.text)
+
+
+def _router(tmp_path, primary, fallback) -> ProviderRouter:
+    model = ModelConfig(provider="ollama", model="m",
+                        input_per_million=Decimal(0), output_per_million=Decimal(0))
+    settings = Settings(
+        workspace=tmp_path, state_dir=tmp_path / "state", audit_path=tmp_path / "audit.jsonl",
+        primary_model="primary", fallback_model="fallback",
+        models={"primary": model, "fallback": model},
+    )
+    return ProviderRouter(settings, AuditLog(settings.audit_path),
+                          providers={"primary": primary, "fallback": fallback})
+
+
+async def test_router_does_not_fall_back_after_text_reached_the_user(tmp_path):
+    fallback = StreamingFake("İkinci yanıt.")
+    router = _router(tmp_path, StreamingFake("Birinci ", RetryableProviderError("koptu")),
+                     fallback)
+    recorder = Recorder()
+    with pytest.raises(RetryableProviderError):
+        await router.complete(STREAM_MESSAGES, [], timeout=5, stream=recorder)
+    assert fallback.calls == 0 and recorder.joined == "Birinci "
+    rows = [json.loads(line) for line in (tmp_path / "audit.jsonl").read_text().splitlines()]
+    assert any(row["event"] == "provider_fallback_skipped" for row in rows)
+
+
+async def test_router_still_falls_back_when_nothing_was_streamed(tmp_path):
+    fallback = StreamingFake("Yedek yanıt.")
+    router = _router(tmp_path, StreamingFake("", RetryableProviderError("bağlanamadı")),
+                     fallback)
+    recorder = Recorder()
+    completion = await router.complete(STREAM_MESSAGES, [], timeout=5, stream=recorder)
+    assert completion.content == "Yedek yanıt." and fallback.calls == 1
+    assert recorder.joined == "Yedek yanıt."
+
+
+async def test_router_without_stream_keeps_old_provider_contract(tmp_path):
+    class Legacy:
+        async def complete(self, messages, tools, *, timeout):
+            return Completion(content="eski")
+
+    router = _router(tmp_path, Legacy(), Legacy())
+    assert (await router.complete(STREAM_MESSAGES, [], timeout=5)).content == "eski"
+
