@@ -145,10 +145,17 @@ hatalı, sessiz ve yarım sözleri sayar. Wake bildirimi görev yanıtı metrikl
 Aşama p50/p90 değerlerinin kendi geçerli örnek sayısı ve dışlama paydası vardır;
 `model_complete` tüm CommandRunner süresidir. `completed` ses oynatma sonucudur,
 araç başarısı değildir. İlk PCM, player yazım callback'idir; fiziksel duyulabilirlik
-ölçülmez. Stop olay çifti henüz bağlanmadığı için stop metriği null'dır. Model/token/
-araç içi zamanlar, komut sınıfları, masaüstü dışa aktarımı ve gerçek cihaz/bellek
-ölçümleri sonraki adımdır. Donanım profilindeki `requested_*` ayardır; bilinmeyen
-fiilî değerler null kalır. `collection_complete` yalnız olay tamponunun taşmadığını
+ölçülmez. Model istek/yanıt ve araç başlangıç/bitiş zamanları `RunResult` üzerinden
+gelir; turlar sohbet (`chat`) ve araçlı (`tool`) olarak, ilk görev turu `cold`, sonrakiler
+`warm` olarak ayrı raporlanır. Söz kesme stop çifti (stop isteği ve kullanıcı sesinin
+başından sink yazımının bitmesine) yalnız hoparlöre yazım sürerken üretilir. Hedefler
+(sohbet p50 < 1.5 sn, p90 < 3 sn, stop p90 < 300 ms) en az 30 geçerli örnek olmadan ve
+sahte kipte hiç değerlendirilmez (`met: null`). Canlı kip PortAudio'nun bildirdiği çıkış
+gecikmesini, süreç bellek tepe değerini ve varsa `nvidia-smi` ile aygıt geneli VRAM'i
+yazar. Sağlayıcılar streaming kullanmadığından ilk token null'dır. Masaüstünde
+`voice.telemetry_report: true` iken ses kapanınca aynı rapor
+`state_dir/voice-telemetry/` altına yazılır. Donanım profilindeki `requested_*` ayardır;
+bilinmeyen fiilî değerler null kalır. `collection_complete` yalnız olay tamponunun taşmadığını
 belirtir; başarısızlıklar ve yarım/geçersiz sözler ayrıca raporlanır. Model hazırlığı
 iptal edilince çalışan native yükleme thread'i durdurulmuş sayılmaz.
 

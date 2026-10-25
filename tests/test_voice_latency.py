@@ -11,6 +11,13 @@ import pytest
 from artemis.channels.voice.telemetry import VoiceTimingEvent as Event
 from artemis.config.settings import Settings, VoiceConfig
 from bench import voice_latency as bench
+from bench.voice_resources import GpuSampler
+
+
+@pytest.fixture(autouse=True)
+def no_real_gpu_query(monkeypatch):
+    # Kural 8: test gerçek makinede nvidia-smi bile çalıştırmaz; okunamayan GPU null kalır.
+    monkeypatch.setattr(bench, "GpuSampler", lambda: GpuSampler(lambda _arguments: None))
 
 
 @pytest.mark.parametrize("failure", [None, "init", "run", "signal"])
@@ -117,6 +124,8 @@ async def test_live_uses_shared_runtime_factory_and_restores_resources(
     assert hardware["requested_input_device"] == 7 and hardware["input_device"] is None
     assert hardware["noise_suppression"]["actual"] is False
     assert hardware["echo_cancellation"]["actual"] is False
+    assert hardware["gpu_samples"] == 0 and hardware["gpu_peak_memory_bytes"] is None
+    assert hardware["output_latency_seconds"] is None  # Sahte controller'ın sink'i yok.
     serialized = json.dumps(report)
     assert "private transcript" not in serialized and "secret" not in serialized
     captured = capsys.readouterr()

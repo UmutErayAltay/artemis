@@ -6,6 +6,7 @@ from time import monotonic
 
 import pytest
 
+from artemis.brain.agent_loop import RunResult
 from artemis.channels.voice.core import (
     AudioFrame,
     AudioSegment,
@@ -77,7 +78,7 @@ class FakeRunner:
 
     async def run(self, text):
         self.commands.append(text)
-        return type("Result", (), {"text": "yanıt"})()
+        return RunResult(text="yanıt", stop_reason="completed", turn_id="t")
 
 
 class FakeTTS:
@@ -690,7 +691,7 @@ async def test_run_command_kwarg_replaces_runner_and_default_is_runner_run():
 
     async def run_command(text):
         seen.append(text)
-        return type("Result", (), {"text": ""})()
+        return RunResult(text="", stop_reason="completed", turn_id="t")
 
     frames = [AudioFrame(b"a", float(i)) for i in range(7)]
     controller = VoiceController(

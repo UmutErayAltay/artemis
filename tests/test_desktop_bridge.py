@@ -27,7 +27,8 @@ from artemis.channels.desktop.bridge import (
     VoiceCommand,
 )
 from artemis.channels.runtime import AuditObserver, Runtime, create_runtime
-from artemis.config.settings import ModelConfig, Settings
+from artemis.channels.voice.telemetry import VoiceTimingEvent
+from artemis.config.settings import ModelConfig, Settings, VoiceConfig
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import ToolRegistry
@@ -110,6 +111,7 @@ def _fixture(
     max_seconds: float = 1.0,
     provider_override: Any = None,
     voice_factory: Any = None,
+    voice: VoiceConfig | None = None,
 ) -> DesktopBridge:
     settings = Settings(
         workspace=tmp_path,
@@ -125,6 +127,7 @@ def _fixture(
             )
         },
         max_seconds=max_seconds,
+        voice=voice if voice is not None else VoiceConfig(),
     )
     registry = ToolRegistry()
     registry.register(ExternalRead)
@@ -791,3 +794,52 @@ def test_esc_hotkey_cancels_running_turn_immediately(tmp_path, monkeypatch):
         release.set()
         bridge.shutdown()
         assert bridge._stopped.wait(2)
+
+
+class MeasuredVoice(FakeVoice):
+    """Bridge'in sonradan bağladığı toplayıcıya içeriksiz bir söz bildirir."""
+
+    on_event: Any = None
+
+    async def run(self) -> None:
+        if self.on_event is not None:
+            self.on_event(VoiceTimingEvent(1, None, "speech_start", 1.0))
+            self.on_event(VoiceTimingEvent(
+                1, None, "terminal", 2.0, outcome="rejected", reason="no_wake",
+            ))
+        await super().run()
+
+
+@pytest.mark.parametrize("enabled", [False, True])
+def test_voice_telemetry_report_is_written_only_when_enabled(tmp_path, enabled):
+    created: list[FakeVoice] = []
+
+    async def factory(runtime: Any, run_command: Any, on_state: Any) -> FakeVoice:
+        fake = MeasuredVoice(run_command, on_state, None)
+        created.append(fake)
+        return fake
+
+    bridge = _fixture(
+        tmp_path, [], voice_factory=factory, voice=VoiceConfig(telemetry_report=enabled),
+    )
+    try:
+        assert bridge.start_voice()
+        _collect_until(bridge, lambda items: _has_state_message(items, "voice", "listening"))
+        assert bridge.stop_voice()
+        _collect_until(bridge, lambda items: _has_state_message(items, "voice", "off"))
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+    reports = sorted((tmp_path / "state" / "voice-telemetry").glob("voice-*.json"))
+    audit = tmp_path / "audit.jsonl"
+    lines = audit.read_text(encoding="utf-8").splitlines() if audit.exists() else []
+    records = [json.loads(line) for line in lines]
+    telemetry = [row for row in records if row["event"] == "voice_telemetry"]
+    if not enabled:
+        assert reports == [] and telemetry == []
+        assert created[0].on_event is None
+        return
+    assert len(reports) == 1 and telemetry[0]["written"] is True
+    report = json.loads(reports[0].read_text(encoding="utf-8"))
+    assert report["mode"] == "masaustu" and report["collection_complete"]
+    assert report["outcomes"]["rejected"] == 1 and report["hardware"] == {"output": None}

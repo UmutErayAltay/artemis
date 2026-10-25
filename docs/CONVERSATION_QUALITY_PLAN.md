@@ -31,7 +31,24 @@ Bu düzeltme aşağıdaki gerçek doğruluk ve gecikme ölçümlerinin yerini tu
 
 ### 1. Ortak canlı çalışma zamanı ölçümü
 
-**2026-10-25 — ilk alt adım uygulandı; aşamanın tamamı bitmedi.**
+**2026-10-25 — aşamanın kod kapsamı tamamlandı; canlı ölçüm alınmadı.** İkinci alt adım
+([ADR 0041 eki](adr/0041-common-voice-telemetry.md#ek-2026-10-25-aşamanın-kalan-ölçümleri))
+model istek/yanıt ve araç zamanlarını, sohbet/araç sınıfını, soğuk/ısınmış profili, söz
+kesme stop çiftini, en az 30 örnek isteyen hedef değerlendirmesini, PortAudio çıkış
+gecikmesini, bellek/VRAM profilini ve masaüstü rapor dışa aktarımını ekledi. Açık kalan:
+Windows'ta profil başına en az 30 canlı tur, loopback/manuel cihaz kabulü; ilk token
+streaming gerektirdiği için aşama 3'e kalır.
+
+İkinci alt adımın doğrulaması (Linux container, donanımsız): `1638 passed, 19 skipped,
+4 deselected`; ruff ve mypy (106 dosya) temiz; senaryo bench'i 39/39, tehlikeli hata ve
+onaysız yan etki 0. Sahte ses ölçümü 30/30 tamamlandı (15 sohbet, 15 araçlı), geçersiz
+zaman 0, hedefler sahte kipte `null`. Yedi mutasyon (stop çiftinin kaldırılması, düşünmede
+stop üretilmesi, meşgul turun sınıflandırılması, 30 örnek eşiği, sahte kip koruması, tur
+dışı aşama kontrolü, aşamaların RunResult'a konmaması) ilgili testleri kırdı. Bu ortamda
+`tests/test_mcp_client.py` hatası yeniden üretilmedi. Canlı mikrofon/hoparlör ve gerçek
+model çağrısı yapılmadı.
+
+İlk alt adım:
 [ADR 0041](adr/0041-common-voice-telemetry.md) ortak factory/runtime ve kimlikli
 olay kararını kaydeder. Rapor; VAD başlangıcı/son voiced frame, endpoint, nihai STT,
 komut başlangıcı, bütün runner tamamlanması, TTS ilk parça ve player ilk PCM'ini
@@ -51,7 +68,7 @@ Native model yüklemesi `to_thread` iptaliyle durmaz: döngü çalışıyorsa y�
 bitince kaynak temizlenir; süreç kapanışının native yüklemeyi anında kestiği veya
 kesin sürede bittiği iddia edilmez.
 
-**Ertelenen ölçümler:** model isteği/ilk token ve tool içi aşamalar, gerçek streaming,
+**İlk adımda ertelenen ölçümler** (ikinci alt adımda bağlandı; ilk token ve streaming hariç): model isteği/ilk token ve tool içi aşamalar, gerçek streaming,
 sohbet/araç sınıfları, stop isteği/oynatma durması olaylarını bağlamak, masaüstü
 telemetri dışa aktarımı, soğuk/ısınmış profil ayrımı, gerçek aygıt gecikmesi ve
 GPU/CPU/bellek/contention profili. Bunlar bilinmiyorsa null'dır; ayar profili
