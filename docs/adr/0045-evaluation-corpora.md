@@ -83,3 +83,32 @@ Uyandırma kuralı değişikliğinin A/B'si (aynı STT çıktısı, aynı corpus
 uyanma (hepsi "artmış"), yeni kural **0**; uyandırma kaçırma iki kuralda da **%3,8**
 (değişmedi). Sentetik sonuç kabul kanıtı değildir; Windows/GPU karşılaştırması
 [WINDOWS_CHECKLIST.md](../WINDOWS_CHECKLIST.md) A6'dadır.
+
+## Gürültüde uyandırma (2026-10-26, Windows, RTX 4050)
+
+`wake_noise_tr` (150 örnek: 15 wake + 15 wake-siz × pembe 10/5 dB, babble 10/5 dB, telefon),
+`--canli --sentetik-metin`. Whisper `large-v3`, `cuda`, `float16`, `stt_language: tr_en`,
+config'te `stt_hotwords: [Artemis, tarayıcı]` zaten açık.
+
+| Deney | Kaçırma | Telefon | Yanlış uyanma | WER | Ad | Hedef | Gecikme medyan |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Bugünkü ayar | %8,0 | %40 | 0 | %25,4 | %69,3 | %82,5 | 941 ms |
+| `--ek-hotword Artemis` | %8,0 | %40 | 0 | %25,4 | %69,3 | %82,5 | 1973 ms |
+| `--gurultu-engelle orta` | %6,7 | %27 | 0 | %26,6 | %64,3 | %85,0 | 2784 ms |
+| `stt_vad_filter: false` | **%0** | **%0** | 0 | **%19,8** | **%74,3** | **%90,0** | 2507 ms |
+
+- Pembe ve babble gürültüde kaçırma GPU large-v3'te her deneyde %0'dır (DFN'de babble 5 dB
+  tek kaçırma); buluttaki %29 turbo/int8/CPU'ya aittir.
+- Tek sorun telefon bandı: Whisper "Artemis" yerine "Tertemiz", "Temiz" yazar ya da sözcüğü
+  düşürür. "Tertemiz" gerçek sözcük olduğundan eşleştirici gevşetilmez.
+- Hotword deneyi taban çizgisiyle aynıdır, çünkü ipucu zaten config'tedir.
+- DFN telefonu iyileştirir ama ad doğruluğunu düşürür; değmez.
+- VAD süzgecini kapatmak telefon kaçırmalarını sıfırlar ve tüm doğruluk ölçülerini
+  iyileştirir: VAD, bant sınırlı seste baştaki "Artemis"i kesiyor.
+
+**Karar (askıda):** varsayılan henüz değişmez. Gecikme sütunu güvenilir değildir (aynı ayardaki
+ilk iki deney 941 ve 1973 ms); corpus'ta sessizlik örneği yoktur (VAD kapalıyken halüsinasyon
+riski ölçülmedi) ve wake-siz ses yalnız 4 dakikadır. Sıradaki: aynı oturumda taban ve VAD
+kapalı gecikmesini art arda yeniden ölç, sessizlik/≥1 saat komutsuz sesle yanlış uyanma ve
+halüsinasyon ölç; ikisi temizse `stt_vad_filter: false` (ya da yalnız uyandırma penceresinde
+VAD'siz) önerilir.
