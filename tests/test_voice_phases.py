@@ -69,7 +69,9 @@ class ScriptedRunner:
         start = monotonic()
         result = self.results.pop(0)
         if result.turn_id:
-            stamps = [start + index * 1e-6 for index in range(4)]
+            # Gerçek AgentLoop gibi yalnız saat okunur; yapay ofset Windows'un ~15 ms'lik
+            # monotonic adımında model_complete damgasını geçip örneği geçersiz kılıyordu.
+            stamps = [start] * 4
             stages = ["model_request", "model_response", "tool_start", "tool_end"]
             phases = [PhaseTiming(stage=stage, timestamp=stamp)
                       for stage, stamp in zip(stages, stamps, strict=True)]
