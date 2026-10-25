@@ -134,6 +134,13 @@ seçili model/quantization/beam, STT/TTS yolu ve aygıt örnekleme oranını iç
 
 ### 2. Gerçek konuşmacı değerlendirmesi ve ASR/VAD deneyleri
 
+**2026-10-25 — başladı (gönüllü kaydı yerine açık veri).** Karar
+[ADR 0045](adr/0045-evaluation-corpora.md): Common Voice 17.0 Türkçe (gerçek konuşmacılar,
+CC0) ve Piper/Edge ile etiketli sentetik komut corpus'u; konuşmacı sızıntısı reddi, kaynak
+ve koşul kırılımları, uyandırma ve STT+çözücü hedef ölçümü, kaynak başına plan şeması. Kalan:
+GPU'da model/beam/dil karşılaştırması, ≥1 saat komutsuz sesle yanlış uyanma, daha çok
+sentetik ses, Umut'un kendi kayıtları ([WINDOWS_CHECKLIST.md](WINDOWS_CHECKLIST.md) A6).
+
 İlk veri paketi en az 200 kısa örnek ve en az 8 gönüllü içersin; bunlar önerilen
 planlama tabanıdır, temsili demografik örnek iddiası değildir. Örnekler gündelik
 soru, Türkçe içinde İngilizce söz/özel ad, tereddüt ve kendini düzeltme, uygulama

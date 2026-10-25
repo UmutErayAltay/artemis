@@ -188,6 +188,8 @@ def test_wake_word_accepts_close_spellings(transcript: str, command: str):
     [
         "sesi artırmış", "hatemiz son", "Artemisia çiçeği", "temiz bir oda", "Ar, temiz",
         "ertesi gün",
+        # Harf düşmesi: sentetik ölçümde gündelik cümle uyandırıyordu (ADR 0045).
+        "Benzin fiyatları yine artmış.", "artmis", "artemisi",
     ],
 )
 def test_wake_word_rejects_other_words(transcript: str):
