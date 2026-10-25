@@ -74,7 +74,7 @@ module = ["send2trash.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["pyarrow.*"]
+module = ["pyarrow.*", "TTS.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

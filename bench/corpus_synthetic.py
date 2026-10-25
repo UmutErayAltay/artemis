@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import json
+import os
 import random
 import sys
 from collections.abc import Awaitable, Callable, Sequence
@@ -221,8 +222,50 @@ def _collector(synthesizer: Any) -> Synthesize:
     return synthesize
 
 
+XTTS_MODEL = "tts_models/multilingual/multi-dataset/xtts_v2"
+
+
+def voice_slug(name: str) -> str:
+    return "".join(char if char.isalnum() else "_" for char in name.casefold()).strip("_")
+
+
+def xtts_voices(speakers: Sequence[str]) -> dict[str, Synthesize]:
+    """XTTS-v2'nin hazır stüdyo sesleri Türkçe konuşturulur (gerçek kişi klonlanmaz).
+
+    Model Coqui Public Model License altındadır (ticari olmayan kullanım); yalnız
+    ``--xtts-lisans-kabul`` ile indirilir. torch gerektirir: ayrı ortamda kurulması önerilir.
+    """
+    import threading
+
+    from TTS.api import TTS  # lazy: ağır bağımlılık yalnız bu seçenekte yüklenir
+
+    engine = TTS(XTTS_MODEL, progress_bar=False)
+    known = set(engine.speakers or [])
+    unknown = sorted(set(speakers) - known)
+    if unknown:
+        raise ValueError(f"XTTS'te olmayan ses: {', '.join(unknown)}")
+    rate = int(engine.synthesizer.output_sample_rate)
+    lock = threading.Lock()  # model tek; çağrılar sırayla
+
+    def make(speaker: str) -> Synthesize:
+        def run(text: str) -> Any:
+            with lock:
+                return engine.tts(text=text, speaker=speaker, language="tr")
+
+        async def synthesize(text: str) -> tuple[Signal, int]:
+            audio = np.asarray(await asyncio.to_thread(run, text), dtype=np.float32)
+            if not audio.size:
+                raise ValueError("XTTS ses üretmedi")
+            return audio, rate
+
+        return synthesize
+
+    return {"xtts_" + voice_slug(speaker): make(speaker) for speaker in speakers}
+
+
 def real_voices(
-    piper_models: Sequence[Path], edge_voices: Sequence[str], audit_path: Path
+    piper_models: Sequence[Path], edge_voices: Sequence[str], audit_path: Path,
+    xtts_speakers: Sequence[str] = (),
 ) -> list[Voice]:
     from artemis.channels.voice.adapters import EdgeTTSynthesizer, PiperSynthesizer
     from artemis.config.settings import VoiceConfig
@@ -237,6 +280,8 @@ def real_voices(
         config = VoiceConfig(tts_backend="edge", edge_voice=voice, allow_cloud_tts_text=True)
         # Bulut aktarımı uygulamadaki gibi denetime yazılır (metin yazılmaz).
         named["edge_" + voice] = _collector(EdgeTTSynthesizer(config, AuditLog(audit_path)))
+    if xtts_speakers:
+        named.update(xtts_voices(xtts_speakers))
     splits = assign_splits(list(named))
     return [Voice(name, splits[name], synthesize) for name, synthesize in named.items()]
 
@@ -248,13 +293,22 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--edge", action="append", default=[], metavar="SES")
     parser.add_argument("--bulut-tts-izni", action="store_true",
                         help="Edge TTS şablon metnini Microsoft'a gönderir")
+    parser.add_argument("--xtts", action="append", default=[], metavar="SES",
+                        help="XTTS-v2 hazır stüdyo sesi (ör. 'Ana Florence'); tekrarlanabilir")
+    parser.add_argument("--xtts-lisans-kabul", action="store_true",
+                        help="Coqui Public Model License (ticari olmayan) koşullarını kabul eder")
     parser.add_argument("--sablonlar", type=Path, default=TEMPLATES_PATH)
     parser.add_argument("--tohum", type=int, default=0)
     args = parser.parse_args(arguments)
     if args.edge and not args.bulut_tts_izni:
         parser.error("--edge metni buluta gönderir; --bulut-tts-izni ile açıkça izin verin")
+    if args.xtts and not args.xtts_lisans_kabul:
+        parser.error("--xtts modeli CPML lisanslıdır; --xtts-lisans-kabul ile açıkça kabul edin")
+    if args.xtts:
+        # Coqui indirme sırasında etkileşimli lisans sorusu yerine bu açık bayrağı okur.
+        os.environ["COQUI_TOS_AGREED"] = "1"
     output = ensure_outside_repo(args.cikti)
-    voices = real_voices(args.piper, args.edge, output / "tts_audit.jsonl")
+    voices = real_voices(args.piper, args.edge, output / "tts_audit.jsonl", args.xtts)
     note = asyncio.run(build(load_templates(args.sablonlar), voices, output, seed=args.tohum))
     print(json.dumps(note, ensure_ascii=False, indent=2))
     return 0

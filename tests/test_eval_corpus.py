@@ -253,3 +253,13 @@ def load_corpus_from(root: Path, items: list[dict[str, Any]]) -> Any:
         encoding="utf-8",
     )
     return load_corpus(path)[0]
+
+
+def test_xtts_requires_explicit_license_and_cloud_tts_requires_consent(tmp_path: Path) -> None:
+    out = str(tmp_path / "x")
+    with pytest.raises(SystemExit):
+        synthetic.main(["--cikti", out, "--xtts", "Ana Florence"])
+    with pytest.raises(SystemExit):
+        synthetic.main(["--cikti", out, "--edge", "tr-TR-EmelNeural"])
+    assert synthetic.voice_slug("Ana Florence") == "ana_florence"
+    assert not (tmp_path / "x").exists()
