@@ -9,6 +9,13 @@ from urllib.parse import urlsplit
 from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.safety.paths import safe_join
+from artemis.tools.app_resolver import (
+    UNINSTALL_WORDS,
+    AliasStoreError,
+    AppMatch,
+    alias_store,
+    resolve_application,
+)
 from artemis.tools.base import BaseTool, ContentKind, Risk, ToolContext, ToolResult
 from artemis.tools.platform import UnsupportedPlatformError, WindowsDesktop, desktop_service
 from artemis.tools.processes import DesktopProcessResult, run_desktop_action
@@ -23,21 +30,48 @@ class ApplicationArguments(EmptyArguments):
     name: str = Field(min_length=1)
 
 
-def application_executable(context: ToolContext, name: str) -> str | None:
-    # Kurulu adlar boşluk/büyük harf farklarıyla söylenebilir; yol olarak yorumlanmaz.
-    def normalized(value: str) -> str:
-        return "".join(char for char in value.casefold() if char.isalnum() or char in "+#")
+def application_aliases(context: ToolContext) -> dict[str, str]:
+    """Kullanıcının öğrettiği takma adlar; kalıcı hafıza kapalıyken hiç okunmaz (ADR 0044)."""
+    if not context.settings.persist_memory:
+        return {}
+    try:
+        return alias_store(context.settings.state_dir).load()
+    except AliasStoreError as error:
+        # Bozuk dosya uygulama açmayı engellemez; takma adsız çözülür ve iz bırakılır.
+        context.audit.emit("app_alias_unavailable", reason=str(error))
+        return {}
 
-    exact = next((
-        value for alias, value in context.settings.applications.items()
-        if alias.casefold() == name.casefold()
-    ), None)
-    if exact is not None:
-        return exact
-    return next((
-        value for alias, value in context.settings.applications.items()
-        if normalized(alias) == normalized(name)
-    ), None)
+
+def application_match(context: ToolContext, name: str, *, fuzzy: bool) -> AppMatch:
+    # Kurulu adlar boşluk/büyük harf farklarıyla söylenebilir; yol olarak yorumlanmaz.
+    return resolve_application(
+        context.settings.applications, application_aliases(context), name, fuzzy=fuzzy
+    )
+
+
+def application_executable(context: ToolContext, name: str) -> str | None:
+    """Yalnız kesin eşleşme (ad ya da öğretilmiş takma ad); yakın eşleşme dahil değil."""
+    return application_match(context, name, fuzzy=False).executable
+
+
+def _unresolved(name: str, match: AppMatch, *, action: str) -> ToolResult:
+    """Kesin olmayan eşleşmede işlem yapılmaz; model kullanıcıya sorar."""
+    if match.kind == "none":
+        return ToolResult(status="error", message="Uygulama izin listesinde yok.")
+    candidates = list(match.candidates) if match.kind == "ambiguous" else [match.name or ""]
+    listed = ", ".join(candidates)
+    return ToolResult(
+        status="error",
+        message=(
+            f"'{name}' tam eşleşmedi; olası uygulamalar: {listed}. Tahminle {action}; "
+            "kullanıcıya hangisini kastettiğini sor ve tam adla yeniden iste."
+        ),
+        data={"requested": name, "candidates": candidates},
+    )
+
+
+def _uninstaller(name: str | None) -> bool:
+    return name is not None and any(word in name.casefold() for word in UNINSTALL_WORDS)
 
 
 class OpenApplicationArguments(ApplicationArguments):
@@ -103,16 +137,36 @@ class OpenApplication(BaseTool):
     risk = Risk.SIDE_EFFECT
 
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
-        name = cast(OpenApplicationArguments, arguments).name.casefold()
-        if any(word in name for word in ("uninstall", "kaldır", "kaldir")):
+        name = cast(OpenApplicationArguments, arguments).name
+        # Söylenen ad da, takma adın bağlandığı uygulama da kaldırıcıysa onay sorulur.
+        if _uninstaller(name) or _uninstaller(application_match(context, name, fuzzy=False).name):
             return Risk.CONFIRM_REQUIRED
         return self.risk
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(OpenApplicationArguments, arguments)
-        executable = application_executable(context, args.name)
-        if executable is None:
-            return ToolResult(status="error", message="Uygulama izin listesinde yok.")
+        match = application_match(context, args.name, fuzzy=True)
+        # Yakın eşleşme yalnız temiz turda kendiliğinden açılır. Lekeli turda kullanıcı onayda
+        # söylenen adı gördü, yakın eşleşmenin seçtiği uygulamayı değil: tam adla yeniden
+        # istenir ki onay penceresi gerçek hedefi göstersin.
+        if match.executable is None or (match.kind == "fuzzy" and context.turn_tainted):
+            return _unresolved(args.name, match, action="açma")
+        executable = match.executable
+        if match.kind == "fuzzy":
+            context.audit.emit(
+                "app_resolution", turn_id=context.turn_id, application=match.name, kind="fuzzy"
+            )
+        result = await self._open(args, executable, context)
+        if match.kind != "fuzzy":
+            return result
+        return result.model_copy(update={
+            "message": f"'{args.name}' için en yakın uygulama {match.name}. {result.message}",
+            "data": {**result.data, "application": match.name, "requested": args.name},
+        })
+
+    async def _open(
+        self, args: OpenApplicationArguments, executable: str, context: ToolContext
+    ) -> ToolResult:
         try:
             payload: dict[str, object] = {"executable": executable}
             document: str | None = None
@@ -157,10 +211,12 @@ class CloseApplication(BaseTool):
 
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
         args = cast(ApplicationArguments, arguments)
-        executable = application_executable(context, args.name)
+        match = application_match(context, args.name, fuzzy=False)
+        executable = match.executable
+        # Takma ad, bağlandığı uygulamanın onaysız kapatma tercihini taşır.
         if (
-            application_executable(context, args.name) is not None
-            and args.name.casefold() in {
+            match.name is not None
+            and match.name.casefold() in {
                 name.casefold() for name in context.settings.close_without_confirmation
             }
         ):
@@ -184,7 +240,10 @@ class CloseApplication(BaseTool):
         args = cast(ApplicationArguments, arguments)
         executable = application_executable(context, args.name)
         if executable is None:
-            return ToolResult(status="error", message="Uygulama izin listesinde yok.")
+            # Kapatma yakın eşleşmeyle asla yapılmaz; yalnız öneri döner.
+            return _unresolved(
+                args.name, application_match(context, args.name, fuzzy=True), action="kapatma"
+            )
         try:
             if "desktop" in context.services:
                 closed = await asyncio.to_thread(

@@ -348,7 +348,11 @@ Uygulamalar `applications` içindeki izinli takma adlarla açılır/kapatılır
 [ADR 0018](docs/adr/0018-installed-apps-and-wake-feedback.md)); serbest
 shell komutu aracı yoktur. Kapatma, izinli `.exe` adına uyan bütün süreçlere normal
 kapatma isteği gönderir; kaydedilmemiş işler kaybolabilir. Windows'a bağlı uygulama
-ve pano işlevleri Linux'ta desteklenmediğini bildirir. Linux üzerinde çekirdek,
+ve pano işlevleri Linux'ta desteklenmediğini bildirir.
+Söylenen ad tam eşleşmezse okunuşa göre en yakın izinli uygulama açılır ("breyv" →
+Brave); iki aday yakınsa Artemis sorar, kapatma ve dış içerik okunan tur tahminle
+çalışmaz. "Hayır, Brave'i kastettim" gibi düzeltmeler `state_dir/app_aliases.json`'a
+takma ad olarak yazılır ([ADR 0044](docs/adr/0044-spoken-application-names.md)). Linux üzerinde çekirdek,
 dosyalar ve sahte platform adaptörleri test edilir.
 
 Günlük kullanımda seçili uygulamalar için tekrar kapatma onayını kaldırabilirsiniz:

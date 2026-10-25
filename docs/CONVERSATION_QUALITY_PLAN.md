@@ -193,6 +193,13 @@ gecikme ve barge-in ölçümü aşama 1 ile aynı runtime'dan alınmalı.
 
 ### 4. Niyet, hedef ve uygulama kataloğu
 
+**2026-10-25 — başladı.** İlk adım [ADR 0044](adr/0044-spoken-application-names.md):
+söylenen uygulama adı okunuş iskeletiyle izinli katalogdan çözülür, yakın iki aday
+varsa sorulur, kullanıcı düzeltmesi `state_dir`'de takma ad olarak hatırlanır; lekeli
+turda ve kapatmada yakın eşleşme çalışmaz. Kalan: olumsuzluk/düzeltme/belirsiz hedef
+için etiketli niyet seti ve araç başarısı oranı raporu, STT hotword ölçümü, gerçek
+Windows kataloğu ve STT çıktısıyla eşik doğrulaması.
+
 STT metninin doğruluğunu, niyet/hedef seçimini ayrı test katmanlarında ölçün.
 Olumsuzluk (“açma”), düzeltme (“onu değil”), belirsiz hedef ve soru sorma
 davranışını örnek bazında etiketleyin. Yanlış transcript sessizce başka bir
