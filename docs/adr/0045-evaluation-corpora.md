@@ -118,3 +118,28 @@ konuşma diye kestiği parça gider, bu yüzden boşta maliyet oluşmaz.
 **Karar:** `stt_vad_filter: false` önerilir: telefon bandında kaçırma %40 → %0, WER %25,4 →
 %19,8, hedef %82,5 → %90, gecikme ve yanlış uyanma değişmez. Ölçülmeyen: ≥1 saat gerçek komutsuz
 konuşmada yanlış uyanma ve gerçek mikrofonla canlı deneme (A1/A5 ile birlikte).
+
+## A6: GPU STT karşılaştırması (2026-10-26, Windows, RTX 4050 6 GB)
+
+Taban: Umut'un config'i (`large-v3`, `float16`, beam 5, `tr_en`, `stt_vad_filter: false`,
+hotword Artemis/tarayıcı). Her satır tek değişken; Artemis'in sesi kapalı, GPU boşta 439 MiB.
+Corpus: Common Voice tr 600 gerçek konuşmacı; sentetik 294 (Piper dfki 134, Edge Emel 134,
+Edge Ahmet 26 — Ahmet akışı sık hata verdi).
+
+| Ayar | CV WER | Sentetik WER | Hedef | Yanlış hedef | Wake kaçırma | Gecikme medyan (CV/sent.) | VRAM tepe |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Taban | %13,6 | %18,8 | %90,2 | 4 | %2,7 | 979 / 920 ms | 4,75 GB |
+| `large-v3-turbo` | %19,6 | %13,4 | %93,3 | 0 | %0,9 | 698 / 678 ms | 2,91 GB |
+| beam 1 | %14,3 | %19,0 | %90,9 | 2 | %0,9 | 931 / 902 ms | 4,86 GB |
+| `stt_language: tr` | %13,4 | %18,6 | %90,2 | 4 | %2,7 | 641 / 640 ms | 4,77 GB |
+
+Yanlış uyanma her satırda 0 ("artmış" eşleştirici düzeltmesi tutuyor; karar maddesi kapanır).
+
+- **turbo:** sentetikte iyi, gerçek konuşmacıda belirgin kötü (WER %13,6 → %19,6); sentetik
+  kabul sayılmadığından `large-v3` kalır. VRAM 1,8 GB az; GPU'yu oyunla paylaşma gerekirse seçenek.
+- **beam 1:** hız kazancı yok, doğruluk hafif düşer; beam 5 kalır.
+- **`tr`:** doğruluk `tr_en` ile aynı, gecikme ~300 ms az. Fark `tr_en`'in her sözde yaptığı
+  ek `detect_language` geçişidir (ADR 0021). Corpus'ta İngilizce cümle yoktur; `tr`'nin bedeli
+  tam İngilizce cümlenin Türkçe zorla yazılmasıdır ve burada ölçülmedi. Kiril riski `tr`'de de
+  yoktur (dil sabit). Karar Umut'ta: İngilizce cümle kurmuyorsa `tr` önerilir.
+- Yanlış hedef 4 (taban, sentetik): çözücü belirsiz adı yanlış uygulamaya bağladı; ayrı incelenmeli.
