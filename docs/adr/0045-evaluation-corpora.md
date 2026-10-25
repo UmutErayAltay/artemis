@@ -65,3 +65,21 @@ belirlenimliliği ve SNR'ı, Common Voice konuşmacı ayrımı, dengeli seçim, 
 uçtan uca kur + ölç, sızıntı reddi, hedef çözümü, uyandırma ve hedef hata sayımı.
 Mutasyon (9): depo koruması, sızıntı denetimi, konuşmacı ayrımı, down_votes süzgeci, yanlış
 hedef ve yanlış uyanma sayımı, uygulama ve ses ayrımı, yarım indirme — hepsi testleri kırdı.
+
+## İlk ölçüm (2026-10-25, bulut oturumu, CPU)
+
+Whisper `large-v3-turbo`, `stt_device: cpu`, `int8`, `stt_language: tr`, beam 5. Bulut
+CPU'su (4 çekirdek, GPU yok); gecikme sayıları Windows/RTX 4050 için anlamlı değildir.
+
+| Corpus | Örnek / konuşmacı | WER | CER | Diğer |
+| --- | --- | --- | --- | --- |
+| Common Voice tr (gerçek) | 300 / 300 (dev 158, test 142) | %16,3 (test %12,9) | %7,3 | — |
+| Sentetik (Piper dfki dev, Edge Emel test) | 274 / 3 | %14,9 | — | ad yazımı %61, çözücüyle hedef %95, yanlış hedef 0 |
+
+Sentetik koşul kırılımı: temizde uyandırma kaçırma %0; pembe gürültü 5 dB'de %29, telefon
+bandında %19. Hedef doğruluğu dev'de %99, görülmemiş uygulama adlarıyla test'te %92.
+
+Uyandırma kuralı değişikliğinin A/B'si (aynı STT çıktısı, aynı corpus): eski kural 4 yanlış
+uyanma (hepsi "artmış"), yeni kural **0**; uyandırma kaçırma iki kuralda da **%3,8**
+(değişmedi). Sentetik sonuç kabul kanıtı değildir; Windows/GPU karşılaştırması
+[WINDOWS_CHECKLIST.md](../WINDOWS_CHECKLIST.md) A6'dadır.
