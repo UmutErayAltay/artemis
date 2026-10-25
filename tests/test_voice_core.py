@@ -505,7 +505,10 @@ async def test_run_interrupts_playback_only_after_accepted_final_transcript(
 
     recognizer = Recognizer([transcript])
     controller = VoiceController(
-        runner, VoiceConfig(pre_roll_ms=0, end_silence_ms=100, **config), Mic(),
+        runner,
+        # ADR 0040 kuralları; uyandırmasız susturma (ADR 0042) ayrı testlerde sınanır.
+        VoiceConfig(pre_roll_ms=0, end_silence_ms=100, barge_in_without_wake=False, **config),
+        Mic(),
         FakeVAD([True] * 60 + [False] * 5), recognizer, FakeTTS(), sink,
     )
     if followup:
@@ -598,7 +601,8 @@ async def test_stream_eof_aborts_pending_playback_after_non_wake_noise():
 
     controller = VoiceController(
         runner,
-        VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100),
+        # ADR 0040 yolu: uyandırmasız söz kesme (ADR 0042) kapalıyken gürültü susturmaz.
+        VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100, barge_in_without_wake=False),
         Mic(frames, delay=0.01),
         FakeVAD([True, True, *([False] * 5), *([True] * 10), *([False] * 5)]),
         recognizer,

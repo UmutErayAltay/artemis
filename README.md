@@ -115,7 +115,10 @@ onay sayılmaz. İlk Windows denemesini kulaklıkla yapın.
 
 **Kesintisiz sohbet** (varsayılan kapalı): ayarlardaki onay kutusu veya `voice.continuous_mode` ile
 "artemis" demeden konuşabilirsiniz; “kesintisiz moda geç” / “normal moda geç” diyerek de değiştirilir.
-Asistan konuşurken söz kesmek yine “artemis” ister (`voice.require_wake_during_output`,
+Asistan konuşurken herhangi bir söz (“dur”, “bir saniye”) onu susturur; bu söz komut
+olarak çalıştırılmaz, ardından söylenen cümle uyandırmasız takip komutu olur
+(`voice.barge_in_without_wake`, [ADR 0042](docs/adr/0042-wake-free-barge-in.md)). Konuşurken
+doğrudan komut vermek yine “artemis” ister (`voice.require_wake_during_output`,
 [ADR 0022](docs/adr/0022-repetition-and-spoken-echo-guard.md),
 [ADR 0024](docs/adr/0024-continuous-voice-mode.md)). Asistanın kendi sesinin yankısı ve
 tekrar eden STT parçaları komut sayılmaz.

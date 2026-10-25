@@ -436,6 +436,24 @@ class VoiceController:
             and segment.speech_start <= self._spoken_until
             and find_wake_word(transcript, self.config.wake_word) is None
         ):
+            # ADR 0042: hoparlöre yazım sürerken doğrulanmış söz susturur ama komut olmaz;
+            # sonraki söz uyandırmasız takip olarak alınır. Kısa patlama (öksürük, kapı)
+            # STT'den geçse bile barge_in_ms altında kalır.
+            if (
+                self.config.barge_in_without_wake
+                and self._output_active
+                and (segment.speech_end - segment.speech_start) * 1000 >= self.config.barge_in_ms
+            ):
+                self.on_transcript("Söz kesildi; dinliyorum.")
+                await self._interrupt_output(uid)
+                # Kullanıcı bilerek susturdu: takip sözü wake istemez. Yankı filtresi
+                # (_is_spoken_echo) son yanıt metniyle çalışmaya devam eder.
+                self._output_requires_wake = False
+                self._followup_until = self.clock() + self.config.followup_seconds
+                self._awaiting_followup = True
+                self._emit_state("awaiting_command")
+                self._event(uid, "terminal", outcome="interrupted", reason="barge_in")
+                return
             self.on_transcript("Ses yok sayıldı; söz kesmek için Artemis diyerek başla.")
             self._event(uid, "terminal", outcome="rejected", reason="output_requires_wake")
             return
@@ -446,8 +464,25 @@ class VoiceController:
         if toggle is None and command is None:
             self._event(uid, "terminal", outcome="rejected", reason="no_wake")
             return
-        # Stop çifti kesen sözün kimliğinde tutulur (generation'sız): böylece hem stop
-        # isteğinden hem kullanıcı sesinin başından oynatmanın durmasına süre ölçülür.
+        await self._interrupt_output(uid)
+        self._generation_sequence += 1
+        gid = self._generation_sequence
+        if toggle is not None:
+            self.set_continuous(toggle)
+            text = "Kesintisiz mod açık." if toggle else "Kesintisiz mod kapalı."
+            self._active = asyncio.create_task(self._acknowledge_wake(text, uid=uid, gid=gid))
+        elif not command:
+            self._active = asyncio.create_task(self._acknowledge_wake(uid=uid, gid=gid))
+        else:
+            self._barge_cancelled = False
+            self._active = asyncio.create_task(self._run_and_speak(command, uid=uid, gid=gid))
+
+    async def _interrupt_output(self, uid: int) -> None:
+        """Etkin turu ve oynatmayı durdurur; temizlik bitmeden yeni tur başlamaz.
+
+        Stop çifti kesen sözün kimliğinde tutulur (generation'sız): böylece hem stop
+        isteğinden hem kullanıcı sesinin başından oynatmanın durmasına süre ölçülür.
+        """
         interrupting = self._output_active
         if self._active is not None and not self._active.done():
             if interrupting:
@@ -463,17 +498,6 @@ class VoiceController:
         if interrupting:
             # Sink'e yazım burada bitmiştir; aygıt tamponundaki son blok ölçülmez.
             self._event(uid, "playback_stopped")
-        self._generation_sequence += 1
-        gid = self._generation_sequence
-        if toggle is not None:
-            self.set_continuous(toggle)
-            text = "Kesintisiz mod açık." if toggle else "Kesintisiz mod kapalı."
-            self._active = asyncio.create_task(self._acknowledge_wake(text, uid=uid, gid=gid))
-        elif not command:
-            self._active = asyncio.create_task(self._acknowledge_wake(uid=uid, gid=gid))
-        else:
-            self._barge_cancelled = False
-            self._active = asyncio.create_task(self._run_and_speak(command, uid=uid, gid=gid))
 
     @staticmethod
     def _speech_words(text: str) -> list[str]:

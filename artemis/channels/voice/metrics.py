@@ -26,10 +26,14 @@ STAGES = (
 )
 # Çok adımlı turda model ve araç birden çok kez çağrılır; bu aşamalar tekrar edebilir.
 REPEATABLE = {"model_request", "model_response", "tool_start", "tool_end"}
-OUTCOMES = ("completed", "rejected", "cancelled", "error", "no_audio", "ack", "unfinished")
+OUTCOMES = (
+    "completed", "rejected", "cancelled", "error", "no_audio", "ack", "interrupted",
+    "unfinished",
+)
 REASONS = {
     "max_utterance", "empty_transcript", "echo", "output_requires_wake", "no_wake",
     "stt_error", "stt_cancelled", "waiting_previous", "approval", "capture_stopped",
+    "barge_in",
 }
 COMMAND_CLASSES = ("chat", "tool")
 PROFILES = ("cold", "warm")

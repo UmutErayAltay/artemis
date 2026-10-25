@@ -9,7 +9,10 @@ Stage = Literal[
     "model_complete", "tts_first_chunk", "first_pcm", "terminal",
     "stop_requested", "playback_stopped",
 ]
-Outcome = Literal["completed", "rejected", "cancelled", "error", "no_audio", "ack"]
+# ``interrupted``: uyandırmasız söz yalnız oynatmayı susturdu, komut çalışmadı (ADR 0042).
+Outcome = Literal[
+    "completed", "rejected", "cancelled", "error", "no_audio", "ack", "interrupted",
+]
 # Araç çağrısı olan tur ``tool``; model hiç araç çağırmadıysa ``chat``. Runner'a hiç
 # ulaşmayan (meşgul/iptal) tur sınıflandırılmaz.
 CommandClass = Literal["chat", "tool"]
