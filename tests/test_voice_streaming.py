@@ -218,7 +218,9 @@ async def test_first_sentence_is_heard_before_the_model_finishes(tmp_path):
     report = timing_report(events)
     sample = report["utterances"][0]
     assert sample["streamed"] and not sample["invalid_timing"]
-    assert sample["timings"]["first_pcm"] < sample["timings"]["model_complete"]
+    # Sıra yukarıda olayla kanıtlandı (ilk PCM'de model_complete yoktu); Windows saati
+    # ~15.6 ms çözünürlüklüdür, iki damga aynı tik'e düşebilir.
+    assert sample["timings"]["first_pcm"] <= sample["timings"]["model_complete"]
     assert report["model_first_token_ms"]["samples"] == 1
 
 
