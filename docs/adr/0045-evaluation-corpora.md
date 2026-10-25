@@ -106,9 +106,15 @@ config'te `stt_hotwords: [Artemis, tarayıcı]` zaten açık.
 - VAD süzgecini kapatmak telefon kaçırmalarını sıfırlar ve tüm doğruluk ölçülerini
   iyileştirir: VAD, bant sınırlı seste baştaki "Artemis"i kesiyor.
 
-**Karar (askıda):** varsayılan henüz değişmez. Gecikme sütunu güvenilir değildir (aynı ayardaki
-ilk iki deney 941 ve 1973 ms); corpus'ta sessizlik örneği yoktur (VAD kapalıyken halüsinasyon
-riski ölçülmedi) ve wake-siz ses yalnız 4 dakikadır. Sıradaki: aynı oturumda taban ve VAD
-kapalı gecikmesini art arda yeniden ölç, sessizlik/≥1 saat komutsuz sesle yanlış uyanma ve
-halüsinasyon ölç; ikisi temizse `stt_vad_filter: false` (ya da yalnız uyandırma penceresinde
-VAD'siz) önerilir.
+Yeniden ölçüm (aynı oturum, dönüşümlü, başka GPU yükü yok): doğruluk sayıları iki koşuda da
+birebir aynı (belirlenimli). Gecikme medyanı taban 1035 / 916 ms, VAD kapalı 848 / 927 ms:
+fark yok; ilk tablodaki 1973–2784 ms art arda koşulan iki ağır işin GPU çekişmesiydi.
+
+Sessizlik corpus'u (`silence_tr`, 48 × 4 sn: dither −70 dBFS, pembe −50/−40/−30 dBFS, telefon
+bandı pembe −40, 50 Hz vınlama + pembe): iki ayarda da halüsinasyon **0**, yanlış uyanma **0**.
+VAD kapalıyken saf gürültü STT'si 346 → 892 ms sürer; canlı döngüde STT'ye yalnız webrtc VAD'in
+konuşma diye kestiği parça gider, bu yüzden boşta maliyet oluşmaz.
+
+**Karar:** `stt_vad_filter: false` önerilir: telefon bandında kaçırma %40 → %0, WER %25,4 →
+%19,8, hedef %82,5 → %90, gecikme ve yanlış uyanma değişmez. Ölçülmeyen: ≥1 saat gerçek komutsuz
+konuşmada yanlış uyanma ve gerçek mikrofonla canlı deneme (A1/A5 ile birlikte).
