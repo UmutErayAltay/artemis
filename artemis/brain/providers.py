@@ -18,6 +18,7 @@ from uuid import uuid4
 
 import httpx
 
+from artemis.brain.claude_stream import ClaudeStreamReader
 from artemis.brain.errors import (
     BudgetExceeded as BudgetExceeded,
 )
@@ -604,7 +605,7 @@ class AnthropicProvider:
             "system": "\n".join(system),
             "messages": converted,
             "max_tokens": self.settings.max_output_tokens,
-            "stream": False,
+            "stream": stream is not None,
         }
         if tools:
             payload["tools"] = [
@@ -615,12 +616,14 @@ class AnthropicProvider:
                 }
                 for item in _tool_schemas(tools)
             ]
-        data = await _post(
-            f"{str(self.settings.anthropic_base_url).rstrip('/')}/messages",
-            payload,
-            {"x-api-key": _key("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"},
-            timeout=timeout,
-        )
+        url = f"{str(self.settings.anthropic_base_url).rstrip('/')}/messages"
+        headers = {"x-api-key": _key("ANTHROPIC_API_KEY"), "anthropic-version": "2023-06-01"}
+        if stream is None:
+            data = await _post(url, payload, headers, timeout=timeout)
+        else:
+            accumulator = _AnthropicStreamAccumulator(stream)
+            await _post_lines(url, payload, headers, timeout=timeout, on_line=accumulator)
+            data = accumulator.response()
         content: list[str] = []
         calls: list[ToolCall] = []
         for raw in _array(data.get("content")):
@@ -643,6 +646,100 @@ class AnthropicProvider:
             provider="anthropic",
             model=self.model.model,
         )
+
+
+class _AnthropicStreamAccumulator:
+    """Messages API SSE olaylarını tam yanıt gövdesine çevirir; araç girdisi akışa girmez."""
+
+    def __init__(self, stream: TextStream) -> None:
+        self.stream = stream
+        self.blocks: dict[int, dict[str, Any]] = {}
+        self.input_tokens: Any = None
+        self.output_tokens: Any = None
+        self.stop_reason: Any = None
+        self.done = False
+        self._text_seen = False
+
+    def __call__(self, line: str) -> None:
+        if not line.startswith("data:"):
+            return  # "event:" satırı; tür, veri nesnesinin "type" alanında da var
+        data = _json_line(line[5:].strip())
+        kind = data.get("type")
+        if kind == "message_start":
+            usage = _object(_object(data.get("message")).get("usage") or {})
+            self.input_tokens = usage.get("input_tokens")
+            self.output_tokens = usage.get("output_tokens")
+        elif kind == "content_block_start":
+            block = _object(data.get("content_block"))
+            index = self._index(data)
+            if block.get("type") == "tool_use":
+                self.stream.tool_call()
+                self.blocks[index] = {
+                    "type": "tool_use", "id": block.get("id"), "name": block.get("name"),
+                    "json": "",
+                }
+            elif block.get("type") == "text":
+                self.blocks[index] = {"type": "text", "text": "", "started": False}
+        elif kind == "content_block_delta":
+            target = self.blocks.get(self._index(data))
+            delta = _object(data.get("delta"))
+            if target is None:
+                raise ProviderError("Sağlayıcı akışında başlamamış bir içerik bloğu var.")
+            if delta.get("type") == "text_delta" and target["type"] == "text":
+                piece = _string(delta.get("text"))
+                if piece and not target["started"]:
+                    target["started"] = True
+                    if self._text_seen:
+                        # Akışsız ayrıştırıcı metin bloklarını satır sonuyla birleştirir.
+                        self.stream.text("\n")
+                    self._text_seen = True
+                target["text"] += piece
+                self.stream.text(piece)
+            elif delta.get("type") == "input_json_delta" and target["type"] == "tool_use":
+                target["json"] += _string(delta.get("partial_json"))
+        elif kind == "message_delta":
+            delta = _object(data.get("delta") or {})
+            if delta.get("stop_reason") is not None:
+                self.stop_reason = delta["stop_reason"]
+            usage = _object(data.get("usage") or {})
+            if "output_tokens" in usage:
+                self.output_tokens = usage["output_tokens"]
+        elif kind == "message_stop":
+            self.done = True
+        elif kind == "error":
+            error = _object(data.get("error") or {})
+            if error.get("type") == "overloaded_error":
+                raise RetryableProviderError("Sağlayıcı aşırı yüklü; akış kesildi.")
+            raise ProviderError("Sağlayıcı akışı hata ile bitti.")
+
+    @staticmethod
+    def _index(data: dict[str, Any]) -> int:
+        index = data.get("index")
+        if isinstance(index, bool) or not isinstance(index, int):
+            raise ProviderError("Sağlayıcı akışındaki blok sırası geçersiz.")
+        return index
+
+    def response(self) -> dict[str, Any]:
+        if not self.done:
+            raise RetryableProviderError("Sağlayıcı akışı tamamlanmadan kesildi.")
+        content: list[dict[str, Any]] = []
+        for index in sorted(self.blocks):
+            block = self.blocks[index]
+            if block["type"] == "text":
+                content.append({"type": "text", "text": block["text"]})
+            else:
+                try:
+                    arguments = json.loads(block["json"] or "{}")
+                except (json.JSONDecodeError, ValueError):
+                    raise ProviderError("Sağlayıcı akışındaki araç girdisi geçersiz.") from None
+                content.append({
+                    "type": "tool_use", "id": block["id"], "name": block["name"],
+                    "input": arguments,
+                })
+        return {
+            "content": content, "stop_reason": self.stop_reason,
+            "usage": {"input_tokens": self.input_tokens, "output_tokens": self.output_tokens},
+        }
 
 
 class OllamaProvider:
@@ -803,7 +900,9 @@ class ClaudeCliProvider:
             handle.write(system)
         prompt_file = Path(handle.name)
         try:
-            return await self._run(executable, prompt_file, schema, masked, names, timeout)
+            return await self._run(
+                executable, prompt_file, schema, masked, names, timeout, stream
+            )
         finally:
             prompt_file.unlink(missing_ok=True)
 
@@ -815,10 +914,16 @@ class ClaudeCliProvider:
         masked: list[Message],
         names: list[str],
         timeout: float,
+        stream: TextStream | None = None,
     ) -> Completion:
+        # ADR 0043: akışta yanıt StructuredOutput aracının girdisi olarak parça parça gelir.
+        output = (
+            ["--output-format", "stream-json", "--verbose", "--include-partial-messages"]
+            if stream is not None else ["--output-format", "json"]
+        )
         # Yerleşik araçlar kapalı; MCP ile kullanıcı/proje ayarları (CLAUDE.md dahil) yok sayılır.
         args = [
-            "-p", "--output-format", "json", "--model", self.model.model,
+            "-p", *output, "--model", self.model.model,
             "--tools", "", "--strict-mcp-config", "--setting-sources", "",
             "--no-session-persistence", "--system-prompt-file", str(prompt_file),
             "--json-schema", json.dumps(schema),
@@ -838,17 +943,25 @@ class ClaudeCliProvider:
                 *args,
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+                # Akışta stderr okunmaz; boru dolup süreci tıkamasın diye atılır.
+                stderr=asyncio.subprocess.PIPE if stream is None else asyncio.subprocess.DEVNULL,
                 cwd=self.settings.state_dir,
                 env=child_environment(),  # ANTHROPIC_API_KEY geçmez: abonelik kullanılır
+                # result satırı tam yanıtı taşır; varsayılan 64 KiB satır sınırı yetmeyebilir.
+                limit=16 * 1024 * 1024,
                 **options,
             )
         except OSError:
             raise ProviderError(_CLI_FAILED) from None
         try:
-            out, _err = await asyncio.wait_for(
-                proc.communicate(self._transcript(masked).encode()), timeout
-            )
+            if stream is None:
+                out, _err = await asyncio.wait_for(
+                    proc.communicate(self._transcript(masked).encode()), timeout
+                )
+            else:
+                out = await asyncio.wait_for(
+                    self._read_stream(proc, self._transcript(masked).encode(), stream), timeout
+                )
         except TimeoutError:
             raise RetryableProviderError("Claude Code yanıt süresi doldu.") from None
         finally:
@@ -860,6 +973,29 @@ class ClaudeCliProvider:
                         proc.kill()
                 await proc.wait()
         return self._parse(proc.returncode, out, names)
+
+    @staticmethod
+    async def _read_stream(
+        proc: asyncio.subprocess.Process, transcript: bytes, stream: TextStream,
+    ) -> bytes:
+        """Satırları akıtır; tam yanıt olarak son ``result`` nesnesini döndürür."""
+        reader = ClaudeStreamReader(stream)
+        assert proc.stdin is not None and proc.stdout is not None
+        try:
+            proc.stdin.write(transcript)
+            await proc.stdin.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            raise ProviderError(_CLI_FAILED) from None
+        finally:
+            proc.stdin.close()
+        try:
+            while line := await proc.stdout.readline():
+                reader.line(line.decode("utf-8", "replace"))
+        except ValueError:  # satır sınırı aşıldı (LimitOverrunError)
+            raise ProviderError(_CLI_FAILED) from None
+        await proc.wait()
+        # result satırı yoksa boş gövde _parse'ta başarısızlık olur; uydurma yanıt yok.
+        return json.dumps(reader.result).encode() if reader.result is not None else b""
 
     def _parse(self, code: int | None, out: bytes, names: list[str]) -> Completion:
         # stdout/stderr kullanıcı verisi içerebilir; hata metnine asla girmez.

@@ -79,3 +79,28 @@ argüman sızıntısı, kesik akışın başarı sayılması, akan metnin tekrar
 kesme testleri kırdı; iki mutasyon eşdeğer çıktı (bekleyen iddia adım başında zaten
 temizlenir; tur başına ayrı akış kuyruğu yeni tura geçemez). Kalan: `claude_cli`,
 Anthropic SSE, Windows canlı ölçüm.
+
+## Uygulama (2026-10-25, ikinci adım): Anthropic ve `claude_cli`
+
+- **Anthropic** Messages SSE (`message_start` … `message_stop`) tam yanıt gövdesine
+  toplanır; `tool_use` girdisi (`input_json_delta`) akışa girmez, `message_stop` gelmeden
+  biten akış başarı sayılmaz, `overloaded_error` yeniden denenebilir hatadır.
+- **`claude_cli`**: `--output-format stream-json --verbose --include-partial-messages`.
+  Agent SDK belgesine göre `--json-schema` yanıtı CLI'nin eklediği `StructuredOutput`
+  aracının girdisidir. `artemis/brain/claude_stream.py` bu girdinin yalnız **üst düzey**
+  `content` dizgesini artımlı çözer (derinlik + dizge durumu; kaçış ve vekil çift parça
+  sınırında bölünebilir, geçersiz kaçış akışı keser). Üst düzey `tool_calls` dizisine öğe
+  yazılınca "araç başladı" denir; iç içe `content` (ör. bir aracın argümanı) ve dizge
+  olmayan `content` asla akmaz. İkinci `StructuredOutput` çağrısı (şema yeniden denemesi
+  veya yedek model geri alması) akıtılmaz; tur sonunda doğrulanmış yanıt söylenir. Tam
+  yanıt yine son `result` satırının `structured_output`'undan bugünkü ayrıştırıcıyla
+  doğrulanır; `result` yoksa başarısızlıktır. Akışta stderr atılır (boru dolup süreci
+  tıkamasın), satır sınırı 16 MiB'tir.
+- `finish` karşılaştırması boşluk normalize edilerek yapılır: blokların satır sonuyla
+  birleşmesi akan yanıtı ikinci kez söyletmez.
+
+**Doğrulanmayan:** `claude_cli` akış biçimi belgeye ve sahte süreçle sınandı; gerçek CLI
+çıktısı bu ortamda çalıştırılmadı (abonelik çağrısı). Biçim farklıysa metin akmaz ve yanıt
+tamamı gelince söylenir (bugünkü davranış). Windows'ta canlı deneme gerekir.
+Doğrulama: 1700 test; mutasyon: iç içe/dizge olmayan `content`, ikinci deneme, araç işareti,
+`result` yokluğu, Anthropic girdi sızıntısı ve kesik akış testleri kırdı.

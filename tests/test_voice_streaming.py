@@ -87,6 +87,7 @@ def test_claim_before_tool_call_is_dropped_and_rest_of_step_is_silent():
     ("Saat on.", "Saat on.", ["Saat on."]),  # akarken bir kez; sonda tekrar yok
     ("Uzun yanıt", "Uzun yanıt\n\n…(kesildi)", ["Uzun yanıt", "…(kesildi)"]),
     ("", "Model yanıtı akmadı.", ["Model yanıtı akmadı."]),
+    ("Bir.\nİki.", "Bir.\n\nİki.", ["Bir.", "İki."]),  # yalnız boşluk farkı: tekrar yok
 ])
 def test_finish_speaks_only_what_did_not_stream(streamed, final, expected):
     speech = SpeechStream()

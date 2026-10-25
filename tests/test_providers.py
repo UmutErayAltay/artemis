@@ -648,3 +648,81 @@ async def test_router_without_stream_keeps_old_provider_contract(tmp_path):
     router = _router(tmp_path, Legacy(), Legacy())
     assert (await router.complete(STREAM_MESSAGES, [], timeout=5)).content == "eski"
 
+
+
+def _anthropic_sse(*events: dict[str, Any]) -> bytes:
+    lines = []
+    for event in events:
+        lines.append(f"event: {event['type']}")
+        lines.append(f"data: {json.dumps(event, ensure_ascii=False)}")
+        lines.append("")
+    return ("\n".join(lines) + "\n").encode("utf-8")
+
+
+def _anthropic_events(*, stop: bool = True) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = [
+        {"type": "message_start", "message": {"usage": {"input_tokens": 100, "output_tokens": 1}}},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+        {"type": "content_block_delta", "index": 0,
+         "delta": {"type": "text_delta", "text": "Bakıyorum. "}},
+        {"type": "content_block_delta", "index": 0,
+         "delta": {"type": "text_delta", "text": "Hemen."}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "content_block_start", "index": 1,
+         "content_block": {"type": "tool_use", "id": "call_1", "name": "file-read_1", "input": {}}},
+        {"type": "content_block_delta", "index": 1,
+         "delta": {"type": "input_json_delta", "partial_json": "{\"path\": \"ör"}},
+        {"type": "content_block_delta", "index": 1,
+         "delta": {"type": "input_json_delta", "partial_json": "nek.txt\"}"}},
+        {"type": "content_block_stop", "index": 1},
+        {"type": "message_delta", "delta": {"stop_reason": "tool_use"},
+         "usage": {"output_tokens": 20}},
+    ]
+    if stop:
+        events.append({"type": "message_stop"})
+    return events
+
+
+async def test_anthropic_streams_text_and_assembles_tool_input_silently(http_server, tmp_path):
+    http_server.body = _anthropic_sse(*_anthropic_events())
+    recorder = Recorder()
+    completion = await provider_for("anthropic", http_server, tmp_path).complete(
+        STREAM_MESSAGES, STREAM_TOOLS, timeout=5, stream=recorder,
+    )
+    assert http_server.requests[0][1]["stream"] is True
+    assert recorder.joined == "Bakıyorum. Hemen."
+    assert ("tool", "") in recorder.events and "örnek" not in recorder.joined
+    assert completion.tool_calls[0].arguments == {"path": "örnek.txt"}
+    assert (completion.usage.input_tokens, completion.usage.output_tokens) == (100, 20)
+
+
+async def test_anthropic_stream_without_message_stop_is_not_success(http_server, tmp_path):
+    http_server.body = _anthropic_sse(*_anthropic_events(stop=False))
+    with pytest.raises(RetryableProviderError):
+        await provider_for("anthropic", http_server, tmp_path).complete(
+            STREAM_MESSAGES, STREAM_TOOLS, timeout=5, stream=Recorder(),
+        )
+
+
+@pytest.mark.parametrize(("error", "expected"), [
+    ("overloaded_error", RetryableProviderError), ("invalid_request_error", ProviderError),
+])
+async def test_anthropic_stream_error_event_is_an_error(http_server, tmp_path, error, expected):
+    http_server.body = _anthropic_sse(
+        _anthropic_events()[0], {"type": "error", "error": {"type": error, "message": "x"}},
+    )
+    with pytest.raises(expected):
+        await provider_for("anthropic", http_server, tmp_path).complete(
+            STREAM_MESSAGES, [], timeout=5, stream=Recorder(),
+        )
+
+
+async def test_anthropic_broken_streamed_tool_input_is_rejected(http_server, tmp_path):
+    events = _anthropic_events()
+    events[7] = {"type": "content_block_delta", "index": 1,
+                 "delta": {"type": "input_json_delta", "partial_json": ""}}
+    http_server.body = _anthropic_sse(*events)
+    with pytest.raises(ProviderError):
+        await provider_for("anthropic", http_server, tmp_path).complete(
+            STREAM_MESSAGES, STREAM_TOOLS, timeout=5, stream=Recorder(),
+        )

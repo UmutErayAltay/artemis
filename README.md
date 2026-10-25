@@ -125,8 +125,8 @@ tekrar eden STT parçaları komut sayılmaz.
 Yanıt, model yazarken cümle cümle seslendirilir (`voice.streaming`,
 [ADR 0043](docs/adr/0043-streaming-voice-response.md)); araç çağrısı başlayan adımın
 metni ve araç sonucu görülmeden söylenen “kapattım/gönderdim” gibi cümleler
-seslendirilmez. Şimdilik Ollama ve OpenRouter/OpenAI uyumlu sağlayıcılar akar; diğerlerinde
-yanıt tamamı gelince söylenir.
+seslendirilmez. Ollama, OpenRouter/OpenAI uyumlu, Anthropic ve `claude_cli` akar; akmayan
+sağlayıcıda (ve demo kipinde) yanıt tamamı gelince söylenir.
 Gürültü veya yalnız VAD etkinliği seslendirmeyi kesmez; söz kesme cümle sonu
 sessizliği ve nihai STT doğrulamasını bekler
 ([ADR 0040](docs/adr/0040-validated-playback-interruption.md)).

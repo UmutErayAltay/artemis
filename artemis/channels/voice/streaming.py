@@ -102,8 +102,10 @@ class SpeechStream:
         akan metniyle başlamaz ve olduğu gibi söylenir.
         """
         if not self._closed:
-            streamed = (self._finished_step_text or "").strip()
-            final = final_text.strip()
+            # Boşluk farkı (sağlayıcının blokları satır sonuyla birleştirmesi) akan yanıtı
+            # ikinci kez söyletmesin: karşılaştırma boşluk normalize edilerek yapılır.
+            streamed = " ".join((self._finished_step_text or "").split())
+            final = " ".join(final_text.split())
             if not streamed:
                 remainder = final
             elif final.startswith(streamed):
