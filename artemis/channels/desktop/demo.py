@@ -68,8 +68,11 @@ class DemoWriteTool(BaseTool):
 class DemoProvider:
     """İki sabit senaryoyu oynatır; serbest metin işlem iddiası üretmez."""
 
-    async def complete(self, messages: list[Message], _tools: Any, *, timeout: float) -> Completion:
-        del timeout
+    async def complete(
+        self, messages: list[Message], _tools: Any, *, timeout: float, stream: Any = None,
+    ) -> Completion:
+        # Demo akış yapmaz: ses kanalı tam yanıta düşer (ADR 0043 yedeği).
+        del timeout, stream
         # Önceki turlardan gelen araç mesajları bu turun yanıtını belirlememeli.
         last_user = max(
             (index for index, message in enumerate(messages) if message.role == "user"),

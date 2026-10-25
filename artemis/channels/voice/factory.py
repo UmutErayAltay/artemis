@@ -166,6 +166,7 @@ async def build_voice_controller(
             synthesizer,
             sink,
             run_command=run_command,
+            stream_responses=settings.voice.streaming,
             on_state=on_state,
             on_timing=on_timing,
             on_event=on_event,

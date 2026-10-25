@@ -9,6 +9,7 @@ from pydantic import BaseModel
 from artemis.brain.agent_loop import AgentLoop, RunResult
 from artemis.brain.conversation import ConversationContext
 from artemis.brain.models import ToolCall
+from artemis.brain.streaming import ResponseStream
 from artemis.safety.gate import TurnState
 from artemis.tools.base import ToolResult
 
@@ -40,23 +41,30 @@ class CommandRunner:
         self.loop.context.audit.emit("context_reset", removed_turns=removed)
         return True
 
-    async def _run_locked(self, text: str, unattended: bool) -> RunResult:
+    async def _run_locked(
+        self, text: str, unattended: bool, stream: ResponseStream | None = None,
+    ) -> RunResult:
         window = self.conversation.render()
-        result = await self.loop.run(text, window, unattended=unattended)
+        if stream is None:
+            result = await self.loop.run(text, window, unattended=unattended)
+        else:
+            result = await self.loop.run(text, window, unattended=unattended, stream=stream)
         if result.record is not None:
             self.conversation.record(result.record)
         return result
 
-    async def run(self, text: str, *, unattended: bool = False) -> RunResult:
+    async def run(
+        self, text: str, *, unattended: bool = False, stream: ResponseStream | None = None,
+    ) -> RunResult:
         async with self._lock:
             if not self.loop.cleanup_pending:
                 self.loop.context.cancelled.clear()
             task = asyncio.current_task()
             if task is None:
-                return await self._run_locked(text, unattended)
+                return await self._run_locked(text, unattended, stream)
             self._active_task = task
             try:
-                return await self._run_locked(text, unattended)
+                return await self._run_locked(text, unattended, stream)
             finally:
                 if self._active_task is task:
                     self._active_task = None

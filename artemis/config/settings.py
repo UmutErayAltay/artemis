@@ -77,6 +77,8 @@ class VoiceConfig(BaseModel):
     require_wake_during_output: bool = True
     # ADR 0042: konuşurken uyandırmasız doğrulanmış söz yalnız susturur, komut çalıştırmaz.
     barge_in_without_wake: bool = True
+    # ADR 0043: model yazarken cümle cümle seslendir; sağlayıcı akmıyorsa tam yanıt beklenir.
+    streaming: bool = True
     continuous_mode: bool = False
     # Ses kapanınca içeriksiz gecikme raporu state_dir/voice-telemetry/ altına yazılır (ADR 0041).
     telemetry_report: bool = False

@@ -17,6 +17,7 @@ from typing import Protocol
 
 from artemis.brain.agent_loop import RunResult
 from artemis.channels.runner import CommandRunner
+from artemis.channels.voice.streaming import SpeechStream
 from artemis.channels.voice.telemetry import (
     CommandClass,
     Outcome,
@@ -259,7 +260,8 @@ class VoiceController:
         on_first_pcm: Callable[[], None] | None = None,
         on_timing: Callable[[str, float], None] | None = None,
         on_event: Callable[[VoiceTimingEvent], None] | None = None,
-        run_command: Callable[[str], Awaitable[RunResult]] | None = None,
+        run_command: Callable[..., Awaitable[RunResult]] | None = None,
+        stream_responses: bool = False,
         on_state: Callable[[str], None] | None = None,
         on_input_level: Callable[[int], None] | None = None,
         on_transcript: Callable[[str], None] | None = None,
@@ -285,6 +287,9 @@ class VoiceController:
         # Masaüstü köprüsü komutu kendi istek modelinden (request_id, tek aktif istek)
         # geçirir; varsayılan runner.run CLI/bench davranışını değiştirmez.
         self.run_command = run_command if run_command is not None else runner.run
+        # ADR 0043: True ise run_command ``stream=`` kabul etmelidir (runner.run ve masaüstü
+        # köprüsü eder); sağlayıcı akmıyorsa yanıt yine tamamı gelince söylenir.
+        self.stream_responses = stream_responses
         # on_state yalnız durum bildirir; arbitrary callback'in hatasını burada
         # yakalamak kör except olurdu, bu yüzden çağıran fırlatmamalıdır.
         self.on_state = on_state or (lambda _state: None)
@@ -682,9 +687,118 @@ class VoiceController:
         async with aclosing(self._timed_chunks(text, cancelled, uid, gid)) as chunks:
             await self.sink.play(chunks, cancelled, first_pcm)
 
+    def _record_result(self, uid: int, gid: int | None, result: RunResult) -> None:
+        self.on_timing("model_complete", self.clock())
+        # Aşamalar AgentLoop'un monotonik saatindendir; sahte saatli testte sıra
+        # bozulursa rapor örneği geçersiz sayar, sessizce düzeltmez.
+        for phase in result.phases:
+            self._event(uid, phase.stage, generation_id=gid, timestamp=phase.timestamp)
+        command_class: CommandClass | None = None
+        if result.turn_id:
+            command_class = "tool" if result.tool_calls else "chat"
+        self._event(uid, "model_complete", generation_id=gid, command_class=command_class)
+
+    async def _play_stream(
+        self, speech: SpeechStream, cancelled: asyncio.Event, uid: int, gid: int | None,
+        first_pcm: Callable[[], None],
+    ) -> None:
+        """Cümleleri sırayla sentezler; hepsi tek sink akışında çalınır (cihaz bir kez açılır)."""
+
+        async def chunks() -> AsyncGenerator[PCMChunk]:
+            first = True
+            async for sentence in speech.sentences():
+                if cancelled.is_set():
+                    return
+                if self._output_active:
+                    # Yankı süzgeci şimdiye dek söylenen/söylenecek tüm cümleleri bilsin.
+                    self._spoken_text = " ".join(speech.spoken)
+                stream = self.synthesizer.stream(sentence, cancelled)
+                try:
+                    async for chunk in stream:
+                        if first and chunk.pcm:
+                            first = False
+                            self._event(uid, "tts_first_chunk", generation_id=gid)
+                        yield chunk
+                finally:
+                    closer = getattr(stream, "aclose", None)
+                    if closer is not None:
+                        await closer()
+
+        async with aclosing(chunks()) as generator:
+            await self.sink.play(generator, cancelled, first_pcm)
+
+    async def _run_and_speak_streamed(self, command: str, uid: int, gid: int | None) -> None:
+        """ADR 0043: model yazarken cümleler söylenir; tek ``generation`` olayı hepsini durdurur."""
+        generation = asyncio.Event()
+        speech = SpeechStream()
+        played = False
+        outcome: Outcome = "no_audio"
+        playback: asyncio.Task[None] | None = None
+
+        def first_pcm() -> None:
+            nonlocal played
+            if not played:
+                # Hoparlöre ilk yazım: söz kesme (ADR 0042) ve yankı süzgeci ancak şimdi devrede.
+                self._mark_spoken(" ".join(speech.spoken))
+                self._output_active = True
+                self._emit_state("speaking")
+                self.on_timing("first_pcm", self.clock())
+                self._event(uid, "first_pcm", generation_id=gid)
+                self.on_first_pcm()
+            played = True
+
+        try:
+            self._emit_state("thinking")
+            self._task_turns += 1
+            self._event(uid, "command_start", generation_id=gid, warm=self._task_turns > 1)
+            self._playback_cancelled = generation
+            playback = asyncio.create_task(
+                self._play_stream(speech, generation, uid, gid, first_pcm)
+            )
+            self._playback = playback
+            result = await self.run_command(command, stream=speech)
+            self._record_result(uid, gid, result)
+            speech.finish(result.text)
+            try:
+                await playback
+            except asyncio.CancelledError:
+                current = asyncio.current_task()
+                if not generation.is_set() or (current is not None and current.cancelling()):
+                    raise
+            if played:
+                self._followup_until = self.clock() + self.config.followup_seconds
+            outcome = "completed" if played else "no_audio"
+        except asyncio.CancelledError:
+            outcome = "cancelled"
+            generation.set()
+            raise
+        except (OSError, RuntimeError, ValueError) as error:
+            outcome = "error"
+            logger.warning("Ses yanıtı başarısız (%s).", type(error).__name__)
+        finally:
+            # Kuyrukta kalan cümleler yeni tura geçmez: akış kapanır, oynatma beklenir.
+            speech.close()
+            if playback is not None and not playback.done():
+                if outcome != "completed":
+                    generation.set()
+                    playback.cancel()
+                with suppress(asyncio.CancelledError):
+                    await playback
+            self._output_active = False
+            self._playback = None
+            self._playback_cancelled = None
+            if played:
+                self._spoken_until = self.clock() + 1.2
+            self._event(uid, "terminal", generation_id=gid, outcome=outcome)
+            if not self._closed:
+                self._emit_state("listening")
+
     async def _run_and_speak(
         self, command: str, *, uid: int = 0, gid: int | None = None,
     ) -> None:
+        if self.stream_responses:
+            await self._run_and_speak_streamed(command, uid, gid)
+            return
         generation = asyncio.Event()
         played = False
         outcome: Outcome = "no_audio"
@@ -693,15 +807,7 @@ class VoiceController:
             self._task_turns += 1
             self._event(uid, "command_start", generation_id=gid, warm=self._task_turns > 1)
             result = await self.run_command(command)
-            self.on_timing("model_complete", self.clock())
-            # Aşamalar AgentLoop'un monotonik saatindendir; sahte saatli testte sıra
-            # bozulursa rapor örneği geçersiz sayar, sessizce düzeltmez.
-            for phase in result.phases:
-                self._event(uid, phase.stage, generation_id=gid, timestamp=phase.timestamp)
-            command_class: CommandClass | None = None
-            if result.turn_id:
-                command_class = "tool" if result.tool_calls else "chat"
-            self._event(uid, "model_complete", generation_id=gid, command_class=command_class)
+            self._record_result(uid, gid, result)
             if result.text.strip() and not generation.is_set():
 
                 def first_pcm() -> None:

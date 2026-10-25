@@ -56,6 +56,7 @@ voice:
   barge_in_ms: 180 # Uyandırmasız söz kesmede en kısa söz süresi (ADR 0042); VAD tek başına kesmez.
   require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
   barge_in_without_wake: true # Konuşurken herhangi bir söz susturur; komut için wake ya da takip sözü gerekir.
+  streaming: true # Model yazarken cümle cümle seslendirir (ADR 0043); başarı iddiası araç sonucunu bekler.
   continuous_mode: false # true: "artemis" demeden dinler (ADR 0024).
   telemetry_report: false # true: ses kapanınca içeriksiz gecikme raporu (state_dir/voice-telemetry/).
   listening_hotkey: ctrl+space # Masaüstünde sesi aç/kapat (Windows); boş: kapalı.

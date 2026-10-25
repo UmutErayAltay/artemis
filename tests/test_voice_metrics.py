@@ -126,7 +126,9 @@ def test_repeated_model_and_tool_phases_are_summed_not_invalid():
     assert sample["derived_ms"]["model_first_response_ms"] == pytest.approx(300)
     assert report["by_command_class"]["tool"]["completed"] == 1
     assert report["by_command_class"]["chat"]["utterances"] == 0
-    assert report["model_first_token_ms"] is None
+    # Akışsız sağlayıcı: ilk token örneği yok, uydurulmaz.
+    assert report["model_first_token_ms"]["samples"] == 0 and not sample["streamed"]
+    assert report["streamed_utterances"] == 0
 
 
 @pytest.mark.parametrize("phases", [

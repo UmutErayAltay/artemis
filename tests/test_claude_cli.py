@@ -252,3 +252,151 @@ async def test_kill_fallback_when_tree_kill_fails(
     with pytest.raises(RetryableProviderError):
         await provider(tmp_path).complete([Message(role="user", content="a")], [], timeout=0.05)
     assert cli["proc"].returncode == -9  # proc.kill() devreye girdi
+
+
+# --- ADR 0043: stream-json; yalnız StructuredOutput'un üst düzey content'i akar ---
+
+
+class _Writer:
+    def __init__(self) -> None:
+        self.data = b""
+        self.closed = False
+
+    def write(self, data: bytes) -> None:
+        self.data += data
+
+    async def drain(self) -> None:
+        return None
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class _Lines:
+    def __init__(self, lines: list[bytes]) -> None:
+        self.lines = list(lines)
+
+    async def readline(self) -> bytes:
+        return self.lines.pop(0) if self.lines else b""
+
+
+class FakeStreamProc(FakeProc):
+    def __init__(self, events: list[dict[str, Any]], code: int = 0) -> None:
+        super().__init__({}, code)
+        self.stdin = _Writer()
+        self.stdout = _Lines([json.dumps(event).encode() + b"\n" for event in events])
+
+
+def _partials(*chunks: str, index: int = 1, attempt_name: str = "StructuredOutput"):
+    return [
+        {"type": "stream_event", "event": {
+            "type": "content_block_start", "index": index,
+            "content_block": {"type": "tool_use", "id": "t", "name": attempt_name, "input": {}}}},
+        *({"type": "stream_event", "event": {
+            "type": "content_block_delta", "index": index,
+            "delta": {"type": "input_json_delta", "partial_json": chunk}}} for chunk in chunks),
+    ]
+
+
+def _recorder() -> Any:
+    class Recorder:
+        def __init__(self) -> None:
+            self.joined = ""
+            self.tool_calls = 0
+
+        def text(self, delta: str) -> None:
+            self.joined += delta
+
+        def tool_call(self) -> None:
+            self.tool_calls += 1
+
+    return Recorder()
+
+
+async def test_stream_json_flows_top_level_content_only(tmp_path, cli) -> None:
+    body = {"content": "Saat on, \"tam\" on.", "tool_calls": []}
+    raw = json.dumps(body, ensure_ascii=False)
+    cli["proc"] = FakeStreamProc([
+        {"type": "system", "subtype": "init"},
+        {"type": "stream_event", "event": {"type": "content_block_delta", "index": 0,
+                                           "delta": {"type": "text_delta", "text": "serbest"}}},
+        *_partials(*(raw[i:i + 3] for i in range(0, len(raw), 3))),
+        {"type": "result", **ok(**body)},
+    ])
+    recorder = _recorder()
+    result = await provider(tmp_path).complete(
+        [Message(role="user", content="saat")], [TOOL], timeout=5, stream=recorder,
+    )
+    argv = cli["argv"]
+    assert argv[argv.index("--output-format") + 1] == "stream-json"
+    assert "--include-partial-messages" in argv and "--verbose" in argv
+    # Kaçışlı tırnak çözülür; StructuredOutput dışındaki serbest metin akmaz.
+    assert recorder.joined == "Saat on, \"tam\" on." and recorder.tool_calls == 0
+    assert result.content == body["content"] and cli["proc"].stdin.closed
+    assert "saat" in cli["proc"].stdin.data.decode()
+
+
+async def test_nested_content_argument_never_streams(tmp_path, cli) -> None:
+    body = {"tool_calls": [{"name": "echo", "arguments": {"content": "GİZLİ-ARGÜMAN"}}],
+            "content": "Kaydediyorum."}
+    raw = json.dumps(body, ensure_ascii=False)
+    cli["proc"] = FakeStreamProc([*_partials(raw), {"type": "result", **ok(**body)}])
+    recorder = _recorder()
+    result = await provider(tmp_path).complete(
+        [Message(role="user", content="kaydet")], [TOOL], timeout=5, stream=recorder,
+    )
+    assert "GİZLİ" not in recorder.joined
+    assert recorder.joined == "Kaydediyorum." and recorder.tool_calls == 1
+    assert result.tool_calls[0].arguments == {"content": "GİZLİ-ARGÜMAN"}
+
+
+async def test_second_structured_attempt_is_not_streamed(tmp_path, cli) -> None:
+    final = {"content": "Doğru yanıt.", "tool_calls": []}
+    cli["proc"] = FakeStreamProc([
+        *_partials('{"content": "İlk den', index=1),
+        *_partials('{"content": "Doğru yanıt.", "tool_calls": []}', index=3),
+        {"type": "result", **ok(**final)},
+    ])
+    recorder = _recorder()
+    result = await provider(tmp_path).complete(
+        [Message(role="user", content="x")], [], timeout=5, stream=recorder,
+    )
+    # Yeniden deneme akmaz; "araç başladı" işareti adımın kalanını susturur.
+    assert recorder.joined == "İlk den" and recorder.tool_calls == 1
+    assert result.content == "Doğru yanıt."
+
+
+async def test_stream_without_result_line_is_failure(tmp_path, cli) -> None:
+    cli["proc"] = FakeStreamProc(_partials('{"content": "Yarım'))
+    with pytest.raises(ProviderError):
+        await provider(tmp_path).complete(
+            [Message(role="user", content="x")], [], timeout=5, stream=_recorder(),
+        )
+
+
+@pytest.mark.parametrize(("chunks", "expected"), [
+    (['{"content": "Gül \\ud83c', '\\udf39 açtı"}'], "Gül 🌹 açtı"),  # vekil çift bölünmüş
+    (['{"content": "A\\', 'nB"}'], "A\nB"),  # kaçış parça sınırında
+    (['{"content": "Kötü \\q kaçış"}'], "Kötü "),  # geçersiz kaçış akışı keser, çökmez
+])
+def test_scanner_handles_split_escapes(chunks, expected) -> None:
+    from artemis.brain.claude_stream import TopLevelContentScanner
+
+    recorder = _recorder()
+    scanner = TopLevelContentScanner(recorder)
+    for chunk in chunks:
+        scanner.feed(chunk)
+    assert recorder.joined == expected
+
+
+async def test_non_string_content_value_never_streams(tmp_path, cli) -> None:
+    # Şemaya uymayan yanıt: content dizge değil nesne. İçindeki dizge akmamalı, yanıt reddedilir.
+    body = {"content": {"text": "GİZLİ-İÇ-METİN"}, "tool_calls": []}
+    cli["proc"] = FakeStreamProc([*_partials(json.dumps(body, ensure_ascii=False)),
+                                  {"type": "result", **ok(**body)}])
+    recorder = _recorder()
+    with pytest.raises(ProviderError):
+        await provider(tmp_path).complete(
+            [Message(role="user", content="x")], [], timeout=5, stream=recorder,
+        )
+    assert recorder.joined == ""

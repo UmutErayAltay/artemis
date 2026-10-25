@@ -18,6 +18,7 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from artemis.brain.agent_loop import RunResult
+from artemis.brain.streaming import ResponseStream
 from artemis.channels.desktop.computer_host import ComputerHost
 from artemis.channels.runtime import (
     Approval as ApprovalCallback,
@@ -657,7 +658,9 @@ class DesktopBridge:
         with suppress(asyncio.CancelledError):
             await self._execute_request(request_id, text)
 
-    async def _execute_request(self, request_id: str, text: str) -> RunResult | None:
+    async def _execute_request(
+        self, request_id: str, text: str, stream: ResponseStream | None = None,
+    ) -> RunResult | None:
         """Yazılı ve sesli isteğin ortak turu: aynı olaylar, aynı temizlik, aynı bitiş."""
         runtime = self._runtime
         if runtime is None:
@@ -668,7 +671,10 @@ class DesktopBridge:
             return None
         result: RunResult | None = None
         try:
-            result = await runtime.runner.run(text)
+            if stream is None:
+                result = await runtime.runner.run(text)
+            else:
+                result = await runtime.runner.run(text, stream=stream)
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id
             self._events.put(Finished(request_id, result))
@@ -687,7 +693,9 @@ class DesktopBridge:
                 self._finish_request(request_id)
         return result
 
-    async def _run_voice_command(self, text: str) -> RunResult:
+    async def _run_voice_command(
+        self, text: str, *, stream: ResponseStream | None = None,
+    ) -> RunResult:
         """Sesli komut, yazılı istekle aynı anda yürümez; meşgulse runner'a hiç gitmez."""
         with self._lock:
             if self._active_request is not None or self._cleanup_pending or self._shutdown:
@@ -698,7 +706,7 @@ class DesktopBridge:
         self._events.put(VoiceCommand(request_id, text))
         self._events.put(State("running", "Sesli istek çalışıyor.", request_id))
         # Söz kesme bu görevi iptal eder; CancelledError temizlikten sonra yukarı çıkar.
-        result = await self._execute_request(request_id, text)
+        result = await self._execute_request(request_id, text, stream)
         if result is not None:
             return result
         if self._broker.is_cancelled():
