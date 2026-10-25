@@ -113,6 +113,9 @@ class VoiceConfig(BaseModel):
     stt_min_logprob: float = -1.0
     stt_max_no_speech: float = Field(default=0.6, ge=0, le=1)
     stt_hotwords: tuple[str, ...] = Field(default=(), max_length=100)
+    # Öğretilmiş uygulama takma adlarının hedef adları STT ipucuna eklenir (ADR 0044).
+    # Varsayılan kapalı: geniş hotword listesi uyandırmada yan etki verdi (CPA_LOCAL_TEST).
+    stt_alias_hotwords: bool = False
     tts_backend: Literal["piper", "edge", "ema"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True

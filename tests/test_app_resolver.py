@@ -341,3 +341,31 @@ async def test_alias_success_is_reported_only_after_reading_it_back(
         context, "app_alias_remember", {"spoken": "breyv", "application": "Brave"}
     )
     assert not result.success and "doğrulanamadı" in result.message
+
+
+def test_alias_hotwords_are_opt_in_bounded_and_only_user_taught(tmp_path: Path) -> None:
+    from artemis.channels.voice.factory import alias_hotword_config
+    from artemis.config.settings import VoiceConfig
+
+    def settings(**voice: Any) -> Settings:
+        return Settings(
+            state_dir=tmp_path / "state", applications=APPS,
+            voice=VoiceConfig(stt_hotwords=("Artemis",), **voice),
+        )
+
+    alias_store(tmp_path / "state").save(
+        {"brev": "Brave", "brevv": "Brave", "kroum": "Google Chrome", "eski": "Silinmiş"}
+    )
+    # Kapalıyken (varsayılan) hiçbir şey eklenmez.
+    assert alias_hotword_config(settings()).stt_hotwords == ("Artemis",)
+    enabled = alias_hotword_config(settings(stt_alias_hotwords=True))
+    # Yalnız öğretilmiş ve hâlâ izinli hedefler, tekrarsız; katalog eklenmez.
+    assert enabled.stt_hotwords == ("Artemis", "Brave", "Google Chrome")
+    off = settings(stt_alias_hotwords=True).model_copy(update={"persist_memory": False})
+    assert alias_hotword_config(off).stt_hotwords == ("Artemis",)
+    full = settings(stt_alias_hotwords=True).model_copy(update={"voice": VoiceConfig(
+        stt_hotwords=tuple(f"w{index}" for index in range(100)), stt_alias_hotwords=True,
+    )})
+    assert len(alias_hotword_config(full).stt_hotwords) == 100
+    alias_store(tmp_path / "state").path.write_text("{bozuk", encoding="utf-8")
+    assert alias_hotword_config(settings(stt_alias_hotwords=True)).stt_hotwords == ("Artemis",)

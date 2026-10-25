@@ -171,7 +171,10 @@ otomatik dil seçimini dener, fakat Türkçe ve İngilizceyi cümle içinde doğ
 değiştirmeyi garanti etmez. `stt_hotwords` isteğe bağlı, sınırlı yerel kelime
 ipuçlarıdır; boş liste genel kullanım başlangıcıdır. Bu ipuçları her kullanıcıya
 veya modelin bilmediği özel adlara yönelik doğruluğu kanıtlamaz. STT'ye prompt
-verilmez ve tanınan metne sonradan yaklaşık uygulama adı eklenmez.
+verilmez ve tanınan metne sonradan yaklaşık uygulama adı eklenmez. `stt_alias_hotwords:
+true` yalnız "hayır, X'i kastettim" diye öğretilmiş uygulama adlarını ipucuna ekler
+(varsayılan kapalı, ADR 0044); etkisi önce `bench/speech_accuracy.py --ek-hotword` ile
+ölçülmelidir.
 
 İlk doğrulamayı kulaklıkla yapın. Akustik yankı giderme artık isteğe bağlı bir
 seçenek olarak vardır (ADR 0038); ardından hoparlörle, yankı engelleme açıkken

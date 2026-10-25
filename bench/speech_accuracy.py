@@ -24,7 +24,7 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from artemis.channels.voice.adapters import FasterWhisperRecognizer
-from artemis.config.settings import Settings, load_settings
+from artemis.config.settings import Settings, VoiceConfig, load_settings
 from artemis.safety.paths import safe_join
 
 
@@ -277,8 +277,19 @@ def metadata(settings: Settings) -> dict[str, Any]:
         "stt_beam_size": settings.voice.stt_beam_size,
         "stt_partial_beam_size": settings.voice.stt_partial_beam_size,
         "stt_hotwords_count": len(settings.voice.stt_hotwords),
+        # Ölçülen ipuçları içerik değil uygulama adıdır; A/B karşılaştırması için raporlanır.
+        "stt_hotwords": list(settings.voice.stt_hotwords),
         "system": platform.platform(),
     }
+
+
+def with_extra_hotwords(settings: Settings, extra: Sequence[str]) -> Settings:
+    """A/B ölçümü için config'i değiştirmeden ek STT ipucu verir; sınırlar yine doğrulanır."""
+    if not extra:
+        return settings
+    words = tuple(dict.fromkeys((*settings.voice.stt_hotwords, *extra)))
+    voice = VoiceConfig.model_validate({**settings.voice.model_dump(), "stt_hotwords": words})
+    return settings.model_copy(update={"voice": voice})
 
 
 async def run(args: argparse.Namespace) -> dict[str, Any]:
@@ -297,7 +308,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         recognizer: Recognizer = EchoRecognizer(corpus.items)
         model = metadata(fake_settings)
     else:
-        settings = load_settings(args.config)
+        settings = with_extra_hotwords(load_settings(args.config), args.ek_hotword)
         if settings.voice.stt_model is None:
             raise ValueError("Canlı benchmark için voice.stt_model gerekli.")
         recognizer = FasterWhisperRecognizer(settings.voice)
@@ -317,6 +328,10 @@ def main() -> None:
     modes.add_argument("--canli", action="store_true")
     parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     parser.add_argument("--corpus", type=Path, required=True)
+    parser.add_argument(
+        "--ek-hotword", action="append", default=[], metavar="AD",
+        help="Yalnız bu ölçümde STT ipucuna eklenir (ör. uygulama adı); tekrarlanabilir",
+    )
     args = parser.parse_args()
     try:
         report = asyncio.run(run(args))
