@@ -1,0 +1,44 @@
+# Sentetik komut corpus'u şablonları (konuşma kalitesi planı aşama 2, ADR 0045).
+# Metin TTS ile seslendirilir; WAV depoya girmez. Referans transcript uygulamanın yazılı
+# adını kullanır, TTS'e ise `spoken` biçimlerinden biri okunur ("breyv" gibi Türkçe ağız).
+# Test bölümünde geliştirmede görülmemiş uygulama adları ve sesler kullanılır.
+wake_word: Artemis
+apps:
+  dev:
+    - {name: Brave, spoken: [Brave, breyv]}
+    - {name: Spotify, spoken: [Spotify, spotifay]}
+    - {name: Discord, spoken: [Discord, diskord]}
+    - {name: WhatsApp, spoken: [WhatsApp, vatsap]}
+    - {name: Steam, spoken: [Steam, stim]}
+    - {name: Google Chrome, spoken: [Google Chrome, gugıl krom]}
+  test:
+    - {name: Obsidian, spoken: [Obsidian, obsidyın]}
+    - {name: Telegram, spoken: [Telegram]}
+    - {name: Firefox, spoken: [Firefox, fayırfoks]}
+    - {name: Zoom, spoken: [Zoom, zum]}
+    - {name: Audacity, spoken: [Audacity, odasiti]}
+    - {name: Notion, spoken: [Notion, noşın]}
+# {app}: hedef uygulama; {other}: düzeltmede vazgeçilen uygulama. Etiketler:
+# wake: uyandırma sözcüğü söylendi mi; intent: open|close|none|question|chat;
+# target: niyetin hedef uygulaması (yoksa boş); negation/correction: olumsuzluk/düzeltme.
+templates:
+  - {id: open, text: "{wake}, {app} uygulamasını aç.", wake: true, intent: open, target: true, category: command}
+  - {id: open_short, text: "{wake} {app} aç.", wake: true, intent: open, target: true, category: command}
+  - {id: open_polite, text: "{wake}, {app} uygulamasını açar mısın?", wake: true, intent: open, target: true, category: command}
+  - {id: open_hesitant, text: "{wake}, şey, {app} uygulamasını aç.", wake: true, intent: open, target: true, category: hesitation}
+  - {id: close, text: "{wake}, {app} uygulamasını kapat.", wake: true, intent: close, target: true, category: command}
+  - {id: negation, text: "{wake}, {app} uygulamasını açma.", wake: true, intent: none, target: false, negation: true, category: negation}
+  - {id: correction, text: "{wake}, {other} değil, {app} uygulamasını aç.", wake: true, intent: open, target: true, correction: true, category: correction}
+  - {id: question, text: "{wake}, {app} açık mı?", wake: true, intent: question, target: false, category: question}
+  - {id: mention, text: "Dün {app} uygulamasında güzel bir şey izledim.", wake: false, intent: none, target: false, category: mention}
+  - {id: no_wake, text: "{app} uygulamasını aç.", wake: false, intent: none, target: false, category: no_wake}
+# Uygulama içermeyen cümleler: gündelik istek ve uyandırmaya benzeyen sözcükler.
+phrases:
+  - {id: weather, text: "{wake}, yarın sabah hava nasıl olacak?", wake: true, intent: chat, category: daily}
+  - {id: reminder, text: "{wake}, akşam sekizde su içmeyi hatırlat.", wake: true, intent: chat, category: daily}
+  - {id: stop, text: "{wake}, dur.", wake: true, intent: chat, category: daily}
+  - {id: near_wake_1, text: "Fiyatları biraz artırmış olabilirler.", wake: false, intent: none, category: near_wake}
+  - {id: near_wake_2, text: "Arte kanalında güzel bir belgesel var.", wake: false, intent: none, category: near_wake}
+  - {id: near_wake_3, text: "Temiz bir sayfa açıp baştan yazalım.", wake: false, intent: none, category: near_wake}
+  # Bilinen risk: uyandırma eşleştiricisi tek harf farkını kabul eder; "artmış" -> "artemis".
+  - {id: near_wake_4, text: "Benzin fiyatları yine artmış.", wake: false, intent: none, category: near_wake}

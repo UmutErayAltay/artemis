@@ -15,7 +15,7 @@ import unicodedata
 import wave
 from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field
@@ -24,8 +24,10 @@ if __package__ in {None, ""}:
     sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from artemis.channels.voice.adapters import FasterWhisperRecognizer
+from artemis.channels.voice.core import find_wake_word
 from artemis.config.settings import Settings, VoiceConfig, load_settings
 from artemis.safety.paths import safe_join
+from artemis.tools.app_resolver import resolve_application
 
 
 class CorpusItem(BaseModel):
@@ -38,13 +40,24 @@ class CorpusItem(BaseModel):
     audio: str = Field(min_length=1, max_length=240)
     transcript: str = Field(max_length=2000)
     expected_apps: list[str] = Field(default_factory=list, max_length=20)
+    # Aşama 2 etiketleri (ADR 0045). Kaynak ve koşul raporda ayrı tutulur: sentetik, Common
+    # Voice ve gerçek kayıt sonuçları birbirinin yerine geçmez. Etiketsiz alan ölçülmez.
+    source: Literal["real", "common_voice", "synthetic"] = "real"
+    condition: str = Field(default="clean", min_length=1, max_length=40)
+    wake: bool | None = None
+    intent: str | None = Field(default=None, max_length=40)
+    target_app: str | None = Field(default=None, max_length=100)
+    negation: bool = False
+    correction: bool = False
 
 
 class Corpus(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    apps: list[str] = Field(min_length=1, max_length=100)
-    items: list[CorpusItem] = Field(min_length=1, max_length=500)
+    # Common Voice gibi okunmuş cümle corpus'unda uygulama adı yoktur.
+    apps: list[str] = Field(default_factory=list, max_length=100)
+    wake_word: str = Field(default="Artemis", min_length=1, max_length=40)
+    items: list[CorpusItem] = Field(min_length=1, max_length=5000)
 
 
 class Recognizer(Protocol):
@@ -110,6 +123,18 @@ def load_corpus(path: Path) -> tuple[Corpus, Path]:
     for item in corpus.items:
         if any(normalize(app) not in known_apps for app in item.expected_apps):
             raise ValueError(f"{item.id}: expected_apps corpus.apps içinde olmalı")
+        if item.target_app is not None and normalize(item.target_app) not in known_apps:
+            raise ValueError(f"{item.id}: target_app corpus.apps içinde olmalı")
+    # Aynı konuşmacı hem dev hem test'te olursa test skoru ezberi ölçer (plan aşama 2).
+    splits: dict[str, set[str]] = {}
+    for item in corpus.items:
+        splits.setdefault(item.speaker_id, set()).add(item.split)
+    leaked = sorted(
+        speaker for speaker, names in splits.items()
+        if speaker != "unspecified" and {"dev", "test"} <= names
+    )
+    if leaked:
+        raise ValueError(f"Konuşmacı sızıntısı: dev ve test'te aynı konuşmacı ({len(leaked)})")
     return corpus, path.resolve().parent
 
 
@@ -138,6 +163,68 @@ def _rate(errors: int, units: int) -> float | None:
     return errors / units if units else None
 
 
+_TOKEN = re.compile(r"[^\W_]+(?:['’][^\W_]+)?", re.UNICODE)
+
+
+def resolve_target(text: str, apps: Sequence[str], wake_word: str) -> str | None:
+    """STT metninden okunuş çözücüsüyle (ADR 0044) son anılan uygulamayı bulur.
+
+    Model niyeti değildir: yalnız "doğru yazıya dökülen ad doğru uygulamaya çözülüyor mu"
+    sorusunu ölçer. Ek ("Brave'i") kesilir, uyandırma sözcüğü ve 3 harften kısa sözcükler
+    aday olmaz. Düzeltmede ("X değil, Y aç") hedef son anılan uygulamadır.
+    """
+    catalog = {app: app for app in apps}
+    words = [
+        token.split("'")[0].split("’")[0] for token in _TOKEN.findall(text)
+        if find_wake_word(token, wake_word) is None
+    ]
+    found: list[tuple[int, str]] = []
+    for size in (3, 2, 1):
+        for start in range(len(words) - size + 1):
+            phrase = " ".join(words[start:start + size])
+            if len(phrase.replace(" ", "")) < 3:
+                continue
+            match = resolve_application(catalog, {}, phrase)
+            if match.kind in ("exact", "fuzzy") and match.name is not None:
+                found.append((start + size, match.name))
+    return max(found)[1] if found else None
+
+
+def _group() -> dict[str, float]:
+    return {
+        "items": 0, "word_errors": 0, "reference_words": 0,
+        "char_errors": 0, "reference_chars": 0, "apps_correct": 0, "app_samples": 0,
+        "silence_samples": 0, "silence_hallucinations": 0,
+        "wake_samples": 0, "missed_wake": 0, "non_wake_samples": 0, "false_wake": 0,
+        "non_wake_seconds": 0.0, "target_samples": 0, "target_correct": 0, "wrong_target": 0,
+    }
+
+
+def _summary(values: dict[str, float]) -> dict[str, Any]:
+    hours = values["non_wake_seconds"] / 3600
+    return {
+        "items": int(values["items"]),
+        "wer": _rate(int(values["word_errors"]), int(values["reference_words"])),
+        "cer": _rate(int(values["char_errors"]), int(values["reference_chars"])),
+        "app_name_accuracy": (
+            values["apps_correct"] / values["app_samples"] if values["app_samples"] else None
+        ),
+        "app_name_samples": int(values["app_samples"]),
+        "silence_samples": int(values["silence_samples"]),
+        "silence_hallucinations": int(values["silence_hallucinations"]),
+        "missed_wake_rate": _rate(int(values["missed_wake"]), int(values["wake_samples"])),
+        "wake_samples": int(values["wake_samples"]),
+        "false_wake": int(values["false_wake"]),
+        "non_wake_samples": int(values["non_wake_samples"]),
+        # Kısa örneklerden saatlik oran kanıt değildir; ölçülen süre yanında verilir.
+        "false_wake_per_hour": values["false_wake"] / hours if hours else None,
+        "non_wake_hours": round(hours, 4),
+        "target_accuracy": _rate(int(values["target_correct"]), int(values["target_samples"])),
+        "target_samples": int(values["target_samples"]),
+        "wrong_target": int(values["wrong_target"]),
+    }
+
+
 async def measure(
     corpus: Corpus,
     corpus_root: Path,
@@ -150,7 +237,8 @@ async def measure(
     total_word_errors = total_ref_words = total_char_errors = total_ref_chars = 0
     app_correct = app_samples = silence_total = silence_hallucinations = 0
     latencies: list[float] = []
-    groups: dict[str, dict[str, int]] = {}
+    latencies_by_source: dict[str, list[float]] = {}
+    groups: dict[str, dict[str, float]] = {}
     for item in corpus.items:
         audio_path = safe_join(corpus_root, item.audio, allow_symlinks=False)
         pcm = read_audio(audio_path)
@@ -158,6 +246,7 @@ async def measure(
         prediction = await recognizer.transcribe(pcm)
         elapsed = time.perf_counter() - started
         latencies.append(elapsed)
+        latencies_by_source.setdefault(item.source, []).append(elapsed)
         ref_words = normalize(item.transcript).split()
         hyp_words = normalize(prediction).split()
         ref_chars = " ".join(ref_words)
@@ -178,13 +267,14 @@ async def measure(
         app_samples += int(annotated_apps)
         silence_total += int(is_silence)
         silence_hallucinations += int(hallucinated)
-        for label in (item.category,):
-            group = groups.setdefault(label, {
-                "items": 0, "word_errors": 0, "reference_words": 0,
-                "char_errors": 0, "reference_chars": 0, "apps_correct": 0,
-                "app_samples": 0,
-                "silence_samples": 0, "silence_hallucinations": 0,
-            })
+        woke = find_wake_word(prediction, corpus.wake_word) is not None
+        target = (
+            resolve_target(prediction, corpus.apps, corpus.wake_word)
+            if item.target_app is not None else None
+        )
+        for key in ("all", f"category:{item.category}", f"source:{item.source}",
+                    f"condition:{item.condition}", f"split:{item.split}"):
+            group = groups.setdefault(key, _group())
             group["items"] += 1
             group["word_errors"] += word_errors
             group["reference_words"] += len(ref_words)
@@ -194,6 +284,18 @@ async def measure(
             group["app_samples"] += int(annotated_apps)
             group["silence_samples"] += int(is_silence)
             group["silence_hallucinations"] += int(hallucinated)
+            if item.wake is True:
+                group["wake_samples"] += 1
+                group["missed_wake"] += int(not woke)
+            elif item.wake is False:
+                group["non_wake_samples"] += 1
+                group["false_wake"] += int(woke)
+                group["non_wake_seconds"] += len(pcm) / 32_000
+            if item.target_app is not None:
+                group["target_samples"] += 1
+                group["target_correct"] += int(target == item.target_app)
+                # Başka bir uygulamaya çözülmek, hiç çözülmemekten tehlikelidir.
+                group["wrong_target"] += int(target is not None and target != item.target_app)
         rows.append({
             "id": item.id,
             "category": item.category,
@@ -206,31 +308,42 @@ async def measure(
             "app_names_correct": correct if annotated_apps else None,
             "unexpected_app_names": sorted(app for app in found if app not in expected),
             "silence_hallucination": hallucinated,
+            "source": item.source,
+            "condition": item.condition,
+            "wake_detected": woke if item.wake is not None else None,
+            "target_resolved": target,
             "latency_ms": round(elapsed * 1000, 2),
         })
     ordered = sorted(latencies)
     p90_index = max(0, min(len(ordered) - 1, math.ceil(len(ordered) * 0.9) - 1))
-    breakdown = {
-        name: {
-            "items": values["items"],
-            "wer": _rate(values["word_errors"], values["reference_words"]),
-            "cer": _rate(values["char_errors"], values["reference_chars"]),
-            "app_name_accuracy": (
-                values["apps_correct"] / values["app_samples"]
-                if values["app_samples"] else None
-            ),
-            "app_name_samples": values["app_samples"],
-            "silence_samples": values["silence_samples"],
-            "silence_hallucinations": values["silence_hallucinations"],
+    def breakdown_for(kind: str) -> dict[str, dict[str, Any]]:
+        prefix = kind + ":"
+        return {
+            key[len(prefix):]: _summary(values)
+            for key, values in sorted(groups.items()) if key.startswith(prefix)
         }
-        for name, values in sorted(groups.items())
-    }
+
+    breakdown = breakdown_for("category")
+    overall = _summary(groups.get("all", _group()))
     return {
         "mode": mode,
         "model_profile": model_metadata,
         "corpus_items": len(rows),
         "items": rows,
         "category_breakdown": breakdown,
+        "source_breakdown": breakdown_for("source"),
+        "condition_breakdown": breakdown_for("condition"),
+        "split_breakdown": breakdown_for("split"),
+        # Plan şeması kaynak başına ayrıdır: sentetik ve gerçek sonuçlar karışmaz.
+        "plan_reports": {
+            source: plan_report(
+                mode, model_metadata, summary, latencies_by_source.get(source, []),
+                items=summary["items"],
+                speakers=len({i.speaker_id for i in corpus.items if i.source == source}),
+                source=source,
+            )
+            for source, summary in breakdown_for("source").items()
+        },
         "speaker_count": len({item.speaker_id for item in corpus.items}),
         "split_counts": {
             split: sum(item.split == split for item in corpus.items)
@@ -246,6 +359,13 @@ async def measure(
             "app_name_correct": app_correct,
             "silence_samples": silence_total,
             "silence_hallucinations": silence_hallucinations,
+            "missed_wake_rate": overall["missed_wake_rate"],
+            "false_wake": overall["false_wake"],
+            "false_wake_per_hour": overall["false_wake_per_hour"],
+            "non_wake_hours": overall["non_wake_hours"],
+            "target_accuracy": overall["target_accuracy"],
+            "target_samples": overall["target_samples"],
+            "wrong_target": overall["wrong_target"],
             "latency_ms": {
                 "median": round(statistics.median(latencies) * 1000, 2) if latencies else None,
                 "p90": round(ordered[p90_index] * 1000, 2) if ordered else None,
@@ -253,8 +373,45 @@ async def measure(
         },
         "privacy": "Transcripts and audio are omitted; local files stay on this machine.",
         "metric_scope": (
-            "Transcript/app-name match only; this does not measure intent or tool execution."
+            "Transcript, app-name, wake and STT+resolver target only; intent and negation "
+            "need the model (bench.run intent category)."
         ),
+    }
+
+
+def plan_report(
+    mode: str, model: dict[str, Any], summary: dict[str, Any], latencies: Sequence[float],
+    *, items: int, speakers: int, source: str,
+) -> dict[str, Any]:
+    """CONVERSATION_QUALITY_PLAN rapor şeması; ölçülmeyen alan ``None`` kalır."""
+    from datetime import UTC, datetime
+
+    return {
+        "mode": "fake" if mode == "sahte" else "live",
+        "runtime": "isolated",
+        "date_utc": datetime.now(UTC).isoformat(timespec="seconds"),
+        "hardware": {"gpu": None, "ram_gb": None, "vram_free_gb": None},
+        "config": {
+            "stt_model": model.get("stt_model"), "language": model.get("stt_language"),
+            "beam": model.get("stt_beam_size"),
+        },
+        "corpus": {"id": source, "split": "all", "items": items, "speakers": speakers},
+        "metrics": {
+            "wer": summary["wer"], "cer": summary["cer"], "intent_accuracy": None,
+            "target_accuracy": summary["target_accuracy"], "negation_accuracy": None,
+            "false_wake_per_hour": summary["false_wake_per_hour"],
+            "missed_wake_rate": summary["missed_wake_rate"], "false_interrupt_rate": None,
+            "latency_ms": round(statistics.median(latencies) * 1000, 2) if latencies else None,
+            "endpoint_delay_ms": None, "device_output_latency_ms": None,
+            "failed_or_cancelled": 0, "excluded_with_reason": 0,
+        },
+        "notes": [
+            "synthetic: TTS sesi gerçek konuşmadan temizdir; kabul kanıtı değildir."
+            if source == "synthetic" else
+            "common_voice: okunmuş cümle; komut, uyandırma ve uygulama adı içermez."
+            if source == "common_voice" else "real: kullanıcı kayıtları.",
+            "target_accuracy STT+okunuş çözücüsüdür, model niyeti değildir.",
+        ],
     }
 
 
