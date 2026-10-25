@@ -263,3 +263,78 @@ def test_xtts_requires_explicit_license_and_cloud_tts_requires_consent(tmp_path:
         synthetic.main(["--cikti", out, "--edge", "tr-TR-EmelNeural"])
     assert synthetic.voice_slug("Ana Florence") == "ana_florence"
     assert not (tmp_path / "x").exists()
+
+
+def test_babble_mixes_pool_clips_and_requires_a_pool() -> None:
+    pool = [eval_audio.pink_noise(8000, seed) for seed in range(4)]
+    mixed = eval_audio.babble(16_000, pool, 3)
+    assert len(mixed) == 16_000 and np.any(mixed)
+    assert np.array_equal(mixed, eval_audio.babble(16_000, pool, 3))
+    with pytest.raises(ValueError):
+        eval_audio.babble(100, [], 0)
+
+
+def test_noise_corpus_keeps_labels_and_needs_babble_source(tmp_path: Path) -> None:
+    from bench import corpus_noise
+
+    eval_audio.write_wav(tmp_path / "src" / "a.wav", eval_audio.to_float(_pcm(0.5)))
+    items = [
+        {"id": f"v_{kind}_clean", "category": "c", "speaker_id": "v", "split": "test",
+         "audio": "a.wav", "transcript": "Artemis aç.", "source": "synthetic",
+         "condition": condition, "wake": wake}
+        for kind, wake, condition in (("w", True, "clean"), ("n", False, "clean"),
+                                      ("x", True, "pink_snr5"), ("y", None, "clean"))
+    ]
+    (tmp_path / "src" / "corpus.yaml").write_text(
+        yaml.safe_dump({"items": items}, allow_unicode=True), encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="babble"):
+        corpus_noise.build(tmp_path / "src" / "corpus.yaml", tmp_path / "out",
+                           babble_corpus=None, per_class=5)
+    note = corpus_noise.build(
+        tmp_path / "src" / "corpus.yaml", tmp_path / "out2", babble_corpus=None,
+        per_class=5, conditions=("pink_snr10", "telephone"),
+    )
+    corpus, _ = load_corpus(tmp_path / "out2" / "corpus.yaml")
+    # Yalnız temiz ve uyandırma etiketli örnekler, her koşulda bir kez.
+    assert note["items"] == 4 and {i.condition for i in corpus.items} == {"pink_snr10", "telephone"}
+    assert sorted(i.wake for i in corpus.items) == [False, False, True, True]
+    assert all(i.source == "synthetic" and i.transcript == "Artemis aç." for i in corpus.items)
+
+
+def test_denoised_recognizer_keeps_length_and_alignment() -> None:
+    pytest.importorskip("onnxruntime")
+    from bench.speech_accuracy import DenoisedRecognizer
+
+    class Capture:
+        pcm = b""
+
+        async def transcribe(self, pcm: bytes) -> str:
+            Capture.pcm = pcm
+            return "tamam"
+
+    pcm = _pcm(0.73)
+    recognizer = DenoisedRecognizer(Capture(), "orta")
+    assert asyncio.run(recognizer.transcribe(pcm)) == "tamam"
+    assert len(Capture.pcm) == len(pcm) and Capture.pcm != pcm
+
+
+def test_hypothesis_text_only_for_synthetic_items(tmp_path: Path) -> None:
+    eval_audio.write_wav(tmp_path / "a.wav", eval_audio.to_float(_pcm(0.2)))
+    corpus = load_corpus_from(tmp_path, [
+        {"id": "s", "category": "c", "speaker_id": "a", "split": "test", "audio": "a.wav",
+         "transcript": "x", "source": "synthetic"},
+        {"id": "r", "category": "c", "speaker_id": "b", "split": "test", "audio": "a.wav",
+         "transcript": "x", "source": "real"},
+    ])
+
+    class Same:
+        async def transcribe(self, _pcm: bytes) -> str:
+            return "gizli olabilir"
+
+    report = asyncio.run(measure(corpus, tmp_path, Same(), mode="sahte", model_metadata={},
+                                 include_synthetic_text=True))
+    rows = {row["id"]: row for row in report["items"]}
+    assert rows["s"]["hypothesis"] == "gizli olabilir" and "hypothesis" not in rows["r"]
+    plain = asyncio.run(measure(corpus, tmp_path, Same(), mode="sahte", model_metadata={}))
+    assert all("hypothesis" not in row for row in plain["items"])
