@@ -6,6 +6,7 @@ import argparse
 import asyncio
 import json
 import math
+import os
 import platform
 import signal
 import sys
@@ -17,20 +18,39 @@ from pathlib import Path
 from time import monotonic
 from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
 from artemis.brain.agent_loop import AgentLoop
 from artemis.brain.fake import ScriptedProvider
-from artemis.brain.models import Completion
+from artemis.brain.models import Completion, ToolCall
 from artemis.channels.runner import CommandRunner
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.channels.voice.core import AudioFrame, PCMChunk, VoiceController
 from artemis.channels.voice.factory import build_voice_controller
+from artemis.channels.voice.metrics import EventCollector, collector_report
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.settings import Settings, VoiceConfig, load_settings
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate
-from artemis.tools.base import ToolContext
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import ToolRegistry
-from bench.voice_metrics import EventCollector, timing_report
+from bench.voice_resources import GpuSampler, process_peak_memory_bytes
+
+
+class _NoArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+class BenchClockTool(BaseTool):
+    """Yalnız sahte ölçümün araçlı tur yolunu sınar; global registry'ye girmez."""
+
+    name = "bench_clock"
+    description = "Sahte ölçüm için sabit saat döndürür."
+    args_model = _NoArguments
+    risk = Risk.READ_ONLY
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        return ToolResult(success=True, status="ok", message="Saat 10.00.")
 
 
 class FakeMicrophone:
@@ -140,7 +160,7 @@ def group_live_events(
     return completed, aborted, no_audio, invalid
 
 
-async def _fake_once() -> list[VoiceTimingEvent]:
+async def _fake_once(*, with_tool: bool = False) -> list[VoiceTimingEvent]:
     with tempfile.TemporaryDirectory(prefix="artemis-voice-bench-") as directory:
         root = Path(directory)
         settings = Settings(
@@ -151,9 +171,17 @@ async def _fake_once() -> list[VoiceTimingEvent]:
         )
         audit = AuditLog(settings.audit_path)
         context = ToolContext(root, settings, audit)
-        provider = ScriptedProvider([Completion(content="Deneme yanıtı")])
+        registry = ToolRegistry()
+        if with_tool:
+            registry.register(BenchClockTool)
+            provider = ScriptedProvider([
+                Completion(tool_calls=[ToolCall(id="bench-1", name="bench_clock")]),
+                Completion(content="Saat 10.00."),
+            ])
+        else:
+            provider = ScriptedProvider([Completion(content="Deneme yanıtı")])
         runner = CommandRunner(
-            AgentLoop(provider, SafetyGate(ToolRegistry()), context, lambda _n, _a: False)
+            AgentLoop(provider, SafetyGate(registry), context, lambda _n, _a: False)
         )
         events: list[VoiceTimingEvent] = []
         completed = asyncio.Event()
@@ -183,11 +211,16 @@ async def fake_report(iterations: int) -> dict[str, Any]:
     failures: list[dict[str, str]] = []
     for index in range(iterations):
         try:
-            for event in await _fake_once():
+            # Tek ve çift turlar sohbet ile araçlı turun aynı rapor şemasından geçtiğini sınar.
+            for event in await _fake_once(with_tool=index % 2 == 1):
                 collector(replace(event, utterance_id=event.utterance_id + index * 1_000))
         except (OSError, RuntimeError, ValueError) as error:
             failures.append({"phase": "fake_iteration", "error_type": type(error).__name__})
     report = _report(collector, "sahte (gerçek gecikme ölçümü değildir)")
+    # Sahte adaptörün süresi hedef kanıtı değildir; örnek sayısı yetse de hedef değerlendirilmez.
+    for target in report["targets"].values():
+        target["met"] = None
+        target["not_evaluated"] = "sahte"
     report["requested_iterations"] = iterations
     report["session_failures"] = failures
     report["failed_iterations"] = len(failures)
@@ -196,25 +229,23 @@ async def fake_report(iterations: int) -> dict[str, Any]:
 
 
 def _report(collector: EventCollector, mode: str) -> dict[str, Any]:
-    report = timing_report(collector.events)
-    report.update({
-        "mode": mode, "dropped_events": collector.dropped_events,
-        "overflow_utterances": collector.overflow_utterances,
-        "collection_complete": collector.dropped_events == 0,
-    })
-    report["total_utterances"] += collector.overflow_utterances
-    report["outcomes"]["overflow"] = collector.overflow_utterances
-    return report
+    return collector_report(collector, mode)
 
 
-def _hardware(settings: Settings, states: set[str]) -> dict[str, Any]:
+def _hardware(
+    settings: Settings, states: set[str], output: dict[str, Any] | None = None,
+    resources: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     voice = settings.voice
+    output = output or {}
+    resources = resources or {}
     return {
         "system": platform.platform(), "machine": platform.machine(),
         "requested_input_device": voice.input_device,
-        "input_device": None, "output_device": None,
-        "input_sample_rate": None, "output_sample_rate": None,
-        "output_latency_seconds": None,
+        "input_device": None, "output_device": output.get("device"),
+        "input_sample_rate": None, "output_sample_rate": output.get("sample_rate"),
+        # PortAudio'nun bildirdiği çıkış gecikmesi; Windows loopback/manuel kabul değildir.
+        "output_latency_seconds": output.get("latency_seconds"),
         "requested_stt_model": str(voice.stt_model) if voice.stt_model is not None else None,
         "requested_stt_device": voice.stt_device,
         "requested_stt_compute_type": voice.stt_compute_type,
@@ -237,8 +268,17 @@ def _hardware(settings: Settings, states: set[str]) -> dict[str, Any]:
             "actual": False if not voice.echo_cancellation or "echo:off" in states else None,
         },
         "processing_states": sorted(states),
-        "cpu_peak_memory_bytes": None, "gpu_peak_memory_bytes": None,
-        "free_vram_bytes": None, "contention": None,
+        "cpu_peak_memory_bytes": resources.get("cpu_peak_memory_bytes"),
+        "gpu_peak_memory_bytes": resources.get("gpu_peak_memory_bytes"),
+        "free_vram_bytes": resources.get("free_vram_bytes"),
+        "total_vram_bytes": resources.get("total_vram_bytes"),
+        "gpu_samples": resources.get("gpu_samples", 0),
+        "contention": resources.get("contention"),
+        "resource_notes": {
+            "cpu_peak_memory_bytes": "süreç RSS/working set tepe değeri (model yükleme dahil)",
+            "gpu_peak_memory_bytes": "aygıt geneli VRAM tepe değeri; diğer süreçler dahil",
+            "free_vram_bytes": "örneklenen en düşük boş VRAM",
+        },
     }
 
 
@@ -261,6 +301,9 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
     failures: list[dict[str, str]] = []
     loop = asyncio.get_running_loop()
     phase = "runtime_setup"
+    gpu = GpuSampler()
+    sampling_stopped = asyncio.Event()
+    sampler: asyncio.Task[None] | None = None
 
     def on_state(state: str) -> None:
         # heard/level durumları kişisel içerik taşır; rapora yalnız sabit durumlar girer.
@@ -305,6 +348,7 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
         signal.signal(signal.SIGINT, stop)
         signal_installed = True
         timer = loop.call_later(duration, controller.request_stop)
+        sampler = asyncio.create_task(gpu.run(os.getpid(), sampling_stopped))
         phase = "capture"
         print(f"Canlı ölçüm başladı ({duration:g} sn). 'artemis' deyin.", file=sys.stderr)
         await controller.run()
@@ -313,6 +357,9 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
     finally:
         if timer is not None:
             timer.cancel()
+        sampling_stopped.set()
+        if sampler is not None:
+            await sampler
         try:
             if signal_installed:
                 signal.signal(signal.SIGINT, previous)
@@ -333,9 +380,20 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
                         "phase": "runtime_shutdown", "error_type": type(error).__name__,
                     })
     report = _report(collector, "canli")
-    report["hardware"] = _hardware(settings, states)
+    # Yalnız gerçek sounddevice çıkışı bu bilgiyi taşır; sahte/başka sink için null kalır.
+    sink_output = getattr(getattr(controller, "sink", None), "output_info", None)
+    resources = {"cpu_peak_memory_bytes": _peak_memory(failures), **gpu.report()}
+    report["hardware"] = _hardware(settings, states, sink_output, resources)
     report["session_failures"] = failures
     return report
+
+
+def _peak_memory(failures: list[dict[str, str]]) -> int | None:
+    try:
+        return process_peak_memory_bytes()
+    except (OSError, AttributeError, ImportError) as error:
+        failures.append({"phase": "resource_read", "error_type": type(error).__name__})
+        return None
 
 
 def main() -> None:

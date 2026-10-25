@@ -6,6 +6,7 @@ from time import monotonic
 
 import pytest
 
+from artemis.brain.agent_loop import RunResult
 from artemis.channels.voice.core import (
     AudioFrame,
     AudioSegment,
@@ -77,7 +78,7 @@ class FakeRunner:
 
     async def run(self, text):
         self.commands.append(text)
-        return type("Result", (), {"text": "yanıt"})()
+        return RunResult(text="yanıt", stop_reason="completed", turn_id="t")
 
 
 class FakeTTS:
@@ -504,7 +505,10 @@ async def test_run_interrupts_playback_only_after_accepted_final_transcript(
 
     recognizer = Recognizer([transcript])
     controller = VoiceController(
-        runner, VoiceConfig(pre_roll_ms=0, end_silence_ms=100, **config), Mic(),
+        runner,
+        # ADR 0040 kuralları; uyandırmasız susturma (ADR 0042) ayrı testlerde sınanır.
+        VoiceConfig(pre_roll_ms=0, end_silence_ms=100, barge_in_without_wake=False, **config),
+        Mic(),
         FakeVAD([True] * 60 + [False] * 5), recognizer, FakeTTS(), sink,
     )
     if followup:
@@ -597,7 +601,8 @@ async def test_stream_eof_aborts_pending_playback_after_non_wake_noise():
 
     controller = VoiceController(
         runner,
-        VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100),
+        # ADR 0040 yolu: uyandırmasız söz kesme (ADR 0042) kapalıyken gürültü susturmaz.
+        VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100, barge_in_without_wake=False),
         Mic(frames, delay=0.01),
         FakeVAD([True, True, *([False] * 5), *([True] * 10), *([False] * 5)]),
         recognizer,
@@ -690,7 +695,7 @@ async def test_run_command_kwarg_replaces_runner_and_default_is_runner_run():
 
     async def run_command(text):
         seen.append(text)
-        return type("Result", (), {"text": ""})()
+        return RunResult(text="", stop_reason="completed", turn_id="t")
 
     frames = [AudioFrame(b"a", float(i)) for i in range(7)]
     controller = VoiceController(

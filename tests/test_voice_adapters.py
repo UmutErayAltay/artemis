@@ -950,3 +950,42 @@ async def test_open_failure_at_both_rates_still_reports_runtime_error(monkeypatc
     with pytest.raises(RuntimeError, match="Mikrofon aygıtı açılamadı"):
         await anext(microphone.frames())
     await microphone.close()
+
+
+@pytest.mark.parametrize(("latency", "expected"), [(0.085, 0.085), (float("nan"), None),
+                                                   ("bilinmiyor", None), (True, None)])
+async def test_sink_records_reported_output_latency_without_inventing_values(
+    monkeypatch, latency, expected,
+):
+    class Stream:
+        def __init__(self, **kwargs):
+            self.samplerate = kwargs["samplerate"]
+            self.latency = latency
+            self.device = 3
+
+        def start(self):
+            pass
+
+        def write(self, _pcm):
+            pass
+
+        def stop(self):
+            pass
+
+        def abort(self):
+            pass
+
+        def close(self):
+            pass
+
+    fake_module = ModuleType("sounddevice")
+    fake_module.RawOutputStream = Stream
+    monkeypatch.setitem(__import__("sys").modules, "sounddevice", fake_module)
+    sink = SoundDeviceSink()
+    assert sink.output_info is None
+
+    async def chunks():
+        yield PCMChunk(b"x" * 960, 24000, 1, 2)
+
+    await sink.play(chunks(), asyncio.Event(), lambda: None)
+    assert sink.output_info == {"latency_seconds": expected, "sample_rate": 24000.0, "device": 3}

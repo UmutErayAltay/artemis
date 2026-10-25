@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import importlib
 import logging
+import math
 import os
 import queue
 import subprocess
@@ -373,6 +374,22 @@ class SoundDeviceSink:
         self._audio_errors: tuple[type[Exception], ...] = ()
         self._echo_reference = echo_reference
         self._on_echo_failure = on_echo_failure
+        # Son açılan çıkış akışının PortAudio'nun bildirdiği değerleri (ölçüm raporu için).
+        # Bildirilen gecikme sürücü tahminidir; fiziksel duyulabilirlik ölçümü değildir.
+        self.output_info: dict[str, float | int | None] | None = None
+
+    def _record_output_info(self, stream: Any) -> None:
+        def number(value: object) -> float | None:
+            if isinstance(value, bool) or not isinstance(value, int | float):
+                return None
+            return float(value) if math.isfinite(value) else None
+
+        device = getattr(stream, "device", None)
+        self.output_info = {
+            "latency_seconds": number(getattr(stream, "latency", None)),
+            "sample_rate": number(getattr(stream, "samplerate", None)),
+            "device": device if isinstance(device, int) and not isinstance(device, bool) else None,
+        }
 
     def _feed_echo_reference(
         self,
@@ -432,6 +449,7 @@ class SoundDeviceSink:
                     )
                     stream.start()
                     self._streams.add(stream)
+                    self._record_output_info(stream)
                 sample_frame = chunk.channels * chunk.sample_width
                 block_bytes = max(sample_frame, chunk.sample_rate * sample_frame // 50)
                 block_bytes -= block_bytes % sample_frame

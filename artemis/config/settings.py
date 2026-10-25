@@ -75,7 +75,11 @@ class VoiceConfig(BaseModel):
     # Eski config uyumluluğu; söz kesme artık nihai STT doğrulamasını bekler (ADR 0040).
     barge_in_ms: int = Field(default=180, ge=100, le=1000)
     require_wake_during_output: bool = True
+    # ADR 0042: konuşurken uyandırmasız doğrulanmış söz yalnız susturur, komut çalıştırmaz.
+    barge_in_without_wake: bool = True
     continuous_mode: bool = False
+    # Ses kapanınca içeriksiz gecikme raporu state_dir/voice-telemetry/ altına yazılır (ADR 0041).
+    telemetry_report: bool = False
     # Masaüstünde sesi açıp kapatan Windows genel kısayolu ("Ses" düğmesiyle aynı yol);
     # tek elle basılabilsin diye ctrl+space. Boş dize kısayolu kapatır.
     listening_hotkey: str = Field(default="ctrl+space", max_length=40)

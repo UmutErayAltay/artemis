@@ -53,9 +53,11 @@ voice:
   frame_ms: 20
   vad_aggressiveness: 2
   end_silence_ms: 600
-  barge_in_ms: 180 # Eski config uyumluluğu; artık kullanılmaz, söz kesme nihai STT'yi bekler.
+  barge_in_ms: 180 # Uyandırmasız söz kesmede en kısa söz süresi (ADR 0042); VAD tek başına kesmez.
   require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
+  barge_in_without_wake: true # Konuşurken herhangi bir söz susturur; komut için wake ya da takip sözü gerekir.
   continuous_mode: false # true: "artemis" demeden dinler (ADR 0024).
+  telemetry_report: false # true: ses kapanınca içeriksiz gecikme raporu (state_dir/voice-telemetry/).
   listening_hotkey: ctrl+space # Masaüstünde sesi aç/kapat (Windows); boş: kapalı.
   # Gürültü engelleme (ADR 0037): DeepFilterNet3, işlemcide çalışır, ekran kartı gerekmez.
   # Model pakete dahildir (indirme yok), yaklaşık 34 ms gecikme ekler. Yankı giderme DEĞİLDİR.

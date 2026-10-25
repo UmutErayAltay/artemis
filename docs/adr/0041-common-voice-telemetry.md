@@ -33,3 +33,26 @@ metriğin kendi paydası vardır. Stop olayları bu alt adımda bağlanmaz, değ
 Native model yüklemesi thread iptaliyle durdurulamaz. Döngü yaşarken yükleme bitişinde
 gecikmiş cleanup yapılır; süreç kapanışında native yüklemenin anında kesildiği veya
 kapanışın kesin süreyle sınırlı olduğu iddia edilmez.
+
+## Ek (2026-10-25): aşamanın kalan ölçümleri
+
+- Model ve araç aşamaları AgentLoop'ta içeriksiz `PhaseTiming` (model_request/response,
+  tool_start/end, `time.monotonic`) olarak `RunResult.phases`'e yazılır. Turn_end denetimine
+  girmez (`exclude=True`): monotonik değer denetimde anlamsızdır, süre zaten oradadır. Ayrı
+  bir gözlemci/global durum eklenmedi; masaüstü, CLI ve bench aynı süreçte `RunResult`'ı
+  zaten alıyor. Araç süresi `SafetyGate.dispatch`'tir, onay bekleme dahildir.
+- Komut sınıfı: araç çağrısı varsa `tool`, yoksa `chat`; runner'a ulaşmayan tur
+  (boş `turn_id`: meşgul/iptal) sınıflandırılmaz. İlk görev turu `cold`, sonrakiler `warm`.
+- Stop çifti kesen sözün kimliğinde ve generation'sız yazılır; yalnız hoparlöre yazım
+  sürerken (`_output_active`) üretilir. Düşünme sırasındaki iptal söz kesme sayılmaz.
+  `playback_stopped` sink yazımının bittiği andır; aygıt tamponu ölçülmez.
+- Hedefler en az 30 geçerli örnek ister, aksi halde `met: null`; sahte kip hedef
+  değerlendirmez. İlk token, sağlayıcılar streaming kullanmadığı için null'dır.
+- Canlı kip PortAudio'nun bildirdiği çıkış gecikmesini (sürücü tahmini; loopback/manuel
+  kabul değildir), süreç bellek tepe değerini ve `nvidia-smi` varsa aygıt geneli VRAM
+  tepe/boş değerleri ile eşzamanlı GPU süreç sayısını yazar. Okunamayan değer null'dır.
+- Masaüstü `voice.telemetry_report` (varsayılan kapalı) ile ses kapanınca aynı rapor
+  `state_dir/voice-telemetry/` altına `"x"` kipiyle yazılır; sonuç `voice_telemetry`
+  denetim olayıdır. Rapor `artemis/channels/voice/metrics.py`'dedir, bench yeniden kullanır.
+
+Bu ek gerçek Windows cihaz kabulünü, canlı 30 turluk ölçümü ve streaming'i sağlamaz.

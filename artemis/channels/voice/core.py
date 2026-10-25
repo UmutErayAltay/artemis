@@ -17,7 +17,12 @@ from typing import Protocol
 
 from artemis.brain.agent_loop import RunResult
 from artemis.channels.runner import CommandRunner
-from artemis.channels.voice.telemetry import Outcome, Stage, VoiceTimingEvent
+from artemis.channels.voice.telemetry import (
+    CommandClass,
+    Outcome,
+    Stage,
+    VoiceTimingEvent,
+)
 from artemis.config.settings import VoiceConfig
 
 logger = logging.getLogger(__name__)
@@ -273,6 +278,10 @@ class VoiceController:
         self._utterance_sequence = 0
         self._generation_sequence = 0
         self._capturing_id: int | None = None
+        # Controller ömrünün ilk görev turu soğuk sayılır (model/önbellek ısınmamış olabilir).
+        self._task_turns = 0
+        # Hoparlöre yazım sürerken True; söz kesme stop olay çiftini yalnız o zaman üretir.
+        self._output_active = False
         # Masaüstü köprüsü komutu kendi istek modelinden (request_id, tek aktif istek)
         # geçirir; varsayılan runner.run CLI/bench davranışını değiştirmez.
         self.run_command = run_command if run_command is not None else runner.run
@@ -369,12 +378,13 @@ class VoiceController:
         self, utterance_id: int, stage: Stage, *, generation_id: int | None = None,
         timestamp: float | None = None, outcome: Outcome | None = None,
         reason: str | None = None, ack: bool = False,
+        command_class: CommandClass | None = None, warm: bool | None = None,
     ) -> None:
         if self.on_event is not None:
             self.on_event(VoiceTimingEvent(
                 utterance_id, generation_id, stage,
                 self.clock() if timestamp is None else timestamp,
-                "ack" if ack else "task", outcome, reason,
+                "ack" if ack else "task", outcome, reason, command_class, warm,
             ))
 
     def _discard_capture(self, reason: str) -> None:
@@ -426,6 +436,24 @@ class VoiceController:
             and segment.speech_start <= self._spoken_until
             and find_wake_word(transcript, self.config.wake_word) is None
         ):
+            # ADR 0042: hoparlöre yazım sürerken doğrulanmış söz susturur ama komut olmaz;
+            # sonraki söz uyandırmasız takip olarak alınır. Kısa patlama (öksürük, kapı)
+            # STT'den geçse bile barge_in_ms altında kalır.
+            if (
+                self.config.barge_in_without_wake
+                and self._output_active
+                and (segment.speech_end - segment.speech_start) * 1000 >= self.config.barge_in_ms
+            ):
+                self.on_transcript("Söz kesildi; dinliyorum.")
+                await self._interrupt_output(uid)
+                # Kullanıcı bilerek susturdu: takip sözü wake istemez. Yankı filtresi
+                # (_is_spoken_echo) son yanıt metniyle çalışmaya devam eder.
+                self._output_requires_wake = False
+                self._followup_until = self.clock() + self.config.followup_seconds
+                self._awaiting_followup = True
+                self._emit_state("awaiting_command")
+                self._event(uid, "terminal", outcome="interrupted", reason="barge_in")
+                return
             self.on_transcript("Ses yok sayıldı; söz kesmek için Artemis diyerek başla.")
             self._event(uid, "terminal", outcome="rejected", reason="output_requires_wake")
             return
@@ -436,15 +464,7 @@ class VoiceController:
         if toggle is None and command is None:
             self._event(uid, "terminal", outcome="rejected", reason="no_wake")
             return
-        if self._active is not None and not self._active.done():
-            self._barge_cancelled = True
-            self.runner.cancel_current()
-            self._active.cancel()
-        try:
-            await self._settle_active()
-        except asyncio.CancelledError:
-            self._event(uid, "terminal", outcome="cancelled", reason="waiting_previous")
-            raise
+        await self._interrupt_output(uid)
         self._generation_sequence += 1
         gid = self._generation_sequence
         if toggle is not None:
@@ -456,6 +476,28 @@ class VoiceController:
         else:
             self._barge_cancelled = False
             self._active = asyncio.create_task(self._run_and_speak(command, uid=uid, gid=gid))
+
+    async def _interrupt_output(self, uid: int) -> None:
+        """Etkin turu ve oynatmayı durdurur; temizlik bitmeden yeni tur başlamaz.
+
+        Stop çifti kesen sözün kimliğinde tutulur (generation'sız): böylece hem stop
+        isteğinden hem kullanıcı sesinin başından oynatmanın durmasına süre ölçülür.
+        """
+        interrupting = self._output_active
+        if self._active is not None and not self._active.done():
+            if interrupting:
+                self._event(uid, "stop_requested")
+            self._barge_cancelled = True
+            self.runner.cancel_current()
+            self._active.cancel()
+        try:
+            await self._settle_active()
+        except asyncio.CancelledError:
+            self._event(uid, "terminal", outcome="cancelled", reason="waiting_previous")
+            raise
+        if interrupting:
+            # Sink'e yazım burada bitmiştir; aygıt tamponundaki son blok ölçülmez.
+            self._event(uid, "playback_stopped")
 
     @staticmethod
     def _speech_words(text: str) -> list[str]:
@@ -551,6 +593,7 @@ class VoiceController:
             self._mark_spoken(text, requires_wake=False)
 
         try:
+            self._output_active = True
             async with aclosing(self._timed_chunks(text, cancelled, uid, gid, ack=True)) as chunks:
                 await self.sink.play(chunks, cancelled, first_pcm)
             outcome = "ack" if played else "no_audio"
@@ -561,6 +604,7 @@ class VoiceController:
             outcome = "error"
             logger.warning("Uyandırma sesi üretilemedi (%s).", type(error).__name__)
         finally:
+            self._output_active = False
             self._event(uid, "terminal", generation_id=gid, outcome=outcome, ack=True)
             cancelled.set()
             self._spoken_until = self.clock() + 1.2
@@ -646,10 +690,18 @@ class VoiceController:
         outcome: Outcome = "no_audio"
         try:
             self._emit_state("thinking")
-            self._event(uid, "command_start", generation_id=gid)
+            self._task_turns += 1
+            self._event(uid, "command_start", generation_id=gid, warm=self._task_turns > 1)
             result = await self.run_command(command)
             self.on_timing("model_complete", self.clock())
-            self._event(uid, "model_complete", generation_id=gid)
+            # Aşamalar AgentLoop'un monotonik saatindendir; sahte saatli testte sıra
+            # bozulursa rapor örneği geçersiz sayar, sessizce düzeltmez.
+            for phase in result.phases:
+                self._event(uid, phase.stage, generation_id=gid, timestamp=phase.timestamp)
+            command_class: CommandClass | None = None
+            if result.turn_id:
+                command_class = "tool" if result.tool_calls else "chat"
+            self._event(uid, "model_complete", generation_id=gid, command_class=command_class)
             if result.text.strip() and not generation.is_set():
 
                 def first_pcm() -> None:
@@ -663,6 +715,7 @@ class VoiceController:
 
                 self._emit_state("speaking")
                 self._playback_cancelled = generation
+                self._output_active = True
                 self._playback = asyncio.create_task(self._play_response(
                     result.text, generation, uid, gid, first_pcm,
                 ))
@@ -673,6 +726,7 @@ class VoiceController:
                     if not generation.is_set() or (current is not None and current.cancelling()):
                         raise
                 finally:
+                    self._output_active = False
                     self._playback = None
                     self._playback_cancelled = None
                     self._spoken_until = self.clock() + 1.2

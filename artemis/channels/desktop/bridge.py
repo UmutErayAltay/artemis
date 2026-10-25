@@ -30,6 +30,7 @@ from artemis.channels.runtime import (
 from artemis.channels.telegram.api import TelegramClient, build_telegram_client
 from artemis.channels.voice.core import VoiceController
 from artemis.channels.voice.factory import build_voice_controller
+from artemis.channels.voice.metrics import EventCollector, collector_report, write_report
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.scheduler import ProactiveScheduler
 from artemis.proactive.store import ProactiveStore
@@ -803,13 +804,17 @@ class DesktopBridge:
             self._voice_failed()
             self._emit_voice_state("off")
             return
+        # Ölçüm isteğe bağlıdır; factory imzası değişmesin diye toplayıcı sonradan bağlanır.
+        collector = EventCollector() if runtime.settings.voice.telemetry_report else None
+        if collector is not None:
+            controller.on_event = collector
         with self._lock:
             abandoned = self._voice_stop_requested or self._shutdown
             if not abandoned:
                 self._voice_controller = controller
                 # Model `voice_continuous` aracıyla kipi değiştirebilsin; yalnız ses çalışırken var.
                 runtime.context.services["voice_controller"] = controller
-                self._voice_task = asyncio.create_task(self._run_voice(controller))
+                self._voice_task = asyncio.create_task(self._run_voice(controller, collector))
                 self._voice_starting = False
         if abandoned:
             # Hazırlık sürerken kapatıldı: mikrofon hiç açılmadan kaynaklar bırakılır.
@@ -818,7 +823,9 @@ class DesktopBridge:
                 self._voice_starting = False
             self._emit_voice_state("off")
 
-    async def _run_voice(self, controller: VoiceController) -> None:
+    async def _run_voice(
+        self, controller: VoiceController, collector: EventCollector | None = None,
+    ) -> None:
         try:
             await controller.run()
         except (OSError, RuntimeError, ValueError, ImportError):
@@ -830,7 +837,29 @@ class DesktopBridge:
                 if self._runtime is not None:
                     self._runtime.context.services.pop("voice_controller", None)
                 self._voice_stop_requested = False
+            if collector is not None:
+                await self._export_voice_telemetry(controller, collector)
             self._emit_voice_state("off")
+
+    async def _export_voice_telemetry(
+        self, controller: VoiceController, collector: EventCollector,
+    ) -> None:
+        """Ses kapanınca içeriksiz rapor yazılır; yazılamazsa ses kapanışı bozulmaz."""
+        runtime = self._runtime
+        if runtime is None:
+            return
+        report = collector_report(collector, "masaustu")
+        # Yalnız gerçek sounddevice çıkışı bu bilgiyi taşır; başka sink için null kalır.
+        output = getattr(getattr(controller, "sink", None), "output_info", None)
+        report["hardware"] = {"output": output}
+        try:
+            path = await asyncio.to_thread(
+                write_report, report, runtime.settings.state_dir / "voice-telemetry"
+            )
+        except (OSError, ValueError) as error:
+            runtime.audit.emit("voice_telemetry", written=False, error_type=type(error).__name__)
+            return
+        runtime.audit.emit("voice_telemetry", written=True, path=str(path))
 
     def set_continuous(self, enabled: bool) -> bool:
         """Çalışan ses denetleyicisinin kesintisiz kipini değiştirir (GUI thread'i)."""

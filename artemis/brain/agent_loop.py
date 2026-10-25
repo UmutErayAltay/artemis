@@ -6,7 +6,7 @@ import logging
 import sqlite3
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -157,6 +157,13 @@ async def _wait_for_turn(
         await _cancel_and_wait(cancellation, pending_tasks)
 
 
+class PhaseTiming(BaseModel):
+    """İçeriksiz aşama damgası (ADR 0041 eki); ``time.monotonic`` saatidir, duvar saati değildir."""
+
+    stage: Literal["model_request", "model_response", "tool_start", "tool_end"]
+    timestamp: float
+
+
 class RunResult(BaseModel):
     text: str
     stop_reason: str
@@ -168,6 +175,9 @@ class RunResult(BaseModel):
     # Konuşma geçmişi için ham tur kaydı; turn_end denetimine kopyalanmasın diye
     # dışlanır (araç çıktıları zaten tool_result olaylarında vardır).
     record: TurnRecord | None = Field(default=None, exclude=True)
+    # Ses ölçümü için model/araç aşama zamanları; monotonik değerler denetimde anlam taşımaz
+    # (süre zaten elapsed_seconds'ta), bu yüzden turn_end'e yazılmaz.
+    phases: list[PhaseTiming] = Field(default_factory=list, exclude=True)
 
 
 # İptal edilen ve temizliği süren turlar "devam edilecek iş" gibi görünmesin diye
@@ -278,6 +288,7 @@ class AgentLoop:
         past = history.messages if history is not None else []
         history_private = any(message.private for message in past)
         record_steps: list[Message | ToolExchange] = []
+        phases: list[PhaseTiming] = []
         messages = [
             Message(
                 role="system",
@@ -325,6 +336,7 @@ class AgentLoop:
                 elapsed_seconds=time.monotonic() - start,
                 turn_id=state.turn_id,
                 record=record,
+                phases=phases,
             )
             if not finished:
                 audit.emit("turn_end", **result.model_dump(mode="json"))
@@ -351,6 +363,7 @@ class AgentLoop:
                 if remaining() <= 0:
                     return finish("timeout", TIMEOUT_MESSAGE)
                 steps += 1
+                phases.append(PhaseTiming(stage="model_request", timestamp=time.monotonic()))
                 completion = await _wait_for_turn(
                     self.provider.complete(
                         messages, self.gate.registry.definitions(), timeout=remaining()
@@ -359,6 +372,7 @@ class AgentLoop:
                     remaining(),
                     self._pending_cleanup,
                 )
+                phases.append(PhaseTiming(stage="model_response", timestamp=time.monotonic()))
                 if self.context.cancelled.is_set():
                     return finish("cancelled", _cancelled_message())
                 usage.input_tokens += completion.usage.input_tokens
@@ -422,12 +436,14 @@ class AgentLoop:
                     if completion.local_fallback:
                         local_calls += 1
                     self.context.turn_private = private_seen or history_private
+                    phases.append(PhaseTiming(stage="tool_start", timestamp=time.monotonic()))
                     result = await _wait_for_turn(
                         self.gate.dispatch(normalized_call, self.context, state, self.approve),
                         self.context.cancelled,
                         remaining(),
                         self._pending_cleanup,
                     )
+                    phases.append(PhaseTiming(stage="tool_end", timestamp=time.monotonic()))
                     if self.context.cancelled.is_set():
                         return finish("cancelled", _cancelled_message())
                     if remaining() <= 0:
