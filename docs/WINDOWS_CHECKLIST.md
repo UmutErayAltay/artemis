@@ -87,6 +87,26 @@ kapanınca içeriksiz rapor `state_dir/voice-telemetry/` altına yazılır (ADR 
   `false_wake` değerleri; sentetik sonuç kabul sayılmaz.
 - [ ] "artmış" yanlış uyanma bulgusu (ADR 0045): eşleştirici değişsin mi? (karar)
 
+### A7. Gürültüde uyandırma deneyi (ADR 0045) — SIRADAKİ İŞ
+Bulutta sentetik ölçüm: temiz seste "Artemis" kaçırma %0, pembe gürültü 5 dB'de %29, telefon
+bandında %19. Dört yolu karşılaştır; feature branch gerekir (main'de değil):
+`git fetch origin claude/mt3ui55os-readme-gpugv7` → `git checkout claude/mt3ui55os-readme-gpugv7`.
+- [ ] Corpus: bulut oturumunun gönderdiği `wake_noise_tr.zip`'i
+  `%USERPROFILE%\.cache\artemis-eval\` altına aç (150 örnek: 15 wake + 15 wake-siz temiz
+  örnek × pembe 10/5 dB, babble 10/5 dB, telefon). Zip yoksa yeniden kur:
+  `python -m bench.corpus_noise --kaynak <sentetik corpus.yaml> --babble <common_voice corpus.yaml>`.
+- [ ] `$C = "$env:USERPROFILE\.cache\artemis-eval\wake_noise_tr\corpus.yaml"` ve:
+  1. `python -m bench.speech_accuracy --canli --sentetik-metin --corpus $C > wn-base.json`
+  2. `... --ek-hotword Artemis ... > wn-hot.json`
+  3. `... --gurultu-engelle orta ... > wn-dfn.json` (16 kHz yol; gerçek 48 kHz zincirin alt sınırı)
+  4. config'te geçici `stt_vad_filter: false` → `... > wn-novad.json`
+- [ ] Karşılaştır: `totals.missed_wake_rate`, `totals.false_wake`, `condition_breakdown`;
+  kaçan örneklerin `hypothesis` alanında Whisper "Artemis" yerine ne yazdı? Yakın yazımsa
+  eşleştirici, hiç yoksa ipucu/DFN/VAD yolu. Karar ADR 0045'e eklenecek.
+- [ ] İsteğe bağlı: 10 sesli sentetik set (XTTS-v2 8 stüdyo sesi + Piper + Emel, 1340 örnek)
+  bulutta kuruldu ama ölçümü yarıda kesildi; GPU'da yeniden ölçülebilir (XTTS için torch 2.8 +
+  transformers<5 + coqui-tts 0.27.5 ayrı ortam).
+
 ## B. Önceki oturumlardan kalanlar
 
 - [ ] Panelde ayar değiştir → "Uygula" → değişiklik gerçekten etkin (2026-10-23, PR #2).
