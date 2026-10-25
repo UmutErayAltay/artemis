@@ -142,4 +142,6 @@ Yanlış uyanma her satırda 0 ("artmış" eşleştirici düzeltmesi tutuyor; ka
   ek `detect_language` geçişidir (ADR 0021). Corpus'ta İngilizce cümle yoktur; `tr`'nin bedeli
   tam İngilizce cümlenin Türkçe zorla yazılmasıdır ve burada ölçülmedi. Kiril riski `tr`'de de
   yoktur (dil sabit). Karar Umut'ta: İngilizce cümle kurmuyorsa `tr` önerilir.
-- Yanlış hedef 4 (taban, sentetik): çözücü belirsiz adı yanlış uygulamaya bağladı; ayrı incelenmeli.
+- Yanlış hedef 4 (taban, sentetik): hepsi "X değil, Y aç"; Y bozuk yazılınca ("Kobe C. Rona")
+  tek tanınan ad olumsuzlanan X kalır. Bu ölçüm olumsuzluğu bilmez (`metric_scope`); canlıda
+  modelin işidir ve `bench.run` intent kategorisinde sınanır. Gerçek kaynak Y'nin STT hatasıdır.
