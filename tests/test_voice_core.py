@@ -301,11 +301,47 @@ async def test_partial_transcript_never_dispatches():
     assert runner.commands == []
 
 
+async def test_reply_end_does_not_open_followup_by_default():
+    class StreamRunner(FakeRunner):
+        async def run(self, text, stream=None):
+            return await super().run(text)
+
+    for streaming in (False, True):
+        controller = VoiceController(
+            StreamRunner(), VoiceConfig(followup_seconds=5), FakeMic(), FakeVAD([]),
+            FakeRecognizer([]), FakeTTS(), FakeSink(), clock=lambda: 100.0,
+            stream_responses=streaming,
+        )
+        await controller._run_and_speak("saat kaç")
+        assert controller._followup_until == 0.0
+        assert controller._wake_command("hava nasıl") is None
+
+
+async def test_ack_is_synthesized_once_and_replayed():
+    calls = []
+
+    class CountingTTS(FakeTTS):
+        async def stream(self, text, cancelled):
+            calls.append(text)
+            async for chunk in super().stream(text, cancelled):
+                yield chunk
+
+    sink = FakeSink()
+    controller = VoiceController(
+        FakeRunner(), VoiceConfig(), FakeMic(), FakeVAD([]), FakeRecognizer([]),
+        CountingTTS(), sink,
+    )
+    await controller._acknowledge_wake()
+    await controller._acknowledge_wake()
+    assert calls == ["Seni dinliyorum."]
+    assert len(sink.chunks) == 2 and sink.chunks[0] == sink.chunks[1] != b""
+
+
 async def test_successful_reply_renews_followup_window():
     now = [100.0]
     controller = VoiceController(
         FakeRunner(),
-        VoiceConfig(followup_seconds=5),
+        VoiceConfig(followup_seconds=5, followup_listening=True),
         FakeMic(),
         FakeVAD([]),
         FakeRecognizer([]),
@@ -373,7 +409,7 @@ async def test_wake_ack_does_not_require_repeating_wake_for_followup():
     try:
         await controller._handle_utterance(AudioSegment(b"\x00\x00", 10, 11))
         await controller._settle_active()
-        assert controller._spoken_text == "Dinliyorum."
+        assert controller._spoken_text == "Seni dinliyorum."
         await controller._handle_utterance(AudioSegment(b"\x00\x00", 12.1, 13))
         await controller._settle_active()
         assert runner.commands == ["tarayıcı aç"]
@@ -560,7 +596,7 @@ async def test_run_accepts_followup_during_dinliyorum_without_repeating_wake():
                 yield AudioFrame(b"\x01\x00", monotonic())
             await sink.started.wait()
             acknowledgements.append(controller._active)
-            assert controller._spoken_text == "Dinliyorum."
+            assert controller._spoken_text == "Seni dinliyorum."
             for _ in range(60 + 5):
                 yield AudioFrame(b"\x01\x00", monotonic())
             processed.set()
@@ -569,7 +605,7 @@ async def test_run_accepts_followup_during_dinliyorum_without_repeating_wake():
     controller = VoiceController(
         runner, VoiceConfig(pre_roll_ms=0, end_silence_ms=100), Mic(),
         FakeVAD([True] * 2 + [False] * 5 + [True] * 60 + [False] * 5),
-        FakeRecognizer(["Artemis", "Dinliyorum, saat kaç"]), FakeTTS(), sink,
+        FakeRecognizer(["Artemis", "Seni dinliyorum, saat kaç"]), FakeTTS(), sink,
     )
     listening = asyncio.create_task(controller.run())
     try:
@@ -756,7 +792,7 @@ async def test_continuous_wake_alone_still_acknowledges():
     try:
         await _say(controller)
         assert runner.commands == []
-        assert controller._spoken_text == "Dinliyorum."
+        assert controller._spoken_text == "Seni dinliyorum."
         assert sink.chunks
     finally:
         await controller.close()
@@ -872,7 +908,7 @@ async def test_wake_ack_keeps_microphone_open_and_strips_own_words():
     runner = FakeRunner()
     controller = VoiceController(
         runner, VoiceConfig(), mic, FakeVAD([]),
-        FakeRecognizer(["Artemis", "Dinliyorum, saat kaç"]),
+        FakeRecognizer(["Artemis", "Seni dinliyorum, saat kaç"]),
         FakeTTS(), FakeSink(), clock=lambda: 12.0,
     )
     try:

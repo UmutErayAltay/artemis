@@ -106,7 +106,8 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda box: "hybrid" if box.isChecked() else "local",
         lambda box, value: box.setChecked(value == "hybrid"),
     ),
-    _checkbox(("voice", "allow_cloud_stt_audio"), "cloud_stt_consent"),
+    _checkbox(("voice", "barge_in_without_wake"), "barge_in_box"),
+    _checkbox(("voice", "followup_listening"), "followup_box"),
     _checkbox(("voice", "noise_suppression"), "noise_suppression"),
     _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
     _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
@@ -420,14 +421,15 @@ class SettingsPanel(QWidget):
             "ucuna gider (ADR 0046). Değişiklik ses yeniden başlayınca uygulanır."
         )
         voice_layout.addWidget(self.hybrid_stt)
-        self.cloud_stt_consent = QCheckBox("Komut sesinin seçilen uca gönderilmesine izin ver")
-        voice_layout.addWidget(self.cloud_stt_consent)
+        self.barge_in_box = QCheckBox("Konuşurken sesimle sustur")
+        voice_layout.addWidget(self.barge_in_box)
+        self.followup_box = QCheckBox("Yanıttan ve susturmadan sonra Artemis demeden dinle")
+        voice_layout.addWidget(self.followup_box)
         self.cloud_stt_hint = QLabel()
         self.cloud_stt_hint.setWordWrap(True)
         self.cloud_stt_hint.setTextFormat(Qt.TextFormat.PlainText)
         voice_layout.addWidget(self.cloud_stt_hint)
         self.hybrid_stt.toggled.connect(self._update_cloud_hint)
-        self.cloud_stt_consent.toggled.connect(self._update_cloud_hint)
         self._cloud_configured = False
         self.noise_suppression = QCheckBox("Gürültü engelleme")
         self.noise_suppression.setToolTip(
@@ -591,16 +593,14 @@ class SettingsPanel(QWidget):
             self.cloud_stt_hint.setText("")
             return
         text = (
-            "Komut sesi seçilen uca gider; kesintisiz kipte her söz gider. "
-            "Uyandırma yerelde kalır."
+            "Komut sesi seçilen uca (config: voice.stt_cloud_endpoint) gönderilir; "
+            "kesintisiz kipte her söz gider."
         )
         if not self._cloud_configured:
             text += (
                 " Uç ve model config'te (voice.stt_cloud_endpoint, stt_cloud_model) "
                 "tanımlı değil; tanımlanmadan Uygula reddedilir."
             )
-        if not self.cloud_stt_consent.isChecked():
-            text += " İzin kutusu işaretlenmeden ses kanalı başlamaz."
         self.cloud_stt_hint.setText(text)
 
     def _toggle_advanced(self, checked: bool) -> None:

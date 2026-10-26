@@ -157,14 +157,19 @@ async def build_voice_controller(
         cleanup.push_async_callback(_close_optional, sink)
         cloud_recognizer: OpenAICompatibleTranscriber | None = None
         if settings.voice.stt_mode == "hybrid":
-            # İzin kapalıysa kurucu ValueError verir ve ses kanalı başlamaz (Edge TTS ile aynı);
-            # model yüklemeden önce denetlenir ki boşuna GPU belleği ayrılmasın.
             endpoint_id = settings.voice.stt_cloud_endpoint
             cloud_recognizer = OpenAICompatibleTranscriber(
                 alias_hotword_config(settings), endpoint_id,
                 settings.endpoints[endpoint_id], runtime.audit,
             )
-        recognizer = FasterWhisperRecognizer(alias_hotword_config(settings))
+        local_voice = alias_hotword_config(settings)
+        if cloud_recognizer is not None:
+            # Hybrid'de yerel tanıyıcı yalnız uyandırmaya karar verir; tam hotword listesi
+            # "Artemis tarayıcı" gibi kuyruk halüsinasyonu üretiyordu (ADR 0046 eki).
+            local_voice = VoiceConfig.model_validate(
+                {**local_voice.model_dump(), "stt_hotwords": (local_voice.wake_word,)}
+            )
+        recognizer = FasterWhisperRecognizer(local_voice)
         await _prepare(recognizer)
         synthesizer: SpeechSynthesizer
         if settings.voice.tts_backend == "edge":

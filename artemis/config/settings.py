@@ -4,7 +4,7 @@ import re
 from datetime import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -77,6 +77,11 @@ class VoiceConfig(BaseModel):
     require_wake_during_output: bool = True
     # ADR 0042: konuşurken uyandırmasız doğrulanmış söz yalnız susturur, komut çalıştırmaz.
     barge_in_without_wake: bool = True
+    # ADR 0046 eki: False iken söz kesme ve yanıt sonu takip penceresi açmaz (Artemis demeden
+    # dinleme yok); tek başına "Artemis" karşılığı takibi her zaman açar. True: eski davranış.
+    followup_listening: bool = False
+    # Uyandırma karşılığı; çok kısa metin EMA TTS'te bozuk çıkıyordu (ADR 0046 eki).
+    wake_ack_text: str = Field(default="Seni dinliyorum.", min_length=1, max_length=40)
     # ADR 0043: model yazarken cümle cümle seslendir; sağlayıcı akmıyorsa tam yanıt beklenir.
     streaming: bool = True
     continuous_mode: bool = False
@@ -121,7 +126,6 @@ class VoiceConfig(BaseModel):
     stt_mode: Literal["local", "hybrid"] = "local"
     stt_cloud_endpoint: str = ""
     stt_cloud_model: str = ""
-    allow_cloud_stt_audio: bool = False
     tts_backend: Literal["piper", "edge", "ema"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True
@@ -131,6 +135,15 @@ class VoiceConfig(BaseModel):
     edge_voice: str = ""
     allow_cloud_tts_text: bool = False
     ffmpeg: str = "ffmpeg"
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_cloud_consent(cls, data: Any) -> Any:
+        # Eski config'lerdeki allow_cloud_stt_audio kaldırıldı (hybrid seçmek açık izindir);
+        # yalnız bu anahtar yutulur, diğer bilinmeyen alanlar yine reddedilir.
+        if isinstance(data, dict) and "allow_cloud_stt_audio" in data:
+            data = {k: v for k, v in data.items() if k != "allow_cloud_stt_audio"}
+        return data
 
     @field_validator("stt_hotwords")
     @classmethod

@@ -322,6 +322,8 @@ class VoiceController:
         self._spoken_text = ""
         self._spoken_until = 0.0
         self._output_requires_wake = False
+        # Uyandırma karşılıkları metne göre bir kez sentezlenir, sonra aynı PCM çalınır.
+        self._ack_cache: dict[str, list[PCMChunk]] = {}
         # Çalışma anı kipi; config yalnız başlangıç değeridir (ADR 0024).
         self.continuous = config.continuous_mode
 
@@ -467,9 +469,12 @@ class VoiceController:
                 # Kullanıcı bilerek susturdu: takip sözü wake istemez. Yankı filtresi
                 # (_is_spoken_echo) son yanıt metniyle çalışmaya devam eder.
                 self._output_requires_wake = False
-                self._followup_until = self.clock() + self.config.followup_seconds
-                self._awaiting_followup = True
-                self._emit_state("awaiting_command")
+                if self.config.followup_listening:
+                    self._followup_until = self.clock() + self.config.followup_seconds
+                    self._awaiting_followup = True
+                    self._emit_state("awaiting_command")
+                else:
+                    self._emit_state("listening")
                 self._event(uid, "terminal", outcome="interrupted", reason="barge_in")
                 return
             self.on_transcript("Ses yok sayıldı; söz kesmek için Artemis diyerek başla.")
@@ -500,7 +505,12 @@ class VoiceController:
             self._active = asyncio.create_task(self._run_and_speak(command, uid=uid, gid=gid))
 
     async def _cloud_command(self, uid: int, segment: AudioSegment, local_command: str) -> str:
-        """Komut metnini bulut tanıyıcıdan alır; her hatada yerel metne düşer (komut kaybolmaz)."""
+        """Komut metnini bulut tanıyıcıdan alır.
+
+        Yalnız istisnada (ağ/HTTP/geçersiz yanıt) yerel metne düşülür. Çağrı başarılıysa bulut
+        metni nihaidir: boş ya da yalnız uyandırma sözcüğü ise "" (tek başına uyandırma) döner;
+        yerel kuyruk (halüsinasyon) komut olmaz.
+        """
         assert self.cloud_recognizer is not None
         try:
             text = (await self.cloud_recognizer.transcribe(segment.pcm)).strip()
@@ -515,10 +525,7 @@ class VoiceController:
             return local_command
         span = find_wake_word(text, self.config.wake_word)
         command = (text[span[1]:] if span is not None else text).lstrip(" \t,.;:!?-")
-        if not command.strip(" \t,.;:!?-"):
-            self._event(uid, "stt_cloud_fallback", reason="stt_cloud_fallback")
-            return local_command
-        return command
+        return command if command.strip(" \t,.;:!?-") else ""
 
     async def _interrupt_output(self, uid: int) -> None:
         """Etkin turu ve oynatmayı durdurur; temizlik bitmeden yeni tur başlamaz.
@@ -615,7 +622,7 @@ class VoiceController:
         self._output_requires_wake = requires_wake
 
     async def _acknowledge_wake(
-        self, text: str = "Dinliyorum.", *, uid: int = 0, gid: int | None = None,
+        self, text: str | None = None, *, uid: int = 0, gid: int | None = None,
     ) -> None:
         """Tek başına uyandırmada (ve kip değişiminde) LLM çağırmadan kısa karşılık verir.
 
@@ -623,6 +630,7 @@ class VoiceController:
         "Dinliyorum" sırasında kayboluyordu. Kendi sesimiz yankı filtresiyle (_is_spoken_echo)
         elenir, başa yapışırsa _strip_spoken_prefix ayıklar.
         """
+        text = self.config.wake_ack_text if text is None else text
         cancelled = asyncio.Event()
         self._emit_state("awaiting_command")
         played = False
@@ -705,6 +713,15 @@ class VoiceController:
         *, ack: bool = False,
     ) -> AsyncGenerator[PCMChunk]:
         first = True
+        cached = self._ack_cache.get(text) if ack else None
+        if cached is not None:
+            for chunk in cached:
+                if first and chunk.pcm:
+                    first = False
+                    self._event(uid, "tts_first_chunk", generation_id=gid, ack=ack)
+                yield chunk
+            return
+        recorded: list[PCMChunk] = []
         # Adaptörün süreç/ağ finally bloğu, sink erken dönse de kapanabilmeli.
         chunks = self.synthesizer.stream(text, cancelled)
         try:
@@ -712,7 +729,11 @@ class VoiceController:
                 if first and chunk.pcm:
                     first = False
                     self._event(uid, "tts_first_chunk", generation_id=gid, ack=ack)
+                recorded.append(chunk)
                 yield chunk
+            # Yalnız sonuna dek üretilen ses saklanır; kesilen akış yarım kalıp önbelleğe girmez.
+            if ack and recorded and not cancelled.is_set():
+                self._ack_cache[text] = recorded
         finally:
             closer = getattr(chunks, "aclose", None)
             if closer is not None:
@@ -803,7 +824,7 @@ class VoiceController:
                 current = asyncio.current_task()
                 if not generation.is_set() or (current is not None and current.cancelling()):
                     raise
-            if played:
+            if played and self.config.followup_listening:
                 self._followup_until = self.clock() + self.config.followup_seconds
             outcome = "completed" if played else "no_audio"
         except asyncio.CancelledError:
@@ -874,7 +895,8 @@ class VoiceController:
                     self._playback = None
                     self._playback_cancelled = None
                     self._spoken_until = self.clock() + 1.2
-                self._followup_until = self.clock() + self.config.followup_seconds
+                if self.config.followup_listening:
+                    self._followup_until = self.clock() + self.config.followup_seconds
             outcome = "completed" if played else "no_audio"
         except asyncio.CancelledError:
             outcome = "cancelled"

@@ -92,7 +92,7 @@ def _transcriber(
     audit = Audit()
     config = VoiceConfig(
         stt_mode="hybrid", stt_cloud_endpoint="bulut", stt_cloud_model="whisper-x",
-        allow_cloud_stt_audio=True, **voice,
+        **voice,
     )
     endpoint = EndpointConfig(base_url=server.url, api_key=api_key)
     return OpenAICompatibleTranscriber(config, "bulut", endpoint, audit), audit  # type: ignore[arg-type]
@@ -107,10 +107,12 @@ async def test_request_shape_without_key(server: Server) -> None:
     assert headers["Content-Type"].startswith("multipart/form-data")
     for fragment in (
         b'name="model"\r\n\r\nwhisper-x', b'name="language"\r\n\r\ntr',
-        b'name="response_format"\r\n\r\njson', b'name="prompt"\r\n\r\nArtemis Brave',
+        b'name="response_format"\r\n\r\njson',
         b'name="file"; filename="command.wav"', b"RIFF",
     ):
         assert fragment in body, fragment
+    # Hotword'den prompt kurulmaz: Whisper gürültüde prompt'u yankılıyor.
+    assert b'name="prompt"' not in body
     # Denetim kaydı ses ya da metin taşımaz.
     assert audit.records == [
         ("cloud_stt_transfer",
@@ -195,12 +197,10 @@ async def test_ghost_cloud_text_is_dropped(server: Server) -> None:
     assert await transcriber.transcribe(b"\x00\x00") == ""
 
 
-def test_transcriber_refuses_without_consent() -> None:
-    config = VoiceConfig(stt_mode="hybrid", stt_cloud_endpoint="b", stt_cloud_model="m")
-    with pytest.raises(ValueError, match="allow_cloud_stt_audio"):
-        OpenAICompatibleTranscriber(
-            config, "b", EndpointConfig(base_url="https://x.com/v1"), Audit()  # type: ignore[arg-type]
-        )
+def test_legacy_consent_key_is_ignored_but_other_extras_rejected() -> None:
+    assert VoiceConfig.model_validate({"allow_cloud_stt_audio": True}).stt_mode == "local"
+    with pytest.raises(ValidationError):
+        VoiceConfig.model_validate({"bilinmeyen_anahtar": 1})
 
 
 # ---- Denetleyici ----
@@ -297,9 +297,7 @@ async def test_non_command_speech_never_goes_to_cloud() -> None:
         await controller.close()
 
 
-@pytest.mark.parametrize("failure", [
-    RuntimeError("x"), OSError("x"), ValueError("x"), "",
-])
+@pytest.mark.parametrize("failure", [RuntimeError("x"), OSError("x"), ValueError("x")])
 async def test_cloud_failure_falls_back_to_local_text_and_logs_event(
     failure: Exception | str,
 ) -> None:
@@ -310,6 +308,20 @@ async def test_cloud_failure_falls_back_to_local_text_and_logs_event(
         assert runner.commands == ["saat kac"]
         fallback = [e for e in events if e.stage == "stt_cloud_fallback"]
         assert len(fallback) == 1 and fallback[0].reason == "stt_cloud_fallback"
+    finally:
+        await controller.close()
+
+
+@pytest.mark.parametrize("cloud_text", ["Artemis.", "", "  Artemis, "])
+async def test_successful_cloud_wake_only_beats_hallucinated_local_tail(cloud_text: str) -> None:
+    cloud = CloudFake(cloud_text)
+    controller, runner, events = _controller(["Artemis tarayıcı"], cloud)
+    try:
+        await _say(controller)
+        assert cloud.calls == 1 and runner.commands == []
+        assert not [e for e in events if e.stage == "stt_cloud_fallback"]
+        assert [e.outcome for e in events if e.stage == "terminal"] == ["ack"]
+        assert controller._awaiting_followup
     finally:
         await controller.close()
 
@@ -352,10 +364,9 @@ def _settings(**voice: Any) -> Settings:
     )
 
 
-def test_defaults_are_local_without_consent() -> None:
+def test_defaults_are_local() -> None:
     voice = VoiceConfig()
     assert (voice.stt_mode, voice.stt_cloud_endpoint, voice.stt_cloud_model) == ("local", "", "")
-    assert voice.allow_cloud_stt_audio is False
 
 
 def test_hybrid_requires_known_endpoint_and_model() -> None:
@@ -383,29 +394,23 @@ def _patch_factory(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(factory, "WebRTCVAD", lambda _config: object())
 
 
-async def test_voice_channel_refuses_hybrid_without_consent(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _patch_factory(monkeypatch)
-    settings = _settings(
-        stt_mode="hybrid", stt_cloud_endpoint="bulut", stt_cloud_model="m"
-    )
-    with pytest.raises(ValueError, match="allow_cloud_stt_audio"):
-        await factory.build_voice_controller(_runtime(settings), lambda _: None, lambda _: None)
-
-
 async def test_factory_wires_cloud_recognizer_only_in_hybrid(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _patch_factory(monkeypatch)
     hybrid = _settings(
         stt_mode="hybrid", stt_cloud_endpoint="bulut", stt_cloud_model="m",
-        allow_cloud_stt_audio=True,
+        stt_hotwords=("Artemis", "tarayıcı"),
     )
+    seen: list[VoiceConfig] = []
+    monkeypatch.setattr(factory, "FasterWhisperRecognizer",
+                        lambda config: seen.append(config) or SimpleNamespace(prepare=lambda: None))
     controller = await factory.build_voice_controller(
         _runtime(hybrid), lambda _: None, lambda _: None
     )
     assert isinstance(controller.cloud_recognizer, OpenAICompatibleTranscriber)
+    # Hybrid'de yerel tanıyıcı yalnız uyandırma sözcüğünü ipucu alır.
+    assert seen[0].stt_hotwords == ("artemis",)
     local = await factory.build_voice_controller(
         _runtime(_settings()), lambda _: None, lambda _: None
     )

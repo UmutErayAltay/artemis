@@ -41,7 +41,8 @@ uyanma 0.
    config'e yazılmaz); model `voice.stt_cloud_model` (koda gömülmez; örnek config:
    `groq` + `whisper-large-v3`). Yönlendirme takip edilmez; yanıt gövdesi ve anahtar
    loga/hata mesajına girmez.
-5. **Gizlilik:** `voice.allow_cloud_stt_audio: false` varsayılan. Hybrid seçili ama izin
+5. **Gizlilik** (aşağıdaki Ek madde 2 ile kaldırıldı; `stt_mode: hybrid` seçimi izindir):
+   `voice.allow_cloud_stt_audio: false` varsayılan. Hybrid seçili ama izin
    kapalıysa ses kanalı başlamaz, açık hata verir (Edge TTS `allow_cloud_tts_text` deseni).
    Panelde karma seçimi izin onay kutusunu da açar ve "komut sesin {uç} sunucusuna gider"
    uyarısını gösterir. Ham ses diske yazılmaz.
@@ -50,3 +51,10 @@ uyanma 0.
 small kalır (~1 GB); komut doğruluğu sağlayıcıya bağlıdır ve gerçek seste ölçülmedi
 (kendi ses seti işi ertelendi). Groq ücretsiz kotası (20 istek/dk, 2000/gün) doğrulanmadı;
 aşılırsa yerel düşüş devreye girer. Oyun modu ve uygulama adı hotword'ü ayrı işler.
+
+## Ek (2026-10-26, canlı kullanım)
+
+1. **Karma hata düzeltmesi:** Yerel Whisper tam `stt_hotwords` listesiyle "Artemis" tek başına denince "Artemis tarayıcı" uydurdu; kuyruk komut sanıldı, buluta gitti, bulut da aynı metni (veya yalnız uyandırmayı) döndürünce yerel metne düşülüp komut çalıştı. Artık hybrid'de yerel tanıyıcı yalnız uyandırma sözcüğünü ipucu alır, bulut isteğinde `prompt` yoktur (Whisper gürültüde prompt'u yankılıyor) ve başarılı bulut yanıtı nihaidir: boş ya da yalnız uyandırma ise tek başına uyandırma sayılır. Yerel metne yalnız istisnada düşülür (`stt_cloud_fallback` yalnız orada).
+2. **Tek onay:** `allow_cloud_stt_audio` kaldırıldı; `stt_mode: hybrid` seçmek açık izindir (mesajlar zaten bulut LLM'e gidiyor). Panelde tek kutu ve görünür uyarı kalır; `cloud_stt_transfer` denetimi sürer. Eski config'teki anahtar yutulur, diğer bilinmeyen alanlar yine reddedilir.
+3. **`voice.followup_listening` (varsayılan false):** Söz kesme yalnız sesi durdurur, yanıt sonu ve susturma sonrası Artemis demeden dinleme açılmaz. Tek başına "Artemis" karşılığı takibi her zaman açar; kesintisiz kip değişmez. true eski davranıştır. Panelde `barge_in_without_wake` ile birlikte iki kutu.
+4. **`voice.wake_ack_text` (varsayılan "Seni dinliyorum."):** "Dinliyorum." EMA TTS'te çok kısa olduğundan bozuk çıkıyordu. Karşılık metne göre bir kez sentezlenir, sonraki uyandırmalarda aynı PCM çalınır (yarım kesilen akış önbelleğe girmez).

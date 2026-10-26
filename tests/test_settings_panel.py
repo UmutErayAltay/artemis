@@ -388,12 +388,10 @@ def test_hybrid_stt_checkboxes_round_trip_and_hint(tmp_path: Path) -> None:
     assert panel.cloud_stt_hint.text() == ""
     panel.hybrid_stt.setChecked(True)
     assert "kesintisiz kipte her söz gider" in panel.cloud_stt_hint.text()
-    assert "İzin kutusu" in panel.cloud_stt_hint.text()
-    panel.cloud_stt_consent.setChecked(True)
-    assert "İzin kutusu" not in panel.cloud_stt_hint.text()
+    assert "voice.stt_cloud_endpoint" in panel.cloud_stt_hint.text()
     save_choices(path, None, values=panel.values())
     saved = load_settings(path).voice
-    assert (saved.stt_mode, saved.allow_cloud_stt_audio) == ("hybrid", True)
+    assert saved.stt_mode == "hybrid"
     assert _panel(path).hybrid_stt.isChecked()
     panel.deleteLater()
 

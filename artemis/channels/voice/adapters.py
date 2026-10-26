@@ -381,8 +381,6 @@ class OpenAICompatibleTranscriber:
     def __init__(
         self, config: VoiceConfig, endpoint_id: str, endpoint: EndpointConfig, audit: AuditLog,
     ) -> None:
-        if not config.allow_cloud_stt_audio:
-            raise ValueError("Karma tanıma için allow_cloud_stt_audio açık olmalı.")
         self.config = config
         self.endpoint_id = endpoint_id
         self.endpoint = endpoint
@@ -408,8 +406,7 @@ class OpenAICompatibleTranscriber:
         data = {"model": self.config.stt_cloud_model, "response_format": "json"}
         if self.config.stt_language == "tr":
             data["language"] = "tr"
-        if self.config.stt_hotwords:
-            data["prompt"] = " ".join(self.config.stt_hotwords)
+        # prompt yok: Whisper gürültüde prompt metnini yankılıyor (ADR 0046 eki).
         # Gizlilik denetimi sesi göndermeden önce yazılır; ses ve metin kaydedilmez.
         self.audit.emit(
             "cloud_stt_transfer", service=self.endpoint_id, content_kind="command_audio",
