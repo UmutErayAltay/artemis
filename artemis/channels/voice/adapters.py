@@ -21,7 +21,12 @@ from typing import Any, Protocol
 import httpx
 
 from artemis.brain.providers import stored_endpoint_key
-from artemis.channels.voice.core import AudioFrame, PCMChunk, SpeechSynthesizer
+from artemis.channels.voice.core import (
+    AudioFrame,
+    PCMChunk,
+    SpeechSynthesizer,
+    is_ghost_transcript,
+)
 from artemis.config.settings import EndpointConfig, VoiceConfig
 from artemis.safety.audit import AuditLog
 from artemis.tools.platform import child_environment
@@ -42,20 +47,8 @@ class EchoReferenceSink(Protocol):
         ...
 
 
-_GHOST_PHRASES = {
-    "abone olmayı unutmayın", "izlediğiniz için teşekkürler",
-    "izlediğiniz için teşekkür ederim", "izlediğiniz için teşekkür ederiz",
-    "bu videoyu izlediğiniz için teşekkür ederim",
-    "bu videoyu izlediğiniz için teşekkür ederiz", "altyazı mk",
-}
-
-
-def is_ghost_transcript(text: str) -> bool:
-    normalized = text.replace("I", "ı").replace("İ", "i").lower()
-    normalized = " ".join("".join(
-        char for char in normalized if char.isalnum() or char.isspace()
-    ).split())
-    return normalized in _GHOST_PHRASES
+# Kalıp listesi core'da: uyandırma sonrası kuyruk da aynı süzgeçten geçer.
+__all__ = ["is_ghost_transcript"]
 
 
 def is_repeating_transcript(text: str) -> bool:

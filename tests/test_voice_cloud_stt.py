@@ -312,7 +312,9 @@ async def test_cloud_failure_falls_back_to_local_text_and_logs_event(
         await controller.close()
 
 
-@pytest.mark.parametrize("cloud_text", ["Artemis.", "", "  Artemis, "])
+@pytest.mark.parametrize(
+    "cloud_text", ["Artemis.", "", "  Artemis, ", "Artemis. Abone olmayı unutmayın."],
+)
 async def test_successful_cloud_wake_only_beats_hallucinated_local_tail(cloud_text: str) -> None:
     cloud = CloudFake(cloud_text)
     controller, runner, events = _controller(["Artemis tarayıcı"], cloud)

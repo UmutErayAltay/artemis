@@ -161,6 +161,23 @@ def test_wake_word_uses_word_boundaries_and_casefold():
     assert controller._wake_command("saat kaç") is None
 
 
+@pytest.mark.parametrize("transcript", [
+    "Artemis. Abone olmayı unutmayın.",
+    "Artemis, bu videoyu izlediğiniz için teşekkür ederim",
+    "Artemis Altyazı M.K.",
+])
+def test_ghost_tail_after_wake_is_wake_only(transcript: str):
+    # Canlı 2026-10-26: Whisper kısa "Artemis"e altyazı kalıbı ekledi, kuyruk komut sanıldı.
+    controller = object.__new__(VoiceController)
+    controller.config = VoiceConfig(wake_word="artemis", followup_seconds=8)
+    controller.clock = lambda: 10.0
+    controller._followup_until = 0.0
+    controller.continuous = False
+
+    assert controller._wake_command(transcript) == ""
+    assert controller._followup_until == 18.0
+
+
 @pytest.mark.parametrize(
     ("transcript", "command"),
     [

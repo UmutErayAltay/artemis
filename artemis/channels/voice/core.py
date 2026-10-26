@@ -77,6 +77,28 @@ def _substitutions(a: str, b: str, limit: int) -> int:
     return sum(char_a != char_b for char_a, char_b in zip(a, b, strict=True))
 
 
+_GHOST_PHRASES = {
+    "abone olmayı unutmayın", "izlediğiniz için teşekkürler",
+    "izlediğiniz için teşekkür ederim", "izlediğiniz için teşekkür ederiz",
+    "bu videoyu izlediğiniz için teşekkür ederim",
+    "bu videoyu izlediğiniz için teşekkür ederiz", "altyazı mk",
+}
+
+
+def is_ghost_transcript(text: str) -> bool:
+    """Whisper'ın sessizlik/kısa seste uydurduğu altyazı kalıbı mı.
+
+    Tanıyıcı yalnız tam metne bakar; canlıda "Artemis. Abone olmayı unutmayın." geçti ve
+    kuyruk komut sanıldı (2026-10-26). Bu yüzden VoiceController uyandırma sonrası kuyruğa da
+    uygular.
+    """
+    normalized = text.replace("I", "ı").replace("İ", "i").lower()
+    normalized = " ".join("".join(
+        char for char in normalized if char.isalnum() or char.isspace()
+    ).split())
+    return normalized in _GHOST_PHRASES
+
+
 def find_wake_word(transcript: str, wake_word: str) -> tuple[int, int] | None:
     """Uyandırma sözcüğünün transcript'teki (başlangıç, bitiş) konumu; yoksa None.
 
@@ -525,6 +547,8 @@ class VoiceController:
             return local_command
         span = find_wake_word(text, self.config.wake_word)
         command = (text[span[1]:] if span is not None else text).lstrip(" \t,.;:!?-")
+        if is_ghost_transcript(command):
+            return ""
         return command if command.strip(" \t,.;:!?-") else ""
 
     async def _interrupt_output(self, uid: int) -> None:
@@ -669,7 +693,8 @@ class VoiceController:
         span = find_wake_word(transcript, self.config.wake_word)
         if span is not None:
             tail = transcript[span[1] :].lstrip(" \t,.;:!?-")
-            if not tail.strip(" \t,.;:!?-"):
+            # Uydurma altyazı kuyruğu ("Artemis. Abone olmayı unutmayın.") tek başına uyandırmadır.
+            if not tail.strip(" \t,.;:!?-") or is_ghost_transcript(tail):
                 self._followup_until = self.clock() + self.config.followup_seconds
                 return ""
             self._followup_until = 0.0
