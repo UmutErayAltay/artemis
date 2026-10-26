@@ -15,6 +15,7 @@ from artemis.channels.voice.adapters import (
     EmaSynthesizer,
     FallbackSynthesizer,
     FasterWhisperRecognizer,
+    OpenAICompatibleTranscriber,
     PiperSynthesizer,
     SoundDeviceMicrophone,
     SoundDeviceSink,
@@ -154,6 +155,15 @@ async def build_voice_controller(
                 on_echo_failure=lambda: report_echo_state("echo:off"),
             )
         cleanup.push_async_callback(_close_optional, sink)
+        cloud_recognizer: OpenAICompatibleTranscriber | None = None
+        if settings.voice.stt_mode == "hybrid":
+            # İzin kapalıysa kurucu ValueError verir ve ses kanalı başlamaz (Edge TTS ile aynı);
+            # model yüklemeden önce denetlenir ki boşuna GPU belleği ayrılmasın.
+            endpoint_id = settings.voice.stt_cloud_endpoint
+            cloud_recognizer = OpenAICompatibleTranscriber(
+                alias_hotword_config(settings), endpoint_id,
+                settings.endpoints[endpoint_id], runtime.audit,
+            )
         recognizer = FasterWhisperRecognizer(alias_hotword_config(settings))
         await _prepare(recognizer)
         synthesizer: SpeechSynthesizer
@@ -200,6 +210,7 @@ async def build_voice_controller(
             on_event=on_event,
             on_input_level=lambda level: on_state(f"level:{level}"),
             on_transcript=lambda text: on_state("heard:" + text[:200]),
+            cloud_recognizer=cloud_recognizer,
         )
         cleanup.pop_all()
         return controller

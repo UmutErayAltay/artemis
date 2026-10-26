@@ -88,6 +88,17 @@ voice:
   stt_partial_enabled: true # Konuşurken ara tanıma; kısmi metin komut çalıştırmaz.
   stt_hotwords: [] # İsteğe bağlı yerel ipuçları; prompt veya transcript düzeltmesi değildir.
   stt_alias_hotwords: false # Öğretilmiş uygulama takma adlarının hedefleri STT ipucuna eklenir (ADR 0044).
+  # Karma tanıma (ADR 0046): uyandırma, yankı ve söz kesme yerel metinle karar verilir; yalnız
+  # KOMUT olan sözün SESİ aşağıdaki uca gider ("Artemis" tek başına, kısmi çözümler ve komut
+  # olmayan konuşma gitmez). Kesintisiz kipte her söz komut sayıldığı için her söz gider.
+  # Gizlilik: ses seçilen sağlayıcının sunucusuna aktarılır; allow_cloud_stt_audio açık olmadan
+  # ses kanalı başlamaz. Ham ses diske yazılmaz. Anahtar config'e yazılmaz (ADR 0033: ortam
+  # değişkeni ARTEMIS_<UÇ>_API_KEY veya Kimlik Bilgisi Yöneticisi). Bulut hatasında (8 sn
+  # zaman aşımı dahil) yerel metin kullanılır, komut kaybolmaz.
+  stt_mode: local # local | hybrid
+  # stt_cloud_endpoint: groq # Üstteki `endpoints` içinde tanımlı bir kimlik (hybrid için zorunlu).
+  # stt_cloud_model: whisper-large-v3 # Sağlayıcının güncel belgesinden doğrulayın (hybrid için zorunlu).
+  allow_cloud_stt_audio: false
   tts_backend: piper
   tts_local_fallback: true # Edge hatasında yerel sese dön; false seçili sesi korur.
   piper_model: ../models/tr_TR-dfki-medium.onnx

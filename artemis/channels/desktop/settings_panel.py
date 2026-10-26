@@ -101,6 +101,12 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
     _precision_binding(),
     _checkbox(("voice", "continuous_mode"), "continuous_mode", quiet=True),
+    PanelBinding(
+        ("voice", "stt_mode"), "hybrid_stt",
+        lambda box: "hybrid" if box.isChecked() else "local",
+        lambda box, value: box.setChecked(value == "hybrid"),
+    ),
+    _checkbox(("voice", "allow_cloud_stt_audio"), "cloud_stt_consent"),
     _checkbox(("voice", "noise_suppression"), "noise_suppression"),
     _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
     _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
@@ -408,6 +414,21 @@ class SettingsPanel(QWidget):
         voice_layout.addLayout(form)
         self.continuous_mode = QCheckBox("Kesintisiz sohbet (Artemis demeden dinle)")
         voice_layout.addWidget(self.continuous_mode)
+        self.hybrid_stt = QCheckBox("Karma tanıma (komutlar buluta)")
+        self.hybrid_stt.setToolTip(
+            "Uyandırma yerelde kalır; komut olan sözün sesi config'teki stt_cloud_endpoint "
+            "ucuna gider (ADR 0046). Değişiklik ses yeniden başlayınca uygulanır."
+        )
+        voice_layout.addWidget(self.hybrid_stt)
+        self.cloud_stt_consent = QCheckBox("Komut sesinin seçilen uca gönderilmesine izin ver")
+        voice_layout.addWidget(self.cloud_stt_consent)
+        self.cloud_stt_hint = QLabel()
+        self.cloud_stt_hint.setWordWrap(True)
+        self.cloud_stt_hint.setTextFormat(Qt.TextFormat.PlainText)
+        voice_layout.addWidget(self.cloud_stt_hint)
+        self.hybrid_stt.toggled.connect(self._update_cloud_hint)
+        self.cloud_stt_consent.toggled.connect(self._update_cloud_hint)
+        self._cloud_configured = False
         self.noise_suppression = QCheckBox("Gürültü engelleme")
         self.noise_suppression.setToolTip(
             "DeepFilterNet3; işlemcide çalışır, ekran kartı gerekmez. Yankı gidermez. "
@@ -564,6 +585,24 @@ class SettingsPanel(QWidget):
         else:
             self.refresh()
 
+    def _update_cloud_hint(self, *_args: object) -> None:
+        """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0046)."""
+        if not self.hybrid_stt.isChecked():
+            self.cloud_stt_hint.setText("")
+            return
+        text = (
+            "Komut sesi seçilen uca gider; kesintisiz kipte her söz gider. "
+            "Uyandırma yerelde kalır."
+        )
+        if not self._cloud_configured:
+            text += (
+                " Uç ve model config'te (voice.stt_cloud_endpoint, stt_cloud_model) "
+                "tanımlı değil; tanımlanmadan Uygula reddedilir."
+            )
+        if not self.cloud_stt_consent.isChecked():
+            text += " İzin kutusu işaretlenmeden ses kanalı başlamaz."
+        self.cloud_stt_hint.setText(text)
+
     def _toggle_advanced(self, checked: bool) -> None:
         """Gelişmiş ses ayarlarını açar ve ok yönünü duruma göre değiştirir."""
         self.advanced_box.setVisible(checked)
@@ -695,6 +734,11 @@ class SettingsPanel(QWidget):
                 binding.write(widget, setting_value(settings, binding.path))
                 if binding.quiet:
                     widget.blockSignals(False)
+            voice = settings.voice
+            self._cloud_configured = (
+                voice.stt_cloud_endpoint in settings.endpoints and bool(voice.stt_cloud_model)
+            )
+            self._update_cloud_hint()
             # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
             self.precision_combo.setEnabled(
                 settings.voice.stt_device != "cpu" and not self._demo

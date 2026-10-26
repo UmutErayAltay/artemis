@@ -116,6 +116,12 @@ class VoiceConfig(BaseModel):
     # Öğretilmiş uygulama takma adlarının hedef adları STT ipucuna eklenir (ADR 0044).
     # Varsayılan kapalı: geniş hotword listesi uyandırmada yan etki verdi (CPA_LOCAL_TEST).
     stt_alias_hotwords: bool = False
+    # ADR 0046: hybrid'de uyandırma/yankı kararları yerel metinle verilir, yalnız komut olacak
+    # sözün sesi `stt_cloud_endpoint` ucuna (üst düzey `endpoints` kimliği) gider.
+    stt_mode: Literal["local", "hybrid"] = "local"
+    stt_cloud_endpoint: str = ""
+    stt_cloud_model: str = ""
+    allow_cloud_stt_audio: bool = False
     tts_backend: Literal["piper", "edge", "ema"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True
@@ -461,6 +467,14 @@ class Settings(BaseModel):
             for m in self.models.values()
         ):
             raise ValueError("Modelin endpoint değeri endpoints içinde tanımlanmalı")
+        voice = self.voice
+        if voice.stt_mode == "hybrid" and (
+            voice.stt_cloud_endpoint not in self.endpoints or not voice.stt_cloud_model.strip()
+        ):
+            raise ValueError(
+                "Karma tanıma için stt_cloud_endpoint endpoints içinde tanımlı ve "
+                "stt_cloud_model dolu olmalı"
+            )
         if any(name not in self.applications for name in self.close_without_confirmation):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")
         if self.primary_model and self.primary_model not in self.models:

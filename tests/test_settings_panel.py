@@ -13,7 +13,7 @@ from artemis.channels.desktop.settings_panel import microphone_choices, save_cho
 from artemis.config.settings import load_settings
 
 
-def config(tmp_path: Path, *, local: bool = True) -> Path:
+def config(tmp_path: Path, *, local: bool = True, cloud: bool = False) -> Path:
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump({
         "workspace": "desktop", "state_dir": "state", "audit_path": "audit.jsonl",
@@ -22,7 +22,11 @@ def config(tmp_path: Path, *, local: bool = True) -> Path:
         "applications": {"brave": "brave.exe"}, "close_without_confirmation": ["brave"],
         "models": {"first": {"provider": "openrouter", "model": "first-model",
                              "input_per_million": "0", "output_per_million": "0"}},
-        "voice": {"stt_device": "cpu", "stt_model": "models/whisper"},
+        # Karma tanıma kutusu açılınca doğrulama uç + model ister (ADR 0046).
+        **({"endpoints": {"bulut": {"base_url": "https://api.example.com/v1"}}} if cloud else {}),
+        "voice": {"stt_device": "cpu", "stt_model": "models/whisper",
+                  **({"stt_cloud_endpoint": "bulut", "stt_cloud_model": "whisper-x"}
+                     if cloud else {})},
     }), encoding="utf-8")
     return path
 
@@ -316,7 +320,7 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
     """Uygula → diske yaz → yeni panel: her bağ değeri aynı göstermeli (yenile/kaydet simetrisi)."""
     from artemis.channels.desktop.settings_panel import PANEL_BINDINGS, setting_value
 
-    path = config(tmp_path)
+    path = config(tmp_path, cloud=True)
     first = _panel(path)
     defaults = first.values()
     assert set(defaults) == {binding.path for binding in PANEL_BINDINGS}
@@ -375,3 +379,32 @@ def test_save_choices_rejects_paths_without_a_panel_binding(tmp_path: Path) -> N
     with pytest.raises(KeyError):
         save_choices(path, None, values={("voice", "echo_cancelation"): True})  # yazım hatası
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_hybrid_stt_checkboxes_round_trip_and_hint(tmp_path: Path) -> None:
+    path = config(tmp_path, cloud=True)
+    panel = _panel(path)
+    assert panel.values()[("voice", "stt_mode")] == "local"
+    assert panel.cloud_stt_hint.text() == ""
+    panel.hybrid_stt.setChecked(True)
+    assert "kesintisiz kipte her söz gider" in panel.cloud_stt_hint.text()
+    assert "İzin kutusu" in panel.cloud_stt_hint.text()
+    panel.cloud_stt_consent.setChecked(True)
+    assert "İzin kutusu" not in panel.cloud_stt_hint.text()
+    save_choices(path, None, values=panel.values())
+    saved = load_settings(path).voice
+    assert (saved.stt_mode, saved.allow_cloud_stt_audio) == ("hybrid", True)
+    assert _panel(path).hybrid_stt.isChecked()
+    panel.deleteLater()
+
+
+def test_hybrid_without_endpoint_warns_and_save_is_rejected(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    _set_voice(path, stt_cloud_endpoint="", stt_cloud_model="")
+    panel = _panel(path)
+    panel.hybrid_stt.setChecked(True)
+    assert "config'te" in panel.cloud_stt_hint.text()
+    with pytest.raises(ValueError):
+        save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.stt_mode == "local"
+    panel.deleteLater()

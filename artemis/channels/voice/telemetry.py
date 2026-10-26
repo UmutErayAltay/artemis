@@ -8,6 +8,8 @@ Stage = Literal[
     "model_request", "model_first_token", "model_response", "tool_start", "tool_end",
     "model_complete", "tts_first_chunk", "first_pcm", "terminal",
     "stop_requested", "playback_stopped",
+    # Karma tanıma bulut hatası (ADR 0046): turu bitirmez, yalnız nedeni kaydeder.
+    "stt_cloud_fallback",
 ]
 # ``interrupted``: uyandırmasız söz yalnız oynatmayı susturdu, komut çalışmadı (ADR 0042).
 Outcome = Literal[

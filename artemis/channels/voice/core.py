@@ -275,8 +275,11 @@ class VoiceController:
         on_state: Callable[[str], None] | None = None,
         on_input_level: Callable[[int], None] | None = None,
         on_transcript: Callable[[str], None] | None = None,
+        cloud_recognizer: SpeechRecognizer | None = None,
     ) -> None:
         self.runner = runner
+        # ADR 0046: yalnız komut olacak söz için; uyandırma/yankı kararları hep yerel metinle.
+        self.cloud_recognizer = cloud_recognizer
         self.config = config
         self.microphone = microphone
         self.segmenter = AudioSegmenter(config, vad)
@@ -479,6 +482,10 @@ class VoiceController:
         if toggle is None and command is None:
             self._event(uid, "terminal", outcome="rejected", reason="no_wake")
             return
+        if command and self.cloud_recognizer is not None:
+            # Karar yerel metinle bir kez verildi (_wake_command takip durumunu değiştirir);
+            # burada yalnız komut metni bulut sürümüyle değişir.
+            command = await self._cloud_command(uid, segment, command)
         await self._interrupt_output(uid)
         self._generation_sequence += 1
         gid = self._generation_sequence
@@ -491,6 +498,27 @@ class VoiceController:
         else:
             self._barge_cancelled = False
             self._active = asyncio.create_task(self._run_and_speak(command, uid=uid, gid=gid))
+
+    async def _cloud_command(self, uid: int, segment: AudioSegment, local_command: str) -> str:
+        """Komut metnini bulut tanıyıcıdan alır; her hatada yerel metne düşer (komut kaybolmaz)."""
+        assert self.cloud_recognizer is not None
+        try:
+            text = (await self.cloud_recognizer.transcribe(segment.pcm)).strip()
+        except asyncio.CancelledError:
+            self._event(uid, "terminal", outcome="cancelled", reason="stt_cancelled")
+            raise
+        except (OSError, RuntimeError, ValueError) as error:
+            # Hata metni yanıt gövdesi/anahtar taşımaz ama yine de yalnız tür günlüğe yazılır.
+            logger.warning("Bulut tanıma başarısız, yerel metin kullanılıyor (%s).",
+                           type(error).__name__)
+            self._event(uid, "stt_cloud_fallback", reason="stt_cloud_fallback")
+            return local_command
+        span = find_wake_word(text, self.config.wake_word)
+        command = (text[span[1]:] if span is not None else text).lstrip(" \t,.;:!?-")
+        if not command.strip(" \t,.;:!?-"):
+            self._event(uid, "stt_cloud_fallback", reason="stt_cloud_fallback")
+            return local_command
+        return command
 
     async def _interrupt_output(self, uid: int) -> None:
         """Etkin turu ve oynatmayı durdurur; temizlik bitmeden yeni tur başlamaz.
