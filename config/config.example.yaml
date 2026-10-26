@@ -77,7 +77,7 @@ voice:
   queue_frames: 32
   stt_model: ../models/whisper-small
   stt_device: cuda
-  stt_compute_type: float16
+  stt_compute_type: float16 # Panelden seçilir: int8_float16 (az bellek, aynı doğruluk) | float16; CPU'da yok sayılır.
   stt_language: tr_en # Türkçe öncelikli; güçlü İngilizce kanıtında en. auto tüm dilleri seçer.
   cuda_library_dirs: [] # Windows: gerektiğinde yerel cublas/cudnn DLL dizinleri.
   stt_vad_filter: true # Sessiz bölümleri STT öncesinde ele.

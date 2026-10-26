@@ -336,6 +336,39 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
     second.deleteLater()
 
 
+def _set_voice(path: Path, **voice: str) -> None:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["voice"].update(voice)
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+
+def test_precision_combo_round_trips_and_keeps_custom_value(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    key = ("voice", "stt_compute_type")
+    panel = _panel(path)
+    assert panel.values()[key] == "float16"  # kod varsayılanı değişmez
+    panel.precision_combo.setCurrentIndex(panel.precision_combo.findData("int8_float16"))
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.stt_compute_type == "int8_float16"
+    # Elle yazılmış eski değer panelde görünür ve Uygula ile ezilmez.
+    _set_voice(path, stt_compute_type="int8")
+    panel.refresh()
+    assert panel.values()[key] == "int8"
+    panel.refresh()  # tekrar yenileme özel öğeyi çoğaltmaz
+    assert panel.precision_combo.count() == 3
+    panel.deleteLater()
+
+
+def test_precision_combo_disabled_on_cpu_only(tmp_path: Path) -> None:
+    path = config(tmp_path)  # stt_device: cpu
+    panel = _panel(path)
+    assert not panel.precision_combo.isEnabled()
+    _set_voice(path, stt_device="cuda")
+    panel.refresh()
+    assert panel.precision_combo.isEnabled()
+    panel.deleteLater()
+
+
 def test_save_choices_rejects_paths_without_a_panel_binding(tmp_path: Path) -> None:
     path = config(tmp_path)
     before = path.read_text(encoding="utf-8")

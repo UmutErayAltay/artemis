@@ -75,10 +75,31 @@ def _combo(path: SettingPath, widget: str, *, fallback_first: bool) -> PanelBind
     return PanelBinding(path, widget, lambda combo: str(combo.currentData()), write)
 
 
+def _precision_binding() -> PanelBinding:
+    """stt_compute_type: kayıtlı değer iki standart seçenekten biri değilse (örn. `int8`) ayrı bir
+    öğe olarak gösterilir; böylece Uygula kullanıcının elle yazdığı değeri sessizce ezmez."""
+
+    def write(combo: Any, value: Any) -> None:
+        for index in range(combo.count() - 1, -1, -1):
+            if combo.itemData(index) not in _STANDARD_PRECISIONS:
+                combo.removeItem(index)
+        if combo.findData(value) < 0:
+            combo.addItem(f"Özel ({value})", value)
+        combo.setCurrentIndex(combo.findData(value))
+
+    return PanelBinding(
+        ("voice", "stt_compute_type"), "precision_combo",
+        lambda combo: str(combo.currentData()), write,
+    )
+
+
+_STANDARD_PRECISIONS = ("int8_float16", "float16")
+
 # Panelin "Uygula" ile yazdığı ve "yenile" ile okuduğu sade alanlar. Özel mantığı olanlar
 # (mikrofon aygıtı, STT model yolu, uygulama listesi, code_agent) save_choices'ta açık kalır.
 PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
+    _precision_binding(),
     _checkbox(("voice", "continuous_mode"), "continuous_mode", quiet=True),
     _checkbox(("voice", "noise_suppression"), "noise_suppression"),
     _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
@@ -357,6 +378,16 @@ class SettingsPanel(QWidget):
         self.stt_status.setTextFormat(Qt.TextFormat.PlainText)
         stt_layout.addWidget(self.stt_status)
         form.addRow("Tanıma modeli", stt_box)
+        self.precision_combo = QComboBox()
+        self.precision_combo.setAccessibleName("Tanıma hassasiyeti")
+        self.precision_combo.setToolTip(
+            "Dengeli ölçümde En yüksek hassasiyetle aynı doğrulukta, yaklaşık 1,8 GB daha az "
+            "GPU belleği kullanır (ADR 0046). CPU'da seçici kapalıdır. Değişiklik ses yeniden "
+            "başlayınca uygulanır."
+        )
+        self.precision_combo.addItem("Dengeli (az bellek)", "int8_float16")
+        self.precision_combo.addItem("En yüksek hassasiyet", "float16")
+        form.addRow("Tanıma hassasiyeti", self.precision_combo)
         self.tts_combo = QComboBox()
         self.tts_combo.setAccessibleName("Konuşma sesi")
         self.tts_combo.setToolTip("Değişiklik ses yeniden başlayınca uygulanır.")
@@ -664,6 +695,10 @@ class SettingsPanel(QWidget):
                 binding.write(widget, setting_value(settings, binding.path))
                 if binding.quiet:
                     widget.blockSignals(False)
+            # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
+            self.precision_combo.setEnabled(
+                settings.voice.stt_device != "cpu" and not self._demo
+            )
             self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self.noise_stt.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self._sync_application_access()
