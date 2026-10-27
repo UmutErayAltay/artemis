@@ -125,18 +125,18 @@ QLabel#demo {
   color: #3B2A07; background: #FFD78C; border-radius: 15px;
   padding: 6px 14px; font-weight: 800;
 }
-QPlainTextEdit, QListWidget, QLineEdit, QComboBox {
+QPlainTextEdit, QListWidget, QLineEdit, QComboBox, QSpinBox {
   background: #0E1828; border: 1px solid #2A3E58; border-radius: 16px;
   padding: 12px; selection-background-color: #255B61;
 }
-QLineEdit, QComboBox { padding: 7px 14px; border-radius: 18px; min-height: 22px; }
+QLineEdit, QComboBox, QSpinBox { padding: 7px 14px; border-radius: 18px; min-height: 22px; }
 QComboBox::drop-down { border: none; width: 34px; }
 QComboBox::down-arrow { image: url(@CHEVRON@); width: 12px; height: 8px; }
 QComboBox QAbstractItemView {
   background: #12203A; border: 1px solid #2E4260; border-radius: 12px;
   selection-background-color: #255B61; outline: none; padding: 4px;
 }
-QPlainTextEdit:focus, QListWidget:focus, QLineEdit:focus, QComboBox:focus {
+QPlainTextEdit:focus, QListWidget:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus {
   border: 2px solid #53D6C7;
 }
 QPushButton {
