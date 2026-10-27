@@ -398,3 +398,118 @@ def test_particles_sleep_z_and_success_burst(made: Any) -> None:
         quiet.tick(0.05)
     quiet.code_agent_event("code_agent_done", {"job_id": "1", "status": "done"})
     assert quiet._particles == []
+
+
+# ------------------------------------------------------------- sprite pet (ADR 0048)
+
+
+def _pet_widget(made: Any, tmp_path: Path, **kwargs: Any) -> tuple[PetWidget, Calls]:
+    from tests.test_pet_sprite import make_pet
+
+    pets = tmp_path / "pets"
+    make_pet(pets, "blob")
+    return made(pets_dir=pets, **kwargs)
+
+
+def _center(pet: PetWidget) -> tuple[int, int, int]:
+    color = render(pet).pixelColor(BODY // 2, BODY // 2)
+    return color.red(), color.green(), color.alpha()
+
+
+@pytest.mark.parametrize("name", STATES)
+def test_sprite_renders_pixels_in_every_state(made: Any, tmp_path: Path, name: str) -> None:
+    pet, _ = _pet_widget(made, tmp_path, reduced_motion=False)
+    assert pet.set_skin("blob") is None and pet.skin == "blob"
+    apply_state(pet, name)
+    _settle(pet, 0.2)
+    assert _opaque(render(pet)) > 200, name
+
+
+def test_sprite_rows_follow_state_and_reduced_motion_is_frame_zero(
+    made: Any, tmp_path: Path
+) -> None:
+    from artemis.channels.desktop import pet_sprite as ps
+
+    pet, _ = _pet_widget(made, tmp_path, reduced_motion=True)
+    pet.set_skin("blob")
+    for name, row in (("listening", ps.REVIEW), ("thinking", ps.RUNNING),
+                      ("speaking", ps.WAVING), ("approval", ps.WAITING), ("error", ps.FAILED)):
+        fresh, _ = _pet_widget_reuse(made, pet)
+        apply_state(fresh, name)
+        _settle(fresh, 0.3)
+        assert fresh._sprite_row == row, name
+        # Hücre rengi R=satır*25, G=sütun*25: azaltılmış harekette hep sütun 0
+        assert _center(fresh)[:2] == (row * 25, 0), name
+
+
+def _pet_widget_reuse(made: Any, template: PetWidget) -> tuple[PetWidget, Calls]:
+    fresh, calls = made(pets_dir=template._pets_dir, reduced_motion=template._reduced)
+    fresh.set_skin("blob")
+    return fresh, calls
+
+
+def test_sprite_animates_when_motion_allowed(made: Any, tmp_path: Path) -> None:
+    pet, _ = _pet_widget(made, tmp_path, reduced_motion=False)
+    pet.set_skin("blob")
+    pet.say("x")
+    pet.tick(0.016)
+    first = _center(pet)
+    _settle(pet, 0.2)  # >1 kare ilerler
+    assert _center(pet)[1] != first[1]
+
+
+def test_sprite_jump_once_and_drag_direction(made: Any, tmp_path: Path) -> None:
+    from artemis.channels.desktop import pet_sprite as ps
+
+    pet, _ = _pet_widget(made, tmp_path, reduced_motion=False)
+    pet.set_skin("blob")
+    apply_state(pet, "happy")
+    pet.tick(0.016)
+    assert pet._sprite_row == ps.JUMPING
+    _settle(pet, 1.0)  # 5 kare / 8 fps sonrası idle
+    assert pet._sprite_row == ps.IDLE
+    pet._dragging, pet._run_right = True, False
+    pet.tick(0.016)
+    assert pet._sprite_row == ps.RUN_LEFT
+    pet._run_right = True
+    pet.tick(0.016)
+    assert pet._sprite_row == ps.RUN_RIGHT
+
+
+def test_broken_or_missing_pet_falls_back_to_orb(made: Any, tmp_path: Path) -> None:
+    pet, _ = _pet_widget(made, tmp_path)
+    assert "bulunamadı" in (pet.set_skin("yok") or "") and pet.skin == "orb"
+    (tmp_path / "pets" / "blob" / "spritesheet.png").write_bytes(b"bozuk")
+    assert pet.set_skin("blob") is not None and pet._sprite is None
+    assert _opaque(render(pet)) > 200  # küre çizilmeye devam eder
+    assert pet.set_skin(None) is None and pet.skin == "orb"
+
+
+def test_skin_is_persisted_and_loaded_on_start(made: Any, tmp_path: Path) -> None:
+    pet, _ = _pet_widget(made, tmp_path)
+    pet.set_skin("blob")
+    assert pet._settings.value("skin") == "blob"
+    again, _ = made(pets_dir=tmp_path / "pets")  # aynı pet.ini
+    assert again.skin == "orb"  # start() öncesi
+    again.start()
+    assert again.skin == "blob"
+    (tmp_path / "pets" / "blob" / "pet.json").unlink()
+    broken, _ = made(pets_dir=tmp_path / "pets")
+    broken.start()
+    assert broken.skin == "orb" and pet._settings.value("skin") == "blob"  # kayıt silinmez
+
+
+def test_os_reduced_motion_used_only_without_explicit_setting(
+    made: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.channels.desktop import pet as pet_module
+
+    monkeypatch.setattr(pet_module, "os_reduced_motion", lambda: True)
+    assert made()[0]._reduced is True
+    explicit, _ = made()
+    explicit._settings.setValue("reduced_motion", False)
+    again, _ = made()
+    assert again._reduced is False  # açık ayar işletim sistemini yener
+    monkeypatch.setattr(pet_module, "os_reduced_motion", lambda: False)
+    again._settings.remove("reduced_motion")
+    assert made()[0]._reduced is False

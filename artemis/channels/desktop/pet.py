@@ -1,18 +1,23 @@
 """Masaüstü pet (ADR 0023): köşede duran, Artemis'in ne yaptığını gösteren küçük karakter.
 
 Pet'in komut ya da onay mantığı yoktur: durumu `DesktopWindow` besler, tık ve menü
-seçimleri yine pencerenin mevcut yöntemlerine döner. Yalnız QPainter ile çizilir; yeni
-bağımlılık ya da görsel dosya yoktur. Zamanlayıcı yalnız pencere görünürken çalışır.
+seçimleri yine pencerenin mevcut yöntemlerine döner. Varsayılan görünüm QPainter küredir
+(depoda görsel dosya yok); ADR 0048 ile kullanıcı Codex uyumlu sprite pet seçebilir
+(`pet_sprite.py`). Durum, balon, konum ve zamanlayıcı ortaktır; yalnız çizim ve kare
+ilerletme `self._sprite` varlığına göre ayrılır. Zamanlayıcı yalnız pencere görünürken çalışır.
 """
 
 from __future__ import annotations
 
+import logging
 import math
 import os
 import random
+import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, cast
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer
@@ -32,6 +37,11 @@ from PySide6.QtGui import (
     QRadialGradient,
 )
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
+
+from artemis.channels.desktop import pet_sprite
+from artemis.channels.desktop.pet_sprite import SpritePet
+
+log = logging.getLogger(__name__)
 
 BODY = 120  # karakter alanı (px); yuvarlak gövde bunun içinde ~80 px
 BUBBLE_W = 210
@@ -59,6 +69,20 @@ DESCRIPTIONS = {
     "off": "Uyuyor, ses kapalı",
     "idle": "Hazır",
 }
+
+
+def os_reduced_motion() -> bool:
+    """Windows "istemci alanı animasyonları" kapalıysa hareket azaltılır (ADR 0048 madde 7)."""
+    if sys.platform != "win32":
+        return False
+    import ctypes
+    from ctypes import wintypes
+
+    enabled = wintypes.BOOL(True)
+    ok = ctypes.windll.user32.SystemParametersInfoW(  # SPI_GETCLIENTAREAANIMATION
+        0x1042, 0, ctypes.byref(enabled), 0
+    )
+    return bool(ok) and not enabled.value
 
 
 def level_from_message(message: str) -> float | None:
@@ -139,6 +163,7 @@ class PetWidget(QWidget):
         on_quit: Callable[[], None],
         settings: QSettings | None = None,
         reduced_motion: bool | None = None,
+        pets_dir: Path | None = None,
     ) -> None:
         super().__init__(
             None,
@@ -158,11 +183,22 @@ class PetWidget(QWidget):
             QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Artemis", "pet"
         )
         if reduced_motion is None:
-            # Hareket azaltma: ortam değişkeni ya da QSettings "reduced_motion".
-            reduced_motion = os.environ.get("ARTEMIS_REDUCE_MOTION") == "1" or bool(
+            # Hareket azaltma: açık ayar (ortam değişkeni / QSettings "reduced_motion")
+            # kazanır; ayar yoksa işletim sistemi tercihi okunur.
+            explicit = os.environ.get("ARTEMIS_REDUCE_MOTION") == "1" or bool(
                 self._settings.value("reduced_motion", False, type=bool)
             )
+            reduced_motion = explicit or (
+                not self._settings.contains("reduced_motion") and os_reduced_motion()
+            )
         self._reduced = reduced_motion
+        # Sprite görünümü (None = küre); ADR 0048. `skin` seçili olanın kimliğidir.
+        self._pets_dir = pets_dir
+        self._sprite: SpritePet | None = None
+        self._skin = pet_sprite.ORB
+        self._frame_t = 0.0
+        self._sprite_row = pet_sprite.IDLE
+        self._run_right = True
 
         # Dış durum (DesktopWindow besler)
         self._voice = "off"
@@ -362,10 +398,46 @@ class PetWidget(QWidget):
         left = self.width() - BODY if self._bubble_side_left else 0
         return QRect(left, 0, BODY, BODY)
 
+    # ------------------------------------------------------------ görünüm
+
+    @property
+    def skin(self) -> str:
+        return self._skin
+
+    def set_skin(self, pet_id: str | None, *, persist: bool = True) -> str | None:
+        """Küre (`None`/"orb") ya da sprite pet seçer; sorun varsa küreye döner ve mesaj verir."""
+        if pet_id in (None, pet_sprite.ORB):
+            self._sprite, self._skin = None, pet_sprite.ORB
+            if persist:
+                self._settings.setValue("skin", pet_sprite.ORB)
+            self.update()
+            return None
+        try:
+            info = (
+                pet_sprite.find_pet(str(pet_id), self._pets_dir)
+                if self._pets_dir is not None
+                else None
+            )
+            if info is None:
+                raise pet_sprite.PetError(f"'{pet_id}' kimlikli pet bulunamadı.")
+            sprite = SpritePet(info, BODY)
+        except pet_sprite.PetError as error:
+            log.warning("Pet yüklenemedi, küre kullanılıyor: %s", error)
+            self._sprite, self._skin = None, pet_sprite.ORB
+            return f"Pet yüklenemedi, küre kullanılıyor: {error}"
+        self._sprite, self._skin = sprite, info.id
+        self._frame_t = 0.0
+        if persist:
+            self._settings.setValue("skin", info.id)
+        self.update()
+        return None
+
     # ------------------------------------------------------------ görünürlük
 
     def start(self) -> None:
-        """Kayıtlı görünürlüğe göre açılır (varsayılan görünür)."""
+        """Kayıtlı görünürlüğe göre açılır (varsayılan görünür); kayıtlı pet yüklenir."""
+        # Bozuk kayıtlı pet kaydı silmez: Codex klasörü geçici yoksa sonra yine çalışır.
+        self.set_skin(str(self._settings.value("skin", pet_sprite.ORB)), persist=False)
         if self._settings.value("visible", True, type=bool):
             self.show()
 
@@ -435,6 +507,8 @@ class PetWidget(QWidget):
             before = self._anchor.x()
             self.move_anchor(self._press_anchor + delta)
             self._drag_dx = float(self._anchor.x() - before)
+            if self._drag_dx:
+                self._run_right = self._drag_dx > 0
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton or self._press_global is None:
@@ -498,6 +572,23 @@ class PetWidget(QWidget):
                 self._bubble_alpha = 0.0
                 self._relayout()
 
+        if self._sprite is not None:
+            self._tick_sprite(dt, state)
+        else:
+            self._tick_orb(dt, state, t, motion)
+        self._hover = _ease(self._hover, 1.0 if self._hovered else 0.0, dt, 10)
+        self._drag_dx = _ease(self._drag_dx, 0.0, dt, 12)
+
+    def _tick_sprite(self, dt: float, state: str) -> None:
+        row = pet_sprite.row_for(
+            state, self._reaction, self._react_age, self._dragging, self._run_right
+        )
+        if row != self._sprite_row:
+            self._sprite_row, self._frame_t = row, 0.0
+        self._frame_t += dt * (0.5 if state == "off" else 1.0)  # uyurken yavaş
+        self._dim = _ease(self._dim, 0.78 if state == "off" else 1.0, dt, 4)
+
+    def _tick_orb(self, dt: float, state: str, t: float, motion: float) -> None:
         # Hedefler
         eye, smile, mopen, mw, wave = 1.0, 0.35, 0.0, 10.0, 0.0
         gaze = self._gaze_goal
@@ -567,12 +658,10 @@ class PetWidget(QWidget):
                 else QPointF(0, 0)
             )
 
-        self._hover = _ease(self._hover, 1.0 if self._hovered else 0.0, dt, 10)
         self._tick_particles(dt, state, motion)
 
         # Anten sürüklemede geride kalır
         self._antenna = _ease(self._antenna, -self._drag_dx * 0.6, dt, 10)
-        self._drag_dx = _ease(self._drag_dx, 0.0, dt, 12)
 
     def _cursor_gaze(self) -> QPointF | None:
         """İmleç yakınsa gözler ona döner; uzaktaysa rastgele bakış sürer."""
@@ -585,7 +674,7 @@ class PetWidget(QWidget):
         return QPointF(d.x() / dist * k, d.y() / dist * k * 0.8)
 
     def _burst(self) -> None:
-        if self._reduced:
+        if self._reduced or self._sprite is not None:
             return
         for i in range(10):
             a = i * 2 * math.pi / 10 + random.uniform(-0.2, 0.2)
@@ -651,6 +740,29 @@ class PetWidget(QWidget):
 
     def _paint_body(self, p: QPainter, cx: float) -> None:
         state = self.state
+        if self._sprite is not None:
+            self._paint_sprite(p, cx)
+            bx, by = cx, _CENTER_Y
+        else:
+            bx, by = self._paint_orb(p, cx, state)
+        # Rozetler görünümden bağımsız ve ölçeksiz çizilir
+        if self._jobs:
+            self._paint_gear(p, bx + _RADIUS * 0.8, by - _RADIUS * 0.74)
+        if state == "approval":
+            self._paint_bang(p, bx - _RADIUS * 0.8, by - _RADIUS * 0.72)
+
+    def _paint_sprite(self, p: QPainter, cx: float) -> None:
+        sprite = self._sprite
+        assert sprite is not None
+        col = sprite.frame_index(self._sprite_row, self._frame_t, self._reduced)
+        pixmap = sprite.pixmap(self._sprite_row, col)
+        p.save()
+        p.setOpacity(self._dim)
+        p.drawPixmap(round(cx - pixmap.width() / 2), (BODY - pixmap.height()) // 2, pixmap)
+        p.restore()
+
+    def _paint_orb(self, p: QPainter, cx: float, state: str) -> tuple[float, float]:
+        """Küreyi çizer; rozetlerin dayanacağı merkezi (x, y) döndürür."""
         t = self._t
         tint = self._tint
         dx, dy, sx, sy = self._offsets(state)
@@ -695,13 +807,9 @@ class PetWidget(QWidget):
             self._paint_waves(p, cx + dx, cy + dy, tint)
         self._paint_particles(p, cx + dx, cy + dy)
 
-        # Rozetler gövdenin üstünde, ölçeksiz çizilir
         if state == "thinking":
             self._paint_dots(p, cx + dx, cy + dy)
-        if self._jobs:
-            self._paint_gear(p, cx + dx + radius * 0.8, cy + dy - radius * 0.74)
-        if state == "approval":
-            self._paint_bang(p, cx + dx - radius * 0.8, cy + dy - radius * 0.72)
+        return cx + dx, cy + dy
 
     def _paint_character(self, p: QPainter, tint: QColor, state: str) -> None:
         t = self._t

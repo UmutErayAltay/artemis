@@ -64,6 +64,7 @@ from artemis.channels.desktop.bridge import (
 from artemis.channels.desktop.hotkey import GlobalHotkey
 from artemis.channels.desktop.instance import InstanceServer, claim_instance, instance_name
 from artemis.channels.desktop.pet import TEAL, PetWidget, level_from_message
+from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.projects_panel import ProjectsPanel
 from artemis.channels.desktop.settings_panel import (
     SettingsPanel,
@@ -763,6 +764,7 @@ class DesktopWindow(QMainWindow):
         if not demo:
             self._start_hotkey()
         self.pet.start()
+        self.settings_panel.pet.set_current(self.pet.skin)
         self._timer = QTimer(self)
         self._timer.setInterval(60)
         self._timer.timeout.connect(self._drain_bridge)
@@ -776,7 +778,13 @@ class DesktopWindow(QMainWindow):
             on_quick=self._show_overlay,
             on_approval=self._focus_approval,
             on_quit=self._request_exit,
+            pets_dir=pets_dir_for(self._config_path),
         )
+
+    def _select_skin(self, pet_id: str) -> None:
+        problem = self.pet.set_skin(pet_id)
+        if problem:
+            self.settings_panel.pet.show_problem(problem)
 
     def _start_hotkey(self) -> None:
         try:
@@ -991,6 +999,7 @@ class DesktopWindow(QMainWindow):
         self.settings_panel.computer_auto.toggled.connect(self._toggle_auto_mode)
         self.settings_panel.github_synced.connect(self._github_synced)
         self.settings_panel.providers.changed.connect(self._providers_changed)
+        self.settings_panel.pet.skin_selected.connect(self._select_skin)
         self.settings_scroll = QScrollArea()
         self.settings_scroll.setWidgetResizable(True)
         self.settings_scroll.setWidget(self.settings_panel)

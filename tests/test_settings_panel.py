@@ -188,7 +188,7 @@ def test_settings_panel_tabs_are_grouped_by_topic(tmp_path: Path, qt_app) -> Non
     panel = settings_panel.SettingsPanel(config(tmp_path))
     assert [
         panel.sections.tabText(index) for index in range(panel.sections.count())
-    ] == ["Ses", "Model", "Uygulamalar", "GitHub"]
+    ] == ["Ses", "Model", "Uygulamalar", "GitHub", "Pet"]
     assert panel.sections.currentIndex() == 0
     for index in range(panel.sections.count()):
         page = panel.sections.widget(index)

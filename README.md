@@ -49,6 +49,21 @@ Pet ekranın köşesinde durur ve Artemis'in o an ne yaptığını gösterir: ha
 düşünüyor ya da onayını bekliyor. Yanıtlar ve iş bitişleri kısa bir balonla görünür
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)).
 
+#### Pet seçimi
+
+Varsayılan görünüm depodaki çizilmiş küredir. **Ayarlar > Pet** sekmesinden Codex uyumlu
+sprite pet'ler de seçilir ([ADR 0048](docs/adr/0048-sprite-pets-quick-box-and-pet-creator.md)):
+klasörde `pet.json` (`id`, `displayName`, `description`, `spritesheetPath`) ve
+`spritesheet.webp` ya da `.png` (1536×1872 ya da 1536×2288, 8×9 hücre) bulunur. Pet'ler
+`state_dir/pets/<id>/` (Artemis'in) ve varsa `~/.codex/pets/` (`CODEX_HOME` ile değişir, salt
+okunur) altından listelenir. **Pet yükle…** bir klasörü ya da `.zip` dosyasını `state_dir/pets/`
+içine kurar; yalnız `pet.json` + tek görsel kabul edilir, boyut ve yol sınırları denetlenir.
+Silme yalnız Artemis'e yüklenen pet'lerde çalışır. Windows'ta "animasyon efektleri" kapalıysa
+ya da `ARTEMIS_REDUCE_MOTION=1` ise pet ilk kareyi gösterir.
+
+**Lisans:** Depoya hiçbir topluluk pet'i konmaz. İndirdiğin pet'lerin (galeri siteleri dahil)
+lisansı ve içeriği, bazıları marka karakteridir, senin sorumluluğundadır.
+
 Python 3.12 ortamında arayüzü kurup ücretsiz, ağsız demoyu açın:
 
 ```powershell

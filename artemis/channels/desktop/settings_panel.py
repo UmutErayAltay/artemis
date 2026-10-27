@@ -32,6 +32,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.channels.desktop.pet_section import PetSection
+from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.provider_section import ProviderSection
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import GITHUB_OWNER_RE, Settings, load_settings
@@ -315,6 +317,8 @@ class SettingsPanel(QWidget):
         *,
         demo: bool = False,
         github_sync: GitHubSyncFunction = sync_repos,
+        pets_dir: Path | None = None,
+        codex_pets_dir: Path | None = None,
     ) -> None:
         super().__init__()
         self.config_path = config_path
@@ -571,6 +575,15 @@ class SettingsPanel(QWidget):
         self.github_list.setAccessibleName("GitHub eşitleme sonuçları")
         github_layout.addWidget(self.github_list)
         github_layout.addStretch(1)
+        pet_scroll, pet_layout = tab_page()
+        self.sections.addTab(pet_scroll, "Pet")
+        self.pet = PetSection(
+            pets_dir if pets_dir is not None else pets_dir_for(config_path),
+            codex_pets_dir,
+            demo=demo,
+        )
+        pet_layout.addWidget(self.pet)
+        pet_layout.addStretch(1)
         self.sections.setCurrentIndex(0)
         self.notice = QLabel(
             "Uygula mikrofon, uygulama ve GitHub ayarlarını kaydeder; yeni sohbet başlar."
