@@ -258,3 +258,15 @@ Umut approved: keep structure (palettes, four themes, Segoe UI, left navigation)
 - **Gallery card (`galleryCard`):** 140×120, pet image 64px centered, 13px name, 12px muted source; selected = 2px `accent` border + small "Seçili" chip.
 - **Stage bar (`stageBar`):** horizontal steps Tarif → Görsel → Animasyon → Kaydet; current step `accent` text + 2px underline, done steps `success` check, future `muted`.
 - **Dialogs:** 24px padding, 22px title, plain-language summary first, technical detail in a collapsible area, buttons right-aligned, safe default focused.
+
+## Warm companion direction (2026-10-28, supersedes conflicting rules above)
+
+Umut: the UI "looks too robotic". No voice orb / waveform / audio presence (voice is rarely used in the UI; the pet already is the companion). The selected pet is the face of the app and reuses its existing state texts ("Seni dinliyor", "Konuşuyor"); no new voice widget.
+
+- **Palette:** warm neutrals replace corporate slate-blue. Light: cream/bone workspace, warm white surfaces. Dark: warm ink, never blue-black. Accent = the existing turquoise status colour; secondary = amber (approval, warnings). Still flat: tonal surfaces, no gradients, no glows. This replaces "restrained blue emphasis" and "Don't introduce gradients" only in the sense of colour: the no-gradient/no-glow rule stays.
+- **Type:** Segoe UI Variable where available, falling back to Segoe UI. Page greeting 28/650, page title 22/650, section 16/600, body 14, label 13, caption 12 minimum (no 11px, help text uses `muted` with AA contrast on its surface).
+- **Shape:** 12px surfaces, 8px controls, 14px pet cards. Fewer borders: separate by tone first, 1px border only where tone is not enough. No box inside a box inside a box: Settings sections are flat blocks with a heading, not nested cards.
+- **Presence:** empty chat shows the selected pet large (96px) + time-based greeting + three real example commands; assistant messages carry the small pet avatar; header pet stays.
+- **Nav:** themed SVG icons + label, soft selected pill. **Header:** pet + "Artemis", model chip, one status dot, voice and auto-approve as tooltip icon toggles.
+- **Motion:** hover/focus transitions only. Pet frame rate is 6 fps (Umut, 2026-10-28; was 5).
+- **Contract that stays:** spacing scale, labels above fields, one scroll region per page, empty/error state patterns, safe-default dialogs.
