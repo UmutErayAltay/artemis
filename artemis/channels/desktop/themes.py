@@ -220,4 +220,8 @@ QMenu, QToolTip {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; padding: 8px; }}
 QMenu::item:selected {{ background: {t['soft']}; }}
 QSplitter::handle {{ background: {t['bg']}; width: 8px; }}
+/* wave2-shell */
+/* wave2-settings */
+/* wave2-pets */
+/* wave2-lists */
 """
