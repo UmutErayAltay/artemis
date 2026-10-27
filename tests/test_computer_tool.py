@@ -566,3 +566,21 @@ async def test_approval_skipped_only_when_approval_was_actually_needed(tmp_path:
     gate, context, *_ = env(tmp_path, mode="auto")
     await gate.dispatch(CALL, context, TurnState(tainted=True), never)
     assert "approval_skipped" in events()
+
+
+async def test_memory_is_shared_within_same_turn_and_reset_for_new_turn(tmp_path: Path) -> None:
+    gate, context, _host, _backend, vision = env(
+        tmp_path, mode="auto", replies=(click(), DONE, YES, DONE, YES, DONE, YES)
+    )
+    state = TurnState()  # aynı kullanıcı mesajı = aynı turn_id
+    await gate.dispatch(CALL, context, state, never)  # ilk çağrı: tık + done
+    await gate.dispatch(CALL, context, state, never)  # aynı mesaj: bellek taşınır
+    seen = [str(call[1].content) for call in vision.seen]
+    first_prompt_of_second_call = next(
+        text for text in seen if "Aynı mesajdaki önceki computer_use çağrısı" in text
+    )
+    assert "Adım 1: click" in first_prompt_of_second_call
+    before = len(vision.seen)
+    await gate.dispatch(CALL, context, TurnState(), never)  # yeni mesaj: bellek düşer
+    fresh = str(vision.seen[before][1].content)
+    assert "Aynı mesajdaki önceki" not in fresh and "Adım 1" not in fresh

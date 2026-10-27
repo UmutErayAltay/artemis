@@ -172,3 +172,17 @@ def test_summary_truncates_and_reduces_url_and_path() -> None:
     assert summarize_arguments({"url": "https://example.com/x?token=1"}) == "example.com"
     assert summarize_arguments({"path": "C:\\a\\b\\rapor.txt"}) == "rapor.txt"
     assert summarize_arguments({"content": SECRET}) == "content: 13 karakter"
+
+
+def test_computer_step_shows_observed_as_muted_second_line() -> None:
+    log = _log()
+    _feed(log, "r1", "tool_requested", tool="computer_use", arguments={"goal": "x"})
+    _feed(log, "r1", "computer_step", step=2, action="type", text_length=9, reason="yaz",
+          observed="video durdu " + "u" * 200)
+    _feed(log, "r1", "computer_step", step=3, action="click", reason="", observed="")
+    (op,) = log.cards["r1"].ops
+    texts = [sub.text for sub in op.subrows]
+    assert texts[0] == "Adım 2 · Yazma (9 karakter) — yaz"
+    assert texts[1].startswith("↳ sonuç: video durdu") and len(texts[1]) <= len("↳ sonuç: ") + 120
+    assert op.subrows[1].kind == "info"
+    assert len(texts) == 3 and texts[2] == "Adım 3 · Tıklama"

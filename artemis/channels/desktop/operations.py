@@ -286,6 +286,11 @@ class OperationLog:
         if fields.get("auto_approved") is True:
             text += " · otomatik onay"
         op.subrows.append(SubRow(text))
+        # Sonuç ayrı satır: arayüz "info" türünü soluk çizer. `observed` modelin ekrandan
+        # türettiği serbest metindir; yazılan `text` hiçbir yoldan buraya gelmez.
+        observed = fields.get("observed")
+        if isinstance(observed, str) and observed:
+            op.subrows.append(SubRow(f"↳ sonuç: {truncate(observed, 120)}"))
 
     def _on_computer_verify(self, card: Card, fields: Mapping[str, Any]) -> None:
         op = self._computer_op(card)
