@@ -426,6 +426,25 @@ def test_voice_command_adds_user_voice_bubble_and_marks_busy(
         _close_cleanly(app, window)
 
 
+def test_live_text_updates_only_last_heard_and_final_overwrites(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        heard: list[str] = []
+        window.pet.heard = heard.append  # type: ignore[method-assign]
+        window._handle_event(State("voice_live", "merhaba dün"))
+        assert window.settings_panel.last_heard.text() == "merhaba dün"
+        assert heard == []  # pet balonuna gitmez
+        window._handle_event(State("voice_heard", "merhaba dünya"))
+        assert window.settings_panel.last_heard.text() == "merhaba dünya"
+        assert heard == ["merhaba dünya"]
+        window._handle_event(State("voice_live_unavailable", "deps:eksik"))
+        assert "pip install" in window.chat._messages[-1][1]
+    finally:
+        _close_cleanly(app, window)
+
+
 def test_demo_mode_never_builds_or_starts_the_voice_controller(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

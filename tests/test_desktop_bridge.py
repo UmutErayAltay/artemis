@@ -843,3 +843,15 @@ def test_voice_telemetry_report_is_written_only_when_enabled(tmp_path, enabled):
     report = json.loads(reports[0].read_text(encoding="utf-8"))
     assert report["mode"] == "masaustu" and report["collection_complete"]
     assert report["outcomes"]["rejected"] == 1 and report["hardware"] == {"output": None}
+
+
+def test_live_states_become_their_own_events(tmp_path):
+    bridge = DesktopBridge(tmp_path / "unused.yaml", lambda *_a, **_k: None)
+    for state in ("live:merhaba dünya", "live:unavailable:deps:eksik", "heard:merhaba"):
+        bridge._on_voice_state(state)
+    events = [(e.state, e.message) for e in bridge.poll_events()]
+    assert events == [
+        ("voice_live", "merhaba dünya"),
+        ("voice_live_unavailable", "deps:eksik"),
+        ("voice_heard", "merhaba"),
+    ]

@@ -108,6 +108,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     ),
     _checkbox(("voice", "barge_in_without_wake"), "barge_in_box"),
     _checkbox(("voice", "followup_listening"), "followup_box"),
+    _checkbox(("voice", "live_transcript"), "live_transcript"),
     _checkbox(("voice", "noise_suppression"), "noise_suppression"),
     _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
     _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
@@ -431,6 +432,18 @@ class SettingsPanel(QWidget):
         voice_layout.addWidget(self.cloud_stt_hint)
         self.hybrid_stt.toggled.connect(self._update_cloud_hint)
         self._cloud_configured = False
+        self.live_transcript = QCheckBox("Canlı yazı (konuşurken)")
+        self.live_transcript.setToolTip(
+            "Konuşurken metin 'Son duyulan' satırında akar; yalnız gösterimdir, komutu etkilemez. "
+            "Kurulum: pip install .[stream] ve config'te model/revision. "
+            "Değişiklik ses yeniden başlayınca uygulanır."
+        )
+        voice_layout.addWidget(self.live_transcript)
+        # Lisans atfı (mihu Community License): "Powered by mihu" arayüzde görünür kalmalı.
+        live_notice = QLabel("Yerel, işlemcide çalışır. Powered by mihu · mihu Community License")
+        live_notice.setTextFormat(Qt.TextFormat.PlainText)
+        live_notice.setWordWrap(True)
+        voice_layout.addWidget(live_notice)
         self.noise_suppression = QCheckBox("Gürültü engelleme")
         self.noise_suppression.setToolTip(
             "DeepFilterNet3; işlemcide çalışır, ekran kartı gerekmez. Yankı gidermez. "

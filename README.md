@@ -137,6 +137,20 @@ kurulum: [ses rehberi](docs/VOICE_SETUP.md)).
 İsteğe bağlı **yankı engelleme**, Artemis'in hoparlörden çalan kendi sesinin mikrofon
 yolunda oluşturduğu yankıyı azaltır; işlem yereldir ve varsayılan kapalıdır
 ([ADR 0038](docs/adr/0038-echo-cancellation.md)).
+### Canlı yazı (isteğe bağlı) — Powered by mihu
+
+Varsayılan kapalı. `voice.live_transcript: true` ya da panelde "Canlı yazı (konuşurken)" ile
+konuşurken "Son duyulan" satırında metin kelime kelime akar. **Yalnız gösterimdir**: komut hâlâ
+large-v3 sonucundan çıkar, canlı metin uyandırma/yankı/söz kesme kararına girmez
+([ADR 0047](docs/adr/0047-live-transcript.md)). Yerelde, işlemcide çalışır; ses makineden çıkmaz.
+Kurulum: `pip install -e ".[stream]"` ve config'te `live_transcript_model` /
+`live_transcript_revision` (örnek: `config/config.example.yaml`).
+
+Model [mihu turkish-stt-66m-v2](https://huggingface.co/mihuai/turkish-stt-66m-v2) olup
+**mihu Community License v1.0** ile lisanslıdır; **Powered by mihu**. Ağırlıklar bu depoda yoktur,
+özelliği açınca sabit revision'dan indirilir; lisans şartları (ticari kullanımda gelir sınırı, rakip
+model eğitimi yasağı) açan kişiye aittir. Ayrıntı: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
 Ortak ses ölçümünün ilk adımı ([ADR 0041](docs/adr/0041-common-voice-telemetry.md)):

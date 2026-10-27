@@ -781,6 +781,14 @@ class DesktopBridge:
         if state.startswith("denoise:"):
             self._events.put(State("voice_denoise", state.removeprefix("denoise:")))
             return
+        if state.startswith("live:unavailable:"):
+            self._events.put(
+                State("voice_live_unavailable", state.removeprefix("live:unavailable:"))
+            )
+            return
+        if state.startswith("live:"):
+            self._events.put(State("voice_live", state.removeprefix("live:")))
+            return
         if state.startswith("echo:"):
             self._events.put(State("voice_echo", state.removeprefix("echo:")))
             return

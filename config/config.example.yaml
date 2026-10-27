@@ -100,6 +100,14 @@ voice:
   stt_mode: local # local | hybrid
   # stt_cloud_endpoint: groq # Üstteki `endpoints` içinde tanımlı bir kimlik (hybrid için zorunlu).
   # stt_cloud_model: whisper-large-v3 # Sağlayıcının güncel belgesinden doğrulayın (hybrid için zorunlu).
+  # Canlı yazı (ADR 0047): konuşurken "Son duyulan" satırında akan YALNIZ GÖSTERİM metni; komutu,
+  # uyandırmayı, yankıyı ve söz kesmeyi etkilemez. Yerel, işlemcide çalışır (`pip install .[stream]`).
+  # Model Artemis ile gelmez; ilk açılışta aşağıdaki SABİT revision'dan indirilir. Powered by mihu:
+  # model mihu Community License v1.0 ile lisanslıdır (kişisel/ticari olmayan kullanım serbest;
+  # ticari kullanım gelir sınırına ve mihu'nun şartlarına bağlıdır). Ayrıntı: THIRD_PARTY_NOTICES.md.
+  live_transcript: false
+  # live_transcript_model: mihuai/turkish-stt-66m-v2
+  # live_transcript_revision: bc2f77287cfc3ec2568cf5ba9f9181e1a43bfff4
   tts_backend: piper
   tts_local_fallback: true # Edge hatasında yerel sese dön; false seçili sesi korur.
   piper_model: ../models/tr_TR-dfki-medium.onnx

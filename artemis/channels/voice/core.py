@@ -275,6 +275,21 @@ class AudioSegmenter:
         return b"".join(self._active)
 
 
+class LiveTranscriber(Protocol):
+    """ADR 0047: yalnız gösterim metni; ``feed`` iş parçacığında çağrılır."""
+
+    def feed(self, pcm16: bytes) -> str: ...
+
+    def reset(self) -> None: ...
+
+    def close(self) -> None: ...
+
+
+# ~100 ms'lik STT PCM'i birikince bir iş gönderilir; metin güncellemesi en çok ~150 ms'de bir.
+LIVE_BATCH_MS = 100
+LIVE_EMIT_INTERVAL = 0.15
+
+
 class VoiceController:
     """Wake word, CommandRunner ve TTS arasındaki tek voice-channel sınırı."""
 
@@ -298,8 +313,19 @@ class VoiceController:
         on_input_level: Callable[[int], None] | None = None,
         on_transcript: Callable[[str], None] | None = None,
         cloud_recognizer: SpeechRecognizer | None = None,
+        live_transcriber: LiveTranscriber | None = None,
+        on_live_text: Callable[[str], None] | None = None,
     ) -> None:
         self.runner = runner
+        # ADR 0047: canlı metin YALNIZ on_live_text'e gider; komut/uyandırma/yankı/söz kesme
+        # hiçbir yerde okumaz.
+        self._live = live_transcriber
+        self.on_live_text = on_live_text or (lambda _text: None)
+        self._live_buffer = bytearray()
+        self._live_task: asyncio.Task[str] | None = None
+        self._live_text = ""
+        self._live_next_emit = 0.0
+        self._live_stale = False
         # ADR 0046: yalnız komut olacak söz için; uyandırma/yankı kararları hep yerel metinle.
         self.cloud_recognizer = cloud_recognizer
         self.config = config
@@ -399,6 +425,7 @@ class VoiceController:
                     self._capturing_id = None
                 # VAD gürültüyü/yankıyı da konuşma sanabilir. Oynatma yalnız nihai
                 # transcript kabul edilince _handle_utterance içinde kesilir (ADR 0040).
+                self._live_step(frame, was_active)
                 if self.segmenter.active and self.config.stt_partial_enabled:
                     self._partial_frames += 1
                     if self._partial_frames >= max(1, 1000 // self.config.frame_ms):
@@ -707,6 +734,63 @@ class VoiceController:
         # _handle_utterance zaten wake word ister; yankı da öncesinde elenir).
         return transcript if self.continuous else None
 
+    def _live_step(self, frame: AudioFrame, was_active: bool) -> None:
+        """Konuşma süren PCM'i toplar; ~100 ms'de bir, tek uçuşta işle thread'e gönderir."""
+        if self._live is None:
+            return
+        if not self.segmenter.active or self.segmenter._discarding:
+            if was_active:
+                self._live_reset()
+            return
+        if was_active:
+            self._live_buffer += frame.raw_pcm or frame.pcm
+        else:  # Konuşma başı: ön tampon + bu kare zaten segmentte.
+            self._live_buffer[:] = self.segmenter.snapshot()
+        batch = 2 * self.config.sample_rate * LIVE_BATCH_MS // 1000
+        if self._live_task is None and len(self._live_buffer) >= batch:
+            chunk = bytes(self._live_buffer)
+            self._live_buffer.clear()
+            self._live_task = asyncio.create_task(asyncio.to_thread(self._live.feed, chunk))
+            self._live_task.add_done_callback(self._live_finished)
+
+    def _live_reset(self) -> None:
+        self._live_buffer.clear()
+        self._live_text = ""
+        if self._live_task is not None:
+            # Thread sürerken reset yarışır; iş bitince _live_finished sıfırlar.
+            self._live_stale = True
+        elif self._live is not None:
+            self._live.reset()
+
+    def _live_finished(self, task: asyncio.Task[str]) -> None:
+        if self._live_task is task:
+            self._live_task = None
+        if task.cancelled():
+            return
+        live = self._live
+        try:
+            text = task.result()
+        except (OSError, RuntimeError, ValueError) as error:
+            if live is not None:
+                logger.warning(
+                    "Canlı yazı durdu, bu oturumda kapatıldı (%s).", type(error).__name__
+                )
+                self._live = None
+                self._live_buffer.clear()
+                self.on_state("live:unavailable:runtime")
+            return
+        if live is None:
+            return
+        if self._live_stale:
+            self._live_stale = False
+            live.reset()
+            return
+        now = self.clock()
+        if text and text != self._live_text and now >= self._live_next_emit:
+            self._live_text = text
+            self._live_next_emit = now + LIVE_EMIT_INTERVAL
+            self.on_live_text(text)
+
     def _start_partial_decode(self) -> None:
         method = getattr(self.recognizer, "transcribe_partial", None)
         if method is None or self._partial_task is not None:
@@ -951,16 +1035,19 @@ class VoiceController:
         self.microphone.discard_pending()
         self._discard_capture("approval")
         self.segmenter.reset()
+        self._live_reset()
 
     def pause_for_approval(self) -> None:
         self.microphone.pause()
         self._discard_capture("approval")
         self.segmenter.reset()
+        self._live_reset()
 
     def resume_after_approval(self) -> None:
         self.microphone.discard_pending()
         self._discard_capture("approval")
         self.segmenter.reset()
+        self._live_reset()
         self.microphone.resume()
 
     async def close(self) -> None:
@@ -973,6 +1060,12 @@ class VoiceController:
             self._active.cancel()
         await self._settle_active()
         await self._settle_partial()
+        if self._live_task is not None:
+            with suppress(asyncio.CancelledError, OSError, RuntimeError, ValueError):
+                await self._live_task
+        if self._live is not None:
+            self._live.close()
+            self._live = None
         for label, closer in (
             ("mikrofon", self.microphone.close),
             ("ses çıkışı", self.sink.close),

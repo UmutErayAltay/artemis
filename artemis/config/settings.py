@@ -126,6 +126,11 @@ class VoiceConfig(BaseModel):
     stt_mode: Literal["local", "hybrid"] = "local"
     stt_cloud_endpoint: str = ""
     stt_cloud_model: str = ""
+    # ADR 0047: konuşurken akan YALNIZ GÖSTERİM metni (yerel, `pip install .[stream]`).
+    # Model kimliği koda gömülmez; açıkken depo ve sabit revision config'ten gelir.
+    live_transcript: bool = False
+    live_transcript_model: str = ""
+    live_transcript_revision: str = ""
     tts_backend: Literal["piper", "edge", "ema"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True

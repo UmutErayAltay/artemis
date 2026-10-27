@@ -1418,6 +1418,29 @@ class DesktopWindow(QMainWindow):
             elif event.state == "voice_heard":
                 self.settings_panel.last_heard.setText(event.message)
                 self.pet.heard(event.message)
+            elif event.state == "voice_live":
+                # Yalnız "Son duyulan" satırı: pet balonu ve zamanlayıcılar nihai metne kalır.
+                self.settings_panel.last_heard.setText(event.message)
+            elif event.state == "voice_live_unavailable":
+                kind, _, reason = event.message.partition(":")
+                if kind == "runtime":
+                    # Çalışırken düşen canlı yazı bir yapılandırma sorunu değildir.
+                    self._append_chat(
+                        "Artemis",
+                        "Canlı yazı çalışırken hata verdi ve bu oturumda kapatıldı; "
+                        "ses canlı yazısız sürüyor.",
+                    )
+                else:
+                    fix = (
+                        'Paketleri `pip install -e ".[stream]"` ile kurun'
+                        if kind == "deps"
+                        else "config'te `voice.live_transcript_model` ve "
+                        "`voice.live_transcript_revision` ayarlarına bakın"
+                    )
+                    self._append_chat(
+                        "Artemis",
+                        f"Canlı yazı açılamadı: {reason}. {fix}; ses canlı yazısız sürüyor.",
+                    )
             elif event.state == "voice_denoise":
                 if event.message.startswith("unavailable:"):
                     kind, _, reason = event.message.removeprefix("unavailable:").partition(":")
