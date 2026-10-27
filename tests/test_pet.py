@@ -13,8 +13,8 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPoint, QRect, QSettings, Qt
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSettings, Qt
+from PySide6.QtGui import QImage, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -39,6 +39,12 @@ def app() -> QApplication:
 class Calls:
     def __init__(self) -> None:
         self.log: list[str] = []
+        self.sent: list[str] = []
+        self.accept = True
+
+    def submit(self, text: str) -> bool:
+        self.sent.append(text)
+        return self.accept
 
     def cb(self, name: str) -> Callable[[], None]:
         return lambda: self.log.append(name)
@@ -56,6 +62,7 @@ def made(app: QApplication, tmp_path: Path) -> Any:
             on_quick=calls.cb("quick"),
             on_approval=calls.cb("approval"),
             on_quit=calls.cb("quit"),
+            on_submit=calls.submit,
             settings=QSettings(str(tmp_path / "pet.ini"), QSettings.Format.IniFormat),
             **kwargs,
         )
@@ -238,18 +245,74 @@ def test_code_agent_events_update_jobs_and_bubble(made: Any) -> None:
     assert pet.code_agent_event("tool_result", {}) is None
 
 
-def test_click_vs_drag(app: QApplication, made: Any) -> None:
+def _mouse_event(kind: QEvent.Type, pos: QPoint) -> QMouseEvent:
+    point = QPointF(pos)
+    return QMouseEvent(
+        kind, point, point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def _click(pet: PetWidget, times: int = 1) -> None:
+    center = QPoint(BODY // 2, BODY // 2)
+    for _ in range(times):
+        QTest.mouseClick(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
+
+
+def test_one_click_opens_quick_box_below_pet(app: QApplication, made: Any) -> None:
     pet, calls = made()
     pet._click_delay_ms = 0
     pet.show()
     pet.move_anchor(QPoint(200, 200))
     start = QPoint(pet.pos())
-    center = QPoint(BODY // 2, BODY // 2)
-    QTest.mouseClick(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
-    _wait(app, lambda: calls.log == ["voice"])
-    assert pet.pos() == start
+    _click(pet)
+    _wait(app, lambda: pet._quick.isVisible())
+    assert calls.log == [] and pet.pos() == start
+    assert pet._quick.y() >= 200 + BODY  # gövdenin altında
+    pet.move_anchor(QPoint(300, 220))  # pet taşınınca kutu izler
+    assert pet._quick.y() >= 220 + BODY and pet._quick.x() != 200
+    _click(pet)  # ikinci tek tık kapatır
+    _wait(app, lambda: not pet._quick.isVisible())
 
-    calls.log.clear()
+
+def test_quick_box_flips_above_near_screen_bottom(made: Any) -> None:
+    pet, _ = made()
+    pet.show()
+    area = pet._area(pet._anchor)
+    pet.move_anchor(QPoint(300, area.bottom()))
+    pet._quick.open()
+    pet._place_quick()
+    assert pet._quick.y() + pet._quick.height() <= pet._anchor.y()
+
+
+def test_two_clicks_toggle_voice_three_open_menu(
+    app: QApplication, made: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pet, calls = made()
+    pet._click_delay_ms = 0
+    pet.show()
+    menus: list[QPoint] = []
+    monkeypatch.setattr(pet, "_open_menu", menus.append)
+    # Qt'nin gerçek çift-tık dizisi: basış, bırakış, çift-tık olayı (ikinci basış), bırakış.
+    center = QPoint(BODY // 2, BODY // 2)
+    _click(pet)
+    QApplication.sendEvent(pet, _mouse_event(QEvent.Type.MouseButtonDblClick, center))
+    QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
+    _wait(app, lambda: calls.log == ["voice"])
+    assert not pet._quick.isVisible() and menus == []
+
+    pet._click_delay_ms = 10_000  # 3. tık zamanlayıcıyı beklemeden gönderilir
+    _click(pet, 3)
+    assert len(menus) == 1 and calls.log == ["voice"] and pet._clicks == 0
+    assert not pet._quick.isVisible()
+
+
+def test_click_vs_drag(app: QApplication, made: Any) -> None:
+    pet, calls = made()
+    pet._click_delay_ms = 0
+    pet.show()
+    pet.move_anchor(QPoint(200, 200))
+    center = QPoint(BODY // 2, BODY // 2)
     QTest.mousePress(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
     QTest.mouseMove(pet, center + QPoint(40, 30))
     QTest.mouseRelease(
@@ -257,19 +320,63 @@ def test_click_vs_drag(app: QApplication, made: Any) -> None:
     )
     time.sleep(0.05)
     app.processEvents()
-    assert calls.log == []  # sürükleme tık sayılmaz
+    assert calls.log == [] and pet._clicks == 0 and not pet._quick.isVisible()  # tık sayılmaz
     assert pet._anchor != QPoint(200, 200)
     assert pet._settings.value("x", type=int) == pet._anchor.x()
 
 
-def test_double_click_opens_panel_not_voice(app: QApplication, made: Any) -> None:
+def test_quick_box_submit_outcomes(made: Any) -> None:
+    pet, calls = made()
+    box = pet._quick
+    box.open()
+    box.input.setText("   ")
+    box.send()
+    assert calls.sent == [] and box.isVisible()  # boş metin bir şey yapmaz
+
+    calls.accept = False
+    box.input.setText("merhaba")
+    box.send()
+    assert calls.sent == ["merhaba"] and box.input.text() == "merhaba"
+    assert not box.hint.isHidden() and box.isVisible()  # metin korunur, ipucu görünür
+
+    calls.accept = True
+    box.send()
+    assert box.input.text() == "" and not box.isVisible() and box.hint.isHidden()
+
+    box.open()
+    QTest.keyClick(box, Qt.Key.Key_Escape)
+    assert not box.isVisible()
+    assert box.input.maxLength() == 2000 and box.accessibleName()
+
+
+def test_quick_box_hides_with_pet_and_never_gives_pet_command_logic(made: Any) -> None:
     pet, calls = made()
     pet.show()
-    center = QPoint(BODY // 2, BODY // 2)
-    QTest.mouseDClick(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
-    time.sleep(0.4)
-    app.processEvents()
-    assert "panel" in calls.log and "voice" not in calls.log
+    pet._quick.open()
+    pet.hide()
+    assert not pet._quick.isVisible() and calls.log == []
+
+
+def test_job_list_states_hover_and_drop(made: Any) -> None:
+    pet, _ = made()
+    pet.show()
+    pet.code_agent_event("code_agent_started", {"job_id": "1", "project": "web"})
+    assert pet._bubble_text == "web · çalışıyor"
+    pet.code_agent_event("code_agent_started", {"job_id": "2", "project": "api"})
+    pet.code_agent_event("code_agent_waiting", {"job_id": "2", "project": "api"})
+    assert pet._bubble_text == "web · çalışıyor\napi · girdi bekliyor"
+    assert pet.jobs == 2  # dişli sayısı = etkin işler (bekleyen de etkin)
+    pet._bubble_text = ""
+    gear = pet._body_rect().topLeft() + QPoint(BODY // 2 + 32, 60 - 30)
+    QTest.mouseMove(pet, QPoint(5, 5))
+    QTest.mouseMove(pet, gear)
+    assert "api · girdi bekliyor" in pet._bubble_text  # rozet üstüne gelme listeyi açar
+    text = pet.code_agent_event(
+        "code_agent_done", {"job_id": "1", "project": "web", "status": "done"}
+    )
+    assert text == "web: bitti, commit yok" and pet.jobs == 1
+    pet.code_agent_event("code_agent_done", {"job_id": "2", "project": "api", "status": "error"})
+    assert pet.jobs == 0 and pet.job_lines() == []
 
 
 def test_click_during_approval_focuses_approval(made: Any) -> None:
@@ -339,6 +446,7 @@ def test_position_restored_from_settings(app: QApplication, tmp_path: Path) -> N
         on_quick=lambda: None,
         on_approval=lambda: None,
         on_quit=lambda: None,
+        on_submit=lambda text: True,
         settings=settings,
     )
     assert pet._anchor == QPoint(33, 44)

@@ -448,6 +448,27 @@ def test_live_text_goes_to_pet_and_final_overwrites(
         _close_cleanly(app, window)
 
 
+def test_pet_quick_box_forwards_to_submit_text(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        sent: list[str] = []
+        monkeypatch.setattr(window, "_submit_text", lambda text: sent.append(text) or True)
+        window.pet._quick.open()
+        window.pet._quick.input.setText("selam")
+        window.pet._quick.send()
+        assert sent == ["selam"] and not window.pet._quick.isVisible()
+        monkeypatch.undo()
+        window.pet._quick.open()
+        window.pet._quick.input.setText("gerçek")
+        window.pet._quick.send()  # gerçek _submit_text köprüye gider
+        assert window._busy and window._active_request is not None
+        window.pet._quick.hide()
+    finally:
+        _close_cleanly(app, window)
+
+
 def test_demo_mode_never_builds_or_starts_the_voice_controller(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

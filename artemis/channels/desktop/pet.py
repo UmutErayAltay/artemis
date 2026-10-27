@@ -39,6 +39,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
 from artemis.channels.desktop import pet_sprite
+from artemis.channels.desktop.pet_quick import QuickBox
 from artemis.channels.desktop.pet_sprite import SpritePet
 
 log = logging.getLogger(__name__)
@@ -161,6 +162,7 @@ class PetWidget(QWidget):
         on_quick: Callable[[], None],
         on_approval: Callable[[], None],
         on_quit: Callable[[], None],
+        on_submit: Callable[[str], bool],
         settings: QSettings | None = None,
         reduced_motion: bool | None = None,
         pets_dir: Path | None = None,
@@ -205,7 +207,9 @@ class PetWidget(QWidget):
         self._busy = False
         self._approval = False
         self._level_raw = 0.0
-        self._jobs: set[str] = set()
+        # job_id -> (proje, "running" | "waiting"); biten iş balonda bir kez gösterilip düşer.
+        self._jobs: dict[str, tuple[str, str]] = {}
+        self._gear_hover = False
         self._reaction: str | None = None
         self._react_age = 0.0
         self._error_left = 0.0
@@ -255,7 +259,10 @@ class PetWidget(QWidget):
         self._click_delay_ms = min(QApplication.doubleClickInterval(), 280)
         self._click_timer = QTimer(self)
         self._click_timer.setSingleShot(True)
-        self._click_timer.timeout.connect(self._on_toggle_voice)
+        self._click_timer.timeout.connect(self._dispatch_clicks)
+        self._clicks = 0
+        self._quick = QuickBox(self, on_submit)
+        self.setMouseTracking(True)  # dişli rozetin üstüne gelme iş listesini açar
         self._timer = QTimer(self)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._on_timer)
@@ -325,8 +332,10 @@ class PetWidget(QWidget):
         if text.strip():
             self.say(text, "answer")
 
-    def say(self, text: str, kind: str = "answer", seconds: float = BUBBLE_SECONDS) -> None:
-        self._bubble_text = truncate(text)
+    def say(
+        self, text: str, kind: str = "answer", seconds: float = BUBBLE_SECONDS, flat: bool = True
+    ) -> None:
+        self._bubble_text = truncate(text) if flat else text
         self._bubble_kind = kind
         self._bubble_left = seconds
         self._awake = max(self._awake, 10.0)
@@ -335,14 +344,17 @@ class PetWidget(QWidget):
     def code_agent_event(self, event: str, fields: dict[str, Any]) -> str | None:
         """Başlangıç/bitiş denetim olayları; bitişte gösterilen metni döndürür."""
         job = str(fields.get("job_id") or "?")
-        if event == "code_agent_started":
-            self._jobs.add(job)
+        if event in {"code_agent_started", "code_agent_waiting"}:
+            project = str(fields.get("project") or self._jobs.get(job, ("", ""))[0])
+            status = "running" if event == "code_agent_started" else "waiting"
+            self._jobs[job] = (project, status)
             self._awake = max(self._awake, 10.0)
             self._refresh_access()
+            self._say_jobs()
             return None
         if event != "code_agent_done":
             return None
-        self._jobs.discard(job)
+        self._jobs.pop(job, None)
         status = str(fields.get("status", ""))
         text = job_summary(str(fields.get("project", "")), status, fields.get("commits"))
         self._reaction = "happy" if status == "done" else "sad"
@@ -352,6 +364,19 @@ class PetWidget(QWidget):
         self.say(text, "job")
         self._refresh_access()
         return text
+
+    def job_lines(self) -> list[str]:
+        """Etkin işlerin kısa listesi: 'web · çalışıyor', 'api · girdi bekliyor'."""
+        label = {"running": "çalışıyor", "waiting": "girdi bekliyor"}
+        lines = [
+            f"{truncate(project or 'kod ajanı', 24)} · {label[status]}"
+            for project, status in self._jobs.values()
+        ]
+        return lines[:4] + ([f"+{len(lines) - 4} iş daha"] if len(lines) > 4 else [])
+
+    def _say_jobs(self) -> None:
+        if self._jobs:
+            self.say("\n".join(self.job_lines()), "job", flat=False)
 
     def _refresh_access(self) -> None:
         text = DESCRIPTIONS[self.state]
@@ -393,6 +418,19 @@ class PetWidget(QWidget):
         self.setFixedSize(BODY + extra, BODY)
         shift = extra if self._bubble_side_left else 0
         self.move(self._anchor.x() - shift, self._anchor.y())
+        if self._quick.isVisible():
+            self._place_quick()
+
+    def _place_quick(self) -> None:
+        """Kutu gövdenin hemen altında; ekranın altına sığmazsa üstüne çıkar."""
+        area = self._area(self._anchor)
+        box = self._quick
+        x = max(area.left(), min(self._anchor.x() + (BODY - box.width()) // 2,
+                                 area.right() + 1 - box.width()))
+        y = self._anchor.y() + BODY + GAP
+        if y + box.height() > area.bottom() + 1:
+            y = self._anchor.y() - GAP - box.height()
+        box.move(x, y)
 
     def _body_rect(self) -> QRect:
         left = self.width() - BODY if self._bubble_side_left else 0
@@ -455,6 +493,7 @@ class PetWidget(QWidget):
 
     def hideEvent(self, event: Any) -> None:
         self._timer.stop()
+        self._quick.hide()
         super().hideEvent(event)
 
     # --------------------------------------------------------------- etkileşim
@@ -475,7 +514,7 @@ class PetWidget(QWidget):
         return menu
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:
-        self.build_menu().exec(event.globalPos())
+        self._open_menu(event.globalPos())
 
     def enterEvent(self, event: Any) -> None:
         super().enterEvent(event)
@@ -497,8 +536,17 @@ class PetWidget(QWidget):
         self._press_anchor = QPoint(self._anchor)
         self._dragging = False
 
+    def _over_gear(self, pos: QPoint) -> bool:
+        body = self._body_rect()
+        gear = QPointF(body.left() + BODY / 2 + _RADIUS * 0.8, _CENTER_Y - _RADIUS * 0.74)
+        return bool(self._jobs) and math.hypot(pos.x() - gear.x(), pos.y() - gear.y()) <= 14
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._press_global is None:
+            over = self._over_gear(event.position().toPoint())
+            if over and not self._gear_hover:
+                self._say_jobs()
+            self._gear_hover = over
             return
         delta = event.globalPosition().toPoint() - self._press_global
         if not self._dragging and delta.manhattanLength() >= QApplication.startDragDistance():
@@ -517,23 +565,47 @@ class PetWidget(QWidget):
         self._press_global = None
         self._dragging = False
         if dragged:
+            # Sürükleme tık dizisini böler: tık-sürükle-tık çift tık (ses) sayılmaz.
+            self._clicks = 0
+            self._click_timer.stop()
             self._save_position()
         else:
             self._clicked()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        # Çift tıkın ikinci bırakması tık sayılmasın diye basış kaydı silinir.
-        self._press_global = None
-        self._click_timer.stop()
-        if event.button() == Qt.MouseButton.LeftButton:
-            self._on_show_panel()
+        # Qt ikinci basışı çift-tık olayı olarak yollar; sıradan basış gibi sayılır ki
+        # bırakma ikinci tık olsun.
+        self.mousePressEvent(event)
 
     def _clicked(self) -> None:
+        """Tık sayacı (ADR 0048): 1 hızlı kutu, 2 ses, 3 menü; onayda tık hemen onaya gider."""
         if self._approval:
+            self._clicks = 0
+            self._click_timer.stop()
             self._on_approval()
             return
-        # Çift tık beklenir; sesi açma/kapama gecikmesi kısa tutulur.
-        self._click_timer.start(self._click_delay_ms)
+        self._clicks += 1
+        if self._clicks >= 3:
+            self._dispatch_clicks()
+        else:
+            self._click_timer.start(self._click_delay_ms)
+
+    def _dispatch_clicks(self) -> None:
+        self._click_timer.stop()
+        count, self._clicks = self._clicks, 0
+        if count == 1:
+            if self._quick.isVisible():
+                self._quick.hide()
+            else:
+                self._quick.open()
+                self._place_quick()
+        elif count == 2:
+            self._on_toggle_voice()
+        elif count >= 3:
+            self._open_menu(QCursor.pos())
+
+    def _open_menu(self, pos: QPoint) -> None:
+        self.build_menu().exec(pos)
 
     # --------------------------------------------------------------- animasyon
 

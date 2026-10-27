@@ -102,7 +102,7 @@ Tek başına **Artemis** dediğinizde yerel **Dinliyorum** yanıtı ve komut bek
 durumu gelir. Ayarlar'daki mikrofon seviyesi ve **Son duyulan** göstergesi, sesin
 girdiğini ve nasıl tanındığını gösterir; ayrı ses kaydı tutulmaz.
 Tepsi menüsündeki **Peti göster/gizle** köşede duran animasyonlu masaüstü petini açar;
-pete tıklamak sesi açıp kapatır, kod ajanı bitince pet balonu ve bildirim gösterilir
+pete bir kez tıklamak altında hızlı yazma kutusu açar, iki tık sesi açıp kapatır, üç tık menüyü açar, kod ajanı bitince pet balonu ve bildirim gösterilir
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). Pet kendi komut veya onay
 yolu taşımaz.
 Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.

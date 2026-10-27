@@ -33,7 +33,7 @@ içeriğinden üretilir, Artemis için dış veridir.
 
 **Karar — pet:** Çerçevesiz, şeffaf, hep üstte, sürüklenebilir küçük bir Qt penceresi;
 QPainter ile çizilir, yeni bağımlılık yoktur. Durumları mevcut ses durumu, ses seviyesi,
-tur, onay ve kod ajanı olaylarından türetir; kendi komut veya onay yolu yoktur. Tık sesi
+tur, onay ve kod ajanı olaylarından türetir; kendi komut veya onay yolu yoktur. (ADR 0048: tık eşlemesi değişti; 1 tık hızlı kutu, 2 tık ses, 3 tık menü.) Tık sesi
 açar/kapatır; komutlar ve onaylar mevcut runner ve onay penceresinden geçer.
 
 **Sonuçlar:** Ajan kullanıcı projesinde gerçek değişiklik yapar; geri alma taban commit

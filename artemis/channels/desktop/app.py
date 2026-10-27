@@ -778,6 +778,7 @@ class DesktopWindow(QMainWindow):
             on_quick=self._show_overlay,
             on_approval=self._focus_approval,
             on_quit=self._request_exit,
+            on_submit=lambda text: self._submit_text(text),
             pets_dir=pets_dir_for(self._config_path),
         )
 
