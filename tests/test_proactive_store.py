@@ -339,3 +339,23 @@ def test_reminder_event_id_format() -> None:
     assert reminder_event_id(1) == "reminder:1"
     assert reminder_event_id(42) == "reminder:42"
     assert reminder_event_id(0) == "reminder:0"
+
+
+def test_delivery_history_and_retry_keep_original_and_privacy(tmp_path):
+    from datetime import UTC, datetime
+
+    store = ProactiveStore(tmp_path / 'retry.sqlite3')
+    now = datetime.now(UTC)
+    old = store.add_reminder('özel', now, tainted=True, private=True, now=now)
+    event = f'reminder:{old.id}'
+    assert store.claim(event, now, 'reminder', 'owner', now)
+    store.finish(event, now, 'uncertain', 'kesinti', now)
+    assert store.pending_reminders() == []
+    assert store.list_reminders('uncertain')[0].id == old.id
+    new = store.retry_reminder(old.id, now)
+    assert new.id != old.id and new.created_private and new.created_tainted
+    assert new.state is None
+    assert store.get_reminder(old.id).state == 'uncertain'
+    with pytest.raises(ProactiveStoreError, match='zaten'):
+        store.retry_reminder(old.id, now)
+    assert len(store.list_reminders()) == 2

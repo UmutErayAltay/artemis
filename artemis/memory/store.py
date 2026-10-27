@@ -12,7 +12,7 @@ import sqlite3
 from collections import Counter
 from contextlib import closing
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -24,6 +24,12 @@ from artemis.memory.vault import tokenize, turkish_fold
 _SEARCH_SCAN_TURNS = 2000
 
 _SCHEMA = """
+CREATE TABLE IF NOT EXISTS history_policy (
+    id INTEGER PRIMARY KEY CHECK(id = 1),
+    retention_days INTEGER NOT NULL CHECK(retention_days >= 0)
+);
+INSERT OR IGNORE INTO history_policy VALUES (1, 0);
+
 CREATE TABLE IF NOT EXISTS turns (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     turn_id TEXT NOT NULL,
@@ -81,6 +87,50 @@ class MemoryStore:
         db = sqlite3.connect(self.path, timeout=5)
         db.execute("PRAGMA journal_mode=WAL")
         return closing(db)
+
+    def history_status(self) -> dict[str, int]:
+        with self._connect() as db:
+            count = db.execute("SELECT COUNT(*) FROM turns").fetchone()[0]
+            days = db.execute("SELECT retention_days FROM history_policy WHERE id = 1").fetchone()[
+                0
+            ]
+        return {"turns": int(count), "retention_days": int(days)}
+
+    def set_retention(self, days: int) -> int:
+        if not 0 <= days <= 36500:
+            raise ValueError("Saklama süresi 0–36500 gün olmalı; 0 otomatik silmeyi kapatır.")
+        with self._connect() as db, db:
+            db.execute("UPDATE history_policy SET retention_days = ? WHERE id = 1", (days,))
+            return self._prune(db, days)
+
+    @staticmethod
+    def _prune(db: sqlite3.Connection, days: int) -> int:
+        if not days:
+            return 0
+        cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
+        return db.execute("DELETE FROM turns WHERE created_at < ?", (cutoff,)).rowcount
+
+    def apply_retention(self) -> int:
+        with self._connect() as db, db:
+            days = db.execute("SELECT retention_days FROM history_policy WHERE id = 1").fetchone()[
+                0
+            ]
+            return self._prune(db, days)
+
+    def delete_history(self) -> int:
+        # Tek transaction: notlara dokunma; sıfırlama işaretleri artık gereksizdir.
+        with self._connect() as db, db:
+            count = db.execute("DELETE FROM turns").rowcount
+            db.execute("DELETE FROM resets")
+            return count
+
+    def history_page(self, limit: int = 50) -> list[dict[str, str]]:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT created_at, user_text, answer FROM turns ORDER BY id DESC LIMIT ?",
+                (min(max(limit, 1), 100),),
+            ).fetchall()
+        return [{"created_at": r[0], "user": r[1], "answer": r[2]} for r in rows]
 
     # --- katman 1: konuşma geçmişi ---------------------------------------------------
 

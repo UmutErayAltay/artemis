@@ -104,9 +104,36 @@ async def chat(config_path: Path) -> None:
             if text.strip().casefold() == "/yeni":
                 # Komut tur çalıştırmaz ve modele gitmez; yalnız geçmişi unutturur.
                 if runner.reset_context():
-                    print("Yeni sohbet başladı; önceki konuşma unutuldu.")
+                    print("Yeni sohbet başladı; kalıcı konuşma arşivi silinmedi.")
                 else:
                     print("Aktif işlem sürerken sohbet sıfırlanamaz.")
+                continue
+            if text.strip().casefold().startswith("/hafıza"):
+                from artemis.tools.plugins.history import HistoryArguments
+
+                parts = text.strip().casefold().split()
+                action = parts[1] if len(parts) > 1 else "durum"
+                actions = {
+                    "durum": "status",
+                    "göster": "list",
+                    "sil": "delete",
+                    "sakla": "retention",
+                }
+                if action not in actions or (
+                    action == "sakla"
+                    and (len(parts) != 3 or not parts[2].isdigit() or int(parts[2]) > 36500)
+                ):
+                    print("/hafıza durum | göster | sil | sakla <gün>; 0 otomatik silmeyi kapatır.")
+                    continue
+                arguments = HistoryArguments.model_validate(
+                    {
+                        "action": actions[action],
+                        "retention_days": int(parts[2]) if action == "sakla" else 0,
+                    }
+                )
+                history_result = await runner.dispatch_tool("conversation_history", arguments)
+                print(history_result.message)
+                print(json.dumps(history_result.data, ensure_ascii=False, indent=2))
                 continue
             turn_task = asyncio.create_task(runner.run(text))
             result = await asyncio.shield(turn_task)

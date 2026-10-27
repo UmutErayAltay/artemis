@@ -114,6 +114,7 @@ def create_runtime(
         if loaded.persist_memory:
             try:
                 store = MemoryStore(loaded.state_dir / "memory.sqlite3")
+                store.apply_retention()
             except (OSError, sqlite3.Error) as error:
                 log.emit("memory_error", error=str(error))
             else:
@@ -123,6 +124,7 @@ def create_runtime(
             log.emit("memory_error", error=str(error))
 
         conversation = ConversationContext(loaded.context_turns, budget, store, memory_failed)
+        context.services["memory_refresh"] = lambda: conversation.refresh_memory(force=True)
         runner = CommandRunner(agent, conversation)
         runtime = Runtime(loaded, log, tools, gate, context, selected_provider, agent, runner)
         cleanup.pop_all()

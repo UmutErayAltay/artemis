@@ -720,3 +720,37 @@ def test_app_icon_file_exists_and_loads() -> None:
     icon = desktop_app.app_icon()
     assert not icon.isNull()
     assert 256 in {size.width() for size in icon.availableSizes()}
+
+
+def test_data_panel_controls_use_typed_requests_and_show_uncertain(app: QApplication) -> None:
+    from artemis.channels.desktop.data_panel import DataPanel
+    from artemis.tools.base import ToolResult
+    from artemis.tools.plugins.history import HistoryArguments
+
+    panel = DataPanel()
+    requests: list[tuple[str, Any]] = []
+    panel.tool_requested.connect(lambda name, args: requests.append((name, args)))
+    panel.set_busy(False)
+    assert panel.history.isEnabled() and not panel.delete.isEnabled()
+    panel.accept_result('conversation_history', ToolResult(
+        success=True, status='ok', message='ok',
+        data={'turns': 2, 'retention_days': 30, 'recent_turns': []},
+    ))
+    assert panel.days.value() == 30 and panel.delete.isEnabled()
+    panel.delete.click()
+    assert requests[-1] == ('conversation_history', HistoryArguments(action='delete'))
+    panel.accept_result('reminder_list', ToolResult(
+        success=True, status='ok', message='ok', data={'reminders': [{
+            'reminder_id': 7, 'state': 'uncertain', 'due_local': '2026-10-27 12:00',
+            'text': 'Deneme',
+        }]},
+    ))
+    panel.items.setCurrentRow(0)
+    assert 'Teslim doğrulanamadı' in panel.items.item(0).text()
+    assert panel.retry.isEnabled()
+    panel.retry.click()
+    assert requests[-1][0] == 'reminder_retry'
+    assert requests[-1][1].reminder_id == 7
+    panel.set_busy(True)
+    assert not panel.delete.isEnabled() and not panel.retry.isEnabled()
+    panel.close()

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
-from typing import Any, cast
+from typing import Any, Literal, cast
 from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -28,9 +28,7 @@ class ReminderCreateArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     text: str = Field(min_length=1, max_length=500)
-    at: str | None = Field(
-        default=None, description="Yerel saat, 'YYYY-MM-DD HH:MM' biçiminde."
-    )
+    at: str | None = Field(default=None, description="Yerel saat, 'YYYY-MM-DD HH:MM' biçiminde.")
     in_minutes: int | None = Field(default=None, ge=1, le=60 * 24 * 365)
 
     @model_validator(mode="after")
@@ -42,6 +40,16 @@ class ReminderCreateArguments(BaseModel):
 
 class ReminderListArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
+    state: Literal[
+        "all",
+        "pending",
+        "claimed",
+        "delivered",
+        "failed",
+        "missed",
+        "uncertain",
+        "cancelled",
+    ] = "all"
 
 
 class ReminderCancelArguments(BaseModel):
@@ -118,7 +126,9 @@ class ReminderList(BaseTool):
     name = "reminder_list"
     label = "Hatırlatmaları listele"
     done_label = "Hatırlatmalar listelendi"
-    description = "Henüz zamanı gelmemiş veya teslim edilmemiş hatırlatmaları listeler."
+    description = (
+        "Hatırlatma teslim geçmişini durumuyla listeler; uncertain teslimin doğrulanamamasıdır."
+    )
     args_model = ReminderListArguments
     risk = Risk.READ_ONLY
 
@@ -128,11 +138,19 @@ class ReminderList(BaseTool):
             return ToolResult(message=_DISABLED)
         tz = ZoneInfo(context.settings.proactive.timezone)
         try:
-            pending = store.pending_reminders()
+            pending = store.list_reminders(cast(ReminderListArguments, arguments).state)
         except ProactiveStoreError:
             return ToolResult(message="Hatırlatmalar okunamadı (yerel depo hatası).")
         items: list[dict[str, Any]] = [
             {
+                "state": "cancelled" if item.cancelled else item.state or "pending",
+                "delivery_status": (
+                    "Teslim doğrulanamadı; teslim edilmiş de olabilir."
+                    if item.state == "uncertain"
+                    else "cancelled"
+                    if item.cancelled
+                    else item.state or "pending"
+                ),
                 "reminder_id": item.id,
                 "text": item.text,
                 "due_local": format_local(item.due_at, tz),
@@ -144,7 +162,7 @@ class ReminderList(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{len(items)} bekleyen hatırlatma var.",
+            message=f"{len(items)} hatırlatma kaydı var (en fazla son 100).",
             data={"reminders": items},
             external=any(item.created_tainted for item in pending),
             content_kind="file" if any(item.created_private for item in pending) else "text",
@@ -174,3 +192,35 @@ class ReminderCancel(BaseTool):
                 message="Hatırlatma bulunamadı ya da zaten teslim edildi veya iptal edildi."
             )
         return ToolResult(success=True, status="ok", message="Hatırlatma iptal edildi.")
+
+
+@register_tool
+class ReminderRetry(BaseTool):
+    name = "reminder_retry"
+    label = "Hatırlatmayı yeniden dene"
+    done_label = "Yeni hatırlatma kuruldu"
+    description = (
+        "Önceki teslim gerçekleşmiş olabilir: bu işlem çift bildirim üretebilir. "
+        "Eski sonucu koruyarak yeni hatırlatma kurar; Artemis açık olmalıdır."
+    )
+    args_model = ReminderCancelArguments
+    risk = Risk.CONFIRM_REQUIRED
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        store = _store(context)
+        if store is None:
+            return ToolResult(message=_DISABLED)
+        try:
+            old = store.get_reminder(cast(ReminderCancelArguments, arguments).reminder_id)
+            if old is None:
+                return ToolResult(message="Hatırlatma bulunamadı.")
+            # Eski gizlilik/taint düşürülmez; aynı içerik yeni kimlikle teslim edilir.
+            new = store.retry_reminder(old.id, _now(context))
+        except ProactiveStoreError as error:
+            return ToolResult(message=str(error))
+        return ToolResult(
+            success=True,
+            status="ok",
+            message="Yeni teslim girişimi kuruldu; henüz teslim edilmedi.",
+            data={"reminder_id": new.id, "retry_of": old.id},
+        )

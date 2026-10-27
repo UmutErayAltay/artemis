@@ -61,6 +61,7 @@ from artemis.channels.desktop.bridge import (
     ToolFinished,
     VoiceCommand,
 )
+from artemis.channels.desktop.data_panel import DataPanel
 from artemis.channels.desktop.hotkey import GlobalHotkey
 from artemis.channels.desktop.instance import InstanceServer, claim_instance, instance_name
 from artemis.channels.desktop.pet import TEAL, PetWidget, level_from_message
@@ -906,7 +907,7 @@ class DesktopWindow(QMainWindow):
         self.quick_action = QPushButton("Hızlı komut")
         self.quick_action.clicked.connect(self._show_overlay)
         self.new_chat_button = QPushButton("Yeni sohbet")
-        self.new_chat_button.setToolTip("Önceki konuşmayı unutturur")
+        self.new_chat_button.setToolTip("Yeni bağlam açar; kalıcı konuşma arşivini silmez")
         self.new_chat_button.clicked.connect(self._new_chat)
         conversation_header.addWidget(chat_title)
         conversation_header.addStretch(1)
@@ -996,6 +997,9 @@ class DesktopWindow(QMainWindow):
         self.settings_scroll.setWidget(self.settings_panel)
         self.tabs.addTab(self.settings_scroll, "Ayarlar")
         self.tabs.addTab(self.projects_panel, "Projeler")
+        self.data_panel = DataPanel(demo=self._demo)
+        self.data_panel.tool_requested.connect(self._submit_project_tool)
+        self.tabs.addTab(self.data_panel, "Hafıza ve hatırlatmalar")
         main.addWidget(self.tabs, 1)
 
         self.setCentralWidget(root)
@@ -1227,7 +1231,8 @@ class DesktopWindow(QMainWindow):
     def _submit_project_tool(self, name: str, arguments: BaseModel) -> None:
         request_id = self.bridge.submit_tool(name, arguments)
         if request_id is None:
-            self.projects_panel.notice.setText("Başka işlem sürüyor; istek çalıştırılmadı.")
+            panel = self.projects_panel if name.startswith("code_agent_") else self.data_panel
+            panel.notice.setText("Başka işlem sürüyor; istek çalıştırılmadı.")
             return
         self._active_request = request_id
         self._busy = True
@@ -1331,6 +1336,7 @@ class DesktopWindow(QMainWindow):
         # Kip değişimi çalışan turu kesmez; yalnız bitişte kapanmasın diye korunur.
         self.auto_button.setEnabled(not self._exiting and not self._demo)
         self.projects_panel.set_busy(not enabled)
+        self.data_panel.set_busy(not enabled)
         self.prompt.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
         self.new_chat_button.setEnabled(enabled)
@@ -1478,7 +1484,9 @@ class DesktopWindow(QMainWindow):
         if isinstance(event, ToolFinished):
             if event.request_id == self._active_request:
                 self._dismiss_approval_for(event.request_id)
-                self.projects_panel.accept_result(event.tool_name, event.result)
+                panel = (self.projects_panel if event.tool_name.startswith("code_agent_")
+                         else self.data_panel)
+                panel.accept_result(event.tool_name, event.result)
             return
         if isinstance(event, Finished):
             if event.request_id == self._active_request:
