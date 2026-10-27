@@ -31,3 +31,7 @@ turdan dönen `conversation_search` sonucu `external=True` taşır, taint sürer
 turların budanması, depo şifrelemesi, notların kullanıcı arayüzünde düzenlenmesi.
 Arama son 2000 turu bellekte tarar. SQLite dosyası düz metindir; gizli turların ham JSON'u
 (araç çıktısı dahil) diskte durur.
+
+
+2026-10-27, ADR 0046: opt-in saklama süresi ve açık geçmiş silme eklendi; varsayılan
+budama kapalıdır. Öz notlar, audit ve yedekler ayrı kalır. Şifreleme eklenmedi.
