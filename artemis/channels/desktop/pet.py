@@ -276,6 +276,15 @@ class PetWidget(QWidget):
         if text.strip():
             self.say(text, "heard")
 
+    def live(self, text: str) -> None:
+        """Konuşurken akan canlı yazı (ADR 0047): uzun sözde başı değil en son sözcükler görünür."""
+        flat = " ".join(text.split())
+        if not flat:
+            return
+        if len(flat) > BUBBLE_LIMIT:
+            flat = "…" + flat[-(BUBBLE_LIMIT - 1):].lstrip()
+        self.say(flat, "heard")
+
     def answer(self, text: str) -> None:
         if text.strip():
             self.say(text, "answer")

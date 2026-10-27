@@ -201,6 +201,17 @@ def test_bubble_heard_answer_and_autohide(made: Any) -> None:
     assert pet._bubble_text == "" and pet.width() == BODY
 
 
+def test_live_bubble_shows_latest_words(made: Any) -> None:
+    pet, _ = made()
+    pet.live("  ")
+    assert pet._bubble_text == ""
+    pet.live("artemis saat")
+    assert pet._bubble_text == "artemis saat" and pet._bubble_kind == "heard"
+    pet.live("baş " + "x" * 300 + " son")
+    assert len(pet._bubble_text) == 140
+    assert pet._bubble_text.startswith("…") and pet._bubble_text.endswith(" son")
+
+
 def test_bubble_is_plain_text_not_markup(made: Any) -> None:
     pet, _ = made()
     pet.answer("<b>kalın</b>")

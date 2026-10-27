@@ -426,16 +426,19 @@ def test_voice_command_adds_user_voice_bubble_and_marks_busy(
         _close_cleanly(app, window)
 
 
-def test_live_text_updates_only_last_heard_and_final_overwrites(
+def test_live_text_goes_to_pet_and_final_overwrites(
     app: QApplication, tmp_path: Path
 ) -> None:
     window = _window(app, tmp_path)
     try:
         heard: list[str] = []
+        live: list[str] = []
         window.pet.heard = heard.append  # type: ignore[method-assign]
+        window.pet.live = live.append  # type: ignore[method-assign]
+        before = window.settings_panel.last_heard.text()
         window._handle_event(State("voice_live", "merhaba dün"))
-        assert window.settings_panel.last_heard.text() == "merhaba dün"
-        assert heard == []  # pet balonuna gitmez
+        assert live == ["merhaba dün"]
+        assert window.settings_panel.last_heard.text() == before  # ayarlarda canlı yazı yok
         window._handle_event(State("voice_heard", "merhaba dünya"))
         assert window.settings_panel.last_heard.text() == "merhaba dünya"
         assert heard == ["merhaba dünya"]

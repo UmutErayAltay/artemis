@@ -16,10 +16,11 @@ konuşurken yazının akmasını istiyor. Kullanıcının 33 gerçek klibinde ö
 
 **Karar:**
 
-1. **Yalnız gösterim.** Canlı metin `on_live_text` ile panelde "Son duyulan" satırına gider;
+1. **Yalnız gösterim.** Canlı metin `on_live_text` ile masaüstü petinin balonuna gider (ayarlar paneli yalnız nihai metni gösterir);
    komut, uyandırma, yankı ve söz kesme kararına hiçbir zaman girmez (CLAUDE.md: kısmi STT komut
    çalıştırmaz). Komut yine `FasterWhisperRecognizer` sonucudur; nihai `heard:` canlı metnin
-   üzerine yazar. Pet balonuna gönderilmez.
+   üzerine yazar. Uzun sözde balon en son sözcükleri gösterir (kullanıcı konuşurken pete bakar;
+   2026-10-27 Umut'un isteğiyle ayarlar panelinden pete taşındı).
 2. **Model:** Mihu turkish-stt-66m-v2, `sherpa_onnx` (Apache-2.0) ile; kendi ince sarmalayıcımız
    (`artemis/channels/voice/live_text.py`). Mihu'nun pip paketi **kullanılmaz** (kodu da ayrı
    lisanslı). Model kimliği koda gömülmez; `voice.live_transcript_model` ve

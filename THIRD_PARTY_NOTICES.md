@@ -9,7 +9,7 @@ Bu dosya, Artemis'in isteğe bağlı olarak kullanabildiği üçüncü taraf bil
   (Hunters AI, mihu adıyla; destek: support@mihu.ai)
 - Lisans: **mihu Community License v1.0**
   ([LICENSE](https://huggingface.co/mihuai/turkish-stt-66m-v2/blob/main/LICENSE))
-- Kullanım: yalnız `voice.live_transcript: true` iken, konuşurken "Son duyulan" satırında akan
+- Kullanım: yalnız `voice.live_transcript: true` iken, konuşurken pet balonunda akan
   **gösterim metni** için (ADR 0047). Komut, uyandırma, yankı ve söz kesme kararlarına girmez.
   Özellik varsayılan olarak **kapalıdır**.
 

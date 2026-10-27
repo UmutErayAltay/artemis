@@ -1419,8 +1419,9 @@ class DesktopWindow(QMainWindow):
                 self.settings_panel.last_heard.setText(event.message)
                 self.pet.heard(event.message)
             elif event.state == "voice_live":
-                # Yalnız "Son duyulan" satırı: pet balonu ve zamanlayıcılar nihai metne kalır.
-                self.settings_panel.last_heard.setText(event.message)
+                # Kullanıcı konuşurken pete bakar; ayarlar paneli yalnız nihai metni gösterir.
+                # Her güncelleme balon süresini yeniler, nihai `voice_heard` üzerine yazar.
+                self.pet.live(event.message)
             elif event.state == "voice_live_unavailable":
                 kind, _, reason = event.message.partition(":")
                 if kind == "runtime":

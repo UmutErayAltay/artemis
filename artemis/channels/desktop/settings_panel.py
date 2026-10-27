@@ -434,7 +434,7 @@ class SettingsPanel(QWidget):
         self._cloud_configured = False
         self.live_transcript = QCheckBox("Canlı yazı (konuşurken)")
         self.live_transcript.setToolTip(
-            "Konuşurken metin 'Son duyulan' satırında akar; yalnız gösterimdir, komutu etkilemez. "
+            "Konuşurken metin pet balonunda akar; yalnız gösterimdir, komutu etkilemez. "
             "Kurulum: pip install .[stream] ve config'te model/revision. "
             "Değişiklik ses yeniden başlayınca uygulanır."
         )

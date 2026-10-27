@@ -100,7 +100,7 @@ voice:
   stt_mode: local # local | hybrid
   # stt_cloud_endpoint: groq # Üstteki `endpoints` içinde tanımlı bir kimlik (hybrid için zorunlu).
   # stt_cloud_model: whisper-large-v3 # Sağlayıcının güncel belgesinden doğrulayın (hybrid için zorunlu).
-  # Canlı yazı (ADR 0047): konuşurken "Son duyulan" satırında akan YALNIZ GÖSTERİM metni; komutu,
+  # Canlı yazı (ADR 0047): konuşurken pet balonunda akan YALNIZ GÖSTERİM metni; komutu,
   # uyandırmayı, yankıyı ve söz kesmeyi etkilemez. Yerel, işlemcide çalışır (`pip install .[stream]`).
   # Model Artemis ile gelmez; ilk açılışta aşağıdaki SABİT revision'dan indirilir. Powered by mihu:
   # model mihu Community License v1.0 ile lisanslıdır (kişisel/ticari olmayan kullanım serbest;

@@ -140,7 +140,7 @@ yolunda oluşturduğu yankıyı azaltır; işlem yereldir ve varsayılan kapalı
 ### Canlı yazı (isteğe bağlı) — Powered by mihu
 
 Varsayılan kapalı. `voice.live_transcript: true` ya da panelde "Canlı yazı (konuşurken)" ile
-konuşurken "Son duyulan" satırında metin kelime kelime akar. **Yalnız gösterimdir**: komut hâlâ
+konuşurken pet balonunda metin kelime kelime akar. **Yalnız gösterimdir**: komut hâlâ
 large-v3 sonucundan çıkar, canlı metin uyandırma/yankı/söz kesme kararına girmez
 ([ADR 0047](docs/adr/0047-live-transcript.md)). Yerelde, işlemcide çalışır; ses makineden çıkmaz.
 Kurulum: `pip install -e ".[stream]"` ve config'te `live_transcript_model` /
