@@ -107,3 +107,24 @@ Claude Code'daki gibi bir otomatik kip olsun ("kontrol bende, gerekirse Esc ile 
 3. Sağlayıcılarda görüntü parçası (OpenRouter/OpenAI uyumlu/Anthropic/Ollama).
 4. `artemis/computer/windows.py`: ekran görüntüsü (GDI), SendInput, ön plan süreç adı, DPI.
 5. `artemis/computer/session.py` + `computer_use` aracı + masaüstü bağlantısı (Esc, onay, durum).
+
+## Ek karar (2026-10-28): ekranda doğrulama, hız ve doğruluk
+
+Canlı denemede "YouTube'u aç, rastgele video aç, 5. dakikaya sar, o sekmeyi kapat" işi
+hedef sekme ayırt edilmeden üç sekmeyi kapattı ve sonuç hep "doğrulanmadı" döndü.
+
+1. **Son ekran doğrulaması.** Model `done` dedikten sonra (yalnız o zaman) oturum tüm
+   monitörlerin TAZE görüntüsünü alır ve aynı sağlayıcıya `VERIFY_PROMPT` ile hedef, modelin
+   bitti notu ve görüntüleri verir; yanıt `{"verified": bool, "evidence": "..."}` olarak katı
+   ayrıştırılır (bozuksa bir yeniden deneme). Temkinli kural: ekranda görünmüyorsa `false`.
+   Sağlayıcı hatası, süre, Esc ve görüntü hatası nedeni "error" yapmaz; sonuç `done` +
+   `verified=False` kalır. Denetime `computer_verify` yazılır.
+2. **Kural 5'in bu araç için değişikliği.** `done` + `verified=True` ise sonuç `ok`/
+   `success=True`, mesaj "Ekranda doğrulandı" der; aksi hâlde `sent`/`success=False`.
+3. **Sınırı.** Bu, bağımsız bir ekran kontrolüdür ama yine bir MODEL yargısıdır: aynı model
+   ailesi hem eylemi hem doğrulamayı yapar, yanlış pozitif olabilir; ekranda izi kalmayan işler
+   (ör. gönderilmiş mesajın karşıya ulaşması) doğrulanamaz. Bu yüzden mesaj "kesin" demez.
+4. **Hız ve doğruluk.** PNG üretimi `asyncio.to_thread`'e alındı; `step_delay_seconds`
+   varsayılanı 0.6 -> 0.3. Hiçbir güvenlik denetimi gevşetilmedi. Sistem istemine
+   klavye/URL tercihi, URL zaman parametresiyle sarma, kapatmadan önce sekme başlığını okuyup
+   yalnız hedefi kapatma, her eylem sonrası doğrulama ve "ekranda görünmeden done deme" eklendi.

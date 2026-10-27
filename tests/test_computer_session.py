@@ -122,6 +122,8 @@ def click(x: int = 2, y: int = 1, **extra: Any) -> str:
 
 
 DONE = act(type="done", text="Bitti.")
+YES = json.dumps({"verified": True, "evidence": "Hedef ekranda görünüyor."})
+NO = json.dumps({"verified": False, "evidence": "Hedef ekranda görünmüyor."})
 
 
 class Env:
@@ -178,9 +180,9 @@ class Env:
 
 
 async def test_done_ends_without_input() -> None:
-    env = Env(DONE)
+    env = Env(DONE, YES)
     result = await env.run()
-    assert result == SessionResult("done", "Bitti.", 0)
+    assert result == SessionResult("done", "Bitti.", 0, True, "Hedef ekranda görünüyor.")
     assert env.backend.calls == []
     assert env.audit.named("computer_session_end") == [
         {"turn_id": "t1", "reason": "done", "steps": 0}
@@ -194,18 +196,18 @@ async def test_ask_user_returns_question() -> None:
 
 
 async def test_click_then_done_sends_only_latest_image_on_user_message() -> None:
-    env = Env(click(button="right", double=True), DONE)
+    env = Env(click(button="right", double=True), DONE, YES)
     result = await env.run("dosyayı aç")
     assert result.reason == "done" and result.steps == 1
     assert env.backend.calls == [("click", 2, 1, "right", True)]
     assert env.steps == ["Adım 1: deneme"]
-    assert env.backend.captures == 2
+    assert env.backend.captures == 3  # iki adım + doğrulama için taze görüntü
     for call in env.provider.seen:
         with_image = [m for m in call if m.image_png is not None]
         assert len(with_image) == 1 and with_image[0] is call[-1] and with_image[0].role == "user"
         assert with_image[0].image_png.startswith(b"\x89PNG")  # type: ignore[union-attr]
         assert call[0].role == "system"
-    first, second = (call[1].content for call in env.provider.seen)
+    first, second = (call[1].content for call in env.provider.seen[:2])
     assert "Hedef: dosyayı aç" in first
     assert "Ekran sayısı: 1" in first
     assert "8x4 piksel" in first
@@ -360,9 +362,9 @@ async def test_invalid_twice_ends_invalid_with_one_capture() -> None:
 
 
 async def test_invalid_once_then_ok() -> None:
-    env = Env("sacma", DONE)
+    env = Env("sacma", DONE, YES)
     assert (await env.run()).reason == "done"
-    assert env.backend.captures == 1
+    assert env.backend.captures == 2  # adım + doğrulama; yeniden deneme taze görüntü almaz
 
 
 @pytest.mark.parametrize(
@@ -662,3 +664,92 @@ async def test_executor_rechecks_deadline_before_native_input(monkeypatch):
     result = await env.run()
     assert result.reason == 'timeout' and result.steps == 0
     assert env.backend.calls == []
+
+
+# --- Son ekran doğrulaması (ADR 0039 ek karar 3) ----------------------------------------
+
+
+async def test_verified_true_and_audit() -> None:
+    env = Env(click(), DONE, YES)
+    result = await env.run()
+    assert (result.reason, result.verified, result.evidence) == (
+        "done", True, "Hedef ekranda görünüyor."
+    )
+    assert env.audit.named("computer_verify") == [
+        {"turn_id": "t1", "verified": True, "evidence": "Hedef ekranda görünüyor."}
+    ]
+    assert env.audit.named("computer_session_end")[0]["reason"] == "done"
+
+
+async def test_verification_uses_fresh_screenshot_and_verify_prompt() -> None:
+    env = Env(DONE, NO)
+    result = await env.run("hedef X")
+    assert env.backend.captures == 2  # eylem için bir, done'dan SONRA doğrulama için bir taze
+    assert result.verified is False and result.evidence == "Hedef ekranda görünmüyor."
+    action_call, verify_call = env.provider.seen
+    assert verify_call[0].content != action_call[0].content
+    assert "hedef X" in verify_call[1].content and "Bitti." in verify_call[1].content
+    assert verify_call[-1].image_png is not None
+
+
+async def test_invalid_verdict_twice_is_unverified_not_error() -> None:
+    env = Env(DONE, "sacma", "yine sacma")
+    result = await env.run()
+    assert result.reason == "done" and result.verified is False
+    assert "çalışamadı" in result.evidence
+    assert len(env.provider.seen) == 3  # eylem + iki doğrulama denemesi
+
+
+async def test_invalid_verdict_once_then_ok() -> None:
+    env = Env(DONE, '{"verified": "belki", "evidence": "x"}', YES)
+    assert (await env.run()).verified is True
+
+
+async def test_provider_error_in_verification_is_not_session_error() -> None:
+    from artemis.brain.errors import ProviderError
+
+    env = Env(DONE, YES)
+    original = env.provider.complete
+    calls = 0
+
+    async def flaky(messages: list[Message], tools: list[Any], *, timeout: float):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise ProviderError("ağ koptu")
+        return await original(messages, tools, timeout=timeout)
+
+    env.provider.complete = flaky  # type: ignore[method-assign]
+    result = await env.run()
+    assert result.reason == "done" and result.verified is False
+    assert "ağ koptu" in result.evidence
+    assert env.audit.named("computer_verify")[0]["verified"] is False
+
+
+async def test_stop_set_during_verification_never_becomes_verified() -> None:
+    env = Env(DONE, YES)
+    original = env.provider.complete
+
+    async def stopping(messages: list[Message], tools: list[Any], *, timeout: float):
+        if len(env.provider.seen) == 1:
+            env.stop.set()  # doğrulama çağrısı başlarken Esc
+        return await original(messages, tools, timeout=timeout)
+
+    env.provider.complete = stopping  # type: ignore[method-assign]
+    result = await env.run()
+    assert result.reason == "done" and result.verified is False
+    assert "çalışamadı" in result.evidence
+
+
+async def test_deadline_before_verification_is_unverified_done() -> None:
+    env = Env(DONE, YES)
+    original = env.provider.complete
+
+    async def slow(messages: list[Message], tools: list[Any], *, timeout: float):
+        env.clock.now += 10_000  # eylem yanıtı süreyi bitirdi
+        return await original(messages, tools, timeout=timeout)
+
+    env.provider.complete = slow  # type: ignore[method-assign]
+    result = await env.run()
+    # Eylem yanıtından sonra süre dolmuşsa mevcut kural timeout; doğrulama hiç denenmez.
+    assert result.reason == "timeout" and result.verified is None

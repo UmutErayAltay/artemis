@@ -2,8 +2,10 @@
 
 Varsayılan kapalıdır (`computer_use.enabled`). Açıkken çağrı CONFIRM_REQUIRED'dır; oturum
 yalnız masaüstü uygulamasında çalışır çünkü Esc ile durdurma ve hassas adım onayı orada
-vardır (`services["computer_host"]`). Sonuç `sent`'tir: modelin "bitti" demesi işin
-yapıldığını kanıtlamaz (kural 5).
+vardır (`services["computer_host"]`). Modelin "bitti" demesi işin yapıldığını kanıtlamaz:
+oturum bitince taze ekran görüntüsüyle ayrı bir doğrulama yapılır. Yalnız ekranda doğrulanan
+`done` `ok`/`success=True` olur; bu bir model yargısıdır, "kesin" değildir (kural 5, ADR 0039
+ek karar 3). Doğrulanamayan her sonuç `sent` kalır.
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
 
 _REASON_TEXT = {
-    "done": "Model işi bitirdiğini bildirdi (doğrulanmadı)",
+    "done": "Model işi bitirdiğini bildirdi",
     "ask_user": "Model size bir soru soruyor",
     "limit": "Adım sınırına ulaşıldı",
     "timeout": "Süre doldu",
@@ -199,6 +201,21 @@ async def _relay_cancel(cancelled: asyncio.Event, stop: threading.Event) -> None
 
 def _to_tool_result(result: SessionResult) -> ToolResult:
     detail = f" {result.summary}" if result.summary else ""
+    if result.reason == "done":
+        verified = result.verified is True
+        head = (
+            f"Ekranda doğrulandı: {result.evidence}"
+            if verified
+            else f"Model bitirdi ama ekranda doğrulanamadı: {result.evidence}"
+        )
+        return ToolResult(
+            success=verified,
+            status="ok" if verified else "sent",
+            message=f"{head} ({result.steps} adım).{detail}",
+            data={"reason": "done", "steps": result.steps, "verified": verified},
+            external=True,
+            content_kind="screen",
+        )
     return ToolResult(
         success=False,
         status="sent",

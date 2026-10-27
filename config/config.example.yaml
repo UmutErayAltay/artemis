@@ -261,7 +261,7 @@ voice:
 #   max_steps: 25            # 1-100
 #   max_minutes: 5           # 0.5-30
 #   screenshot_width: 1280   # 640-2560
-#   step_delay_seconds: 0.6  # 0-3
+#   step_delay_seconds: 0.3  # 0-3
 #   mode: accept             # accept: adımlar sorulur | auto: sormaz (Esc durdurur)
 
 openrouter_base_url: https://openrouter.ai/api/v1

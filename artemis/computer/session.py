@@ -21,11 +21,13 @@ from artemis.brain.models import Message
 from artemis.brain.providers import Provider
 from artemis.computer.actions import (
     SYSTEM_PROMPT,
+    VERIFY_PROMPT,
     Action,
     is_sensitive,
     key_block_reason,
     parse_action,
     parse_keys,
+    parse_verdict,
     process_block_reason,
     scale_point,
 )
@@ -68,6 +70,9 @@ class SessionResult:
     reason: Reason
     summary: str
     steps: int
+    # None: doğrulama denenmedi (done dışı nedenler). False: denendi ya da çalışamadı.
+    verified: bool | None = None
+    evidence: str = ""
 
 
 @dataclass(frozen=True)
@@ -143,35 +148,10 @@ class ComputerSession:
             if remaining <= 0:
                 return self._result("timeout", "Oturum süresi doldu.")
 
-            try:
-                # Geç yükleme: png numpy ister; numpy yalnız ses/hafıza ekleriyle gelir ve araç
-                # keşfi bu modülü içe aktardığı için üstte yüklense temel kurulum çökerdi.
-                from artemis.computer.png import screenshot_png
-
-                # Her monitör ayrı görüntü: sanal masaüstünü tek görüntüye küçültmek
-                # yazıyı okunmaz yapardı (ADR 0039 ek karar).
-                screens: list[_Screen] = []
-                monitor_rects = await asyncio.to_thread(self._backend.monitors)
-                for left, top, width, height in monitor_rects:
-                    if self._clock() >= limit:
-                        return self._result("timeout", "Oturum süresi doldu.")
-                    if self._stop.is_set():
-                        return self._result("stopped", "Kullanıcı oturumu durdurdu.")
-                    buffer, width, height = await asyncio.to_thread(
-                        self._backend.capture, left, top, width, height
-                    )
-                    png, shot_size = screenshot_png(
-                        buffer, width, height, self._config.screenshot_width
-                    )
-                    screens.append(_Screen((left, top), (width, height), shot_size, png))
-            except ImportError:
-                return self._result(
-                    "error", "Ekran görüntüsü için numpy gerekli (`pip install numpy`)."
-                )
-            except (OSError, RuntimeError, ValueError) as error:
-                return self._result("error", f"Ekran görüntüsü alınamadı: {error}")
-            if not screens:
-                return self._result("error", "Ekran bulunamadı.")
+            captured = await self._capture(limit)
+            if isinstance(captured, SessionResult):
+                return captured
+            screens = captured
 
             lines = "\n".join(history[-_HISTORY_LINES:]) or "-"
             # Görüntüler ayrı kullanıcı iletilerinde, etiketleriyle: sağlayıcılar ardışık
@@ -201,7 +181,7 @@ class ComputerSession:
             try:
                 if self._clock() >= limit:
                     return self._result("timeout", "Oturum süresi doldu.")
-                action = await self._ask(messages, limit)
+                action = await self._ask(messages, limit, parse_action)
             except ProviderError as error:
                 return self._result("error", f"Model çağrısı başarısız: {error}")
             if self._stop.is_set():
@@ -212,7 +192,7 @@ class ComputerSession:
                 return self._result("invalid", "Model iki denemede de geçerli eylem döndürmedi.")
 
             if action.type == "done":
-                return self._result("done", action.text or "")
+                return await self._verify(goal, turn_id, action.text or "", limit)
             if action.type == "ask_user":
                 return self._result("ask_user", action.text or "")
 
@@ -236,15 +216,99 @@ class ComputerSession:
 
             await self._sleep(self._config.step_delay_seconds)
 
-    async def _ask(self, messages: list[Message], limit: float) -> Action | None:
-        """Modelden eylem ister; bozuksa YENİ ekran görüntüsü almadan bir kez yeniden dener."""
+    async def _capture(self, limit: float) -> list[_Screen] | SessionResult:
+        """Her monitörün taze görüntüsünü alır; alınamazsa oturum sonucunu döner."""
+        try:
+            # Geç yükleme: png numpy ister; numpy yalnız ses/hafıza ekleriyle gelir ve araç
+            # keşfi bu modülü içe aktardığı için üstte yüklense temel kurulum çökerdi.
+            from artemis.computer.png import screenshot_png
+
+            # Her monitör ayrı görüntü: sanal masaüstünü tek görüntüye küçültmek
+            # yazıyı okunmaz yapardı (ADR 0039 ek karar).
+            screens: list[_Screen] = []
+            monitor_rects = await asyncio.to_thread(self._backend.monitors)
+            for left, top, width, height in monitor_rects:
+                if self._clock() >= limit:
+                    return self._result("timeout", "Oturum süresi doldu.")
+                if self._stop.is_set():
+                    return self._result("stopped", "Kullanıcı oturumu durdurdu.")
+                buffer, width, height = await asyncio.to_thread(
+                    self._backend.capture, left, top, width, height
+                )
+                # PNG sıkıştırma ana döngüyü bloklamasın (Esc/iptal gecikmesin).
+                png, shot_size = await asyncio.to_thread(
+                    screenshot_png, buffer, width, height, self._config.screenshot_width
+                )
+                screens.append(_Screen((left, top), (width, height), shot_size, png))
+        except ImportError:
+            return self._result(
+                "error", "Ekran görüntüsü için numpy gerekli (`pip install numpy`)."
+            )
+        except (OSError, RuntimeError, ValueError) as error:
+            return self._result("error", f"Ekran görüntüsü alınamadı: {error}")
+        if not screens:
+            return self._result("error", "Ekran bulunamadı.")
+        return screens
+
+    async def _verify(self, goal: str, turn_id: str, done_text: str, limit: float) -> SessionResult:
+        """`done` sonrası taze görüntüyle sonucu doğrular (ADR 0039 ek karar 3).
+
+        Doğrulama çalışamazsa (sağlayıcı hatası, süre, Esc) oturum nedeni "error" olmaz: iş
+        zaten yapılmış olabilir, yalnız doğrulanamamıştır.
+        """
+        verdict: tuple[bool, str]
+        if self._stop.is_set() or self._clock() >= limit:
+            verdict = (False, "Doğrulama çalışamadı: süre doldu ya da durduruldu.")
+        else:
+            captured = await self._capture(limit)
+            if isinstance(captured, SessionResult):
+                verdict = (False, f"Doğrulama çalışamadı: {captured.summary}")
+            else:
+                messages = [
+                    Message(role="system", content=VERIFY_PROMPT),
+                    Message(
+                        role="user",
+                        content=f"Hedef: {goal}\nModelin bitti notu: {done_text}\n"
+                        f"Ekran sayısı: {len(captured)}.",
+                    ),
+                    *(
+                        Message(
+                            role="user",
+                            content=f"Ekran {number} ({item.shot[0]}x{item.shot[1]} piksel)",
+                            image_png=item.png,
+                        )
+                        for number, item in enumerate(captured, start=1)
+                    ),
+                ]
+                try:
+                    parsed = await self._ask(messages, limit, parse_verdict)
+                except ProviderError as error:
+                    verdict = (False, f"Doğrulama çalışamadı: model çağrısı başarısız ({error}).")
+                else:
+                    if self._stop.is_set() or self._clock() >= limit:
+                        # Esc/süre sonrası gelen "evet" kullanıcının durdurduğu bir oturumu
+                        # başarılı göstermesin.
+                        verdict = (False, "Doğrulama çalışamadı: süre doldu ya da durduruldu.")
+                    elif parsed is None:
+                        verdict = (False, "Doğrulama çalışamadı: model geçerli yanıt vermedi.")
+                    else:
+                        verdict = (parsed.verified, parsed.evidence)
+        self._audit.emit(
+            "computer_verify", turn_id=turn_id, verified=verdict[0], evidence=verdict[1]
+        )
+        return SessionResult("done", done_text, self._steps, verdict[0], verdict[1])
+
+    async def _ask[T](
+        self, messages: list[Message], limit: float, parse: Callable[[str], T]
+    ) -> T | None:
+        """Modelden eylem/karar ister; bozuksa YENİ görüntü almadan bir kez yeniden dener."""
         for attempt in range(2):
             timeout = min(self._provider_timeout, limit - self._clock())
             if timeout <= 0 or self._stop.is_set():
                 return None
             completion = await self._provider.complete(messages, [], timeout=timeout)
             try:
-                return parse_action(completion.content)
+                return parse(completion.content)
             except ValueError as error:
                 if attempt:
                     return None
