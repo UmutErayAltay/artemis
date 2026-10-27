@@ -128,3 +128,11 @@ hedef sekme ayırt edilmeden üç sekmeyi kapattı ve sonuç hep "doğrulanmadı
    varsayılanı 0.6 -> 0.3. Hiçbir güvenlik denetimi gevşetilmedi. Sistem istemine
    klavye/URL tercihi, URL zaman parametresiyle sarma, kapatmadan önce sekme başlığını okuyup
    yalnız hedefi kapatma, her eylem sonrası doğrulama ve "ekranda görünmeden done deme" eklendi.
+
+5. **Bilinen, kabul edilmiş risk (Umut, 2026-10-28).** `auto` kipinde tarayıcı sekmesi
+   kapatma (Ctrl+W) onaysızdır ve model hedef olmayan sekmeyi (ör. diğer YouTube
+   sekmeleri) da kapatabilir. Canlı denemede işlem doğru yapıldı ama ek YouTube sekmeleri
+   kapandı. Umut bunu otomatik onayın küçük bedeli olarak şimdilik kabul etti; kod
+   engeli eklenmedi, yalnız istem kuralı ve son ekran doğrulaması var. Gözden geçirme
+   tetikleyicisi: kapanan sekmede kayıp (yazılmamış form, belge) yaşanırsa Ctrl+W/Ctrl+F4
+   `is_sensitive` listesine alınır.
