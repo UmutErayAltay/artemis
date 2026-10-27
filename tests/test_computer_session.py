@@ -605,3 +605,60 @@ async def test_capture_failure_on_second_monitor_is_honest_error() -> None:
     assert result.reason == "error"
     assert "Ekran görüntüsü alınamadı" in result.summary
     assert env.backend.calls == []
+
+
+@pytest.mark.parametrize('delayed', ['capture', 'provider', 'approval', 'target'])
+async def test_no_input_after_deadline_during_substep(delayed):
+    env = Env(click(), deadline=3.0)
+    if delayed == 'capture':
+        original = env.backend.capture
+
+        def capture(*args):
+            env.clock.now = 1.1
+            return original(*args)
+
+        env.backend.capture = capture
+    elif delayed == 'provider':
+        original_complete = env.provider.complete
+
+        async def complete(*args, **kwargs):
+            result = await original_complete(*args, **kwargs)
+            env.clock.now = 1.1
+            return result
+
+        env.provider.complete = complete
+    elif delayed == 'target':
+        def target(*args):
+            env.clock.now = 1.1
+            return env.backend.foreground
+
+        env.backend.process_at = target
+    else:
+        env.provider.contents = [act(type='key', keys='ENTER')]
+
+        def approve(*args):
+            env.clock.now = 1.1
+            return True
+
+        env._approve = approve
+    result = await env.run()
+    assert result.reason == 'timeout'
+    assert result.steps == 0
+    assert env.backend.calls == []
+
+
+async def test_executor_rechecks_deadline_before_native_input(monkeypatch):
+    import asyncio
+
+    env = Env(click(), deadline=3.0)
+    original = asyncio.to_thread
+
+    async def queued(func, *args, **kwargs):
+        if func.__name__ == 'send':
+            env.clock.now = 1.1
+        return await original(func, *args, **kwargs)
+
+    monkeypatch.setattr(asyncio, 'to_thread', queued)
+    result = await env.run()
+    assert result.reason == 'timeout' and result.steps == 0
+    assert env.backend.calls == []

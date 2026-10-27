@@ -26,3 +26,7 @@ onay istesin, onay kısmında bu site için bir daha sorma seçeneği de olsun".
   hatırlama sunmaz. Liste dosyadan elle düzenlenir/silinir.
 
 **Sonuç:** ADR 0013 `open_url` için yalnız veri taşıyan adreste işler.
+
+
+2026-10-27, ADR 0046: host güveni CONFIRM_REQUIRED riskini atlamaz; zorunlu onayda
+host hatırlama düğmesi gösterilmez. Önceki "hiç sorulmaz" ifadesi yalnız bu sınır içinde geçerlidir.

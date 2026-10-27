@@ -173,6 +173,7 @@ class SafetyGate:
         carries_data = parts is not None and bool(parts.query or parts.fragment)
         trusted_site = (
             site is not None
+            and risk is not Risk.CONFIRM_REQUIRED
             and not fills
             and not ((state.tainted or state.history_external) and carries_data)
             and site in load_trusted_sites(trusted_sites_path(context.settings.state_dir))
@@ -207,7 +208,7 @@ class SafetyGate:
                 history_external=state.history_external,
             )
         if requires_approval:
-            if site is not None and not fills:
+            if site is not None and not fills and risk is not Risk.CONFIRM_REQUIRED:
                 self.pending_site = site
             if state.tainted:
                 notice = TAINT_NOTICE
