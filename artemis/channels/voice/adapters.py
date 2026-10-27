@@ -259,6 +259,7 @@ class FasterWhisperRecognizer:
         self._model: Any = None
         self._load_lock = threading.Lock()
         self._inference_lock = threading.Lock()
+        self._final_waiting = threading.Event()
         self._cuda_handles: list[Any] = []
 
     def _prepare_cuda_libraries(self) -> None:
@@ -302,7 +303,11 @@ class FasterWhisperRecognizer:
         self._load()
 
     async def transcribe(self, pcm: bytes) -> str:
-        return await self._decode(pcm, partial=False)
+        self._final_waiting.set()
+        try:
+            return await self._decode(pcm, partial=False)
+        finally:
+            self._final_waiting.clear()
 
     async def transcribe_partial(self, pcm: bytes) -> str:
         """Artan geçici pencereyi çözer; VoiceController sonucu asla dispatch etmez."""
@@ -319,6 +324,8 @@ class FasterWhisperRecognizer:
         def infer() -> str:
             # asyncio iptali yerel inference thread'ini durduramaz.
             with self._inference_lock:
+                if partial and self._final_waiting.is_set():
+                    return ""
                 model = self._load()
                 language = None if self.config.stt_language == "auto" else "tr"
                 if self.config.stt_language == "tr_en":

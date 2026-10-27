@@ -4,14 +4,35 @@ from dataclasses import dataclass
 from typing import Literal
 
 Stage = Literal[
-    "speech_start", "speech_end", "endpoint", "stt_final", "command_start",
-    "model_request", "model_first_token", "model_response", "tool_start", "tool_end",
-    "model_complete", "tts_first_chunk", "first_pcm", "terminal",
-    "stop_requested", "playback_stopped",
+    "capture_health",
+    "stt_queued",
+    "stt_start",
+    "speech_start",
+    "speech_end",
+    "endpoint",
+    "stt_final",
+    "command_start",
+    "model_request",
+    "model_first_token",
+    "model_response",
+    "tool_start",
+    "tool_end",
+    "model_complete",
+    "tts_first_chunk",
+    "first_pcm",
+    "terminal",
+    "stop_requested",
+    "playback_stopped",
 ]
 # ``interrupted``: uyandırmasız söz yalnız oynatmayı susturdu, komut çalışmadı (ADR 0042).
 Outcome = Literal[
-    "completed", "rejected", "cancelled", "error", "no_audio", "ack", "interrupted",
+    "completed",
+    "rejected",
+    "cancelled",
+    "error",
+    "no_audio",
+    "ack",
+    "interrupted",
 ]
 # Araç çağrısı olan tur ``tool``; model hiç araç çağırmadıysa ``chat``. Runner'a hiç
 # ulaşmayan (meşgul/iptal) tur sınıflandırılmaz.
