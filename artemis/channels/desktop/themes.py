@@ -136,6 +136,7 @@ QFrame#galleryCard {{ background: {t['surface']}; border: 1px solid {t['border']
 QFrame#galleryCard[selected="true"] {{ border: 2px solid {t['accent']}; }}
 QFrame#stepPanel {{ background: {t['surface']}; border: 1px solid {t['border']};
  border-radius: 10px; }}
+QFrame#opCard {{ border: 1px solid {t['border']}; border-radius: 10px; }}
 QFrame#emptyState {{ background: transparent; border: none; }}
 QFrame#stageBar {{ background: transparent; border: none; }}
 QLabel#stage {{ color: {t['muted']}; padding: 4px 8px; border-bottom: 2px solid transparent; }}

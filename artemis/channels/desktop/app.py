@@ -6,7 +6,6 @@ import html
 import json
 import sys
 import tempfile
-import time
 from collections import deque
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,8 +36,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QMainWindow,
     QMenu,
     QPlainTextEdit,
@@ -69,6 +66,12 @@ from artemis.channels.desktop.bridge import (
 from artemis.channels.desktop.data_panel import DataPanel
 from artemis.channels.desktop.hotkey import GlobalHotkey
 from artemis.channels.desktop.instance import InstanceServer, claim_instance, instance_name
+from artemis.channels.desktop.operations import (
+    CHIP_TONES,
+    STATE_TONES,
+    Card,
+    OperationLog,
+)
 from artemis.channels.desktop.pet import TEAL, PetWidget, level_from_message
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.projects_panel import ProjectsPanel, make_page_header
@@ -314,6 +317,88 @@ class StepBlock(QFrame):
                 font.setPixelSize(13)
                 widest = max(widest, QFontMetrics(font).horizontalAdvance(label.text()))
         self.setMinimumWidth(min(520, widest + margins.left() + margins.right() + 4))
+
+
+class OperationCard(QFrame):
+    """Bir mesajın işlem kartı: başlık + rozet, araç satırları, kapalı "Ayrıntılar".
+
+    Model (operations.Card) her olayda değişir; kart küçük olduğundan değişen kart baştan
+    kurulur. Açık/kapalı tercihi modelde durur, bu yüzden yeniden kurulumda kaybolmaz.
+    """
+
+    def __init__(self, card: Card, palette: dict[str, str]) -> None:
+        super().__init__()
+        self.setObjectName("opCard")
+        self.model = card
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(4)
+
+        title = self._label(card.title or "İstek", palette["text"], 13)
+        title.setObjectName("opTitle")
+        layout.addWidget(title)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        stamp = QLabel(card.started)
+        stamp.setObjectName("meta")
+        color = palette[CHIP_TONES[card.chip]]
+        chip = QLabel(card.chip)
+        chip.setObjectName("opChip")
+        # Rozet rengi durum jetonundan gelir; hex değer gömülmez.
+        chip.setStyleSheet(
+            f"QLabel {{ color: {color}; border: 1px solid {color}; border-radius: 7px;"
+            " font-size: 12px; padding: 2px 8px; background: transparent; }"
+        )
+        head.addWidget(stamp)
+        head.addWidget(chip)
+        head.addStretch(1)
+        layout.addLayout(head)
+
+        for op in card.ops:
+            tone = palette[STATE_TONES.get(op.state, "muted")]
+            row = QVBoxLayout()
+            row.setSpacing(0)
+            row.addWidget(self._label(op.label, palette["text"], 13))
+            if op.summary:
+                row.addWidget(self._label(op.summary, palette["muted"], 12))
+            state = op.state_text + (f" · {op.duration}" if op.duration else "")
+            row.addWidget(self._label(state, tone, 12))
+            if op.message:
+                row.addWidget(self._label(op.message, palette["muted"], 12))
+            if op.approval:
+                row.addWidget(self._label(op.approval, palette["muted"], 12))
+            for sub in op.subrows:
+                sub_tone = {"ok": "success", "sent": "warning"}.get(sub.kind, "muted")
+                row.addWidget(self._label("› " + sub.text, palette[sub_tone], 12, indent=8))
+            layout.addLayout(row)
+
+        toggle = QPushButton("Ayrıntılar")
+        toggle.setObjectName("ghost")
+        toggle.setCheckable(True)
+        toggle.setChecked(card.expanded)
+        toggle.setAccessibleName("Mesaj işlem ayrıntılarını göster")
+        layout.addWidget(toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self.details = self._label("\n".join(card.details), palette["muted"], 12)
+        self.details.setObjectName("opDetails")
+        self.details.setVisible(card.expanded)
+        layout.addWidget(self.details)
+        toggle.toggled.connect(self._toggle)
+        self.toggle = toggle
+
+    @staticmethod
+    def _label(text: str, color: str, size: int, indent: int = 0) -> QLabel:
+        label = QLabel(text)
+        # Araç ve model çıktısı biçimli metin sayılmaz.
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        label.setStyleSheet(
+            f"QLabel {{ color: {color}; font-size: {size}px; margin-left: {indent}px; }}"
+        )
+        return label
+
+    def _toggle(self, on: bool) -> None:
+        self.model.expanded = on
+        self.details.setVisible(on)
 
 
 @dataclass
@@ -788,8 +873,8 @@ class DesktopWindow(QMainWindow):
         self._approval_dialog: ApprovalDialog | None = None
         self._active_request: str | None = None
         self._turn_steps: dict[str, _TurnSteps] = {}
-        self._activity_count = 0
-        self._activity_empty = True
+        self._ops = OperationLog()
+        self._op_widgets: dict[str, OperationCard] = {}
         self._theme = themes.DEFAULT_THEME
         self._status_tone = "running"
         self._model_full = ""
@@ -849,8 +934,8 @@ class DesktopWindow(QMainWindow):
         for block in self.findChildren(StepBlock):
             block.apply_theme(palette)
         self.chat.apply_theme(palette)
-        for index in range(self.activity.count()):
-            self._tint_activity(self.activity.item(index))
+        for request_id in list(self._op_widgets):
+            self._render_card(request_id)
         if hasattr(self, "overlay"):
             self.overlay.setStyleSheet(style)
             self._theme_placeholders(self.overlay)
@@ -1080,24 +1165,36 @@ class DesktopWindow(QMainWindow):
         panel_layout = QVBoxLayout(self.activity_panel)
         panel_layout.setContentsMargins(16, 16, 16, 16)
         panel_layout.setSpacing(12)
-        activity_title = QLabel("Son işlem")
+        activity_title = QLabel("Mesaj işlemleri")
         activity_title.setObjectName("sectionTitle")
-        self.activity = QListWidget()
-        self.activity.setAccessibleName("Gerçek işlem adımları")
+        # Her mesaj bir kart; en yeni üstte. Kartlar kaydırılır, yatay kaydırma yoktur.
+        self.activity = QScrollArea()
+        self.activity.setAccessibleName("Mesaj başına işlemler")
+        self.activity.setWidgetResizable(True)
         self.activity.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.activity.setSelectionMode(QListWidget.SelectionMode.NoSelection)
         self.activity.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.activity.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
-        # Çerçevesiz ve dolgusuz; satırlar kendi dolgusunu taşır (renk yok, tema'dan gelir).
+        self.activity.setFrameShape(QFrame.Shape.NoFrame)
         self.activity.setStyleSheet(
-            "QListWidget { border: none; background: transparent; padding: 0; }"
-            "QListWidget::item { padding: 0; border: none; }"
+            "QScrollArea { border: none; background: transparent; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
         )
+        cards_host = QWidget()
+        cards_host.setObjectName("flat")
+        self.activity_cards = QVBoxLayout(cards_host)
+        self.activity_cards.setContentsMargins(0, 0, 8, 0)
+        self.activity_cards.setSpacing(8)
+        self.activity_cards.addStretch(1)
+        self.activity.setWidget(cards_host)
         self.activity.hide()
+        self.activity_notice = QLabel("")
+        self.activity_notice.setObjectName("meta")
+        self.activity_notice.setWordWrap(True)
+        self.activity_notice.hide()
         self.activity_empty = QLabel("Henüz bir işlem yok")
         self.activity_empty.setObjectName("meta")
         panel_layout.addWidget(activity_title)
         # Boş durumda başlığın hemen altında kalır; satırlar üstten dizilir.
+        panel_layout.addWidget(self.activity_notice)
         panel_layout.addWidget(self.activity_empty, 1, Qt.AlignmentFlag.AlignTop)
         panel_layout.addWidget(self.activity, 1)
         content.addWidget(self.activity_panel)
@@ -1428,8 +1525,6 @@ class DesktopWindow(QMainWindow):
         self.model_box.setVisible(width >= 800)
         self._show_model(self._model_full)
         self.activity_panel.setVisible(width >= _STEP_PANEL_MIN_WINDOW)
-        for index in range(self.activity.count()):
-            self._fit_activity(self.activity.item(index))
 
     def _show_model(self, text: str) -> None:
         self._model_full = text
@@ -1461,6 +1556,7 @@ class DesktopWindow(QMainWindow):
             return False
         self._active_request = request_id
         self._busy = True
+        self._begin_card(request_id, text)
         self._append_chat("Siz", text)
         self._set_status("Çalışıyor…", "running")
         self._set_controls()
@@ -1475,6 +1571,7 @@ class DesktopWindow(QMainWindow):
             return
         self._active_request = request_id
         self._busy = True
+        self._begin_card(request_id, f"Proje işlemi: {name}")
         self._set_controls()
 
     def _refresh_projects(self) -> None:
@@ -1738,6 +1835,7 @@ class DesktopWindow(QMainWindow):
         if isinstance(event, VoiceCommand):
             self._active_request = event.request_id
             self._busy = True
+            self._begin_card(event.request_id, event.text)
             self._append_chat("Siz (ses)", event.text)
             self._set_status("Çalışıyor…", "running")
             self._set_controls()
@@ -1768,6 +1866,8 @@ class DesktopWindow(QMainWindow):
                 self._append_chat("Artemis", event.message)
             elif event.request_id == self._active_request:
                 self._dismiss_approval_for(event.request_id)
+                self._ops.fail(event.request_id)
+                self._render_card(event.request_id)
                 self._append_chat(
                     "Artemis",
                     f"İstek tamamlanamadı ({event.error_type}).",
@@ -1781,11 +1881,15 @@ class DesktopWindow(QMainWindow):
             self.pet.answer(event.body)
             return
         if isinstance(event, ActivityGap):
-            self._add_activity(f"{event.dropped_count} eski etkinlik görünümden düştü", "warning")
+            self._ops.dropped += event.dropped_count
+            self.activity_notice.setText(
+                f"{self._ops.dropped} eski etkinlik görünümden düştü; kartlar eksik olabilir."
+            )
+            self.activity_notice.show()
             return
         if isinstance(event, Activity):
             self._pet_activity(event)
-            self._render_activity(event)
+            self._feed_card(event)
             self._collect_step(event)
 
     def _pet_activity(self, event: Activity) -> None:
@@ -1824,110 +1928,37 @@ class DesktopWindow(QMainWindow):
             self._approval_dialog = None
             self.pet.set_approval(False)
 
-    def _render_activity(self, event: Activity) -> None:
-        fields = event.fields
-        tool = str(fields.get("tool", ""))
-        if event.event == "turn_start":
-            label = "İstek alındı"
-        elif event.event == "tool_requested":
-            label = f"Araç istendi · {tool}"
-        elif event.event == "tool_dispatch":
-            label = f"Araç başlatıldı · {tool}"
-        elif event.event == "tool_result":
-            result = fields.get("result", {})
-            status = (
-                result.get("status", "bilinmiyor") if isinstance(result, dict) else "bilinmiyor"
-            )
-            status_labels = {
-                "ok": "tamamlandı",
-                "error": "başarısız",
-                "denied": "reddedildi",
-                "sent": "gönderildi; başarı doğrulanmadı",
-            }
-            label = f"Araç sonucu · {tool} · {status_labels.get(str(status), 'bilinmiyor')}"
-        elif event.event == "approval":
-            label = f"Onay {'verildi' if fields.get('approved') is True else 'reddedildi'} · {tool}"
-        elif event.event == "tool_interrupted":
-            label = f"Araç kesildi; sonuç doğrulanamadı · {tool}"
-        elif event.event == "turn_end":
-            reasons = {
-                "completed": "yanıt hazır",
-                "cancelled": "iptal edildi",
-                "timeout": "süre sınırı",
-                "budget": "bütçe sınırı",
-                "max_steps": "adım sınırı",
-                "cleanup_pending": "önceki işlem temizleniyor",
-                "denied_repeat": "reddedilen çağrı tekrarlandı; durduruldu",
-                "repeated_call": "yinelenen çağrı durduruldu",
-                "local_limit": "yerel araç sınırı",
-            }
-            reason = str(fields.get("stop_reason", "unknown"))
-            label = f"Tur tamamlandı · {reasons.get(reason, 'sonuç bilinmiyor')}"
-        elif event.event == "model_response":
-            label = "Model yanıtı alındı"
-        elif event.event == "privacy_decision":
-            label = "Gizlilik kontrolü"
-        else:
-            label = event.event.replace("_", " ")
-        tone = "error" if "failed" in event.event or "exception" in event.event else "muted"
-        self._add_activity(label, tone)
+    def _begin_card(self, request_id: str, text: str) -> None:
+        self._ops.begin(request_id, text)
+        self._render_card(request_id)
 
-    def _add_activity(self, text: str, tone: str = "muted") -> None:
-        """Son işlem paneline satır ekler: 12px saat + 13px metin; renk yalnız noktada."""
-        if self._activity_empty:
+    def _feed_card(self, event: Activity) -> None:
+        # Etiket tablosu işçi açılınca dolar; her olayda güncel kopya okunur.
+        card = self._ops.feed(event.request_id, event.event, event.fields, self.bridge.labels())
+        if card is not None:
+            self._render_card(card.request_id)
+
+    def _render_card(self, request_id: str) -> None:
+        """Kartı (yeniden) kurar; yeni kart listenin en üstüne, 20'yi aşan eskiler düşer."""
+        card = self._ops.cards.get(request_id)
+        if card is None:
+            return
+        if not self.activity_empty.isHidden():
             self.activity_empty.hide()
             self.activity.show()
-            self._activity_empty = False
-        item = QListWidgetItem()
-        item.setData(Qt.ItemDataRole.UserRole, tone)
-        item.setToolTip(text)
-        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
-        row = QWidget()
-        row.setObjectName("flat")
-        row_layout = QHBoxLayout(row)
-        row_layout.setContentsMargins(0, 4, 8, 4)
-        row_layout.setSpacing(8)
-        glyph = QLabel("●")
-        glyph.setObjectName("activityGlyph")
-        glyph.setAlignment(Qt.AlignmentFlag.AlignTop)
-        texts = QVBoxLayout()
-        texts.setSpacing(0)
-        stamp = QLabel(time.strftime("%H:%M:%S"))
-        stamp.setObjectName("meta")
-        body = QLabel(text)
-        body.setTextFormat(Qt.TextFormat.PlainText)
-        body.setWordWrap(True)
-        body_font = body.font()
-        body_font.setPixelSize(13)
-        body.setFont(body_font)
-        texts.addWidget(stamp)
-        texts.addWidget(body)
-        row_layout.addWidget(glyph, 0, Qt.AlignmentFlag.AlignTop)
-        row_layout.addLayout(texts, 1)
-        self.activity.addItem(item)
-        self.activity.setItemWidget(item, row)
-        self._tint_activity(item)
-        self._fit_activity(item)
-        self._activity_count += 1
-        while self.activity.count() > 500:
-            self.activity.takeItem(0)
-        self.activity.scrollToBottom()
-
-    def _tint_activity(self, item: QListWidgetItem) -> None:
-        row = self.activity.itemWidget(item)
-        glyph = row.findChild(QLabel, "activityGlyph") if row is not None else None
-        if glyph is not None:
-            key = item.data(Qt.ItemDataRole.UserRole) or "muted"
-            glyph.setStyleSheet(_dot_style(self._token(str(key))))
-
-    def _fit_activity(self, item: QListWidgetItem) -> None:
-        """Satır yüksekliği sarılan metne göre; yoksa satırlar üst üste biner."""
-        row = self.activity.itemWidget(item)
-        if row is None:
-            return
-        width = max(120, self.activity.viewport().width())
-        height = row.heightForWidth(width) if row.hasHeightForWidth() else -1
-        item.setSizeHint(QSize(width, height if height > 0 else row.sizeHint().height()))
+        widget = OperationCard(card, themes.THEMES[self._theme])
+        old = self._op_widgets.get(request_id)
+        index = 0
+        if old is not None:
+            index = self.activity_cards.indexOf(old)
+            self.activity_cards.removeWidget(old)
+            old.deleteLater()
+        self._op_widgets[request_id] = widget
+        self.activity_cards.insertWidget(index, widget)
+        for stale in [key for key in self._op_widgets if key not in self._ops.cards]:
+            gone = self._op_widgets.pop(stale)
+            self.activity_cards.removeWidget(gone)
+            gone.deleteLater()
 
     def _append_chat(self, speaker: str, text: str, steps: StepBlock | None = None) -> None:
         self.chat.append(speaker, text, steps)

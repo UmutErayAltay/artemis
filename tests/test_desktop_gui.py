@@ -1042,11 +1042,53 @@ def test_step_panel_shows_only_on_wide_windows_and_caps_rows(
         window.resize(900, 700)
         app.processEvents()
         assert window.activity_panel.isHidden()
-        assert window.activity.count() == 0 and not window.activity_empty.isHidden()
-        for index in range(505):
-            window._add_activity(f"adım {index}")
-        assert window.activity.count() == 500
+        assert not window._op_widgets and not window.activity_empty.isHidden()
+        for index in range(25):
+            window._begin_card(f"r{index}", f"mesaj {index}")
+        assert len(window._op_widgets) == 20
         assert window.activity_empty.isHidden()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_message_operation_cards_group_per_request_and_theme_safe(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        window.resize(1280, 800)
+        assert window.findChild(QLabel, "sectionTitle", Qt.FindChildOption.FindChildrenRecursively)
+        for request, text in (("m1", "ilk <b>mesaj</b>"), ("m2", "ikinci")):
+            window._begin_card(request, text)
+            window._handle_event(Activity(request, "t-" + request, 1, "turn_start", {}))
+            window._handle_event(
+                Activity(request, "t-" + request, 2, "tool_requested",
+                         {"tool": "demo_write_memory", "arguments": {"key": "k", "value": "gizli"}})
+            )
+            window._handle_event(
+                Activity(request, "t-" + request, 3, "tool_result",
+                         {"tool": "demo_write_memory", "elapsed_seconds": 0.1,
+                          "result": {"status": "sent", "success": False, "message": "gitti"}})
+            )
+            window._handle_event(
+                Activity(request, "t-" + request, 4, "turn_end", {"stop_reason": "completed"})
+            )
+        app.processEvents()
+        cards = [window.activity_cards.itemAt(i).widget() for i in range(2)]
+        titles = [c.findChild(QLabel, "opTitle").text() for c in cards]
+        assert titles == ["ikinci", "ilk <b>mesaj</b>"]
+        assert cards[0].findChild(QLabel, "opChip").text() == "Doğrulanamadı"
+        assert cards[0].findChild(QLabel, "opTitle").textFormat() == Qt.TextFormat.PlainText
+        # Ayrıntılar kapalı başlar; açınca ham olaylar görünür ve gizli değer sızmaz.
+        assert cards[0].details.isHidden()
+        cards[0].toggle.click()
+        assert not cards[0].details.isHidden()
+        assert "turn_start" in cards[0].details.text() and "gizli" not in cards[0].details.text()
+        # Tema değişimi kartları yeniden boyar ama genişleme tercihini korur.
+        window._apply_theme("dark")
+        window._apply_theme("light")
+        again = window.activity_cards.itemAt(0).widget()
+        assert not again.details.isHidden()
     finally:
         _close_cleanly(app, window)
 
