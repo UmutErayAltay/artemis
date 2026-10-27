@@ -307,12 +307,12 @@ def test_slice_removes_opaque_background(qapp: QApplication) -> None:
 
 
 def solid_row(
-    row: int, height: int, lift: tuple[int, ...] | None = None
+    row: int, height: int, lift: tuple[int, ...] | None = None, width: int = 60
 ) -> list[pipe.Frame | None]:
     count = ps.FRAMES[row]
     frames: list[pipe.Frame | None] = []
     for i in range(count):
-        image = QImage(60, height, QImage.Format.Format_ARGB32)
+        image = QImage(width, height, QImage.Format.Format_ARGB32)
         image.fill(QColor(200, 30, 30, 255))
         frames.append(pipe.Frame(image, 500 - height - (lift[i] if lift else 0)))
     return frames
@@ -326,25 +326,78 @@ def bbox_of(sheet: QImage, row: int, col: int) -> tuple[int, int, int, int]:
     return xs[0], ys[0], xs[-1] + 1, ys[-1] + 1
 
 
-def test_common_scale_and_baseline(qapp: QApplication) -> None:
+def test_rows_normalised_to_base_size_and_baseline(qapp: QApplication) -> None:
     base = QImage(100, 100, QImage.Format.Format_ARGB32)
     base.fill(QColor(0, 0, 255))
-    rows = {ps.IDLE: solid_row(ps.IDLE, 400), ps.WAVING: solid_row(ps.WAVING, 200),
-            ps.JUMPING: solid_row(ps.JUMPING, 200, lift=(0, 100, 200, 100, 0))}
+    # model her şeritte farklı boyutta çizer: aynı karakter 400, 200 ve 100 px
+    rows = {r: solid_row(r, h, width=h) for r, h in
+            ((ps.IDLE, 400), (ps.WAVING, 200), (ps.REVIEW, 100))}
     sheet, fallback = pipe.assemble(rows, base)
     assert (sheet.width(), sheet.height()) == (1536, 1872)
-    scale = pipe.common_scale(rows)
-    assert scale == pytest.approx(0.92 * 208 / 400)  # zıplama zarfı en büyük
-    idle = bbox_of(sheet, ps.IDLE, 0)
-    wave = bbox_of(sheet, ps.WAVING, 0)
-    assert idle[3] == wave[3] == pipe.BASELINE  # ortak zemin
-    assert (idle[3] - idle[1]) == pytest.approx(400 * scale, abs=1)  # satırlar arası aynı ölçek
-    assert (wave[3] - wave[1]) == pytest.approx(200 * scale, abs=1)
-    assert idle[0] + idle[2] == pytest.approx(192, abs=2)  # yatay ortalı
-    # zıplama yüksekliği korunur: tepe karesi zeminden yukarıda
-    assert bbox_of(sheet, ps.JUMPING, 2)[3] < bbox_of(sheet, ps.JUMPING, 0)[3]
-    assert sorted(fallback) == [ps.RUN_RIGHT, ps.RUN_LEFT, ps.FAILED, ps.WAITING, ps.RUNNING,
-                                ps.REVIEW]
+    boxes = [bbox_of(sheet, r, 0) for r in (ps.IDLE, ps.WAVING, ps.REVIEW)]
+    assert all(b[3] == pipe.BASELINE for b in boxes)  # ortak zemin
+    heights = [b[3] - b[1] for b in boxes]
+    assert max(heights) - min(heights) <= 2  # satırlar arası aynı boyut
+    assert heights[0] == pytest.approx(pipe.FILL * 208, abs=5)  # temel ~%92 (genişlik sınırı)
+    assert boxes[0][0] + boxes[0][2] == pytest.approx(192, abs=2)  # yatay ortalı
+    assert sorted(fallback) == [ps.RUN_RIGHT, ps.RUN_LEFT, ps.JUMPING, ps.FAILED, ps.WAITING,
+                                ps.RUNNING]
+
+
+def test_jump_keeps_arc_and_fits_cell(qapp: QApplication) -> None:
+    base = QImage(100, 100, QImage.Format.Format_ARGB32)
+    base.fill(QColor(0, 0, 255))
+    lift = (0, 100, 300, 100, 0)  # zıplama yayı çok yüksek: ölçek hücreye sığacak kadar kısılır
+    frames = solid_row(ps.JUMPING, 200, lift=lift, width=200)
+    scale = pipe.row_scale(frames, base)
+    sheet, _ = pipe.assemble({ps.JUMPING: frames}, base)
+    boxes = [bbox_of(sheet, ps.JUMPING, c) for c in range(5)]
+    assert boxes[0][3] == boxes[4][3] == pipe.BASELINE
+    assert boxes[2][1] >= 0  # tepe kare hücreden taşmaz
+    assert boxes[0][3] - boxes[2][3] == pytest.approx(300 * scale, abs=2)  # yay oranı korunur
+    assert scale * (500) <= pipe.BASELINE
+
+
+def test_slice_touching_frames_cut_at_thinnest_column(qapp: QApplication) -> None:
+    strip = QImage(1000, 300, QImage.Format.Format_ARGB32)
+    strip.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(strip)
+    for i in range(5):  # kareler bitişik (boşluk yok), aralarında yalnız ince köprü
+        painter.fillRect(20 + i * 190, 50, 170, 200, QColor(200, 80, 20))
+        if i:
+            painter.fillRect(20 + i * 190 - 20, 240, 20, 4, QColor(200, 80, 20))
+    painter.end()
+    frames = pipe.slice_strip(strip, 5)
+    assert all(f is not None for f in frames)
+    # düz eşit bölme gövdeleri keserdi; köprüden kesilince gövde (170) hiçbir karede bölünmez
+    assert all(170 <= f.image.width() <= 190 and f.image.height() == 200 for f in frames if f)
+
+
+def test_clean_frame_drops_edge_sliver_keeps_prop(qapp: QApplication) -> None:
+    image = QImage(300, 340, QImage.Format.Format_ARGB32)
+    image.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(image)
+    painter.fillRect(60, 40, 160, 220, QColor(200, 80, 20))  # gövde
+    painter.fillRect(230, 120, 40, 40, QColor(250, 200, 0))  # yakın aksesuar (asa)
+    painter.fillRect(293, 100, 7, 60, QColor(200, 80, 20))  # sağ kenarda komşu artığı
+    painter.fillRect(0, 100, 6, 60, QColor(200, 80, 20))  # sol kenarda komşu artığı
+    painter.fillRect(150, 320, 6, 6, QColor(200, 80, 20))  # gövdeden uzak kıvılcım
+    painter.end()
+    out = pipe.clean_frame(image)
+    alpha = lambda x, y: QColor.fromRgba(out.pixel(x, y)).alpha()  # noqa: E731
+    assert alpha(100, 100) == 255 and alpha(250, 140) == 255  # gövde ve asa kalır
+    assert alpha(296, 130) == 0 and alpha(2, 130) == 0 and alpha(152, 322) == 0
+
+
+def test_slice_strip_removes_neighbour_sliver(qapp: QApplication) -> None:
+    strip = make_strip([(100, 200, 0)] * 4, gap=30)
+    painter = QPainter(strip)
+    # karenin yanında 6 px lik komşu kare artığı (kareye katılır, temizlenmeli)
+    painter.fillRect(136, 1024 - 50 - 200, 6, 200, QColor(0xC0, 0x30, 0x50))
+    painter.end()
+    frames = pipe.slice_strip(strip, 4)
+    assert all(f is not None for f in frames)
+    assert [f.image.width() for f in frames if f] == [100, 100, 100, 100]
 
 
 def test_running_left_is_mirror(qapp: QApplication) -> None:

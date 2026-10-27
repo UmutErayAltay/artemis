@@ -1,4 +1,4 @@
-"""Pet üretici resim modeli hattı (ADR 0048 eki): temel görsel, 8 şerit, dilimleme, ortak ölçek.
+"""Pet üretici resim modeli hattı (ADR 0048 eki): temel görsel, 8 şerit, dilimleme, satır ölçeği.
 
 Qt'ye bağlıdır ama ağa değil: model çağrısı `Generate` olarak enjekte edilir (üretimde
 `brain.images.generate_image`). Model çıktısı güvenilmezdir; görsel yalnız QImage ile çözülür,
@@ -26,7 +26,9 @@ BASE_SIZE = "1024x1024"
 STRIP_SIZE = "1536x1024"
 MAX_SIDE = 4096
 ALPHA_MIN = 16  # bunun altı saydam sayılır
-FILL = 0.92  # karakterin hücre yüksekliğine oranı (tüm pet için tek ölçek)
+FILL = 0.92  # temel karakterin hücreye oranı; her satır buna göre normalize edilir
+BLOCK = 4  # bağlı bölge analizinde indirgeme hücresi (piksel)
+SLIVER = 0.12  # kenara değen parça gövde alanının altındaysa komşu artığıdır
 BASELINE = 204  # hücrede ortak zemin çizgisi (animatörün ayak noktası + 4)
 BG_TOLERANCE = 32
 _ARGB = QImage.Format.Format_ARGB32_Premultiplied
@@ -195,43 +197,141 @@ def _merge_fragments(runs: list[tuple[int, int]]) -> list[tuple[int, int]]:
     return out
 
 
-def slice_strip(strip: QImage, expected: int) -> list[Frame | None]:
-    """Şeridi saydam sütun boşluklarından böler; sayı tutmazsa eşit genişliğe düşer.
+def _min_cuts(counts: list[int], expected: int) -> list[tuple[int, int]]:
+    """Eşit aralık sınırlarının ±%20 penceresinde en az opak pikselli sütundan keser.
 
-    Opak zeminli şerit önce `remove_background`'dan geçer. Boş dilim `None` olur.
+    Kareler birbirine değiyorsa (kuyruk/pati ucu) düz eşit bölme karakteri ortadan keser;
+    en ince sütun bitişik karenin parçasını en az taşır. Eşitlikte sınıra en yakın sütun.
+    İçerik aralığı (ilk-son dolu sütun) bölünür: şerit kenarındaki boşluk ölçüyü bozmaz.
+    """
+    filled = [x for x, n in enumerate(counts) if n]
+    if not filled:
+        return []
+    first, end = filled[0], filled[-1] + 1
+    width = (end - first) / expected
+    win = round(0.2 * width)
+    cuts = [first]
+    for i in range(1, expected):
+        mid = first + round(i * width)
+        lo, hi = max(cuts[-1] + 1, mid - win), min(end - 1, mid + win)
+        if lo > hi:
+            cuts.append(min(max(mid, lo), end - 1))
+            continue
+        cuts.append(min(range(lo, hi + 1), key=lambda x: (counts[x], abs(x - mid))))
+    cuts.append(end)
+    return list(zip(cuts, cuts[1:], strict=False))
+
+
+def _blocks(mask: bytes, w: int, h: int) -> tuple[bytes, int, int]:
+    """Maskeyi BLOCK×BLOCK hücrelere indirger (hücre = içinde opak piksel var mı); hızlıdır."""
+    dw, dh = -(-w // BLOCK), -(-h // BLOCK)
+    out = bytearray()
+    for r in range(dh):
+        acc = 0
+        for y in range(r * BLOCK, min(h, (r + 1) * BLOCK)):
+            acc |= int.from_bytes(mask[y * w:(y + 1) * w].ljust(dw * BLOCK, b"\0"), "big")
+        row = acc.to_bytes(dw * BLOCK, "big")
+        cell = 0
+        for k in range(BLOCK):
+            cell |= int.from_bytes(row[k::BLOCK], "big")
+        out += cell.to_bytes(dw, "big")
+    return bytes(out), dw, dh
+
+
+def _components(grid: bytes, dw: int, dh: int) -> list[list[int]]:
+    """4 komşulu bağlı bölgeler (hücre indeksleri); blok indirgeme küçük boşlukları kapatır."""
+    seen = bytearray(len(grid))
+    comps: list[list[int]] = []
+    for start in range(len(grid)):
+        if not grid[start] or seen[start]:
+            continue
+        seen[start] = 1
+        stack, comp = [start], []
+        while stack:
+            p = stack.pop()
+            comp.append(p)
+            x = p % dw
+            for q in (p - 1 if x else -1, p + 1 if x < dw - 1 else -1, p - dw, p + dw):
+                if 0 <= q < len(grid) and grid[q] and not seen[q]:
+                    seen[q] = 1
+                    stack.append(q)
+        comps.append(comp)
+    return comps
+
+
+def clean_frame(image: QImage) -> QImage:
+    """Ana gövdeyi ve ona yakın parçaları (asa, yıldız, dizüstü) tutar, komşu artıklarını siler.
+
+    Silinen: karenin sol/sağ kenarına değen ve gövdeye göre küçük (SLIVER) parçalar ile
+    gövdeden uzak (gövde boyutunun >%15'i) kıvılcımlar. `image` yerinde değişir.
+    """
+    w, h = image.width(), image.height()
+    grid, dw, dh = _blocks(_mask(image), w, h)
+    comps = _components(grid, dw, dh)
+    if len(comps) < 2:
+        return image
+    main = max(comps, key=len)
+    mxs, mys = [p % dw for p in main], [p // dw for p in main]
+    box = (min(mxs), min(mys), max(mxs), max(mys))
+    near = 0.15 * max(box[2] - box[0] + 1, box[3] - box[1] + 1)
+    painter = QPainter(image)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+    for comp in comps:
+        if comp is main:
+            continue
+        xs, ys = [p % dw for p in comp], [p // dw for p in comp]
+        gap = max(box[0] - max(xs), min(xs) - box[2], box[1] - max(ys), min(ys) - box[3], 0)
+        edge = min(xs) == 0 or max(xs) == dw - 1
+        if gap > near or (edge and len(comp) < SLIVER * len(main)):
+            for p in comp:
+                painter.fillRect(
+                    QRect((p % dw) * BLOCK, (p // dw) * BLOCK, BLOCK, BLOCK), Qt.GlobalColor.black
+                )
+    painter.end()
+    return image
+
+
+def slice_strip(strip: QImage, expected: int) -> list[Frame | None]:
+    """Şeridi saydam sütun boşluklarından böler; sayı tutmazsa en ince sütundan keser.
+
+    Opak zeminli şerit önce `remove_background`'dan geçer. Her kare `clean_frame`'den geçer.
+    Boş dilim `None` olur.
     """
     strip = remove_background(strip)
     w, h = strip.width(), strip.height()
     mask = _mask(strip)
-    cols = _cols(mask, w, h)
-    spans = _merge_fragments(_runs(cols))
-    if len(spans) != expected:
-        spans = [(i * w // expected, (i + 1) * w // expected) for i in range(expected)]
+    runs = _merge_fragments(_runs(_cols(mask, w, h)))
+    spans = runs if len(runs) == expected else _min_cuts(
+        [sum(mask[x::w]) for x in range(w)], expected)
     frames: list[Frame | None] = []
     for x0, x1 in spans:
-        # Sütun aralığındaki gerçek içerik sınırı (eşit dilimde yan boşluklar kırpılır).
-        seg = cols[x0:x1]
-        box = _bbox(mask, w, x0, x1)
-        if not any(seg) or box is None:
+        crop = strip.copy(QRect(x0, 0, x1 - x0, h))
+        if not any(_mask(crop)):
             frames.append(None)
             continue
-        left = x0 + len(seg) - len(seg.lstrip(b"\x00"))
-        right = x1 - (len(seg) - len(seg.rstrip(b"\x00")))
-        rect = QRect(left, box[0], right - left, box[1] - box[0])
-        frames.append(Frame(strip.copy(rect), box[0]))
-    return frames
+        clean = trim_or_none(clean_frame(crop))
+        frames.append(None if clean is None else Frame(*clean))
+    return frames + [None] * (expected - len(frames))
 
 
-def trim(image: QImage) -> QImage:
+def trim_or_none(image: QImage) -> tuple[QImage, int] | None:
+    """Alfa sınırına kırpılmış görsel ve üst y'si; boşsa None."""
     w = image.width()
     mask = _mask(image)
     box = _bbox(mask, w, 0, w)
     if box is None:
-        raise PetImageError("Model görseli boş çıktı.")
+        return None
     cols = _cols(mask, w, image.height())
     left = len(cols) - len(cols.lstrip(b"\x00"))
     right = len(cols.rstrip(b"\x00"))
-    return image.copy(QRect(left, box[0], right - left, box[1] - box[0]))
+    return image.copy(QRect(left, box[0], right - left, box[1] - box[0])), box[0]
+
+
+def trim(image: QImage) -> QImage:
+    trimmed = trim_or_none(image)
+    if trimmed is None:
+        raise PetImageError("Model görseli boş çıktı.")
+    return trimmed[0]
 
 
 # ------------------------------------------------------------- yerleşim ve sayfa
@@ -244,12 +344,20 @@ def _envelope(frames: list[Frame | None]) -> tuple[int, int, int]:
     return ground, ground - min(f.top for f in live), max(f.image.width() for f in live)
 
 
-def common_scale(rows: dict[int, list[Frame | None]]) -> float:
-    """Tüm pet için TEK ölçek: en büyük zarf hücre yüksekliğinin %92'sine (genişlik de sığar)."""
-    env = [_envelope(f) for f in rows.values() if any(f)]
-    if not env:
+def row_scale(frames: list[Frame | None], base: QImage) -> float:
+    """Satırı temel karakterin hücredeki boyutuna eşler (model her şeritte farklı boyutta çizer).
+
+    Boyut ölçüsü opak alanın karekökü: yatay koşu ya da kıvrılmış poz, bbox yüksekliği/genişliği
+    gibi poza göre oynamaz. Satırın medyan karesi alınır, tek tuhaf kare ölçeği bozmaz. Sonra
+    zıplama zarfı ve en geniş kare hücreye sığacak şekilde kısılır.
+    """
+    live = [f for f in frames if f is not None]
+    if not live:
         raise PetImageError("Hiçbir satırdan kullanılabilir kare çıkmadı.")
-    return min(FILL * CELL_H / max(e[1] for e in env), 0.98 * CELL_W / max(e[2] for e in env))
+    base_fit = min(FILL * CELL_H / base.height(), 0.98 * CELL_W / base.width())
+    ratio = (sum(_mask(base)) / median(sum(_mask(f.image)) for f in live)) ** 0.5
+    _ground, height, width = _envelope(frames)
+    return float(min(base_fit * ratio, (BASELINE - 2) / height, 0.98 * CELL_W / width))
 
 
 def place_row(frames: list[Frame | None], scale: float) -> list[QImage]:
@@ -278,8 +386,9 @@ def assemble(
     rows: dict[int, list[Frame | None]], base: QImage
 ) -> tuple[QImage, list[int]]:
     """Satırlardan 1536×1872 sayfa. Eksik satır prosedürel dolar; (sayfa, yedek satırlar)."""
-    scale = common_scale(rows)
-    cells: dict[int, list[QImage]] = {r: place_row(f, scale) for r, f in rows.items()}
+    cells: dict[int, list[QImage]] = {
+        r: place_row(f, row_scale(f, base)) for r, f in rows.items() if any(f)
+    }
     if ps.RUN_RIGHT in cells:  # sola koşma = sağa koşmanın yatay aynası, çağrı yok
         cells[ps.RUN_LEFT] = [c.flipped(Qt.Orientation.Horizontal) for c in cells[ps.RUN_RIGHT]]
     fallback = [r for r in range(len(FRAMES)) if r not in cells]
@@ -345,7 +454,7 @@ def animate(
                     raise Cancelled from None
                 continue
             rows[row] = frames
-            row_ready(row, place_row(frames, common_scale({row: frames})))
+            row_ready(row, place_row(frames, row_scale(frames, base)))
             break
     sheet, fallback = assemble(rows, base)
     return sheet, fallback
