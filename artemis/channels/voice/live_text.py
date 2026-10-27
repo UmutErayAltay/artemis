@@ -55,8 +55,10 @@ class SherpaLiveTranscriber:
         return str(getattr(result, "text", result)).strip()
 
     def reset(self) -> None:
+        # Taze akış: recognizer.reset() kod çözücüyü sıfırlar ama akışın işlenmemiş ses
+        # tamponunu bırakır; gerçek modelde önceki sözün son sözcükleri yenisinin başına taştı.
         if self._recognizer is not None:
-            self._recognizer.reset(self._stream)
+            self._stream = self._recognizer.create_stream()
 
     def close(self) -> None:
         self._stream = None

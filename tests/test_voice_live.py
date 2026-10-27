@@ -256,8 +256,10 @@ def test_sherpa_transcriber_uses_pinned_revision_and_converts_pcm(monkeypatch):
     assert live.feed(np.array([16384, -32768], dtype=np.int16).tobytes()) == "merhaba"
     rate, samples = waves[0]
     assert rate == 16000 and samples.dtype == np.float32 and list(samples) == [0.5, -1.0]
+    old_stream = live._stream
     live.reset()
-    assert waves[-1] == "reset"
+    # Önceki sözün tamponu yeni söze taşmasın: reset yeni akış açar.
+    assert live._stream is not old_stream
 
 
 def test_sherpa_transcriber_missing_package_points_to_extra(monkeypatch):
