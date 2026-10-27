@@ -191,7 +191,8 @@ başından sink yazımının bitmesine) yalnız hoparlöre yazım sürerken üre
 (sohbet p50 < 1.5 sn, p90 < 3 sn, stop p90 < 300 ms) en az 30 geçerli örnek olmadan ve
 sahte kipte hiç değerlendirilmez (`met: null`). Canlı kip PortAudio'nun bildirdiği çıkış
 gecikmesini, süreç bellek tepe değerini ve varsa `nvidia-smi` ile aygıt geneli VRAM'i
-yazar. Sağlayıcılar streaming kullanmadığından ilk token null'dır. Masaüstünde
+yazar. Streaming açık ve sağlayıcı metin akıtıyorsa ilk token ölçülür; akışsız
+kipte null kalır. Masaüstünde
 `voice.telemetry_report: true` iken ses kapanınca aynı rapor
 `state_dir/voice-telemetry/` altına yazılır. Donanım profilindeki `requested_*` ayardır;
 bilinmeyen fiilî değerler null kalır. `collection_complete` yalnız olay tamponunun taşmadığını
@@ -426,6 +427,17 @@ CLI, masaüstü ve Telegram aynı `state_dir/memory.sqlite3` deposunu kullanır:
   turların yanıtını göstermez.
 
 Depo hatası turu bozmaz; konuşma bellekte sürer ve denetime `memory_error` yazılır.
+
+Masaüstünde **Hafıza ve hatırlatmalar** sekmesi konuşma geçmişini ve saklama süresini
+kontrol eder. Önce geçmişi yükleyin; varsayılan **0 gün: otomatik silme kapalı**.
+Pozitif süre seçimi eski turları hemen siler ve açık onay ister. Öz notlar ayrı kalır.
+CLI karşılıkları: `/hafıza durum`, `/hafıza göster`, `/hafıza sil`, `/hafıza sakla 30`
+(otomatik silmeyi kapatmak için `/hafıza sakla 0`). Uygulama kapalıyken budama yapılmaz.
+Silme yalnız konuşma deposunu kapsar; audit, disk/WAL ve yedeklerden güvenli silme değildir.
+
+Aynı sekmede hatırlatmaların teslim geçmişi görülür. **Teslim doğrulanamadı**, bildirimin
+ulaşmış da olabileceğini belirtir. Yeniden deneme açık onayla yeni hatırlatma oluşturur;
+otomatik tekrar yapılmaz ve çift bildirim ihtimali gösterilir.
 
 ## Hafıza (Obsidian vault)
 
@@ -710,3 +722,12 @@ Yeni araç tek bir `artemis/tools/plugins/` dosyasına argüman modeli ve
 üretilir. Onay mantığını araca eklemeyin; örnek ve kurallar
 [CLAUDE.md](CLAUDE.md) içindedir. Yeni davranış için izole test ve kabul senaryosu
 ekleyin.
+
+
+## Kabul durumu
+
+Güncel kod ve Windows kabul durumu tek tabloda: [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md).
+Streaming mevcuttur; gerçek cihazda geçilmeyen senaryolar bu tabloda açık kalır.
+Ses tanıma beklerken yakalama devam eder; iki bekleyen segment sınırı aşılırsa uyarı verilir.
+Ses raporu STT kuyruk/çözüm sürelerini ve mikrofon düşmelerini gösterir; sınırsız yükte
+kayıpsız ses veya çalışan native STT'yi anında kesme garantisi yoktur.

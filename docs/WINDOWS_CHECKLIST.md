@@ -1,5 +1,7 @@
 # Windows birleşik kontrol listesi
 
+Güncel sonuçların tek kaynağı: [Kabul ve güvenilirlik durumu](RELIABILITY_STATUS.md).
+
 Bulut oturumunda yapılamayan (gerçek ses, ekran, uygulama, canlı model) ve şimdiye dek
 "Windows'ta denenmedi" diye bırakılan her şey burada toplanır. Bulut oturumu sahte
 testlerle geçtiyse bile bu maddeler kabul sayılmaz. Faz 6–7'nin ayrıntılı listesi ve sonuç
@@ -108,3 +110,18 @@ kapanınca içeriksiz rapor `state_dir/voice-telemetry/` altına yazılır (ADR 
 - [ ] `open_url` yol/sorgu sızıntısı (ADR 0036): bugünkü kural yalnız dış içerik varken
   `?`/`#` taşıyan adreste sorar; yol bölümü sorulmuyor. Değişsin mi?
 - [ ] LinkedIn taslağı (2026-10-23).
+
+
+## D. Güvenilirlik düzeltmeleri kabulü (ADR 0046)
+
+- [ ] Güvenilen host'a destructive MCP çağrısı hâlâ tam argümanla onay istiyor; Hayır çalıştırmıyor.
+- [ ] Yavaş model ve uzun onay beklemesinde süre dolduktan sonra click/key gönderilmiyor; Esc çalışıyor.
+- [ ] STT sürerken peş peşe sözler yakalanıyor; yoğunlukta uyarı, kuyruk ve kayıp metrikleri var.
+- [ ] Onay sırasında/sesi kapatınca sıradaki eski sözler sonradan komut olmuyor.
+- [ ] Soğuk/sıcak GPU profillerinde ≥30 tur, A6/A7 gürültü setleri ve söz kesme tekrar ölçüldü.
+- [ ] Hafıza panelinde gerçek süre okunuyor; test verisiyle 0/30 gün ve reddedilen/onaylanan silme denendi.
+- [ ] /yeni arşivi koruyor; açık geçmiş silme arşivi ve bağlamı siliyor, öz notları koruyor.
+- [ ] Hatırlatma teslim geçmişi failed/uncertain gösteriyor; tekrar çift bildirim uyarısıyla yeni kayıt açıyor.
+- [ ] Ses/scheduler/kod işi açıkken kapatıp açma sonrası yetim süreç veya kalmış sahiplik kilidi yok.
+
+Sonuçları bu listede ikinci bir tablo açmadan kanonik durum tablosuna tarih/commit/kanıtla yazın.

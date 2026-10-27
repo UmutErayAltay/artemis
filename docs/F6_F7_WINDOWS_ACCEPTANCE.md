@@ -83,6 +83,9 @@ pytest -q                      # Windows'ta da yeşil olmalı
 
 ## Sonuçlar
 
+Aşağıdakiler tarihsel ham gözlemlerdir. Güncel yorum ve kalan kabul işleri
+[kanonik durum tablosundadır](RELIABILITY_STATUS.md).
+
 | # | Sonuç | Gözlem |
 | --- | --- | --- |
 | 1 | geçti (kısmen) | Hatırlatma 2 dk sonra panelde, `proactive_delivery` delivered. Toast `disabled`: Windows bildirimleri bu uygulama için kapalı (kullanıcı ayarı, kod dürüst raporluyor). |

@@ -153,6 +153,10 @@ class ComputerSession:
                 screens: list[_Screen] = []
                 monitor_rects = await asyncio.to_thread(self._backend.monitors)
                 for left, top, width, height in monitor_rects:
+                    if self._clock() >= limit:
+                        return self._result("timeout", "Oturum süresi doldu.")
+                    if self._stop.is_set():
+                        return self._result("stopped", "Kullanıcı oturumu durdurdu.")
                     buffer, width, height = await asyncio.to_thread(
                         self._backend.capture, left, top, width, height
                     )
@@ -195,9 +199,15 @@ class ComputerSession:
                 ),
             ]
             try:
-                action = await self._ask(messages, remaining)
+                if self._clock() >= limit:
+                    return self._result("timeout", "Oturum süresi doldu.")
+                action = await self._ask(messages, limit)
             except ProviderError as error:
                 return self._result("error", f"Model çağrısı başarısız: {error}")
+            if self._stop.is_set():
+                return self._result("stopped", "Kullanıcı oturumu durdurdu.")
+            if self._clock() >= limit:
+                return self._result("timeout", "Oturum süresi doldu.")
             if action is None:
                 return self._result("invalid", "Model iki denemede de geçerli eylem döndürmedi.")
 
@@ -206,7 +216,7 @@ class ComputerSession:
             if action.type == "ask_user":
                 return self._result("ask_user", action.text or "")
 
-            outcome = await self._act(action, turn_id, screens)
+            outcome = await self._act(action, turn_id, screens, limit)
             if isinstance(outcome, SessionResult):
                 return outcome
             if outcome is not None:
@@ -226,10 +236,12 @@ class ComputerSession:
 
             await self._sleep(self._config.step_delay_seconds)
 
-    async def _ask(self, messages: list[Message], remaining: float) -> Action | None:
+    async def _ask(self, messages: list[Message], limit: float) -> Action | None:
         """Modelden eylem ister; bozuksa YENİ ekran görüntüsü almadan bir kez yeniden dener."""
-        timeout = min(self._provider_timeout, remaining)
         for attempt in range(2):
+            timeout = min(self._provider_timeout, limit - self._clock())
+            if timeout <= 0 or self._stop.is_set():
+                return None
             completion = await self._provider.complete(messages, [], timeout=timeout)
             try:
                 return parse_action(completion.content)
@@ -246,9 +258,12 @@ class ComputerSession:
         action: Action,
         turn_id: str,
         screens: list[_Screen],
+        limit: float,
     ) -> SessionResult | str | None:
         """Eylemi denetler ve uygular. Oturum bitecekse sonucu, adım engellendiyse nedeni
         (modele geri bildirilir), adım uygulandıysa None döner."""
+        if self._clock() >= limit:
+            return self._result("timeout", "Oturum süresi doldu.")
         point: tuple[int, int] | None = None
         window: str | None = None
         # Modelin koordinatı seçtiği ekranın görüntüsüne göredir; fare ise sanal masaüstü.
@@ -258,7 +273,9 @@ class ComputerSession:
             return f"Ekran {action.screen} yok; {len(screens)} ekran görülüyor"
         screen = screens[min(action.screen, len(screens)) - 1]
         if action.type == "wait":
-            await self._sleep(action.seconds or 0.0)  # arka uca dokunmaz
+            await self._sleep(
+                min(action.seconds or 0.0, max(0.0, limit - self._clock()))
+            )  # arka uca dokunmaz
         else:
             if action.type == "key":
                 key_blocked = key_block_reason(parse_keys(action.keys or ""))
@@ -307,8 +324,13 @@ class ComputerSession:
         if self._stop.is_set():
             return self._result("stopped", "Kullanıcı oturumu durdurdu.")
 
+        if self._clock() >= limit:
+            return self._result("timeout", "Oturum süresi doldu.")
         try:
-            await self._execute(action, point)
+            executed = await self._execute(action, point, limit)
+            if not executed:
+                reason: Reason = "stopped" if self._stop.is_set() else "timeout"
+                return self._result(reason, "İptal veya süre sınırı nedeniyle girdi gönderilmedi.")
         except (OSError, RuntimeError) as error:
             return self._result("error", f"Eylem uygulanamadı: {error}")
 
@@ -357,13 +379,25 @@ class ComputerSession:
             return blocked, None
         return None, exe.replace("\\", "/").rsplit("/", 1)[-1]
 
-    async def _execute(self, action: Action, point: tuple[int, int] | None) -> None:
-        backend = self._backend
-        if action.type == "click" and point:
-            await asyncio.to_thread(backend.click, point[0], point[1], action.button, action.double)
-        elif action.type == "scroll" and point:
-            await asyncio.to_thread(backend.scroll, point[0], point[1], action.dy or 0)
-        elif action.type == "type":
-            await asyncio.to_thread(backend.type_text, action.text or "")
-        elif action.type == "key":
-            await asyncio.to_thread(backend.press_keys, parse_keys(action.keys or ""))
+    async def _execute(
+        self,
+        action: Action,
+        point: tuple[int, int] | None,
+        limit: float,
+    ) -> bool:
+        # Executor kuyruğunda beklenmiş olabilir: kontrol, OS çağrısını yapan thread'de.
+        def send() -> bool:
+            if self._stop.is_set() or self._clock() >= limit:
+                return False
+            backend = self._backend
+            if action.type == "click" and point:
+                backend.click(point[0], point[1], action.button, action.double)
+            elif action.type == "scroll" and point:
+                backend.scroll(point[0], point[1], action.dy or 0)
+            elif action.type == "type":
+                backend.type_text(action.text or "")
+            elif action.type == "key":
+                backend.press_keys(parse_keys(action.keys or ""))
+            return True
+
+        return await asyncio.to_thread(send)

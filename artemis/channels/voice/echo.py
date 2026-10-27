@@ -415,6 +415,10 @@ class EchoCancelledMicrophone:
         )
         self._on_state("echo:off")
 
+    @property
+    def dropped_frames(self) -> int:
+        return int(getattr(self._inner, "dropped_frames", 0))
+
     async def frames(self) -> AsyncIterator[AudioFrame]:
         """Her iç kareyi iptal eder; hata olursa oturum boyunca değiştirmez."""
         async for frame in self._inner.frames():

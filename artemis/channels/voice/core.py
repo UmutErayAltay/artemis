@@ -61,9 +61,13 @@ def _edit_distance(a: str, b: str, limit: int) -> int:
     for i, char_a in enumerate(a, 1):
         current = [i]
         for j, char_b in enumerate(b, 1):
-            current.append(min(
-                previous[j] + 1, current[j - 1] + 1, previous[j - 1] + (char_a != char_b),
-            ))
+            current.append(
+                min(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + (char_a != char_b),
+                )
+            )
         if min(current) > limit:
             return limit + 1
         previous = current
@@ -115,7 +119,8 @@ def find_wake_word(transcript: str, wake_word: str) -> tuple[int, int] | None:
     wake = _fold(wake_word)
     if not wake.isalnum():
         match = re.search(
-            rf"(?<!\w){re.escape(wake_word)}(?!\w)", transcript,
+            rf"(?<!\w){re.escape(wake_word)}(?!\w)",
+            transcript,
             flags=re.IGNORECASE | re.UNICODE,
         )
         return match.span() if match else None
@@ -125,7 +130,7 @@ def find_wake_word(transcript: str, wake_word: str) -> tuple[int, int] | None:
         word = _fold(token.group())
         if _substitutions(word, wake, limit) <= limit:
             return token.span()
-        if index + 1 < len(tokens) and transcript[token.end():tokens[index + 1].start()] == " ":
+        if index + 1 < len(tokens) and transcript[token.end() : tokens[index + 1].start()] == " ":
             joined = word + _fold(tokens[index + 1].group())
             if len(word) >= 2 and _substitutions(joined, wake, limit) <= limit:
                 return token.start(), tokens[index + 1].end()
@@ -365,6 +370,12 @@ class VoiceController:
         self._stop = asyncio.Event()
         self._partial_task: asyncio.Task[str] | None = None
         self._partial_frames = 0
+        # İki bekleyen segment + tek çalışan çözüm; ham ses diske yazılmaz.
+        self._segments: asyncio.Queue[tuple[AudioSegment, int, int, float]] = asyncio.Queue(2)
+        self._decoder: asyncio.Task[None] | None = None
+        self._decode_busy = False
+        self._capture_epoch = 0
+        self._seen_drops = 0
         self._playback: asyncio.Task[None] | None = None
         self._playback_cancelled: asyncio.Event | None = None
         self._spoken_text = ""
@@ -377,6 +388,7 @@ class VoiceController:
 
     async def run(self) -> None:
         """Mikrofon yalnız bu açıkça çağrılan döngü süresince tüketilir."""
+        self._decoder = asyncio.create_task(self._decode_segments())
         try:
             frames = self.microphone.frames().__aiter__()
             self._emit_state("listening")
@@ -390,13 +402,16 @@ class VoiceController:
                 next_frame: asyncio.Task[AudioFrame] = asyncio.create_task(next_audio_frame())
                 stop_wait = asyncio.create_task(self._stop.wait())
                 done, pending = await asyncio.wait(
-                    {next_frame, stop_wait}, return_when=asyncio.FIRST_COMPLETED
+                    {next_frame, stop_wait, self._decoder}, return_when=asyncio.FIRST_COMPLETED
                 )
+                pending.discard(self._decoder)
                 for task in pending:
                     task.cancel()
                 for task in pending:
                     with suppress(asyncio.CancelledError, StopAsyncIteration):
                         await task
+                if self._decoder in done:
+                    self._decoder.result()
                 if stop_wait in done and self._stop.is_set():
                     break
                 try:
@@ -407,8 +422,16 @@ class VoiceController:
                         self._active.cancel()
                         self._barge_cancelled = True
                     break
+                drops = int(getattr(self.microphone, "dropped_frames", 0))
+                if drops > self._seen_drops:
+                    self.on_transcript(
+                        f"Mikrofon yoğun: {drops - self._seen_drops} ses karesi kayboldu."
+                    )
+                    self._seen_drops = drops
+                    self.on_timing("audio_dropped_frames", float(drops))
+                    self._event(0, "capture_health", reason=f"dropped_frames={drops}")
                 if self.clock() >= self._next_level_update:
-                    samples = array("h", frame.pcm[:len(frame.pcm) // 2 * 2])
+                    samples = array("h", frame.pcm[: len(frame.pcm) // 2 * 2])
                     rms = math.sqrt(sum(value * value for value in samples) / max(1, len(samples)))
                     self.on_input_level(min(100, int(rms / 32768 * 500)))
                     self._next_level_update = self.clock() + 0.2
@@ -420,8 +443,9 @@ class VoiceController:
                 if not was_active and self.segmenter.active:
                     self._capturing_id = self._new_utterance(frame.timestamp)
                 if self._capturing_id is not None and self.segmenter._discarding:
-                    self._event(self._capturing_id, "terminal", outcome="rejected",
-                                reason="max_utterance")
+                    self._event(
+                        self._capturing_id, "terminal", outcome="rejected", reason="max_utterance"
+                    )
                     self._capturing_id = None
                 # VAD gürültüyü/yankıyı da konuşma sanabilir. Oynatma yalnız nihai
                 # transcript kabul edilince _handle_utterance içinde kesilir (ADR 0040).
@@ -432,11 +456,64 @@ class VoiceController:
                         self._partial_frames = 0
                         self._start_partial_decode()
                 if utterance is not None:
-                    await self._handle_utterance(utterance)
+                    self._queue_segment(utterance)
             if not self._stop.is_set():
+                await self._drain_segments()
                 await self._settle_active()
         finally:
             await self.close()
+
+    async def _drain_segments(self) -> None:
+        # EOF ile aynı anda decoder hata verirse join sonsuza dek beklememeli.
+        joined = asyncio.create_task(self._segments.join())
+        try:
+            if self._decoder is not None:
+                done, _pending = await asyncio.wait(
+                    {joined, self._decoder}, return_when=asyncio.FIRST_COMPLETED,
+                )
+                if self._decoder in done:
+                    self._decoder.result()
+            await joined
+        finally:
+            if not joined.done():
+                joined.cancel()
+                with suppress(asyncio.CancelledError):
+                    await joined
+
+    def _queue_segment(self, segment: AudioSegment) -> None:
+        uid = self._capturing_id
+        self._capturing_id = None
+        if uid is None:
+            uid = self._new_utterance(segment.speech_start)
+        self.on_timing("speech_start", segment.speech_start)
+        self.on_timing("speech_end", segment.speech_end)
+        self._event(uid, "speech_end", timestamp=segment.speech_end)
+        self._event(uid, "endpoint")
+        self._event(uid, "stt_queued")
+        try:
+            self._segments.put_nowait((segment, uid, self._capture_epoch, self.clock()))
+        except asyncio.QueueFull:
+            self.on_transcript("Ses tanıma yoğun; son söz alınamadı. Lütfen tekrar söyle.")
+            self._event(uid, "terminal", outcome="rejected", reason="stt_queue_full")
+        self.on_timing("stt_queue_depth", float(self._segments.qsize()))
+
+    async def _decode_segments(self) -> None:
+        while True:
+            segment, uid, epoch, queued_at = await self._segments.get()
+            self._decode_busy = True
+            try:
+                self.on_timing("stt_queue_wait_seconds", self.clock() - queued_at)
+                await self._handle_utterance(segment, uid=uid, epoch=epoch)
+            finally:
+                self._decode_busy = False
+                self._segments.task_done()
+
+    def _invalidate_segments(self) -> None:
+        self._capture_epoch += 1
+        while not self._segments.empty():
+            _segment, uid, _epoch, _at = self._segments.get_nowait()
+            self._segments.task_done()
+            self._event(uid, "terminal", outcome="cancelled", reason="capture_invalidated")
 
     def _new_utterance(self, timestamp: float) -> int:
         self._utterance_sequence += 1
@@ -444,17 +521,32 @@ class VoiceController:
         return self._utterance_sequence
 
     def _event(
-        self, utterance_id: int, stage: Stage, *, generation_id: int | None = None,
-        timestamp: float | None = None, outcome: Outcome | None = None,
-        reason: str | None = None, ack: bool = False,
-        command_class: CommandClass | None = None, warm: bool | None = None,
+        self,
+        utterance_id: int,
+        stage: Stage,
+        *,
+        generation_id: int | None = None,
+        timestamp: float | None = None,
+        outcome: Outcome | None = None,
+        reason: str | None = None,
+        ack: bool = False,
+        command_class: CommandClass | None = None,
+        warm: bool | None = None,
     ) -> None:
         if self.on_event is not None:
-            self.on_event(VoiceTimingEvent(
-                utterance_id, generation_id, stage,
-                self.clock() if timestamp is None else timestamp,
-                "ack" if ack else "task", outcome, reason, command_class, warm,
-            ))
+            self.on_event(
+                VoiceTimingEvent(
+                    utterance_id,
+                    generation_id,
+                    stage,
+                    self.clock() if timestamp is None else timestamp,
+                    "ack" if ack else "task",
+                    outcome,
+                    reason,
+                    command_class,
+                    warm,
+                )
+            )
 
     def _discard_capture(self, reason: str) -> None:
         if self._capturing_id is not None:
@@ -468,18 +560,31 @@ class VoiceController:
         """Yalnız listening/thinking/speaking/off; ekran durumu buradan okur."""
         self.on_state(state)
 
-    async def _handle_utterance(self, segment: AudioSegment) -> None:
+    async def _handle_utterance(
+        self,
+        segment: AudioSegment,
+        *,
+        uid: int | None = None,
+        epoch: int | None = None,
+    ) -> None:
         # Kimlik, async yanıtın ömrünce korunur; reddedilen sonraki söz bunu değiştirmez.
-        uid = self._capturing_id
-        self._capturing_id = None
+        if uid is None:
+            uid = self._capturing_id
+            self._capturing_id = None
         if uid is None:
             uid = self._new_utterance(segment.speech_start)
-        self.on_timing("speech_start", segment.speech_start)
-        self.on_timing("speech_end", segment.speech_end)
-        self._event(uid, "speech_end", timestamp=segment.speech_end)
-        self._event(uid, "endpoint")
+        if epoch is None:
+            epoch = self._capture_epoch
+            self.on_timing("speech_start", segment.speech_start)
+            self.on_timing("speech_end", segment.speech_end)
+            self._event(uid, "speech_end", timestamp=segment.speech_end)
+            self._event(uid, "endpoint")
         try:
+            if self._partial_task is not None:
+                self._partial_task.cancel()
             await self._settle_partial()
+            self._event(uid, "stt_start")
+            stt_started = self.clock()
             transcript = (await self.recognizer.transcribe(segment.pcm)).strip()
         except asyncio.CancelledError:
             self._event(uid, "terminal", outcome="cancelled", reason="stt_cancelled")
@@ -487,6 +592,10 @@ class VoiceController:
         except (OSError, RuntimeError, ValueError) as error:
             logger.warning("Ses tanıma başarısız (%s).", type(error).__name__)
             self._event(uid, "terminal", outcome="error", reason="stt_error")
+            return
+        self.on_timing("stt_duration_seconds", self.clock() - stt_started)
+        if self._closed or self._stop.is_set() or epoch != self._capture_epoch:
+            self._event(uid, "terminal", outcome="cancelled", reason="capture_invalidated")
             return
         self._event(uid, "stt_final")
         if not transcript:
@@ -541,6 +650,9 @@ class VoiceController:
             # burada yalnız komut metni bulut sürümüyle değişir.
             command = await self._cloud_command(uid, segment, command)
         await self._interrupt_output(uid)
+        if self._closed or self._stop.is_set() or epoch != self._capture_epoch:
+            self._event(uid, "terminal", outcome="cancelled", reason="capture_invalidated")
+            return
         self._generation_sequence += 1
         gid = self._generation_sequence
         if toggle is not None:
@@ -613,21 +725,23 @@ class VoiceController:
         """Yalnız (uyandırma sözcüğü + ) kip cümlesinden ibaret söz; LLM'e gitmez."""
         span = find_wake_word(transcript, self.config.wake_word)
         if span is not None and not self._speech_words(transcript[: span[0]]):
-            transcript = transcript[span[1]:]
+            transcript = transcript[span[1] :]
         words = [_fold(word) for word in self._speech_words(transcript)]
         if tuple(words) in _CONTINUOUS_OFF:
             return False
         if len(words) > _CONTINUOUS_MAX_WORDS or not any(
             # z/s her konumda eşit: "gezintisiz" ile "kesintisiz" yalnız g/k farkıyla eşleşir.
             _edit_distance(word.replace("z", "s"), key, 1) <= 1
-            for word in words for key in _CONTINUOUS_KEYS
+            for word in words
+            for key in _CONTINUOUS_KEYS
         ):
             return None
 
         def has_verb(stems: tuple[str, ...]) -> bool:
             return any(
-                word.startswith(stem) and word[len(stem):] in _VERB_SUFFIXES
-                for word in words for stem in stems
+                word.startswith(stem) and word[len(stem) :] in _VERB_SUFFIXES
+                for word in words
+                for stem in stems
             )
 
         on = has_verb(_CONTINUOUS_ON_VERBS)
@@ -644,10 +758,9 @@ class VoiceController:
         normalized = " ".join(heard)
         for size in {max(1, len(heard) - 1), len(heard), len(heard) + 1}:
             for index in range(max(0, len(spoken) - size + 1)):
-                candidate = " ".join(spoken[index:index + size])
+                candidate = " ".join(spoken[index : index + size])
                 if candidate == normalized or (
-                    len(heard) >= 2
-                    and SequenceMatcher(None, normalized, candidate).ratio() >= 0.88
+                    len(heard) >= 2 and SequenceMatcher(None, normalized, candidate).ratio() >= 0.88
                 ):
                     return True
         return False
@@ -661,11 +774,12 @@ class VoiceController:
             return text
         spoken = [_fold(word) for word in self._speech_words(self._spoken_text)]
         tokens = list(re.finditer(r"\w+", text))
-        if len(tokens) <= len(spoken) or [
-            _fold(token.group()) for token in tokens[: len(spoken)]
-        ] != spoken:
+        if (
+            len(tokens) <= len(spoken)
+            or [_fold(token.group()) for token in tokens[: len(spoken)]] != spoken
+        ):
             return text
-        return text[tokens[len(spoken) - 1].end():].lstrip(" \t,.;:!?-")
+        return text[tokens[len(spoken) - 1].end() :].lstrip(" \t,.;:!?-")
 
     def _mark_spoken(self, text: str, *, requires_wake: bool = True) -> None:
         self._spoken_text = text
@@ -793,7 +907,12 @@ class VoiceController:
 
     def _start_partial_decode(self) -> None:
         method = getattr(self.recognizer, "transcribe_partial", None)
-        if method is None or self._partial_task is not None:
+        if (
+            method is None
+            or self._partial_task is not None
+            or self._decode_busy
+            or not self._segments.empty()
+        ):
             return
         pcm = self.segmenter.snapshot()
         if pcm:
@@ -818,8 +937,13 @@ class VoiceController:
                 logger.debug("Ara STT penceresi kullanılamadı.")
 
     async def _timed_chunks(
-        self, text: str, cancelled: asyncio.Event, uid: int, gid: int | None,
-        *, ack: bool = False,
+        self,
+        text: str,
+        cancelled: asyncio.Event,
+        uid: int,
+        gid: int | None,
+        *,
+        ack: bool = False,
     ) -> AsyncGenerator[PCMChunk]:
         first = True
         cached = self._ack_cache.get(text) if ack else None
@@ -849,7 +973,11 @@ class VoiceController:
                 await closer()
 
     async def _play_response(
-        self, text: str, cancelled: asyncio.Event, uid: int, gid: int | None,
+        self,
+        text: str,
+        cancelled: asyncio.Event,
+        uid: int,
+        gid: int | None,
         first_pcm: Callable[[], None],
     ) -> None:
         async with aclosing(self._timed_chunks(text, cancelled, uid, gid)) as chunks:
@@ -867,7 +995,11 @@ class VoiceController:
         self._event(uid, "model_complete", generation_id=gid, command_class=command_class)
 
     async def _play_stream(
-        self, speech: SpeechStream, cancelled: asyncio.Event, uid: int, gid: int | None,
+        self,
+        speech: SpeechStream,
+        cancelled: asyncio.Event,
+        uid: int,
+        gid: int | None,
         first_pcm: Callable[[], None],
     ) -> None:
         """Cümleleri sırayla sentezler; hepsi tek sink akışında çalınır (cihaz bir kez açılır)."""
@@ -962,7 +1094,11 @@ class VoiceController:
                 self._emit_state("listening")
 
     async def _run_and_speak(
-        self, command: str, *, uid: int = 0, gid: int | None = None,
+        self,
+        command: str,
+        *,
+        uid: int = 0,
+        gid: int | None = None,
     ) -> None:
         if self.stream_responses:
             await self._run_and_speak_streamed(command, uid, gid)
@@ -990,9 +1126,15 @@ class VoiceController:
                 self._emit_state("speaking")
                 self._playback_cancelled = generation
                 self._output_active = True
-                self._playback = asyncio.create_task(self._play_response(
-                    result.text, generation, uid, gid, first_pcm,
-                ))
+                self._playback = asyncio.create_task(
+                    self._play_response(
+                        result.text,
+                        generation,
+                        uid,
+                        gid,
+                        first_pcm,
+                    )
+                )
                 try:
                     await self._playback
                 except asyncio.CancelledError:
@@ -1032,18 +1174,21 @@ class VoiceController:
 
     def discard_during_approval(self) -> None:
         """Senkron terminal onayı dönüşünde eski ses kuyruğunu ve segmenti sıfırlar."""
+        self._invalidate_segments()
         self.microphone.discard_pending()
         self._discard_capture("approval")
         self.segmenter.reset()
         self._live_reset()
 
     def pause_for_approval(self) -> None:
+        self._invalidate_segments()
         self.microphone.pause()
         self._discard_capture("approval")
         self.segmenter.reset()
         self._live_reset()
 
     def resume_after_approval(self) -> None:
+        self._invalidate_segments()
         self.microphone.discard_pending()
         self._discard_capture("approval")
         self.segmenter.reset()
@@ -1054,6 +1199,11 @@ class VoiceController:
         if self._closed:
             return
         self._closed = True
+        self._invalidate_segments()
+        if self._decoder is not None:
+            self._decoder.cancel()
+            with suppress(asyncio.CancelledError):
+                await self._decoder
         self._discard_capture("capture_stopped")
         if self._active is not None and not self._active.done():
             self.runner.cancel_current()

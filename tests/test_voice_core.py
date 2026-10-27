@@ -581,6 +581,7 @@ async def test_run_interrupts_playback_only_after_accepted_final_transcript(
         assert controller._followup_until == followup_until
         allow_final.set()
         await asyncio.wait_for(processed.wait(), 1)
+        await asyncio.wait_for(controller._segments.join(), 1)
         await asyncio.sleep(0)
         if command is None:
             assert not sink.aborted
@@ -627,6 +628,7 @@ async def test_run_accepts_followup_during_dinliyorum_without_repeating_wake():
     listening = asyncio.create_task(controller.run())
     try:
         await asyncio.wait_for(processed.wait(), 1)
+        await asyncio.wait_for(controller._segments.join(), 1)
         await asyncio.sleep(0)
         assert acknowledgements[0].cancelled()
         assert sink.aborted
@@ -1011,3 +1013,50 @@ async def test_early_sink_return_closes_underlying_synthesizer_iterator():
         assert finalized.is_set()
     finally:
         await controller.close()
+
+
+async def test_capture_continues_during_slow_final_and_overload_is_visible():
+    started, release, captured = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    events, heard = [], []
+    runner = FakeRunner()
+
+    class Slow(FakeRecognizer):
+        async def transcribe(self, pcm):
+            started.set()
+            await release.wait()
+            return 'Artemis saat kaç'
+
+    class Mic(FakeMic):
+        dropped_frames = 3
+
+        async def frames(self):
+            for _ in range(7):
+                yield AudioFrame(b'a', monotonic())
+            await started.wait()
+            # STT hâlâ beklerken 4 söz daha yakalanır; son ikisi açıkça reddedilir.
+            for _ in range(28):
+                yield AudioFrame(b'a', monotonic())
+            captured.set()
+            await asyncio.Future()
+
+    controller = VoiceController(
+        runner, VoiceConfig(pre_roll_ms=0, end_silence_ms=100), Mic(),
+        FakeVAD(([True] * 2 + [False] * 5) * 5), Slow([]), FakeTTS(), FakeSink(),
+        on_event=events.append, on_transcript=heard.append,
+    )
+    task = asyncio.create_task(controller.run())
+    try:
+        await asyncio.wait_for(captured.wait(), 1)
+        assert not release.is_set()
+        assert controller._segments.qsize() == 2
+        assert sum(e.reason == 'stt_queue_full' for e in events) == 2
+        assert any('ses karesi kayboldu' in text for text in heard)
+        controller.pause_for_approval()
+        controller.resume_after_approval()
+        release.set()
+        await asyncio.wait_for(controller._segments.join(), 1)
+        assert runner.commands == []  # Onay öncesi çözülen eski söz yürütülmez.
+        assert any(e.reason == 'capture_invalidated' for e in events)
+    finally:
+        controller.request_stop()
+        await asyncio.wait_for(task, 1)
