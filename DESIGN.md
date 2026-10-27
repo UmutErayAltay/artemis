@@ -18,7 +18,7 @@ Source authority: [PRODUCT.md](PRODUCT.md), [surface contract](.impeccable/surfa
 
 ## Colors
 
-Slate and blue provide calm structure. Primary uses `accent` and `accent_text` for actions and selection. Neutral roles are `bg`, `surface`, `soft`, `text`, `muted`, and `border`. Navigation has its own `nav`, `nav_text`, `nav_muted`, and `nav_selected` roles. `warning`, `error`, and `success` carry status meaning. All four complete source palettes follow; no synthetic tonal ramps are shipped.
+Warm neutrals (cream/bone, warm ink) with a turquoise accent provide calm structure; `accent_soft` is the gentle accent tint for user bubbles and soft selected fills. Primary uses `accent` and `accent_text` for actions and selection. Neutral roles are `bg`, `surface`, `soft`, `text`, `muted`, and `border`. Navigation has its own `nav`, `nav_text`, `nav_muted`, and `nav_selected` roles. `warning`, `error`, and `success` carry status meaning. All four complete source palettes follow; no synthetic tonal ramps are shipped.
 
 - **Açık / light:** pale workspace and pale navigation.
 - **Koyu / dark:** dark workspace and darker navigation.
@@ -32,88 +32,98 @@ Slate and blue provide calm structure. Primary uses `accent` and `accent_text` f
   "name": "Artemis",
   "description": "Native Windows workspace with warm companion language",
   "colors": {
-    "light-bg": "#edf0f4",
-    "light-surface": "#ffffff",
-    "light-soft": "#f4f7fb",
-    "light-text": "#0b1f3f",
-    "light-muted": "#51637c",
-    "light-border": "#d5e0ec",
-    "light-accent": "#365c9e",
+    "light-bg": "#f6f1e9",
+    "light-surface": "#fffdf9",
+    "light-soft": "#efe8dc",
+    "light-text": "#2a2420",
+    "light-muted": "#6b5f55",
+    "light-border": "#e2d8c8",
+    "light-accent": "#0f7f7a",
     "light-accent-text": "#ffffff",
-    "light-nav": "#eef5ff",
-    "light-nav-text": "#0b1f3f",
-    "light-nav-muted": "#51637c",
-    "light-nav-selected": "#dbeafe",
-    "light-warning": "#87590d",
-    "light-error": "#b12f36",
+    "light-accent-soft": "#d9efec",
+    "light-nav": "#efe7da",
+    "light-nav-text": "#2a2420",
+    "light-nav-muted": "#5f544a",
+    "light-nav-selected": "#e0d4c0",
+    "light-warning": "#8a5a0b",
+    "light-error": "#b3392f",
     "light-success": "#1f6d4b",
-    "dark-bg": "#0b0f14",
-    "dark-surface": "#171d26",
-    "dark-soft": "#1f2936",
-    "dark-text": "#e5e8ee",
-    "dark-muted": "#9aa4b2",
-    "dark-border": "#364159",
-    "dark-accent": "#b2caff",
-    "dark-accent-text": "#0b1f3f",
-    "dark-nav": "#0f1621",
-    "dark-nav-text": "#e5e8ee",
-    "dark-nav-muted": "#9aa4b2",
-    "dark-nav-selected": "#243755",
-    "dark-warning": "#ffd285",
-    "dark-error": "#ffb0ad",
+    "dark-bg": "#16120f",
+    "dark-surface": "#201b17",
+    "dark-soft": "#2a2420",
+    "dark-text": "#f0e9df",
+    "dark-muted": "#b3a698",
+    "dark-border": "#3b332c",
+    "dark-accent": "#5fd0c5",
+    "dark-accent-text": "#0d2926",
+    "dark-accent-soft": "#1f3a37",
+    "dark-nav": "#120f0c",
+    "dark-nav-text": "#f0e9df",
+    "dark-nav-muted": "#b3a698",
+    "dark-nav-selected": "#342d26",
+    "dark-warning": "#f2c46d",
+    "dark-error": "#ff9d8f",
     "dark-success": "#8fd7ae",
-    "light-mixed-bg": "#edf0f4",
-    "light-mixed-surface": "#ffffff",
-    "light-mixed-soft": "#f4f7fb",
-    "light-mixed-text": "#0b1f3f",
-    "light-mixed-muted": "#51637c",
-    "light-mixed-border": "#d5e0ec",
-    "light-mixed-accent": "#365c9e",
+    "light-mixed-bg": "#f6f1e9",
+    "light-mixed-surface": "#fffdf9",
+    "light-mixed-soft": "#efe8dc",
+    "light-mixed-text": "#2a2420",
+    "light-mixed-muted": "#6b5f55",
+    "light-mixed-border": "#e2d8c8",
+    "light-mixed-accent": "#0f7f7a",
     "light-mixed-accent-text": "#ffffff",
-    "light-mixed-nav": "#25344d",
-    "light-mixed-nav-text": "#f2f5fc",
-    "light-mixed-nav-muted": "#bbc9df",
-    "light-mixed-nav-selected": "#405777",
-    "light-mixed-warning": "#87590d",
-    "light-mixed-error": "#b12f36",
+    "light-mixed-accent-soft": "#d9efec",
+    "light-mixed-nav": "#2b231d",
+    "light-mixed-nav-text": "#f4ece1",
+    "light-mixed-nav-muted": "#cdbfae",
+    "light-mixed-nav-selected": "#43382f",
+    "light-mixed-warning": "#8a5a0b",
+    "light-mixed-error": "#b3392f",
     "light-mixed-success": "#1f6d4b",
-    "dark-mixed-bg": "#0b0f14",
-    "dark-mixed-surface": "#171d26",
-    "dark-mixed-soft": "#1f2936",
-    "dark-mixed-text": "#e5e8ee",
-    "dark-mixed-muted": "#9aa4b2",
-    "dark-mixed-border": "#364159",
-    "dark-mixed-accent": "#b2caff",
-    "dark-mixed-accent-text": "#0b1f3f",
-    "dark-mixed-nav": "#e8edf5",
-    "dark-mixed-nav-text": "#26364d",
-    "dark-mixed-nav-muted": "#485a76",
-    "dark-mixed-nav-selected": "#cbd9ee",
-    "dark-mixed-warning": "#ffd285",
-    "dark-mixed-error": "#ffb0ad",
+    "dark-mixed-bg": "#16120f",
+    "dark-mixed-surface": "#201b17",
+    "dark-mixed-soft": "#2a2420",
+    "dark-mixed-text": "#f0e9df",
+    "dark-mixed-muted": "#b3a698",
+    "dark-mixed-border": "#3b332c",
+    "dark-mixed-accent": "#5fd0c5",
+    "dark-mixed-accent-text": "#0d2926",
+    "dark-mixed-accent-soft": "#1f3a37",
+    "dark-mixed-nav": "#efe7da",
+    "dark-mixed-nav-text": "#2a2420",
+    "dark-mixed-nav-muted": "#5f544a",
+    "dark-mixed-nav-selected": "#e0d4c0",
+    "dark-mixed-warning": "#f2c46d",
+    "dark-mixed-error": "#ff9d8f",
     "dark-mixed-success": "#8fd7ae"
   },
   "typography": {
+    "greeting": {
+      "fontFamily": "Segoe UI Variable Text, Segoe UI",
+      "fontSize": "28px",
+      "fontWeight": 650
+    },
     "headline": {
-      "fontFamily": "Segoe UI",
+      "fontFamily": "Segoe UI Variable Text, Segoe UI",
       "fontSize": "22px",
       "fontWeight": 650
     },
     "body": {
-      "fontFamily": "Segoe UI",
+      "fontFamily": "Segoe UI Variable Text, Segoe UI",
       "fontSize": "14px"
     },
     "label": {
-      "fontFamily": "Segoe UI",
-      "fontSize": "14px",
+      "fontFamily": "Segoe UI Variable Text, Segoe UI",
+      "fontSize": "13px",
       "fontWeight": 600
     }
   },
   "rounded": {
-    "control": "7px",
-    "surface": "10px",
-    "user-message": "9px",
-    "tab-tool": "6px",
+    "control": "8px",
+    "surface": "12px",
+    "pet-card": "14px",
+    "chip": "8px",
+    "user-bubble": "14px",
     "progress": "5px"
   },
   "spacing": {
@@ -161,7 +171,7 @@ Slate and blue provide calm structure. Primary uses `accent` and `accent_text` f
 
 ## Typography
 
-Segoe UI is the shared native family. Body is 14px, headings are 22px at weight 650, and status labels are weight 600. Primary buttons use weight 650. Small tool/status details include 12px overrides; these are local supporting text, not a second display scale. Line height and letter spacing are not explicitly tokenized in Qt source.
+Segoe UI Variable Text (fallback Segoe UI) is the shared family. Body is 14px, labels 13px, captions/meta/hints 12px (nothing smaller), greeting 28px and page titles 22px at weight 650, section titles 16px at 600, and status labels are weight 600. Primary buttons use weight 650. Small tool/status details include 12px overrides; these are local supporting text, not a second display scale. Line height and letter spacing are not explicitly tokenized in Qt source.
 
 ## Layout
 
@@ -177,7 +187,7 @@ Shared surfaces are flat: tonal separation and 1px semantic borders establish hi
 
 ## Shapes
 
-Controls and fields have 7px corners. Main cards, sidebar and composer surfaces use 10px corners. User messages use 9px corners; tabs/tool buttons use 6px; progress bars use 5px. These are distinct implemented roles, not a universal pill shape.
+Controls and fields have 8px corners. Cards, sidebar and composer surfaces use 12px; pet gallery cards 14px; chips 8px; user bubbles 14px; tabs/tool buttons 8px; progress bars 5px. These are distinct implemented roles, not a universal pill shape.
 
 ## Components
 
@@ -187,11 +197,11 @@ Secondary buttons use soft background, semantic text, a 1px border, 8px by 13px 
 
 ### Inputs / Fields
 
-Native line edits, text edits, lists, combos and spin boxes use surface/text, a 1px border, 7px corners and 8px padding. Text selection pairs accent with accent_text. Explicit 2px accent focus is defined for line edits, plain text edits and combos. Disabled combos use muted text. Do not infer unimplemented validation states.
+Native line edits, text edits, lists, combos and spin boxes use surface/text, a 1px border, 8px corners and 8px padding. Text selection pairs accent with accent_text. Explicit 2px accent focus is defined for line edits, plain text edits and combos. Disabled combos use muted text. Do not infer unimplemented validation states.
 
 ### Cards / Containers
 
-Cards, raised containers and blocks share surface, a 1px border and 10px corners. Raised is a semantic name, not a shadow. Conversation and activity containers use the measured Layout spacing above.
+Cards, raised containers and blocks share surface, a 1px border and 12px corners. Raised is a semantic name, not a shadow. Conversation and activity containers use the measured Layout spacing above.
 
 ### Navigation
 
@@ -210,7 +220,7 @@ The icon gallery shows installed assets, their source and selection. Selection, 
 ### Do:
 - **Do** apply semantic workspace and navigation colors together when switching themes.
 - **Do** keep Artemis as the app brand and show the selected pet beside it.
-- **Do** use 7px control corners, 10px surface corners and the extracted typography.
+- **Do** use 8px control corners, 12px surface corners and the extracted typography.
 - **Do** preserve existing pet assets and their established interactions.
 
 ### Don't:
@@ -230,13 +240,13 @@ Umut approved: keep structure (palettes, four themes, Segoe UI, left navigation)
 - **Spacing:** 4, 8, 12, 16, 24, 32. No other margins/gaps (no 6, 10, 14, 15, 18, 22).
 - **Type:** 12 caption/meta, 13 secondary/label, 14 body, 16 section heading (600), 22 page title (650). Never uppercase eyebrows; sentence case everywhere.
 - **Control height:** 32px standard (buttons, line edits, combos, spin boxes), 36px primary call-to-action and composer send. Multi-line editors start at 72px.
-- **Radius:** 7px controls, 10px surfaces/cards, 12px pet gallery cards. Nothing pill-shaped except the status dot.
+- **Radius:** 8px controls, 12px surfaces/cards, 14px pet gallery cards (updated 2026-10-28). Nothing pill-shaped except the status dot.
 - **Shell:** outer margin 16px, shell gaps 16px, sidebar 176px with 12px inner padding, page content inset 24px, page title row 48px tall.
 
 ### Layout rules
 - Every page: title row (22px title left, page actions right) then content. One scroll region per page, never nested.
 - Labels sit above their field (13px, `muted`, 4px gap). No right-aligned `QFormLayout` label column. Checkbox rows use the label as checkbox text plus an optional 12px muted hint below.
-- Group related controls in a `card` (surface, 1px border, 10px radius, 16px padding, 12px internal gap) with a 16px section heading. Cards stack with 16px gap.
+- Group related controls in a `card` (surface, 1px border, 12px radius, 16px padding, 12px internal gap) with a 16px section heading. Cards stack with 16px gap.
 - Buttons size to content (min width 88px). Full-width buttons only inside narrow side columns. Button rows are right-aligned, primary last.
 - Max readable width for forms: 720px; extra width stays as margin, not stretched fields.
 - At 900px window width nothing clips: header items elide or collapse, side panels hide.

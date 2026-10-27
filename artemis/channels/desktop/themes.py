@@ -7,75 +7,54 @@ _ASSETS = Path(__file__).resolve().parent
 
 DEFAULT_THEME = "light-mixed"
 
+# Sıcak yoldaş paleti (DESIGN.md "Warm companion direction"): krem/kemik ve sıcak mürekkep;
+# kurumsal slate-mavi bırakıldı. Düz tonlar, gradyan/parıltı yok.
+# nav_muted #6b5f55 -> #5f544a: krem menüde nav_selected üstünde 4.23:1 idi (AA için 4.5 gerekir).
+_LIGHT = {
+    "bg": "#f6f1e9",
+    "surface": "#fffdf9",
+    "soft": "#efe8dc",
+    "text": "#2a2420",
+    "muted": "#6b5f55",
+    "border": "#e2d8c8",
+    "accent": "#0f7f7a",
+    "accent_text": "#ffffff",
+    "accent_soft": "#d9efec",
+    "nav": "#efe7da",
+    "nav_text": "#2a2420",
+    "nav_muted": "#5f544a",
+    "nav_selected": "#e0d4c0",
+    "warning": "#8a5a0b",
+    "error": "#b3392f",
+    "success": "#1f6d4b",
+}
+_DARK = {
+    "bg": "#16120f",
+    "surface": "#201b17",
+    "soft": "#2a2420",
+    "text": "#f0e9df",
+    "muted": "#b3a698",
+    "border": "#3b332c",
+    "accent": "#5fd0c5",
+    "accent_text": "#0d2926",
+    "accent_soft": "#1f3a37",
+    "nav": "#120f0c",
+    "nav_text": "#f0e9df",
+    "nav_muted": "#b3a698",
+    "nav_selected": "#342d26",
+    "warning": "#f2c46d",
+    "error": "#ff9d8f",
+    "success": "#8fd7ae",
+}
+_WARM_NAV = {"nav": "#2b231d", "nav_text": "#f4ece1", "nav_muted": "#cdbfae",
+             "nav_selected": "#43382f"}
+_CREAM_NAV = {k: _LIGHT[k] for k in ("nav", "nav_text", "nav_muted", "nav_selected")}
+
 THEMES: dict[str, dict[str, str]] = {
-    "light": {
-        "bg": "#edf0f4",
-        "surface": "#ffffff",
-        "soft": "#f4f7fb",
-        "text": "#0b1f3f",
-        "muted": "#51637c",
-        "border": "#d5e0ec",
-        "accent": "#365c9e",
-        "accent_text": "#ffffff",
-        "nav": "#eef5ff",
-        "nav_text": "#0b1f3f",
-        "nav_muted": "#51637c",
-        "nav_selected": "#dbeafe",
-        "warning": "#87590d",
-        "error": "#b12f36",
-        "success": "#1f6d4b",
-    },
-    "dark": {
-        "bg": "#0b0f14",
-        "surface": "#171d26",
-        "soft": "#1f2936",
-        "text": "#e5e8ee",
-        "muted": "#9aa4b2",
-        "border": "#364159",
-        "accent": "#b2caff",
-        "accent_text": "#0b1f3f",
-        "nav": "#0f1621",
-        "nav_text": "#e5e8ee",
-        "nav_muted": "#9aa4b2",
-        "nav_selected": "#243755",
-        "warning": "#ffd285",
-        "error": "#ffb0ad",
-        "success": "#8fd7ae",
-    },
-    "light-mixed": {
-        "bg": "#edf0f4",
-        "surface": "#ffffff",
-        "soft": "#f4f7fb",
-        "text": "#0b1f3f",
-        "muted": "#51637c",
-        "border": "#d5e0ec",
-        "accent": "#365c9e",
-        "accent_text": "#ffffff",
-        "nav": "#25344d",
-        "nav_text": "#f2f5fc",
-        "nav_muted": "#bbc9df",
-        "nav_selected": "#405777",
-        "warning": "#87590d",
-        "error": "#b12f36",
-        "success": "#1f6d4b",
-    },
-    "dark-mixed": {
-        "bg": "#0b0f14",
-        "surface": "#171d26",
-        "soft": "#1f2936",
-        "text": "#e5e8ee",
-        "muted": "#9aa4b2",
-        "border": "#364159",
-        "accent": "#b2caff",
-        "accent_text": "#0b1f3f",
-        "nav": "#e8edf5",
-        "nav_text": "#26364d",
-        "nav_muted": "#485a76",
-        "nav_selected": "#cbd9ee",
-        "warning": "#ffd285",
-        "error": "#ffb0ad",
-        "success": "#8fd7ae",
-    },
+    "light": _LIGHT,
+    "dark": _DARK,
+    "light-mixed": {**_LIGHT, **_WARM_NAV},
+    "dark-mixed": {**_DARK, **_CREAM_NAV},
 }
 
 THEME_LABELS: dict[str, str] = {
@@ -107,7 +86,8 @@ def stylesheet(name: str) -> str:
     # Exact-class selectors (.QWidget) leave inputs, which subclass QWidget, untouched.
     surfaces = ", ".join(
         f"QFrame#{owner} {child}"
-        for owner in ("card", "raised", "topbar", "galleryCard", "stepPanel", "sidebar")
+        for owner in ("card", "raised", "topbar", "galleryCard", "stepPanel", "sidebar",
+                      "userBubble", "assistantBubble")
         for child in (".QWidget", ".QFrame", ".QStackedWidget", "QCheckBox", "QRadioButton",
                       "QScrollArea > .QWidget > .QWidget")
     )
@@ -116,27 +96,29 @@ def stylesheet(name: str) -> str:
            "QPlainTextEdit:focus, QTextEdit:focus")
     return f"""
 QWidget {{ background: {t['bg']}; color: {t['text']};
- font-family: 'Segoe UI'; font-size: 14px; }}
+ font-family: 'Segoe UI Variable Text', 'Segoe UI'; font-size: 14px; }}
 QDialog {{ background: {t['surface']}; }}
 QLabel {{ background: transparent; }}
 QLabel#status {{ border: none; background: transparent; font-weight: 600; }}
+QLabel#greeting {{ font-size: 28px; font-weight: 650; }}
 QLabel#title, QLabel#pageTitle {{ font-size: 22px; font-weight: 650; }}
-QLabel#muted, QLabel#hint, QLabel#rawToolName, QLabel#eyebrow {{ color: {t['muted']}; }}
+QLabel#muted, QLabel#rawToolName, QLabel#eyebrow {{ color: {t['muted']}; }}
+QLabel#hint {{ color: {t['muted']}; font-size: 12px; }}
 QLabel#fieldLabel, QLabel#emptyBody {{ color: {t['muted']}; font-size: 13px; }}
 QLabel#meta {{ color: {t['muted']}; font-size: 12px; }}
 QLabel#sectionTitle, QLabel#emptyTitle {{ font-size: 16px; font-weight: 600; }}
-QLabel#chip {{ background: {t['soft']}; border-radius: 7px; font-size: 12px;
+QLabel#chip {{ background: {t['soft']}; border-radius: 8px; font-size: 13px;
  padding: 2px 8px; }}
 QLabel#chipWarning {{ background: transparent; color: {t['warning']};
- border: 1px solid {t['warning']}; border-radius: 7px; font-size: 12px; padding: 2px 8px; }}
+ border: 1px solid {t['warning']}; border-radius: 8px; font-size: 12px; padding: 2px 8px; }}
 QFrame#card, QFrame#raised, QFrame#block, QFrame#topbar {{ background: {t['surface']};
- border: 1px solid {t['border']}; border-radius: 10px; }}
+ border: 1px solid {t['border']}; border-radius: 12px; }}
 QFrame#galleryCard {{ background: {t['surface']}; border: 1px solid {t['border']};
- border-radius: 12px; }}
+ border-radius: 14px; }}
 QFrame#galleryCard[selected="true"] {{ border: 2px solid {t['accent']}; }}
 QFrame#stepPanel {{ background: {t['surface']}; border: 1px solid {t['border']};
- border-radius: 10px; }}
-QFrame#opCard {{ border: 1px solid {t['border']}; border-radius: 10px; }}
+ border-radius: 12px; }}
+QFrame#opCard {{ border: 1px solid {t['border']}; border-radius: 12px; }}
 QFrame#emptyState {{ background: transparent; border: none; }}
 QFrame#stageBar {{ background: transparent; border: none; }}
 QLabel#stage {{ color: {t['muted']}; padding: 4px 8px; border-bottom: 2px solid transparent; }}
@@ -146,22 +128,26 @@ QLabel#stage[state="done"] {{ color: {t['success']}; }}
 QLabel#stage[state="todo"] {{ color: {t['muted']}; }}
 QLabel#statusPill, QFrame#statusPill, QFrame#topbar QFrame#statusPill {{
  background: {t['soft']}; border: none;
- border-radius: 7px; padding: 4px 12px; font-size: 13px; font-weight: 600; }}
+ border-radius: 8px; padding: 4px 12px; font-size: 13px; font-weight: 600; }}
 QFrame#messageUser, QFrame#card QFrame#messageUser {{ background: {t['soft']};
- border-radius: 10px; }}
+ border-radius: 12px; }}
+QFrame#userBubble, QFrame#card QFrame#userBubble {{ background: {t['accent_soft']};
+ color: {t['text']}; border: none; border-radius: 14px; }}
+QFrame#userBubble QLabel {{ color: {t['text']}; font-size: 14px; }}
 QFrame#messageAssistant, QFrame#stepBlock {{ background: {t['surface']}; }}
-QFrame#sidebar {{ background: {t['nav']}; border-radius: 10px; }}
+QFrame#assistantBubble {{ background: transparent; border: none; }}
+QFrame#sidebar {{ background: {t['nav']}; border-radius: 12px; }}
 {surfaces} {{ background: transparent; }}
 QWidget#flat, QWidget#cardRow {{ background: transparent; }}
-QFrame#previewWell {{ background: {t['soft']}; border: none; border-radius: 10px; }}
+QFrame#previewWell {{ background: {t['soft']}; border: none; border-radius: 12px; }}
 QPlainTextEdit[readOnly="true"], QTextEdit[readOnly="true"] {{ background: {t['soft']}; }}
 QFrame#sidebar QLabel {{ color: {t['nav_text']}; }}
 {ctl} {{ background: {t['soft']}; border: 1px solid {t['border']};
- border-radius: 7px; padding: 4px 8px; min-height: 22px; }}
+ border-radius: 8px; padding: 4px 8px; min-height: 22px; }}
 QLineEdit, QComboBox, QSpinBox {{ background: {t['surface']}; color: {t['text']};
  selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
 QPlainTextEdit, QTextEdit, QListWidget {{ background: {t['surface']}; color: {t['text']};
- border: 1px solid {t['border']}; border-radius: 7px; padding: 4px 8px;
+ border: 1px solid {t['border']}; border-radius: 8px; padding: 4px 8px;
  selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
 QPushButton:hover, QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
  border-color: {t['accent']}; }}
@@ -216,7 +202,7 @@ QRadioButton::indicator:checked {{ image: url({radio}); border: none; }}
 QCheckBox:focus, QRadioButton:focus {{ color: {t['accent']}; }}
 QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{ background: {t['soft']}; padding: 8px 12px; margin-right: 4px;
- border-radius: 7px; }}
+ border-radius: 8px; }}
 QTabBar::tab:selected {{ background: {t['accent']}; color: {t['accent_text']}; }}
 QScrollArea {{ background: transparent; border: none; }}
 QScrollBar:vertical {{ background: transparent; width: 10px; margin: 0; }}
@@ -229,7 +215,7 @@ QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QProgressBar {{ border: 1px solid {t['border']}; background: {t['soft']};
  border-radius: 5px; text-align: center; }}
 QProgressBar::chunk {{ background: {t['accent']}; border-radius: 4px; }}
-QToolButton {{ border: 1px solid {t['border']}; padding: 4px 8px; border-radius: 7px; }}
+QToolButton {{ border: 1px solid {t['border']}; padding: 4px 8px; border-radius: 8px; }}
 QMenu, QToolTip {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; padding: 8px; }}
 QMenu::item:selected {{ background: {t['soft']}; }}

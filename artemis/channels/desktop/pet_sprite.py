@@ -40,7 +40,7 @@ SHEET_SIZES = frozenset({(1536, 1872), (1536, 2288)})
 # Satır sırası: idle, running-right, running-left, waving, jumping, failed, waiting, running, review
 FRAMES = (6, 8, 8, 4, 5, 8, 6, 6, 6)
 IDLE, RUN_RIGHT, RUN_LEFT, WAVING, JUMPING, FAILED, WAITING, RUNNING, REVIEW = range(9)
-FPS =  5 # kare hızı (sn başına); 8 çok hızlı, 4 çok yavaştı (Umut, 2026-10-27)
+FPS = 6  # kare hızı (sn başına); eskiden 8 çok hızlı, 4 çok yavaştı. Umut 2026-10-28: 6
 STATE_ROW = {
     "idle": IDLE, "off": IDLE, "listening": REVIEW, "thinking": RUNNING,
     "speaking": WAVING, "approval": WAITING, "error": FAILED,

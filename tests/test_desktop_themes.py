@@ -1,4 +1,6 @@
 """Four native palettes must retain readable text, controls and mixed navigation."""
+import pytest
+
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEMES, stylesheet
 
 
@@ -12,16 +14,63 @@ def contrast(first: str, second: str) -> float:
 
 
 def test_palettes_are_readable_and_mixed_navigation_is_distinct() -> None:
-    for palette in THEMES.values():
+    for name, palette in THEMES.items():
         for background in ("bg", "surface", "soft"):
             for foreground in ("text", "muted", "warning", "error", "success"):
-                assert contrast(palette[foreground], palette[background]) >= 4.5
-        assert contrast(palette["accent"], palette["accent_text"]) >= 4.5
+                assert contrast(palette[foreground], palette[background]) >= 4.5, (
+                    name, foreground, background)
+            # Metin olmayan öğeler (düğme, odak halkası, seçim çizgisi) için 3:1 yeter.
+            assert contrast(palette["accent"], palette[background]) >= 3, (name, background)
+        assert contrast(palette["accent_text"], palette["accent"]) >= 4.5, name
+        assert contrast(palette["text"], palette["accent_soft"]) >= 4.5, name
         for background in ("nav", "nav_selected"):
-            assert contrast(palette["nav_text"], palette[background]) >= 4.5
+            for foreground in ("nav_text", "nav_muted"):
+                assert contrast(palette[foreground], palette[background]) >= 4.5, (
+                    name, foreground, background)
+        # Kart kenarı yüzeyden ayırt edilebilir kalmalı.
+        assert contrast(palette["border"], palette["surface"]) >= 1.3, name
     assert THEMES["light-mixed"]["nav"] != THEMES["light"]["nav"]
     assert THEMES["dark-mixed"]["nav"] != THEMES["dark"]["nav"]
     assert stylesheet("invalid") == stylesheet(DEFAULT_THEME)
+
+
+def test_themes_share_token_keys_and_warm_type_rules() -> None:
+    keys = set(THEMES["light"])
+    assert "accent_soft" in keys
+    for name, palette in THEMES.items():
+        assert set(palette) == keys, name
+        css = stylesheet(name)
+        assert "Segoe UI Variable Text" in css
+        assert "11px" not in css
+        for selector in ("QLabel#greeting", "QFrame#userBubble", "QFrame#assistantBubble",
+                         "QLabel#hint"):
+            assert selector in css, (name, selector)
+
+
+def test_stylesheet_builds_without_qt_warnings_for_all_themes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Qt ayrıştırma hatalarını (Could not parse stylesheet) qWarning olarak yazar."""
+    monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtCore import qInstallMessageHandler
+    from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton
+
+    app = QApplication.instance() or QApplication([])
+    messages: list[str] = []
+    previous = qInstallMessageHandler(lambda kind, ctx, msg: messages.append(msg))
+    try:
+        for name in THEMES:
+            host = QFrame()
+            host.setStyleSheet(stylesheet(name))
+            for widget in (QLabel("x"), QPushButton("x"), QFrame()):
+                widget.setParent(host)
+            host.ensurePolished()
+            host.show()
+            app.processEvents()
+            host.close()
+    finally:
+        qInstallMessageHandler(previous)
+    assert not [m for m in messages if "stylesheet" in m.lower()], messages
 
 
 NEW_NAMES = (

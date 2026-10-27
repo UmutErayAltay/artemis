@@ -267,7 +267,7 @@ def test_state_to_row_mapping() -> None:
 def test_frame_index_loop_once_and_reduced(tmp_path: Path, qapp: QApplication) -> None:
     sprite = ps.SpritePet(ps.read_pet(make_pet(tmp_path), "artemis"), 120)
     assert sprite.frame_index(ps.IDLE, 0.0, False) == 0
-    assert sprite.frame_index(ps.IDLE, 1.0 / ps.FPS * 7, False) == 1  # 6 kare döner
+    assert sprite.frame_index(ps.IDLE, 7.5 / ps.FPS, False) == 1  # 6 kare döner; 7.5 float payı
     assert sprite.frame_index(ps.JUMPING, 99.0, False) == 4  # döngü yok
     assert sprite.frame_index(ps.RUN_RIGHT, 99.0, True) == 0  # hareket azaltıldı
 
