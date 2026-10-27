@@ -166,7 +166,17 @@ class CreatorPanel(QWidget):
         self._base_png = b""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 12, 0, 0)
-        layout.addWidget(QLabel("Pet üret"))
+        header = QHBoxLayout()
+        header.addWidget(QLabel("Pet üret"))
+        header.addStretch(1)
+        self.reset_button = QPushButton("Yeni pet")
+        self.reset_button.setAccessibleName("Yeni pet")
+        self.reset_button.setToolTip(
+            "Sohbeti ve kaydedilmemiş çizimi temizleyerek yeni pet başlatır."
+        )
+        self.reset_button.clicked.connect(self.reset_conversation)
+        header.addWidget(self.reset_button)
+        layout.addLayout(header)
         row = QHBoxLayout()
         self.method = QComboBox()
         self.method.setAccessibleName("Üretim yöntemi")
@@ -290,6 +300,7 @@ class CreatorPanel(QWidget):
     def _update_buttons(self) -> None:
         idle = not self._busy()
         ready = not self._demo and self.model_combo.count() > 0
+        self.reset_button.setEnabled(not self._demo and idle)
         self.send_button.setEnabled(ready and idle)
         self.input.setEnabled(ready and idle)
         self.model_combo.setEnabled(ready and idle)
@@ -305,6 +316,28 @@ class CreatorPanel(QWidget):
             self.busy.setText("")
 
     # ----------------------------------------------------------------- sohbet
+
+    def reset_conversation(self) -> None:
+        """Yeni taslak; kurulu petler ve model/yöntem seçimi korunur."""
+        if self._busy() or self._demo:
+            return
+        self._timer.stop()
+        self._svg = ""
+        self._sheet = None
+        self._base = None
+        self._base_png = b""
+        self._frames = []
+        self._frame = 0
+        self.state_combo.setCurrentIndex(0)
+        self.preview.clear()
+        self.preview.setText("Önizleme yok")
+        self.chat_log.clear()
+        self.input.clear()
+        self.name_edit.clear()
+        self.status.clear()
+        self.busy.clear()
+        self._update_buttons()
+        self.input.setFocus()
 
     def _log(self, who: str, text: str) -> None:
         self.chat_log.appendPlainText(f"{who}: {text}")

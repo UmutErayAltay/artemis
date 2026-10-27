@@ -278,3 +278,37 @@ def test_paid_warning_and_demo(section: PetSection, tmp_path: Path) -> None:
     assert demo.creator is not None and not demo.creator.send_button.isEnabled()
     demo.creator.shutdown()
     demo.deleteLater()
+
+
+def test_new_pet_clears_svg_context_but_keeps_installed_pet(
+    section: PetSection, qapp: QApplication,
+) -> None:
+    creator = section.creator
+    assert creator is not None
+    creator.name_edit.setText("İlk pet")
+    creator.input.setText("turuncu kedi")
+    creator.send()
+    assert not creator.reset_button.isEnabled()
+    creator.reset_conversation()  # Direct calls must also respect an in-flight request.
+    assert "turuncu kedi" in creator.chat_log.toPlainText()
+    wait_reply(creator, qapp)
+    creator.save()
+    files = {p: p.read_bytes() for p in creator._pets_dir.rglob("*") if p.is_file()}
+    assert files
+    alias = creator.model_combo.currentData()
+    creator.state_combo.setCurrentIndex(3)
+    creator.input.setText("henüz gönderilmedi")
+    creator.reset_button.click()
+    assert creator.chat_log.toPlainText() == creator.input.text() == creator.name_edit.text() == ""
+    assert creator._sheet is None and creator._svg == ""
+    assert not creator._timer.isActive() and not creator._frames and creator._frame == 0
+    assert creator.preview.text() == "Önizleme yok"
+    assert not creator.save_button.isEnabled() and creator.reset_button.isEnabled()
+    assert creator.status.text() == "" and creator.busy.text() == ""
+    assert creator.state_combo.currentIndex() == 0
+    assert creator.model_combo.currentData() == alias
+    assert all(p.read_bytes() == content for p, content in files.items())
+    creator.input.setText("yeşil köpek")
+    creator.send()
+    wait_reply(creator, qapp)
+    assert FakeRouter.calls[-1][1][1].content == "yeşil köpek"

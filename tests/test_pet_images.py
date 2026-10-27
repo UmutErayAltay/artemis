@@ -587,6 +587,40 @@ def test_ui_image_flow(section: tuple[PetSection, UiFake, Settings], qapp: QAppl
     assert set(fake.aliases) == {"resim"}
 
 
+def test_new_pet_starts_fresh_image_instead_of_editing(
+    section: tuple[PetSection, UiFake, Settings], qapp: QApplication,
+) -> None:
+    sec, fake, _ = section
+    creator = sec.creator
+    assert creator is not None
+    creator.method.setCurrentIndex(1)
+    creator.input.setText("mavi robot")
+    creator.send()
+    assert not creator.reset_button.isEnabled()
+    creator.reset_conversation()
+    assert "mavi robot" in creator.chat_log.toPlainText()
+    wait_image(creator, qapp)
+    assert creator._base is not None and creator._base_png
+    creator.animate()
+    assert not creator.reset_button.isEnabled()
+    old_base = creator._base
+    creator.reset_conversation()
+    assert creator._base is old_base
+    wait_image(creator, qapp)
+    assert creator._sheet is not None and creator._timer.isActive()
+    creator.reset_button.click()
+    assert creator.method.currentIndex() == 1
+    assert creator.model_combo.currentData() == "resim"
+    assert creator._base is None and creator._base_png == b"" and creator._sheet is None
+    assert not creator._timer.isActive() and not creator._frames
+    assert not creator.animate_button.isEnabled() and not creator.save_button.isEnabled()
+    assert creator.chat_log.toPlainText() == "" and creator.preview.text() == "Önizleme yok"
+    creator.input.setText("kırmızı tilki")
+    creator.send()
+    wait_image(creator, qapp)
+    assert fake.model.calls[-1][1] is None  # A new generation, no previous reference image.
+
+
 def test_ui_progress_text_and_cancel(section: tuple[PetSection, UiFake, Settings],
                                      qapp: QApplication) -> None:
     sec, fake, _ = section

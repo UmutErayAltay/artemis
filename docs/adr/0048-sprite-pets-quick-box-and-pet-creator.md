@@ -107,3 +107,13 @@ kalır; **resim modeli yolu artık her durum için gerçek kare üretir.** Bu ek
 tutar; abonelik kotasından düşer. Karakter tutarlılığı modele bağlıdır (referans görsel ve sabit
 istemle sağlanır, garanti değildir; bozuk satır yedeğe düşer). Canlı model doğrulaması bu eke dahil
 değildir: testler sahte taşıma/üreteçle çalışır.
+
+
+## Ek: yeni pet sohbeti (2026-10-27)
+
+Umut'un bildirimi: ilk üretimden sonra yeni bir karakter başlatmak için uygulamayı kapatmak
+gerekiyordu; eski SVG ya da temel görsel sonraki isteklerde düzenleme referansı oluyordu.
+Pet üretici başlığındaki **Yeni pet**, sohbeti ve kaydedilmemiş üretim durumunu birlikte temizler.
+Yöntem/model seçimi ve kurulmuş petler korunur. Çalışan metin, temel görsel veya animasyon
+isteği varken düğme kapalıdır; çağrı bitmeden sıfırlama yapılmaz. Böylece eski çağrı yanıtı
+yeni taslağa karışmaz. Bu işlem genel asistan sohbetini ya da kalıcı verileri silmez.
