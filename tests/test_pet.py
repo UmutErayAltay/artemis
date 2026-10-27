@@ -574,7 +574,7 @@ def test_sprite_jump_once_and_drag_direction(made: Any, tmp_path: Path) -> None:
     apply_state(pet, "happy")
     pet.tick(0.016)
     assert pet._sprite_row == ps.JUMPING
-    _settle(pet, 1.0)  # 5 kare / 8 fps sonrası idle
+    _settle(pet, 5 / ps.FPS + 0.3)  # zıplamanın 5 karesi bitince idle
     assert pet._sprite_row == ps.IDLE
     pet._dragging, pet._run_right = True, False
     pet.tick(0.016)
