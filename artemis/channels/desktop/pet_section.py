@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop import pet_sprite
+from artemis.channels.desktop.pet_creator_panel import CreatorPanel
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError, PetInfo
 
 _SOURCE_LABEL = {"artemis": "Artemis", "codex": "Codex"}
@@ -34,7 +35,8 @@ class PetSection(QWidget):
     skin_selected = Signal(str)  # pet kimliği ya da "orb"
 
     def __init__(
-        self, pets_dir: Path, codex_dir: Path | None = None, *, demo: bool = False
+        self, pets_dir: Path, codex_dir: Path | None = None, *, demo: bool = False,
+        config_path: Path | None = None,
     ) -> None:
         super().__init__()
         self._pets_dir = pets_dir
@@ -73,15 +75,26 @@ class PetSection(QWidget):
         )
         note.setWordWrap(True)
         layout.addWidget(note)
-        # Paket 3 (ADR 0048 madde 8): "Pet üret" sohbeti buraya eklenecek. Şimdilik boş.
+        # Pet üretici (ADR 0048 madde 8): config yoksa (yalnız liste kullanan testler) eklenmez.
         self.creator_slot = QVBoxLayout()
         layout.addLayout(self.creator_slot)
+        self.creator: CreatorPanel | None = None
+        if config_path is not None:
+            self.creator = CreatorPanel(config_path, pets_dir, demo=demo)
+            self.creator.installed.connect(self._creator_installed)
+            self.creator_slot.addWidget(self.creator)
         if demo:
             self.import_button.setEnabled(False)
         self._demo = demo
         self.refresh()
 
     # ------------------------------------------------------------------ liste
+
+    def _creator_installed(self, pet_id: str) -> None:
+        self.refresh()
+        self._current = pet_id
+        self.skin_selected.emit(pet_id)
+        self.refresh()
 
     def set_current(self, pet_id: str) -> None:
         self._current = pet_id

@@ -61,6 +61,8 @@ içine kurar; yalnız `pet.json` + tek görsel kabul edilir, boyut ve yol sını
 Silme yalnız Artemis'e yüklenen pet'lerde çalışır. Windows'ta "animasyon efektleri" kapalıysa
 ya da `ARTEMIS_REDUCE_MOTION=1` ise pet ilk kareyi gösterir.
 
+**Pet üret:** Ayarlar > Pet sekmesindeki sohbette bir model seçip "turuncu bir kedi" gibi yazarsın; ücretsiz bir metin modeli tek bir SVG karakter çizer, SVG beyaz listeyle temizlenir (script, href, style, olay öznitelikleri atılır), Artemis 9 durumluk Codex spritesheet'ini kendisi animasyonlar ve önizlemeyi gösterir. "daha mavi yap" gibi düzeltmelerden sonra **Kaydet ve seç** pet'i `state_dir/pets/` içine kurar. Çağrı `ProviderRouter` üzerinden gider; ücretli model seçersen uyarı çıkar, `allow_paid` ve bütçe geçerlidir. Resim modeliyle üretim sonraki pakettir (arayüzde "yakında").
+
 **Lisans:** Depoya hiçbir topluluk pet'i konmaz. İndirdiğin pet'lerin (galeri siteleri dahil)
 lisansı ve içeriği, bazıları marka karakteridir, senin sorumluluğundadır.
 

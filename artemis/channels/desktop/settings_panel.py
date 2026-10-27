@@ -581,6 +581,7 @@ class SettingsPanel(QWidget):
             pets_dir if pets_dir is not None else pets_dir_for(config_path),
             codex_pets_dir,
             demo=demo,
+            config_path=config_path,
         )
         pet_layout.addWidget(self.pet)
         pet_layout.addStretch(1)
