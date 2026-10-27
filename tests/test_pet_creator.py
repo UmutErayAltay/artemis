@@ -312,3 +312,72 @@ def test_new_pet_clears_svg_context_but_keeps_installed_pet(
     creator.send()
     wait_reply(creator, qapp)
     assert FakeRouter.calls[-1][1][1].content == "yeşil köpek"
+
+
+def test_workshop_refreshes_models_after_settings_without_losing_character(
+    section: PetSection, qapp: QApplication, monkeypatch: pytest.MonkeyPatch, tmp_path: Path,
+) -> None:
+    creator = section.creator
+    assert creator is not None
+    creator.model_combo.setCurrentIndex(creator.model_combo.findData("ucretli"))
+    creator.input.setText("mavi kedi")
+    creator.send()
+    creator.input.setText("sonraki taslak mesajı")
+    creator.name_edit.setText("Kedi")
+    settings = make_settings(tmp_path)
+    expanded = settings.model_copy(update={
+        "models": {"yeni": settings.models["bedava"], **settings.models},
+    })
+    monkeypatch.setattr(panel_mod, "load_settings", lambda _: expanded)
+    creator.reload_models()
+    assert creator._models_reload_pending
+    wait_reply(creator, qapp)
+    assert creator.model_combo.findData("yeni") >= 0
+    assert creator.model_combo.currentData() == "ucretli"
+    assert creator._svg and creator._sheet is not None
+    assert creator.input.text() == "sonraki taslak mesajı" and creator.name_edit.text() == "Kedi"
+    shrunk = settings.model_copy(update={"models": {"yeni": settings.models["bedava"]}})
+    monkeypatch.setattr(panel_mod, "load_settings", lambda _: shrunk)
+    creator.reload_models()
+    assert creator.model_combo.currentData() == "yeni"
+    assert creator.model_combo.findData("ucretli") == -1
+    assert creator._svg and creator.name_edit.text() == "Kedi"
+
+
+def test_svg_cancel_ignores_late_reply(section: PetSection, qapp: QApplication) -> None:
+    """SVG çağrısı kesilemez; iptal beklemeyi bırakır, geç yanıt taslağı değiştirmez."""
+    creator = section.creator
+    assert creator is not None
+    creator.input.setText("turuncu kedi")
+    creator.send()
+    call = creator._call
+    assert call is not None and creator.cancel_button.isEnabled()
+    creator.cancel()
+    assert creator._call is None and not creator.cancel_button.isEnabled()
+    assert creator.status.text() == "İptal edildi; model yanıtı yok sayılacak."
+    call.wait(5000)
+    for _ in range(50):
+        qapp.processEvents()  # geç yanıt (iyi SVG) teslim edilir
+    assert creator._svg == "" and creator._sheet is None
+    assert "Hazır" not in creator.chat_log.toPlainText()
+    assert creator.send_button.isEnabled()
+
+
+def test_stage_bar_follows_draft(section: PetSection, qapp: QApplication) -> None:
+    creator = section.creator
+    assert creator is not None
+    states = lambda: [lb.property("state") for lb in creator._stage_labels]  # noqa: E731
+    assert states() == ["current", "todo", "todo", "todo"]
+    creator.input.setText("turuncu kedi")
+    creator.send()
+    wait_reply(creator, qapp)
+    assert states() == ["done", "done", "done", "current"]
+
+
+def test_empty_model_state_shown_without_models(tmp_path: Path, qapp: QApplication) -> None:
+    demo = PetSection(tmp_path / "pets", None, demo=True, config_path=tmp_path / "c.yaml")
+    assert demo.creator is not None
+    assert not demo.creator.empty_state.isHidden() and demo.creator.fields.isHidden()
+    assert "Demo modunda" in demo.creator.empty_body.text()
+    demo.creator.shutdown()
+    demo.deleteLater()

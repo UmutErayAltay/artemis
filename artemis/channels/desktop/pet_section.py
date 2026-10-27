@@ -12,8 +12,10 @@ from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QLabel,
+    QListView,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -26,9 +28,10 @@ from PySide6.QtWidgets import (
 from artemis.channels.desktop import pet_sprite
 from artemis.channels.desktop.pet_creator_panel import CreatorPanel
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError, PetInfo
+from artemis.channels.desktop.projects_panel import AutoHideLabel, make_page_header
 
 _SOURCE_LABEL = {"artemis": "Artemis", "codex": "Codex"}
-_ORB_LABEL = "Küre (varsayılan) · Artemis"
+_ORB_LABEL = "Küre · Artemis"
 
 
 class PetSection(QWidget):
@@ -45,12 +48,21 @@ class PetSection(QWidget):
         self._pets: dict[str, PetInfo] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        self.listing = QListWidget()
-        self.listing.setIconSize(QSize(40, 44))
-        self.listing.setAccessibleName("Kullanılabilir pet'ler")
-        self.listing.itemSelectionChanged.connect(self._update_buttons)
-        layout.addWidget(self.listing)
-        row = QHBoxLayout()
+        layout.setSpacing(16)
+        layout.addWidget(
+            make_page_header("Petler", "Masaüstü arkadaşını seç ya da yenisini üret.")
+        )
+        gallery = QFrame()
+        gallery.setObjectName("card")
+        card = QVBoxLayout(gallery)
+        card.setContentsMargins(16, 16, 16, 16)
+        card.setSpacing(12)
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        heading = QLabel("Yüklü petler")
+        heading.setObjectName("sectionTitle")
+        head.addWidget(heading)
+        head.addStretch(1)
         self.select_button = QPushButton("Seç")
         self.select_button.clicked.connect(self.select_current)
         self.import_button = QPushButton("Pet yükle…")
@@ -58,26 +70,44 @@ class PetSection(QWidget):
         menu.addAction("Zip dosyası…").triggered.connect(self._pick_zip)
         menu.addAction("Klasör…").triggered.connect(self._pick_folder)
         self.import_button.setMenu(menu)
-        self.delete_button = QPushButton("Sil")
-        self.delete_button.clicked.connect(self.delete_selected)
-        for button in (self.select_button, self.import_button, self.delete_button):
-            row.addWidget(button)
-        row.addStretch(1)
-        layout.addLayout(row)
-        self.status = QLabel()
-        self.status.setWordWrap(True)
-        self.status.setTextFormat(Qt.TextFormat.PlainText)
-        layout.addWidget(self.status)
-        note = QLabel(
+        self.import_button.setToolTip(
             "Pet'ler Codex biçimindedir: klasörde pet.json ve spritesheet.webp/png. "
             "Topluluk pet'lerinin lisansı ve içeriği senin sorumluluğundadır; Artemis "
             "hiçbirini kendisi dağıtmaz."
         )
-        note.setWordWrap(True)
-        layout.addWidget(note)
+        self.delete_button = QPushButton("Sil")
+        self.delete_button.setObjectName("danger")
+        self.delete_button.clicked.connect(self.delete_selected)
+        for button in (self.select_button, self.import_button, self.delete_button):
+            button.setMinimumWidth(88)
+            head.addWidget(button)
+        card.addLayout(head)
+        # Galeri tek satır: kartlar yatay kayar, 140×120 ızgara (DESIGN.md galleryCard).
+        self.listing = QListWidget()
+        self.listing.setObjectName("galleryList")
+        self.listing.setViewMode(QListView.ViewMode.IconMode)
+        self.listing.setResizeMode(QListView.ResizeMode.Adjust)
+        self.listing.setMovement(QListView.Movement.Static)
+        self.listing.setWrapping(False)
+        self.listing.setGridSize(QSize(140, 120))
+        self.listing.setIconSize(QSize(64, 64))
+        self.listing.setWordWrap(True)
+        # Yalnız yerleşim: ızgara 140 px olduğundan varsayılan 12 px yan boşluk adı kırpıyordu.
+        self.listing.setStyleSheet("QListWidget#galleryList::item { padding: 4px; }")
+        self.listing.setSpacing(4)
+        self.listing.setFixedHeight(120 + 16)  # tek satır: ızgara yüksekliği + 16px
+        self.listing.setHorizontalScrollMode(QListView.ScrollMode.ScrollPerPixel)
+        self.listing.setAccessibleName("Kullanılabilir pet'ler")
+        self.listing.itemSelectionChanged.connect(self._update_buttons)
+        self.listing.itemDoubleClicked.connect(lambda _item: self.select_current())
+        card.addWidget(self.listing)
+        self.status = AutoHideLabel()
+        card.addWidget(self.status)
+        layout.addWidget(gallery)
         # Pet üretici (ADR 0048 madde 8): config yoksa (yalnız liste kullanan testler) eklenmez.
         self.creator_slot = QVBoxLayout()
         layout.addLayout(self.creator_slot)
+        layout.addStretch(1)
         self.creator: CreatorPanel | None = None
         if config_path is not None:
             self.creator = CreatorPanel(config_path, pets_dir, demo=demo)
@@ -103,22 +133,27 @@ class PetSection(QWidget):
     def refresh(self) -> None:
         self._pets = {p.id: p for p in pet_sprite.list_pets(self._pets_dir, self._codex_dir)}
         self.listing.clear()
-        orb = QListWidgetItem(_ORB_LABEL + (" · seçili" if self._current == "orb" else ""))
+        orb = QListWidgetItem(_ORB_LABEL + ("\nseçili" if self._current == "orb" else ""))
+        orb.setIcon(QIcon(str(Path(__file__).with_name("artemis.ico"))))
         orb.setData(Qt.ItemDataRole.UserRole, pet_sprite.ORB)
         self.listing.addItem(orb)
         for info in self._pets.values():
             text = f"{info.display_name} · {_SOURCE_LABEL[info.source]}"
-            item = QListWidgetItem(text + (" · seçili" if info.id == self._current else ""))
+            item = QListWidgetItem(text + ("\nseçili" if info.id == self._current else ""))
             item.setData(Qt.ItemDataRole.UserRole, info.id)
             try:
                 item.setIcon(QIcon(pet_sprite.preview(info)))
             except PetError:
-                item.setText(text + " · önizleme yok")
+                item.setText(text + "\nönizleme yok")
             item.setToolTip(info.description)
             self.listing.addItem(item)
         for i in range(self.listing.count()):
-            if self.listing.item(i).data(Qt.ItemDataRole.UserRole) == self._current:
+            row_item = self.listing.item(i)
+            if row_item.data(Qt.ItemDataRole.UserRole) == self._current:
                 self.listing.setCurrentRow(i)
+                font = row_item.font()
+                font.setBold(True)  # etkin pet: ikinci satırdaki "seçili" yanında kalın ad
+                row_item.setFont(font)
         if self.listing.currentRow() < 0:
             self.listing.setCurrentRow(0)
         self._update_buttons()

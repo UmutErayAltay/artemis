@@ -1060,3 +1060,10 @@ async def test_capture_continues_during_slow_final_and_overload_is_visible():
     finally:
         controller.request_stop()
         await asyncio.wait_for(task, 1)
+
+
+@pytest.mark.parametrize("wake", ["Ali", "Veli", "Mavi Ada"])
+def test_custom_name_is_independent_from_artemis_brand(wake: str) -> None:
+    assert find_wake_word(f"{wake} tarayıcı aç", wake) == (0, len(wake))
+    assert find_wake_word("Artemis tarayıcı aç", wake) is None
+    assert find_wake_word("Alim tarayıcı aç", "Ali") is None

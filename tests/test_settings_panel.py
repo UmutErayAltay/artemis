@@ -180,21 +180,56 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
-def test_settings_panel_tabs_are_grouped_by_topic(tmp_path: Path, qt_app) -> None:
-    from PySide6.QtWidgets import QFrame, QScrollArea
+def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtWidgets import QScrollArea
 
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
-    assert [
-        panel.sections.tabText(index) for index in range(panel.sections.count())
-    ] == ["Ses", "Model", "Uygulamalar", "GitHub", "Pet"]
-    assert panel.sections.currentIndex() == 0
-    for index in range(panel.sections.count()):
-        page = panel.sections.widget(index)
-        assert isinstance(page, QScrollArea)
-        assert page.widgetResizable()
-        assert page.frameShape() == QFrame.Shape.NoFrame
+    assert panel.section_names() == ["Ses", "Model", "Uygulamalar", "GitHub", "Görünüm"]
+    assert panel.sections.objectName() == "sectionList"
+    assert panel.sections.currentRow() == 0
+    # Tek kaydırma bölgesi: sayfa başına ikinci kaydırıcı yok.
+    assert len(panel.findChildren(QScrollArea)) == 1
+    for index in range(len(panel.section_names())):
+        panel.show_section(index)
+        assert panel.stack.currentIndex() == index
+    assert panel.pet.parent() is not panel.stack.currentWidget()
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_theme_cards_follow_combo_and_emit_once(tmp_path: Path, qt_app) -> None:
+    from artemis.channels.desktop import settings_panel
+    from artemis.channels.desktop.themes import THEME_LABELS
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    seen: list[str] = []
+    panel.theme_changed.connect(seen.append)
+    assert set(panel.theme_cards) == set(THEME_LABELS)
+    panel.theme_cards["dark"].radio.click()
+    assert seen == ["dark"]
+    assert panel.theme_combo.currentData() == "dark"
+    panel.set_theme("light")  # sinyal yaymaz, kartı eşler
+    assert seen == ["dark"]
+    assert panel.theme_cards["light"].radio.isChecked()
+    assert panel.theme_cards["light"].property("selected") is True
+    panel.theme_combo.setCurrentIndex(panel.theme_combo.findData("dark-mixed"))
+    assert panel.theme_cards["dark-mixed"].radio.isChecked()
+    assert seen[-1] == "dark-mixed"
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_dirty_notice_shows_after_edit_and_clears_on_refresh(tmp_path: Path, qt_app) -> None:
+    from artemis.channels.desktop import settings_panel
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    assert panel.dirty_label.isHidden()
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    assert not panel.dirty_label.isHidden()
+    panel.refresh()
+    assert panel.dirty_label.isHidden()
     panel.deleteLater()
     qt_app.processEvents()
 
@@ -256,6 +291,7 @@ def test_save_computer_mode_writes_only_the_mode(tmp_path: Path) -> None:
 # Bilinçli olarak PANEL_BINDINGS dışında kalan seçim widget'ları ve nedenleri. Yeni bir kutu ya da
 # liste eklenip bağlanmazsa aşağıdaki test kırılır: ya bağ ekleyin ya da buraya gerekçe yazın.
 _UNBOUND_WIDGETS = {
+    "theme_combo": "yalnız görünüm; QSettings ile anında kaydedilir, ses config'ine yazılmaz",
     "device_combo": "input_device: aygıt listesi ve 'sistem varsayılanı' özel yenilenir",
     "stt_combo": "stt_model: katalog seçimi yola çevrilir, indirme durumu taşır",
     "github_auto": "code_agent.auto_sync: github_values ile birlikte, save_code_agent de yazar",
@@ -274,8 +310,11 @@ def _panel(path: Path):  # type: ignore[no-untyped-def]
 
 def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     """Widget'ı varsayılandan farklı, seçilebilir bir değere getirir."""
-    from PySide6.QtWidgets import QCheckBox, QComboBox
+    from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit
 
+    if isinstance(widget, QLineEdit):
+        widget.setText("Veli")
+        return
     if isinstance(widget, QCheckBox):
         widget.setChecked(not widget.isChecked())
         return
@@ -405,4 +444,20 @@ def test_hybrid_without_endpoint_warns_and_save_is_rejected(tmp_path: Path) -> N
     with pytest.raises(ValueError):
         save_choices(path, None, values=panel.values())
     assert load_settings(path).voice.stt_mode == "local"
+    panel.deleteLater()
+
+
+def test_custom_wake_name_roundtrip_and_invalid_value_keeps_file(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    panel.wake_name.setText("  Ali  ")
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.wake_word == "Ali"
+    panel.refresh()
+    assert panel.wake_name.text() == "Ali"
+    original = path.read_bytes()
+    panel.wake_name.setText("   ")
+    with pytest.raises(ValueError):
+        save_choices(path, None, values=panel.values())
+    assert path.read_bytes() == original
     panel.deleteLater()

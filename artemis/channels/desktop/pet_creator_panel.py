@@ -15,9 +15,11 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QImage, QPixmap
+from PySide6.QtGui import QCloseEvent, QImage, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QComboBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -148,11 +150,47 @@ def price_warning(model: ModelConfig) -> str:
     )
 
 
-class CreatorPanel(QWidget):
+_STAGES = ("Tarif", "Görsel", "Animasyon", "Kaydet")
+_WIDE_MIN = 1000  # bunun altında iki sütun alt alta dizilir (DESIGN.md: stack when narrower)
+
+
+def _label(text: str, name: str) -> QLabel:
+    label = QLabel(text)
+    label.setObjectName(name)
+    return label
+
+
+def _flat(widget: QWidget) -> QWidget:
+    """Kapsayıcı QWidget temanın genel `QWidget` zeminini almasın (tema `QWidget#flat` verir)."""
+    widget.setObjectName("flat")
+    return widget
+
+
+def _field(caption: str, widget: QWidget) -> QWidget:
+    """Etiket alanın üstünde (DESIGN.md: 13px muted, 4px aralık)."""
+    box = _flat(QWidget())
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(4)
+    lay.addWidget(_label(caption, "fieldLabel"))
+    lay.addWidget(widget)
+    return box
+
+
+def _column() -> tuple[QWidget, QVBoxLayout]:
+    box = _flat(QWidget())
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(12)
+    return box, lay
+
+
+class CreatorPanel(QFrame):
     installed = Signal(str)  # kurulan pet kimliği (pencere seçer)
 
     def __init__(self, config_path: Path, pets_dir: Path, *, demo: bool = False) -> None:
         super().__init__()
+        self.setObjectName("card")
         self._config_path = config_path
         self._pets_dir = pets_dir
         self._models: dict[str, ModelConfig] = {}
@@ -161,13 +199,17 @@ class CreatorPanel(QWidget):
         self._frames: list[QPixmap] = []
         self._frame = 0
         self._call: ModelCall | None = None
+        self._abandoned: set[ModelCall] = set()  # iptal edilen SVG çağrıları; geç yanıt yok sayılır
         self._image_call: ImageCall | None = None
         self._base: QImage | None = None  # resim yolu: kırpılmış temel görsel
         self._base_png = b""
+        self._models_reload_pending = False
+        self._demo = demo
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 12, 0, 0)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(12)
         header = QHBoxLayout()
-        header.addWidget(QLabel("Pet üret"))
+        header.addWidget(_label("Yeni pet üret", "sectionTitle"))
         header.addStretch(1)
         self.reset_button = QPushButton("Yeni pet")
         self.reset_button.setAccessibleName("Yeni pet")
@@ -177,7 +219,23 @@ class CreatorPanel(QWidget):
         self.reset_button.clicked.connect(self.reset_conversation)
         header.addWidget(self.reset_button)
         layout.addLayout(header)
-        row = QHBoxLayout()
+        # Aşama çubuğu yalnız mevcut durumdan türetilir (_update_stage).
+        self.stage_bar = QFrame()
+        self.stage_bar.setObjectName("stageBar")
+        stage_row = QHBoxLayout(self.stage_bar)
+        stage_row.setContentsMargins(0, 0, 0, 0)
+        stage_row.setSpacing(8)
+        self._stage_labels: list[QLabel] = []
+        for i, name in enumerate(_STAGES):
+            label = _label(name, "stage")
+            self._stage_labels.append(label)
+            stage_row.addWidget(label)
+            if i < len(_STAGES) - 1:
+                stage_row.addWidget(_label("→", "meta"))
+        stage_row.addStretch(1)
+        layout.addWidget(self.stage_bar)
+
+        left, left_lay = _column()
         self.method = QComboBox()
         self.method.setAccessibleName("Üretim yöntemi")
         self.method.addItem("SVG (metin modeli)")
@@ -186,86 +244,148 @@ class CreatorPanel(QWidget):
         self.model_combo = QComboBox()
         self.model_combo.setAccessibleName("Model")
         self.model_combo.currentIndexChanged.connect(self._update_warning)
-        row.addWidget(self.method)
-        row.addWidget(self.model_combo, 1)
-        layout.addLayout(row)
-        self.warning = QLabel()
+        # Model yokken boş combo yerine açıklayıcı boş durum gösterilir (combolar ağaçta kalır).
+        self.fields = _flat(QWidget())
+        fields_lay = QVBoxLayout(self.fields)
+        fields_lay.setContentsMargins(0, 0, 0, 0)
+        fields_lay.setSpacing(12)
+        pair = QHBoxLayout()
+        pair.setSpacing(12)
+        pair.addWidget(_field("Yöntem", self.method), 1)
+        pair.addWidget(_field("Model", self.model_combo), 2)
+        fields_lay.addLayout(pair)
+        self.warning = _label("", "meta")
         self.warning.setWordWrap(True)
         self.warning.setTextFormat(Qt.TextFormat.PlainText)
-        layout.addWidget(self.warning)
+        fields_lay.addWidget(self.warning)
+        left_lay.addWidget(self.fields)
+        self.empty_state = QFrame()
+        self.empty_state.setObjectName("emptyState")
+        empty_lay = QVBoxLayout(self.empty_state)
+        empty_lay.setContentsMargins(0, 8, 0, 8)
+        empty_lay.setSpacing(4)
+        empty_lay.addWidget(_label("Pet üretmek için bir model gerekli", "emptyTitle"))
+        self.empty_body = _label("Ayarlar > Model bölümünden bir bağlantı ekle.", "emptyBody")
+        self.empty_body.setWordWrap(True)
+        empty_lay.addWidget(self.empty_body)
+        left_lay.addWidget(self.empty_state)
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Pet adı")
+        self.name_edit.setPlaceholderText("Örn. Şirin Maskot")
         self.name_edit.setMaxLength(80)
         self.name_edit.setAccessibleName("Pet adı")
-        layout.addWidget(self.name_edit)
+        self.name_edit.setMinimumHeight(32)
+        left_lay.addWidget(_field("Pet adı", self.name_edit))
         self.chat_log = QPlainTextEdit()
         self.chat_log.setReadOnly(True)
-        self.chat_log.setMaximumHeight(140)
+        self.chat_log.setMinimumHeight(160)
         self.chat_log.setAccessibleName("Pet üretici sohbeti")
-        layout.addWidget(self.chat_log)
+        left_lay.addWidget(self.chat_log, 1)
         send_row = QHBoxLayout()
+        send_row.setSpacing(8)
         self.input = QLineEdit()
         self.input.setPlaceholderText("Nasıl bir pet? (sonra: 'daha mavi yap', 'şapka ekle')")
         self.input.setAccessibleName("Pet isteği")
+        self.input.setFixedHeight(36)
         self.input.returnPressed.connect(self.send)
         self.send_button = QPushButton("Gönder")
+        self.send_button.setObjectName("primary")
+        self.send_button.setFixedHeight(36)
+        self.send_button.setMinimumWidth(88)
         self.send_button.clicked.connect(self.send)
         send_row.addWidget(self.input, 1)
         send_row.addWidget(self.send_button)
-        layout.addLayout(send_row)
-        job_row = QHBoxLayout()
-        self.animate_button = QPushButton("Animasyonları üret")
-        self.animate_button.clicked.connect(self.animate)
-        self.cancel_button = QPushButton("İptal")
-        self.cancel_button.clicked.connect(self.cancel)
-        job_row.addWidget(self.animate_button)
-        job_row.addWidget(self.cancel_button)
-        job_row.addStretch(1)
-        layout.addLayout(job_row)
-        self.busy = QLabel()
-        layout.addWidget(self.busy)
-        preview_row = QHBoxLayout()
-        self.preview = QLabel("Önizleme yok")
-        self.preview.setFixedSize(pet_sprite.CELL_W, pet_sprite.CELL_H)
+        left_lay.addLayout(send_row)
+
+        right, right_lay = _column()
+        well = QFrame()
+        well.setObjectName("messageUser")  # tema 'soft' zemin + 10px yarıçap (ayrı kural yok)
+        well.setMinimumSize(280, 280)
+        well_lay = QVBoxLayout(well)
+        well_lay.setContentsMargins(16, 16, 16, 16)
+        self.preview = _label("Önizleme yok", "emptyBody")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setAccessibleName("Pet önizlemesi")
+        well_lay.addWidget(self.preview, 1)
+        right_lay.addWidget(well, 1)
         self.state_combo = QComboBox()
         self.state_combo.setAccessibleName("Önizleme durumu")
         for name in pet_animator.STATE_NAMES:
             self.state_combo.addItem(name)
         self.state_combo.currentIndexChanged.connect(self._load_frames)
-        preview_row.addWidget(self.preview)
-        preview_row.addWidget(self.state_combo, 0, Qt.AlignmentFlag.AlignTop)
-        preview_row.addStretch(1)
-        layout.addLayout(preview_row)
+        # Uzun model adları sütunu genişletip dar pencerede yığılmayı engellemesin.
+        for combo in (self.method, self.model_combo, self.state_combo):
+            combo.setMinimumHeight(32)
+            combo.setSizeAdjustPolicy(
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+            )
+            combo.setMinimumContentsLength(8)
+        right_lay.addWidget(_field("Önizleme durumu", self.state_combo))
+        job_row = QHBoxLayout()
+        job_row.setSpacing(8)
+        job_row.addStretch(1)
+        self.animate_button = QPushButton("Animasyonları üret")
+        self.animate_button.clicked.connect(self.animate)
+        self.cancel_button = QPushButton("İptal")
+        self.cancel_button.clicked.connect(self.cancel)
         self.save_button = QPushButton("Kaydet ve seç")
+        self.save_button.setObjectName("primary")
         self.save_button.clicked.connect(self.save)
-        layout.addWidget(self.save_button)
-        self.status = QLabel()
+        for button in (self.animate_button, self.cancel_button, self.save_button):
+            button.setMinimumWidth(88)
+            job_row.addWidget(button)
+        right_lay.addLayout(job_row)
+        self.busy = _label("", "meta")
+        self.busy.setWordWrap(True)
+        right_lay.addWidget(self.busy)
+        self.status = _label("", "meta")
         self.status.setWordWrap(True)
         self.status.setTextFormat(Qt.TextFormat.PlainText)
-        layout.addWidget(self.status)
+        right_lay.addWidget(self.status)
+
+        self._columns = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        self._columns.setSpacing(24)
+        self._columns.addWidget(left, 3)
+        self._columns.addWidget(right, 2)
+        layout.addLayout(self._columns)
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / pet_sprite.FPS))
         self._timer.timeout.connect(self._tick)
-        self._demo = demo
         self._load_models()
         self._update_buttons()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt)
+        wide = event.size().width() >= _WIDE_MIN
+        want = QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
+        if self._columns.direction() != want:
+            self._columns.setDirection(want)
+            self._columns.setStretch(0, 3 if wide else 0)
+            self._columns.setStretch(1, 2 if wide else 0)
+        super().resizeEvent(event)
 
     # -------------------------------------------------------------- hazırlık
 
     def _load_models(self) -> None:
         if self._demo:
-            self.status.setText("Demo modunda pet üretilmez.")
             return
         try:
             self._models = dict(load_settings(self._config_path).models)
         except (OSError, ValueError) as error:
             self.status.setText(f"Model listesi okunamadı: {error}")
             return
-        if not self._models:
-            self.status.setText("Config'te model tanımlı değil.")
         self._fill_models()
+
+    def reload_models(self) -> None:
+        """Refresh provider choices without clearing the current character or active request."""
+        if self._demo:
+            return
+        if self._busy():
+            self._models_reload_pending = True
+            return
+        selected = self.model_combo.currentData()
+        self._load_models()
+        index = self.model_combo.findData(selected)
+        if index >= 0:
+            self.model_combo.setCurrentIndex(index)
 
     @property
     def _image_mode(self) -> bool:
@@ -286,18 +406,21 @@ class CreatorPanel(QWidget):
     def _update_warning(self) -> None:
         model = self._models.get(str(self.model_combo.currentData() or ""))
         if model is None:
-            self.warning.setText("")
+            text = ""
         elif self._image_mode:
-            self.warning.setText(
-                image_calls_note(model, len(pipe.ROWS)) + " Toplam süre yaklaşık 4-6 dk."
-            )
+            text = image_calls_note(model, len(pipe.ROWS)) + " Toplam süre yaklaşık 4-6 dk."
         else:
-            self.warning.setText(price_warning(model))
+            text = price_warning(model)
+        self.warning.setText(text)
+        self.warning.setVisible(bool(text))  # boş satır boşluk bırakmasın
 
     def _busy(self) -> bool:
         return self._call is not None or self._image_call is not None
 
     def _update_buttons(self) -> None:
+        if self._models_reload_pending and not self._busy():
+            self._models_reload_pending = False
+            self.reload_models()
         idle = not self._busy()
         ready = not self._demo and self.model_combo.count() > 0
         self.reset_button.setEnabled(not self._demo and idle)
@@ -308,12 +431,34 @@ class CreatorPanel(QWidget):
         self.save_button.setEnabled(not self._demo and idle and self._sheet is not None)
         self.animate_button.setVisible(self._image_mode)
         self.animate_button.setEnabled(ready and idle and self._base is not None)
-        self.cancel_button.setVisible(self._image_mode)
-        self.cancel_button.setEnabled(self._image_call is not None)
+        self.cancel_button.setEnabled(not idle)  # SVG çağrısı da iptal edilebilir (yok sayılır)
         if self._call is not None:
             self.busy.setText("Model düşünüyor…")
         elif self._image_call is None:
             self.busy.setText("")
+        self.empty_state.setVisible(not self._models)
+        self.fields.setVisible(bool(self._models))
+        self.empty_body.setText(
+            "Demo modunda pet üretilmez." if self._demo
+            else "Ayarlar > Model bölümünden bir bağlantı ekle."
+        )
+        self._update_stage()
+
+    def _update_stage(self) -> None:
+        """Aşama yalnız mevcut taslak durumundan türer; yeni durum tutulmaz."""
+        if self._sheet is not None:
+            current = 3
+        elif self._svg or self._base is not None:
+            current = 1
+        else:
+            current = 0
+        for i, label in enumerate(self._stage_labels):
+            state = "current" if i == current else "done" if i < current else "todo"
+            label.setText(("✓ " if state == "done" else "") + _STAGES[i])
+            if label.property("state") != state:
+                label.setProperty("state", state)
+                label.style().unpolish(label)
+                label.style().polish(label)
 
     # ----------------------------------------------------------------- sohbet
 
@@ -363,6 +508,10 @@ class CreatorPanel(QWidget):
         self._call.start()
 
     def _on_reply(self, reply: str, error: str) -> None:
+        sender = self.sender()
+        if isinstance(sender, ModelCall) and sender in self._abandoned:
+            self._abandoned.discard(sender)  # iptal edilmişti: geç yanıt taslağı değiştirmez
+            return
         self._call = None
         try:
             if error:
@@ -486,6 +635,14 @@ class CreatorPanel(QWidget):
             self._update_buttons()
 
     def cancel(self) -> None:
+        if self._call is not None:
+            # ModelCall kesilemez (asyncio.run iş parçacığında); uzaktaki çağrıyı durdurduğumuzu
+            # iddia etmeyiz, yalnız beklemeyi bırakır ve geç yanıtı yok sayarız.
+            self._abandoned.add(self._call)
+            self._call = None
+            self._update_buttons()
+            self.status.setText("İptal edildi; model yanıtı yok sayılacak.")
+            return
         if self._image_call is not None:
             self._image_call.cancel_requested = True
             self.busy.setText("İptal ediliyor (süren çağrı bitince)…")
@@ -541,6 +698,9 @@ class CreatorPanel(QWidget):
         if self._call is not None:
             self._call.done.disconnect(self._on_reply)  # iş parçacığı `_RUNNING` ile yaşar
             self._call = None
+        for call in self._abandoned:
+            call.done.disconnect(self._on_reply)
+        self._abandoned.clear()
         if self._image_call is not None:
             self._image_call.cancel_requested = True
             for signal in (self._image_call.progress, self._image_call.row_ready,

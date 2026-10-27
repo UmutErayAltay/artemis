@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import re
 import time
@@ -15,7 +16,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import QApplication, QFrame, QLabel, QWidget
 
 import artemis.channels.desktop.bridge as bridge_module
 from artemis.brain.agent_loop import RunResult
@@ -28,6 +29,7 @@ from artemis.channels.desktop.app import (
 )
 from artemis.channels.desktop.bridge import Activity, Finished, State, VoiceCommand
 from artemis.channels.desktop.demo import DemoReadTool, DemoWriteTool
+from artemis.channels.desktop.themes import THEMES
 from artemis.channels.runtime import Runtime
 
 
@@ -92,7 +94,7 @@ def test_message_bubbles_expand_and_follow_the_available_chat_width(
         bubble, speaker, text = window.chat._bubbles[-1]
         assert speaker == "Artemis"
         assert len(text) > 100
-        assert 320 <= bubble.width() <= 520
+        assert 320 <= bubble.width() <= 672
         window.resize(720, 650)
         app.processEvents()
         assert bubble.width() <= window.chat.width() - 28
@@ -386,11 +388,11 @@ def test_status_label_is_plain_text_without_button_rule(app: QApplication, tmp_p
 @pytest.mark.parametrize(
     ("state", "text", "dot_color"),
     [
-        ("listening", "Dinliyor", "#53D6C7"),
-        ("thinking", "Düşünüyor", "#FFD78C"),
-        ("speaking", "Konuşuyor", "#53D6C7"),
-        ("off", "Ses kapalı", "#718096"),
-        ("bilinmeyen", "Ses kapalı", "#718096"),
+        ("listening", "Dinliyor", "success"),
+        ("thinking", "Düşünüyor", "warning"),
+        ("speaking", "Konuşuyor", "success"),
+        ("off", "Ses kapalı", "muted"),
+        ("bilinmeyen", "Ses kapalı", "muted"),
     ],
 )
 def test_voice_state_text_and_dot_follow_the_state(
@@ -400,7 +402,9 @@ def test_voice_state_text_and_dot_follow_the_state(
     try:
         window._show_voice_state(state)
         assert window.voice_state.text() == text
-        assert dot_color in window.voice_dot.styleSheet()
+        # Tek görünür denetim düğmedir; metni durumu, noktası tema rengini taşır.
+        assert window.voice_button.text() == text
+        assert THEMES[window._theme][dot_color] in window.voice_dot.styleSheet()
     finally:
         _close_cleanly(app, window)
 
@@ -797,3 +801,268 @@ def test_data_panel_controls_use_typed_requests_and_show_uncertain(app: QApplica
     panel.set_busy(True)
     assert not panel.delete.isEnabled() and not panel.retry.isEnabled()
     panel.close()
+
+
+def test_themes_and_navigation_preserve_conversation_and_pet_draft(
+    app: QApplication, tmp_path: Path,
+) -> None:
+    from artemis.channels.desktop.themes import THEMES
+
+    window = _window(app, tmp_path)
+    try:
+        window.chat.append("Artemis", "Bu konuşma korunmalı")
+        creator = window.settings_panel.pet.creator
+        assert creator is not None
+        creator.input.setText("Taslak pet açıklaması")
+        bridge = window.bridge
+        window.settings_panel.providers.base_url.setText("http://example.invalid/draft")
+        for name in THEMES:
+            combo = window.settings_panel.theme_combo
+            combo.setCurrentIndex(combo.findData(name))
+            assert window._theme == name
+            assert window.bridge is bridge
+            assert "Bu konuşma korunmalı" in window.chat.toPlainText()
+            assert creator.input.text() == "Taslak pet açıklaması"
+            assert window.settings_panel.providers.base_url.text() == "http://example.invalid/draft"
+            assert THEMES[name]["surface"] in window.styleSheet()
+        for page, button in window.nav_buttons.items():
+            button.click()
+            assert window.tabs.currentWidget() is page
+            assert button.isChecked()
+            assert sum(b.isChecked() for b in window.nav_buttons.values()) == 1
+        assert window.settings_panel.pet.parent() is not window.settings_panel
+        assert window.windowTitle().startswith("Artemis")
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_brand_uses_selected_pet_and_keeps_product_name(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from PySide6.QtGui import QColor, QPixmap
+
+    from artemis.channels.desktop import pet_sprite
+
+    window = _window(app, tmp_path)
+    try:
+        pixmap = QPixmap(36, 40)
+        pixmap.fill(QColor("#365c9e"))
+        monkeypatch.setattr(window.pet, "set_skin", lambda pet_id: None)
+        monkeypatch.setattr(pet_sprite, "find_pet", lambda *args: object())
+        monkeypatch.setattr(pet_sprite, "preview", lambda *args: pixmap)
+        window._select_skin("sample")
+        assert not window.brand_pet.isHidden()
+        assert window.brand_mark.isHidden()
+        assert window.brand_pet.pixmap().size() == pixmap.size()
+        assert window.windowTitle().startswith("Artemis")
+        monkeypatch.setattr(pet_sprite, "find_pet", lambda *args: None)
+        window._select_skin("orb")
+        assert window.brand_pet.isHidden()
+        assert not window.brand_mark.isHidden()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_placeholder_palette_tracks_all_themes(app: QApplication, tmp_path: Path) -> None:
+    from PySide6.QtGui import QPalette
+
+    from artemis.channels.desktop.themes import THEMES
+
+    window = _window(app, tmp_path)
+    try:
+        for name, colors in THEMES.items():
+            window._apply_theme(name)
+            for widget in (window.prompt, window.settings_panel.wake_name, window.overlay.input):
+                actual = widget.palette().color(QPalette.ColorRole.PlaceholderText).name()
+                assert actual == colors["muted"]
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_data_panel_search_filters_loaded_rows_and_empty_states(app: QApplication) -> None:
+    from artemis.channels.desktop.data_panel import DataPanel
+    from artemis.tools.base import ToolResult
+
+    panel = DataPanel()
+    requests: list[tuple[str, Any]] = []
+    panel.tool_requested.connect(lambda name, args: requests.append((name, args)))
+    assert panel.history_stack.currentWidget() is panel.history_empty
+    assert panel.items_stack.currentWidget() is panel.items_empty
+    assert not panel.retention_hint.isHidden()
+    panel.accept_result('conversation_history', ToolResult(
+        success=True, status='ok', message='ok',
+        data={'turns': 0, 'retention_days': 0, 'recent_turns': []},
+    ))
+    assert panel.history_stack.currentWidget() is panel.history_empty
+    assert 'Kayıt yok' in [lbl.text() for lbl in panel.history_empty.findChildren(QLabel)]
+    assert panel.retention_hint.isHidden()
+    turns = [
+        {'created_at': 't1', 'user': 'IŞIK aç', 'answer': 'Açtım'},
+        {'created_at': 't2', 'user': 'saat kaç', 'answer': 'Üç'},
+    ]
+    panel.accept_result('conversation_history', ToolResult(
+        success=True, status='ok', message='ok',
+        data={'turns': 2, 'retention_days': 0, 'recent_turns': turns},
+    ))
+    assert panel.history_stack.currentWidget() is panel.preview
+    panel.search.setText('ışık')
+    text = panel.preview.toPlainText()
+    assert 'IŞIK aç' in text and 'saat kaç' not in text
+    panel.search.setText('yok böyle')
+    assert panel.history_stack.currentWidget() is panel.history_empty
+    panel.search.clear()
+    assert 'saat kaç' in panel.preview.toPlainText()
+    assert requests == []  # arama araç çağırmaz
+    panel.accept_result('reminder_list', ToolResult(
+        success=True, status='ok', message='ok', data={'reminders': []},
+    ))
+    assert panel.items_stack.currentWidget() is panel.items_empty
+    panel.accept_result('reminder_list', ToolResult(
+        success=True, status='ok', message='ok', data={'reminders': [{
+            'reminder_id': 1, 'state': 'pending', 'due_local': 'x', 'text': 'y',
+        }]},
+    ))
+    assert panel.items_stack.currentWidget() is panel.items
+    panel.close()
+
+
+def test_projects_panel_empty_state_and_question_visibility(app: QApplication) -> None:
+    from artemis.channels.desktop.projects_panel import ProjectsPanel
+    from artemis.tools.base import ToolResult
+
+    panel = ProjectsPanel()
+    assert panel.list_stack.currentWidget() is not panel.items
+    assert panel.question_box.isHidden() and panel.hint.isHidden()
+    assert 'Kapsam' in panel.hint.text() or panel.hint.text()
+    panel.accept_result('code_agent_status', ToolResult(
+        success=True, status='ok', message='ok', data={'projects': ['p'], 'jobs': [{
+            'job_id': 'j', 'project': 'p', 'status': 'waiting', 'question_id': 'q',
+            'question': 'Renk?', 'spec': {},
+        }], 'drafts': []},
+    ))
+    assert panel.list_stack.currentWidget() is panel.items
+    assert not panel.question_box.isHidden()
+    panel.close()
+
+
+# --- Kabuk yeniden tasarımı: onay özeti, tema düğmesi, son işlem paneli ---------------------
+
+
+def _approval(arguments: dict[str, Any]) -> Any:
+    from artemis.channels.desktop.bridge import Approval
+
+    notice = "Bu adım dış bir içerik okunduktan sonra istendi"
+    return Approval("r", "t", "a", "demo_tool", arguments, notice)
+
+
+def test_approval_real_enter_key_on_focused_default_control_rejects(app: QApplication) -> None:
+    """Gerçek Enter tuşu (isDefault bayrağı değil) onayı vermemeli; varsayılan cevap hayırdır."""
+    decisions: list[bool] = []
+
+    def decide(_item: Any, approved: bool, _remember: bool) -> bool:
+        decisions.append(approved)
+        return True
+
+    parent = QWidget()
+    dialog = ApprovalDialog(_approval({"key": "a"}), decide, parent)
+    dialog.show()
+    QTest.qWaitForWindowExposed(dialog)
+    focused = dialog.focusWidget()
+    assert focused is dialog.no_button
+    QTest.keyClick(focused, Qt.Key.Key_Return)
+    assert decisions == [False]
+    assert dialog.result() == int(dialog.DialogCode.Rejected)
+
+
+def test_approval_summary_lists_every_argument_and_collapses_short_ones(app: QApplication) -> None:
+    parent = QWidget()
+    dialog = ApprovalDialog(_approval({"key": "a", "value": "kısa"}), lambda *_: True, parent)
+    texts = [label.text() for label in dialog.findChildren(QLabel)]
+    assert "key = a" in texts and "value = kısa" in texts
+    assert "Bu adım dış bir içerik okunduktan sonra istendi" in texts
+    assert dialog.arguments_view.isHidden() and not dialog.details_toggle.isChecked()
+    assert dialog.no_button.isDefault() and not dialog.yes_button.isDefault()
+    dialog._choose(False)
+
+
+@pytest.mark.parametrize(
+    "value", ["x" * 61, r"C:\Users\umut\gizli.txt", "https://example.test/a", "a/b"]
+)
+def test_approval_opens_details_for_long_values_paths_and_urls(
+    app: QApplication, value: str
+) -> None:
+    parent = QWidget()
+    arguments = {"target": value}
+    dialog = ApprovalDialog(_approval(arguments), lambda *_: True, parent)
+    assert dialog.details_toggle.isChecked() and not dialog.arguments_view.isHidden()
+    # Tam doğrulanmış argümanlar kırpılmadan ayrıntıda durur.
+    assert json.dumps(value)[1:-1] in dialog.arguments_view.toPlainText()
+    dialog._choose(False)
+
+
+def test_approval_summary_elides_long_value_but_keeps_full_text_in_tooltip(
+    app: QApplication,
+) -> None:
+    parent = QWidget()
+    value = "y" * 200
+    dialog = ApprovalDialog(_approval({"text": value}), lambda *_: True, parent)
+    row = next(lbl for lbl in dialog.findChildren(QLabel) if lbl.text().startswith("text = "))
+    assert len(row.text()) <= len("text = ") + 80 and row.text().endswith("…")
+    assert value in row.toolTip()
+    dialog._choose(False)
+
+
+def test_theme_toggle_flips_light_dark_and_keeps_mixed_variant(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        emitted: list[str] = []
+        window.settings_panel.theme_changed.connect(emitted.append)
+        for start, other in (("light-mixed", "dark-mixed"), ("light", "dark")):
+            window._apply_theme(start)
+            window.theme_toggle.click()
+            assert window._theme == other
+            assert window.settings_panel.theme_combo.currentData() == other
+            window.theme_toggle.click()
+            assert window._theme == start
+        assert emitted == []  # düğme ayar denetimini sinyalsiz eşitler
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_step_panel_shows_only_on_wide_windows_and_caps_rows(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        window.resize(1280, 800)
+        app.processEvents()
+        assert not window.activity_panel.isHidden()
+        window.resize(900, 700)
+        app.processEvents()
+        assert window.activity_panel.isHidden()
+        assert window.activity.count() == 0 and not window.activity_empty.isHidden()
+        for index in range(505):
+            window._add_activity(f"adım {index}")
+        assert window.activity.count() == 500
+        assert window.activity_empty.isHidden()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_header_does_not_clip_at_900px(app: QApplication, tmp_path: Path) -> None:
+    window = _window(app, tmp_path)
+    try:
+        window.resize(900, 700)
+        app.processEvents()
+        window._show_model("çok-uzun-model-adı-" * 6)
+        assert window.model_value.text().endswith("…")
+        assert window.demo_chip is not None and window.demo_chip.text() == "Demo"
+        header = window.findChild(QFrame, "topbar")
+        assert header is not None
+        for child in header.findChildren(QWidget):
+            if child.isVisible() and child.parentWidget() is header:
+                assert header.rect().contains(child.geometry())
+    finally:
+        _close_cleanly(app, window)
