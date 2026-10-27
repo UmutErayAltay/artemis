@@ -162,6 +162,13 @@ def build_sheet(base: QImage, blink: QImage | None = None) -> QImage:
     return sheet
 
 
+def procedural_row(base: QImage, row: int) -> list[QImage]:
+    """Tek satırın prosedürel kareleri (resim hattında yedek: model şeridi alınamayınca)."""
+    cell = _fit_cell(base)
+    gray = _gray(cell)
+    return [_frame(cell, cell, gray, row, i) for i in range(FRAMES[row])]
+
+
 def state_frames(sheet: QImage, row: int) -> list[QPixmap]:
     """Önizleme için bir satırın kareleri."""
     return [

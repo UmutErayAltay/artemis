@@ -56,3 +56,54 @@ marka karakteri.
 PySide6'da var). Topluluk pet lisansları kullanıcının sorumluluğundadır; README bunu yazar.
 Resim modeli yolu ücretlidir ve `allow_paid` kapalıyken çalışmaz. Prosedürel animasyon el çizimi
 piksel sanat kadar zengin değildir; amaç tutarlı karakter + okunur durumlardır.
+
+## Ek (2026-10-27): resim modeli yolu
+
+Kullanıcı geri bildirimi: SVG pet ve prosedürel animasyon kötü görünüyor; ChatGPT'nin maskot
+pet'lerinde ayrıntılı çizilmiş animasyonlar var. Metin yolu (SVG + prosedürel animatör) aynen
+kalır; **resim modeli yolu artık her durum için gerçek kare üretir.** Bu ek, madde 8'deki
+"OpenRouter sohbet tamamlamada görüntü çıktısı" ifadesinin yerine geçer.
+
+1. **Yapılandırma:** `ModelConfig.kind: chat|image` (varsayılan `chat`). `image` yalnız
+   `openai_compatible` + uç ile geçerlidir ve birincil/yedek/bilgisayar kullanımı modeli olamaz
+   (doğrulama hatası). `image_cost_usd` çağrı başına sabit üst tutardır. Doğrulanmış uç:
+   kullanıcının yerel OpenAI uyumlu CLI proxy'si (abonelikten sunulur; `gpt-image-2.5`).
+2. **`artemis/brain/images.py::generate_image`:** referans yoksa `POST /images/generations`
+   (JSON: model, prompt, size, `background: transparent`, n=1), referans varsa `POST /images/edits`
+   (multipart, dosya alanı `image`). Taban adres ve anahtar sohbet sağlayıcılarıyla aynı yardımcılardan
+   gelir; `follow_redirects=False`, zaman aşımı 240 sn, yanıt ≤ 25 MB, yalnız `b64_json`
+   (adresle dönerse açık hata: ikinci bir sunucuya gidilmez), PNG/WebP imzası. Ücretli kurallar:
+   herhangi bir fiyat ya da `image_cost_usd` sıfırdan büyükse `allow_paid` şart (yoksa
+   `BudgetExceeded`), `image_cost_usd` = 0 ise yanlış yapılandırma, tutar `BudgetLedger`'da ayrılır;
+   hatada rezervasyon tutulur (sunucu işlemiş olabilir). Denetim: `cloud_transfer`
+   (`content_kind="pet_image_prompt"`, `has_reference`) ve `provider_call`; görsel baytı ve anahtar
+   yazılmaz. Görüntü çözme/boyut doğrulaması Qt tarafındadır (`QImage`, oran ve ≤ 4096).
+3. **Hat (`pet_image_pipeline.py`):** temel görsel sabit stil şablonu (chibi maskot, tam boy,
+   piksel-art çizgi, ortada, saydam zemin, yazı yok) + kullanıcı tarifi ile `generations`;
+   düzeltme ("şapka ekle") mevcut temeli referans alan `edits`. Animasyon: onaylı temel referansıyla
+   durum başına bir `edits` çağrısı, tam kare sayısıyla istem: idle 6, running-right 8, waving 4,
+   jumping 5, failed 8, waiting 6, running 6, review 6 = **8 çağrı**; running-left, running-right'ın
+   yatay aynasıdır (çağrı yok). Çağrı başına ~26-43 sn, toplam ~4-6 dk.
+4. **Dilimleyici:** şerit saydam sütun boşluklarından bölünür; medyan genişliğin %15'inden dar
+   parçalar (kıvılcım) komşuya katılır; sayı beklenenle tutmazsa eşit genişliğe düşülür. Opak
+   zeminli şeritte dört köşeden renk toleranslı taşırmayla zemin kaldırılır. Kareler alfa sınırına
+   kırpılır; **şerit içindeki dikey konum (zıplama yüksekliği) korunur**, satırın en alt tabanı o
+   satırın zemini sayılır (karelerin tek tek tabana yapıştırılması zıplamayı yok ederdi).
+5. **Yerleşim:** TÜM pet için tek ölçek (en büyük satır zarfı hücre yüksekliğinin %92'si, genişlik de
+   sığar) uygulanır; böylece karakter satırlar arasında boyut değiştirmez. Kareler ortak zemine
+   (y=204) hizalanır, yatayda 192×208 hücrede ortalanır; kullanılmayan hücreler saydam. Kurulum yine
+   `pet_sprite.import_pet` ile (doğrulama tek yerde).
+6. **Dayanıklılık:** satır başına en çok iki deneme; hâlâ olmazsa o satır temel görselden prosedürel
+   animatörle üretilir (`pet_animator.procedural_row`) ve kullanıcıya hangi satırların yedek olduğu
+   söylenir. `BudgetExceeded` yedeğe düşmez, üretimi durdurur. İptal çağrılar arasında gözlenir
+   (süren çağrı bitene kadar bekler).
+7. **Arayüz:** "Resim modeli (animasyonlu)" yöntemi; model listesi `kind`'a göre süzülür (SVG için
+   sohbet, resim için resim modelleri). Sohbet → temel önizleme; her ek mesaj `edits`; "Animasyonları
+   üret" 8 çağrıyı QThread'de ilerleme ("3/8: zıplama…"), satır satır canlı önizleme ve iptalle
+   çalıştırır; "Kaydet ve seç". Ücretli modelde çağrıdan önce tutar × çağrı sayısı açıkça onaylatılır;
+   ücretsiz proxy'de "abonelik kotasından düşer" notu gösterilir. Demo modunda kapalıdır.
+
+**Sonuçlar:** Bir pet ≈ 9 resim çağrısı (1 temel + 8 şerit; her düzeltme +1) ve birkaç dakika
+tutar; abonelik kotasından düşer. Karakter tutarlılığı modele bağlıdır (referans görsel ve sabit
+istemle sağlanır, garanti değildir; bozuk satır yedeğe düşer). Canlı model doğrulaması bu eke dahil
+değildir: testler sahte taşıma/üreteçle çalışır.

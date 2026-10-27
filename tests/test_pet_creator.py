@@ -208,7 +208,7 @@ def test_ui_flow_send_preview_save(section: PetSection, qapp: QApplication,
                                    monkeypatch: pytest.MonkeyPatch) -> None:
     creator = section.creator
     assert creator is not None
-    assert "yakında" in creator.method.itemText(1)
+    assert "Resim modeli" in creator.method.itemText(1)
     chosen: list[str] = []
     section.skin_selected.connect(chosen.append)
     creator.name_edit.setText("Şirin Maskot")

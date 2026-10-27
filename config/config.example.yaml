@@ -36,6 +36,17 @@ models: {}
 #     model: <sağlayıcının model kimliği>
 #     input_per_million: '0'
 #     output_per_million: '0'
+#   # Pet üretici için resim modeli (ADR 0048 eki): sohbet modeli olarak seçilemez.
+#   # Abonelik proxy'si ücretsiz sayılır; fiyatlı bir modelde allow_paid: true ve
+#   # image_cost_usd (çağrı başına ayrılan üst tutar) şarttır.
+#   pet-resim:
+#     provider: openai_compatible
+#     endpoint: yerel-proxy
+#     model: gpt-image-2.5
+#     kind: image
+#     input_per_million: '0'
+#     output_per_million: '0'
+#     image_cost_usd: '0'
 applications: {}
 allow_all_applications: false # Windows Başlat menüsündeki tüm kurulu uygulamalar.
 # Temiz turda bu izinli takma adlar yeniden onay almadan kapatılır.

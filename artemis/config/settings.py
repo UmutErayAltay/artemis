@@ -52,11 +52,17 @@ class ModelConfig(BaseModel):
     output_per_million: Decimal = Field(ge=0)
     context_window: int = Field(default=32768, ge=1024)
     endpoint: str | None = None
+    # "image": resim üretim modeli (pet üretici, ADR 0048 eki); sohbet modeli olarak kullanılamaz.
+    kind: Literal["chat", "image"] = "chat"
+    # Resim çağrısı başına bütçeden ayrılan sabit üst tutar (USD); token fiyatı resimde anlamsız.
+    image_cost_usd: Decimal = Field(default=Decimal(0), ge=0)
 
     @model_validator(mode="after")
     def validate_endpoint_use(self) -> Self:
         if (self.provider == "openai_compatible") != (self.endpoint is not None):
             raise ValueError("endpoint yalnız ve her zaman openai_compatible modelde verilir")
+        if self.kind == "image" and self.provider != "openai_compatible":
+            raise ValueError("Resim modeli openai_compatible sağlayıcı ve uç gerektirir")
         return self
 
 
@@ -497,6 +503,14 @@ class Settings(BaseModel):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")
         if self.primary_model and self.primary_model not in self.models:
             raise ValueError("Birincil model models içinde tanımlanmalı")
+        if any(
+            self.models[name].kind == "image"
+            for name in (
+                self.primary_model, self.computer_use.model, *self.computer_use.fallback_models
+            )
+            if name in self.models
+        ):
+            raise ValueError("Resim modeli birincil ya da bilgisayar kullanımı modeli olamaz")
         if self.fallback_model:
             fallback = self.models.get(self.fallback_model)
             if fallback is None or fallback.provider != "ollama":

@@ -1,17 +1,21 @@
-"""Ayarlar > Pet > "Pet üret" sohbeti (ADR 0048 madde 8, Paket 3a: metin modeli → SVG).
+"""Ayarlar > Pet > "Pet üret" sohbeti (ADR 0048 madde 8 ve "resim modeli yolu" eki).
 
-Model çağrısı yalnız `ProviderRouter` üzerinden gider (allow_paid, bütçe defteri ve denetim
-orada uygulanır; burada atlanmaz). Çağrı QThread'de `asyncio.run` ile yapılır. Resim modeli
-yolu Paket 3b'dir; arayüzde kapalı "yakında" seçeneği olarak durur.
+Metin modeli → SVG yolu: çağrı yalnız `ProviderRouter` üzerinden gider (allow_paid, bütçe defteri
+ve denetim orada uygulanır; burada atlanmaz), QThread'de `asyncio.run` ile. Resim modeli yolu:
+`brain.images.generate_image` (aynı kurallar) QThread'de; önce temel görsel, "Animasyonları üret"
+ile 8 şerit çağrısı, canlı satır önizlemesi ve iptal. Ücretli resim modelinde çağrıdan önce
+tutar×çağrı sayısı açıkça onaylatılır.
 """
 
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QImage, QPixmap, QStandardItemModel
+from PySide6.QtGui import QCloseEvent, QImage, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QHBoxLayout,
@@ -25,9 +29,11 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.errors import BudgetExceeded, ProviderError, RateLimitedError
+from artemis.brain.images import generate_image
 from artemis.brain.models import Message
 from artemis.brain.router import ProviderRouter
 from artemis.channels.desktop import pet_animator, pet_creator, pet_sprite
+from artemis.channels.desktop import pet_image_pipeline as pipe
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError
 from artemis.config.settings import ModelConfig, load_settings
 from artemis.safety.audit import AuditLog
@@ -70,6 +76,69 @@ class ModelCall(QThread):
             self.done.emit(completion.content, "")
 
 
+class ImageCall(QThread):
+    """Resim hattı işi (temel görsel ya da 8 şerit); (sonuç, hata) iletir.
+
+    `work(call, generate)` iş parçacığında çalışır; `generate(istem, referans, boyut)` ücret/izin
+    kurallarını `generate_image` içinde uygular. İptal yalnız çağrılar arasında gözlenir.
+    """
+
+    progress = Signal(int, int, int)  # biten, toplam, şimdiki satır
+    row_ready = Signal(int, object)  # satır, hücre listesi
+    done = Signal(object, str)
+
+    def __init__(
+        self, config_path: Path, alias: str, work: Callable[[ImageCall, Any], object]
+    ) -> None:
+        super().__init__()
+        self._config_path = config_path
+        self._alias = alias
+        self._work = work
+        self.cancel_requested = False
+        _RUNNING.add(self)
+        self.finished.connect(lambda: _RUNNING.discard(self))
+
+    def run(self) -> None:
+        try:
+            settings = load_settings(self._config_path)
+            audit = AuditLog(settings.audit_path)
+
+            def generate(prompt: str, reference: bytes | None, size: str) -> bytes:
+                return generate_image(
+                    settings, self._alias, prompt, reference=reference, size=size, audit=audit
+                )
+
+            result = self._work(self, generate)
+        except pipe.Cancelled:
+            self.done.emit(None, "İptal edildi.")
+        except BudgetExceeded as error:
+            self.done.emit(None, f"Ücretli model ya da bütçe sınırı: {error}")
+        except RateLimitedError:
+            self.done.emit(None, "Model kota sınırında; biraz sonra yeniden dene.")
+        except (ProviderError, pipe.PetImageError) as error:
+            self.done.emit(None, f"Resim modeli yanıt veremedi: {error}")
+        except (OSError, ValueError) as error:
+            self.done.emit(None, f"Ayarlar ya da denetim kaydı kullanılamadı: {error}")
+        else:
+            self.done.emit(result, "")
+
+
+def _is_priced(model: ModelConfig) -> bool:
+    return bool(model.input_per_million or model.output_per_million or model.image_cost_usd)
+
+
+def image_calls_note(model: ModelConfig, calls: int) -> str:
+    """Resim çağrılarının maliyet notu; ücretsiz abonelik proxy'sinde kota uyarısı."""
+    if _is_priced(model):
+        total = model.image_cost_usd * calls
+        return (
+            f"Ücretli resim modeli: çağrı başına {model.image_cost_usd} USD ayrılır; "
+            f"{calls} çağrı = {total} USD (satır yeniden denemesiyle en çok {total * 2} USD). "
+            "allow_paid kapalıysa reddedilir."
+        )
+    return "Çağrılar abonelik kotasından düşer (ayrı ücret yok)."
+
+
 def price_warning(model: ModelConfig) -> str:
     if not (model.input_per_million or model.output_per_million):
         return ""
@@ -92,6 +161,9 @@ class CreatorPanel(QWidget):
         self._frames: list[QPixmap] = []
         self._frame = 0
         self._call: ModelCall | None = None
+        self._image_call: ImageCall | None = None
+        self._base: QImage | None = None  # resim yolu: kırpılmış temel görsel
+        self._base_png = b""
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 12, 0, 0)
         layout.addWidget(QLabel("Pet üret"))
@@ -99,12 +171,8 @@ class CreatorPanel(QWidget):
         self.method = QComboBox()
         self.method.setAccessibleName("Üretim yöntemi")
         self.method.addItem("SVG (metin modeli)")
-        self.method.addItem("Resim modeli · yakında")
-        item_model = self.method.model()
-        assert isinstance(item_model, QStandardItemModel)
-        item = item_model.item(1)
-        assert item is not None
-        item.setEnabled(False)  # Paket 3b
+        self.method.addItem("Resim modeli (animasyonlu)")
+        self.method.currentIndexChanged.connect(self._fill_models)
         self.model_combo = QComboBox()
         self.model_combo.setAccessibleName("Model")
         self.model_combo.currentIndexChanged.connect(self._update_warning)
@@ -135,6 +203,15 @@ class CreatorPanel(QWidget):
         send_row.addWidget(self.input, 1)
         send_row.addWidget(self.send_button)
         layout.addLayout(send_row)
+        job_row = QHBoxLayout()
+        self.animate_button = QPushButton("Animasyonları üret")
+        self.animate_button.clicked.connect(self.animate)
+        self.cancel_button = QPushButton("İptal")
+        self.cancel_button.clicked.connect(self.cancel)
+        job_row.addWidget(self.animate_button)
+        job_row.addWidget(self.cancel_button)
+        job_row.addStretch(1)
+        layout.addLayout(job_row)
         self.busy = QLabel()
         layout.addWidget(self.busy)
         preview_row = QHBoxLayout()
@@ -176,24 +253,56 @@ class CreatorPanel(QWidget):
         except (OSError, ValueError) as error:
             self.status.setText(f"Model listesi okunamadı: {error}")
             return
-        for alias, model in self._models.items():
-            self.model_combo.addItem(f"{alias} · {model.provider}/{model.model}", alias)
         if not self._models:
             self.status.setText("Config'te model tanımlı değil.")
+        self._fill_models()
+
+    @property
+    def _image_mode(self) -> bool:
+        return self.method.currentIndex() == 1
+
+    def _fill_models(self) -> None:
+        """Model listesi yönteme göre süzülür: SVG için sohbet, resim yolu için resim modelleri."""
+        want = "image" if self._image_mode else "chat"
+        self.model_combo.clear()
+        for alias, model in self._models.items():
+            if model.kind == want:
+                self.model_combo.addItem(f"{alias} · {model.provider}/{model.model}", alias)
+        if self._models and self.model_combo.count() == 0:
+            self.status.setText(f"Bu yöntem için config'te '{want}' türünde model yok.")
         self._update_warning()
+        self._update_buttons()
 
     def _update_warning(self) -> None:
         model = self._models.get(str(self.model_combo.currentData() or ""))
-        self.warning.setText(price_warning(model) if model else "")
+        if model is None:
+            self.warning.setText("")
+        elif self._image_mode:
+            self.warning.setText(
+                image_calls_note(model, len(pipe.ROWS)) + " Toplam süre yaklaşık 4-6 dk."
+            )
+        else:
+            self.warning.setText(price_warning(model))
+
+    def _busy(self) -> bool:
+        return self._call is not None or self._image_call is not None
 
     def _update_buttons(self) -> None:
-        idle = self._call is None
-        ready = not self._demo and bool(self._models)
+        idle = not self._busy()
+        ready = not self._demo and self.model_combo.count() > 0
         self.send_button.setEnabled(ready and idle)
         self.input.setEnabled(ready and idle)
         self.model_combo.setEnabled(ready and idle)
-        self.save_button.setEnabled(ready and idle and self._sheet is not None)
-        self.busy.setText("" if idle else "Model düşünüyor…")
+        self.method.setEnabled(not self._demo and idle)
+        self.save_button.setEnabled(not self._demo and idle and self._sheet is not None)
+        self.animate_button.setVisible(self._image_mode)
+        self.animate_button.setEnabled(ready and idle and self._base is not None)
+        self.cancel_button.setVisible(self._image_mode)
+        self.cancel_button.setEnabled(self._image_call is not None)
+        if self._call is not None:
+            self.busy.setText("Model düşünüyor…")
+        elif self._image_call is None:
+            self.busy.setText("")
 
     # ----------------------------------------------------------------- sohbet
 
@@ -203,7 +312,10 @@ class CreatorPanel(QWidget):
     def send(self) -> None:
         text = self.input.text().strip()
         alias = self.model_combo.currentData()
-        if not text or self._call is not None or self._demo or alias is None:
+        if not text or self._busy() or self._demo or alias is None:
+            return
+        if self._image_mode:
+            self._send_image(text, str(alias))
             return
         self.input.clear()
         self._log("Sen", text)
@@ -241,6 +353,109 @@ class CreatorPanel(QWidget):
             self._load_frames()
         finally:
             self._update_buttons()
+
+    # ------------------------------------------------------------ resim yolu
+
+    def _start_image(
+        self, alias: str, calls: int, work: Callable[[ImageCall, Any], object],
+        on_done: Callable[[object, str], None],
+    ) -> bool:
+        """Ücretli modelde tutar×çağrıyı onaylatır; sonra işi başlatır."""
+        model = self._models[alias]
+        if _is_priced(model) and not self._confirm(
+            image_calls_note(model, calls) + " Devam edilsin mi?"
+        ):
+            return False
+        call = ImageCall(self._config_path, alias, work)
+        call.progress.connect(self._on_progress)
+        call.row_ready.connect(self._on_row)
+        call.done.connect(on_done)
+        self._image_call = call
+        self._update_buttons()
+        call.start()
+        return True
+
+    def _send_image(self, text: str, alias: str) -> None:
+        base_png = self._base_png if self._base is not None else None
+
+        def work(call: ImageCall, generate: Any) -> object:
+            if base_png is None:
+                return pipe.make_base(text, generate)
+            return pipe.edit_base(text, base_png, generate)
+
+        if self._start_image(alias, 1, work, self._on_base):
+            self.input.clear()
+            self._log("Sen", text)
+            self.busy.setText("Temel görsel üretiliyor (~1 dk)…")
+
+    def _on_base(self, result: object, error: str) -> None:
+        self._image_call = None
+        try:
+            if error or not isinstance(result, tuple):
+                self._log("Hata", error or "Beklenmeyen sonuç.")
+                return
+            self._base, self._base_png = result
+            self._sheet = None  # temel değişti: eski animasyonlar geçersiz
+            self._show_still(self._base)
+            self._log("Model", "Temel görsel hazır. Düzeltmek için yaz ya da animasyonları üret.")
+        finally:
+            self._update_buttons()
+
+    def _show_still(self, image: QImage) -> None:
+        self._timer.stop()
+        self._frames = []
+        self.preview.setPixmap(QPixmap.fromImage(pet_animator._fit_cell(image)))
+
+    def animate(self) -> None:
+        alias = self.model_combo.currentData()
+        if self._base is None or self._busy() or self._demo or alias is None:
+            return
+        base, base_png = self._base, self._base_png
+
+        def work(call: ImageCall, generate: Any) -> object:
+            return pipe.animate(
+                base_png, base, generate,
+                progress=lambda done, total, row: call.progress.emit(done, total, row),
+                row_ready=lambda row, cells: call.row_ready.emit(row, cells),
+                cancelled=lambda: call.cancel_requested,
+            )
+
+        if self._start_image(str(alias), len(pipe.ROWS), work, self._on_animated):
+            self._log("Model", "Animasyonlar üretiliyor (yaklaşık 4-6 dk); iptal edebilirsin.")
+
+    def _on_progress(self, done: int, total: int, row: int) -> None:
+        self.busy.setText(f"{done + 1}/{total}: {pet_animator.STATE_NAMES[row].lower()}…")
+
+    def _on_row(self, row: int, cells: object) -> None:
+        """Satır gelir gelmez önizler (satırın kendi ölçeğiyle; nihai ölçek en sonda ortaktır)."""
+        assert isinstance(cells, list)
+        self.state_combo.blockSignals(True)
+        self.state_combo.setCurrentIndex(row)
+        self.state_combo.blockSignals(False)
+        self._frames = [QPixmap.fromImage(c) for c in cells]
+        self._frame = 0
+        self._tick()
+        self._timer.start()
+
+    def _on_animated(self, result: object, error: str) -> None:
+        self._image_call = None
+        try:
+            if error or not isinstance(result, tuple):
+                self._log("Hata", error or "Beklenmeyen sonuç.")
+                return
+            self._sheet, fallback = result
+            if fallback:
+                names = ", ".join(pet_animator.STATE_NAMES[r] for r in fallback)
+                self._log("Uyarı", f"Model çıktısı alınamayan (prosedürel) satırlar: {names}.")
+            self._log("Model", "Animasyonlar hazır; durumları önizle, sonra kaydet.")
+            self._load_frames()
+        finally:
+            self._update_buttons()
+
+    def cancel(self) -> None:
+        if self._image_call is not None:
+            self._image_call.cancel_requested = True
+            self.busy.setText("İptal ediliyor (süren çağrı bitince)…")
 
     # -------------------------------------------------------------- önizleme
 
@@ -288,11 +503,17 @@ class CreatorPanel(QWidget):
         self.installed.emit(info.id)
 
     def shutdown(self) -> None:
-        """Panel kapanırken: zamanlayıcı durur, çalışan çağrının sonucu yok sayılır."""
+        """Panel kapanırken: zamanlayıcı durur, çalışan çağrıların sonucu yok sayılır."""
         self._timer.stop()
         if self._call is not None:
             self._call.done.disconnect(self._on_reply)  # iş parçacığı `_RUNNING` ile yaşar
             self._call = None
+        if self._image_call is not None:
+            self._image_call.cancel_requested = True
+            for signal in (self._image_call.progress, self._image_call.row_ready,
+                           self._image_call.done):
+                signal.disconnect()  # sonuç yok sayılır; iş parçacığı `_RUNNING`'de biter
+            self._image_call = None
 
     def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt)
         self.shutdown()
