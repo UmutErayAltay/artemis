@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -36,6 +37,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.projects_panel import CurrentPageStack
@@ -49,7 +51,7 @@ from artemis.channels.desktop.provider_section import (
 )
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
 from artemis.channels.voice import stt_catalog
-from artemis.config.settings import GITHUB_OWNER_RE, Settings, load_settings
+from artemis.config.settings import BUILTIN_AGENT, GITHUB_OWNER_RE, Settings, load_settings
 from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
 SettingPath = tuple[str, ...]
@@ -748,8 +750,8 @@ class SettingsPanel(QWidget):
 
         github = page(
             "GitHub",
-            "Kendi repolarını kod ajanının erişimine bağla. “Bağla” düğmesi hemen kaydeder; "
-            "diğer alanlar Uygula ile.",
+            "Kendi repolarını kod ajanının erişimine bağla ve hangi ajanın çalışacağını seç. "
+            "“Bağla” düğmesi hemen kaydeder; diğer alanlar Uygula ile.",
         )
         account_box, account = group("Hesap", divided=False)
         github.addWidget(account_box)
@@ -785,6 +787,34 @@ class SettingsPanel(QWidget):
         self.github_list.setMaximumHeight(144)
         self.github_list.setAccessibleName("GitHub eşitleme sonuçları")
         result.addWidget(self.github_list)
+        # Kod ajanları GitHub sayfasında: aynı `code_agent` config bölümü ve aynı "kod ajanı"
+        # bağlamı; Uygulamalar sayfası açılacak masaüstü uygulamalarını yönetir. Düz grup,
+        # Uygulamalar listesiyle aynı kirli-durum/Uygula akışı (ikinci kaydetme yolu yok).
+        agents_box, agents = group(
+            "Kod ajanları",
+            "Arka plan proje işinde çalışacak ajanlar. Değişiklikler Uygula ile kaydedilir.",
+        )
+        github.addWidget(agents_box)
+        self.agent_list = QListWidget()
+        self.agent_list.setMaximumHeight(144)
+        self.agent_list.setAccessibleName("Kod ajanları")
+        agents.addWidget(self.agent_list)
+        self.default_agent_combo = QComboBox()
+        self.default_agent_combo.setAccessibleName("Varsayılan kod ajanı")
+        field(agents, "Varsayılan ajan", self.default_agent_combo,
+              "Projede ayrıca seçilmediyse bu ajan çalışır.")
+        self.add_codex_button = QPushButton("Codex ekle")
+        self.add_codex_button.clicked.connect(self._add_codex)
+        self.add_custom_agent_button = QPushButton("Özel ajan ekle…")
+        self.add_custom_agent_button.clicked.connect(self._add_custom_agent)
+        agents.addLayout(button_row(self.add_codex_button, self.add_custom_agent_button))
+        self.agent_hint = meta_label("")
+        agents.addWidget(self.agent_hint)
+        self.code_agents: dict[str, dict[str, Any]] = {}
+        self.default_agent = BUILTIN_AGENT
+        self._builtin_command = "claude"
+        self._refresh_code_agents()
+        self.default_agent_combo.activated.connect(self._default_agent_picked)
         github.addStretch(1)
 
         # Pet bölümü ayarlarda gösterilmez; app.py kendi sayfasında barındırır.
@@ -866,7 +896,8 @@ class SettingsPanel(QWidget):
             for binding in PANEL_BINDINGS:
                 getattr(self, binding.widget).setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
-                           self.github_auto, self.github_button):
+                           self.github_auto, self.github_button, self.default_agent_combo,
+                           self.add_codex_button, self.add_custom_agent_button):
                 widget.setEnabled(False)
         else:
             self.refresh()
@@ -1117,6 +1148,13 @@ class SettingsPanel(QWidget):
             self.github_owner.setText(agent.github_owner or "")
             self.repos_dir.setText(str(agent.repos_dir) if agent.repos_dir else "")
             self.github_auto.setChecked(agent.auto_sync)
+            self.code_agents = {
+                name: profile.model_dump(mode="json", exclude_defaults=True)
+                for name, profile in agent.agents.items()
+            }
+            self.default_agent = agent.default_agent
+            self._builtin_command = agent.command
+            self._refresh_code_agents()
             self._set_dirty(False)
         except (OSError, ValueError, KeyError):
             self.notice.setText("Ayarlar okunamadı.")
@@ -1245,6 +1283,53 @@ class SettingsPanel(QWidget):
             "repos_dir": folder or None,
             "auto_sync": self.github_auto.isChecked(),
         }
+
+    def code_agent_values(self) -> dict[str, Any]:
+        """Uygula için: GitHub alanları + ajan profilleri. None değer anahtarı config'ten siler."""
+        return {
+            **self.github_values(),
+            "agents": dict(self.code_agents) or None,
+            "default_agent": None if self.default_agent == BUILTIN_AGENT else self.default_agent,
+        }
+
+    def _refresh_code_agents(self) -> None:
+        self.agent_list.clear()
+        rows = [(BUILTIN_AGENT, "claude", self._builtin_command)]
+        rows += [(n, p["kind"], p.get("command")) for n, p in self.code_agents.items()]
+        for name, kind, command in rows:
+            # Yalnız PATH/önbellek bakılır; arayüz iş parçacığında süreç başlatılmaz.
+            status = command_status(command)
+            self.agent_list.addItem(f"{name} · {kind} · {command or '—'} · {status}")
+        blocked = self.default_agent_combo.blockSignals(True)
+        self.default_agent_combo.clear()
+        for name, _kind, _command in rows:
+            self.default_agent_combo.addItem(name, name)
+        current = self.default_agent_combo.findData(self.default_agent)
+        self.default_agent_combo.setCurrentIndex(max(0, current))
+        self.default_agent_combo.blockSignals(blocked)
+        self.add_codex_button.setEnabled(not self._demo and "codex" not in self.code_agents)
+        self.agent_hint.setText(
+            "Giriş her ajanın kendi CLI'sindedir (Claude/Codex login); Artemis sır saklamaz."
+        )
+
+    def _default_agent_picked(self, index: int) -> None:
+        self.default_agent = str(self.default_agent_combo.itemData(index))
+        self._mark_dirty()
+
+    def _stage_agent(self, name: str, profile: dict[str, Any]) -> None:
+        self.code_agents[name] = profile
+        self._refresh_code_agents()
+        self._mark_dirty()
+        self.agent_hint.setText(f"'{name}' eklendi; kaydetmek için Uygula'ya bas.")
+
+    def _add_codex(self) -> None:
+        if "codex" not in self.code_agents:
+            self._stage_agent("codex", {"kind": "codex", "command": "codex"})
+
+    def _add_custom_agent(self) -> None:
+        dialog = AgentDialog((BUILTIN_AGENT, *self.code_agents), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.result_profile:
+            self._stage_agent(*dialog.result_profile)
 
     def _browse_repos_dir(self) -> None:
         start = self.repos_dir.text().strip() or default_repos_dir()

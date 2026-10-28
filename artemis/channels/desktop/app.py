@@ -727,6 +727,28 @@ class ApprovalDialog(QDialog):
         raw_name.setAccessibleName("Ham araç adı")
         body_layout.addWidget(raw_name)
 
+        # Kod ajanı: hangi ajanın nerede başlayacağı ilk düz dil bloğudur (ADR 0049). Metin
+        # arka uçtan gelir; proje dışı klasörde uyarı satırı uyarı tonlu kutuda ayrılır.
+        self.approval_text_label: QLabel | None = None
+        self.workdir_warning_box: QLabel | None = None
+        spec = item.arguments.get("spec")
+        if item.tool_name == "code_agent_start" and isinstance(spec, dict):
+            lines = str(spec.get("approval_text", "")).split("\n")
+            warn = lines[3:] if spec.get("workdir", "proje") != "proje" else []
+            head = lines[: len(lines) - len(warn)]
+            if head and any(head):
+                self.approval_text_label = QLabel("\n".join(head))
+                self.approval_text_label.setTextFormat(Qt.TextFormat.PlainText)
+                self.approval_text_label.setWordWrap(True)
+                self.approval_text_label.setAccessibleName("Ajan ve başlangıç klasörü")
+                body_layout.addWidget(self.approval_text_label)
+            if warn:
+                self.workdir_warning_box = QLabel("\n".join(warn))
+                self.workdir_warning_box.setObjectName("approvalNotice")
+                self.workdir_warning_box.setTextFormat(Qt.TextFormat.PlainText)
+                self.workdir_warning_box.setWordWrap(True)
+                body_layout.addWidget(self.workdir_warning_box)
+
         # Özet: her argüman anahtarı görünür; uzun değer kısalır, tamamı ipucunda ve ayrıntıda.
         intro = QLabel("Artemis bu aracı şu değerlerle çalıştırmak için izin istiyor:")
         intro.setWordWrap(True)
@@ -966,6 +988,8 @@ class DesktopWindow(QMainWindow):
         self._app = app_instance
         self._config_path = config_path
         self._restart_settings = False
+        self._config_restart_pending = False
+        self._config_restart_serial = -1
         self._demo = demo
         self._continuous = False
         self._voice_state = "off"
@@ -1457,8 +1481,9 @@ class DesktopWindow(QMainWindow):
         self.chat_page = self._build_chat_page()
         self.tabs = QTabWidget()
         self.tabs.addTab(self.chat_page, "Sohbet")
-        self.projects_panel = ProjectsPanel(demo=self._demo)
+        self.projects_panel = ProjectsPanel(demo=self._demo, config_path=self._config_path)
         self.projects_panel.tool_requested.connect(self._submit_project_tool)
+        self.projects_panel.config_saved.connect(self._code_agent_config_saved)
         self._projects_timer = QTimer(self)
         self._projects_timer.setInterval(2000)
         self._projects_timer.timeout.connect(self._refresh_projects)
@@ -1571,6 +1596,43 @@ class DesktopWindow(QMainWindow):
             return
         self._restart_runtime()
 
+    def _code_agent_config_saved(self) -> None:
+        """Projeler'den yazılan ajan/klasör ayarı çalışma zamanına yeniden kurulumla ulaşır.
+
+        Takma adları çalışma zamanının ayarı çözer; yeniden kurulmazsa yeni klasör taslakta
+        "bilinmeyen klasör" olur. Meşgulken sahte bir uygulama iddiası yerine dürüst not düşülür.
+        """
+        if self._exiting or self._demo:
+            self.projects_panel.notice.setText(
+                "Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur."
+            )
+            return
+        # Yeniden kurulum çalışan arka plan işlerini sessizce iptal eder ve bekleyen onayları
+        # geçersiz kılar; bu yüzden boşta olana dek ertelenir (bayrak tek seferliktir).
+        self._config_restart_pending = True
+        self._config_restart_serial = self.projects_panel.status_serial
+        self._maybe_restart_for_config()
+
+    def _config_restart_blocker(self) -> str:
+        """Yeniden kurulumu engelleyen neden ('' = boşta)."""
+        if self._approval_dialog is not None:
+            return "Kaydedildi; bekleyen onay bitince uygulama yeniden başlayınca geçerli olur."
+        if self.projects_panel.active_job_count():
+            return "Kaydedildi; çalışan iş bitince uygulama yeniden başlayınca geçerli olur."
+        if self._busy:
+            return "Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur."
+        return ""
+
+    def _maybe_restart_for_config(self) -> None:
+        if not self._config_restart_pending or self._exiting:
+            return
+        reason = self._config_restart_blocker()
+        if reason:
+            self.projects_panel.notice.setText(reason)
+            return
+        self._config_restart_pending = False
+        self._restart_runtime()
+
     def _github_synced(self, report: Any, auto: bool) -> None:
         if not (auto and report.cloned):
             return
@@ -1599,7 +1661,7 @@ class DesktopWindow(QMainWindow):
                 device,
                 values=self.settings_panel.values(),
                 applications=self.settings_panel.applications,
-                code_agent=self.settings_panel.github_values(),
+                code_agent=self.settings_panel.code_agent_values(),
                 stt_model=self.settings_panel.stt_model_path(),
             )
         except (OSError, ValueError, KeyError, TypeError):
@@ -1791,6 +1853,16 @@ class DesktopWindow(QMainWindow):
         self._set_controls()
 
     def _refresh_projects(self) -> None:
+        if self._config_restart_pending:
+            # Ertelenmiş yeniden kurulum: iş listesi sekmeden bağımsız tazelenir, son durumu
+            # (status_serial arttıktan sonra) boşsa tek kez yeniden kurulur.
+            if self._worker_ready and not self._busy:
+                if self.projects_panel.status_serial == self._config_restart_serial:
+                    self.projects_panel.refresh()
+                else:
+                    self._config_restart_serial = self.projects_panel.status_serial
+                    self._maybe_restart_for_config()
+            return
         if (
             self.tabs.currentWidget() is self.projects_page
             and self._worker_ready

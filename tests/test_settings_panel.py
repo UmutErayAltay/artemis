@@ -296,6 +296,7 @@ _UNBOUND_WIDGETS = {
     "stt_combo": "stt_model: katalog seçimi yola çevrilir, indirme durumu taşır",
     "github_auto": "code_agent.auto_sync: github_values ile birlikte, save_code_agent de yazar",
     "advanced_devices": "yalnız görünüm; config'e yazılmaz",
+    "default_agent_combo": "code_agent.default_agent: code_agent_values ile ajanlarla yazılır",
 }
 
 
