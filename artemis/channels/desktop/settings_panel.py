@@ -31,7 +31,6 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSizePolicy,
-    QStackedWidget,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -39,6 +38,7 @@ from PySide6.QtWidgets import (
 
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
+from artemis.channels.desktop.projects_panel import CurrentPageStack
 from artemis.channels.desktop.provider_section import (
     ProviderSection,
     button_row,
@@ -486,7 +486,7 @@ class SettingsPanel(QWidget):
         self.sections.setFixedWidth(200)
         self.sections.setAccessibleName("Ayar bölümleri")
         body.addWidget(self.sections)
-        self.stack = QStackedWidget()
+        self.stack = CurrentPageStack()
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -895,13 +895,9 @@ class SettingsPanel(QWidget):
         if row < 0:
             return
         self.stack.setCurrentIndex(row)
-        # Gizli sayfalar yükseklik hesabına katılmasın; yoksa kısa sayfada boş kaydırma kalır.
-        for index in range(self.stack.count()):
-            policy = QSizePolicy.Policy.Preferred if index == row else QSizePolicy.Policy.Ignored
-            page_widget = self.stack.widget(index)
-            if page_widget is not None:
-                page_widget.setSizePolicy(QSizePolicy.Policy.Preferred, policy)
-        self.stack.updateGeometry()
+        # Önceki sayfanın kaydırma konumu yeni (kısa) sayfada alta düşmesin; programatik
+        # show_section() de buradan geçer.
+        self.sections.scroll_area.verticalScrollBar().setValue(0)
         self._sync_theme_cards()
 
     def set_theme(self, name: str) -> None:

@@ -376,12 +376,16 @@ class _ChatStreamAccumulator:
         return result
 
 
+# Kullanıcıya ortam değişkeni adı yerine sağlayıcı adı gösterilir (ad yalnız ikincil ayrıntı).
+_KEY_LABELS = {"OPENROUTER_API_KEY": "OpenRouter", "ANTHROPIC_API_KEY": "Anthropic"}
+
+
 def _key(name: str) -> str:
     key = os.environ.get(name, "")
     if not key:
         raise ProviderError(
-            f"{name} ortam değişkeni tanımlı değil. Ortamda {name} tanımlayın veya "
-            f"Kimlik Bilgisi Yöneticisi'ne Artemis/{name} olarak kaydedin."
+            f"{_KEY_LABELS.get(name, name)} anahtarı bulunamadı. Anahtarı ekle: Windows ortam "
+            f"değişkeni {name} ya da Kimlik Bilgisi Yöneticisi'nde Artemis/{name}."
         )
     return key
 
@@ -405,8 +409,8 @@ def _endpoint_key(settings: Settings, model: ModelConfig) -> str | None:
     if not key:
         variable = endpoint_key_variable(endpoint_id)
         raise ProviderError(
-            f"'{endpoint_id}' ucu için API anahtarı kayıtlı değil. Ortamda {variable} "
-            f"tanımlayın veya Kimlik Bilgisi Yöneticisi'ne Artemis/{endpoint_id} olarak kaydedin."
+            f"'{endpoint_id}' ucunun anahtarı bulunamadı. Anahtarı ekle: Windows ortam "
+            f"değişkeni {variable} ya da Kimlik Bilgisi Yöneticisi'nde Artemis/{endpoint_id}."
         )
     return key
 

@@ -1082,8 +1082,9 @@ class DesktopWindow(QMainWindow):
         if hasattr(self, "overlay"):
             self.overlay.setStyleSheet(style)
             self._theme_placeholders(self.overlay)
-        # Pet yanındaki hızlı kutu ayrı pencere; aynı jetonlarla boyanır (sabit lacivert yok).
-        self.pet._quick.apply_theme(palette)
+        # Masaüstü pet ve yanındaki hızlı kutu ayrı pencereler; aynı jetonlarla boyanır
+        # (pet.apply_theme hızlı kutuyu da günceller; sabit lacivert yok).
+        self.pet.apply_theme(self._theme)
         self._theme_placeholders(self)
         self._refresh_tones()
         self._refresh_icons()

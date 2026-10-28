@@ -20,8 +20,8 @@ Source authority: [PRODUCT.md](PRODUCT.md), [surface contract](.impeccable/surfa
 
 Warm neutrals (cream/bone, warm ink) with a turquoise accent provide calm structure; `accent_soft` is the gentle accent tint for user bubbles and soft selected fills. Primary uses `accent` and `accent_text` for actions and selection. Neutral roles are `bg`, `surface`, `soft`, `text`, `muted`, and `border`. Navigation has its own `nav`, `nav_text`, `nav_muted`, and `nav_selected` roles. `warning`, `error`, and `success` carry status meaning. All four complete source palettes follow; no synthetic tonal ramps are shipped.
 
-- **Açık / light:** pale workspace and pale navigation.
-- **Koyu / dark:** dark workspace and darker navigation.
+- **Açık / light:** pale workspace and a slightly deeper cream navigation (≥1.15:1 against the workspace).
+- **Koyu / dark:** dark workspace and a slightly lighter warm navigation (≥1.15:1 against the workspace).
 - **Açık ağırlıklı / light-mixed:** light workspace and slate navigation; current default.
 - **Koyu ağırlıklı / dark-mixed:** dark workspace and pale navigation.
 
@@ -41,10 +41,10 @@ Warm neutrals (cream/bone, warm ink) with a turquoise accent provide calm struct
     "light-accent": "#0f7f7a",
     "light-accent-text": "#ffffff",
     "light-accent-soft": "#d9efec",
-    "light-nav": "#efe7da",
+    "light-nav": "#e8dfcf",
     "light-nav-text": "#2a2420",
     "light-nav-muted": "#5f544a",
-    "light-nav-selected": "#e0d4c0",
+    "light-nav-selected": "#dacdb7",
     "light-warning": "#8a5a0b",
     "light-error": "#b3392f",
     "light-success": "#1f6d4b",
@@ -57,10 +57,10 @@ Warm neutrals (cream/bone, warm ink) with a turquoise accent provide calm struct
     "dark-accent": "#5fd0c5",
     "dark-accent-text": "#0d2926",
     "dark-accent-soft": "#1f3a37",
-    "dark-nav": "#120f0c",
+    "dark-nav": "#292119",
     "dark-nav-text": "#f0e9df",
     "dark-nav-muted": "#b3a698",
-    "dark-nav-selected": "#342d26",
+    "dark-nav-selected": "#3d332a",
     "dark-warning": "#f2c46d",
     "dark-error": "#ff9d8f",
     "dark-success": "#8fd7ae",
@@ -89,10 +89,10 @@ Warm neutrals (cream/bone, warm ink) with a turquoise accent provide calm struct
     "dark-mixed-accent": "#5fd0c5",
     "dark-mixed-accent-text": "#0d2926",
     "dark-mixed-accent-soft": "#1f3a37",
-    "dark-mixed-nav": "#efe7da",
+    "dark-mixed-nav": "#e8dfcf",
     "dark-mixed-nav-text": "#2a2420",
     "dark-mixed-nav-muted": "#5f544a",
-    "dark-mixed-nav-selected": "#e0d4c0",
+    "dark-mixed-nav-selected": "#dacdb7",
     "dark-mixed-warning": "#f2c46d",
     "dark-mixed-error": "#ff9d8f",
     "dark-mixed-success": "#8fd7ae"

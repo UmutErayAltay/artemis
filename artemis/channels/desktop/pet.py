@@ -38,7 +38,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QApplication, QMenu, QWidget
 
-from artemis.channels.desktop import pet_sprite
+from artemis.channels.desktop import pet_sprite, themes
 from artemis.channels.desktop.pet_quick import QuickBox
 from artemis.channels.desktop.pet_sprite import SpritePet
 
@@ -50,13 +50,6 @@ GAP = 6
 MARGIN = 24
 BUBBLE_SECONDS = 6.0
 BUBBLE_LIMIT = 140
-
-TEAL = QColor("#53D6C7")
-AMBER = QColor("#FFD78C")
-ERROR = QColor("#F0B2AA")
-NAVY = QColor("#0B1220")
-SURFACE = QColor("#111C2D")
-TEXT = QColor("#E6EDF5")
 
 _RADIUS = 40.0
 _CENTER_Y = 60.0
@@ -226,7 +219,11 @@ class PetWidget(QWidget):
         self._wave = 0.0
         self._gaze = QPointF(0, 0)
         self._gaze_goal = QPointF(0, 0)
-        self._tint = QColor(TEAL)
+        # Pet ayrı bir üst pencere: ana pencerenin stil sayfasını devralmaz, bu yüzden aktif
+        # temanın jetonlarını kendisi tutar. Başlangıçta kayıtlı temayı okur (app.py'den bağımsız).
+        self._theme = themes.DEFAULT_THEME
+        self._pal = themes.THEMES[self._theme]
+        self._tint = self._col("accent")
         self._glow = 0.1
         self._dim = 0.8
         self._happy = 0.0
@@ -267,11 +264,29 @@ class PetWidget(QWidget):
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._on_timer)
 
+        saved = QSettings(
+            QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Artemis", "appearance"
+        ).value("theme", themes.DEFAULT_THEME)
+        self.apply_theme(str(saved))
+        self._tint = self._col("accent")
+
         self.setAccessibleName("Artemis pet")
         self.setFixedSize(BODY, BODY)
         self._load_position()
         self._relayout()
         self._refresh_access()
+
+    # ------------------------------------------------------------------ tema
+
+    def _col(self, key: str) -> QColor:
+        return QColor(self._pal[key])
+
+    def apply_theme(self, name: str) -> None:
+        """Balon, rozet ve çizili avatar renkleri aktif temanın jetonlarından gelir."""
+        self._theme = name if name in themes.THEMES else themes.DEFAULT_THEME
+        self._pal = themes.THEMES[self._theme]
+        self._quick.apply_theme(self._pal)
+        self.update()
 
     # ------------------------------------------------------------------ durum
 
@@ -664,7 +679,7 @@ class PetWidget(QWidget):
         # Hedefler
         eye, smile, mopen, mw, wave = 1.0, 0.35, 0.0, 10.0, 0.0
         gaze = self._gaze_goal
-        color, glow, dim, happy, droop = TEAL, 0.14, 1.0, 0.0, 0.0
+        color, glow, dim, happy, droop = self._col("accent"), 0.14, 1.0, 0.0, 0.0
         if state == "off":
             eye, smile, mw, glow, dim = 0.42, 0.1, 8.0, 0.04, 0.78
             gaze = QPointF(0, 0.5)
@@ -678,10 +693,10 @@ class PetWidget(QWidget):
             eye, smile, mw, wave, glow = 1.0, 0.45, 12.0, 1.0, 0.2
             gaze = QPointF(0, 0)
         elif state == "approval":
-            eye, smile, mw, glow, color = 1.15, -0.25, 8.0, 0.32, AMBER
+            eye, smile, mw, glow, color = 1.15, -0.25, 8.0, 0.32, self._col("warning")
             gaze = QPointF(0, 0.2)
         elif state == "error":
-            eye, smile, mw, glow, color = 0.85, -0.7, 9.0, 0.3, ERROR
+            eye, smile, mw, glow, color = 0.85, -0.7, 9.0, 0.3, self._col("error")
             gaze = QPointF(0, 0.5)
         elif self._reaction is None:
             smile += 0.35 * self._hover
@@ -689,7 +704,7 @@ class PetWidget(QWidget):
             if follow is not None:
                 gaze = follow
         elif self._reaction == "happy":
-            eye, smile, mw, happy = 1.0, 1.0, 13.0, 1.0
+            eye, smile, mw, happy, color = 1.0, 1.0, 13.0, 1.0, self._col("success")
         elif self._reaction == "sad":
             eye, smile, mw, droop, gaze = 0.7, -0.8, 9.0, 1.0, QPointF(0, 0.7)
         # idle: hedefler yukarıdaki varsayılanlardır.
@@ -863,9 +878,9 @@ class PetWidget(QWidget):
             ring_r = radius + 6 + self._level * 9 + pulse * 2
             ring_a = self._ring * (0.3 + 0.6 * self._level + 0.1 * pulse)
             p.setBrush(Qt.BrushStyle.NoBrush)
-            p.setPen(QPen(_alpha(TEAL, ring_a), 2.5 + self._level * 2.5))
+            p.setPen(QPen(_alpha(self._col("accent"), ring_a), 2.5 + self._level * 2.5))
             p.drawEllipse(QPointF(cx + dx, cy + dy), ring_r, ring_r)
-            p.setPen(QPen(_alpha(TEAL, ring_a * 0.4), 1.5))
+            p.setPen(QPen(_alpha(self._col("accent"), ring_a * 0.4), 1.5))
             p.drawEllipse(QPointF(cx + dx, cy + dy), ring_r + 5, ring_r + 5)
 
         p.save()
@@ -890,7 +905,7 @@ class PetWidget(QWidget):
 
         # Anten: ucu durum renginde yanar
         tip = QPointF(self._antenna * 0.4 + math.sin(t * 1.3) * 1.5, -r - 15)
-        p.setPen(QPen(QColor("#2A3B52"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.setPen(QPen(self._col("border"), 3, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.drawLine(QPointF(0, -r + 3), tip)
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(_alpha(tint, 0.25))
@@ -899,28 +914,20 @@ class PetWidget(QWidget):
         p.drawEllipse(tip, 3.6, 3.6)
 
         # Kulaklar
-        p.setBrush(QColor("#1B2C44"))
+        p.setBrush(self._col("soft"))
         p.setPen(QPen(_alpha(tint, 0.55), 1.5))
         for side in (-1, 1):
             p.drawRoundedRect(QRectF(side * (r - 2) - 5, -2, 10, 20), 5, 5)
 
-        # Gövde: hafif basık küre
+        # Gövde: hafif basık küre; DESIGN.md gereği düz ton (gradyan ve parlama yok)
         body = QRectF(-r * 1.04, -r, r * 2.08, r * 2)
-        grad = QRadialGradient(QPointF(-12, -18), r * 1.7)
-        grad.setColorAt(0.0, QColor("#2A3F5E"))
-        grad.setColorAt(0.55, QColor("#16253B"))
-        grad.setColorAt(1.0, QColor("#0A1220"))
-        p.setBrush(QBrush(grad))
+        p.setBrush(self._col("surface"))
         p.setPen(QPen(_alpha(tint, 0.7), 2))
         p.drawEllipse(body)
-        # Parlama
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(255, 255, 255, 30))
-        p.drawEllipse(QRectF(-r * 0.72, -r * 0.82, r * 0.7, r * 0.38))
 
         # Yanaklar (mutluyken belirir)
         if self._happy > 0.02:
-            p.setBrush(_alpha(AMBER, 0.22 * self._happy))
+            p.setBrush(_alpha(self._col("warning"), 0.22 * self._happy))
             for side in (-1, 1):
                 p.drawEllipse(QPointF(side * 27, 10), 6.5, 4)
 
@@ -972,7 +979,7 @@ class PetWidget(QWidget):
             bottom.append(QPointF(u * w, y + self._mouth_open * 12 * env))
         p.setBrush(Qt.BrushStyle.NoBrush)
         if self._mouth_open > 0.06:
-            p.setBrush(QColor("#08101C"))
+            p.setBrush(_mix(self._col("surface"), self._col("text"), 0.85))
             p.setPen(QPen(_alpha(tint, 0.9), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
             p.drawPolygon(QPolygonF(top + bottom[::-1]))
             return
@@ -1009,11 +1016,11 @@ class PetWidget(QWidget):
                 font.setPixelSize(round(9 + 8 * k))
                 font.setBold(True)
                 p.setFont(font)
-                p.setPen(_alpha(TEXT, 0.75 * alpha))
+                p.setPen(_alpha(self._col("text"), 0.75 * alpha))
                 p.drawText(QPointF(x + 3 * math.sin(pt.age * 2.5), y), "z")
                 continue
             size = 1.5 + 4 * (1 - k)
-            color = AMBER if int(pt.vx * 10) % 2 else TEAL
+            color = self._col("warning" if int(pt.vx * 10) % 2 else "accent")
             p.setPen(
                 QPen(_alpha(color, 1 - k), 1.8, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap)
             )
@@ -1026,7 +1033,7 @@ class PetWidget(QWidget):
         for i in range(3):
             a = self._t * 2.6 * motion + i * 2 * math.pi / 3 + (0.0 if motion else i)
             fade = 0.55 + 0.45 * math.cos(a - self._t * 2.6 * motion)
-            p.setBrush(_alpha(AMBER, 0.45 + 0.55 * fade))
+            p.setBrush(_alpha(self._col("warning"), 0.45 + 0.55 * fade))
             p.drawEllipse(
                 QPointF(cx + (_RADIUS + 13) * math.cos(a), cy + (_RADIUS + 11) * math.sin(a)),
                 3.6, 3.6,
@@ -1036,11 +1043,11 @@ class PetWidget(QWidget):
         motion = 0.0 if self._reduced else 1.0
         p.save()
         p.translate(x, y)
-        p.setPen(QPen(TEAL, 1.6))
-        p.setBrush(NAVY)
+        p.setPen(QPen(self._col("accent"), 1.6))
+        p.setBrush(self._col("surface"))
         p.drawEllipse(QPointF(0, 0), 13, 13)
         p.rotate(math.degrees(self._t * 2.2) * motion)
-        p.setPen(QPen(TEAL, 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        p.setPen(QPen(self._col("accent"), 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         for i in range(6):
             p.save()
             p.rotate(i * 60)
@@ -1052,25 +1059,25 @@ class PetWidget(QWidget):
         count = str(len(self._jobs)) if len(self._jobs) < 10 else "9+"
         pill = QRectF(x + 5, y + 4, 15, 13)
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(AMBER)
+        p.setBrush(self._col("warning"))
         p.drawRoundedRect(pill, 6.5, 6.5)
         font = QFont("Segoe UI")
         font.setPixelSize(10)
         font.setBold(True)
         p.setFont(font)
-        p.setPen(NAVY)
+        p.setPen(self._col("surface"))
         p.drawText(pill, Qt.AlignmentFlag.AlignCenter, count)
 
     def _paint_bang(self, p: QPainter, x: float, y: float) -> None:
         bob = 0.0 if self._reduced else math.sin(self._t * 5) * 3
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(AMBER)
+        p.setBrush(self._col("warning"))
         p.drawEllipse(QPointF(x, y + bob), 11, 11)
         font = QFont("Segoe UI")
         font.setPixelSize(15)
         font.setBold(True)
         p.setFont(font)
-        p.setPen(NAVY)
+        p.setPen(self._col("surface"))
         p.drawText(QRectF(x - 11, y + bob - 11, 22, 22), Qt.AlignmentFlag.AlignCenter, "!")
 
     def _paint_bubble(self, p: QPainter, body: QRect) -> None:
@@ -1086,12 +1093,15 @@ class PetWidget(QWidget):
             body.right() + 1 + GAP - slide
         )
         rect = QRectF(left, (BODY - height) / 2, BUBBLE_W, height)
-        accent = {"heard": TEAL, "job": AMBER}.get(self._bubble_kind, QColor("#2A3B52"))
+        edge = self._col("border")
+        accent = {"heard": self._col("accent"), "job": self._col("warning")}.get(
+            self._bubble_kind, edge
+        )
         p.save()
         p.setOpacity(self._bubble_alpha)
-        p.setPen(QPen(_mix(QColor("#2A3B52"), accent, 0.7), 1.2))
-        p.setBrush(_alpha(SURFACE, 0.96))
-        p.drawRoundedRect(rect, 13, 13)
+        p.setPen(QPen(_mix(edge, accent, 0.7), 1.0))
+        p.setBrush(_alpha(self._col("surface"), 0.96))
+        p.drawRoundedRect(rect, 12, 12)
         # Kuyruk gövdeye bakar
         ty = BODY / 2
         if self._bubble_side_left:
@@ -1101,9 +1111,10 @@ class PetWidget(QWidget):
             tail = QPolygonF([QPointF(rect.left() + 0.5, ty - 6), QPointF(rect.left() - 6, ty),
                               QPointF(rect.left() + 0.5, ty + 6)])
         p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(_alpha(SURFACE, 0.96))
+        p.setBrush(_alpha(self._col("surface"), 0.96))
         p.drawPolygon(tail)
         p.setFont(font)
-        p.setPen(TEXT if self._bubble_kind != "heard" else _mix(TEXT, TEAL, 0.35))
+        ink = self._col("text")
+        p.setPen(ink if self._bubble_kind != "heard" else _mix(ink, self._col("accent"), 0.35))
         p.drawText(rect.adjusted(12, 8, -12, -8), int(flags), self._bubble_text)
         p.restore()

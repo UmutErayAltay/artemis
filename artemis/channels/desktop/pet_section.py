@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QMetaMethod, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QIcon, QPixmap, QResizeEvent, QShowEvent
+from PySide6.QtGui import QBrush, QFocusEvent, QIcon, QPixmap, QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
@@ -22,9 +22,7 @@ from PySide6.QtWidgets import (
     QMenu,
     QMessageBox,
     QPushButton,
-    QScrollArea,
     QSizePolicy,
-    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -32,7 +30,11 @@ from PySide6.QtWidgets import (
 from artemis.channels.desktop import pet_sprite
 from artemis.channels.desktop.pet_creator_panel import CreatorPanel
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError, PetInfo
-from artemis.channels.desktop.projects_panel import AutoHideLabel, make_page_header
+from artemis.channels.desktop.projects_panel import (
+    AutoHideLabel,
+    CurrentPageStack,
+    make_page_header,
+)
 
 _SOURCE_LABEL = {"artemis": "Artemis", "codex": "Codex"}
 _ORB_LABEL = "Küre · Artemis"
@@ -110,10 +112,12 @@ class _PetCard(QFrame):
         self.chip = QLabel("Seçili", self)
         self.chip.setObjectName("selectedChip")
         self.chip.hide()
-        self.set_state(selected=False, highlighted=False)
+        self.set_state(selected=False, highlighted=False, focused=False)
 
-    def set_state(self, *, selected: bool, highlighted: bool) -> None:
-        for key, value in (("selected", selected), ("highlighted", highlighted)):
+    def set_state(self, *, selected: bool, highlighted: bool, focused: bool = False) -> None:
+        for key, value in (
+            ("selected", selected), ("highlighted", highlighted), ("focused", focused)
+        ):
             self.setProperty(key, "true" if value else "false")
         self.chip.setVisible(selected)
         self.style().unpolish(self)
@@ -149,6 +153,20 @@ class _GalleryList(QListWidget):
         self.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+    # Klavye odağı kartta değil listede durur; odak değişince kartlar yeniden boyanır.
+    focus_changed = Signal()
+    keyboard_focus = False
+
+    def focusInEvent(self, event: QFocusEvent) -> None:  # noqa: N802 (Qt)
+        super().focusInEvent(event)
+        self.keyboard_focus = True
+        self.focus_changed.emit()
+
+    def focusOutEvent(self, event: QFocusEvent) -> None:  # noqa: N802 (Qt)
+        super().focusOutEvent(event)
+        self.keyboard_focus = False
+        self.focus_changed.emit()
+
     def fit_height(self) -> None:
         per_row = max(1, self.viewport().width() // (_CARD_W + _GAP))
         rows = max(1, -(-self.count() // per_row))
@@ -174,12 +192,12 @@ class PetSection(QWidget):
         self._pets: dict[str, PetInfo] = {}
         self._demo = demo
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 0, 0, 24)  # sayfa altında tutarlı 24px nefes payı
         layout.setSpacing(16)
         layout.addWidget(
             make_page_header("Petler", "Masaüstü arkadaşını seç ya da yenisini üret.")
         )
-        self.stack = QStackedWidget()
+        self.stack = CurrentPageStack()
         layout.addWidget(self.stack, 1)
         self.stack.addWidget(self._build_gallery_page())
         # Atölye ayrı görünümdür: aşama çubuğu kaydırılan gövdenin dışında sabit kalır
@@ -202,21 +220,25 @@ class PetSection(QWidget):
             self.creator = CreatorPanel(config_path, pets_dir, demo=demo)
             self.creator.installed.connect(self._creator_installed)
             self.creator.model_settings_requested.connect(self.model_settings_requested)
-            workshop.addWidget(self.creator, 1)
+            # Kart içerik yüksekliğinde ve üstten hizalı; yan boşluklar modelsiz kompakt kartı
+            # (azami 480px) ortalar, modelli kartı ise (büyük ağırlık) neredeyse hiç daraltmaz.
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            row.addStretch(1)
+            row.addWidget(self.creator, 1000)
+            row.addStretch(1)
+            workshop.addLayout(row)
+        workshop.addStretch(1)  # kart ekranı doldurmaya zorlanmaz: ölü krem alan oluşmaz
         self.new_button.setVisible(self.creator is not None)
         if demo:
             self.import_button.setEnabled(False)
         self.refresh()
 
     def _build_gallery_page(self) -> QWidget:
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        # Kaydırıcı yok: Petler sayfasının tek kaydırma bölgesi app.py'deki pet_scroll'dur.
         content = QWidget()
         content.setObjectName("flat")
         content.setMaximumWidth(_MAX_WIDTH)
-        scroll.setWidget(content)
         page = QVBoxLayout(content)
         page.setContentsMargins(0, 0, 0, 0)
         page.setSpacing(16)
@@ -272,9 +294,6 @@ class PetSection(QWidget):
         heading.setObjectName("sectionTitle")
         head.addWidget(heading)
         head.addStretch(1)
-        self.select_button = QPushButton("Seç")
-        self.select_button.setObjectName("primary")
-        self.select_button.clicked.connect(self.select_current)
         self.delete_button = QPushButton("Sil")
         self.delete_button.setObjectName("danger")
         self.delete_button.clicked.connect(self.delete_selected)
@@ -290,20 +309,21 @@ class PetSection(QWidget):
             "Topluluk pet'lerinin lisansı ve içeriği senin sorumluluğundadır; Artemis "
             "hiçbirini kendisi dağıtmaz."
         )
-        for button in (self.select_button, self.delete_button, self.import_button):
+        for button in (self.delete_button, self.import_button):
             button.setMinimumWidth(88)
             head.addWidget(button)
         card.addLayout(head)
         self.listing = _GalleryList()
         self.listing.setAccessibleName("Kullanılabilir pet'ler")
         self.listing.itemSelectionChanged.connect(self._update_buttons)
+        self.listing.focus_changed.connect(self._sync_cards)
         self.listing.itemDoubleClicked.connect(lambda _item: self.select_current())
         card.addWidget(self.listing)
         self.status = AutoHideLabel()
         card.addWidget(self.status)
         page.addWidget(gallery)
         page.addStretch(1)
-        return scroll
+        return content
 
     # ------------------------------------------------------------------ görünümler
 
@@ -391,7 +411,11 @@ class PetSection(QWidget):
                 continue
             pet_id = str(item.data(Qt.ItemDataRole.UserRole))
             chosen = pet_id == self._current
-            card.set_state(selected=chosen, highlighted=item is current_item)
+            is_current = item is current_item
+            card.set_state(
+                selected=chosen, highlighted=is_current,
+                focused=is_current and self.listing.keyboard_focus,
+            )
             name = self._name_of(pet_id)
             spoken = f"{name}, seçili" if chosen else name
             card.setAccessibleName(spoken)
@@ -421,9 +445,7 @@ class PetSection(QWidget):
         info = self._pets.get(pet_id or "")
         differs = pet_id is not None and pet_id != self._current
         own = info is not None and info.source == "artemis" and not self._demo
-        # Bağlamsal eylemler: Seç yalnız başka bir pet vurgulanınca, Sil yalnız silinebilirde.
-        self.select_button.setVisible(differs)
-        self.select_button.setEnabled(differs)
+        # Bağlamsal eylemler: Masaüstüne al yalnız başka pet vurgulanınca, Sil yalnız silinebilirde.
         self.hero_select_button.setVisible(differs)
         self.hero_select_button.setEnabled(differs)
         if differs and pet_id is not None:

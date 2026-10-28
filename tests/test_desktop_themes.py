@@ -27,6 +27,8 @@ def test_palettes_are_readable_and_mixed_navigation_is_distinct() -> None:
             for foreground in ("nav_text", "nav_muted"):
                 assert contrast(palette[foreground], palette[background]) >= 4.5, (
                     name, foreground, background)
+        # Menü çalışma alanından ayırt edilebilmeli (koyu temada eskiden 1.06:1 idi).
+        assert contrast(palette["nav"], palette["bg"]) >= 1.15, name
         # Kart kenarı yüzeyden ayırt edilebilir kalmalı.
         assert contrast(palette["border"], palette["surface"]) >= 1.3, name
     assert THEMES["light-mixed"]["nav"] != THEMES["light"]["nav"]

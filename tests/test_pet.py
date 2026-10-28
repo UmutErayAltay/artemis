@@ -621,3 +621,57 @@ def test_os_reduced_motion_used_only_without_explicit_setting(
     monkeypatch.setattr(pet_module, "os_reduced_motion", lambda: False)
     again._settings.remove("reduced_motion")
     assert made()[0]._reduced is False
+
+
+def test_pet_has_no_hard_coded_hex() -> None:
+    """Renkler tema jetonlarından gelir; sprite sanatı pet_sprite.py'de, burada hex yasak."""
+    import re
+
+    from artemis.channels.desktop import pet as pet_module
+
+    source = Path(pet_module.__file__).read_text(encoding="utf-8")
+    assert re.findall(r"#[0-9A-Fa-f]{6}\b", source) == []
+
+
+def _bubble_fill(pet: PetWidget) -> str:
+    pet.say("merhaba", "answer")
+    _settle(pet, 0.6)
+    image = render(pet)
+    # Metin 12 px içeriden başlar: balonun sol kenarına yakın orta nokta düz dolgudur.
+    body = pet._body_rect()
+    x = body.left() - 6 - 210 + 6 if pet._bubble_side_left else body.right() + 7 + 6
+    return str(image.pixelColor(x, 60).name())
+
+
+def test_apply_theme_changes_bubble_colors(made: Any) -> None:
+    from PySide6.QtGui import QColor
+
+    from artemis.channels.desktop import themes
+
+    pet, _ = made()
+    pet.apply_theme("light")
+    light = _bubble_fill(pet)
+    pet.apply_theme("dark")
+    dark = _bubble_fill(pet)
+    # Dolgu yüzey jetonu (%96 opak, bu yüzden birkaç birim sapma payı)
+    for got, name in ((light, "light"), (dark, "dark")):
+        want, have = QColor(themes.THEMES[name]["surface"]), QColor(got)
+        assert abs(want.red() - have.red()) < 12 and abs(want.blue() - have.blue()) < 12
+    assert light != dark
+    assert pet._quick._palette is themes.THEMES["dark"]
+    pet.apply_theme("nope")  # bilinmeyen ad varsayılana düşer
+    assert pet._theme == themes.DEFAULT_THEME
+
+
+@pytest.mark.parametrize("name", ["light", "dark", "light-mixed", "dark-mixed"])
+def test_bubble_text_contrast_is_aa(name: str) -> None:
+    from artemis.channels.desktop import themes
+
+    def lum(h: str) -> float:
+        ch = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in ch]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    t = themes.THEMES[name]
+    hi, lo = sorted((lum(t["text"]), lum(t["surface"])), reverse=True)
+    assert (hi + 0.05) / (lo + 0.05) >= 4.5

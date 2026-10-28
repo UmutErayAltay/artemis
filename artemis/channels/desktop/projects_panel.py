@@ -111,6 +111,56 @@ def make_page_header(
     return host
 
 
+class CurrentPageStack(QWidget):
+    """Boyutu yalnız GÖRÜNEN sayfadan gelen yığın (QStackedWidget'ın küçük API'si).
+
+    QStackedLayout sizeHint, minimumSize VE heightForWidth'te tüm sayfaların en büyüğünü
+    döndürür; kaydırma bölgesinin içinde kısa sayfa uzun sayfa kadar boş kaydırma bırakır
+    (boyut ipuçlarını ezmek yetmedi: kaydırma alanı yerleşimin heightForWidth'ini sorar).
+    Gizli widget yerleşimden düştüğü için burada yalnız mevcut sayfa gösterilir.
+    """
+
+    currentChanged = Signal(int)
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._pages: list[QWidget] = []
+        self._current = -1
+        self._box = QVBoxLayout(self)
+        self._box.setContentsMargins(0, 0, 0, 0)
+
+    def addWidget(self, page: QWidget) -> int:  # noqa: N802 (Qt)
+        self._pages.append(page)
+        self._box.addWidget(page)
+        page.setVisible(len(self._pages) == 1)
+        if self._current < 0:
+            self._current = 0
+        return len(self._pages) - 1
+
+    def count(self) -> int:
+        return len(self._pages)
+
+    def widget(self, index: int) -> QWidget | None:
+        return self._pages[index] if 0 <= index < len(self._pages) else None
+
+    def currentIndex(self) -> int:  # noqa: N802 (Qt)
+        return self._current
+
+    def currentWidget(self) -> QWidget | None:  # noqa: N802 (Qt)
+        return self.widget(self._current)
+
+    def setCurrentWidget(self, page: QWidget) -> None:  # noqa: N802 (Qt)
+        self.setCurrentIndex(self._pages.index(page))
+
+    def setCurrentIndex(self, index: int) -> None:  # noqa: N802 (Qt)
+        if not 0 <= index < len(self._pages) or index == self._current:
+            return
+        self._pages[self._current].hide()
+        self._current = index
+        self._pages[index].show()
+        self.currentChanged.emit(index)
+
+
 def make_scroll_page(panel: QWidget) -> QVBoxLayout:
     """Sayfada tek kaydırma bölgesi: dar pencerede kartlar sıkışmak yerine kayar."""
     outer = QVBoxLayout(panel)
@@ -184,15 +234,17 @@ STATUS_CHIPS = {
     "waiting": ("Cevap bekliyor", "waiting"),
     "cancelling": ("Durduruluyor", "waiting"),
     "cancelled": ("Durduruldu", "neutral"),
-    "timeout": ("Hata", "error"),
+    "timeout": ("Zaman aşımı", "error"),
     "done": ("Bitti", "done"),
     "error": ("Hata", "error"),
-    "interrupted": ("Hata", "error"),
-    "cleanup_pending": ("Hata", "error"),
+    "interrupted": ("Kesildi", "error"),
+    "cleanup_pending": ("Temizleniyor", "error"),
 }
 FLOW_STEPS = ("Hazırla", "İncele", "Başlat")
-LIST_MIN_ROWS = 2
+LIST_MIN_ROWS = 1  # tek taslak tek satır yüksekliği alır; boşken EmptyState gösterilir
 LIST_MAX_ROWS = 6
+EDITOR_MIN_HEIGHT = 72
+EDITOR_MAX_HEIGHT = 120
 
 
 def repolish(widget: QWidget) -> None:
@@ -322,8 +374,9 @@ class ProjectsPanel(QWidget):
         self.acceptance = QPlainTextEdit()
         self.acceptance.setPlaceholderText("Örn. Her satır bir madde: testler geçiyor")
         for editor in (self.task, self.scope, self.acceptance):
-            editor.setMinimumHeight(72)
-            editor.setMaximumHeight(96)  # varsayılan sizeHint sütunu şişirmesin
+            # 1280x850'de "Taslak hazırla" kıvrımın altına düşmesin: 72px, içerikle 120px'e büyür.
+            editor.setFixedHeight(EDITOR_MIN_HEIGHT)
+            editor.textChanged.connect(lambda e=editor: self._grow_editor(e))
             editor.textChanged.connect(lambda: self.set_busy(self._busy))
         for caption, widget in (
             ("Proje", self.project),
@@ -333,7 +386,6 @@ class ProjectsPanel(QWidget):
         ):
             widget.setAccessibleName(caption)
             left_lay.addWidget(make_field(caption, widget))
-        left_lay.addStretch()
         self.prepare_button = QPushButton("Taslak hazırla")
         prepare_row = QHBoxLayout()
         prepare_row.addWidget(self.prepare_button)
@@ -342,6 +394,7 @@ class ProjectsPanel(QWidget):
         # Pasif düğmenin nedeni düğmenin hemen altında tek satır muted metindir.
         self.prepare_reason = AutoHideLabel()
         left_lay.addWidget(self.prepare_reason)
+        left_lay.addStretch()  # boşluk eylem satırının altında kalır; düğme son editöre yapışık
 
         # Sağ kart: liste, ayrıntı, eylemler.
         right, right_lay = make_card()
@@ -434,12 +487,19 @@ class ProjectsPanel(QWidget):
             QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
         )
 
+    @staticmethod
+    def _grow_editor(editor: QPlainTextEdit) -> None:
+        """Yükseklik içeriği izler (72..120px); QPlainTextEdit belge boyutu satır sayısıdır."""
+        lines = max(editor.document().size().height(), 1)
+        want = int(lines * editor.fontMetrics().lineSpacing()) + 24  # dikey dolgu + çerçeve payı
+        editor.setFixedHeight(min(max(want, EDITOR_MIN_HEIGHT), EDITOR_MAX_HEIGHT))
+
     def _sync_list(self) -> None:
         """Boş liste yerine açıklayıcı durum göster; liste yüksekliği satır sayısına uyar."""
         count = self.items.count()
         self.list_stack.setCurrentIndex(0 if count else 1)
         if count:
-            # Tek satır için koca kutu yerine en az 2, en çok 6 satır; fazlası kaydırılır.
+            # Liste satır sayısına uyar (en az 1, en çok 6); fazlası kaydırılır.
             row = max(self.items.sizeHintForRow(0), 36)
             rows = min(max(count, LIST_MIN_ROWS), LIST_MAX_ROWS)
             self.list_stack.setFixedHeight(rows * row + 12)

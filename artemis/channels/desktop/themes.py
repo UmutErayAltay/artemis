@@ -10,6 +10,8 @@ DEFAULT_THEME = "light-mixed"
 # Sıcak yoldaş paleti (DESIGN.md "Warm companion direction"): krem/kemik ve sıcak mürekkep;
 # kurumsal slate-mavi bırakıldı. Düz tonlar, gradyan/parıltı yok.
 # nav_muted #6b5f55 -> #5f544a: krem menüde nav_selected üstünde 4.23:1 idi (AA için 4.5 gerekir).
+# Menü/çalışma alanı ayrımı: nav önce bg ile ~1.07:1 (açık), ~1.06:1 (koyu) idi, görünmüyordu;
+# artık her temada >= 1.15:1 (testte kilitli). Koyu menü artık bg'den biraz AÇIK sıcak ton.
 _LIGHT = {
     "bg": "#f6f1e9",
     "surface": "#fffdf9",
@@ -20,10 +22,10 @@ _LIGHT = {
     "accent": "#0f7f7a",
     "accent_text": "#ffffff",
     "accent_soft": "#d9efec",
-    "nav": "#efe7da",
+    "nav": "#e8dfcf",
     "nav_text": "#2a2420",
     "nav_muted": "#5f544a",
-    "nav_selected": "#e0d4c0",
+    "nav_selected": "#dacdb7",
     "warning": "#8a5a0b",
     "error": "#b3392f",
     "success": "#1f6d4b",
@@ -38,10 +40,10 @@ _DARK = {
     "accent": "#5fd0c5",
     "accent_text": "#0d2926",
     "accent_soft": "#1f3a37",
-    "nav": "#120f0c",
+    "nav": "#292119",
     "nav_text": "#f0e9df",
     "nav_muted": "#b3a698",
-    "nav_selected": "#342d26",
+    "nav_selected": "#3d332a",
     "warning": "#f2c46d",
     "error": "#ff9d8f",
     "success": "#8fd7ae",
@@ -269,12 +271,18 @@ QFrame#galleryCard[selected="true"] {{ padding: 0; }}
 QFrame#galleryCard[highlighted="true"] {{ background: {t['soft']};
  border: 1px solid {t['accent']}; }}
 QFrame#galleryCard[highlighted="true"][selected="true"] {{ border: 2px solid {t['accent']}; }}
+/* Klavye odağı: 2px accent çerçeve + accent_soft zemin; padding 0 ile kutu kaymaz.
+   "Seçili" (surface zemin + chip) ile karışmasın diye zemin ayrışır. */
+QFrame#galleryCard[focused="true"] {{ background: {t['accent_soft']};
+ border: 2px solid {t['accent']}; padding: 0; }}
 QPushButton#importButton {{ padding-right: 28px; }}
 QPushButton#importButton::menu-indicator {{ image: url({down}); width: 10px; height: 6px;
  subcontrol-origin: padding; subcontrol-position: right center; right: 10px; }}
 QFrame#petWell {{ background: {t['soft']}; border: 2px dashed {t['border']};
  border-radius: 12px; }}
 QFrame#petWell QLabel {{ background: transparent; }}
+QFrame#petSilhouette {{ background: transparent; color: {t['muted']};
+ selection-background-color: {t['soft']}; border: none; }}
 /* wave2-lists */
 QPushButton#disclosure {{ background: transparent; border: none; color: {t['text']};
  font-weight: 600; padding: 4px 8px; text-align: left; }}

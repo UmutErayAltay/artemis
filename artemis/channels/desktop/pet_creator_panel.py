@@ -15,7 +15,16 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QCloseEvent, QImage, QPixmap, QResizeEvent
+from PySide6.QtGui import (
+    QCloseEvent,
+    QColor,
+    QImage,
+    QPainter,
+    QPaintEvent,
+    QPalette,
+    QPixmap,
+    QResizeEvent,
+)
 from PySide6.QtWidgets import (
     QBoxLayout,
     QComboBox,
@@ -26,7 +35,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -155,6 +163,37 @@ def price_warning(model: ModelConfig) -> str:
 _STAGES = ("Tarif", "Görsel", "Animasyon", "Kaydet")
 # Bunun altında sütunlar alt alta dizilir; 900px pencerede sağ sütun 240'ın altına inmesin.
 _WIDE_MIN = 760
+_COMPACT_MAX = 480  # modelsiz boş durum kartının azami genişliği
+
+
+class _Silhouette(QFrame):
+    """Önizleme boşken yumuşak pet gölgesi (yedek avatar gibi: gövde elipsi + iki göz).
+
+    Renk sabiti yok: tema QSS'i `color` (gövde) ve `selection-background-color` (göz) verir, palet
+    üzerinden okunur; yeni görsel dosyası gerekmez.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("petSilhouette")
+        self.setFixedSize(112, 96)
+        self.setAccessibleName("Boş önizleme")
+
+    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (Qt)
+        super().paintEvent(event)
+        body = QColor(self.palette().color(QPalette.ColorRole.WindowText))
+        eye = self.palette().color(QPalette.ColorRole.Highlight)
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(Qt.PenStyle.NoPen)
+        body.setAlphaF(0.4)  # gövde zemine karışır; göz tam renkle "oyuk" gibi okunur
+        painter.setBrush(body)
+        painter.drawEllipse(self.rect().adjusted(4, 4, -4, -4))
+        painter.setBrush(eye)
+        w, h = self.width(), self.height()
+        for cx in (w * 0.36, w * 0.64):
+            painter.drawEllipse(int(cx - 5), int(h * 0.42), 10, 12)
+        painter.end()
 
 
 def _label(text: str, name: str) -> QLabel:
@@ -209,11 +248,12 @@ class CreatorPanel(QFrame):
         self._base_png = b""
         self._models_reload_pending = False
         self._demo = demo
-        layout = QVBoxLayout(self)
+        self._layout = layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
         header = QHBoxLayout()
-        header.addWidget(_label("Yeni pet üret", "sectionTitle"))
+        self.title_label = _label("Yeni pet üret", "sectionTitle")
+        header.addWidget(self.title_label)
         header.addStretch(1)
         self.reset_button = QPushButton("Yeni pet")
         self.reset_button.setAccessibleName("Yeni pet")
@@ -272,9 +312,17 @@ class CreatorPanel(QFrame):
         left_lay.addWidget(_field("Pet adı", self.name_edit))
         self.chat_log = QPlainTextEdit()
         self.chat_log.setReadOnly(True)
-        self.chat_log.setMinimumHeight(160)
-        self.chat_log.setPlaceholderText("Konuşma burada görünür; düzeltmek için yazmaya devam et.")
+        self.chat_log.setMinimumHeight(140)
         self.chat_log.setAccessibleName("Pet üretici sohbeti")
+        # Boş günlükte büyük boş dikdörtgen yerine ortada soluk örnek istem (QPlainTextEdit
+        # yer tutucusu sola yaslı çizilir, ortalanamaz; bu yüzden görüntü alanına etiket konur).
+        log_lay = QVBoxLayout(self.chat_log.viewport())
+        self.chat_hint = _label("Örn. ‘turuncu, yuvarlak, uykulu bir tilki’", "emptyBody")
+        self.chat_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.chat_hint.setWordWrap(True)
+        self.chat_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+        log_lay.addWidget(self.chat_hint)
+        self.chat_log.document().contentsChanged.connect(self._sync_chat_hint)
         left_lay.addWidget(self.chat_log, 1)
         send_row = QHBoxLayout()
         send_row.setSpacing(8)
@@ -308,6 +356,9 @@ class CreatorPanel(QFrame):
         self.preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_hint.setWordWrap(True)
         well_lay.addStretch(1)
+        self.silhouette = _Silhouette()
+        well_lay.addWidget(self.silhouette, 0, Qt.AlignmentFlag.AlignHCenter)
+        well_lay.addSpacing(8)
         well_lay.addWidget(self.preview)
         well_lay.addWidget(self.preview_hint)
         well_lay.addStretch(1)
@@ -347,25 +398,26 @@ class CreatorPanel(QFrame):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         right_lay.addWidget(self.status)
 
-        # Gövde kendi kaydırıcısında (sayfadaki tek kaydırma bölgesi); sol:sağ = 2:1.
-        self.workshop = QScrollArea()
-        self.workshop.setWidgetResizable(True)
-        self.workshop.setFrameShape(QFrame.Shape.NoFrame)
-        self.workshop.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        body = _flat(QWidget())
-        self.workshop.setWidget(body)
+        # Gövde doğal yüksekliğinde; kaydırma yalnız sayfa düzeyinde (app.py pet_scroll). İç içe
+        # kaydırıcı küçük bir kutu bırakıyordu. Sol:sağ = 2:1.
+        self.workshop = body = _flat(QWidget())
         self._columns = QBoxLayout(QBoxLayout.Direction.LeftToRight, body)
         self._columns.setContentsMargins(0, 4, 0, 0)
         self._columns.setSpacing(24)
         self._columns.addWidget(left, 2)
         right.setMinimumWidth(240)
         self._columns.addWidget(right, 1)
-        layout.addWidget(self.workshop, 1)
+        layout.addWidget(self.workshop)
         # Model yokken kapalı form yerine tek eylemli boş durum (DESIGN.md boş durum kalıbı).
         self.empty_state = EmptyState(
             "Pet üretmek için bir model gerekli", "Ayarlar > Model bölümünden bir bağlantı ekle."
         )
         self.empty_body = self.empty_state.body_label
+        # EmptyState dar gövde etiketini sütunun soluna yaslar; kompakt kartta ikisi de ortalanır.
+        empty_lay = self.empty_state.layout()
+        assert empty_lay is not None
+        for label in (self.empty_state.title_label, self.empty_state.body_label):
+            empty_lay.setAlignment(label, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.empty_state)
         self.model_button = QPushButton("Ayarlar'da model ekle")
         self.model_button.setObjectName("primary")
@@ -373,7 +425,6 @@ class CreatorPanel(QFrame):
         self.model_button.hide()
         layout.addWidget(self.model_button, 0, Qt.AlignmentFlag.AlignHCenter)
         self._model_hook = False
-        layout.addStretch(1)  # boş durum kartın ortasında dev boşluk bırakmasın
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / pet_sprite.FPS))
         self._timer.timeout.connect(self._tick)
@@ -387,6 +438,9 @@ class CreatorPanel(QFrame):
             self._columns.setDirection(want)
             self._columns.setStretch(0, 2 if wide else 0)
             self._columns.setStretch(1, 1 if wide else 0)
+            # Yön resizeEvent içinde değişir: kaydırma alanı eski (geniş düzen) asgari yüksekliğiyle
+            # kalıp sütunları üst üste bindirmesin diye geometri değişimi ayrıca duyurulur.
+            self.updateGeometry()
         super().resizeEvent(event)
 
     # -------------------------------------------------------------- hazırlık
@@ -476,6 +530,13 @@ class CreatorPanel(QFrame):
             "burası açılır.",
         )
         self.model_button.setVisible(not has_models and not self._demo and self._model_hook)
+        # Model yokken kart içeriğe göre küçük ve ortada durur (üst katman iki yandan boşluk
+        # bırakır); başlık satırı boş durumla çakışmasın diye gizlenir.
+        self.setMaximumWidth(_COMPACT_MAX if not has_models else 16777215)
+        self.title_label.setVisible(has_models)
+        m = 16 if has_models else 32
+        self._layout.setContentsMargins(m, m, m, m)
+        self._layout.setSpacing(12 if has_models else 16)
         self._update_stage()
 
     def set_model_hook(self, available: bool) -> None:
@@ -484,8 +545,13 @@ class CreatorPanel(QFrame):
         self._update_buttons()
 
     def _sync_placeholder(self) -> None:
-        """Önizleme boşken dostça ipucu görünür; çizim gelince kaybolur."""
-        self.preview_hint.setVisible(self.preview.pixmap().isNull())
+        """Önizleme boşken gölge ve ipucu görünür; çizim gelince kaybolur."""
+        empty = self.preview.pixmap().isNull()
+        self.preview_hint.setVisible(empty)
+        self.silhouette.setVisible(empty)
+
+    def _sync_chat_hint(self) -> None:
+        self.chat_hint.setVisible(self.chat_log.document().isEmpty())
 
     def _update_stage(self) -> None:
         """Aşama yalnız mevcut taslak durumundan türer; yeni durum tutulmaz."""

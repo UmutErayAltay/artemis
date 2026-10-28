@@ -12,7 +12,8 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtCore import QPoint
+from PySide6.QtWidgets import QApplication, QLabel, QScrollArea
 
 from artemis.channels.desktop import data_panel, projects_panel, themes
 from artemis.channels.desktop.data_panel import DataPanel
@@ -128,7 +129,13 @@ def test_list_height_bounds_and_empty_state(app: QApplication) -> None:
     for n in (1, 2, 6, 10):
         _status(panel, [_spec(n=i) for i in range(n)], [])
         heights[n] = panel.list_stack.height()
-    assert heights[1] == heights[2] < heights[6]
+    assert heights[1] < heights[2] < heights[6]
+    # 1 taslak = 1 satır yüksekliği (+ 12px çerçeve payı); iki satır rezerve edilmez.
+    _status(panel, [_spec()], [])
+    row = max(panel.items.sizeHintForRow(0), 36)
+    assert panel.list_stack.height() == row + 12
+    _status(panel, [], [])
+    assert panel.list_stack.currentWidget() is not panel.items
     assert heights[10] == heights[6]
     assert LIST_MAX_ROWS == 6
 
@@ -145,6 +152,53 @@ def test_status_chip_and_cancel_separated(app: QApplication) -> None:
     assert panel.cancel_button.parent() is panel.start_button.parent()
     _status(panel, [_spec()], [])
     assert panel.status_chip.text() == "Taslak" and panel.cancel_button.isHidden()
+
+
+def test_status_chip_labels_are_distinct_but_keep_error_tone(app: QApplication) -> None:
+    panel = ProjectsPanel()
+    panel.set_busy(False)
+    seen = {}
+    for status in ("error", "timeout", "interrupted", "cleanup_pending"):
+        job = {"job_id": "j", "project": "p", "status": status, "spec": {}}
+        _status(panel, [], [job])
+        seen[status] = panel.status_chip.text()
+        assert panel.status_chip.property("tone") == "error", status
+    assert len(set(seen.values())) == 4, seen
+    assert seen["timeout"] == "Zaman aşımı" and seen["interrupted"] == "Kesildi"
+    assert seen["cleanup_pending"] == "Temizleniyor"
+
+
+def test_prepare_action_row_visible_at_1280x850(app: QApplication) -> None:
+    """1280x850 pencerede sayfa görünümü ~1000x700: düğme ve nedeni kıvrımın altına düşmemeli."""
+    panel = ProjectsPanel()
+    panel.setStyleSheet(themes.stylesheet(themes.DEFAULT_THEME))
+    panel.resize(1000, 700)
+    panel.show()
+    panel.set_busy(False)
+    _status(panel, [], [])  # neden satırı görünür: düğme pasif
+    app.processEvents()
+    viewport = panel.findChild(QScrollArea).viewport()
+    for widget in (panel.prepare_button, panel.prepare_reason):
+        bottom = widget.mapTo(viewport, QPoint(0, widget.height())).y()
+        assert 0 < bottom <= viewport.height(), (widget, bottom, viewport.height())
+    # Düğme son editörün hemen altındadır (araya germe girmez).
+    gap = panel.prepare_button.mapTo(panel, QPoint(0, 0)).y() - panel.acceptance.mapTo(
+        panel, QPoint(0, panel.acceptance.height())
+    ).y()
+    assert 0 < gap <= 24, gap
+    panel.close()
+
+
+def test_editors_start_at_72_and_grow_to_120(app: QApplication) -> None:
+    panel = ProjectsPanel()
+    panel.show()
+    assert panel.task.height() == 72
+    panel.task.setPlainText("satır\n" * 30)
+    app.processEvents()
+    assert panel.task.height() == 120
+    panel.task.clear()
+    assert panel.task.height() == 72
+    panel.close()
 
 
 # --- Geçmiş ------------------------------------------------------------------------------

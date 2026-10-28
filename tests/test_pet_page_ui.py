@@ -38,12 +38,12 @@ def test_hero_follows_selection_and_actions_are_contextual(
 ) -> None:
     sec = build(tmp_path, qapp)
     assert sec.hero_name.text() == "Küre"
-    assert sec.select_button.isHidden() and sec.hero_select_button.isHidden()
+    assert sec.hero_select_button.isHidden()
     pick(sec, "mine")
-    assert not sec.select_button.isHidden() and sec.select_button.isEnabled()
+    assert not sec.hero_select_button.isHidden() and sec.hero_select_button.isEnabled()
     assert not sec.delete_button.isHidden()
     sec.select_current()
-    assert sec.hero_name.text() == "Mine" and sec.select_button.isHidden()
+    assert sec.hero_name.text() == "Mine" and sec.hero_select_button.isHidden()
     pick(sec, "theirs")
     assert sec.delete_button.isHidden()  # Codex pet'i silinemez
     sec.deleteLater()
@@ -83,16 +83,12 @@ def test_empty_production_state_and_form(
     sec.deleteLater()
 
 
-def test_stage_bar_is_outside_scrolling_body(tmp_path: Path, qapp: QApplication) -> None:  # noqa: F811
+def test_creator_has_no_nested_scroll_area(tmp_path: Path, qapp: QApplication) -> None:  # noqa: F811
     sec = build(tmp_path, qapp)
     creator = sec.creator
     assert creator is not None
-    body = creator.workshop
-    assert isinstance(body, QScrollArea)
-    parent = creator.stage_bar.parent()
-    while parent is not None and parent is not creator:
-        assert parent is not body
-        parent = parent.parent()
+    # Sayfada tek kaydırma bölgesi (app.py pet_scroll); atölye ve galeri kaydırıcı taşımaz.
+    assert not sec.findChildren(QScrollArea)
     sec.deleteLater()
 
 
@@ -101,3 +97,100 @@ def test_no_hard_coded_hex_in_pet_modules() -> None:
     for name in ("pet_section.py", "pet_creator_panel.py"):
         code = (base / name).read_text(encoding="utf-8")
         assert not re.search(r"[\"']#[0-9a-fA-F]{3,8}\b", code), name
+
+
+def _with_model(sec: PetSection) -> None:
+    creator = sec.creator
+    assert creator is not None
+    creator._models = {"y": ModelConfig(provider="ollama", model="m",
+                                        input_per_million=Decimal(0),
+                                        output_per_million=Decimal(0))}
+    creator._fill_models()
+
+
+def _show_workshop(sec: PetSection, qapp: QApplication, width: int = 1000) -> None:  # noqa: F811
+    sec.resize(width, 1400)  # kaydırma alanı içindeki serbest yükseklik
+    sec.show()
+    sec.show_workshop()
+    for _ in range(4):
+        qapp.processEvents()
+
+
+def test_no_model_workshop_is_compact_and_centered(
+    tmp_path: Path, qapp: QApplication  # noqa: F811
+) -> None:
+    sec = build(tmp_path, qapp)
+    creator = sec.creator
+    assert creator is not None
+    _show_workshop(sec, qapp)
+    assert creator.empty_state.isVisibleTo(creator) and creator.width() <= 520
+    assert abs((creator.x() + creator.width() / 2) - sec.width() / 2) <= 2
+    assert creator.height() < sec.height() - 150  # sayfa boyuna gerilmez
+    assert not sec.back_button.isHidden()
+    sec.close()
+    sec.deleteLater()
+
+
+def test_model_workshop_sizes_to_content(tmp_path: Path, qapp: QApplication) -> None:  # noqa: F811
+    sec = build(tmp_path, qapp)
+    creator = sec.creator
+    assert creator is not None
+    _with_model(sec)
+    for width in (1000, 700):  # dar: sütunlar alt alta
+        _show_workshop(sec, qapp, width)
+        assert abs(creator.height() - creator.sizeHint().height()) <= 32
+        # Gövdenin altında yalnız kart iç boşluğu kalır (ölü alan yok).
+        assert creator.height() - creator.workshop.geometry().bottom() <= 32
+        assert creator.width() >= width - 8
+    sec.close()
+    sec.deleteLater()
+
+
+def test_preview_silhouette_and_chat_hint(tmp_path: Path, qapp: QApplication) -> None:  # noqa: F811
+    sec = build(tmp_path, qapp)
+    creator = sec.creator
+    assert creator is not None
+    _with_model(sec)
+    _show_workshop(sec, qapp)
+    assert creator.silhouette.isVisibleTo(creator) and creator.preview_hint.isVisibleTo(creator)
+    assert "tilki" in creator.chat_hint.text() and creator.chat_hint.isVisibleTo(creator)
+    assert creator.chat_log.minimumHeight() >= 140
+    from PySide6.QtGui import QPixmap
+    pixmap = QPixmap(8, 8)
+    pixmap.fill(Qt.GlobalColor.red)
+    creator.preview.setPixmap(pixmap)
+    creator._sync_placeholder()
+    assert not creator.silhouette.isVisibleTo(creator)
+    creator.chat_log.appendPlainText("Sen: merhaba")
+    assert not creator.chat_hint.isVisibleTo(creator)
+    creator.chat_log.clear()
+    assert creator.chat_hint.isVisibleTo(creator)
+    sec.close()
+    sec.deleteLater()
+
+
+def test_gallery_keyboard_focus_ring(tmp_path: Path, qapp: QApplication) -> None:  # noqa: F811
+    from PySide6.QtCore import QEvent
+    from PySide6.QtGui import QFocusEvent
+
+    from artemis.channels.desktop.pet_section import _PetCard
+    from artemis.channels.desktop.themes import stylesheet
+
+    sec = build(tmp_path, qapp)
+    pick(sec, "mine")
+    card = sec.listing.itemWidget(sec.listing.currentItem())
+    other = sec.listing.itemWidget(sec.listing.item(0))
+    assert isinstance(card, _PetCard) and isinstance(other, _PetCard)
+    assert card.property("focused") == "false"
+    QApplication.sendEvent(
+        sec.listing, QFocusEvent(QEvent.Type.FocusIn, Qt.FocusReason.TabFocusReason)
+    )
+    assert card.property("focused") == "true" and other.property("focused") == "false"
+    QApplication.sendEvent(
+        sec.listing, QFocusEvent(QEvent.Type.FocusOut, Qt.FocusReason.TabFocusReason)
+    )
+    assert card.property("focused") == "false"
+    for theme in ("light", "dark", "light-mixed", "dark-mixed"):
+        css = stylesheet(theme)
+        assert 'QFrame#galleryCard[focused="true"]' in css
+    sec.deleteLater()
