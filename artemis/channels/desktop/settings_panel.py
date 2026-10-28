@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from PySide6.QtCore import QRectF, Qt, QThread, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QThread, Signal
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -42,8 +42,9 @@ from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.provider_section import (
     ProviderSection,
     button_row,
-    card,
+    divider,
     field,
+    group,
     meta_label,
 )
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
@@ -52,6 +53,8 @@ from artemis.config.settings import GITHUB_OWNER_RE, Settings, load_settings
 from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
 SettingPath = tuple[str, ...]
+
+_BAR_HEIGHT = 60  # alt çubuk: 12 + 36 (Uygula) + 12
 
 
 @dataclass(frozen=True)
@@ -328,45 +331,78 @@ class _SectionList(QListWidget):
     scroll_area: QScrollArea
 
 
+# Tema adının yanındaki açıklama; anahtarlar themes.THEME_LABELS ile aynı.
+_THEME_HINTS = {
+    "light": "Açık gezinme, açık çalışma alanı",
+    "dark": "Koyu gezinme, koyu çalışma alanı",
+    "light-mixed": "Koyu gezinme, açık çalışma alanı",
+    "dark-mixed": "Açık gezinme, koyu çalışma alanı",
+}
+
+
 def _swatch(key: str) -> QPixmap:
-    """Temanın gezinme ve çalışma alanı renklerinden iki tonlu küçük önizleme."""
+    """Gerçek arayüze yakın küçük önizleme: gezinme, çalışma alanı, balon ve birincil düğme."""
     colors = THEMES[key]
-    pixmap = QPixmap(96, 48)
+    width, height = 128, 76
+    pixmap = QPixmap(width, height)
     pixmap.fill(Qt.GlobalColor.transparent)
     painter = QPainter(pixmap)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing)
     clip = QPainterPath()
-    clip.addRoundedRect(QRectF(0.5, 0.5, 95, 47), 7, 7)
+    clip.addRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
     painter.setClipPath(clip)
-    painter.fillRect(0, 0, 96, 48, QColor(colors["bg"]))
-    painter.fillRect(0, 0, 28, 48, QColor(colors["nav"]))
-    painter.fillRect(36, 8, 52, 14, QColor(colors["surface"]))
-    painter.fillRect(36, 28, 36, 8, QColor(colors["accent"]))
+    painter.fillRect(0, 0, width, height, QColor(colors["bg"]))
+    painter.fillRect(0, 0, 32, height, QColor(colors["nav"]))
+    nav_text = QColor(colors["nav_muted"])
+    painter.fillRect(6, 24, 20, 6, QColor(colors["nav_selected"]))  # seçili gezinme satırı
+    for top in (10, 24, 36, 48):
+        painter.fillRect(8, top + 1, 16, 3, nav_text)
+    ink = QColor(colors["muted"])
+    painter.fillRect(40, 10, 40, 4, ink)  # asistan cevabı
+    painter.fillRect(40, 18, 56, 4, ink)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(colors["accent_soft"]))
+    painter.drawRoundedRect(QRectF(66, 30, 54, 16), 6, 6)  # kullanıcı balonu
+    painter.setBrush(QColor(colors["accent"]))
+    painter.drawRoundedRect(QRectF(88, 56, 32, 11), 4, 4)  # birincil düğme
+    painter.setBrush(QColor(colors["surface"]))
+    painter.setPen(QColor(colors["border"]))
+    painter.drawRoundedRect(QRectF(40, 56, 42, 11), 4, 4)  # ikincil alan
     painter.setClipping(False)
     painter.setPen(QColor(colors["border"]))
-    painter.drawRoundedRect(QRectF(0.5, 0.5, 95, 47), 7, 7)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
     painter.end()
     return pixmap
 
 
 class _ThemeCard(QFrame):
-    """Radyo düğmeli tema kartı; kart her yerinden tıklanır, klavyeyle radyo düğmesi seçilir."""
+    """Tema kartı: tek seçim göstergesi 2px vurgu kenarlığıdır; radyo düğmesi yalnız klavye ve
+    ekran okuyucu için kalır (göstergesi QSS ile gizli), kart her yerinden tıklanır."""
 
     def __init__(self, key: str, label: str) -> None:
         super().__init__()
         self.key = key
-        self.setObjectName("galleryCard")
+        self.setObjectName("themeCard")
         self.setProperty("selected", False)
-        box = QVBoxLayout(self)
-        box.setContentsMargins(12, 12, 12, 12)
-        box.setSpacing(8)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(12, 12, 12, 12)
+        row.setSpacing(12)
         swatch = QLabel()
         swatch.setPixmap(_swatch(key))
         swatch.setAccessibleName(f"{label} önizleme")
         self.radio = QRadioButton(label)
         self.radio.toggled.connect(self._selected)
-        box.addWidget(swatch)
-        box.addWidget(self.radio)
+        text = QVBoxLayout()
+        text.setSpacing(4)
+        text.addStretch(1)
+        text.addWidget(self.radio)
+        hint = meta_label(_THEME_HINTS.get(key, ""))
+        hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        text.addWidget(hint)
+        text.addStretch(1)
+        row.addWidget(swatch)
+        row.addLayout(text, 1)
 
     def _selected(self, on: bool) -> None:
         self.setProperty("selected", on)
@@ -376,6 +412,36 @@ class _ThemeCard(QFrame):
     def mousePressEvent(self, event: Any) -> None:  # noqa: N802
         self.radio.click()
         super().mousePressEvent(event)
+
+
+def _check_hint(text: str) -> QLabel:
+    """Onay kutusunun altındaki 12px soluk açıklama; kutu metni uzayıp satırı taşırmasın diye
+    ayrıntı buraya (sarılabilir) konur. Girinti = gösterge 16px + boşluk 8px."""
+    label = meta_label(text)
+    label.setContentsMargins(24, 0, 0, 0)
+    return label
+
+
+class _ApplyButton(QPushButton):
+    """Uygula: yalnız değişiklik varken açık. Pencere (`_set_controls`) meşgulken `setEnabled`
+    çağırır; o izni saklarız ve kirli durumla birleştiririz, böylece ikisi birbirini ezmez."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self._allowed = True
+        self._dirty = False
+        self._sync()
+
+    def setEnabled(self, arg__1: bool) -> None:  # noqa: N802
+        self._allowed = arg__1
+        self._sync()
+
+    def set_dirty(self, dirty: bool) -> None:
+        self._dirty = dirty
+        self._sync()
+
+    def _sync(self) -> None:
+        super().setEnabled(self._allowed and self._dirty)
 
 
 class SettingsPanel(QWidget):
@@ -394,6 +460,7 @@ class SettingsPanel(QWidget):
         codex_pets_dir: Path | None = None,
     ) -> None:
         super().__init__()
+        self.setObjectName("settingsPanel")
         self.config_path = config_path
         self._demo = demo
         self._gpu_mb = stt_catalog.gpu_memory_mb()
@@ -431,12 +498,14 @@ class SettingsPanel(QWidget):
             """Bölüm sayfası: 720px'i aşmayan sütun, solda; başlık + tek satır açıklama."""
             outer = QWidget()
             row = QHBoxLayout(outer)
-            row.setContentsMargins(0, 0, 0, 0)
+            # Alt dolgu = yapışkan alt çubuğun yüksekliği: kaydırınca son satır çubuğun hemen
+            # altında kırpılı kalmaz, rahatça erişilir.
+            row.setContentsMargins(0, 0, 0, _BAR_HEIGHT)
             column = QWidget()
             column.setMaximumWidth(720)
             content = QVBoxLayout(column)
             content.setContentsMargins(0, 0, 0, 0)
-            content.setSpacing(16)
+            content.setSpacing(24)
             row.addWidget(column, 1)
             row.addStretch(0)
             head = QLabel(name)
@@ -447,12 +516,13 @@ class SettingsPanel(QWidget):
             heading.addWidget(meta_label(description))
             content.addLayout(heading)
             self.sections.addItem(name)
+            self.sections.item(self.sections.count() - 1).setSizeHint(QSize(0, 36))
             self.stack.addWidget(outer)
             return content
 
         voice = page("Ses", "Uyandırma, tanıma ve konuşma. Değişiklikler Uygula ile kaydedilir.")
         # Uyandırma ve mikrofon
-        wake_box, wake = card("Uyandırma ve mikrofon")
+        wake_box, wake = group("Uyandırma ve mikrofon", divided=False)
         voice.addWidget(wake_box)
         self.wake_name = QLineEdit()
         self.wake_name.setText("Artemis")
@@ -467,21 +537,35 @@ class SettingsPanel(QWidget):
               "Sesle çağırma adı; uygulamanın adı Artemis kalır.")
         self.device_combo = QComboBox()
         self.device_combo.setAccessibleName("Mikrofon girişi")
+        self._no_device()  # demo'da ve yenilemeden önce boş açılır liste görünmesin
         field(wake, "Mikrofon girişi", self.device_combo)
-        self.current_device = QLabel()
+        self.current_device = QLabel("Seçilmedi")
         self.current_device.setWordWrap(True)
         field(wake, "Kullanılan mikrofon", self.current_device)
+        # Etiketli seviye ölçeri: düğmeye benzeyen ortalı yazı yerine ince çubuk + değer.
         self.input_level = QProgressBar()
+        self.input_level.setObjectName("levelMeter")
         self.input_level.setRange(0, 100)
         self.input_level.setValue(0)
-        self.input_level.setFormat("Mikrofon seviyesi: %p%")
-        field(wake, "Ses girişi", self.input_level)
+        self.input_level.setTextVisible(False)
+        self.input_level.setFixedHeight(6)
+        self.input_level.setAccessibleName("Ses girişi seviyesi")
+        self.level_value = QLabel("%0")
+        self.level_value.setObjectName("meta")
+        self.level_value.setMinimumWidth(32)
+        self.level_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.input_level.valueChanged.connect(lambda value: self.level_value.setText(f"%{value}"))
+        level_row = QHBoxLayout()
+        level_row.setSpacing(12)
+        level_row.addWidget(self.input_level, 1)
+        level_row.addWidget(self.level_value)
+        field(wake, "Ses girişi", level_row, "Konuşunca çubuk dolar.")
         self.last_heard = QLabel("Henüz konuşma algılanmadı.")
         self.last_heard.setTextFormat(Qt.TextFormat.PlainText)
         self.last_heard.setWordWrap(True)
         field(wake, "Son duyulan", self.last_heard)
         # Tanıma
-        stt_card, stt_layout = card("Tanıma")
+        stt_card, stt_layout = group("Tanıma")
         voice.addWidget(stt_card)
         stt_controls = QHBoxLayout()
         stt_controls.setSpacing(8)
@@ -498,16 +582,16 @@ class SettingsPanel(QWidget):
         self.precision_combo.setAccessibleName("Tanıma hassasiyeti")
         self.precision_combo.setToolTip(
             "Dengeli ölçümde En yüksek hassasiyetle aynı doğrulukta, yaklaşık 1,8 GB daha az "
-            "GPU belleği kullanır (ADR 0046). CPU'da seçici kapalıdır. Değişiklik ses yeniden "
-            "başlayınca uygulanır."
+            "ekran kartı belleği kullanır. İşlemcide çalışırken seçici kapalıdır. Değişiklik ses "
+            "yeniden başlayınca uygulanır."
         )
         self.precision_combo.addItem("Dengeli (az bellek)", "int8_float16")
         self.precision_combo.addItem("En yüksek hassasiyet", "float16")
         field(stt_layout, "Tanıma hassasiyeti", self.precision_combo)
-        self.hybrid_stt = QCheckBox("Karma tanıma (komutlar buluta)")
+        self.hybrid_stt = QCheckBox("Karma tanıma (komutları bulutta çöz)")
         self.hybrid_stt.setToolTip(
-            "Uyandırma yerelde kalır; komut olan sözün sesi config'teki stt_cloud_endpoint "
-            "ucuna gider (ADR 0046). Değişiklik ses yeniden başlayınca uygulanır."
+            "Uyandırma bu bilgisayarda kalır; komut olan sözün sesi seçtiğin bulut sunucusuna "
+            "gider. Değişiklik ses yeniden başlayınca uygulanır."
         )
         stt_layout.addWidget(self.hybrid_stt)
         self.cloud_stt_hint = meta_label("")
@@ -515,7 +599,7 @@ class SettingsPanel(QWidget):
         self.hybrid_stt.toggled.connect(self._update_cloud_hint)
         self._cloud_configured = False
         # Konuşma
-        speech_card, speech = card("Konuşma")
+        speech_card, speech = group("Konuşma")
         voice.addWidget(speech_card)
         self.tts_combo = QComboBox()
         self.tts_combo.setAccessibleName("Konuşma sesi")
@@ -531,19 +615,23 @@ class SettingsPanel(QWidget):
             ema_index = self.tts_combo.count() - 1
             self.tts_combo.model().item(ema_index).setEnabled(False)  # type: ignore[attr-defined]
         field(speech, "Konuşma sesi", self.tts_combo)
-        self.continuous_mode = QCheckBox("Kesintisiz sohbet (uyandırma adı söylemeden dinle)")
+        self.continuous_mode = QCheckBox("Kesintisiz sohbet")
         speech.addWidget(self.continuous_mode)
+        speech.addWidget(_check_hint("Uyandırma adı söylemeden sürekli dinler."))
         self.barge_in_box = QCheckBox("Konuşurken sesimle sustur")
         speech.addWidget(self.barge_in_box)
-        self.followup_box = QCheckBox("Yanıttan ve susturmadan sonra uyandırma adı olmadan dinle")
+        self.followup_box = QCheckBox("Yanıttan sonra adsız dinle")
         speech.addWidget(self.followup_box)
+        speech.addWidget(_check_hint(
+            "Cevap bitince ya da sesinle susturunca, bir süre uyandırma adı söylemeden dinler."
+        ))
         # Ses temizleme ve canlı yazı
-        clean_card, clean = card("Canlı yazı ve ses temizleme")
+        clean_card, clean = group("Canlı yazı ve ses temizleme")
         voice.addWidget(clean_card)
         self.live_transcript = QCheckBox("Canlı yazı (konuşurken)")
         self.live_transcript.setToolTip(
             "Konuşurken metin pet balonunda akar; yalnız gösterimdir, komutu etkilemez. "
-            "Kurulum: pip install .[stream] ve config'te model/revision. "
+            "Kurulum: pip install .[stream] ve ayar dosyasında model/revision. "
             "Değişiklik ses yeniden başlayınca uygulanır."
         )
         clean.addWidget(self.live_transcript)
@@ -558,7 +646,7 @@ class SettingsPanel(QWidget):
             "Değişiklik ses yeniden başlayınca uygulanır."
         )
         clean.addWidget(self.noise_suppression)
-        self.echo_cancellation = QCheckBox("Yankı engelleme (hoparlörle kullanırken)")
+        self.echo_cancellation = QCheckBox("Yankı engelleme")
         self.echo_cancellation.setToolTip(
             "WebRTC yankı giderici; Artemis'in hoparlörden çıkan kendi sesini mikrofondan "
             "siler, böylece konuşurken araya girmek ve kendi sesini komut sanmamak güvenilir "
@@ -566,6 +654,7 @@ class SettingsPanel(QWidget):
             "uygulanır."
         )
         clean.addWidget(self.echo_cancellation)
+        clean.addWidget(_check_hint("Hoparlörle kullanırken aç; kulaklıkta gerekmez."))
         self.advanced_toggle = QToolButton()
         self.advanced_toggle.setText("Gelişmiş ses ayarları")
         self.advanced_toggle.setCheckable(True)
@@ -574,8 +663,9 @@ class SettingsPanel(QWidget):
             Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         )
         self.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+        voice.addWidget(divider())
         voice.addWidget(self.advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
-        self.advanced_box, advanced_layout = card("Gelişmiş ses ayarları")
+        self.advanced_box, advanced_layout = group("Gelişmiş ses ayarları", divided=False)
         self.noise_level = QComboBox()
         for label, key in (("Hafif", "hafif"), ("Orta", "orta"), ("Güçlü", "guclu")):
             self.noise_level.addItem(label, key)
@@ -611,30 +701,34 @@ class SettingsPanel(QWidget):
 
         # Model: bağlantılar ve modeller ProviderSection'dadır.
         model_page = page(
-            "Model", "Beyin modelini seç; bağlantılar ve anahtarlar burada tutulur."
+            "Model", "Beyin modelini seç. Model ve bağlantı değişiklikleri hemen kaydedilir; "
+            "Uygula gerekmez."
         )
         self.providers = ProviderSection(config_path, demo=demo)
         model_page.addWidget(self.providers)
         model_page.addStretch(1)
 
         apps = page(
-            "Uygulamalar", "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı kipi."
+            "Uygulamalar",
+            "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı. "
+            "Değişiklikler Uygula ile kaydedilir.",
         )
-        access_box, access = card("Erişim")
+        access_box, access = group("Erişim", divided=False)
         apps.addWidget(access_box)
         self.all_applications = QCheckBox("Bütün kurulu uygulamalara erişim")
         self.all_applications.toggled.connect(self._sync_application_access)
         access.addWidget(self.all_applications)
-        self.computer_auto = QCheckBox("Bilgisayar kullanımında otomatik kip (adımları sormaz)")
+        self.computer_auto = QCheckBox("Otomatik bilgisayar kullanımı")
         self.computer_auto.setToolTip(
             "Hassas adımlar ve temiz turda başlangıç sorulmaz; Esc her an durdurur. Terminal, "
             "Artemis ve parola yöneticisi engeli ile dış içerikten sonraki onay yine geçerlidir."
         )
         access.addWidget(self.computer_auto)
-        access.addWidget(meta_label(
-            "Bu kutu Uygula ile kaydedilir; üst çubuktaki otomatik onay düğmesi hemen uygulanır."
+        access.addWidget(_check_hint(
+            "Adımları sormadan yapar; Esc her an durdurur. Üst çubuktaki otomatik onay düğmesi "
+            "hemen uygulanır, bu kutu Uygula ile kaydedilir."
         ))
-        list_box, listing = card("İzinli uygulamalar")
+        list_box, listing = group("İzinli uygulamalar")
         apps.addWidget(list_box)
         self.application_list = QListWidget()
         self.application_list.setMaximumHeight(144)
@@ -653,9 +747,11 @@ class SettingsPanel(QWidget):
         apps.addStretch(1)
 
         github = page(
-            "GitHub", "Kendi repolarını kod ajanının erişimine bağla. Bağla düğmesi hemen kaydeder."
+            "GitHub",
+            "Kendi repolarını kod ajanının erişimine bağla. “Bağla” düğmesi hemen kaydeder; "
+            "diğer alanlar Uygula ile.",
         )
-        account_box, account = card("Hesap")
+        account_box, account = group("Hesap", divided=False)
         github.addWidget(account_box)
         self.github_owner = QLineEdit()
         self.github_owner.setAccessibleName("GitHub kullanıcı adı")
@@ -678,11 +774,11 @@ class SettingsPanel(QWidget):
         self.github_button = QPushButton("Bağla ve repoları çek")
         self.github_button.clicked.connect(self._bind_github)
         account.addLayout(button_row(self.github_button))
-        result_box, result = card("Eşitleme")
+        result_box, result = group("Eşitleme")
         github.addWidget(result_box)
         self.github_status = meta_label(
             "Kendi repoların (fork ve arşivlenmişler hariç) kod ajanının erişimine girer. "
-            "Kimlik doğrulamayı gh yapar; Artemis token görmez."
+            "Giriş GitHub CLI (gh) ile yapılır; Artemis anahtarını görmez."
         )
         result.addWidget(self.github_status)
         self.github_list = QListWidget()
@@ -699,8 +795,11 @@ class SettingsPanel(QWidget):
             config_path=config_path,
         )
 
-        look = page("Görünüm", "Arayüz renkleri. Tema hemen uygulanır; sohbeti yeniden başlatmaz.")
-        theme_box, theme = card("Tema")
+        look = page(
+            "Görünüm",
+            "Arayüz renkleri. Hemen uygulanır; Uygula gerekmez, sohbet yeniden başlamaz.",
+        )
+        theme_box, theme = group("Tema", divided=False)
         look.addWidget(theme_box)
         # app.py ve testler bu seçiciyi okur/yazar; kartlar ona bağlı, kendisi görünmez.
         self.theme_combo = QComboBox(self)
@@ -710,20 +809,17 @@ class SettingsPanel(QWidget):
             self.theme_combo.addItem(label, key)
         self.theme_combo.setCurrentIndex(self.theme_combo.findData(DEFAULT_THEME))
         self.theme_cards: dict[str, _ThemeCard] = {}
-        group = QButtonGroup(self)
-        grid = QGridLayout()
-        grid.setSpacing(12)
-        for position, (key, label) in enumerate(THEME_LABELS.items()):
+        theme_group = QButtonGroup(self)
+        self._theme_grid = QGridLayout()
+        self._theme_grid.setSpacing(12)
+        for key, label in THEME_LABELS.items():
             theme_card = _ThemeCard(key, label)
             theme_card.radio.toggled.connect(partial(self._theme_picked, key))
-            group.addButton(theme_card.radio)
+            theme_group.addButton(theme_card.radio)
             self.theme_cards[key] = theme_card
-            grid.addWidget(theme_card, position // 2, position % 2)
-        theme.addLayout(grid)
-        theme.addWidget(meta_label(
-            "Açık ağırlıklı: koyu gezinme, açık çalışma alanı. "
-            "Koyu ağırlıklı: açık gezinme, koyu çalışma alanı."
-        ))
+        theme.addLayout(self._theme_grid)
+        self._theme_columns = 0
+        self._layout_theme_cards(2)
         self.theme_combo.currentIndexChanged.connect(
             lambda: self.theme_changed.emit(str(self.theme_combo.currentData()))
         )
@@ -738,17 +834,18 @@ class SettingsPanel(QWidget):
         # Yapışkan alt çubuk kaydırma bölgesinin dışındadır: uzun sayfada da görünür kalır.
         bar = QFrame()
         bar.setObjectName("card")
+        bar.setFixedHeight(_BAR_HEIGHT)
         bar_row = QHBoxLayout(bar)
         bar_row.setContentsMargins(16, 12, 16, 12)
         bar_row.setSpacing(12)
         self.notice = meta_label(
-            "Uygula mikrofon, uygulama ve GitHub ayarlarını kaydeder; yeni sohbet başlar."
+            "Uygula; ses, uygulama ve GitHub ayarlarını kaydeder ve yeni sohbet başlatır."
         )
         self.current_device.setTextFormat(Qt.TextFormat.PlainText)
-        self.dirty_label = QLabel("Kaydedilmemiş değişiklik var")
-        self.dirty_label.setObjectName("amber")
+        self.dirty_label = QLabel("Kaydedilmemiş değişiklik")
+        self.dirty_label.setObjectName("meta")
         self.dirty_label.setVisible(False)
-        self.apply_button = QPushButton("Uygula")
+        self.apply_button = _ApplyButton("Uygula")
         self.apply_button.setObjectName("primary")
         self.apply_button.setFixedHeight(36)
         self.apply_button.setMinimumWidth(88)
@@ -773,6 +870,10 @@ class SettingsPanel(QWidget):
                 widget.setEnabled(False)
         else:
             self.refresh()
+        # Açılır listeler en uzun öğeye göre genişlemesin: dar pencerede yatay kaydırma çıkarıyordu.
+        for combo in self.findChildren(QComboBox):
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(12)
         # Değişiklik izleme yalnız kullanıcı girdisine bakar; yenileme sonunda temiz sayılır.
         for edit in (self.wake_name, self.github_owner, self.repos_dir):
             edit.textEdited.connect(self._mark_dirty)
@@ -821,12 +922,39 @@ class SettingsPanel(QWidget):
 
     def _mark_dirty(self, *_args: object) -> None:
         if not self._demo:
-            self.dirty_label.setVisible(True)
+            self._set_dirty(True)
+
+    def _set_dirty(self, dirty: bool) -> None:
+        """Uygula yalnız değişiklik varken açılır; tema gibi anında uygulananlar buraya uğramaz."""
+        self.dirty_label.setVisible(dirty)
+        self.apply_button.set_dirty(dirty)
+
+    def _layout_theme_cards(self, columns: int) -> None:
+        """İki sütunlu kart ızgarası ~510px ister; dar pencerede tek sütun, yoksa bütün sayfaların
+        genişliğini (QStackedWidget en büyük sayfaya uyar) yatay kaydırmaya iter."""
+        if columns == self._theme_columns:
+            return
+        self._theme_columns = columns
+        while self._theme_grid.count():
+            self._theme_grid.takeAt(0)
+        for position, theme_card in enumerate(self.theme_cards.values()):
+            self._theme_grid.addWidget(theme_card, position // columns, position % columns)
+        # Üst yerleşimlerin önbelleğindeki geniş asgari boyut düşsün.
+        # Gizli sayfanın iç içe yerleşimleri tembel güncellenir; ızgaradan yukarı hepsini düşür.
+        widget = self._theme_grid.parentWidget()
+        while widget is not None and widget is not self.stack:
+            layout = widget.layout()
+            if layout is not None:
+                layout.invalidate()
+                layout.activate()
+            widget = widget.parentWidget()
+        self.stack.updateGeometry()
 
     def resizeEvent(self, event: Any) -> None:  # noqa: N802
         """Dar pencerede bölüm listesi 160px'e iner; içerik kırpılmasın."""
         super().resizeEvent(event)
         self.sections.setFixedWidth(160 if self.width() < 760 else 200)
+        self._layout_theme_cards(1 if self.width() < 840 else 2)
 
     def _update_cloud_hint(self, *_args: object) -> None:
         """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0046)."""
@@ -834,12 +962,12 @@ class SettingsPanel(QWidget):
             self.cloud_stt_hint.setText("")
             return
         text = (
-            "Komut sesi seçilen uca (config: voice.stt_cloud_endpoint) gönderilir; "
-            "kesintisiz kipte her söz gider."
+            "Komut sesi seçtiğin bulut sunucusuna gönderilir; kesintisiz kipte her söz gider. "
+            "Teknik ayar: voice.stt_cloud_endpoint."
         )
         if not self._cloud_configured:
             text += (
-                " Uç ve model config'te (voice.stt_cloud_endpoint, stt_cloud_model) "
+                " Sunucu ve model config'te (stt_cloud_endpoint, stt_cloud_model) "
                 "tanımlı değil; tanımlanmadan Uygula reddedilir."
             )
         self.cloud_stt_hint.setText(text)
@@ -862,7 +990,7 @@ class SettingsPanel(QWidget):
         try:
             self.stt_combo.clear()
             if selected_name is None:
-                self.stt_combo.addItem("Özel model (config'teki yol)", None)
+                self.stt_combo.addItem("Özel model (elle ayarlı)", None)
             for choice in stt_catalog.CATALOG:
                 text = f"{choice.label} · {self._stt_size_text(choice)}"
                 if choice.name == self._recommended_stt:
@@ -896,7 +1024,9 @@ class SettingsPanel(QWidget):
     def _stt_selection_changed(self, *_args: object) -> None:
         choice = self._selected_stt_choice()
         if choice is None:
-            self.stt_status.setText("Config'teki özel model yolu kullanılıyor.")
+            self.stt_status.setText(
+                "Özel model (elle ayarlı): ayar dosyasındaki model yolu kullanılıyor."
+            )
         else:
             self.stt_status.setText(choice.note)
         self._update_stt_download_button()
@@ -991,13 +1121,23 @@ class SettingsPanel(QWidget):
             self.github_owner.setText(agent.github_owner or "")
             self.repos_dir.setText(str(agent.repos_dir) if agent.repos_dir else "")
             self.github_auto.setChecked(agent.auto_sync)
-            self.dirty_label.setVisible(False)
+            self._set_dirty(False)
         except (OSError, ValueError, KeyError):
             self.notice.setText("Ayarlar okunamadı.")
             return
 
+    def _no_device(self) -> None:
+        """Giriş yoksa liste boş kalmaz: soluk, kapalı satır nedenini söyler."""
+        self.device_combo.clear()
+        self.device_combo.addItem("Mikrofon bulunamadı", None)
+        self.device_combo.setEnabled(False)
+
+    def _set_current_device(self, text: str) -> None:
+        self.current_device.setText(text.strip() or "Seçilmedi")
+
     def _refresh_devices(self, settings: Settings) -> None:
         self.device_combo.clear()
+        self.device_combo.setEnabled(not self._demo)
         self.device_combo.addItem("Sistem varsayılanı", None)
         audio_errors: tuple[type[Exception], ...] = (ImportError, OSError, RuntimeError, ValueError)
         try:
@@ -1013,6 +1153,10 @@ class SettingsPanel(QWidget):
                 list(devices), list(hosts), active,
                 advanced=self.advanced_devices.isChecked(),
             )
+            if not choices:
+                self._no_device()
+                self._set_current_device("")
+                return
             for label, index, indices in choices:
                 self.device_combo.addItem(label, index)
                 if active in indices or (isinstance(active, str) and active in label):
@@ -1022,19 +1166,21 @@ class SettingsPanel(QWidget):
             if active_name == str(active):
                 self.device_combo.addItem(f"Mevcut giriş ({active})", settings.voice.input_device)
                 self.device_combo.setCurrentIndex(self.device_combo.count() - 1)
-            if self.device_combo.count() > 1:
-                self.device_combo.setItemText(0, "Sistem varsayılanı")
-            self.current_device.setText(active_name)
+            self._set_current_device(active_name)
         except audio_errors:
-            self.current_device.setText("Mikrofon aygıtları okunamadı.")
+            self._no_device()
+            self.current_device.setText("Seçilmedi (mikrofon aygıtları okunamadı)")
 
     def _toggle_device_detail(self) -> None:
         if self._demo:
             return
+        was_dirty = not self.dirty_label.isHidden()
         try:
             self._refresh_devices(load_settings(self.config_path))
         except (OSError, ValueError):
             self.notice.setText("Mikrofon ayarı okunamadı.")
+        # Listeyi yeniden kurmak kullanıcı değişikliği değildir.
+        self._set_dirty(was_dirty)
 
     def _refresh_applications(self) -> None:
         friendly = {"brave": "Brave", "notepad": "Not Defteri", "calculator": "Hesap Makinesi",

@@ -169,6 +169,11 @@ class OperationLog:
         card.failed = True
         return card
 
+    def clear(self) -> None:
+        """Yeni sohbet: kartlar sıfırlanır. Denetim günlüğü başka yerde durur, buna dokunulmaz."""
+        self.cards.clear()
+        self.dropped = 0
+
     def newest_first(self) -> list[Card]:
         return list(reversed(self.cards.values()))
 

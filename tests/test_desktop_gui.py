@@ -341,15 +341,14 @@ def test_step_block_shows_verified_lines_and_hides_internal_until_details(
         hidden = [label.text() for label, _line, _activity in block._rows if label.isHidden()]
         assert "İstek alındı" in hidden and "Yanıt hazır" in hidden
 
-        # Adım bloğu yanıt balonunun hemen üstünde, aynı satırda durur.
+        # Adım bloğu yanıt balonunun hemen üstünde durur ve pet yüzü kadar girintilidir.
         bubble, speaker, _text = window.chat._bubbles[-1]
         assert speaker == "Artemis"
-        bubble_row = bubble.parentWidget()
-        block_parent = block.parentWidget()
-        assert bubble_row is not None and block_parent is not None
-        column = block_parent.layout()
-        assert column is not None
-        assert column.indexOf(block) < column.indexOf(bubble_row)
+        app.processEvents()
+        block_pos = block.mapTo(window.chat, block.rect().topLeft())
+        bubble_pos = bubble.mapTo(window.chat, bubble.rect().topLeft())
+        assert block_pos.y() < bubble_pos.y()
+        assert block_pos.x() == bubble_pos.x()
 
         block._toggle.click()
         assert all(not label.isHidden() for label, _line, _activity in block._rows)
@@ -402,8 +401,11 @@ def test_voice_state_text_and_dot_follow_the_state(
     try:
         window._show_voice_state(state)
         assert window.voice_state.text() == text
-        # Tek görünür denetim düğmedir; metni durumu, noktası tema rengini taşır.
-        assert window.voice_button.text() == text
+        # Görünür denetim simge anahtarıdır; durum metni açıklamada ve ipucunda okunur.
+        assert window.voice_button.accessibleDescription() == text
+        assert text in window.voice_button.toolTip() or window._demo
+        assert window.composer_voice.accessibleDescription() == text
+        assert window.voice_button.accessibleName() == "Sesi aç veya kapat"
         assert THEMES[window._theme][dot_color] in window.voice_dot.styleSheet()
     finally:
         _close_cleanly(app, window)
@@ -520,7 +522,8 @@ def test_settings_apply_restarts_runtime_with_selected_device_and_keeps_model(
         assert window.tabs.indexOf(window.settings_scroll) >= 0
         window.tabs.setCurrentWidget(window.settings_scroll)
         window.settings_panel.device_combo.addItem("Test mikrofonu", 9)
-        window.settings_panel.device_combo.setCurrentIndex(0)
+        combo = window.settings_panel.device_combo  # başta "Mikrofon bulunamadı" satırı var
+        combo.setCurrentIndex(combo.findData(9))
         window.settings_panel._apply()
         _wait(app, lambda: len(settings_seen) == 2 and window._worker_ready)
         assert settings_seen[-1].models[settings_seen[-1].primary_model].model == "first-model"
@@ -851,14 +854,16 @@ def test_brand_uses_selected_pet_and_keeps_product_name(
         monkeypatch.setattr(pet_sprite, "find_pet", lambda *args: object())
         monkeypatch.setattr(pet_sprite, "preview", lambda *args: pixmap)
         window._select_skin("sample")
-        assert not window.brand_pet.isHidden()
-        assert window.brand_mark.isHidden()
-        assert window.brand_pet.pixmap().size() == pixmap.size()
+        # Başlık, karşılama ve balonlar aynı gerçek pet görselini kullanır.
+        assert window.brand_pet.has_image()
+        assert window.chat.pet_face.has_image()
+        window.chat.append("Artemis", "merhaba")
+        assert all(face.has_image() for face in window.chat.findChildren(type(window.brand_pet)))
         assert window.windowTitle().startswith("Artemis")
         monkeypatch.setattr(pet_sprite, "find_pet", lambda *args: None)
         window._select_skin("orb")
-        assert window.brand_pet.isHidden()
-        assert not window.brand_mark.isHidden()
+        assert not window.brand_pet.has_image()
+        assert not window.chat.pet_face.has_image()
     finally:
         _close_cleanly(app, window)
 
@@ -895,7 +900,7 @@ def test_data_panel_search_filters_loaded_rows_and_empty_states(app: QApplicatio
     ))
     assert panel.history_stack.currentWidget() is panel.history_empty
     assert 'Kayıt yok' in [lbl.text() for lbl in panel.history_empty.findChildren(QLabel)]
-    assert panel.retention_hint.isHidden()
+    assert not panel.retention_hint.isHidden()  # yardım metni artık kalıcı (iki kısa satır)
     turns = [
         {'created_at': 't1', 'user': 'IŞIK aç', 'answer': 'Açtım'},
         {'created_at': 't2', 'user': 'saat kaç', 'answer': 'Üç'},
@@ -1041,7 +1046,7 @@ def test_step_panel_shows_only_on_wide_windows_and_caps_rows(
         assert not window.activity_panel.isHidden()
         window.resize(900, 700)
         app.processEvents()
-        assert window.activity_panel.isHidden()
+        assert not window.activity_panel.isVisible()  # sütun yok; sayfa kapalı
         assert not window._op_widgets and not window.activity_empty.isHidden()
         for index in range(25):
             window._begin_card(f"r{index}", f"mesaj {index}")
@@ -1106,5 +1111,16 @@ def test_header_does_not_clip_at_900px(app: QApplication, tmp_path: Path) -> Non
         for child in header.findChildren(QWidget):
             if child.isVisible() and child.parentWidget() is header:
                 assert header.rect().contains(child.geometry())
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_pet_workshop_model_button_opens_settings_model(app: QApplication, tmp_path: Path) -> None:
+    # Pet atölyesinin boş durumundaki "Ayarlar'da model ekle" düğmesi Ayarlar > Model'e götürür.
+    window = _window(app, tmp_path)
+    try:
+        window.settings_panel.pet.model_settings_requested.emit()
+        assert window.tabs.currentWidget() is window.settings_scroll
+        assert window.settings_panel.sections.currentRow() == 1
     finally:
         _close_cleanly(app, window)

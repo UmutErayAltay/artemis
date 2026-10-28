@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 from typing import Any
 
@@ -19,6 +20,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QStackedWidget,
+    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -137,7 +139,7 @@ def make_card() -> tuple[QFrame, QVBoxLayout]:
 class EmptyState(QFrame):
     """Boş durum kutusu; başlık ve gövde etiketleri açık alan olarak tutulur."""
 
-    def __init__(self, title: str, body: str) -> None:
+    def __init__(self, title: str, body: str, action_text: str | None = None) -> None:
         super().__init__()
         self.setObjectName("emptyState")
         lay = QVBoxLayout(self)
@@ -148,6 +150,11 @@ class EmptyState(QFrame):
         for label in (self.title_label, self.body_label):
             label.setAlignment(Qt.AlignmentFlag.AlignCenter)
             lay.addWidget(label)
+        # Yalnız "yüklenmedi" durumunda eylem sunulur (DESIGN: yüklendi-boş durumunda eylem yok).
+        self.action_button: QPushButton | None = None
+        if action_text:
+            self.action_button = QPushButton(action_text)
+            lay.addWidget(self.action_button, 0, Qt.AlignmentFlag.AlignCenter)
         self.set_text(title, body)
 
     def set_text(self, title: str, body: str) -> None:
@@ -170,6 +177,96 @@ class EmptyState(QFrame):
         self._fit_width()
 
 
+# Durum çipi: (etiket, ton). Ton QSS'te `tone` özelliğiyle renklenir; renk kodu burada yok.
+STATUS_CHIPS = {
+    "queued": ("Hazırlanıyor", "running"),
+    "running": ("Çalışıyor", "running"),
+    "waiting": ("Cevap bekliyor", "waiting"),
+    "cancelling": ("Durduruluyor", "waiting"),
+    "cancelled": ("Durduruldu", "neutral"),
+    "timeout": ("Hata", "error"),
+    "done": ("Bitti", "done"),
+    "error": ("Hata", "error"),
+    "interrupted": ("Hata", "error"),
+    "cleanup_pending": ("Hata", "error"),
+}
+FLOW_STEPS = ("Hazırla", "İncele", "Başlat")
+LIST_MIN_ROWS = 2
+LIST_MAX_ROWS = 6
+
+
+def repolish(widget: QWidget) -> None:
+    """Dinamik özellik seçicileri (tone/state) yalnız unpolish+polish ile güncellenir."""
+    style = widget.style()
+    style.unpolish(widget)
+    style.polish(widget)
+
+
+class CollapsibleSection(QWidget):
+    """Başlık satırı (ok + başlık) ve katlı gövde; varsayılan kapalı.
+
+    Güvenlik metni silinmez, yalnız katlı durur; bu yüzden gövde etiketi ayrı tutulur.
+    """
+
+    def __init__(self, title: str, body: str) -> None:
+        super().__init__()
+        self._title = title
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        self.toggle = QPushButton()
+        self.toggle.setObjectName("disclosure")
+        self.toggle.setCheckable(True)
+        self.toggle.setAccessibleName(title)
+        self.body = make_label(body, "fieldLabel")
+        self.body.setVisible(False)
+        self.toggle.toggled.connect(self._sync)
+        self._sync(False)
+        row = QHBoxLayout()
+        row.addWidget(self.toggle)
+        row.addStretch()
+        lay.addLayout(row)
+        lay.addWidget(self.body)
+
+    def _sync(self, opened: bool) -> None:
+        self.body.setVisible(opened)
+        self.toggle.setText(("▾  " if opened else "▸  ") + self._title)
+
+
+def spec_to_html(kind: str, record: dict[str, Any]) -> str:
+    """Taslak/iş ayrıntısı: kalın başlıklar + madde listeleri.
+
+    Kullanıcı ve model metni html.escape'ten geçer; ham HTML asla yorumlanmaz.
+    """
+    spec = record if kind == "draft" else record.get("spec", {})
+    esc = html.escape
+
+    def section(title: str, text: str) -> str:
+        return f"<p><b>{title}</b><br>{esc(text)}</p>"
+
+    def bullets(title: str, items: list[Any]) -> str:
+        rows = "".join(f"<li>{esc(str(item))}</li>" for item in items) or "<li>—</li>"
+        return f"<p><b>{title}</b></p><ul>{rows}</ul>"
+
+    parts = [
+        section("Proje", str(spec.get("project", ""))),
+        section("Görev", str(spec.get("task", ""))),
+        bullets("Kapsam", list(spec.get("scope", []))),
+        bullets("Kabul ölçütleri", list(spec.get("acceptance", []))),
+    ]
+    if kind == "job":
+        commits = json.dumps(record.get("commits", []), ensure_ascii=False)
+        parts += [
+            section("Durum", STATUS_LABELS.get(record.get("status", ""), "Bilinmiyor")),
+            section("Özet", str(record.get("summary", ""))),
+            section("Soru", str(record.get("question") or "—")),
+            section("Commit'ler", commits),
+            section("Kalan değişiklikler", str(record.get("leftover_changes"))),
+            section("İş kimliği", str(record.get("job_id", ""))),
+        ]
+    return "".join(parts)
+
+
 class ProjectsPanel(QWidget):
     tool_requested = Signal(str, object)
 
@@ -188,21 +285,31 @@ class ProjectsPanel(QWidget):
                 "Yerel bir depoda iş taslağı hazırla, kapsamını incele, onaylayıp başlat.",
             )
         )
+        # Üç adımlı akış yalnız seçili taslak/iş durumundan türer (_update_flow); durum tutmaz.
+        self.flow_bar = QFrame()
+        self.flow_bar.setObjectName("stageBar")
+        flow_row = QHBoxLayout(self.flow_bar)
+        flow_row.setContentsMargins(0, 0, 0, 0)
+        flow_row.setSpacing(8)
+        self._flow_labels: list[QLabel] = []
+        for i, name in enumerate(FLOW_STEPS):
+            label = make_label(name, "stage")
+            label.setWordWrap(False)
+            self._flow_labels.append(label)
+            flow_row.addWidget(label)
+            if i < len(FLOW_STEPS) - 1:
+                flow_row.addWidget(make_label("→", "meta"))
+        flow_row.addStretch(1)
+        layout.addWidget(self.flow_bar)
+
         # Güvenlik metni silinmedi/yumuşatılmadı; yalnız varsayılan olarak katlı.
-        self.rules_toggle = QPushButton("Bu işler nasıl çalışır?")
-        self.rules_toggle.setObjectName("ghost")
-        self.rules_toggle.setCheckable(True)
-        self.hint = make_label(
+        self.rules = CollapsibleSection(
+            "Bu işler nasıl çalışır?",
             "Taslağı hazırlayın, tam kapsamı inceleyin ve onayla başlatın. " + AUTHORITY_BOUNDARY,
-            "meta",
         )
-        self.hint.setVisible(False)
-        self.rules_toggle.toggled.connect(self.hint.setVisible)
-        toggle_row = QHBoxLayout()
-        toggle_row.addWidget(self.rules_toggle)
-        toggle_row.addStretch()
-        layout.addLayout(toggle_row)
-        layout.addWidget(self.hint)
+        self.rules_toggle = self.rules.toggle
+        self.hint = self.rules.body
+        layout.addWidget(self.rules)
 
         # Sol kart: yeni iş formu.
         left, left_lay = make_card()
@@ -217,37 +324,53 @@ class ProjectsPanel(QWidget):
         for editor in (self.task, self.scope, self.acceptance):
             editor.setMinimumHeight(72)
             editor.setMaximumHeight(96)  # varsayılan sizeHint sütunu şişirmesin
+            editor.textChanged.connect(lambda: self.set_busy(self._busy))
         for caption, widget in (
             ("Proje", self.project),
             ("Görev", self.task),
             ("Kapsam", self.scope),
             ("Kabul ölçütleri", self.acceptance),
         ):
+            widget.setAccessibleName(caption)
             left_lay.addWidget(make_field(caption, widget))
         left_lay.addStretch()
         self.prepare_button = QPushButton("Taslak hazırla")
         prepare_row = QHBoxLayout()
-        prepare_row.addStretch()
         prepare_row.addWidget(self.prepare_button)
+        prepare_row.addStretch()
         left_lay.addLayout(prepare_row)
+        # Pasif düğmenin nedeni düğmenin hemen altında tek satır muted metindir.
+        self.prepare_reason = AutoHideLabel()
+        left_lay.addWidget(self.prepare_reason)
 
         # Sağ kart: liste, ayrıntı, eylemler.
         right, right_lay = make_card()
-        right_lay.addWidget(make_label("Taslaklar ve işler", "sectionTitle"))
+        title_row = QHBoxLayout()
+        title_row.setSpacing(8)
+        title_row.addWidget(make_label("Taslaklar ve işler", "sectionTitle"))
+        self.status_chip = QLabel()
+        self.status_chip.setObjectName("statusChip")
+        self.status_chip.setTextFormat(Qt.TextFormat.PlainText)
+        self.status_chip.setVisible(False)
+        title_row.addWidget(self.status_chip)
+        title_row.addStretch()
+        right_lay.addLayout(title_row)
         self.items = QListWidget()
-        self.items.setMinimumHeight(96)
+        self.items.setAccessibleName("Taslaklar ve işler")
         self.items.currentRowChanged.connect(self._select)
         self.list_stack = QStackedWidget()
-        self.list_stack.setMaximumHeight(200)
         self.list_stack.addWidget(self.items)
         self.list_stack.addWidget(
             EmptyState("Henüz taslak yok", "Soldan bir görev yazıp taslak hazırla.")
         )
-        right_lay.addWidget(self.list_stack, 1)
-        self.preview = QPlainTextEdit()
-        self.preview.setReadOnly(True)
-        self.preview.setMinimumHeight(96)
-        right_lay.addWidget(self.preview, 2)
+        right_lay.addWidget(self.list_stack)
+        self.preview = QTextBrowser()
+        self.preview.setOpenLinks(False)
+        self.preview.setOpenExternalLinks(False)
+        self.preview.setAccessibleName("Taslak ayrıntısı")
+        self.preview.setPlaceholderText("Bir taslak veya iş seç; ayrıntısı burada görünür.")
+        self.preview.setMinimumHeight(120)
+        right_lay.addWidget(self.preview, 1)
         # Bekleyen soru alanı yalnız seçili iş "waiting" iken görünür (set_busy).
         self.question_box = QWidget()
         q_lay = QVBoxLayout(self.question_box)
@@ -255,6 +378,7 @@ class ProjectsPanel(QWidget):
         q_lay.setSpacing(4)
         self.answer = QPlainTextEdit()
         self.answer.setPlaceholderText("Örn. Mavi olsun")
+        self.answer.setAccessibleName("Bekleyen soru")
         self.answer.setMinimumHeight(72)
         self.answer.setMaximumHeight(96)
         q_lay.addWidget(make_label("Bekleyen soru", "fieldLabel"))
@@ -265,18 +389,26 @@ class ProjectsPanel(QWidget):
         answer_row.addWidget(self.answer_button)
         q_lay.addLayout(answer_row)
         right_lay.addWidget(self.question_box)
-        self.cancel_button = QPushButton("İşi durdur")
-        self.cancel_button.setObjectName("danger")
         self.refresh_button = QPushButton("Durumu yenile")
         self.start_button = QPushButton("Taslağı onayla ve başlat")
         self.start_button.setObjectName("primary")
         actions = QHBoxLayout()
         actions.setSpacing(8)
-        actions.addWidget(self.cancel_button)
         actions.addStretch()
         actions.addWidget(self.refresh_button)
         actions.addWidget(self.start_button)
         right_lay.addLayout(actions)
+        self.start_reason = AutoHideLabel()
+        self.start_reason.setAlignment(Qt.AlignmentFlag.AlignRight)
+        right_lay.addWidget(self.start_reason)
+        # Yıkıcı eylem birincil eylemden ayrı satırda ve yalnız iş seçiliyken görünür.
+        self.cancel_button = QPushButton("İşi durdur")
+        self.cancel_button.setObjectName("danger")
+        cancel_row = QHBoxLayout()
+        cancel_row.addWidget(self.cancel_button)
+        cancel_row.addStretch()
+        right_lay.addSpacing(8)
+        right_lay.addLayout(cancel_row)
         self.notice = make_label(
             "Demo modunda proje süreçleri kapalı." if demo else "Durum bekleniyor.", "meta"
         )
@@ -303,32 +435,94 @@ class ProjectsPanel(QWidget):
         )
 
     def _sync_list(self) -> None:
-        """Boş liste yerine açıklayıcı durum göster; veri mantığına dokunmaz."""
-        self.list_stack.setCurrentIndex(0 if self.items.count() else 1)
+        """Boş liste yerine açıklayıcı durum göster; liste yüksekliği satır sayısına uyar."""
+        count = self.items.count()
+        self.list_stack.setCurrentIndex(0 if count else 1)
+        if count:
+            # Tek satır için koca kutu yerine en az 2, en çok 6 satır; fazlası kaydırılır.
+            row = max(self.items.sizeHintForRow(0), 36)
+            rows = min(max(count, LIST_MIN_ROWS), LIST_MAX_ROWS)
+            self.list_stack.setFixedHeight(rows * row + 12)
+        else:
+            self.list_stack.setFixedHeight(120)
+
+    def _update_flow(self, kind: str, record: dict[str, Any]) -> None:
+        """Hazırla → İncele → Başlat: taslak yoksa 0, taslak seçiliyse 1, iş seçiliyse 2."""
+        current = 0 if not kind else 1 if kind == "draft" else 2
+        finished = kind == "job" and record.get("status") == "done"
+        for i, label in enumerate(self._flow_labels):
+            state = "done" if finished or i < current else "current" if i == current else "todo"
+            label.setText(("✓ " if state == "done" else "") + FLOW_STEPS[i])
+            if label.property("state") != state:
+                label.setProperty("state", state)
+                repolish(label)
+
+    def _update_chip(self, kind: str, record: dict[str, Any]) -> None:
+        if not kind:
+            self.status_chip.setVisible(False)
+            return
+        text, tone = (
+            ("Taslak", "neutral")
+            if kind == "draft"
+            else STATUS_CHIPS.get(record.get("status", ""), ("Bilinmiyor", "neutral"))
+        )
+        self.status_chip.setText(text)
+        if self.status_chip.property("tone") != tone:
+            self.status_chip.setProperty("tone", tone)
+            repolish(self.status_chip)
+        self.status_chip.setVisible(True)
 
     def _set_prepare_primary(self, primary: bool) -> None:
         name = "primary" if primary else ""
         if self.prepare_button.objectName() != name:
             self.prepare_button.setObjectName(name)
-            style = self.prepare_button.style()
-            style.unpolish(self.prepare_button)
-            style.polish(self.prepare_button)
+            repolish(self.prepare_button)
 
     def refresh(self) -> None:
         if not self._busy and not self._demo:
             self.tool_requested.emit("code_agent_status", StatusArguments())
 
+    def _prepare_block(self) -> str:
+        """Taslak düğmesi pasifse kullanıcıya gösterilecek tek satır neden ('' = açık)."""
+        if self._demo:
+            return "Demo modunda taslak hazırlanamaz."
+        if self._busy:
+            return "Artemis meşgul; hazır olunca açılır."
+        if not self.project.currentText():
+            return "Önce bir proje tanımla."
+        if not self.task.toPlainText().strip():
+            return "Önce görev yaz."
+        if not self.scope.toPlainText().strip():
+            return "Kapsamı yaz (her satır bir madde)."
+        if not self.acceptance.toPlainText().strip():
+            return "Kabul ölçütünü yaz (her satır bir madde)."
+        return ""
+
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         enabled = not busy and not self._demo
-        self.prepare_button.setEnabled(enabled and bool(self.project.currentText()))
+        prepare_reason = self._prepare_block()
+        self.prepare_button.setEnabled(not prepare_reason)
+        self.prepare_reason.setText(prepare_reason)
         self.refresh_button.setEnabled(enabled)
         selected = self._selected()
         kind, record = selected if selected else ("", {})
         self.start_button.setEnabled(enabled and kind == "draft")
+        if self._demo:
+            start_reason = "Demo modunda proje süreçleri kapalı."
+        elif busy:
+            start_reason = "Artemis meşgul; hazır olunca açılır."
+        elif kind == "job":
+            start_reason = "Bu bir iş; yeni iş için bir taslak seç."
+        elif kind != "draft":
+            start_reason = "Önce bir taslak hazırla veya listeden seç."
+        else:
+            start_reason = ""
+        self.start_reason.setText(start_reason)
         self._set_prepare_primary(kind != "draft")
         self.question_box.setVisible(record.get("status") == "waiting")
         self.answer_button.setEnabled(enabled and record.get("status") == "waiting")
+        self.cancel_button.setVisible(kind == "job")
         self.cancel_button.setEnabled(
             enabled
             and record.get("status")
@@ -339,6 +533,8 @@ class ProjectsPanel(QWidget):
                 "cancelling",
             }
         )
+        self._update_flow(kind, record)
+        self._update_chip(kind, record)
 
     def _selected(self) -> tuple[str, dict[str, Any]] | None:
         row = self.items.currentRow()
@@ -347,26 +543,7 @@ class ProjectsPanel(QWidget):
     def _select(self, row: int) -> None:
         selected = self._selected()
         if selected:
-            kind, record = selected
-            spec = record if kind == "draft" else record.get("spec", {})
-            lines = [
-                "Proje: " + str(spec.get("project", "")),
-                "Görev: " + str(spec.get("task", "")),
-                "Kapsam:",
-                *["• " + item for item in spec.get("scope", [])],
-                "Kabul ölçütleri:",
-                *["• " + item for item in spec.get("acceptance", [])],
-            ]
-            if kind == "job":
-                lines += [
-                    "Durum: " + STATUS_LABELS.get(record.get("status", ""), "Bilinmiyor"),
-                    "Özet: " + str(record.get("summary", "")),
-                    "Soru: " + str(record.get("question") or "—"),
-                    "Commit'ler: " + json.dumps(record.get("commits", []), ensure_ascii=False),
-                    "Kalan değişiklikler: " + str(record.get("leftover_changes")),
-                    "İş kimliği: " + str(record.get("job_id", "")),
-                ]
-            self.preview.setPlainText("\n".join(lines))
+            self.preview.setHtml(spec_to_html(*selected))
         else:
             self.preview.clear()
         self.set_busy(self._busy)

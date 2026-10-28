@@ -2,6 +2,9 @@
 
 Yalnız düz metin alır ve `submit` geri çağrısına iletir; komut ya da onay mantığı yoktur
 (ADR 0023). Geri çağrı False dönerse (hazır değil/meşgul) metin korunur ve kısa ipucu görünür.
+
+Renkler sabit değil tema jetonlarından gelir (`apply_theme`): kutu ayrı bir pencere olduğu için
+ana pencerenin stil sayfasını devralmaz, bu yüzden paleti kendisi uygular.
 """
 
 from __future__ import annotations
@@ -13,12 +16,11 @@ from PySide6.QtCore import QEvent, QRectF, Qt
 from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
 
-WIDTH = 240
+from artemis.channels.desktop import themes
+
+WIDTH = 280
 MAX_CHARS = 2000
 HINT = "Şu an alınamadı; metin korundu."
-_BORDER = QColor("#2A3B52")
-_SURFACE = QColor(0x11, 0x1C, 0x2D, 245)
-_TEXT = "#E6EDF5"
 
 
 class QuickBox(QWidget):
@@ -32,6 +34,7 @@ class QuickBox(QWidget):
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self._submit = submit
+        self._palette = themes.THEMES[themes.DEFAULT_THEME]
         self.setFixedWidth(WIDTH)
         self.setAccessibleName("Artemis hızlı yazma kutusu")
         self.setToolTip("Artemis'e yaz ve Enter'a bas; Esc kapatır")
@@ -39,20 +42,28 @@ class QuickBox(QWidget):
         self.input.setMaxLength(MAX_CHARS)
         self.input.setPlaceholderText("Artemis'e yaz…")
         self.input.setAccessibleName("Artemis'e mesaj")
-        self.input.setStyleSheet(
-            f"QLineEdit {{ background: transparent; border: none; color: {_TEXT};"
-            " font: 12px 'Segoe UI'; padding: 4px 2px; }"
-        )
         self.input.returnPressed.connect(self.send)
         self.hint = QLabel(HINT, self)
-        self.hint.setStyleSheet("color: #FFD78C; font: 11px 'Segoe UI';")
         self.hint.hide()
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(12, 6, 12, 6)
-        layout.setSpacing(0)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(4)
         layout.addWidget(self.input)
         layout.addWidget(self.hint)
+        self.apply_theme(self._palette)
         self.adjustSize()
+
+    def apply_theme(self, palette: dict[str, str]) -> None:
+        self._palette = palette
+        # Alan şeffaf kalır ve odak çerçevesi çizmez: kutunun kendisi yüzeydir.
+        self.input.setStyleSheet(
+            f"QLineEdit, QLineEdit:focus {{ background: transparent; border: none;"
+            f" color: {palette['text']}; font-size: 14px; padding: 4px 0; }}"
+        )
+        self.hint.setStyleSheet(
+            f"QLabel {{ color: {palette['warning']}; font-size: 12px; background: transparent; }}"
+        )
+        self.update()
 
     def send(self) -> None:
         text = self.input.text().strip()
@@ -87,7 +98,7 @@ class QuickBox(QWidget):
     def paintEvent(self, event: Any) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(_BORDER, 1.2))
-        p.setBrush(_SURFACE)
-        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 13, 13)
+        p.setPen(QPen(QColor(self._palette["border"]), 1.2))
+        p.setBrush(QColor(self._palette["surface"]))
+        p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 12, 12)
         p.end()

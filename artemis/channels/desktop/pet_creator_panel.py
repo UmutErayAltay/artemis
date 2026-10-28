@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QVBoxLayout,
     QWidget,
 )
@@ -37,6 +38,7 @@ from artemis.brain.router import ProviderRouter
 from artemis.channels.desktop import pet_animator, pet_creator, pet_sprite
 from artemis.channels.desktop import pet_image_pipeline as pipe
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError
+from artemis.channels.desktop.projects_panel import EmptyState
 from artemis.config.settings import ModelConfig, load_settings
 from artemis.safety.audit import AuditLog
 
@@ -151,7 +153,8 @@ def price_warning(model: ModelConfig) -> str:
 
 
 _STAGES = ("Tarif", "Görsel", "Animasyon", "Kaydet")
-_WIDE_MIN = 1000  # bunun altında iki sütun alt alta dizilir (DESIGN.md: stack when narrower)
+# Bunun altında sütunlar alt alta dizilir; 900px pencerede sağ sütun 240'ın altına inmesin.
+_WIDE_MIN = 760
 
 
 def _label(text: str, name: str) -> QLabel:
@@ -187,6 +190,7 @@ def _column() -> tuple[QWidget, QVBoxLayout]:
 
 class CreatorPanel(QFrame):
     installed = Signal(str)  # kurulan pet kimliği (pencere seçer)
+    model_settings_requested = Signal()  # boş durum: "Ayarlar'da model ekle"
 
     def __init__(self, config_path: Path, pets_dir: Path, *, demo: bool = False) -> None:
         super().__init__()
@@ -219,6 +223,7 @@ class CreatorPanel(QFrame):
         self.reset_button.clicked.connect(self.reset_conversation)
         header.addWidget(self.reset_button)
         layout.addLayout(header)
+        # Başlık ve aşama çubuğu kaydırılan gövdenin DIŞINDA: sayfa kayarken hep görünür.
         # Aşama çubuğu yalnız mevcut durumdan türetilir (_update_stage).
         self.stage_bar = QFrame()
         self.stage_bar.setObjectName("stageBar")
@@ -259,16 +264,6 @@ class CreatorPanel(QFrame):
         self.warning.setTextFormat(Qt.TextFormat.PlainText)
         fields_lay.addWidget(self.warning)
         left_lay.addWidget(self.fields)
-        self.empty_state = QFrame()
-        self.empty_state.setObjectName("emptyState")
-        empty_lay = QVBoxLayout(self.empty_state)
-        empty_lay.setContentsMargins(0, 8, 0, 8)
-        empty_lay.setSpacing(4)
-        empty_lay.addWidget(_label("Pet üretmek için bir model gerekli", "emptyTitle"))
-        self.empty_body = _label("Ayarlar > Model bölümünden bir bağlantı ekle.", "emptyBody")
-        self.empty_body.setWordWrap(True)
-        empty_lay.addWidget(self.empty_body)
-        left_lay.addWidget(self.empty_state)
         self.name_edit = QLineEdit()
         self.name_edit.setPlaceholderText("Örn. Şirin Maskot")
         self.name_edit.setMaxLength(80)
@@ -278,6 +273,7 @@ class CreatorPanel(QFrame):
         self.chat_log = QPlainTextEdit()
         self.chat_log.setReadOnly(True)
         self.chat_log.setMinimumHeight(160)
+        self.chat_log.setPlaceholderText("Konuşma burada görünür; düzeltmek için yazmaya devam et.")
         self.chat_log.setAccessibleName("Pet üretici sohbeti")
         left_lay.addWidget(self.chat_log, 1)
         send_row = QHBoxLayout()
@@ -298,14 +294,23 @@ class CreatorPanel(QFrame):
 
         right, right_lay = _column()
         well = QFrame()
-        well.setObjectName("messageUser")  # tema 'soft' zemin + 10px yarıçap (ayrı kural yok)
-        well.setMinimumSize(280, 280)
+        well.setObjectName("petWell")  # tema: soft zemin + kesikli çerçeve (boşken davetkâr)
+        well.setMinimumSize(240, 240)
         well_lay = QVBoxLayout(well)
         well_lay.setContentsMargins(16, 16, 16, 16)
-        self.preview = _label("Önizleme yok", "emptyBody")
+        well_lay.setSpacing(4)
+        self.preview = _label("Önizleme yok", "emptyTitle")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview.setAccessibleName("Pet önizlemesi")
-        well_lay.addWidget(self.preview, 1)
+        self.preview_hint = _label(
+            "Soldan nasıl bir pet istediğini yaz; çizim burada belirir.", "emptyBody"
+        )
+        self.preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_hint.setWordWrap(True)
+        well_lay.addStretch(1)
+        well_lay.addWidget(self.preview)
+        well_lay.addWidget(self.preview_hint)
+        well_lay.addStretch(1)
         right_lay.addWidget(well, 1)
         self.state_combo = QComboBox()
         self.state_combo.setAccessibleName("Önizleme durumu")
@@ -342,11 +347,33 @@ class CreatorPanel(QFrame):
         self.status.setTextFormat(Qt.TextFormat.PlainText)
         right_lay.addWidget(self.status)
 
-        self._columns = QBoxLayout(QBoxLayout.Direction.LeftToRight)
+        # Gövde kendi kaydırıcısında (sayfadaki tek kaydırma bölgesi); sol:sağ = 2:1.
+        self.workshop = QScrollArea()
+        self.workshop.setWidgetResizable(True)
+        self.workshop.setFrameShape(QFrame.Shape.NoFrame)
+        self.workshop.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        body = _flat(QWidget())
+        self.workshop.setWidget(body)
+        self._columns = QBoxLayout(QBoxLayout.Direction.LeftToRight, body)
+        self._columns.setContentsMargins(0, 4, 0, 0)
         self._columns.setSpacing(24)
-        self._columns.addWidget(left, 3)
-        self._columns.addWidget(right, 2)
-        layout.addLayout(self._columns)
+        self._columns.addWidget(left, 2)
+        right.setMinimumWidth(240)
+        self._columns.addWidget(right, 1)
+        layout.addWidget(self.workshop, 1)
+        # Model yokken kapalı form yerine tek eylemli boş durum (DESIGN.md boş durum kalıbı).
+        self.empty_state = EmptyState(
+            "Pet üretmek için bir model gerekli", "Ayarlar > Model bölümünden bir bağlantı ekle."
+        )
+        self.empty_body = self.empty_state.body_label
+        layout.addWidget(self.empty_state)
+        self.model_button = QPushButton("Ayarlar'da model ekle")
+        self.model_button.setObjectName("primary")
+        self.model_button.clicked.connect(self.model_settings_requested)
+        self.model_button.hide()
+        layout.addWidget(self.model_button, 0, Qt.AlignmentFlag.AlignHCenter)
+        self._model_hook = False
+        layout.addStretch(1)  # boş durum kartın ortasında dev boşluk bırakmasın
         self._timer = QTimer(self)
         self._timer.setInterval(int(1000 / pet_sprite.FPS))
         self._timer.timeout.connect(self._tick)
@@ -358,8 +385,8 @@ class CreatorPanel(QFrame):
         want = QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
         if self._columns.direction() != want:
             self._columns.setDirection(want)
-            self._columns.setStretch(0, 3 if wide else 0)
-            self._columns.setStretch(1, 2 if wide else 0)
+            self._columns.setStretch(0, 2 if wide else 0)
+            self._columns.setStretch(1, 1 if wide else 0)
         super().resizeEvent(event)
 
     # -------------------------------------------------------------- hazırlık
@@ -436,13 +463,29 @@ class CreatorPanel(QFrame):
             self.busy.setText("Model düşünüyor…")
         elif self._image_call is None:
             self.busy.setText("")
-        self.empty_state.setVisible(not self._models)
-        self.fields.setVisible(bool(self._models))
-        self.empty_body.setText(
+        has_models = bool(self._models)
+        self.empty_state.setVisible(not has_models)
+        self.workshop.setVisible(has_models)
+        self.stage_bar.setVisible(has_models)
+        self.reset_button.setVisible(has_models)
+        self.fields.setVisible(has_models)
+        self.empty_state.set_text(
+            "Pet üretmek için bir model gerekli",
             "Demo modunda pet üretilmez." if self._demo
-            else "Ayarlar > Model bölümünden bir bağlantı ekle."
+            else "Çizimi bir model yapar; Ayarlar > Model bölümünden bir bağlantı ekleyince "
+            "burası açılır.",
         )
+        self.model_button.setVisible(not has_models and not self._demo and self._model_hook)
         self._update_stage()
+
+    def set_model_hook(self, available: bool) -> None:
+        """Pencere "Ayarlar > Model"e gidebiliyorsa boş durumda düğme görünür."""
+        self._model_hook = available
+        self._update_buttons()
+
+    def _sync_placeholder(self) -> None:
+        """Önizleme boşken dostça ipucu görünür; çizim gelince kaybolur."""
+        self.preview_hint.setVisible(self.preview.pixmap().isNull())
 
     def _update_stage(self) -> None:
         """Aşama yalnız mevcut taslak durumundan türer; yeni durum tutulmaz."""
@@ -476,6 +519,7 @@ class CreatorPanel(QFrame):
         self.state_combo.setCurrentIndex(0)
         self.preview.clear()
         self.preview.setText("Önizleme yok")
+        self._sync_placeholder()
         self.chat_log.clear()
         self.input.clear()
         self.name_edit.clear()
@@ -587,6 +631,7 @@ class CreatorPanel(QFrame):
         self._timer.stop()
         self._frames = []
         self.preview.setPixmap(QPixmap.fromImage(pet_animator._fit_cell(image)))
+        self._sync_placeholder()
 
     def animate(self) -> None:
         alias = self.model_combo.currentData()
@@ -661,6 +706,7 @@ class CreatorPanel(QFrame):
         if self._frames:
             self.preview.setPixmap(self._frames[self._frame % len(self._frames)])
             self._frame += 1
+            self._sync_placeholder()
 
     # ----------------------------------------------------------------- kayıt
 
