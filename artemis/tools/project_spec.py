@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal, Self
+from typing import Any, Literal, Self
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -15,6 +15,25 @@ AUTHORITY_BOUNDARY = (
 )
 
 
+def approval_text(values: dict[str, Any]) -> str:
+    """Onay ekranında görünen ajan/klasör özeti; SafetyGate'e dokunmadan spec ile gider."""
+    agent = values.get("agent", "claude")
+    workdir = values.get("workdir", "proje")
+    repo = values.get("repo_path") or "(çözülmedi)"
+    folder = values.get("workdir_path") or repo
+    lines = [
+        f"Ajan: {agent}",
+        f"Başlangıç klasörü: {workdir} -> {folder}",
+        f"Hedef repo: {repo}",
+    ]
+    if workdir != "proje":
+        lines.append(
+            "Ajan bu klasörde başlar ve oradaki kuralları yükler; "
+            f"hedef repo: {repo}. Bu klasördeki dosyaları değiştirebilir."
+        )
+    return "\n".join(lines)
+
+
 class ProjectSpec(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -23,6 +42,23 @@ class ProjectSpec(BaseModel):
     task: str = Field(min_length=1, max_length=4000, repr=False)
     scope: tuple[str, ...] = Field(min_length=1, max_length=16, repr=False)
     acceptance: tuple[str, ...] = Field(min_length=1, max_length=16, repr=False)
+    # Ajan ve başlangıç klasörü yalnız yapılandırılmış TAKMA ADLARDIR (ADR 0049); yol
+    # alanları onay ekranında çözülmüş mutlak yolu göstermek için hazırlıkta yazılır ve
+    # başlatmada yeniden çözülüp karşılaştırılır (ayar değiştiyse iş başlamaz).
+    agent: str = Field(default="claude", pattern=r"^[a-z0-9_-]{1,32}$")
+    workdir: str = Field(default="proje", pattern=r"^[a-z0-9_-]{1,32}$")
+    repo_path: str = Field(default="", max_length=1024)
+    workdir_path: str = Field(default="", max_length=1024)
+    # Türetilir: model ne yazarsa yazsın doğrulamada yeniden hesaplanır, böylece onay
+    # ekranındaki metin ajan/klasör/yol alanlarından ayrışamaz.
+    approval_text: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="before")
+    @classmethod
+    def derive_approval_text(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            data = {**data, "approval_text": approval_text(data)}
+        return data
 
     @field_validator("spec_id")
     @classmethod

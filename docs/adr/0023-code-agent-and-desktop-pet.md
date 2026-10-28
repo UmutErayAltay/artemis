@@ -1,6 +1,6 @@
 # ADR 0023 — Kod ajanına iş devri ve masaüstü pet
 
-**Durum:** Kabul. Kullanıcı (2026-10-14) Codex'in masaüstü "pet"ine benzer bir deneyim
+**Durum:** Kabul (ajan türü ve başlangıç klasörü için ADR 0049'a bakın). Kullanıcı (2026-10-14) Codex'in masaüstü "pet"ine benzer bir deneyim
 istedi: köşede duran, sesle konuşulan, işleri bir kod ajanına yaptıran asistan. Ajan
 yetkisi kullanıcı kararıyla **yerel commit**'tir; push yoktur.
 

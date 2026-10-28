@@ -235,12 +235,72 @@ class TelegramConfig(BaseModel):
         return Settings.validate_endpoint(value)
 
 
-class CodeAgentConfig(BaseModel):
-    """Kod ajanı (ADR 0023): izinli proje takma adları; liste boşsa özellik kapalıdır."""
+ALIAS_RE = re.compile(r"[a-z0-9_-]{1,32}")
+ENV_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+# Başlangıç klasörü takma adları: "proje" hedef reponun kendisidir (varsayılan), "ikinci-beyin"
+# memory.vault_path verilince örtük vardır (ADR 0049).
+OWN_REPO_ALIAS = "proje"
+VAULT_ALIAS = "ikinci-beyin"
+BUILTIN_AGENT = "claude"
+
+
+class ConfigChoiceError(ValueError):
+    """Bilinmeyen ajan/klasör takma adı; model yalnız yapılandırılmış adları seçebilir."""
+
+
+class AgentProfile(BaseModel):
+    """Kullanıcının tanımladığı kod ajanı profili (ADR 0049); sır değeri burada tutulmaz."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    projects: dict[str, Path] = Field(default_factory=dict)
+    kind: Literal["claude", "codex", "generic"]
+    command: str | None = Field(default=None, min_length=1)
+    # Yalnız generic: {prompt_file} {prompt} {workdir} {repo} yer tutucuları.
+    args: tuple[str, ...] = ()
+    prompt_via: Literal["stdin", "file", "arg"] | None = None
+    # Çocuğa ek geçirilecek ortam değişkeni ADLARI; değerler asla yazılmaz/loglanmaz.
+    env: tuple[str, ...] = ()
+    # Gelecekteki görünür konsol kipi için ayrılmış alan; şimdilik kullanılmaz.
+    visible_args: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_profile(self) -> Self:
+        for name in self.env:
+            if not ENV_NAME_RE.fullmatch(name):
+                raise ValueError(f"env adı büyük harfli ortam değişkeni adı olmalı: {name!r}")
+        if self.kind == "generic":
+            if self.command is None:
+                raise ValueError("generic ajan için command gerekli")
+            if self.prompt_via == "file" and not any("{prompt_file}" in a for a in self.args):
+                raise ValueError("prompt_via=file için args içinde {prompt_file} gerekli")
+            if self.prompt_via == "arg" and not any("{prompt}" in a for a in self.args):
+                raise ValueError("prompt_via=arg için args içinde {prompt} gerekli")
+        elif self.args or self.prompt_via:
+            raise ValueError("args ve prompt_via yalnız generic ajanda kullanılır")
+        return self
+
+
+class ProjectEntry(BaseModel):
+    """Proje girdisi: eski biçim yalnız yol, yeni biçim ajan/klasör varsayılanı da taşır."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: Path
+    agent: str | None = None
+    workdir: str | None = None
+
+
+class CodeAgentConfig(BaseModel):
+    """Kod ajanı (ADR 0023, 0049): izinli proje takma adları; liste boşsa özellik kapalıdır."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    # YAML anahtarı `projects`dir; eski `alias: yol` ve yeni `alias: {path, agent, workdir}`
+    # biçimleri kabul edilir. `.projects` özelliği eski alias->Path görünümünü korur.
+    project_entries: dict[str, ProjectEntry] = Field(default_factory=dict, alias="projects")
+    agents: dict[str, AgentProfile] = Field(default_factory=dict)
+    default_agent: str = BUILTIN_AGENT
+    workdirs: dict[str, Path] = Field(default_factory=dict)
     command: str = Field(default="claude", min_length=1)
     max_minutes: float = Field(default=20.0, ge=1, le=120)
     model: str | None = None  # Eski yönetici modeli ayarı; manager_model kazanır.
@@ -260,12 +320,85 @@ class CodeAgentConfig(BaseModel):
             raise ValueError("GitHub kullanıcı adı harf, rakam veya - içermeli (en çok 39)")
         return value
 
-    @field_validator("projects")
+    @field_validator("project_entries", mode="before")
     @classmethod
-    def validate_projects(cls, values: dict[str, Path]) -> dict[str, Path]:
-        if any(not re.fullmatch(r"[a-z0-9_-]{1,32}", alias) for alias in values):
-            raise ValueError("Proje takma adı 1-32 küçük harf, rakam, _ veya - olmalı")
+    def normalise_projects(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            return {
+                alias: {"path": value} if isinstance(value, str | Path) else value
+                for alias, value in values.items()
+            }
         return values
+
+    @model_validator(mode="after")
+    def validate_references(self) -> Self:
+        if any(not ALIAS_RE.fullmatch(alias) for alias in self.project_entries):
+            raise ValueError("Proje takma adı 1-32 küçük harf, rakam, _ veya - olmalı")
+        if any(not ALIAS_RE.fullmatch(name) for name in self.agents):
+            raise ValueError("Ajan adı 1-32 küçük harf, rakam, _ veya - olmalı")
+        if BUILTIN_AGENT in self.agents:
+            raise ValueError("'claude' yerleşik ajandır; yeniden tanımlanamaz")
+        if any(not ALIAS_RE.fullmatch(alias) for alias in self.workdirs):
+            raise ValueError("Klasör takma adı 1-32 küçük harf, rakam, _ veya - olmalı")
+        if OWN_REPO_ALIAS in self.workdirs:
+            raise ValueError(f"'{OWN_REPO_ALIAS}' ayrılmış takma addır (projenin kendi reposu)")
+        agent_names = {BUILTIN_AGENT, *self.agents}
+        if self.default_agent not in agent_names:
+            raise ValueError(f"default_agent tanımsız ajan: {self.default_agent!r}")
+        # Örtük ikinci-beyin burada doğrulanamaz (vault_path başka bölümde); çözümleme
+        # anında hata verir.
+        folders = {OWN_REPO_ALIAS, VAULT_ALIAS, *self.workdirs}
+        for alias, entry in self.project_entries.items():
+            if entry.agent is not None and entry.agent not in agent_names:
+                raise ValueError(f"Proje '{alias}' tanımsız ajan kullanıyor: {entry.agent!r}")
+            if entry.workdir is not None and entry.workdir not in folders:
+                raise ValueError(f"Proje '{alias}' tanımsız klasör kullanıyor: {entry.workdir!r}")
+        return self
+
+    @property
+    def projects(self) -> dict[str, Path]:
+        """Eski görünüm: alias -> yol (arayüz ve eski çağıranlar bunu okur)."""
+        return {alias: entry.path for alias, entry in self.project_entries.items()}
+
+    def project_path(self, alias: str) -> Path | None:
+        entry = self.project_entries.get(alias)
+        return entry.path if entry else None
+
+    def project_agent(self, alias: str) -> str:
+        entry = self.project_entries.get(alias)
+        return entry.agent if entry and entry.agent else self.default_agent
+
+    def project_workdir(self, alias: str) -> str:
+        entry = self.project_entries.get(alias)
+        return entry.workdir if entry and entry.workdir else OWN_REPO_ALIAS
+
+    def resolve_agent(self, name: str | None) -> tuple[str, AgentProfile]:
+        """Yerleşik claude her zaman vardır; komutu eski `command` alanından gelir."""
+        name = name or self.default_agent
+        if name == BUILTIN_AGENT:
+            return name, AgentProfile(kind="claude", command=self.command)
+        profile = self.agents.get(name)
+        if profile is None:
+            known = ", ".join(sorted({BUILTIN_AGENT, *self.agents}))
+            raise ConfigChoiceError(f"Bilinmeyen ajan '{name}'. Tanımlı ajanlar: {known}.")
+        return name, profile
+
+    def workdir_choices(self, vault_path: Path | None) -> dict[str, Path | None]:
+        """Seçilebilir klasörler; None = projenin kendi reposu (çözümleme repo'ya bağlı)."""
+        choices: dict[str, Path | None] = {OWN_REPO_ALIAS: None}
+        if vault_path is not None:
+            choices[VAULT_ALIAS] = vault_path
+        return {**choices, **self.workdirs}
+
+    def resolve_workdir(self, name: str | None, repo: Path, vault_path: Path | None = None) -> Path:
+        """Takma ad -> yol. Model yol veremez; yalnız bu tablodaki adlar çözülür."""
+        name = name or OWN_REPO_ALIAS
+        choices = self.workdir_choices(vault_path)
+        if name not in choices:
+            known = ", ".join(sorted(choices))
+            raise ConfigChoiceError(f"Bilinmeyen başlangıç klasörü '{name}'. Tanımlılar: {known}.")
+        chosen = choices[name]
+        return repo if chosen is None else chosen
 
 
 class BriefingConfig(BaseModel):
@@ -562,10 +695,17 @@ def load_settings(path: Path) -> Settings:
     if agent.repos_dir is not None:
         repos = agent.repos_dir
         agent_updates["repos_dir"] = repos if repos.is_absolute() else (base / repos).resolve()
-    if agent.projects:
-        agent_updates["projects"] = {
+    if agent.project_entries:
+        agent_updates["project_entries"] = {
+            alias: entry
+            if entry.path.is_absolute()
+            else entry.model_copy(update={"path": (base / entry.path).resolve()})
+            for alias, entry in agent.project_entries.items()
+        }
+    if agent.workdirs:
+        agent_updates["workdirs"] = {
             alias: value if value.is_absolute() else (base / value).resolve()
-            for alias, value in agent.projects.items()
+            for alias, value in agent.workdirs.items()
         }
     if agent_updates:
         updates["code_agent"] = agent.model_copy(update=agent_updates)

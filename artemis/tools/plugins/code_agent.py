@@ -5,7 +5,7 @@ from typing import Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from artemis.config.settings import CodeAgentConfig
+from artemis.config.settings import OWN_REPO_ALIAS, CodeAgentConfig, ConfigChoiceError
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
 from artemis.tools.github_repos import discover_projects
@@ -19,6 +19,9 @@ class PrepareArguments(BaseModel):
     task: str = Field(min_length=1, max_length=4000, repr=False)
     scope: tuple[str, ...] = Field(min_length=1, max_length=16, repr=False)
     acceptance: tuple[str, ...] = Field(min_length=1, max_length=16, repr=False)
+    # Yalnız yapılandırılmış TAKMA AD; desen yol ayırıcıyı ve boşluğu dışlar (kural 6).
+    agent: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,32}$")
+    workdir: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,32}$")
 
 
 class StartArguments(BaseModel):
@@ -68,6 +71,12 @@ def available_projects(config: CodeAgentConfig) -> dict[str, Path]:
     return {**found, **config.projects}
 
 
+def _resolve_workdir(context: ToolContext, alias: str, repo: Path) -> Path:
+    return context.settings.code_agent.resolve_workdir(
+        alias, repo, context.settings.memory.vault_path
+    )
+
+
 @register_tool
 class CodeAgentPrepare(BaseTool):
     name = "code_agent_prepare"
@@ -75,6 +84,7 @@ class CodeAgentPrepare(BaseTool):
     done_label = "Proje taslağı hazırlandı"
     description = (
         "Proje, görev, kapsam ve kabul ölçütlerini içeren değişmez yerel taslak hazırlar. "
+        "İsteğe bağlı agent ve workdir yalnız yapılandırılmış takma adlardır (yol verme). "
         "Eksik ayrıntıları önce kullanıcıya sorun. Kodlayıcı veya subprocess başlatmaz. "
         "Sonraki code_agent_start çağrısı dönen spec'in tam kopyasını taşımalıdır."
     )
@@ -91,8 +101,27 @@ class CodeAgentPrepare(BaseTool):
         }
         if jobs is None or args.project not in known:
             return ToolResult(message="İzinli proje bulunamadı; taslak hazırlanmadı.")
+        config = context.settings.code_agent
+        agent = args.agent or config.project_agent(args.project)
+        workdir = args.workdir or config.project_workdir(args.project)
+        repo = known[args.project]
         try:
-            spec = jobs.prepare(args.project, args.task, args.scope, args.acceptance)
+            # Takma adlar yapılandırmaya karşı doğrulanır; çözülmüş yollar onay ekranı içindir.
+            config.resolve_agent(agent)
+            workdir_path = _resolve_workdir(context, workdir, repo)
+        except ConfigChoiceError as error:
+            return ToolResult(message=f"{error} Taslak hazırlanmadı.")
+        try:
+            spec = jobs.prepare(
+                args.project,
+                args.task,
+                args.scope,
+                args.acceptance,
+                agent=agent,
+                workdir=workdir,
+                repo_path=str(repo.resolve()),
+                workdir_path=str(workdir_path.resolve()),
+            )
         except (CodeAgentError, ValueError):
             return ToolResult(
                 message="Taslak kaydedilemedi; kapsam ve kabul ölçütlerini kontrol edin."
@@ -125,11 +154,30 @@ class CodeAgentStart(BaseTool):
         if path is None or jobs is None or alias is None or task is None:
             allowed = ", ".join(sorted(projects)) or "(hiçbiri; özellik kapalı)"
             return ToolResult(message=f"Bilinmeyen proje '{alias}'. İzinli projeler: {allowed}.")
+        agent_alias = args.spec.agent if args.spec else "claude"
+        workdir_alias = args.spec.workdir if args.spec else OWN_REPO_ALIAS
+        try:
+            _, profile = config.resolve_agent(agent_alias)
+            workdir = _resolve_workdir(context, workdir_alias, path)
+        except ConfigChoiceError as error:
+            return ToolResult(message=str(error))
+        if args.spec is not None and (
+            args.spec.repo_path not in {"", str(path.resolve())}
+            or (
+                workdir_alias != OWN_REPO_ALIAS and args.spec.workdir_path != str(workdir.resolve())
+            )
+        ):
+            # Onaylanan yollar ayar değişince eskir; kullanıcı eski yolu onaylamıştı.
+            return ToolResult(
+                message="Ayarlar değişti; onaylanan yollar geçersiz. Yeni taslak hazırlayın."
+            )
         try:
             job_id = jobs.start(
                 alias,
                 path,
                 task,
+                profile=profile,
+                workdir=None if workdir_alias == OWN_REPO_ALIAS else workdir,
                 command=config.command,
                 max_minutes=config.max_minutes,
                 model=config.model,
@@ -178,6 +226,10 @@ class CodeAgentStatus(BaseTool):
             ),
             data={
                 "projects": projects,
+                "agents": sorted({"claude", *context.settings.code_agent.agents}),
+                "workdirs": sorted(
+                    context.settings.code_agent.workdir_choices(context.settings.memory.vault_path)
+                ),
                 "jobs": listed,
                 "drafts": [] if jobs is None else jobs.drafts(),
             },
@@ -192,7 +244,7 @@ class CodeAgentAnswer(BaseTool):
     label = "Kod ajanı sorusunu cevapla"
     done_label = "Cevap kod ajanına gönderildi"
     description = (
-        "İş ve tek kullanımlık soru kimliğiyle aynı Claude oturumuna devam eder. "
+        "İş ve tek kullanımlık soru kimliğiyle aynı Claude oturumuna devam eder (yalnız Claude). "
         + AUTHORITY_BOUNDARY
     )
     args_model = AnswerArguments

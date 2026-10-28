@@ -1,5 +1,7 @@
 # ADR 0026 — Proje taslağı, arka plan işleri ve aşamalı soru/cevap
 
+**Durum:** Kabul. Ajan türü (Claude dışı) ve başlangıç klasörü seçimi ADR 0049'dadır.
+
 **Bağlam:** ADR 0023'ün ilk sürümü görevi başlatır, fakat iş durumu bellektedir;
 zaman aşımından sonraki `communicate()` sınırsızdır. Faz 5, sesli görüşmeden
 onaylanabilir bir taslak ve izlenebilir bir kodlama işi üretmelidir.
