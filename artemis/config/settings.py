@@ -242,6 +242,10 @@ ENV_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 OWN_REPO_ALIAS = "proje"
 VAULT_ALIAS = "ikinci-beyin"
 BUILTIN_AGENT = "claude"
+# Yerleşik ajanlar (ADR 0049 eki): claude yeniden tanımlanamaz; codex kullanıcı profili
+# tanımlamadıkça `AgentProfile(kind="codex")` sayılır (komut `locate_codex` ile bulunur).
+BUILTIN_AGENTS = (BUILTIN_AGENT, "codex")
+RunMode = Literal["background", "visible"]
 
 
 class ConfigChoiceError(ValueError):
@@ -260,7 +264,8 @@ class AgentProfile(BaseModel):
     prompt_via: Literal["stdin", "file", "arg"] | None = None
     # Çocuğa ek geçirilecek ortam değişkeni ADLARI; değerler asla yazılmaz/loglanmaz.
     env: tuple[str, ...] = ()
-    # Gelecekteki görünür konsol kipi için ayrılmış alan; şimdilik kullanılmaz.
+    # Yalnız generic: görünür pencere kipinin argümanları (args ile aynı yer tutucular; `{prompt}`
+    # kısa yönergedir, tam istem `{prompt_file}` dosyasındadır). Boşsa görünür kip desteklenmez.
     visible_args: tuple[str, ...] = ()
 
     @model_validator(mode="after")
@@ -275,8 +280,12 @@ class AgentProfile(BaseModel):
                 raise ValueError("prompt_via=file için args içinde {prompt_file} gerekli")
             if self.prompt_via == "arg" and not any("{prompt}" in a for a in self.args):
                 raise ValueError("prompt_via=arg için args içinde {prompt} gerekli")
-        elif self.args or self.prompt_via:
-            raise ValueError("args ve prompt_via yalnız generic ajanda kullanılır")
+            if self.visible_args and not any(
+                "{prompt_file}" in a or "{prompt}" in a for a in self.visible_args
+            ):
+                raise ValueError("visible_args içinde {prompt_file} veya {prompt} gerekli")
+        elif self.args or self.prompt_via or self.visible_args:
+            raise ValueError("args, prompt_via ve visible_args yalnız generic ajanda kullanılır")
         return self
 
 
@@ -288,6 +297,7 @@ class ProjectEntry(BaseModel):
     path: Path
     agent: str | None = None
     workdir: str | None = None
+    mode: RunMode | None = None
 
 
 class CodeAgentConfig(BaseModel):
@@ -300,6 +310,7 @@ class CodeAgentConfig(BaseModel):
     project_entries: dict[str, ProjectEntry] = Field(default_factory=dict, alias="projects")
     agents: dict[str, AgentProfile] = Field(default_factory=dict)
     default_agent: str = BUILTIN_AGENT
+    default_mode: RunMode = "background"
     workdirs: dict[str, Path] = Field(default_factory=dict)
     command: str = Field(default="claude", min_length=1)
     max_minutes: float = Field(default=20.0, ge=1, le=120)
@@ -342,7 +353,7 @@ class CodeAgentConfig(BaseModel):
             raise ValueError("Klasör takma adı 1-32 küçük harf, rakam, _ veya - olmalı")
         if OWN_REPO_ALIAS in self.workdirs:
             raise ValueError(f"'{OWN_REPO_ALIAS}' ayrılmış takma addır (projenin kendi reposu)")
-        agent_names = {BUILTIN_AGENT, *self.agents}
+        agent_names = set(self.agent_names())
         if self.default_agent not in agent_names:
             raise ValueError(f"default_agent tanımsız ajan: {self.default_agent!r}")
         # Örtük ikinci-beyin burada doğrulanamaz (vault_path başka bölümde); çözümleme
@@ -372,14 +383,26 @@ class CodeAgentConfig(BaseModel):
         entry = self.project_entries.get(alias)
         return entry.workdir if entry and entry.workdir else OWN_REPO_ALIAS
 
+    def project_mode(self, alias: str) -> RunMode:
+        entry = self.project_entries.get(alias)
+        return entry.mode if entry and entry.mode else self.default_mode
+
+    def agent_names(self) -> tuple[str, ...]:
+        """Seçilebilir ajan adları: yerleşikler (claude, codex) sonra kullanıcı ajanları."""
+        custom = sorted(name for name in self.agents if name not in BUILTIN_AGENTS)
+        return (*BUILTIN_AGENTS, *custom)
+
     def resolve_agent(self, name: str | None) -> tuple[str, AgentProfile]:
-        """Yerleşik claude her zaman vardır; komutu eski `command` alanından gelir."""
+        """Yerleşik claude her zaman vardır (komutu eski `command` alanından gelir). codex'i
+        kullanıcı tanımladıysa onun profili (örn. açık mutlak yol), yoksa varsayılan profil."""
         name = name or self.default_agent
         if name == BUILTIN_AGENT:
             return name, AgentProfile(kind="claude", command=self.command)
         profile = self.agents.get(name)
+        if profile is None and name == "codex":
+            profile = AgentProfile(kind="codex")
         if profile is None:
-            known = ", ".join(sorted({BUILTIN_AGENT, *self.agents}))
+            known = ", ".join(self.agent_names())
             raise ConfigChoiceError(f"Bilinmeyen ajan '{name}'. Tanımlı ajanlar: {known}.")
         return name, profile
 

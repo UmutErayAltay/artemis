@@ -51,7 +51,13 @@ from artemis.channels.desktop.provider_section import (
 )
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
 from artemis.channels.voice import stt_catalog
-from artemis.config.settings import BUILTIN_AGENT, GITHUB_OWNER_RE, Settings, load_settings
+from artemis.config.settings import (
+    BUILTIN_AGENT,
+    BUILTIN_AGENTS,
+    GITHUB_OWNER_RE,
+    Settings,
+    load_settings,
+)
 from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
 SettingPath = tuple[str, ...]
@@ -803,11 +809,9 @@ class SettingsPanel(QWidget):
         self.default_agent_combo.setAccessibleName("Varsayılan kod ajanı")
         field(agents, "Varsayılan ajan", self.default_agent_combo,
               "Projede ayrıca seçilmediyse bu ajan çalışır.")
-        self.add_codex_button = QPushButton("Codex ekle")
-        self.add_codex_button.clicked.connect(self._add_codex)
         self.add_custom_agent_button = QPushButton("Özel ajan ekle…")
         self.add_custom_agent_button.clicked.connect(self._add_custom_agent)
-        agents.addLayout(button_row(self.add_codex_button, self.add_custom_agent_button))
+        agents.addLayout(button_row(self.add_custom_agent_button))
         self.agent_hint = meta_label("")
         agents.addWidget(self.agent_hint)
         self.code_agents: dict[str, dict[str, Any]] = {}
@@ -897,7 +901,7 @@ class SettingsPanel(QWidget):
                 getattr(self, binding.widget).setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
                            self.github_auto, self.github_button, self.default_agent_combo,
-                           self.add_codex_button, self.add_custom_agent_button):
+                           self.add_custom_agent_button):
                 widget.setEnabled(False)
         else:
             self.refresh()
@@ -1294,12 +1298,21 @@ class SettingsPanel(QWidget):
 
     def _refresh_code_agents(self) -> None:
         self.agent_list.clear()
+        # Yerleşikler (claude, codex) her zaman listededir; kullanıcı codex'i tanımladıysa onun
+        # profili (örn. açık mutlak yol) gösterilir. Ardından özel ajanlar.
         rows = [(BUILTIN_AGENT, "claude", self._builtin_command)]
-        rows += [(n, p["kind"], p.get("command")) for n, p in self.code_agents.items()]
+        codex_command = (self.code_agents.get("codex") or {}).get("command", "codex")
+        rows.append(("codex", "codex", codex_command))
+        rows += [
+            (n, p["kind"], p.get("command"))
+            for n, p in self.code_agents.items()
+            if n not in BUILTIN_AGENTS
+        ]
         for name, kind, command in rows:
             # Yalnız PATH/önbellek bakılır; arayüz iş parçacığında süreç başlatılmaz.
             status = command_status(command)
-            self.agent_list.addItem(f"{name} · {kind} · {command or '—'} · {status}")
+            note = " · yerleşik" if name in BUILTIN_AGENTS and name not in self.code_agents else ""
+            self.agent_list.addItem(f"{name} · {kind} · {command or '—'} · {status}{note}")
         blocked = self.default_agent_combo.blockSignals(True)
         self.default_agent_combo.clear()
         for name, _kind, _command in rows:
@@ -1307,7 +1320,6 @@ class SettingsPanel(QWidget):
         current = self.default_agent_combo.findData(self.default_agent)
         self.default_agent_combo.setCurrentIndex(max(0, current))
         self.default_agent_combo.blockSignals(blocked)
-        self.add_codex_button.setEnabled(not self._demo and "codex" not in self.code_agents)
         self.agent_hint.setText(
             "Giriş her ajanın kendi CLI'sindedir (Claude/Codex login); Artemis sır saklamaz."
         )
@@ -1322,12 +1334,8 @@ class SettingsPanel(QWidget):
         self._mark_dirty()
         self.agent_hint.setText(f"'{name}' eklendi; kaydetmek için Uygula'ya bas.")
 
-    def _add_codex(self) -> None:
-        if "codex" not in self.code_agents:
-            self._stage_agent("codex", {"kind": "codex", "command": "codex"})
-
     def _add_custom_agent(self) -> None:
-        dialog = AgentDialog((BUILTIN_AGENT, *self.code_agents), self)
+        dialog = AgentDialog((*BUILTIN_AGENTS, *self.code_agents), self)
         if dialog.exec() == QDialog.DialogCode.Accepted and dialog.result_profile:
             self._stage_agent(*dialog.result_profile)
 

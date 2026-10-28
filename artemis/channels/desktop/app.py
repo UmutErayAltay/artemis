@@ -734,8 +734,9 @@ class ApprovalDialog(QDialog):
         spec = item.arguments.get("spec")
         if item.tool_name == "code_agent_start" and isinstance(spec, dict):
             lines = str(spec.get("approval_text", "")).split("\n")
-            warn = lines[3:] if spec.get("workdir", "proje") != "proje" else []
-            head = lines[: len(lines) - len(warn)]
+            # İlk 4 satır sabit (ajan, klasör, repo, kip); sonrakiler uyarıdır (proje dışı
+            # klasör, görünür pencere kipi) ve uyarı tonlu kutuda ayrı gösterilir.
+            head, warn = lines[:4], lines[4:]
             if head and any(head):
                 self.approval_text_label = QLabel("\n".join(head))
                 self.approval_text_label.setTextFormat(Qt.TextFormat.PlainText)
@@ -1842,12 +1843,18 @@ class DesktopWindow(QMainWindow):
         return True
 
     def _submit_project_tool(self, name: str, arguments: BaseModel) -> None:
-        request_id = self.bridge.submit_tool(name, arguments)
+        # Durum yoklaması salt okunur ve 2 sn'de bir gelir: kart, meşgul durumu ve pet
+        # tepkisi üretmez (aksi halde "Taslak hazırla"ya basılmış gibi titrer).
+        quiet = name == "code_agent_status"
+        request_id = self.bridge.submit_tool(name, arguments, quiet=quiet)
         if request_id is None:
-            panel = self.projects_panel if name.startswith("code_agent_") else self.data_panel
-            panel.notice.setText("Başka işlem sürüyor; istek çalıştırılmadı.")
+            if not quiet:
+                panel = self.projects_panel if name.startswith("code_agent_") else self.data_panel
+                panel.notice.setText("Başka işlem sürüyor; istek çalıştırılmadı.")
             return
         self._active_request = request_id
+        if quiet:
+            return
         self._busy = True
         self._begin_card(request_id, f"Proje işlemi: {name}")
         self._set_controls()

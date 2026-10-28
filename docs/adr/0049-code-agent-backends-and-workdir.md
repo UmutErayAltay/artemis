@@ -79,3 +79,81 @@ sabit yazılmaz; sonuç süreç başına önbelleğe alınır. Testler PowerShel
 **Sonuçlar / sınırlar:** Gerçek Codex/aider/Gemini ile canlı koşu yapılmadı; testler
 sahte süreç ve gerçek git kullanır. Kullanıcı arayüzü (ajan/klasör seçimi, `approval_text`
 gösterimi) ayrı dalgadadır.
+
+---
+
+## Ek (2026-10-28): yerleşik Codex, taslak silme ve görünür pencere kipi
+
+**Durum:** Kabul. ADR 0049'un yukarıdaki kararlarını değiştirmez; "Görünür konsol kipi bu işte
+YOK" maddesini kaldırır. SafetyGate ve onay anlamı aynıdır.
+
+**Bağlam:** Seçici yalnız `claude` + kullanıcının tanımladığı ajanları listeliyordu; kurulu
+Codex görünmüyordu ("yalnız kurulu" etiketi yanıltıcıydı). Taslaklar oluşturulabiliyor ama
+silinemiyordu. Kullanıcı ajanı arka planda (headless) mı yoksa görünür bir konsol penceresinde
+mi çalıştıracağını seçmek istedi.
+
+**Kararlar:**
+- **Yerleşik codex.** `BUILTIN_AGENTS = ("claude", "codex")`. `resolve_agent("codex")`
+  kullanıcının `agents["codex"]` profilini (örn. açık mutlak yol) varsa onu, yoksa
+  `AgentProfile(kind="codex")` döndürür (komut `locate_codex` ile bulunur); mevcut ayarlar aynen
+  çalışır. `claude` yeniden tanımlanamaz. Ajan adı listesi tek yerden gelir
+  (`CodeAgentConfig.agent_names()`); doğrulayıcılar (`default_agent`, proje girdisi) bunu kullanır.
+  `code_agent_status` ayrıca `agent_status: {ad: {found, visible}}` döndürür; komut arama
+  (`locate_codex` PowerShell çalıştırabilir, önbellekli) araç içinde `asyncio.to_thread` ile
+  işçi tarafında yapılır, arayüz iş parçacığında yapılmaz. Arayüz bulunamayan ajanı
+  "codex (bulunamadı)" diye gösterir, seçilemez (pasif) ve ipucu Ayarlar > GitHub > Kod ajanları'na
+  yönlendirir. Claude seçicide "Claude Code" görünür (saklanan takma ad `claude`); ipucu Claude
+  masaüstü uygulamasının iş alamadığını söyler. Ayarlar "Kod ajanları" listesi iki yerleşiği
+  de gösterir; "Codex ekle" düğmesi gereksiz kaldığı için kaldırıldı.
+- **Taslak silme.** `code_agent_discard` (argüman: `spec_id`, `extra=forbid`) yalnız başlatılmamış
+  taslağı siler. Risk sınıfı `code_agent_cancel` ile aynıdır (SIDE_EFFECT): yalnız yerel,
+  başlamamış üstveri kaydıdır; içerik `code_agent_draft` denetim olayında kalır, dosyalara ve
+  repoya dokunulmaz, lekeli turda SafetyGate yine onay sorar. İş kaydı, çalışan iş ve başlamış
+  taslak silinemez: bellekte `_drafts` + "bu spec bir işe bağlı mı" denetimi, kalıcı depoda
+  `DELETE ... WHERE key=? AND kind='draft'` (anahtar ne olursa olsun iş satırı silinmez).
+  Bilinmeyen kimlik dürüst başarısızlıktır. Denetime `code_agent_draft_discarded` yazılır.
+- **Çalışma kipi.** `mode: background|visible` (varsayılan `background`): `ProjectEntry.mode`,
+  `CodeAgentConfig.default_mode`, `project_mode(alias)`, `PrepareArguments.mode`, `ProjectSpec.mode`.
+  Kip kullanıcının onayladığı spec'in parçasıdır ve `approval_text` içinde (4. satır) yazar;
+  görünürde ek olarak "Görünür pencerede çalışır; pencereyi kapatırsan iş kesilir. Artemis bu
+  kipte ajana soru-cevap yapamaz." uyarısı gelir. `approval_text` hâlâ doğrulamada yeniden
+  türetilir; modelin yazdığı metin kullanılmaz. Desteklenmeyen ajan/platformda hazırlık ve
+  başlatma dürüstçe reddedilir (Windows dışı; generic ajanda `visible_args` yok).
+- **Görünür kipin süreci.** Windows'ta `CREATE_NEW_CONSOLE | CREATE_SUSPENDED`, boru yok;
+  süreç yine bizim `Popen` tutamacımızdadır ve aynı job nesnesine (`WindowsProcessTree`)
+  bağlanır, yani "İşi durdur" ve zaman aşımı süreç ağacını öldürür. `max_minutes` aynen geçerlidir.
+  Soru-cevap, `--resume`, `--json-schema`/structured_output ve çıktı yakalama kapalıdır
+  (stdout okunmaz). **Başarı yalnız git'ten ve çıkış kodundan yargılanır**: çıkış kodu 0 ise
+  `done` (özet yeni commit sayısı ve kalan değişikliği yazar, ajan metni okunmaz), sıfır dışı ise
+  `interrupted` ("Pencere kapandı veya ajan N koduyla çıktı; iş tamamlanmış sayılmadı"). Pencere
+  elle kapatılınca süreç sıfır dışı çıkar; bu hiçbir zaman başarı sayılmaz. Hedef repodaki git
+  doğrulaması, kirli ağaç reddi ve kilit headless ile aynıdır.
+- **Görünür kipin argv'si.** Tam istem işin kendi state klasöründeki `code_agent_jobs/<iş>/task.md`
+  dosyasına yazılır (state yoksa geçici klasör); argv'ye yalnız "Read <yol> and carry out the task
+  described there; stop when done." yönergesi girer. İş bitince dosya ve klasör silinir.
+  Ortam `run_environment` ile aynıdır (yalnız ad listesi). `--dangerously-skip-permissions`,
+  `--dangerously-bypass-approvals-and-sandbox`, `--full-auto` ve `-a never` hiç kullanılmaz.
+
+| Görünür kip argv'si | Durum |
+| --- | --- |
+| codex: `codex -C <klasör> [--add-dir <repo>] -a on-request -s workspace-write "<yönerge>"` | doğrulandı (`codex --help`, codex-cli 0.165.0-alpha.1.2: `[PROMPT]`, `-C`, `--add-dir`, `-a on-request`, `-s workspace-write`) |
+| claude: `claude "<yönerge>" --permission-mode acceptEdits --allowedTools ... --disallowedTools Bash(git push:*) WebFetch WebSearch AskUserQuestion --append-system-prompt ... --agents ... --agent coordinator [--model m] --add-dir <iş klasörü> [<repo>]` | bayraklar headless ile aynı; etkileşimli sırada konumsal yönergenin çok değerli bayraklardan ÖNCE verilmesi **doğrulanmadı** (canlı koşu yok) |
+| generic: profilin `visible_args` listesi; `{prompt_file}` `{workdir}` `{repo}` ve `{prompt}` (= kısa yönerge, tam istem değil) | doğrulanmadı (CLI bayrakları kullanıcıdan gelir); `visible_args` boşsa kip desteklenmez |
+
+**Kabul edilen riskler:**
+- Görünür kipte ajanın çıktısı okunamaz; sonuç git'ten ve çıkış kodundan başka doğrulanamaz.
+  Ajan pencerede ne yaptığını (ör. yalnız okuma) Artemis göremez. Çıkış kodu 0 + git'te değişiklik
+  yok "done" olabilir; özet bunu "git'te değişiklik görülmedi" diye söyler.
+- Pencere kapatma anlamı: kapatma sıfır dışı çıkış üretir ve `interrupted` olur. Pencere
+  kapatılmadan ajanın kendisi sıfır koduyla çıkarsa (örn. `/exit`) `done` sayılır; kullanıcı
+  ajanı bilerek erken bıraktıysa bunu git sonucu ve özet gösterir. Çıkış kodu semantiği ajanlara
+  göre canlı doğrulanmadı.
+- Tam istem diskte düz dosyadır (işe özel state klasörü; iş bitince silinir, Artemis çöküp iş
+  `interrupted` kalırsa dosya kalabilir). İstem argv'ye girmez, fakat dosya yolu argv'dedir; `.cmd`
+  kabuğu gerektiren bir ikilide yolda `&`/`%` gibi karakterler yanlış yorumlanabilir (varsayılan
+  state yolu bunları içermez).
+- Claude görünür kipte `AskUserQuestion` yine yasaktır (headless ile aynı duruş): kullanıcı pencerede
+  yazabilir ama ajan soru sormaz. Codex `-a on-request` ile onayı pencerede kullanıcıya sorar;
+  Artemis bu onayları görmez.
+- Windows konsolu, gerçek `claude`/`codex` ve görünür pencere canlı denenmedi; testler sahte süreç
+  ve gerçek git kullanır, pencere bayrağı fabrikaya giden argümandan doğrulanır.

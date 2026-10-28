@@ -16,12 +16,13 @@ import shutil
 import subprocess
 import tempfile
 from collections.abc import Callable, Mapping
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, Protocol
 
 from artemis.config.settings import ENV_NAME_RE, AgentProfile
-from artemis.tools.code_agent_process import NO_WINDOW
+from artemis.tools.code_agent_process import NO_WINDOW, console_supported
 from artemis.tools.platform import child_environment
 from artemis.tools.project_spec import AUTHORITY_BOUNDARY, ProjectSpec, SegmentOutput
 
@@ -37,6 +38,13 @@ _CLAUDE_RULES = (
     "Turkish result. A question is not completion. User answers arrive in a resumed session. "
 )
 RULES = _COMMON_RULES + _CLAUDE_RULES + AUTHORITY_BOUNDARY
+# Görünür pencere kipi: kullanıcı konsolu görür ama Artemis soru-cevap yapamaz; ajan cevap
+# beklememeli, takılırsa durup nedenini yazmalı. structured_output protokolü yoktur.
+_VISIBLE_RULES = (
+    _COMMON_RULES
+    + "A console window is open for the user, but do not wait for answers: if you cannot "
+    "proceed, stop and explain why in your final message. " + AUTHORITY_BOUNDARY
+)
 # Claude dışı ajanlarda soru/cevap ve structured_output protokolü yoktur; yanıltmamak için
 # yalnız ortak kurallar verilir.
 _PLAIN_RULES = (
@@ -133,7 +141,16 @@ def run_environment(names: tuple[str, ...]) -> dict[str, str]:
     return env
 
 
-def role_profile(coder_model: str | None, tester_model: str | None) -> dict[str, object]:
+def visible_supported(profile: AgentProfile) -> bool:
+    """Görünür pencere kipi: Windows konsolu + (claude/codex yerleşik biçimi veya visible_args)."""
+    return console_supported() and (
+        profile.kind in {"claude", "codex"} or bool(profile.visible_args)
+    )
+
+
+def role_profile(
+    coder_model: str | None, tester_model: str | None, coordinator_rules: str = RULES
+) -> dict[str, object]:
     profile: dict[str, object] = {}
     for name, description, prompt, tools, model in (
         (
@@ -153,7 +170,7 @@ def role_profile(coder_model: str | None, tester_model: str | None) -> dict[str,
         (
             "coordinator",
             "Project manager",
-            RULES,
+            coordinator_rules,
             ["Read", "Glob", "Grep", "Bash", "Agent(coder)", "Agent(tester)"],
             None,
         ),
@@ -176,6 +193,12 @@ class BackendContext:
     manager_model: str | None = None
     coder_model: str | None = None
     tester_model: str | None = None
+    # Görünür kipte tam istemin yazılacağı işe özel klasör (yoksa geçici klasör açılır).
+    job_dir: Path | None = None
+
+    @property
+    def visible(self) -> bool:
+        return self.spec.mode == "visible"
 
     @property
     def separate_workdir(self) -> bool:
@@ -190,16 +213,19 @@ class AgentRun:
     stdin_prompt: str
     kind: str
     extra_env_names: tuple[str, ...] = ()
-    # Yalnız "headless" vardır. Görünür konsol kipi (ADR 0049 sonrası iş) buraya yeni bir
-    # değer ve profilin `visible_args` alanı ile eklenecek; Codex etkileşimli biçimi
-    # `codex [OPTIONS] [PROMPT]` + `-C`, `--add-dir`, `-a on-request|never`, `-s workspace-write`.
-    mode: Literal["headless"] = "headless"
+    # "headless": boru + stdin istemi (arka plan). "visible": yeni konsol penceresi, boru yok,
+    # istem dosyadadır; çıktı okunmaz ve soru-cevap protokolü yoktur (ADR 0049 eki).
+    mode: Literal["headless", "visible"] = "headless"
     temp_files: list[Path] = field(default_factory=list)
     output_file: Path | None = None
+    cleanup_dirs: list[Path] = field(default_factory=list)
 
     def cleanup(self) -> None:
         for path in self.temp_files:
             path.unlink(missing_ok=True)
+        for directory in self.cleanup_dirs:
+            with suppress(OSError):  # boş değilse (başka dosya varsa) dokunulmaz
+                directory.rmdir()
 
     def last_message(self, limit: int = 600) -> str:
         """Ajanın son mesajı (yalnız bilgi; başarı kanıtı DEĞİLDİR)."""
@@ -242,12 +268,91 @@ def _temp_path(suffix: str) -> Path:
     return Path(name)
 
 
+def _visible_prompt(ctx: BackendContext) -> str:
+    return (
+        _VISIBLE_RULES
+        + "\n"
+        + _target_lines(ctx)
+        + "Approved project specification:\n"
+        + ctx.spec.model_dump_json()
+    )
+
+
+def _visible_run(
+    ctx: BackendContext, kind: str, build_argv: Callable[[Path, str], list[str]]
+) -> AgentRun:
+    """Tam istemi işe özel klasöre yazar; argv'ye yalnız kısa yönerge girer (istem metni girmez)."""
+    job_dir = ctx.job_dir or Path(tempfile.mkdtemp(prefix="artemis-agent-"))
+    job_dir.mkdir(parents=True, exist_ok=True)
+    prompt_file = job_dir / "task.md"
+    try:
+        prompt_file.write_text(_visible_prompt(ctx), encoding="utf-8")
+    except OSError:
+        prompt_file.unlink(missing_ok=True)
+        with suppress(OSError):
+            job_dir.rmdir()
+        raise
+    instruction = f"Read {prompt_file} and carry out the task described there; stop when done."
+    return AgentRun(
+        build_argv(job_dir, instruction),
+        "",
+        kind,
+        ctx.profile.env,
+        mode="visible",
+        temp_files=[prompt_file],
+        cleanup_dirs=[job_dir],
+    )
+
+
 class Backend(Protocol):
     def build(self, ctx: BackendContext) -> AgentRun: ...
 
 
 class ClaudeBackend:
+    def _build_visible(self, ctx: BackendContext) -> AgentRun:
+        def argv_for(job_dir: Path, instruction: str) -> list[str]:
+            # Etkileşimli claude: aynı izin duruşu (acceptEdits + aynı araç listeleri), -p/json yok.
+            # Yönerge ilk konumsal argümandır: çok değerli --allowedTools gibi bayraklardan sonra
+            # gelseydi araç adı sanılırdı. Bayrak sırası canlı CLI ile doğrulanmadı.
+            argv = [
+                ctx.exe,
+                instruction,
+                "--permission-mode",
+                "acceptEdits",
+                "--allowedTools",
+                "Read",
+                "Edit",
+                "Write",
+                "Glob",
+                "Grep",
+                "Bash",
+                "Agent(coder)",
+                "Agent(tester)",
+                "--disallowedTools",
+                "Bash(git push:*)",
+                "WebFetch",
+                "WebSearch",
+                "AskUserQuestion",
+                "--append-system-prompt",
+                _VISIBLE_RULES,
+                "--agents",
+                json.dumps(role_profile(ctx.coder_model, ctx.tester_model, _VISIBLE_RULES)),
+                "--agent",
+                "coordinator",
+            ]
+            if ctx.manager_model:
+                argv += ["--model", ctx.manager_model]
+            # Çok değerli --add-dir: istem dosyasının klasörü okunabilsin (izin sorusu çıkmasın).
+            argv += ["--add-dir", str(job_dir)]
+            if ctx.separate_workdir:
+                argv.append(str(ctx.repo))
+            return argv
+
+        return _visible_run(ctx, "claude", argv_for)
+
     def build(self, ctx: BackendContext) -> AgentRun:
+        if ctx.visible:
+            return self._build_visible(ctx)
         argv = [
             ctx.exe,
             "-p",
@@ -290,7 +395,21 @@ class ClaudeBackend:
 
 
 class CodexBackend:
+    def _build_visible(self, ctx: BackendContext) -> AgentRun:
+        def argv_for(_job_dir: Path, instruction: str) -> list[str]:
+            # Doğrulandı (codex-cli 0.165 --help): `codex [OPTIONS] [PROMPT]`; -C, --add-dir,
+            # -a on-request (model onay ister, kullanıcı pencerede cevaplar), -s workspace-write.
+            # --dangerously-bypass-approvals-and-sandbox ve -a never ASLA eklenmez.
+            argv = [ctx.exe, "-C", str(ctx.workdir)]
+            if ctx.separate_workdir:
+                argv += ["--add-dir", str(ctx.repo)]
+            return [*argv, "-a", "on-request", "-s", "workspace-write", instruction]
+
+        return _visible_run(ctx, "codex", argv_for)
+
     def build(self, ctx: BackendContext) -> AgentRun:
+        if ctx.visible:
+            return self._build_visible(ctx)
         output = _temp_path(".txt")
         # Doğrulandı (codex-cli 0.164 --help): exec seçenekleri; --add-dir exec'in kendi
         # seçeneğidir, istem stdin'den `-` ile gelir (konumsal istem verilmez). Ağ kapalı
@@ -317,7 +436,30 @@ class CodexBackend:
 class GenericBackend:
     """Kullanıcı şablonlu CLI (doğrulanmadı: her CLI'nin bayrakları kullanıcıdan gelir)."""
 
+    def _build_visible(self, ctx: BackendContext) -> AgentRun:
+        profile = ctx.profile
+        if not profile.visible_args:
+            raise ValueError("Bu ajan görünür pencere kipini desteklemiyor (visible_args yok).")
+
+        def argv_for(job_dir: Path, instruction: str) -> list[str]:
+            values = {
+                "{workdir}": str(ctx.workdir),
+                "{repo}": str(ctx.repo),
+                "{prompt_file}": str(job_dir / "task.md"),
+                "{prompt}": instruction,  # tam istem değil, kısa yönerge
+            }
+            argv = [ctx.exe]
+            for arg in profile.visible_args:
+                for key, value in values.items():
+                    arg = arg.replace(key, value)
+                argv.append(arg)
+            return argv
+
+        return _visible_run(ctx, "generic", argv_for)
+
     def build(self, ctx: BackendContext) -> AgentRun:
+        if ctx.visible:
+            return self._build_visible(ctx)
         profile = ctx.profile
         prompt = _plain_prompt(ctx)
         via = profile.prompt_via or (

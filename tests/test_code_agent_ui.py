@@ -104,12 +104,15 @@ def _panel(path: Path, projects: list[str], *, demo: bool = False) -> ProjectsPa
 
 def test_combos_from_old_shape_config(tmp_path: Path, app: QApplication) -> None:
     panel = _panel(_old_shape(tmp_path), ["alfa"])
-    assert _items(panel.agent_combo) == ["claude"]
+    # Claude ve Codex yerleşiktir: kurulu olan seçilebilir, "yalnız kurulu" etiketi yoktur.
+    assert _items(panel.agent_combo) == ["claude", "codex"]
+    assert [panel.agent_combo.itemText(i) for i in range(2)] == ["Claude Code", "codex"]
     assert _items(panel.workdir_combo) == ["proje"]
     assert panel.workdir_combo.itemText(0) == "Proje klasörü"
     assert panel.selected_choice() == ("claude", "proje")
-    assert not panel.agent_combo.isEnabled()  # tek ajan: seçici kapalı, nedeni ipucunda
-    assert "Yalnız Claude" in panel.agent_combo.toolTip()
+    assert panel.agent_combo.isEnabled()
+    assert "Claude masaüstü uygulaması iş alamaz" in panel.agent_combo.toolTip()
+    assert "yalnız kurulu" not in panel.agent_combo.itemText(0)
 
 
 def test_new_shape_combos_and_project_defaults(tmp_path: Path, app: QApplication) -> None:
@@ -389,28 +392,43 @@ def test_new_ui_sources_have_no_hardcoded_hex() -> None:
 # --- Ayarlar: Kod ajanları ---------------------------------------------------------------------
 
 
-def test_settings_codex_add_writes_profile_through_apply(tmp_path: Path, app: QApplication) -> None:
+def test_settings_codex_is_builtin_default_applies_without_profile(
+    tmp_path: Path, app: QApplication
+) -> None:
     from artemis.channels.desktop.settings_panel import save_choices
 
     path = config(tmp_path)
     panel = SettingsPanel(path)
-    assert panel.agent_list.count() == 1 and panel.agent_list.item(0).text().startswith("claude")
-    assert panel.add_codex_button.isEnabled() and not panel.apply_button.isEnabled()
-    panel.add_codex_button.click()
-    assert not panel.add_codex_button.isEnabled()  # var olan profil tekrar eklenmez
-    assert panel.apply_button.isEnabled() and not panel.dirty_label.isHidden()
-    assert panel.agent_list.count() == 2
-    assert load_settings(path).code_agent.agents == {}  # Uygula'ya kadar diske yazılmadı
+    assert panel.agent_list.count() == 2 and panel.agent_list.item(0).text().startswith("claude")
+    assert not panel.apply_button.isEnabled()
+    assert panel.agent_list.item(1).text().startswith("codex") and "yerleşik" in (
+        panel.agent_list.item(1).text()
+    )
+    # Codex yerleşik: profil eklemeden varsayılan seçilebilir; Uygula yalnız default_agent yazar.
+    assert panel.default_agent_combo.findData("codex") >= 0
     panel.default_agent_combo.setCurrentIndex(panel.default_agent_combo.findData("codex"))
     panel.default_agent_combo.activated.emit(panel.default_agent_combo.currentIndex())
+    assert panel.apply_button.isEnabled() and not panel.dirty_label.isHidden()
+    assert load_settings(path).code_agent.default_agent == "claude"  # Uygula'ya kadar yazılmadı
     save_choices(path, None, code_agent=panel.code_agent_values())
     agent = load_settings(path).code_agent
-    assert agent.agents["codex"].kind == "codex" and agent.agents["codex"].command == "codex"
-    assert agent.default_agent == "codex"
+    assert agent.default_agent == "codex" and agent.agents == {}
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    assert raw["code_agent"]["agents"] == {"codex": {"kind": "codex", "command": "codex"}}
+    assert "agents" not in raw["code_agent"]
     again = SettingsPanel(path)
-    assert not again.add_codex_button.isEnabled() and again.default_agent == "codex"
+    assert again.default_agent == "codex" and again.agent_list.count() == 2
+
+
+def test_settings_user_defined_codex_profile_still_shown_and_kept(
+    tmp_path: Path, app: QApplication
+) -> None:
+    path = _write(
+        config(tmp_path), agents={"codex": {"kind": "codex", "command": "codex"}}
+    )
+    panel = SettingsPanel(path)
+    assert panel.agent_list.count() == 2  # claude + codex (kullanıcı tanımı, ikinci satır yok)
+    assert "yerleşik" not in panel.agent_list.item(1).text()
+    assert panel.code_agent_values()["agents"] == {"codex": {"kind": "codex", "command": "codex"}}
 
 
 def test_settings_custom_agent_dialog_shows_backend_errors(app: QApplication) -> None:
@@ -468,9 +486,7 @@ def test_settings_custom_agent_is_staged_not_written(
 
 def test_settings_demo_disables_agent_actions(tmp_path: Path, app: QApplication) -> None:
     panel = SettingsPanel(config(tmp_path), demo=True)
-    for widget in (
-        panel.add_codex_button, panel.add_custom_agent_button, panel.default_agent_combo
-    ):
+    for widget in (panel.add_custom_agent_button, panel.default_agent_combo):
         assert not widget.isEnabled()
 
 
@@ -562,3 +578,253 @@ def test_config_restart_is_immediate_when_idle(tmp_path: Path, app: QApplication
     window._code_agent_config_saved()
     assert restarts == [1]
     window.close()
+
+
+# --- Seçici: bulunamayan ajan, kip, taslak silme (ADR 0049 eki) ----------------------------------
+
+
+def _spec(spec_id: str = "00000000-0000-4000-8000-000000000001", **extra: Any) -> dict[str, Any]:
+    return {
+        "spec_id": spec_id, "project": "alfa", "task": "T", "scope": ["a"], "acceptance": ["b"],
+        "agent": "claude", "workdir": "proje", "mode": "background", "repo_path": "R",
+        "workdir_path": "R", **extra,
+    }
+
+
+def _status_with(
+    panel: ProjectsPanel,
+    *,
+    drafts: list[Any] | None = None,
+    jobs: list[Any] | None = None,
+    agents: dict[str, dict[str, bool]] | None = None,
+    message: str = "ok",
+) -> None:
+    data: dict[str, Any] = {"projects": ["alfa"], "drafts": drafts or [], "jobs": jobs or []}
+    if agents is not None:
+        data["agent_status"] = agents
+    panel.accept_result(
+        "code_agent_status", ToolResult(success=True, status="ok", message=message, data=data)
+    )
+
+
+def _count_rebuilds(panel: ProjectsPanel) -> list[bool]:
+    rebuilt: list[bool] = []
+    original = panel._render_items
+
+    def counting(*args: Any, **kwargs: Any) -> None:
+        rebuilt.append(True)
+        original(*args, **kwargs)
+
+    panel._render_items = counting  # type: ignore[method-assign]
+    return rebuilt
+
+
+def test_missing_agent_is_listed_disabled_with_reason_and_blocks_prepare(
+    tmp_path: Path, app: QApplication
+) -> None:
+    from PySide6.QtCore import Qt
+
+    panel = _panel(_old_shape(tmp_path), ["alfa"])
+    panel.task.setPlainText("t")
+    panel.scope.setPlainText("s")
+    panel.acceptance.setPlainText("a")
+    both = {"claude": {"found": True, "visible": True}, "codex": {"found": False, "visible": True}}
+    _status_with(panel, agents=both)
+    combo = panel.agent_combo
+    assert [combo.itemText(i) for i in range(2)] == ["Claude Code", "codex (bulunamadı)"]
+    assert combo.itemData(1, Qt.ItemDataRole.UserRole) == "codex"  # saklanan takma ad değişmez
+    assert combo.itemData(0, Qt.ItemDataRole.UserRole) == "claude"
+    assert combo.model().item(0).isEnabled() and not combo.model().item(1).isEnabled()
+    assert "Ayarlar > GitHub > Kod ajanları" in combo.itemData(1, Qt.ItemDataRole.ToolTipRole)
+    assert "Claude masaüstü uygulaması iş alamaz" in combo.itemData(0, Qt.ItemDataRole.ToolTipRole)
+    assert combo.isEnabled() and panel.prepare_button.isEnabled()
+    # Seçili ajan bulunamazsa hazırlık nedeniyle engellenir.
+    combo.setCurrentIndex(1)
+    panel.set_busy(False)
+    assert not panel.prepare_button.isEnabled() and "bulunamadı" in panel.prepare_reason.text()
+    # Komut düzelince etiket ve seçim korunarak düzelir.
+    found = {"claude": both["claude"], "codex": {"found": True, "visible": True}}
+    _status_with(panel, agents=found)
+    assert combo.itemText(1) == "codex" and combo.currentData() == "codex"
+    assert combo.model().item(1).isEnabled()
+
+
+def test_mode_combo_default_override_and_visible_reason(tmp_path: Path, app: QApplication) -> None:
+    from PySide6.QtCore import Qt
+
+    path = _write(
+        config(tmp_path),
+        projects={"alfa": {"path": str(_repo(tmp_path)), "mode": "visible"}},
+        agents={"aider": {"kind": "generic", "command": "aider"}},
+    )
+    panel = _panel(path, ["alfa"])
+    assert [panel.mode_combo.itemText(i) for i in range(2)] == ["Arka planda", "Görünür pencerede"]
+    on_windows = os.name == "nt"
+    assert panel.selected_mode() == ("visible" if on_windows else "background")
+    panel.agent_combo.setCurrentIndex(panel.agent_combo.findData("aider"))
+    # visible_args yok: seçenek pasif, neden hem ipucunda hem neden satırında, kip arka plana döner.
+    assert panel.selected_mode() == "background"
+    assert not panel.mode_combo.model().item(1).isEnabled()
+    assert "Ayarlar" in panel.mode_combo.itemData(1, Qt.ItemDataRole.ToolTipRole)
+    assert "Görünür pencere kipi kapalı" in panel.agent_reason.text()
+    panel.agent_combo.setCurrentIndex(panel.agent_combo.findData("claude"))
+    assert panel.mode_combo.model().item(1).isEnabled() == on_windows
+
+
+@pytest.mark.skipif(os.name != "nt", reason="görünür kip yalnız Windows'ta seçilebilir")
+def test_prepare_request_and_default_save_carry_mode(tmp_path: Path, app: QApplication) -> None:
+    path = _old_shape(tmp_path)
+    panel = _panel(path, ["alfa"])
+    panel.task.setPlainText("t")
+    panel.scope.setPlainText("s")
+    panel.acceptance.setPlainText("a")
+    seen: list[Any] = []
+    panel.tool_requested.connect(lambda name, args: seen.append(args))
+    panel.prepare_button.click()
+    assert seen[-1].mode == "background"
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData("visible"))
+    panel.prepare_button.click()
+    assert seen[-1].mode == "visible"
+    assert panel.default_button.isEnabled()
+    panel.default_button.click()
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))["code_agent"]["projects"]["alfa"]
+    assert saved == {"path": str(tmp_path / "repo-a"), "mode": "visible"}
+    assert load_settings(path).code_agent.project_mode("alfa") == "visible"
+    assert not panel.default_button.isEnabled()
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData("background"))
+    panel.default_button.click()  # varsayılana dönünce anahtar silinir, eski biçime iner
+    saved = yaml.safe_load(path.read_text(encoding="utf-8"))["code_agent"]["projects"]["alfa"]
+    assert saved == str(tmp_path / "repo-a")
+
+
+def test_save_project_default_mode_keeps_other_keys_and_none_leaves_mode(tmp_path: Path) -> None:
+    path = _old_shape(tmp_path)
+    code_agent_config.save_project_default(
+        path, "alfa", agent="claude", workdir="proje", default_agent="claude", project_path=None,
+        mode="visible",
+    )
+    entry = yaml.safe_load(path.read_text(encoding="utf-8"))["code_agent"]["projects"]["alfa"]
+    assert entry == {"path": str(tmp_path / "repo-a"), "mode": "visible"}
+    code_agent_config.save_project_default(  # mode verilmezse kayıtlı kip korunur
+        path, "alfa", agent="claude", workdir="proje", default_agent="claude", project_path=None,
+    )
+    entry = yaml.safe_load(path.read_text(encoding="utf-8"))["code_agent"]["projects"]["alfa"]
+    assert entry["mode"] == "visible"
+
+
+def test_preview_and_approval_show_mode(app: QApplication) -> None:
+    from artemis.tools.project_spec import VISIBLE_NOTICE, approval_text
+
+    visible = _spec(mode="visible")
+    assert "Çalışma kipi: Görünür pencerede" in spec_to_html("draft", visible)
+    assert VISIBLE_NOTICE in spec_to_html("draft", visible)
+    job = {"job_id": "j", "status": "running", "spec": _spec(), "agent": "claude",
+           "workdir": "proje", "workdir_path": "R", "mode": "visible"}
+    assert "Çalışma kipi: Görünür pencerede" in spec_to_html("job", job)  # iş kaydı kazanır
+    assert "Çalışma kipi: Arka planda" in spec_to_html("draft", _spec())
+    values = {"agent": "claude", "workdir": "proje", "repo_path": "R", "workdir_path": "R",
+              "mode": "visible"}
+    spec = {"spec_id": "s", "project": "p", "task": "T", "scope": ["a"], "acceptance": ["b"],
+            **values, "approval_text": approval_text(values)}
+    approval = Approval("r", "t", "a", "code_agent_start", {"spec": spec}, "Onay gerekir.")
+    parent = QWidget()
+    dialog = ApprovalDialog(approval, lambda *_a: True, parent)
+    assert dialog.approval_text_label is not None and dialog.workdir_warning_box is not None
+    assert "Çalışma kipi: Görünür pencerede" in dialog.approval_text_label.text()
+    assert VISIBLE_NOTICE in dialog.workdir_warning_box.text()  # proje klasöründe de uyarı
+    dialog.reject()
+
+
+def test_discard_button_only_for_a_draft_and_emits_typed_request(
+    tmp_path: Path, app: QApplication
+) -> None:
+    panel = _panel(_old_shape(tmp_path), ["alfa"])
+    seen: list[Any] = []
+    panel.tool_requested.connect(lambda name, args: seen.append((name, args)))
+    panel.show()
+    assert panel.discard_button.isHidden()  # hiçbir şey seçili değil
+    first, second = _spec(), _spec("00000000-0000-4000-8000-000000000002")
+    _status_with(panel, drafts=[first, second])
+    assert not panel.discard_button.isHidden() and panel.discard_button.isEnabled()
+    assert panel.discard_button.objectName() == "danger"
+    panel.discard_button.click()
+    name, args = seen[-1]
+    assert name == "code_agent_discard" and args.spec_id == first["spec_id"]
+    panel.set_busy(True)  # Artemis meşgulken pasif
+    assert not panel.discard_button.isEnabled()
+    panel.set_busy(False)
+    job = {"job_id": "j", "project": "alfa", "status": "done", "spec": _spec()}
+    _status_with(panel, jobs=[job], drafts=[], message="j")
+    assert panel.discard_button.isHidden() and not panel.cancel_button.isHidden()
+    panel.close()
+
+
+def test_discard_success_removes_item_moves_selection_and_forces_next_refresh(
+    tmp_path: Path, app: QApplication
+) -> None:
+    panel = _panel(_old_shape(tmp_path), ["alfa"])
+    ids = [f"00000000-0000-4000-8000-00000000000{i}" for i in (1, 2, 3)]
+    _status_with(panel, drafts=[_spec(i) for i in ids])
+
+    def discarded(spec_id: str) -> None:
+        panel.accept_result(
+            "code_agent_discard",
+            ToolResult(
+                success=True, status="ok", message="Taslak silindi.", data={"spec_id": spec_id}
+            ),
+        )
+
+    panel.items.setCurrentRow(1)
+    discarded(ids[1])
+    assert [item["spec_id"] for _, item in panel._items] == [ids[0], ids[2]]
+    assert panel.items.count() == 2 and panel.items.currentRow() == 1  # sıradaki öğe seçildi
+    selected = panel._selected()
+    assert selected is not None and selected[1]["spec_id"] == ids[2]
+    assert panel.notice.text() == "Taslak silindi."
+    discarded(ids[2])  # son öğe silinirse seçim son kalana geçer
+    selected = panel._selected()
+    assert panel.items.currentRow() == 0 and selected is not None
+    assert selected[1]["spec_id"] == ids[0]
+    discarded(ids[0])
+    assert panel._items == [] and panel.items.currentRow() == -1
+    assert panel.preview.toPlainText() == ""
+    # Sonraki yoklama değişmemiş görünse bile liste kaynaktan yeniden kurulur.
+    rebuilt = _count_rebuilds(panel)
+    _status_with(panel, drafts=[_spec(ids[0])])
+    assert rebuilt == [True] and panel.items.count() == 1
+
+
+def test_failed_discard_keeps_list_and_shows_reason(tmp_path: Path, app: QApplication) -> None:
+    panel = _panel(_old_shape(tmp_path), ["alfa"])
+    _status_with(panel, drafts=[_spec()])
+    panel.accept_result(
+        "code_agent_discard", ToolResult(message="Silinebilir taslak bulunamadı: x.")
+    )
+    assert panel.items.count() == 1 and "bulunamadı" in panel.notice.text()
+
+
+def test_quiet_poll_keeps_notice_and_list_but_manual_refresh_updates_both(
+    tmp_path: Path, app: QApplication
+) -> None:
+    panel = _panel(_old_shape(tmp_path), ["alfa"])
+    rebuilt = _count_rebuilds(panel)
+    requested: list[Any] = []
+    panel.tool_requested.connect(lambda name, args: requested.append(name))
+    second = _spec("00000000-0000-4000-8000-000000000002")
+    _status_with(panel, drafts=[_spec()], message="1 kod ajanı işi.")  # ilk yoklama listeyi kurar
+    assert rebuilt == [True] and panel.items.count() == 1
+    panel.notice.setText("Elle yazılmış bildirim")
+    serial = panel.status_serial
+    _status_with(panel, drafts=[_spec()], message="1 kod ajanı işi.")  # değişmeyen yoklama
+    assert panel.notice.text() == "Elle yazılmış bildirim"  # bildirimi ezmez
+    assert rebuilt == [True]  # listeyi yeniden kurmaz
+    assert panel.status_serial == serial + 1  # ama "taze" sayılır
+    # Veri değişince (yoklama olsa da) liste güncellenir; bildirim yine ezilmez.
+    _status_with(panel, drafts=[_spec(), second])
+    assert rebuilt == [True, True] and panel.items.count() == 2
+    assert panel.notice.text() == "Elle yazılmış bildirim"
+    # Elle "Durumu yenile": aynı veri bile bildirimi ve listeyi yeniler.
+    panel.refresh_button.click()
+    assert requested[-1] == "code_agent_status"
+    _status_with(panel, drafts=[_spec(), second], message="2 iş.")
+    assert panel.notice.text() == "2 iş." and rebuilt == [True, True, True]

@@ -1,12 +1,14 @@
 """F5 araçları: taslak hazırlama da dahil bütün kanallar aynı kapıyı kullanır."""
 
+import asyncio
 from pathlib import Path
-from typing import Self, cast
+from typing import Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from artemis.config.settings import OWN_REPO_ALIAS, CodeAgentConfig, ConfigChoiceError
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.code_agent_backends import resolve_executable, visible_supported
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
 from artemis.tools.github_repos import discover_projects
 from artemis.tools.project_spec import AUTHORITY_BOUNDARY, ProjectSpec
@@ -22,6 +24,8 @@ class PrepareArguments(BaseModel):
     # Yalnız yapılandırılmış TAKMA AD; desen yol ayırıcıyı ve boşluğu dışlar (kural 6).
     agent: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,32}$")
     workdir: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,32}$")
+    # Çalışma kipi: verilmezse projenin/genel varsayılanı (arka plan) kullanılır.
+    mode: Literal["background", "visible"] | None = None
 
 
 class StartArguments(BaseModel):
@@ -53,6 +57,11 @@ class CancelArguments(BaseModel):
     job_id: str = Field(min_length=1, max_length=32)
 
 
+class DiscardArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    spec_id: str = Field(min_length=1, max_length=64)
+
+
 class AnswerArguments(CancelArguments):
     question_id: str = Field(min_length=1, max_length=64)
     answer: str = Field(min_length=1, max_length=4000, repr=False)
@@ -75,6 +84,17 @@ def _resolve_workdir(context: ToolContext, alias: str, repo: Path) -> Path:
     return context.settings.code_agent.resolve_workdir(
         alias, repo, context.settings.memory.vault_path
     )
+
+
+def _agent_status(config: CodeAgentConfig) -> dict[str, dict[str, bool]]:
+    status: dict[str, dict[str, bool]] = {}
+    for name in config.agent_names():
+        _, profile = config.resolve_agent(name)
+        status[name] = {
+            "found": resolve_executable(profile) is not None,
+            "visible": visible_supported(profile),
+        }
+    return status
 
 
 @register_tool
@@ -104,13 +124,19 @@ class CodeAgentPrepare(BaseTool):
         config = context.settings.code_agent
         agent = args.agent or config.project_agent(args.project)
         workdir = args.workdir or config.project_workdir(args.project)
+        mode = args.mode or config.project_mode(args.project)
         repo = known[args.project]
         try:
             # Takma adlar yapılandırmaya karşı doğrulanır; çözülmüş yollar onay ekranı içindir.
-            config.resolve_agent(agent)
+            _, profile = config.resolve_agent(agent)
             workdir_path = _resolve_workdir(context, workdir, repo)
         except ConfigChoiceError as error:
             return ToolResult(message=f"{error} Taslak hazırlanmadı.")
+        if mode == "visible" and not visible_supported(profile):
+            return ToolResult(
+                message=f"'{agent}' ajanı görünür pencere kipini desteklemiyor "
+                "(Windows ve ajan desteği gerekir). Taslak hazırlanmadı."
+            )
         try:
             spec = jobs.prepare(
                 args.project,
@@ -121,6 +147,7 @@ class CodeAgentPrepare(BaseTool):
                 workdir=workdir,
                 repo_path=str(repo.resolve()),
                 workdir_path=str(workdir_path.resolve()),
+                mode=mode,
             )
         except (CodeAgentError, ValueError):
             return ToolResult(
@@ -139,7 +166,10 @@ class CodeAgentStart(BaseTool):
     name = "code_agent_start"
     label = "Onaylanan projeyi başlat"
     done_label = "Görev kod ajanına gönderildi"
-    description = "Tam proje taslağını onaydan sonra arka planda başlatır. " + AUTHORITY_BOUNDARY
+    description = (
+        "Tam proje taslağını onaydan sonra taslaktaki kipte (arka planda veya görünür pencerede) "
+        "başlatır. " + AUTHORITY_BOUNDARY
+    )
     args_model = StartArguments
     risk = Risk.CONFIRM_REQUIRED
 
@@ -215,6 +245,9 @@ class CodeAgentStatus(BaseTool):
             listed = [j for j in listed if j["job_id"] == args.job_id]
         paths = available_projects(context.settings.code_agent)
         context.services["code_agent_project_paths"] = paths
+        # Komut arama (codex için PowerShell olabilir, önbellekli) işçi iş parçacığında yapılır,
+        # arayüz iş parçacığında değil.
+        agent_status = await asyncio.to_thread(_agent_status, context.settings.code_agent)
         projects = sorted(paths)
         return ToolResult(
             success=True,
@@ -226,7 +259,8 @@ class CodeAgentStatus(BaseTool):
             ),
             data={
                 "projects": projects,
-                "agents": sorted({"claude", *context.settings.code_agent.agents}),
+                "agents": list(context.settings.code_agent.agent_names()),
+                "agent_status": agent_status,
                 "workdirs": sorted(
                     context.settings.code_agent.workdir_choices(context.settings.memory.vault_path)
                 ),
@@ -280,4 +314,35 @@ class CodeAgentCancel(BaseTool):
             status="sent",
             message=f"İş {args.job_id} için durdurma gönderildi. "
             "Yarım değişiklikler diskte kalır; süreç temizliği doğrulanacak.",
+        )
+
+
+@register_tool
+class CodeAgentDiscard(BaseTool):
+    name = "code_agent_discard"
+    label = "Taslağı sil"
+    done_label = "Taslak silindi"
+    description = (
+        "Henüz başlatılmamış bir taslağı siler. İş kayıtlarını ve çalışan işleri silmez. "
+        "Dosyalara ve repoya dokunmaz."
+    )
+    args_model = DiscardArguments
+    # İptal ile aynı sınıf: yerel, başlamamış üstveri kaydı; içerik denetim günlüğünde
+    # (`code_agent_draft`) kalır. Lekeli turda yine onay sorulur (SafetyGate).
+    risk = Risk.SIDE_EFFECT
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        args = cast(DiscardArguments, arguments)
+        jobs = _jobs(context)
+        try:
+            removed = jobs is not None and jobs.discard(args.spec_id)
+        except CodeAgentError as error:
+            return ToolResult(message=str(error))
+        if not removed:
+            return ToolResult(message=f"Silinebilir taslak bulunamadı: {args.spec_id}.")
+        return ToolResult(
+            success=True,
+            status="ok",
+            message="Taslak silindi.",
+            data={"spec_id": args.spec_id},
         )

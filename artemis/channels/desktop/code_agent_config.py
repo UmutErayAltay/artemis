@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 
 from artemis.config.settings import (
     ALIAS_RE,
-    BUILTIN_AGENT,
+    BUILTIN_AGENTS,
     ENV_NAME_RE,
     OWN_REPO_ALIAS,
     AgentProfile,
@@ -94,8 +94,12 @@ def save_project_default(
     workdir: str,
     default_agent: str,
     project_path: Path | None,
+    mode: str | None = None,
+    default_mode: str = "background",
 ) -> None:
-    """Projenin varsayılanını yazar; eski `alias: yol` yalnız gerektiğinde sözlüğe çevrilir."""
+    """Projenin varsayılanını yazar; eski `alias: yol` yalnız gerektiğinde sözlüğe çevrilir.
+
+    `mode` None ise projenin kayıtlı kipine dokunulmaz."""
     projects = dict(_raw_code_agent(path).get("projects") or {})
     existing = projects.get(alias)
     if isinstance(existing, dict):
@@ -107,10 +111,10 @@ def save_project_default(
     else:
         raise ValueError("Projenin klasörü bilinmiyor.")
     # Varsayılanla aynı seçim anahtar olarak yazılmaz: proje genel varsayılanı izlemeye devam eder.
-    for key, value, fallback in (
-        ("agent", agent, default_agent),
-        ("workdir", workdir, OWN_REPO_ALIAS),
-    ):
+    choices = [("agent", agent, default_agent), ("workdir", workdir, OWN_REPO_ALIAS)]
+    if mode is not None:
+        choices.append(("mode", mode, default_mode))
+    for key, value, fallback in choices:
         if value == fallback:
             entry.pop(key, None)
         else:
@@ -155,17 +159,19 @@ def parse_agent_form(
     prompt_via: str,
     env_text: str,
     taken: Iterable[str],
+    visible_args_text: str = "",
 ) -> tuple[str, dict[str, Any]]:
     """Özel (generic) ajan formunu arka uç AgentProfile modeliyle doğrular."""
     name = name.strip()
     if not ALIAS_RE.fullmatch(name):
         raise AgentFormError("Ad 1-32 küçük harf, rakam, _ veya - olmalı.")
-    if name == BUILTIN_AGENT or name in set(taken):
+    if name in BUILTIN_AGENTS or name in set(taken):
         raise AgentFormError("Bu ad zaten kullanılıyor.")
     command = command.strip()
     if not command:
         raise AgentFormError("Komut gerekli.")
     args = tuple(line for line in args_text.splitlines() if line.strip())
+    visible_args = tuple(line for line in visible_args_text.splitlines() if line.strip())
     env = tuple(part for part in re.split(r"[,\s]+", env_text.strip()) if part)
     for variable in env:
         if not ENV_NAME_RE.fullmatch(variable):
@@ -177,6 +183,7 @@ def parse_agent_form(
             args=args,
             prompt_via=prompt_via,  # type: ignore[arg-type]  # değer arka uç doğrulamasından geçer
             env=env,
+            visible_args=visible_args,
         )
     except ValidationError as error:
         messages = [str(item["msg"]).removeprefix("Value error, ") for item in error.errors()]
@@ -208,6 +215,11 @@ class AgentDialog(QDialog):
             "Her satır bir argüman. Yer tutucular: {prompt_file} {workdir} {repo}"
         )
         self.args.setFixedHeight(72)
+        self.visible_args = QPlainTextEdit()
+        self.visible_args.setPlaceholderText(
+            "Boşsa görünür kip kapalı. Yer tutucular: {prompt_file} {prompt} {workdir} {repo}"
+        )
+        self.visible_args.setFixedHeight(72)
         self.prompt_via = QComboBox()
         self.prompt_via.addItem("Standart girdi (stdin)", "stdin")
         self.prompt_via.addItem("Geçici dosya ({prompt_file})", "file")
@@ -218,6 +230,11 @@ class AgentDialog(QDialog):
             ("Komut", self.command, None),
             ("Argümanlar", self.args, None),
             ("İstem biçimi", self.prompt_via, None),
+            (
+                "Görünür pencere argümanları (isteğe bağlı)",
+                self.visible_args,
+                "Satır başına bir argüman. {prompt} kısa yönerge, {prompt_file} tam istemdir.",
+            ),
             (
                 "Ortam değişkeni adları (isteğe bağlı)",
                 self.env,
@@ -258,6 +275,7 @@ class AgentDialog(QDialog):
                 str(self.prompt_via.currentData()),
                 self.env.text(),
                 self._taken,
+                self.visible_args.toPlainText(),
             )
         except AgentFormError as error:
             self.error.setText(str(error))

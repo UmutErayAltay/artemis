@@ -41,3 +41,18 @@ def isolated_qsettings(tmp_path_factory):
         return
     path = str(tmp_path_factory.mktemp("qsettings"))
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, path)
+
+
+@pytest.fixture(autouse=True)
+def no_real_codex_lookup(monkeypatch):
+    # code_agent_status artık yerleşik codex'i arar (PowerShell'e kadar gidebilir); testler gerçek
+    # makinede Appx sorgusu çalıştırmaz ve süreç geneli önbelleği kirletmez (kural 8).
+    import shutil
+
+    from artemis.tools.plugins import code_agent
+
+    monkeypatch.setattr(
+        code_agent,
+        "resolve_executable",
+        lambda profile: None if profile.kind == "codex" else shutil.which(profile.command or ""),
+    )

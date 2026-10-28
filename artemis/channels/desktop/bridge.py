@@ -387,8 +387,11 @@ class DesktopBridge:
         loop.call_soon_threadsafe(self._start_turn, request_id, text)
         return request_id
 
-    def submit_tool(self, name: str, arguments: BaseModel) -> str | None:
-        """Tipli GUI isteği aynı worker ve onay aracısından geçer; model çağrılmaz."""
+    def submit_tool(self, name: str, arguments: BaseModel, quiet: bool = False) -> str | None:
+        """Tipli GUI isteği aynı worker ve onay aracısından geçer; model çağrılmaz.
+
+        `quiet` arka plan yoklaması içindir: "Çalışıyor" durumu yayınlanmaz, böylece
+        pet ve düğmeler her yoklamada meşgule dönmez."""
         if len(arguments.model_dump_json().encode("utf-8")) > 32 * 1024:
             return None
         request_id = str(uuid4())
@@ -408,7 +411,8 @@ class DesktopBridge:
             with self._lock:
                 self._active_request = None
             return None
-        self._events.put(State("running", "Araç isteği çalışıyor.", request_id))
+        if not quiet:
+            self._events.put(State("running", "Araç isteği çalışıyor.", request_id))
         loop.call_soon_threadsafe(
             self._start_tool, request_id, name, arguments.model_copy(deep=True)
         )

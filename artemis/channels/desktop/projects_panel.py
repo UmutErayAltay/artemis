@@ -6,11 +6,11 @@ import contextlib
 import html
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from pydantic import ValidationError
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QResizeEvent, QShowEvent
+from PySide6.QtGui import QResizeEvent, QShowEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QBoxLayout,
     QComboBox,
@@ -38,16 +38,17 @@ from artemis.channels.desktop.code_agent_config import (
     workdir_alias_error,
 )
 from artemis.config.settings import (
-    BUILTIN_AGENT,
     OWN_REPO_ALIAS,
     CodeAgentConfig,
     Settings,
     load_settings,
 )
 from artemis.tools.base import ToolResult
+from artemis.tools.code_agent_backends import visible_supported
 from artemis.tools.plugins.code_agent import (
     AnswerArguments,
     CancelArguments,
+    DiscardArguments,
     PrepareArguments,
     StartArguments,
     StatusArguments,
@@ -294,6 +295,11 @@ WORKDIR_WARNING = (
     "Ajan bu klasörde başlar ve oradaki kuralları yükler; dosyaları değiştirebilir."
 )
 FLOW_STEPS = ("Hazırla", "İncele", "Başlat")
+# Seçicide gösterilen ad; saklanan takma ad değişmez (claude).
+AGENT_LABELS = {"claude": "Claude Code"}
+CLAUDE_TIP = "Claude Code komut satırı aracı; Claude masaüstü uygulaması iş alamaz."
+AGENT_MISSING_TIP = "Bulunamadı. Ayarlar > GitHub > Kod ajanları bölümünden komutu belirtin."
+MODE_LABELS = (("Arka planda", "background"), ("Görünür pencerede", "visible"))
 LIST_MIN_ROWS = 1  # tek taslak tek satır yüksekliği alır; boşken EmptyState gösterilir
 LIST_MAX_ROWS = 6
 EDITOR_MIN_HEIGHT = 72
@@ -357,7 +363,8 @@ def spec_to_html(kind: str, record: dict[str, Any]) -> str:
 
     # İlk blok: ajan, başlangıç klasörü ve hedef repo. İş kaydındaki alanlar (agent, workdir,
     # workdir_path) çalışan işin gerçeğidir; onay metni arka uçtaki aynı işlevden gelir.
-    where = {**spec, **{k: record[k] for k in ("agent", "workdir", "workdir_path") if k in record}}
+    keys = ("agent", "workdir", "workdir_path", "mode")
+    where = {**spec, **{k: record[k] for k in keys if k in record}}
     parts = [
         section("Ajan ve başlangıç klasörü", approval_text(where)),
         section("Proje", str(spec.get("project", ""))),
@@ -395,6 +402,10 @@ class ProjectsPanel(QWidget):
         self._busy = True
         # Her durum sonucunda artar; pencere "liste taze mi" diye buna bakar.
         self.status_serial = 0
+        self._force_update = False
+        self._last_status: dict[str, Any] | None = None
+        # Araçtan gelen {ajan: {found, visible}}; boşken (ilk yükleme) ajanlar bulunmuş sayılır.
+        self._agent_status: dict[str, dict[str, bool]] = {}
         layout = make_scroll_page(self)
         layout.addWidget(
             make_page_header(
@@ -524,8 +535,13 @@ class ProjectsPanel(QWidget):
         # Yıkıcı eylem birincil eylemden ayrı satırda ve yalnız iş seçiliyken görünür.
         self.cancel_button = QPushButton("İşi durdur")
         self.cancel_button.setObjectName("danger")
+        # Taslağı sil: yalnız taslak seçiliyken görünür (iptal düğmesiyle aynı satır, ikisi
+        # birlikte görünmez); yıkıcı olduğu için birincil eylemden ayrı satırdadır.
+        self.discard_button = QPushButton("Taslağı sil")
+        self.discard_button.setObjectName("danger")
         cancel_row = QHBoxLayout()
         cancel_row.addWidget(self.cancel_button)
+        cancel_row.addWidget(self.discard_button)
         cancel_row.addStretch()
         right_lay.addSpacing(8)
         right_lay.addLayout(cancel_row)
@@ -541,12 +557,14 @@ class ProjectsPanel(QWidget):
         layout.addLayout(self._columns, 1)
         self.prepare_button.clicked.connect(self._prepare)
         self.start_button.clicked.connect(self._start)
-        self.refresh_button.clicked.connect(self.refresh)
+        self.refresh_button.clicked.connect(self._manual_refresh)
         self.answer_button.clicked.connect(self._answer)
         self.cancel_button.clicked.connect(self._cancel)
+        self.discard_button.clicked.connect(self._discard)
         self.project.currentTextChanged.connect(self._apply_project_defaults)
         self.agent_combo.currentIndexChanged.connect(self._sync_agent_ui)
         self.workdir_combo.currentIndexChanged.connect(self._sync_agent_ui)
+        self.mode_combo.currentIndexChanged.connect(self._sync_agent_ui)
         self.add_folder_button.clicked.connect(self._add_folder)
         self.default_button.clicked.connect(self._make_default)
         self.reload_config()
@@ -580,10 +598,20 @@ class ProjectsPanel(QWidget):
         self.agent_combo.setAccessibleName("Kod ajanı")
         self.workdir_combo = QComboBox()
         self.workdir_combo.setAccessibleName("Başlangıç klasörü")
-        for combo in (self.agent_combo, self.workdir_combo):
-            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-            combo.setMinimumContentsLength(8)
-        self.add_folder_button = QPushButton("Klasör ekle…")
+        self.mode_combo = QComboBox()
+        self.mode_combo.setAccessibleName("Çalışma kipi")
+        for label, value in MODE_LABELS:
+            self.mode_combo.addItem(label, value)
+        # Üç seçici 1280x850'de (~1000px sayfa) tek satıra sığmalı: seçilen metin kısalmasın diye
+        # ajan ve kip daha uzun, klasör düğmesi kısa ("Ekle…").
+        fit = QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        sizes = ((self.agent_combo, 14), (self.mode_combo, 12), (self.workdir_combo, 6))
+        for combo, chars in sizes:
+            combo.setSizeAdjustPolicy(fit)
+            combo.setMinimumContentsLength(chars)
+        self.add_folder_button = QPushButton("Ekle…")
+        self.add_folder_button.setToolTip("Yeni başlangıç klasörü ekle")
+        self.add_folder_button.setAccessibleName("Klasör ekle")
         folder_box = QWidget()
         folder_row = QHBoxLayout(folder_box)
         folder_row.setContentsMargins(0, 0, 0, 0)
@@ -592,8 +620,9 @@ class ProjectsPanel(QWidget):
         folder_row.addWidget(self.add_folder_button)
         self._agent_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._agent_row.setSpacing(12)
-        self._agent_row.addWidget(make_field("Kod ajanı", self.agent_combo), 2)
-        self._agent_row.addWidget(make_field("Başlangıç klasörü", folder_box), 3)
+        self._agent_row.addWidget(make_field("Kod ajanı", self.agent_combo), 3)
+        self._agent_row.addWidget(make_field("Çalışma kipi", self.mode_combo), 3)
+        self._agent_row.addWidget(make_field("Başlangıç klasörü", folder_box), 4)
         column.addLayout(self._agent_row)
         # Çözülmüş yol 12px soluk ipucudur; uyarı yalnız proje dışı klasörde görünür.
         self.workdir_hint = PathHint()
@@ -629,21 +658,11 @@ class ProjectsPanel(QWidget):
                 self._settings = load_settings(self._config_path)
         config = self._config()
         agent, workdir = self.agent_combo.currentData(), self.workdir_combo.currentData()
-        self.agent_combo.blockSignals(True)
+        self._fill_agent_combo()
         self.workdir_combo.blockSignals(True)
-        self.agent_combo.clear()
-        only_claude = not config.agents
-        for name in (BUILTIN_AGENT, *sorted(config.agents)):
-            self.agent_combo.addItem(f"{name} (yalnız kurulu)" if only_claude else name, name)
-        self.agent_combo.setToolTip(
-            "Yalnız Claude kurulu. Diğer ajanlar Ayarlar > GitHub bölümünden eklenir."
-            if only_claude
-            else ""
-        )
         self.workdir_combo.clear()
         for name in config.workdir_choices(self._vault()):
             self.workdir_combo.addItem("Proje klasörü" if name == OWN_REPO_ALIAS else name, name)
-        self.agent_combo.blockSignals(False)
         self.workdir_combo.blockSignals(False)
         # Yeniden kurulum kullanıcının seçimini bozmasın; yoksa projenin varsayılanı gelir.
         if agent is not None and workdir is not None:
@@ -652,6 +671,32 @@ class ProjectsPanel(QWidget):
             self._sync_agent_ui()
         else:
             self._apply_project_defaults()
+
+    def _agent_found(self, name: str) -> bool:
+        return self._agent_status.get(name, {}).get("found", True)
+
+    def _fill_agent_combo(self) -> None:
+        """Claude + Codex + özel ajanlar. Bulunamayan ajan seçilemez (pasif) ve nedeni ipucundadır;
+        seçim korunur. Durum araç iş parçacığından gelir, burada komut aranmaz."""
+        keep = self.agent_combo.currentData()
+        model = cast(QStandardItemModel, self.agent_combo.model())
+        self.agent_combo.blockSignals(True)
+        self.agent_combo.clear()
+        for index, name in enumerate(self._config().agent_names()):
+            found = self._agent_found(name)
+            label = AGENT_LABELS.get(name, name)
+            self.agent_combo.addItem(label if found else f"{label} (bulunamadı)", name)
+            tips = [CLAUDE_TIP] if name == "claude" else []
+            if not found:
+                tips.append(AGENT_MISSING_TIP)
+            self.agent_combo.setItemData(index, " ".join(tips), Qt.ItemDataRole.ToolTipRole)
+            item = model.item(index)
+            if item is not None:
+                item.setEnabled(found)
+        self.agent_combo.setToolTip(CLAUDE_TIP)
+        if keep is not None:
+            self._pick(self.agent_combo, str(keep))
+        self.agent_combo.blockSignals(False)
 
     @staticmethod
     def _pick(combo: QComboBox, alias: str) -> None:
@@ -662,18 +707,39 @@ class ProjectsPanel(QWidget):
         config, project = self._config(), self.project.currentText()
         return config.project_agent(project), config.project_workdir(project)
 
+    def _saved_mode(self) -> str:
+        return self._config().project_mode(self.project.currentText())
+
     def _apply_project_defaults(self, *_args: object) -> None:
         agent, workdir = self._saved_choice()
-        self.agent_combo.blockSignals(True)
-        self.workdir_combo.blockSignals(True)
+        combos = (self.agent_combo, self.workdir_combo, self.mode_combo)
+        for combo in combos:
+            combo.blockSignals(True)
         self._pick(self.agent_combo, agent)
         self._pick(self.workdir_combo, workdir)
-        self.agent_combo.blockSignals(False)
-        self.workdir_combo.blockSignals(False)
+        self._pick(self.mode_combo, self._saved_mode())
+        for combo in combos:
+            combo.blockSignals(False)
         self._sync_agent_ui()
 
     def selected_choice(self) -> tuple[str, str]:
         return str(self.agent_combo.currentData()), str(self.workdir_combo.currentData())
+
+    def selected_mode(self) -> str:
+        return str(self.mode_combo.currentData() or "background")
+
+    def _visible_block(self, agent: str) -> str:
+        """Seçili ajanda görünür pencere kipi kapalıysa nedeni ('' = destekleniyor)."""
+        try:
+            _, profile = self._config().resolve_agent(agent)
+        except ValueError:
+            return "Bilinmeyen ajan."
+        known = self._agent_status.get(agent, {}).get("visible")
+        if known if known is not None else visible_supported(profile):
+            return ""
+        if profile.kind != "generic":
+            return "Görünür pencere kipi yalnız Windows'ta çalışır."
+        return "Bu ajan için görünür kip tanımlı değil (Ayarlar > GitHub > Kod ajanları)."
 
     def _project_repo(self) -> Path | None:
         config, project = self._config(), self.project.currentText()
@@ -693,18 +759,35 @@ class ProjectsPanel(QWidget):
         # onay metni ön izleme bloğunda ve onay penceresinde durur (1280x850 sığma sözleşmesi).
         self.workdir_warning.setText(WORKDIR_WARNING)
         self.workdir_warning.setVisible(workdir != OWN_REPO_ALIAS)
-        config = self._config()
         usable = self._config_path is not None and not self._demo
+        # Ajanda görünür kip yoksa seçenek pasif, nedeni görünür; seçili kip arka plana düşer.
+        visible_reason = self._visible_block(agent)
+        visible_item = cast(QStandardItemModel, self.mode_combo.model()).item(1)
+        if visible_item is not None:
+            visible_item.setEnabled(not visible_reason)
+        self.mode_combo.setItemData(1, visible_reason, Qt.ItemDataRole.ToolTipRole)
+        if visible_reason and self.selected_mode() == "visible":
+            blocked = self.mode_combo.blockSignals(True)
+            self.mode_combo.setCurrentIndex(0)
+            self.mode_combo.blockSignals(blocked)
+        mode = self.selected_mode()
         # Neden satırı yalnız eyleme engel olan durumlarda görünür (1280x850'de "Taslak hazırla"
-        # kıvrımın altına düşmesin); "yalnız Claude kurulu" bilgisi seçicinin kendisinde durur.
+        # kıvrımın altına düşmesin); açıklayıcı bilgi seçicilerin ipuçlarında durur.
         reason = "Demo modunda ajan ve klasör seçimi kapalı." if self._demo else ""
         saved = self._saved_choice()
-        changed = (agent, workdir) != saved
+        changed = (agent, workdir) != saved or mode != self._saved_mode()
         can_default = usable and changed and bool(self.project.currentText()) and repo is not None
         if usable and changed and repo is None:
             reason = "Bu projenin klasörü bulunamadı; varsayılan yazılamaz."
+        elif visible_reason and not self._demo:
+            reason = "Görünür pencere kipi kapalı: " + visible_reason
         self.agent_reason.setText(reason)
-        self.agent_combo.setEnabled(usable and len(config.agents) > 0)
+        self.mode_combo.setToolTip(
+            "Arka planda: pencere açılmaz, Artemis ajana soru-cevap yapabilir (Claude). "
+            "Görünür pencerede: ajan ayrı bir konsolda çalışır, pencereyi kapatırsan iş kesilir."
+        )
+        self.agent_combo.setEnabled(usable)
+        self.mode_combo.setEnabled(usable)
         self.workdir_combo.setEnabled(usable)
         self.add_folder_button.setEnabled(usable)
         self.default_button.setEnabled(can_default)
@@ -727,11 +810,15 @@ class ProjectsPanel(QWidget):
                 workdir=workdir,
                 default_agent=self._config().default_agent,
                 project_path=self._project_repo(),
+                mode=self.selected_mode(),
+                default_mode=self._config().default_mode,
             )
         except (OSError, ValueError):
             self.notice.setText("Varsayılan kaydedilemedi; mevcut ayarlar korunuyor.")
             return
-        self._after_config_write(f"{alias} için varsayılan kaydedildi: {agent}, {workdir}.")
+        self._after_config_write(
+            f"{alias} için varsayılan kaydedildi: {agent}, {workdir}, {self.selected_mode()}."
+        )
 
     def _add_folder(self) -> None:
         if self._config_path is None or self._demo:
@@ -819,6 +906,10 @@ class ProjectsPanel(QWidget):
             if kind == "job" and item.get("status") in ACTIVE_JOB_STATUSES
         )
 
+    def _manual_refresh(self) -> None:
+        self._force_update = True
+        self.refresh()
+
     def refresh(self) -> None:
         if not self._busy and not self._demo:
             self.tool_requested.emit("code_agent_status", StatusArguments())
@@ -831,6 +922,8 @@ class ProjectsPanel(QWidget):
             return "Artemis meşgul; hazır olunca açılır."
         if not self.project.currentText():
             return "Önce bir proje tanımla."
+        if not self._agent_found(str(self.agent_combo.currentData())):
+            return "Seçili ajan bulunamadı; Ayarlar > GitHub > Kod ajanları."
         if not self.task.toPlainText().strip():
             return "Önce görev yaz."
         if not self.scope.toPlainText().strip():
@@ -863,6 +956,8 @@ class ProjectsPanel(QWidget):
         self._set_prepare_primary(kind != "draft")
         self.question_box.setVisible(record.get("status") == "waiting")
         self.answer_button.setEnabled(enabled and record.get("status") == "waiting")
+        self.discard_button.setVisible(kind == "draft")
+        self.discard_button.setEnabled(enabled and kind == "draft")
         self.cancel_button.setVisible(kind == "job")
         self.cancel_button.setEnabled(
             enabled
@@ -890,9 +985,21 @@ class ProjectsPanel(QWidget):
         self.set_busy(self._busy)
 
     def accept_result(self, tool_name: str, result: ToolResult) -> None:
-        self.notice.setText(result.message)
+        forced, self._force_update = self._force_update, False
+        poll = tool_name == "code_agent_status" and not forced
+        # Sessiz yoklama bildirimi ezmez ve değişmeyen listeyi yeniden kurmaz (titreme).
+        if not poll:
+            self.notice.setText(result.message)
         if tool_name == "code_agent_status" and result.success:
             self.status_serial += 1
+            if poll and result.data == self._last_status:
+                return
+            self._last_status = result.data
+            status = result.data.get("agent_status")
+            if isinstance(status, dict) and status != self._agent_status:
+                self._agent_status = status
+                self._fill_agent_combo()
+                self._sync_agent_ui()
             selected = self._selected()
             identity = (
                 None if selected is None else selected[1].get("job_id", selected[1].get("spec_id"))
@@ -909,32 +1016,48 @@ class ProjectsPanel(QWidget):
             # kullanıcının iş başına seçimini ezmemeli.
             if self.project.currentText() != current_project:
                 self._apply_project_defaults()
-            self.items.blockSignals(True)
-            self.items.clear()
             self._items = [("draft", item) for item in result.data.get("drafts", [])]
             self._items += [("job", item) for item in result.data.get("jobs", [])]
-            row = 0
-            for i, (kind, item) in enumerate(self._items):
-                self.items.addItem(
-                    f"{item['project']} · "
-                    + (
-                        "Taslak"
-                        if kind == "draft"
-                        else STATUS_LABELS.get(item.get("status", ""), "Bilinmiyor")
-                    )
-                )
-                if item.get("job_id", item.get("spec_id")) == identity:
-                    row = i
-            self.items.setCurrentRow(row if self._items else -1)
-            self.items.blockSignals(False)
-            self._sync_list()
-            self._select(row)
+            self._render_items(identity)
+        elif tool_name == "code_agent_discard" and result.success:
+            # Silinen taslak hemen listeden düşer, seçim aynı sıradaki (yoksa son) öğeye geçer;
+            # önbellek boşaltılır ki sonraki yoklama listeyi kaynaktan yeniden kursun.
+            gone, row = result.data.get("spec_id"), self.items.currentRow()
+            self._items = [
+                (kind, item)
+                for kind, item in self._items
+                if not (kind == "draft" and item.get("spec_id") == gone)
+            ]
+            self._last_status = None
+            self._render_items(None, row)
         elif tool_name == "code_agent_prepare" and result.success:
             spec = result.data["spec"]
             self._items.append(("draft", spec))
             self.items.addItem(spec["project"] + " · Taslak")
             self.items.setCurrentRow(len(self._items) - 1)
             self._sync_list()
+
+    def _render_items(self, identity: str | None, fallback: int = 0) -> None:
+        """Listeyi `_items`ten kurar; `identity` varsa o öğeyi, yoksa `fallback` sırasını seçer."""
+        self.items.blockSignals(True)
+        self.items.clear()
+        row = fallback
+        for i, (kind, item) in enumerate(self._items):
+            self.items.addItem(
+                f"{item['project']} · "
+                + (
+                    "Taslak"
+                    if kind == "draft"
+                    else STATUS_LABELS.get(item.get("status", ""), "Bilinmiyor")
+                )
+            )
+            if identity is not None and item.get("job_id", item.get("spec_id")) == identity:
+                row = i
+        row = max(0, min(row, len(self._items) - 1))
+        self.items.setCurrentRow(row if self._items else -1)
+        self.items.blockSignals(False)
+        self._sync_list()
+        self._select(row)
 
     def _prepare(self) -> None:
         try:
@@ -946,6 +1069,7 @@ class ProjectsPanel(QWidget):
                 # Yalnız takma ad gider; yol hiçbir zaman istekte yer almaz.
                 agent=str(self.agent_combo.currentData() or "") or None,
                 workdir=str(self.workdir_combo.currentData() or "") or None,
+                mode=self.selected_mode(),  # type: ignore[arg-type]  # iki sabit değerden biri
             )
         except ValidationError:
             self.notice.setText("Proje, görev, kapsam ve kabul ölçütleri gerekli.")
@@ -973,6 +1097,13 @@ class ProjectsPanel(QWidget):
                 self.notice.setText("Cevap 1-4000 karakter olmalı.")
                 return
             self.tool_requested.emit("code_agent_answer", arguments)
+
+    def _discard(self) -> None:
+        selected = self._selected()
+        if selected and selected[0] == "draft":
+            self.tool_requested.emit(
+                "code_agent_discard", DiscardArguments(spec_id=selected[1]["spec_id"])
+            )
 
     def _cancel(self) -> None:
         selected = self._selected()

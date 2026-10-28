@@ -15,17 +15,31 @@ AUTHORITY_BOUNDARY = (
 )
 
 
+VISIBLE_NOTICE = (
+    "Görünür pencerede çalışır; pencereyi kapatırsan iş kesilir. "
+    "Artemis bu kipte ajana soru-cevap yapamaz."
+)
+
+
 def approval_text(values: dict[str, Any]) -> str:
-    """Onay ekranında görünen ajan/klasör özeti; SafetyGate'e dokunmadan spec ile gider."""
+    """Onay ekranında görünen ajan/klasör/kip özeti; SafetyGate'e dokunmadan spec ile gider.
+
+    İlk dört satır sabittir (ajan, klasör, repo, kip); sonrakiler uyarıdır (arayüz bunları
+    uyarı kutusuna ayırır).
+    """
     agent = values.get("agent", "claude")
     workdir = values.get("workdir", "proje")
     repo = values.get("repo_path") or "(çözülmedi)"
     folder = values.get("workdir_path") or repo
+    visible = values.get("mode", "background") == "visible"
     lines = [
         f"Ajan: {agent}",
         f"Başlangıç klasörü: {workdir} -> {folder}",
         f"Hedef repo: {repo}",
+        "Çalışma kipi: " + ("Görünür pencerede" if visible else "Arka planda"),
     ]
+    if visible:
+        lines.append(VISIBLE_NOTICE)
     if workdir != "proje":
         lines.append(
             "Ajan bu klasörde başlar ve oradaki kuralları yükler; "
@@ -47,6 +61,8 @@ class ProjectSpec(BaseModel):
     # başlatmada yeniden çözülüp karşılaştırılır (ayar değiştiyse iş başlamaz).
     agent: str = Field(default="claude", pattern=r"^[a-z0-9_-]{1,32}$")
     workdir: str = Field(default="proje", pattern=r"^[a-z0-9_-]{1,32}$")
+    # Çalışma kipi onaylanan kapsamın parçasıdır; onay metni bundan türetilir.
+    mode: Literal["background", "visible"] = "background"
     repo_path: str = Field(default="", max_length=1024)
     workdir_path: str = Field(default="", max_length=1024)
     # Türetilir: model ne yazarsa yazsın doğrulamada yeniden hesaplanır, böylece onay
