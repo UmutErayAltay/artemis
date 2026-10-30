@@ -37,6 +37,7 @@ from artemis.proactive.scheduler import ProactiveScheduler
 from artemis.proactive.store import ProactiveStore
 from artemis.safety.gate import remember_site, trusted_sites_path
 from artemis.tools.base import ToolResult
+from artemis.tools.code_agent_jobs import ACTIVE, CodeAgentJobs
 
 RuntimeFactory = Callable[[Path, ApprovalCallback, AuditObserver], Runtime]
 # İşçi döngüsünde çalışır: runtime, köprünün istek modelinden geçen komut çalıştırıcısı
@@ -314,6 +315,19 @@ class DesktopBridge:
     @property
     def stopped(self) -> bool:
         return self._stopped.is_set()
+
+    def active_job_count(self) -> int:
+        """Sürmekte olan kod ajanı işi sayısı; GUI listesi bayatken doğrudan kaynaktır.
+
+        `status()` kilit altında kopya verir, GUI thread'inden çağırmak güvenlidir.
+        """
+        runtime = self._runtime
+        jobs = runtime.context.services.get("code_agent_jobs") if runtime is not None else None
+        if not isinstance(jobs, CodeAgentJobs):
+            return 0
+        return sum(
+            1 for job in jobs.status() if job["status"] in ACTIVE or job.get("cleanup_pending")
+        )
 
     def labels(self) -> dict[str, tuple[str, str]]:
         """Araç adından (onay başlığı, adım satırı) çiftine kopya; GUI bunu değiştiremez."""

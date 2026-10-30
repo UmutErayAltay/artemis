@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
+import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -548,6 +550,164 @@ def test_settings_apply_restarts_runtime_with_selected_device_and_keeps_model(
         assert settings_seen[-1].voice.input_device == 9
         assert window.model_value.text() == "first-model"
     finally:
+        _close_cleanly(app, window)
+
+
+class _BlockingProvider:
+    """Tur, test bırakana dek sağlayıcıda bekler; iptal edilirse CancelledError alır."""
+
+    def __init__(self) -> None:
+        self.entered = threading.Event()
+        self.release = threading.Event()
+
+    async def complete(
+        self, messages: Any, tools: Any, *, timeout: float, stream: Any = None
+    ) -> Any:
+        from artemis.brain.models import Completion
+
+        self.entered.set()
+        while not self.release.is_set():
+            await asyncio.sleep(0.01)
+        return Completion(content="bitti")
+
+
+def _deferred_settings_window(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[DesktopWindow, Path, list[Any], _BlockingProvider]:
+    """İlk runtime bloklayan sağlayıcıyla, sonrakiler boş senaryoyla kurulur (sahte, ağsız)."""
+    from artemis.brain.fake import ScriptedProvider
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+    from artemis.channels.runtime import create_runtime
+    from artemis.config.settings import load_settings
+    from tests.test_settings_panel import config
+
+    path = config(tmp_path)
+    seen: list[Any] = []
+    blocker = _BlockingProvider()
+
+    def factory(config_path: Path, approve: Any, **kwargs: Any) -> Runtime:
+        settings = load_settings(config_path)
+        seen.append(settings)
+        provider: Any = blocker if len(seen) == 1 else ScriptedProvider([])
+        return create_runtime(config_path, approve, settings=settings, provider=provider, **kwargs)
+
+    monkeypatch.setattr(bridge_module, "create_runtime", factory)
+    monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
+    window = build_window(path, app=app)
+    _wait(app, lambda: window._worker_ready)
+    # Ertelenen kuruluşun boşta-yoklaması 2 sn; testte hızlandırılır.
+    window._projects_timer.setInterval(20)
+    return window, path, seen, blocker
+
+
+def _pick_device(window: DesktopWindow, device: int) -> None:
+    combo = window.settings_panel.device_combo
+    combo.addItem("Test mikrofonu", device)
+    combo.setCurrentIndex(combo.findData(device))
+
+
+def test_settings_apply_during_active_turn_defers_rebuild_and_keeps_turn(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.config.settings import load_settings
+
+    window, path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    events: list[Any] = []
+    original = window._handle_event
+    monkeypatch.setattr(window, "_handle_event", lambda e: (events.append(e), original(e))[1])
+    first_bridge = window.bridge
+    try:
+        assert window._submit_text("merhaba")
+        _wait(app, lambda: blocker.entered.is_set())
+        _pick_device(window, 9)
+        # Düğme tur sürerken normalde pasif; sinyal yine de gelebilir.
+        window.settings_panel._apply()
+        app.processEvents()
+        # Ayar diske yazıldı ama canlı kuruluş yapılmadı: tur iptal edilmedi, köprü aynı.
+        assert load_settings(path).voice.input_device == 9
+        assert len(seen) == 1 and window.bridge is first_bridge and window._busy
+        assert not first_bridge._shutdown
+        assert "işlem bitince" in window.settings_panel.notice.text()
+        blocker.release.set()
+        _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
+        # Tur kendi cevabıyla bitti (iptal değil), ayar bitişten SONRA uygulandı.
+        assert any(isinstance(e, Finished) and e.result.text == "bitti" for e in events)
+        assert window.bridge is not first_bridge
+        assert seen[-1].voice.input_device == 9
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
+def test_provider_change_during_active_turn_defers_rebuild(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window, _path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    first_bridge = window.bridge
+    try:
+        assert window._submit_text("merhaba")
+        _wait(app, lambda: blocker.entered.is_set())
+        window._providers_changed()
+        app.processEvents()
+        assert len(seen) == 1 and window.bridge is first_bridge and window._busy
+        assert "işlem bitince" in window.settings_panel.providers.status.text()
+        blocker.release.set()
+        _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
+def test_settings_apply_when_idle_rebuilds_immediately_and_pending_approval_defers(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window, _path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    try:
+        # Bekleyen onay penceresi varken (tur zaten meşgul sayılır) yine ertelenir.
+        window._approval_dialog = object()  # type: ignore[assignment]
+        window._request_restart()
+        app.processEvents()
+        assert len(seen) == 1 and window._config_restart_pending
+        window._approval_dialog = None
+        window._config_restart_pending = False
+        # Boştayken eskisi gibi hemen kurulur.
+        window.settings_panel._apply()
+        _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
+        assert not window._config_restart_pending
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
+def test_rebuild_waits_for_background_job_even_when_panel_list_is_stale(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from tests.test_code_agent import make_jobs
+
+    window, _path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    jobs, _factory = make_jobs(tmp_path, "")
+    try:
+        runtime = window.bridge._runtime
+        assert runtime is not None
+        # Sohbetten başlamış gibi: panel listesi boş (bayat) ama işçi tarafında iş sürüyor.
+        runtime.context.services["code_agent_jobs"] = jobs
+        jobs._jobs["j1"] = {"job_id": "j1", "status": "running"}
+        assert window.projects_panel.active_job_count() == 0
+        assert window.bridge.active_job_count() == 1
+        window._providers_changed()
+        app.processEvents()
+        assert len(seen) == 1 and window._config_restart_pending
+        assert "çalışan iş" in window.settings_panel.providers.status.text()
+        del jobs._jobs["j1"]  # iş bitti
+        # Panel durumu tazeleyince (serial artar) bir kez kurulur.
+        window.projects_panel.status_serial += 1
+        _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
+    finally:
+        runtime = window.bridge._runtime
+        if runtime is not None:
+            runtime.context.services.pop("code_agent_jobs", None)
+        jobs.shutdown()
+        blocker.release.set()
         _close_cleanly(app, window)
 
 

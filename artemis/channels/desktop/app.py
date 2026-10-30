@@ -1007,6 +1007,8 @@ class DesktopWindow(QMainWindow):
         self._restart_settings = False
         self._config_restart_pending = False
         self._config_restart_serial = -1
+        # Ertelenen yeniden kurulumun "neden bekliyor" notu isteği yapan panelde görünür.
+        self._restart_notice: QLabel | None = None
         self._demo = demo
         self._continuous = False
         self._voice_state = "off"
@@ -1619,12 +1621,12 @@ class DesktopWindow(QMainWindow):
         if self.settings_panel.pet.creator is not None:
             self.settings_panel.pet.creator.reload_models()
         self._check_provider(open_settings=False)
-        if self._busy or self._exiting or self._demo:
+        if self._exiting or self._demo:
             self.settings_panel.providers.status.setText(
                 "Kaydedildi; işlem bitince Uygula ile yeni ayarlar devreye girer."
             )
             return
-        self._restart_runtime()
+        self._request_restart(self.settings_panel.providers.status)
 
     def _code_agent_config_saved(self) -> None:
         """Projeler'den yazılan ajan/klasör ayarı çalışma zamanına yeniden kurulumla ulaşır.
@@ -1637,8 +1639,19 @@ class DesktopWindow(QMainWindow):
                 "Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur."
             )
             return
-        # Yeniden kurulum çalışan arka plan işlerini sessizce iptal eder ve bekleyen onayları
-        # geçersiz kılar; bu yüzden boşta olana dek ertelenir (bayrak tek seferliktir).
+        self._request_restart()
+
+    def _request_restart(self, notice: QLabel | None = None) -> None:
+        """Config değişince çalışma zamanını kurmanın TEK girişi (Uygula, sağlayıcı, kod ajanı).
+
+        Yeniden kurulum çalışan turu/arka plan işini sessizce iptal eder ve bekleyen onayı
+        geçersiz kılar; bu yüzden hepsi boşta olana dek ertelenir (bayrak tek seferliktir).
+        Config zaten yazılmıştır: ertelenen yalnız canlı kuruluştur, ayar kaybolmaz.
+        """
+        if self._restart_settings:
+            # Sürmekte olan kuruluş config'i durma bittikten sonra okur; ikincisi gereksiz.
+            return
+        self._restart_notice = notice
         self._config_restart_pending = True
         self._config_restart_serial = self.projects_panel.status_serial
         self._maybe_restart_for_config()
@@ -1647,7 +1660,9 @@ class DesktopWindow(QMainWindow):
         """Yeniden kurulumu engelleyen neden ('' = boşta)."""
         if self._approval_dialog is not None:
             return "Kaydedildi; bekleyen onay bitince uygulama yeniden başlayınca geçerli olur."
-        if self.projects_panel.active_job_count():
+        # Panel listesi bayat olabilir (sekme açık değilken yoklanmaz); sohbetten başlayan iş
+        # için doğrudan kaynak olan işçi tarafı sayımına da bakılır.
+        if self.projects_panel.active_job_count() or self.bridge.active_job_count():
             return "Kaydedildi; çalışan iş bitince uygulama yeniden başlayınca geçerli olur."
         if self._busy:
             return "Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur."
@@ -1658,7 +1673,7 @@ class DesktopWindow(QMainWindow):
             return
         reason = self._config_restart_blocker()
         if reason:
-            self.projects_panel.notice.setText(reason)
+            (self._restart_notice or self.projects_panel.notice).setText(reason)
             return
         self._config_restart_pending = False
         self._restart_runtime()
@@ -1680,7 +1695,7 @@ class DesktopWindow(QMainWindow):
         self._theme_placeholders(self.overlay)
 
     def _apply_settings(self, device: int | str | None) -> None:
-        if self._demo or self._busy or self._exiting:
+        if self._demo or self._exiting:
             self.settings_panel.notice.setText(
                 "Ayarları değiştirmek için işlemin bitmesini bekleyin."
             )
@@ -1697,7 +1712,8 @@ class DesktopWindow(QMainWindow):
         except (OSError, ValueError, KeyError, TypeError):
             self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
             return
-        self._restart_runtime()
+        # Meşgulken de kaydedilir; canlı kuruluş işlem bitince kendiliğinden yapılır.
+        self._request_restart(self.settings_panel.notice)
 
     def _restart_runtime(self) -> None:
         """Config değişince çalışma zamanını yeniden kurar (Uygula ve sağlayıcı kaydı)."""
