@@ -297,6 +297,9 @@ WORKDIR_WARNING = (
 FLOW_STEPS = ("Hazırla", "İncele", "Başlat")
 # Seçicide gösterilen ad; saklanan takma ad değişmez (claude).
 AGENT_LABELS = {"claude": "Claude Code"}
+# Proje listesi boşken combo boş ve etiketsiz görünürdü; devre dışı satır nedenini söyler
+# (Ayarlar > Model'deki "Bağlantı yok — aşağıdan ekle" ile aynı dil). Seçilemez ve gönderilmez.
+NO_PROJECT_TEXT = "Proje yok — önce bir depo ekle"
 CLAUDE_TIP = "Claude Code komut satırı aracı; Claude masaüstü uygulaması iş alamaz."
 AGENT_MISSING_TIP = "Bulunamadı. Ayarlar > GitHub > Kod ajanları bölümünden komutu belirtin."
 MODE_LABELS = (("Arka planda", "background"), ("Görünür pencerede", "visible"))
@@ -454,6 +457,7 @@ class ProjectsPanel(QWidget):
             editor.textChanged.connect(lambda e=editor: self._grow_editor(e))
             editor.textChanged.connect(lambda: self.set_busy(self._busy))
         self.project.setAccessibleName("Proje")
+        self._set_projects([])
         left_lay.addWidget(make_field("Proje", self.project))
         left_lay.addWidget(self._build_agent_row())
         for caption, widget in (
@@ -702,13 +706,32 @@ class ProjectsPanel(QWidget):
     def _pick(combo: QComboBox, alias: str) -> None:
         combo.setCurrentIndex(max(0, combo.findData(alias)))
 
+    def _project_name(self) -> str:
+        """Seçili gerçek proje; placeholder verisiz olduğundan '' döner ve hiçbir yere gitmez."""
+        return str(self.project.currentData() or "")
+
+    def _project_names(self) -> list[str]:
+        return [str(self.project.itemData(i)) for i in range(self.project.count())
+                if self.project.itemData(i) is not None]
+
+    def _set_projects(self, projects: list[str]) -> None:
+        self.project.clear()
+        for name in projects:
+            self.project.addItem(name, name)
+        if not projects:
+            self.project.addItem(NO_PROJECT_TEXT)
+            item = cast(QStandardItemModel, self.project.model()).item(0)
+            if item is not None:
+                item.setEnabled(False)
+        self.project.setEnabled(bool(projects))
+
     def _saved_choice(self) -> tuple[str, str]:
         """Seçili projenin kayıtlı varsayılanı: (ajan, klasör takma adı)."""
-        config, project = self._config(), self.project.currentText()
+        config, project = self._config(), self._project_name()
         return config.project_agent(project), config.project_workdir(project)
 
     def _saved_mode(self) -> str:
-        return self._config().project_mode(self.project.currentText())
+        return self._config().project_mode(self._project_name())
 
     def _apply_project_defaults(self, *_args: object) -> None:
         agent, workdir = self._saved_choice()
@@ -742,7 +765,7 @@ class ProjectsPanel(QWidget):
         return "Bu ajan için görünür kip tanımlı değil (Ayarlar > GitHub > Kod ajanları)."
 
     def _project_repo(self) -> Path | None:
-        config, project = self._config(), self.project.currentText()
+        config, project = self._config(), self._project_name()
         return config.project_path(project) or guess_project_path(config.repos_dir, project)
 
     def _workdir_path(self, workdir: str) -> Path | None:
@@ -753,7 +776,8 @@ class ProjectsPanel(QWidget):
         agent, workdir = self.selected_choice()
         repo, folder = self._project_repo(), self._workdir_path(workdir)
         self.workdir_hint.set_full_text(
-            "Başlangıç yolu: " + (str(folder) if folder else "(çözülmedi)"), str(folder or "")
+            f"Başlangıç klasörü: {folder}" if folder else "Başlangıç klasörü henüz seçilmedi",
+            str(folder or ""),
         )
         # Formda kısa uyarı: hedef repo zaten Proje seçicisinden bellidir. Tam backend
         # onay metni ön izleme bloğunda ve onay penceresinde durur (1280x850 sığma sözleşmesi).
@@ -776,7 +800,7 @@ class ProjectsPanel(QWidget):
         reason = "Demo modunda ajan ve klasör seçimi kapalı." if self._demo else ""
         saved = self._saved_choice()
         changed = (agent, workdir) != saved or mode != self._saved_mode()
-        can_default = usable and changed and bool(self.project.currentText()) and repo is not None
+        can_default = usable and changed and bool(self._project_name()) and repo is not None
         if usable and changed and repo is None:
             reason = "Bu projenin klasörü bulunamadı; varsayılan yazılamaz."
         elif visible_reason and not self._demo:
@@ -801,7 +825,9 @@ class ProjectsPanel(QWidget):
         if self._config_path is None or self._demo:
             return
         agent, workdir = self.selected_choice()
-        alias = self.project.currentText()
+        alias = self._project_name()
+        if not alias:
+            return
         try:
             save_project_default(
                 self._config_path,
@@ -920,7 +946,7 @@ class ProjectsPanel(QWidget):
             return "Demo modunda taslak hazırlanamaz."
         if self._busy:
             return "Artemis meşgul; hazır olunca açılır."
-        if not self.project.currentText():
+        if not self._project_name():
             return "Önce bir proje tanımla."
         if not self._agent_found(str(self.agent_combo.currentData())):
             return "Seçili ajan bulunamadı; Ayarlar > GitHub > Kod ajanları."
@@ -1005,16 +1031,15 @@ class ProjectsPanel(QWidget):
                 None if selected is None else selected[1].get("job_id", selected[1].get("spec_id"))
             )
             self.project.blockSignals(True)
-            current_project = self.project.currentText()
+            current_project = self._project_name()
             projects = result.data.get("projects", [])
-            if projects != [self.project.itemText(i) for i in range(self.project.count())]:
-                self.project.clear()
-                self.project.addItems(projects)
+            if projects != self._project_names():
+                self._set_projects(projects)
                 self.project.setCurrentText(current_project)
             self.project.blockSignals(False)
             # Yalnız proje değiştiyse (ilk yükleme) varsayılanlar gelir; 2 sn'lik yenileme
             # kullanıcının iş başına seçimini ezmemeli.
-            if self.project.currentText() != current_project:
+            if self._project_name() != current_project:
                 self._apply_project_defaults()
             self._items = [("draft", item) for item in result.data.get("drafts", [])]
             self._items += [("job", item) for item in result.data.get("jobs", [])]
@@ -1062,7 +1087,7 @@ class ProjectsPanel(QWidget):
     def _prepare(self) -> None:
         try:
             arguments = PrepareArguments(
-                project=self.project.currentText(),
+                project=self._project_name(),
                 task=self.task.toPlainText(),
                 scope=tuple(self.scope.toPlainText().splitlines()),
                 acceptance=tuple(self.acceptance.toPlainText().splitlines()),

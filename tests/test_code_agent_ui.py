@@ -137,12 +137,41 @@ def test_hint_shows_resolved_path_or_unresolved(tmp_path: Path, app: QApplicatio
     path = _new_shape(tmp_path)
     panel = _panel(path, ["alfa"])
     vault = str(load_settings(path).memory.vault_path)
-    assert panel.workdir_hint.full_text == f"Başlangıç yolu: {vault}"
+    assert panel.workdir_hint.full_text == f"Başlangıç klasörü: {vault}"
     assert panel.workdir_hint.toolTip() == vault
     panel.workdir_combo.setCurrentIndex(panel.workdir_combo.findData("proje"))
-    assert panel.workdir_hint.full_text == f"Başlangıç yolu: {tmp_path / 'repo-a'}"
+    assert panel.workdir_hint.full_text == f"Başlangıç klasörü: {tmp_path / 'repo-a'}"
     empty = ProjectsPanel()  # yapılandırma yok, proje yok
-    assert "(çözülmedi)" in empty.workdir_hint.full_text
+    assert empty.workdir_hint.full_text == "Başlangıç klasörü henüz seçilmedi"
+    assert "çözülmedi" not in empty.workdir_hint.full_text
+
+
+def test_empty_project_combo_shows_disabled_placeholder_and_never_submits(
+    tmp_path: Path, app: QApplication
+) -> None:
+    panel = _panel(_new_shape(tmp_path), [])
+    assert panel.project.count() == 1
+    assert panel.project.currentText() == projects_panel.NO_PROJECT_TEXT
+    assert not panel.project.model().item(0).isEnabled() and not panel.project.isEnabled()
+    assert panel._project_name() == ""
+    panel.task.setPlainText("t")
+    panel.scope.setPlainText("s")
+    panel.acceptance.setPlainText("a")
+    seen: list[tuple[str, Any]] = []
+    panel.tool_requested.connect(lambda name, args: seen.append((name, args)))
+    assert not panel.prepare_button.isEnabled()
+    assert panel.prepare_reason.text() == "Önce bir proje tanımla."
+    panel._prepare()  # düğme pasif olsa da doğrudan çağrı placeholder'ı proje diye göndermez
+    assert seen == [] and "Proje" in panel.notice.text()
+    # Poll yenilemesi placeholder'ı her turda yeniden kurmaz; proje gelince yerini bırakır.
+    _status(panel, [])
+    assert panel.project.count() == 1
+    _status(panel, ["alfa"])
+    assert panel._project_names() == ["alfa"] == [panel.project.itemText(0)]
+    assert panel.project.isEnabled() and panel._project_name() == "alfa"
+    _status(panel, [])
+    assert panel.project.currentText() == projects_panel.NO_PROJECT_TEXT
+    panel.close()
 
 
 # --- Hazırlık isteği yalnız takma ad taşır -----------------------------------------------------

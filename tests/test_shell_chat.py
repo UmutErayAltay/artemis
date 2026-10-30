@@ -106,11 +106,26 @@ def test_greeting_follows_injected_hour(app: QApplication, hour: int, text: str)
 
 def test_welcome_chips_fill_composer_without_sending(window: DesktopWindow) -> None:
     assert window.chat.welcome.isVisible()
-    assert [b.text() for b in window.chat.suggestion_buttons] == ["Merhaba", "örnek akış"]
+    assert [b.text() for b in window.chat.suggestion_buttons] == ["Merhaba", "Örnek akış"]
     assert all(b.objectName() == "chip" for b in window.chat.suggestion_buttons)
     window.chat.suggestion_buttons[1].click()
-    assert window.prompt.toPlainText() == "örnek akış"
+    assert window.prompt.toPlainText() == "Örnek akış"
     assert not window._busy and window.chat.toPlainText() == ""
+
+
+def test_capitalised_demo_chip_still_triggers_the_approval_flow(
+    app: QApplication, window: DesktopWindow
+) -> None:
+    # Demo sağlayıcı büyük/küçük harfe duyarsız eşleşir (casefold); büyük Ö akışı bozmamalı.
+    from artemis.channels.desktop.app import ApprovalDialog
+
+    window.chat.suggestion_buttons[1].click()
+    window._submit_main()
+    _wait(app, lambda: isinstance(window._approval_dialog, ApprovalDialog))
+    dialog = window._approval_dialog
+    assert dialog is not None and dialog.item.tool_name == "demo_write_memory"
+    dialog._choose(False)
+    _wait(app, lambda: not window._busy)
 
 
 def test_real_mode_examples_map_to_existing_tools(app: QApplication) -> None:
@@ -226,6 +241,52 @@ def test_operations_drawer_opens_and_closes_below_1100px(window: DesktopWindow) 
     assert not window.drawer.isVisible() and window.activity_panel.isVisible()
     assert len(host.findChildren(OperationCard)) == 1
     assert window.activity_close.isHidden()
+
+
+def test_operations_column_is_collapsed_while_empty_and_shows_with_first_card(
+    window: DesktopWindow,
+) -> None:
+    window.resize(1280, 800)
+    QApplication.processEvents()
+    assert not window._op_widgets and window.activity_panel.isHidden()
+    # Sütun yokken sohbet sütunu tüm genişliği alır; panelin 280px'i + 16px boşluğu kalmaz.
+    full_width = window.chat.width()
+    _card_events(window, "m1")
+    QApplication.processEvents()
+    assert window.activity_panel.isVisible()
+    assert window.chat.width() <= full_width - window.activity_panel.width()
+    window._new_chat()
+    _wait(QApplication.instance(), lambda: not window._op_widgets)
+    QApplication.processEvents()
+    assert window.activity_panel.isHidden() and window.chat.width() == full_width
+
+
+def test_empty_operations_drawer_still_opens_below_1100px(window: DesktopWindow) -> None:
+    window.resize(900, 700)
+    QApplication.processEvents()
+    assert not window._op_widgets and window.operations_button.isVisible()
+    window.operations_button.click()
+    assert window.drawer.isVisible() and window.activity_panel.isVisible()
+    assert not window.activity_empty.isHidden()
+    window.activity_close.click()
+    window.resize(1280, 800)
+    QApplication.processEvents()
+    assert window.activity_panel.isHidden()
+
+
+def test_topbar_chips_are_flat_and_all_controls_have_tooltips(window: DesktopWindow) -> None:
+    assert window.demo_chip is not None and window.demo_chip.toolTip()
+    assert window.model_value.toolTip().startswith("Seçili model")
+    pill = window.status_label.parentWidget()
+    assert pill is not None and pill.toolTip() and pill.accessibleName()
+    for button in (window.voice_button, window.auto_button):
+        assert button.toolTip() and button.accessibleName()
+    # Sohbet başlığı marka ve kenar çubuğuyla üçüncü kez tekrarlanmaz.
+    titles = [
+        label.text()
+        for label in window.chat_page.findChildren(QLabel, "pageTitle")
+    ]
+    assert "Sohbet" not in titles
 
 
 def test_new_chat_clears_operation_cards_and_shows_welcome(

@@ -98,6 +98,15 @@ def test_redesign_selectors_exist_without_gradients_or_solid_list_selection() ->
         assert THEMES[name]["accent"] not in rule.split("border-left")[0]
 
 
+def test_settings_section_list_uses_filled_pill_like_main_nav() -> None:
+    for name in THEMES:
+        css = stylesheet(name)
+        rule = css.split("QListWidget#sectionList::item:selected {")[1].split("}")[0]
+        assert THEMES[name]["soft"] in rule and "border-left" not in rule
+        base = css.split("QListWidget#sectionList::item {")[-1].split("}")[0]
+        assert "border-radius: 18px" in base  # navItem ile aynı hap yarıçapı
+
+
 def test_arrow_images_exist_for_every_theme() -> None:
     """Qt silently drops a missing url() image; a renamed asset would bring back the bar."""
     import re

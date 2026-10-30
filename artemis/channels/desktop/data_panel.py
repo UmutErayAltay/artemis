@@ -161,6 +161,13 @@ class DataPanel(QWidget):
         # Kısa etiket + ayrı uyarı satırı: kullanıcı ne olacağını okur, düğme uzun cümle olmaz.
         self.retry = QPushButton("Yeniden dene")
         self.retry.setObjectName("amber")
+        # Tek başına neyi yeniden denediği belli olmuyordu: ipucu ve ekran okuyucu adı söyler.
+        retry_tip = (
+            "Listede seçili hatırlatma teslimini yeniden dener. "
+            "Yalnız başarısız, belirsiz veya kaçırılmış teslimlerde açılır."
+        )
+        self.retry.setToolTip(retry_tip)
+        self.retry.setAccessibleName("Seçili hatırlatma teslimini yeniden dene")
         self.retry.clicked.connect(self._retry)
         self.retry_warning = make_label("Çift bildirim olabilir", "warnNote")
         self.retry_warning.setVisible(False)

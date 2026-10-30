@@ -111,8 +111,8 @@ QLabel#meta {{ color: {t['muted']}; font-size: 12px; }}
 QLabel#sectionTitle, QLabel#emptyTitle {{ font-size: 16px; font-weight: 600; }}
 QLabel#chip {{ background: {t['soft']}; border-radius: 8px; font-size: 13px;
  padding: 2px 8px; }}
-QLabel#chipWarning {{ background: transparent; color: {t['warning']};
- border: 1px solid {t['warning']}; border-radius: 8px; font-size: 12px; padding: 2px 8px; }}
+QLabel#chipWarning {{ background: {t['soft']}; color: {t['warning']}; border-radius: 8px;
+ font-size: 13px; font-weight: 600; padding: 2px 8px; }}
 QFrame#card, QFrame#raised, QFrame#block, QFrame#topbar {{ background: {t['surface']};
  border: 1px solid {t['border']}; border-radius: 12px; }}
 QFrame#galleryCard {{ background: {t['surface']}; border: 1px solid {t['border']};
@@ -246,9 +246,11 @@ QProgressBar#levelMeter {{ background: {t['soft']}; border: none; border-radius:
  min-height: 6px; max-height: 6px; }}
 QProgressBar#levelMeter::chunk {{ background: {t['accent']}; border-radius: 3px; }}
 QComboBox:disabled, QLineEdit:disabled {{ background: {t['soft']}; color: {t['muted']}; }}
-QListWidget#sectionList::item {{ min-height: 20px; padding: 8px 12px; border-radius: 0; }}
+/* Ayarlar iç listesi ana gezinmeyle (navItem) aynı dili konuşur: dolu hap, sol çizgi yok. */
+QListWidget#sectionList::item {{ min-height: 20px; padding: 8px 12px; border: none;
+ border-radius: 18px; }}
 QListWidget#sectionList::item:selected {{ background: {t['soft']}; color: {t['text']};
- border-left: 2px solid {t['accent']}; font-weight: 600; }}
+ border: none; font-weight: 600; }}
 QFrame#themeCard {{ background: {t['surface']}; border: 1px solid {t['border']};
  border-radius: 12px; padding: 1px; }}
 QFrame#themeCard[selected="true"] {{ border: 2px solid {t['accent']}; padding: 0; }}

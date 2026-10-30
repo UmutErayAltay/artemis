@@ -275,7 +275,12 @@ def test_approval_title_is_readable_label_with_raw_name_below(
         title = dialog.findChild(QLabel, "title")
         raw_name = dialog.findChild(QLabel, "rawToolName")
         assert title is not None and title.text() == expected_title
-        assert raw_name is not None and raw_name.text() == "demo_write_memory"
+        # Ham ad "Teknik ayrıntılar" açılana dek görünmez; açınca tam ad okunur.
+        assert raw_name is not None and raw_name.text() == "Araç adı: demo_write_memory"
+        assert raw_name.isHidden() and not dialog.details_toggle.isChecked()
+        dialog.details_toggle.setChecked(True)
+        assert not raw_name.isHidden()
+        dialog.details_toggle.setChecked(False)
         assert dialog.no_button.isDefault()
         QTest.keyClick(dialog, Qt.Key.Key_Escape)
         _wait(app, lambda: not window._busy)
@@ -983,7 +988,7 @@ def test_approval_summary_lists_every_argument_and_collapses_short_ones(app: QAp
     parent = QWidget()
     dialog = ApprovalDialog(_approval({"key": "a", "value": "kısa"}), lambda *_: True, parent)
     texts = [label.text() for label in dialog.findChildren(QLabel)]
-    assert "key = a" in texts and "value = kısa" in texts
+    assert "key: a" in texts and "value: kısa" in texts and not any(" = " in t for t in texts)
     assert "Bu adım dış bir içerik okunduktan sonra istendi" in texts
     assert dialog.arguments_view.isHidden() and not dialog.details_toggle.isChecked()
     assert dialog.no_button.isDefault() and not dialog.yes_button.isDefault()
@@ -1005,14 +1010,41 @@ def test_approval_opens_details_for_long_values_paths_and_urls(
     dialog._choose(False)
 
 
+def test_approval_splits_warning_and_tool_note_into_separate_paragraphs(
+    app: QApplication,
+) -> None:
+    from artemis.channels.desktop.bridge import Approval
+
+    notice = "Bu adım dış bir içerik okunduktan sonra istendi. Bellek kaydı yazar."
+    item = Approval("r", "t", "a", "demo_write_memory", {"key": "a"}, notice, None, "Demo yazma")
+    parent = QWidget()
+    dialog = ApprovalDialog(item, lambda *_: True, parent)
+    warning = dialog.findChild(QLabel, "approvalNotice")
+    assert warning is not None
+    assert warning.text() == "Bu adım dış bir içerik okunduktan sonra istendi."
+    assert dialog.tool_note_label is not None
+    assert dialog.tool_note_label.text() == "Bellek kaydı yazar."
+    # Ham ad başlık altında değil, kapalı teknik ayrıntılardadır; varsayılan cevap Hayır kalır.
+    assert dialog.raw_name.isHidden() and dialog.no_button.isDefault()
+    assert dialog.findChild(QLabel, "title").text() == "Demo yazma"
+    dialog._choose(False)
+
+
+def test_approval_without_tool_note_keeps_a_single_notice(app: QApplication) -> None:
+    parent = QWidget()
+    dialog = ApprovalDialog(_approval({"key": "a"}), lambda *_: True, parent)
+    assert dialog.tool_note_label is None
+    dialog._choose(False)
+
+
 def test_approval_summary_elides_long_value_but_keeps_full_text_in_tooltip(
     app: QApplication,
 ) -> None:
     parent = QWidget()
     value = "y" * 200
     dialog = ApprovalDialog(_approval({"text": value}), lambda *_: True, parent)
-    row = next(lbl for lbl in dialog.findChildren(QLabel) if lbl.text().startswith("text = "))
-    assert len(row.text()) <= len("text = ") + 80 and row.text().endswith("…")
+    row = next(lbl for lbl in dialog.findChildren(QLabel) if lbl.text().startswith("text: "))
+    assert len(row.text()) <= len("text: ") + 80 and row.text().endswith("…")
     assert value in row.toolTip()
     dialog._choose(False)
 
@@ -1043,7 +1075,10 @@ def test_step_panel_shows_only_on_wide_windows_and_caps_rows(
     try:
         window.resize(1280, 800)
         app.processEvents()
+        assert window.activity_panel.isHidden()  # işlem yokken sütun çöker
+        window._begin_card("r-first", "ilk mesaj")
         assert not window.activity_panel.isHidden()
+        window._reset_cards()
         window.resize(900, 700)
         app.processEvents()
         assert not window.activity_panel.isVisible()  # sütun yok; sayfa kapalı

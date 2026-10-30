@@ -458,7 +458,7 @@ _AVATAR_INDENT = _AVATAR + _AVATAR_GAP
 # Karşılamadaki örnek komutlar gerçek araçlara karşılık gelir: current_time,
 # reminder_create, open_application. Demo çalışma zamanı yalnız kendi örneklerini bilir.
 _EXAMPLE_COMMANDS = ("Saat kaç?", "Yarın 09:00 için hatırlatma kur", "Not defterini aç")
-_DEMO_EXAMPLES = ("Merhaba", "örnek akış")
+_DEMO_EXAMPLES = ("Merhaba", "Örnek akış")
 
 
 class ChatTranscript(QWidget):
@@ -715,17 +715,13 @@ class ApprovalDialog(QDialog):
         scroll.setWidget(body)
         layout.addWidget(scroll, 1)
 
-        # Okunur ad büyük başlıktır; ham ad altında küçük yazılır (ADR 0014).
+        # Okunur ad büyük başlıktır; snake_case ham ad gündelik kullanıcıya gürültüdür, bu yüzden
+        # "Teknik ayrıntılar" alanında durur (ADR 0014); etiketsiz araçta başlık ham ada düşer.
         title = QLabel(item.tool_label or item.tool_name)
         title.setObjectName("title")
         title.setTextFormat(Qt.TextFormat.PlainText)
         title.setWordWrap(True)
         body_layout.addWidget(title)
-        raw_name = QLabel(item.tool_name)
-        raw_name.setObjectName("rawToolName")
-        raw_name.setTextFormat(Qt.TextFormat.PlainText)
-        raw_name.setAccessibleName("Ham araç adı")
-        body_layout.addWidget(raw_name)
 
         # Kod ajanı: hangi ajanın nerede başlayacağı ilk düz dil bloğudur (ADR 0049). Metin
         # arka uçtan gelir; proje dışı klasörde uyarı satırı uyarı tonlu kutuda ayrılır.
@@ -762,26 +758,40 @@ class ApprovalDialog(QDialog):
             shown = " ".join(full.split())
             if len(shown) > _SUMMARY_LIMIT:
                 shown = shown[: _SUMMARY_LIMIT - 1] + "…"
-            row = QLabel(f"{key} = {shown}")
+            row = QLabel(f"{key}: {shown}")
             row.setTextFormat(Qt.TextFormat.PlainText)
             row.setWordWrap(True)
-            row.setToolTip(f"<pre>{html.escape(f'{key} = {full}')}</pre>")
+            row.setToolTip(f"<pre>{html.escape(f'{key}: {full}')}</pre>")
             row.setAccessibleName(f"Argüman {key}")
             rows.addWidget(row)
         if not item.arguments:
             rows.addWidget(QLabel("Argüman yok."))
 
-        notice = QLabel(item.notice or "Bu işlem onay gerektirir.")
+        # Geçit iki ayrı iletiyi ". " ile birleştirir (dış içerik/onay notu + aracın açıklaması);
+        # tek paragrafta okunmaz, bu yüzden uyarı kutusu ile açıklama ayrı satırlara bölünür.
+        warning, _sep, tool_note = (item.notice or "Bu işlem onay gerektirir.").partition(". ")
+        notice = QLabel(warning + ("." if tool_note else ""))
         notice.setObjectName("approvalNotice")
         notice.setTextFormat(Qt.TextFormat.PlainText)
         notice.setWordWrap(True)
         body_layout.addWidget(notice)
+        self.tool_note_label: QLabel | None = None
+        if tool_note:
+            self.tool_note_label = QLabel(tool_note)
+            self.tool_note_label.setTextFormat(Qt.TextFormat.PlainText)
+            self.tool_note_label.setWordWrap(True)
+            body_layout.addWidget(self.tool_note_label)
 
         self.details_toggle = QPushButton("Teknik ayrıntılar")
         self.details_toggle.setObjectName("ghost")
         self.details_toggle.setCheckable(True)
         self.details_toggle.setAccessibleName("Teknik ayrıntıları göster veya gizle")
         body_layout.addWidget(self.details_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self.raw_name = QLabel(f"Araç adı: {item.tool_name}")
+        self.raw_name.setObjectName("rawToolName")
+        self.raw_name.setTextFormat(Qt.TextFormat.PlainText)
+        self.raw_name.setAccessibleName("Ham araç adı")
+        body_layout.addWidget(self.raw_name)
         label = QLabel("Doğrulanmış araç argümanları")
         label.setObjectName("fieldLabel")
         arguments = QPlainTextEdit()
@@ -826,6 +836,7 @@ class ApprovalDialog(QDialog):
         self.no_button.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _show_details(self, on: bool) -> None:
+        self.raw_name.setVisible(on)
         self.details_label.setVisible(on)
         self.arguments_view.setVisible(on)
 
@@ -1225,6 +1236,7 @@ class DesktopWindow(QMainWindow):
         self.model_value.setObjectName("chip")
         self.model_value.setTextFormat(Qt.TextFormat.PlainText)
         self.model_value.setAccessibleName("Seçili model")
+        self.model_value.setToolTip("Seçili model")
         value_font = self.model_value.font()
         value_font.setPixelSize(13)
         self.model_value.setFont(value_font)
@@ -1250,6 +1262,9 @@ class DesktopWindow(QMainWindow):
         row.addWidget(self.auto_button)
         status_pill = QFrame()
         status_pill.setObjectName("statusPill")
+        # Düz durum çipi tıklanmaz (simge anahtarları tıklanır); ikisi de ipucu taşır.
+        status_pill.setToolTip("Çalışma durumu")
+        status_pill.setAccessibleName("Çalışma durumu")
         status_row = QHBoxLayout(status_pill)
         status_row.setContentsMargins(0, 0, 0, 0)
         status_row.setSpacing(8)
@@ -1288,7 +1303,8 @@ class DesktopWindow(QMainWindow):
         self.operations_button.clicked.connect(self._open_operations)
         column.addWidget(
             make_page_header(
-                "Sohbet",
+                # Marka üst çubukta, sayfa adı kenar çubuğunda zaten var; üçüncü kez yazılmaz.
+                "",
                 actions=(self.operations_button, self.new_chat_button, self.quick_action),
             )
         )
@@ -1425,7 +1441,15 @@ class DesktopWindow(QMainWindow):
             self.drawer.undock(panel)
             self._chat_row.addWidget(panel)
         self.activity_close.setVisible(in_drawer)
-        panel.show()
+        self._sync_activity_panel()
+
+    def _sync_activity_panel(self) -> None:
+        """Sağ sütun işlem yokken çöker: boş 280px kolon sohbeti sola iter ve boşa yer tutar.
+
+        Çekmecede (dar pencere) panel hep gösterilir; kullanıcı "İşlemler"e basınca boş
+        durum cümlesini görmeli. Sütun gizlenince sohbet sütunu yerleşimde kendiliğinden ortalanır.
+        """
+        self.activity_panel.setVisible(self._panel_in_drawer or bool(self._op_widgets))
 
     def _build_sidebar(self, pages: list[tuple[str, QWidget]]) -> QFrame:
         sidebar = QFrame()
@@ -1801,6 +1825,7 @@ class DesktopWindow(QMainWindow):
         self._show_model(self._model_full)
         self.operations_button.setVisible(not wide)
         self._dock_operations(not wide)
+        self._sync_activity_panel()
         if self.drawer.isVisible():
             self.drawer.setGeometry(self.chat_page.rect())
 
@@ -1810,7 +1835,7 @@ class DesktopWindow(QMainWindow):
         metrics = QFontMetrics(self.model_value.font())
         shown = metrics.elidedText(text, Qt.TextElideMode.ElideRight, limit)
         self.model_value.setText(shown)
-        self.model_value.setToolTip(text if shown != text else "")
+        self.model_value.setToolTip(f"Seçili model: {text}" if text else "Seçili model")
         # Çipin 8px yan dolgusu iki yanda 16px ekler; 8px pay ölçü sapmasına karşıdır.
         self.model_value.setFixedWidth(max(60, metrics.horizontalAdvance(shown) + 24))
 
@@ -2290,6 +2315,7 @@ class DesktopWindow(QMainWindow):
             self._drop_card(old)
         self._op_widgets[request_id] = widget
         self.activity_cards.insertWidget(index, widget)
+        self._sync_activity_panel()
         for stale in [key for key in self._op_widgets if key not in self._ops.cards]:
             self._drop_card(self._op_widgets.pop(stale))
 
@@ -2302,6 +2328,7 @@ class DesktopWindow(QMainWindow):
         self.activity_notice.hide()
         self.activity.hide()
         self.activity_empty.show()
+        self._sync_activity_panel()
 
     def _append_chat(self, speaker: str, text: str, steps: StepBlock | None = None) -> None:
         self.chat.append(speaker, text, steps)

@@ -295,6 +295,10 @@ def test_retry_label_short_with_separate_warning(app: QApplication) -> None:
     panel.items.setCurrentRow(0)
     assert panel.retry.isEnabled() and not panel.retry_warning.isHidden()
     assert panel.retry_warning.text() == "Çift bildirim olabilir"
+    # Düğme tek başına neyi denediğini ipucunda ve erişilebilir adında söyler; uyarı ayrı kalır.
+    assert "seçili hatırlatma teslimini" in panel.retry.toolTip()
+    assert "Seçili hatırlatma" in panel.retry.accessibleName()
+    assert "çift bildirim" not in panel.retry.text().lower()
 
 
 def test_history_search_is_first_class_and_content_capped(app: QApplication) -> None:
