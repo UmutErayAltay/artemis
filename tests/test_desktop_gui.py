@@ -186,6 +186,19 @@ def test_overlay_shares_bridge_and_active_state(
         _close_cleanly(app, window)
 
 
+def test_overlay_status_labels_are_separated(app: QApplication, tmp_path: Path) -> None:
+    window = _window(app, tmp_path)
+    try:
+        window.overlay.show()
+        app.processEvents()
+        dividers = [w for w in window.overlay.findChildren(QLabel) if w.text() == "·"]
+        assert len(dividers) == 1
+        x = lambda w: w.mapTo(window.overlay, w.rect().topLeft()).x()  # noqa: E731
+        assert x(window.overlay.voice_state) < x(dividers[0]) < x(window.overlay.status)
+    finally:
+        _close_cleanly(app, window)
+
+
 def test_close_exits_cleanly_when_tray_is_unavailable(
     app: QApplication, tmp_path: Path
 ) -> None:

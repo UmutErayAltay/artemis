@@ -906,7 +906,12 @@ class QuickOverlay(QWidget):
         self.voice_state.setAccessibleName("Ses durumu")
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
+        # İki durum etiketi ayraçsız yan yana "Ses kapalı  Hazır" diye tek cümle gibi okunuyordu.
+        divider = QLabel("·")
+        divider.setObjectName("meta")
+        divider.setAccessibleName("")
         buttons.addWidget(self.voice_state)
+        buttons.addWidget(divider)
         buttons.addWidget(self.status)
         buttons.addStretch(1)
         self.cancel_button = QPushButton("İptal")
