@@ -857,3 +857,19 @@ def test_quiet_poll_keeps_notice_and_list_but_manual_refresh_updates_both(
     assert requested[-1] == "code_agent_status"
     _status_with(panel, drafts=[_spec(), second], message="2 iş.")
     assert panel.notice.text() == "2 iş." and rebuilt == [True, True, True]
+
+
+def test_projects_panel_has_no_lambda_reference_cycle(app: QApplication) -> None:
+    import gc
+    import weakref
+
+    panel = ProjectsPanel()
+    ref = weakref.ref(panel)
+    panel.task.setPlainText("satır\n" * 5)  # bağlı yöntem sinyalden çalışır, çökmez
+    assert panel.task.height() >= 1
+    gc.disable()
+    try:
+        del panel
+        assert ref() is None  # döngü olsaydı gc.collect olmadan yaşamaya devam ederdi
+    finally:
+        gc.enable()

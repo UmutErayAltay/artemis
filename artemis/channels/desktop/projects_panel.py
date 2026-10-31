@@ -454,8 +454,10 @@ class ProjectsPanel(QWidget):
         for editor in (self.task, self.scope, self.acceptance):
             # 1280x850'de "Taslak hazırla" kıvrımın altına düşmesin: 72px, içerikle 120px'e büyür.
             editor.setFixedHeight(EDITOR_MIN_HEIGHT)
-            editor.textChanged.connect(lambda e=editor: self._grow_editor(e))
-            editor.textChanged.connect(lambda: self.set_busy(self._busy))
+            # Lambda self'i yakalayıp panel -> editör -> bağlantı -> panel döngüsü kuruyordu;
+            # gc döngüyü rastgele sırada çözünce Qt silinmiş çocuklara erişip çöküyordu.
+            # Bağlı yöntem döngü kurmaz.
+            editor.textChanged.connect(self._editor_text_changed)
         self.project.setAccessibleName("Proje")
         self._set_projects([])
         left_lay.addWidget(make_field("Proje", self.project))
@@ -875,6 +877,12 @@ class ProjectsPanel(QWidget):
             return
         self._after_config_write(f"'{alias}' klasörü eklendi.")
         self._pick(self.workdir_combo, alias)
+
+    def _editor_text_changed(self) -> None:
+        editor = self.sender()
+        if isinstance(editor, QPlainTextEdit):
+            self._grow_editor(editor)
+        self.set_busy(self._busy)
 
     @staticmethod
     def _grow_editor(editor: QPlainTextEdit) -> None:

@@ -881,3 +881,9 @@ async def test_memory_seeds_second_call_under_heading_and_caps_records() -> None
     for index in range(40):
         memory.add(StepRecord(n=index))
     assert len(memory.steps) == 30
+
+
+async def test_done_note_secrets_are_masked_like_evidence() -> None:
+    note = act(type="done", text="Giriş yapıldı, token: abc123xyz9 ekranda.")
+    result = await Env(note, YES).run()
+    assert "abc123xyz9" not in result.summary and "[GİZLENDİ]" in result.summary

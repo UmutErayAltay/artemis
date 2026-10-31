@@ -25,6 +25,7 @@ from artemis.computer.actions import (
     Action,
     is_sensitive,
     key_block_reason,
+    mask_screen_secrets,
     parse_action,
     parse_keys,
     parse_verdict,
@@ -426,7 +427,9 @@ class ComputerSession:
         self._audit.emit(
             "computer_verify", turn_id=turn_id, verified=verdict[0], evidence=verdict[1]
         )
-        return SessionResult("done", done_text, self._steps, verdict[0], verdict[1])
+        # "Bitti" notu da modelin ekrandan aktardığı metin olabilir; kanıtla aynı süzgeçten geçer.
+        note = mask_screen_secrets(done_text)
+        return SessionResult("done", note, self._steps, verdict[0], verdict[1])
 
     async def _ask[T](
         self, messages: list[Message], limit: float, parse: Callable[[str], T]
