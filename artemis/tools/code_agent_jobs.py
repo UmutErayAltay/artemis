@@ -113,9 +113,13 @@ class CodeAgentJobs:
         *,
         process_factory: ProcessFactory = subprocess.Popen,
         store_path: Path | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._audit = audit
         self._factory = process_factory
+        # Toplam süre sınırı bu saatle ölçülür; testler gerçek saniyeleri beklemeden
+        # (ve yük altında sınırı kaçırmadan) sahte saat enjekte eder.
+        self._clock = clock
         self._lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._drafts: dict[str, ProjectSpec] = {}
@@ -365,7 +369,7 @@ class CodeAgentJobs:
                 raise
             self._jobs[job_id] = record
             self._settings[job_id] = start_dir, run
-            self._began[job_id] = time.monotonic()
+            self._began[job_id] = self._clock()
             self._deadlines[job_id] = self._began[job_id] + max_minutes * 60
             self._audit.emit(
                 "code_agent_started",
@@ -411,7 +415,7 @@ class CodeAgentJobs:
             return (
                 not self._shutdown
                 and job_id not in self._cancelled
-                and time.monotonic() < self._deadlines[job_id]
+                and self._clock() < self._deadlines[job_id]
             )
 
     def _run(self, job_id: str, prompt: str) -> None:
@@ -434,7 +438,7 @@ class CodeAgentJobs:
                     argv += ["--resume", job["session_id"]]
                 if job_id in self._cancelled or self._shutdown:
                     status = "cancelled"
-                elif time.monotonic() >= self._deadlines[job_id]:
+                elif self._clock() >= self._deadlines[job_id]:
                     status = "timeout"
                 else:
                     if not self._update(job_id, status="running"):
@@ -474,7 +478,7 @@ class CodeAgentJobs:
                     if cancelled:
                         status = "cancelled"
                         break
-                    if time.monotonic() >= deadline:
+                    if self._clock() >= deadline:
                         status = "timeout"
                         break
                     if capture.overflow.is_set():
@@ -539,7 +543,7 @@ class CodeAgentJobs:
             job = self._jobs[job_id]
             if job_id in self._cancelled and clean:
                 status = "cancelled"
-            elif time.monotonic() >= self._deadlines[job_id] and status in {"done", "waiting"}:
+            elif self._clock() >= self._deadlines[job_id] and status in {"done", "waiting"}:
                 status = "timeout"
             question_id = str(uuid.uuid4()) if status == "waiting" else None
             self._update(
@@ -550,7 +554,7 @@ class CodeAgentJobs:
                 commits=redact(commit_list),
                 leftover_changes=dirty,
                 cleanup_pending=not clean,
-                duration_seconds=round(time.monotonic() - self._began[job_id], 1),
+                duration_seconds=round(self._clock() - self._began[job_id], 1),
                 session_id=session or job["session_id"],
                 question_id=question_id,
                 question=redact(segment.question) if segment and status == "waiting" else None,
@@ -579,7 +583,7 @@ class CodeAgentJobs:
                 job = self._jobs[job_id]
                 if job["status"] != "waiting" or job["question_id"] != question_id:
                     return
-                if time.monotonic() >= self._deadlines[job_id]:
+                if self._clock() >= self._deadlines[job_id]:
                     self._update(
                         job_id,
                         status="timeout",
@@ -636,7 +640,7 @@ class CodeAgentJobs:
                 or job["status"] != "waiting"
                 or job["question_id"] != question_id
                 or job_id in self._cancelled
-                or time.monotonic() >= self._deadlines[job_id]
+                or self._clock() >= self._deadlines[job_id]
                 or not job["session_id"]
             ):
                 return False
