@@ -78,17 +78,19 @@ kapanınca içeriksiz rapor `state_dir/voice-telemetry/` altına yazılır (ADR 
   ([CPA_LOCAL_TEST.md](CPA_LOCAL_TEST.md)). Takma ad eklendikten sonra ses yeniden açılmalı.
 
 ### A6. Aşama 2 STT karşılaştırması (ADR 0045)
-- [ ] Corpus'ları kur (depo dışına yazılır):
+> Yapıldı 2026-10-26 (Windows, RTX 4050 6 GB); sonuçlar ve kararlar
+> [ADR 0045 §A6](adr/0045-evaluation-corpora.md). Gürültülü uyandırma (A7) sonuçları aynı ADR'dedir.
+- [x] Corpus'ları kur (depo dışına yazılır):
   `python -m pip install -e ".[voice,eval]"`,
   `python -m bench.corpus_common_voice --ornek 600 --parca 0 --parca 1`,
   `python -m bench.corpus_synthetic --piper <tr_TR-dfki-medium.onnx> --edge tr-TR-EmelNeural --edge tr-TR-AhmetNeural --bulut-tts-izni`.
-- [ ] Sabit baseline (bugünkü config), sonra tek değişken: `large-v3-turbo` ↔ `large-v3`,
+- [x] Sabit baseline (bugünkü config), sonra tek değişken: `large-v3-turbo` ↔ `large-v3`,
   sonra beam 5 ↔ 1, sonra `stt_language` tr ↔ tr_en. Her biri:
   `python -m bench.speech_accuracy --canli --corpus %USERPROFILE%\.cache\artemis-eval\common_voice_tr\corpus.yaml`
   ve sentetik corpus için aynısı. `nvidia-smi` ile VRAM'i not et.
-- [ ] Raporda `source_breakdown`, `condition_breakdown` ve `totals.wrong_target` /
+- [x] Raporda `source_breakdown`, `condition_breakdown` ve `totals.wrong_target` /
   `false_wake` değerleri; sentetik sonuç kabul sayılmaz.
-- [ ] "artmış" yanlış uyanma bulgusu (ADR 0045): eşleştirici değişsin mi? (karar)
+- [x] "artmış" yanlış uyanma bulgusu (ADR 0045): eşleştirici değişsin mi? (karar)
 
 ## B. Önceki oturumlardan kalanlar
 
