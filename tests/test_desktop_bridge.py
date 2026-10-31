@@ -843,3 +843,60 @@ def test_voice_telemetry_report_is_written_only_when_enabled(tmp_path, enabled):
     report = json.loads(reports[0].read_text(encoding="utf-8"))
     assert report["mode"] == "masaustu" and report["collection_complete"]
     assert report["outcomes"]["rejected"] == 1 and report["hardware"] == {"output": None}
+
+
+def test_live_states_become_their_own_events(tmp_path):
+    bridge = DesktopBridge(tmp_path / "unused.yaml", lambda *_a, **_k: None)
+    for state in ("live:merhaba dünya", "live:unavailable:deps:eksik", "heard:merhaba"):
+        bridge._on_voice_state(state)
+    events = [(e.state, e.message) for e in bridge.poll_events()]
+    assert events == [
+        ("voice_live", "merhaba dünya"),
+        ("voice_live_unavailable", "deps:eksik"),
+        ("voice_heard", "merhaba"),
+    ]
+
+
+def _tool_events(bridge: DesktopBridge, request_id: str) -> list[Any]:
+    from artemis.channels.desktop.bridge import ToolFinished
+
+    return _collect_until(
+        bridge,
+        lambda events: any(
+            isinstance(event, ToolFinished) and event.request_id == request_id for event in events
+        ),
+    )
+
+
+def test_quiet_tool_submit_publishes_no_running_state_but_normal_submit_does(tmp_path):
+    bridge = _fixture(tmp_path, [])
+    try:
+        quiet_id = bridge.submit_tool("external_read", EmptyArgs(), quiet=True)
+        assert quiet_id is not None
+        quiet_events = _tool_events(bridge, quiet_id)
+        # Yoklama "Çalışıyor" yayınlamaz: pet ve düğmeler her yoklamada meşgule dönmez.
+        assert not _has_state(quiet_events, "running", quiet_id)
+        # Meşguliyet kuralı yine geçerlidir: iş bitince (finally) yeni istek alınabilir.
+        loud_id = None
+        deadline = time.monotonic() + 3
+        while loud_id is None and time.monotonic() < deadline:
+            loud_id = bridge.submit_tool("external_read", EmptyArgs())
+            time.sleep(0.01)
+        assert loud_id is not None and loud_id != quiet_id
+        assert _has_state(_tool_events(bridge, loud_id), "running", loud_id)
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_quiet_tool_submit_still_blocks_while_another_request_is_active(tmp_path):
+    bridge = _fixture(tmp_path, _tool_scenario())
+    try:
+        assert bridge.submit("oku ve yaz") is not None
+        assert bridge.submit_tool("external_read", EmptyArgs(), quiet=True) is None
+        prompt = _wait_for(bridge, Approval)
+        assert bridge.decide(prompt.request_id, prompt.turn_id, prompt.approval_id, False)
+        _wait_for(bridge, Finished)
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)

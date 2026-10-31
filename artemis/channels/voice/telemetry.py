@@ -23,6 +23,7 @@ Stage = Literal[
     "terminal",
     "stop_requested",
     "playback_stopped",
+    "stt_cloud_fallback",
 ]
 # ``interrupted``: uyandırmasız söz yalnız oynatmayı susturdu, komut çalışmadı (ADR 0042).
 Outcome = Literal[

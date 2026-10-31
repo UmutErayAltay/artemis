@@ -83,3 +83,65 @@ Uyandırma kuralı değişikliğinin A/B'si (aynı STT çıktısı, aynı corpus
 uyanma (hepsi "artmış"), yeni kural **0**; uyandırma kaçırma iki kuralda da **%3,8**
 (değişmedi). Sentetik sonuç kabul kanıtı değildir; Windows/GPU karşılaştırması
 [WINDOWS_CHECKLIST.md](../WINDOWS_CHECKLIST.md) A6'dadır.
+
+## Gürültüde uyandırma (2026-10-26, Windows, RTX 4050)
+
+`wake_noise_tr` (150 örnek: 15 wake + 15 wake-siz × pembe 10/5 dB, babble 10/5 dB, telefon),
+`--canli --sentetik-metin`. Whisper `large-v3`, `cuda`, `float16`, `stt_language: tr_en`,
+config'te `stt_hotwords: [Artemis, tarayıcı]` zaten açık.
+
+| Deney | Kaçırma | Telefon | Yanlış uyanma | WER | Ad | Hedef | Gecikme medyan |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Bugünkü ayar | %8,0 | %40 | 0 | %25,4 | %69,3 | %82,5 | 941 ms |
+| `--ek-hotword Artemis` | %8,0 | %40 | 0 | %25,4 | %69,3 | %82,5 | 1973 ms |
+| `--gurultu-engelle orta` | %6,7 | %27 | 0 | %26,6 | %64,3 | %85,0 | 2784 ms |
+| `stt_vad_filter: false` | **%0** | **%0** | 0 | **%19,8** | **%74,3** | **%90,0** | 2507 ms |
+
+- Pembe ve babble gürültüde kaçırma GPU large-v3'te her deneyde %0'dır (DFN'de babble 5 dB
+  tek kaçırma); buluttaki %29 turbo/int8/CPU'ya aittir.
+- Tek sorun telefon bandı: Whisper "Artemis" yerine "Tertemiz", "Temiz" yazar ya da sözcüğü
+  düşürür. "Tertemiz" gerçek sözcük olduğundan eşleştirici gevşetilmez.
+- Hotword deneyi taban çizgisiyle aynıdır, çünkü ipucu zaten config'tedir.
+- DFN telefonu iyileştirir ama ad doğruluğunu düşürür; değmez.
+- VAD süzgecini kapatmak telefon kaçırmalarını sıfırlar ve tüm doğruluk ölçülerini
+  iyileştirir: VAD, bant sınırlı seste baştaki "Artemis"i kesiyor.
+
+Yeniden ölçüm (aynı oturum, dönüşümlü, başka GPU yükü yok): doğruluk sayıları iki koşuda da
+birebir aynı (belirlenimli). Gecikme medyanı taban 1035 / 916 ms, VAD kapalı 848 / 927 ms:
+fark yok; ilk tablodaki 1973–2784 ms art arda koşulan iki ağır işin GPU çekişmesiydi.
+
+Sessizlik corpus'u (`silence_tr`, 48 × 4 sn: dither −70 dBFS, pembe −50/−40/−30 dBFS, telefon
+bandı pembe −40, 50 Hz vınlama + pembe): iki ayarda da halüsinasyon **0**, yanlış uyanma **0**.
+VAD kapalıyken saf gürültü STT'si 346 → 892 ms sürer; canlı döngüde STT'ye yalnız webrtc VAD'in
+konuşma diye kestiği parça gider, bu yüzden boşta maliyet oluşmaz.
+
+**Karar:** `stt_vad_filter: false` önerilir: telefon bandında kaçırma %40 → %0, WER %25,4 →
+%19,8, hedef %82,5 → %90, gecikme ve yanlış uyanma değişmez. Ölçülmeyen: ≥1 saat gerçek komutsuz
+konuşmada yanlış uyanma ve gerçek mikrofonla canlı deneme (A1/A5 ile birlikte).
+
+## A6: GPU STT karşılaştırması (2026-10-26, Windows, RTX 4050 6 GB)
+
+Taban: Umut'un config'i (`large-v3`, `float16`, beam 5, `tr_en`, `stt_vad_filter: false`,
+hotword Artemis/tarayıcı). Her satır tek değişken; Artemis'in sesi kapalı, GPU boşta 439 MiB.
+Corpus: Common Voice tr 600 gerçek konuşmacı; sentetik 294 (Piper dfki 134, Edge Emel 134,
+Edge Ahmet 26 — Ahmet akışı sık hata verdi).
+
+| Ayar | CV WER | Sentetik WER | Hedef | Yanlış hedef | Wake kaçırma | Gecikme medyan (CV/sent.) | VRAM tepe |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| Taban | %13,6 | %18,8 | %90,2 | 4 | %2,7 | 979 / 920 ms | 4,75 GB |
+| `large-v3-turbo` | %19,6 | %13,4 | %93,3 | 0 | %0,9 | 698 / 678 ms | 2,91 GB |
+| beam 1 | %14,3 | %19,0 | %90,9 | 2 | %0,9 | 931 / 902 ms | 4,86 GB |
+| `stt_language: tr` | %13,4 | %18,6 | %90,2 | 4 | %2,7 | 641 / 640 ms | 4,77 GB |
+
+Yanlış uyanma her satırda 0 ("artmış" eşleştirici düzeltmesi tutuyor; karar maddesi kapanır).
+
+- **turbo:** sentetikte iyi, gerçek konuşmacıda belirgin kötü (WER %13,6 → %19,6); sentetik
+  kabul sayılmadığından `large-v3` kalır. VRAM 1,8 GB az; GPU'yu oyunla paylaşma gerekirse seçenek.
+- **beam 1:** hız kazancı yok, doğruluk hafif düşer; beam 5 kalır.
+- **`tr`:** doğruluk `tr_en` ile aynı, gecikme ~300 ms az. Fark `tr_en`'in her sözde yaptığı
+  ek `detect_language` geçişidir (ADR 0021). Corpus'ta İngilizce cümle yoktur; `tr`'nin bedeli
+  tam İngilizce cümlenin Türkçe zorla yazılmasıdır ve burada ölçülmedi. Kiril riski `tr`'de de
+  yoktur (dil sabit). Karar Umut'ta: İngilizce cümle kurmuyorsa `tr` önerilir.
+- Yanlış hedef 4 (taban, sentetik): hepsi "X değil, Y aç"; Y bozuk yazılınca ("Kobe C. Rona")
+  tek tanınan ad olumsuzlanan X kalır. Bu ölçüm olumsuzluğu bilmez (`metric_scope`); canlıda
+  modelin işidir ve `bench.run` intent kategorisinde sınanır. Gerçek kaynak Y'nin STT hatasıdır.

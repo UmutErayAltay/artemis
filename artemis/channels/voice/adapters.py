@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import io
 import logging
 import math
 import os
@@ -11,13 +12,22 @@ import queue
 import subprocess
 import threading
 import unicodedata
+import wave
 from collections.abc import AsyncIterator, Callable
 from contextlib import suppress
 from time import monotonic
 from typing import Any, Protocol
 
-from artemis.channels.voice.core import AudioFrame, PCMChunk, SpeechSynthesizer
-from artemis.config.settings import VoiceConfig
+import httpx
+
+from artemis.brain.providers import stored_endpoint_key
+from artemis.channels.voice.core import (
+    AudioFrame,
+    PCMChunk,
+    SpeechSynthesizer,
+    is_ghost_transcript,
+)
+from artemis.config.settings import EndpointConfig, VoiceConfig
 from artemis.safety.audit import AuditLog
 from artemis.tools.platform import child_environment
 
@@ -37,20 +47,8 @@ class EchoReferenceSink(Protocol):
         ...
 
 
-_GHOST_PHRASES = {
-    "abone olmayı unutmayın", "izlediğiniz için teşekkürler",
-    "izlediğiniz için teşekkür ederim", "izlediğiniz için teşekkür ederiz",
-    "bu videoyu izlediğiniz için teşekkür ederim",
-    "bu videoyu izlediğiniz için teşekkür ederiz", "altyazı mk",
-}
-
-
-def is_ghost_transcript(text: str) -> bool:
-    normalized = text.replace("I", "ı").replace("İ", "i").lower()
-    normalized = " ".join("".join(
-        char for char in normalized if char.isalnum() or char.isspace()
-    ).split())
-    return normalized in _GHOST_PHRASES
+# Kalıp listesi core'da: uyandırma sonrası kuyruk da aynı süzgeçten geçer.
+__all__ = ["is_ghost_transcript"]
 
 
 def is_repeating_transcript(text: str) -> bool:
@@ -367,6 +365,82 @@ class FasterWhisperRecognizer:
                 return "" if is_ghost_transcript(text) or is_repeating_transcript(text) else text
 
         return await asyncio.to_thread(infer)
+
+
+CLOUD_STT_TIMEOUT_SECONDS = 8.0
+
+
+class OpenAICompatibleTranscriber:
+    """Karma tanıma (ADR 0046): komut sesini OpenAI uyumlu uca gönderir, metni döndürür.
+
+    Yalnız VoiceController'ın "komut olacak" dediği sözde çağrılır. Hata metnine URL, yanıt
+    gövdesi veya anahtar konmaz; istisna zinciri de taşınmaz (sır sızdırmasın). Yönlendirme
+    takip edilmez: yönlendirme anahtarı başka sunucuya taşıyabilirdi.
+    """
+
+    def __init__(
+        self, config: VoiceConfig, endpoint_id: str, endpoint: EndpointConfig, audit: AuditLog,
+    ) -> None:
+        self.config = config
+        self.endpoint_id = endpoint_id
+        self.endpoint = endpoint
+        self.audit = audit
+
+    @staticmethod
+    def _wav(pcm: bytes, sample_rate: int) -> bytes:
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(sample_rate)
+            wav.writeframes(pcm)
+        return buffer.getvalue()
+
+    async def transcribe(self, pcm: bytes) -> str:
+        headers: dict[str, str] = {}
+        if self.endpoint.api_key:
+            key = stored_endpoint_key(self.endpoint_id)
+            if not key:
+                raise RuntimeError("Bulut tanıma için API anahtarı kayıtlı değil.")
+            headers["Authorization"] = f"Bearer {key}"
+        data = {"model": self.config.stt_cloud_model, "response_format": "json"}
+        if self.config.stt_language == "tr":
+            data["language"] = "tr"
+        # prompt yok: Whisper gürültüde prompt metnini yankılıyor (ADR 0046 eki).
+        # Gizlilik denetimi sesi göndermeden önce yazılır; ses ve metin kaydedilmez.
+        self.audit.emit(
+            "cloud_stt_transfer", service=self.endpoint_id, content_kind="command_audio",
+            allowed=True,
+        )
+        files = {"file": ("command.wav", self._wav(pcm, self.config.sample_rate), "audio/wav")}
+        failed = False
+        response: httpx.Response | None = None
+        try:
+            async with httpx.AsyncClient(
+                follow_redirects=False, timeout=CLOUD_STT_TIMEOUT_SECONDS
+            ) as client:
+                response = await client.post(
+                    f"{self.endpoint.base_url}/audio/transcriptions",
+                    data=data, files=files, headers=headers,
+                )
+        except httpx.HTTPError:
+            failed = True
+        if failed or response is None:
+            raise RuntimeError("Bulut tanıma uca ulaşamadı veya süre doldu.")
+        if response.status_code != 200:
+            raise RuntimeError(f"Bulut tanıma başarısız (HTTP {response.status_code}).")
+        try:
+            text = response.json().get("text")
+        except (ValueError, AttributeError):
+            text = None
+        if not isinstance(text, str):
+            raise RuntimeError("Bulut tanıma yanıtı geçersiz.")
+        text = text.strip()
+        return "" if is_ghost_transcript(text) or is_repeating_transcript(text) else text
+
+    async def transcribe_partial(self, pcm: bytes) -> str:
+        # Kısmi çözümler buluta gitmez; denetleyici bu yolu çağırmaz, protokol için vardır.
+        raise RuntimeError("Kısmi tanıma buluta gönderilmez.")
 
 
 class SoundDeviceSink:

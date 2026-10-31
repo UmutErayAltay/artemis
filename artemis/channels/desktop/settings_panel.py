@@ -8,36 +8,61 @@ import os
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 from pathlib import Path
 from typing import Any
 
 import yaml
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QThread, Signal
+from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
+    QButtonGroup,
     QCheckBox,
     QComboBox,
+    QDialog,
     QFileDialog,
-    QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
     QListWidget,
     QProgressBar,
     QPushButton,
+    QRadioButton,
     QScrollArea,
-    QTabWidget,
+    QSizePolicy,
     QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from artemis.channels.desktop.provider_section import ProviderSection
+from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
+from artemis.channels.desktop.pet_section import PetSection
+from artemis.channels.desktop.pet_sprite import pets_dir_for
+from artemis.channels.desktop.projects_panel import CurrentPageStack
+from artemis.channels.desktop.provider_section import (
+    ProviderSection,
+    button_row,
+    divider,
+    field,
+    group,
+    meta_label,
+)
+from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
 from artemis.channels.voice import stt_catalog
-from artemis.config.settings import GITHUB_OWNER_RE, Settings, load_settings
+from artemis.config.settings import (
+    BUILTIN_AGENT,
+    BUILTIN_AGENTS,
+    GITHUB_OWNER_RE,
+    Settings,
+    load_settings,
+)
 from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
 SettingPath = tuple[str, ...]
+
+_BAR_HEIGHT = 60  # alt çubuk: 12 + 36 (Uygula) + 12
 
 
 @dataclass(frozen=True)
@@ -75,11 +100,44 @@ def _combo(path: SettingPath, widget: str, *, fallback_first: bool) -> PanelBind
     return PanelBinding(path, widget, lambda combo: str(combo.currentData()), write)
 
 
+def _precision_binding() -> PanelBinding:
+    """stt_compute_type: kayıtlı değer iki standart seçenekten biri değilse (örn. `int8`) ayrı bir
+    öğe olarak gösterilir; böylece Uygula kullanıcının elle yazdığı değeri sessizce ezmez."""
+
+    def write(combo: Any, value: Any) -> None:
+        for index in range(combo.count() - 1, -1, -1):
+            if combo.itemData(index) not in _STANDARD_PRECISIONS:
+                combo.removeItem(index)
+        if combo.findData(value) < 0:
+            combo.addItem(f"Özel ({value})", value)
+        combo.setCurrentIndex(combo.findData(value))
+
+    return PanelBinding(
+        ("voice", "stt_compute_type"), "precision_combo",
+        lambda combo: str(combo.currentData()), write,
+    )
+
+
+_STANDARD_PRECISIONS = ("int8_float16", "float16")
+
 # Panelin "Uygula" ile yazdığı ve "yenile" ile okuduğu sade alanlar. Özel mantığı olanlar
 # (mikrofon aygıtı, STT model yolu, uygulama listesi, code_agent) save_choices'ta açık kalır.
 PANEL_BINDINGS: tuple[PanelBinding, ...] = (
+    PanelBinding(
+        ("voice", "wake_word"), "wake_name",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
     _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
+    _precision_binding(),
     _checkbox(("voice", "continuous_mode"), "continuous_mode", quiet=True),
+    PanelBinding(
+        ("voice", "stt_mode"), "hybrid_stt",
+        lambda box: "hybrid" if box.isChecked() else "local",
+        lambda box, value: box.setChecked(value == "hybrid"),
+    ),
+    _checkbox(("voice", "barge_in_without_wake"), "barge_in_box"),
+    _checkbox(("voice", "followup_listening"), "followup_box"),
+    _checkbox(("voice", "live_transcript"), "live_transcript"),
     _checkbox(("voice", "noise_suppression"), "noise_suppression"),
     _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
     _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
@@ -275,7 +333,127 @@ def default_repos_dir() -> str:
     return str(Path(os.environ.get("USERPROFILE") or Path.home()) / "Desktop" / "Projeler")
 
 
+class _SectionList(QListWidget):
+    """Bölüm listesi; sağdaki tek kaydırma bölgesini (`scroll_area`) de taşır."""
+
+    scroll_area: QScrollArea
+
+
+# Tema adının yanındaki açıklama; anahtarlar themes.THEME_LABELS ile aynı.
+_THEME_HINTS = {
+    "light": "Açık gezinme, açık çalışma alanı",
+    "dark": "Koyu gezinme, koyu çalışma alanı",
+    "light-mixed": "Koyu gezinme, açık çalışma alanı",
+    "dark-mixed": "Açık gezinme, koyu çalışma alanı",
+}
+
+
+def _swatch(key: str) -> QPixmap:
+    """Gerçek arayüze yakın küçük önizleme: gezinme, çalışma alanı, balon ve birincil düğme."""
+    colors = THEMES[key]
+    width, height = 128, 76
+    pixmap = QPixmap(width, height)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+    clip = QPainterPath()
+    clip.addRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
+    painter.setClipPath(clip)
+    painter.fillRect(0, 0, width, height, QColor(colors["bg"]))
+    painter.fillRect(0, 0, 32, height, QColor(colors["nav"]))
+    nav_text = QColor(colors["nav_muted"])
+    painter.fillRect(6, 24, 20, 6, QColor(colors["nav_selected"]))  # seçili gezinme satırı
+    for top in (10, 24, 36, 48):
+        painter.fillRect(8, top + 1, 16, 3, nav_text)
+    ink = QColor(colors["muted"])
+    painter.fillRect(40, 10, 40, 4, ink)  # asistan cevabı
+    painter.fillRect(40, 18, 56, 4, ink)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(QColor(colors["accent_soft"]))
+    painter.drawRoundedRect(QRectF(66, 30, 54, 16), 6, 6)  # kullanıcı balonu
+    painter.setBrush(QColor(colors["accent"]))
+    painter.drawRoundedRect(QRectF(88, 56, 32, 11), 4, 4)  # birincil düğme
+    painter.setBrush(QColor(colors["surface"]))
+    painter.setPen(QColor(colors["border"]))
+    painter.drawRoundedRect(QRectF(40, 56, 42, 11), 4, 4)  # ikincil alan
+    painter.setClipping(False)
+    painter.setPen(QColor(colors["border"]))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
+    painter.end()
+    return pixmap
+
+
+class _ThemeCard(QFrame):
+    """Tema kartı: tek seçim göstergesi 2px vurgu kenarlığıdır; radyo düğmesi yalnız klavye ve
+    ekran okuyucu için kalır (göstergesi QSS ile gizli), kart her yerinden tıklanır."""
+
+    def __init__(self, key: str, label: str) -> None:
+        super().__init__()
+        self.key = key
+        self.setObjectName("themeCard")
+        self.setProperty("selected", False)
+        row = QHBoxLayout(self)
+        row.setContentsMargins(12, 12, 12, 12)
+        row.setSpacing(12)
+        swatch = QLabel()
+        swatch.setPixmap(_swatch(key))
+        swatch.setAccessibleName(f"{label} önizleme")
+        self.radio = QRadioButton(label)
+        self.radio.toggled.connect(self._selected)
+        text = QVBoxLayout()
+        text.setSpacing(4)
+        text.addStretch(1)
+        text.addWidget(self.radio)
+        hint = meta_label(_THEME_HINTS.get(key, ""))
+        hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        text.addWidget(hint)
+        text.addStretch(1)
+        row.addWidget(swatch)
+        row.addLayout(text, 1)
+
+    def _selected(self, on: bool) -> None:
+        self.setProperty("selected", on)
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mousePressEvent(self, event: Any) -> None:  # noqa: N802
+        self.radio.click()
+        super().mousePressEvent(event)
+
+
+def _check_hint(text: str) -> QLabel:
+    """Onay kutusunun altındaki 12px soluk açıklama; kutu metni uzayıp satırı taşırmasın diye
+    ayrıntı buraya (sarılabilir) konur. Girinti = gösterge 16px + boşluk 8px."""
+    label = meta_label(text)
+    label.setContentsMargins(24, 0, 0, 0)
+    return label
+
+
+class _ApplyButton(QPushButton):
+    """Uygula: yalnız değişiklik varken açık. Pencere (`_set_controls`) meşgulken `setEnabled`
+    çağırır; o izni saklarız ve kirli durumla birleştiririz, böylece ikisi birbirini ezmez."""
+
+    def __init__(self, text: str) -> None:
+        super().__init__(text)
+        self._allowed = True
+        self._dirty = False
+        self._sync()
+
+    def setEnabled(self, arg__1: bool) -> None:  # noqa: N802
+        self._allowed = arg__1
+        self._sync()
+
+    def set_dirty(self, dirty: bool) -> None:
+        self._dirty = dirty
+        self._sync()
+
+    def _sync(self) -> None:
+        super().setEnabled(self._allowed and self._dirty)
+
+
 class SettingsPanel(QWidget):
+    theme_changed = Signal(str)
     apply_requested = Signal(object)  # mikrofon aygıtı; model seçimi ProviderSection'da
     # (SyncReport, otomatik_mi): otomatik eşitleme sonucu pencere tarafından baloncukla duyurulur.
     github_synced = Signal(object, bool)
@@ -286,8 +464,11 @@ class SettingsPanel(QWidget):
         *,
         demo: bool = False,
         github_sync: GitHubSyncFunction = sync_repos,
+        pets_dir: Path | None = None,
+        codex_pets_dir: Path | None = None,
     ) -> None:
         super().__init__()
+        self.setObjectName("settingsPanel")
         self.config_path = config_path
         self._demo = demo
         self._gpu_mb = stt_catalog.gpu_memory_mb()
@@ -298,65 +479,136 @@ class SettingsPanel(QWidget):
         self._github_auto = False
         self.applications: dict[str, str] = {}
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(10)
+        layout.setContentsMargins(24, 0, 24, 24)
+        layout.setSpacing(16)
         title = QLabel("Ayarlar")
-        title.setObjectName("title")
+        title.setObjectName("pageTitle")
+        title.setFixedHeight(48)
         layout.addWidget(title)
-        self.sections = QTabWidget()
-        layout.addWidget(self.sections, 1)
+        body = QHBoxLayout()
+        body.setSpacing(16)
+        layout.addLayout(body, 1)
+        # Sol bölüm listesi + tek kaydırma bölgesi (iç içe kaydırıcı yok).
+        self.sections = _SectionList()
+        self.sections.setObjectName("sectionList")
+        self.sections.setFixedWidth(200)
+        self.sections.setAccessibleName("Ayar bölümleri")
+        body.addWidget(self.sections)
+        self.stack = CurrentPageStack()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(self.stack)
+        self.sections.scroll_area = scroll
+        body.addWidget(scroll, 1)
 
-        def tab_page() -> tuple[QScrollArea, QVBoxLayout]:
-            """Her bölümü kendi kaydırılabilir sayfasına yerleştirir."""
-            scroll = QScrollArea()
-            scroll.setWidgetResizable(True)
-            scroll.setFrameShape(QFrame.Shape.NoFrame)
-            content = QWidget()
-            page_layout = QVBoxLayout(content)
-            page_layout.setContentsMargins(0, 12, 0, 0)
-            page_layout.setSpacing(10)
-            scroll.setWidget(content)
-            return scroll, page_layout
+        def page(name: str, description: str) -> QVBoxLayout:
+            """Bölüm sayfası: 720px'i aşmayan sütun, solda; başlık + tek satır açıklama."""
+            outer = QWidget()
+            row = QHBoxLayout(outer)
+            # Alt dolgu = yapışkan alt çubuğun yüksekliği: kaydırınca son satır çubuğun hemen
+            # altında kırpılı kalmaz, rahatça erişilir.
+            row.setContentsMargins(0, 0, 0, _BAR_HEIGHT)
+            column = QWidget()
+            column.setMaximumWidth(720)
+            content = QVBoxLayout(column)
+            content.setContentsMargins(0, 0, 0, 0)
+            content.setSpacing(24)
+            row.addWidget(column, 1)
+            row.addStretch(0)
+            head = QLabel(name)
+            head.setObjectName("sectionTitle")
+            heading = QVBoxLayout()
+            heading.setSpacing(4)
+            heading.addWidget(head)
+            heading.addWidget(meta_label(description))
+            content.addLayout(heading)
+            self.sections.addItem(name)
+            self.sections.item(self.sections.count() - 1).setSizeHint(QSize(0, 36))
+            self.stack.addWidget(outer)
+            return content
 
-        voice_scroll, voice_layout = tab_page()
-        self.sections.addTab(voice_scroll, "Ses")
-        model_scroll, model_layout = tab_page()
-        self.sections.addTab(model_scroll, "Model")
-        self.providers = ProviderSection(config_path, demo=demo)
-        model_layout.addWidget(self.providers)
-        model_layout.addStretch(1)
-        form = QFormLayout()
+        voice = page("Ses", "Uyandırma, tanıma ve konuşma. Değişiklikler Uygula ile kaydedilir.")
+        # Uyandırma ve mikrofon
+        wake_box, wake = group("Uyandırma ve mikrofon", divided=False)
+        voice.addWidget(wake_box)
+        self.wake_name = QLineEdit()
+        self.wake_name.setText("Artemis")
+        self.wake_name.setMaxLength(64)
+        self.wake_name.setAccessibleName("Uyandırma adı")
+        self.wake_name.setPlaceholderText("Örneğin: Artemis, Ali veya Veli")
+        self.wake_name.setToolTip(
+            "Sesle çağırmak için kullanacağın ad. Uygulamanın adı Artemis olarak kalır. "
+            "Uygula ile ses yeniden başlatılınca geçerli olur."
+        )
+        field(wake, "Uyandırma adı", self.wake_name,
+              "Sesle çağırma adı; uygulamanın adı Artemis kalır.")
         self.device_combo = QComboBox()
         self.device_combo.setAccessibleName("Mikrofon girişi")
-        self.current_device = QLabel()
+        self._no_device()  # demo'da ve yenilemeden önce boş açılır liste görünmesin
+        field(wake, "Mikrofon girişi", self.device_combo)
+        self.current_device = QLabel("Seçilmedi")
         self.current_device.setWordWrap(True)
-        form.addRow("Mikrofon girişi", self.device_combo)
-        form.addRow("Kullanılan mikrofon", self.current_device)
+        field(wake, "Kullanılan mikrofon", self.current_device)
+        # Etiketli seviye ölçeri: düğmeye benzeyen ortalı yazı yerine ince çubuk + değer.
         self.input_level = QProgressBar()
+        self.input_level.setObjectName("levelMeter")
         self.input_level.setRange(0, 100)
         self.input_level.setValue(0)
-        self.input_level.setFormat("Mikrofon seviyesi: %p%")
-        form.addRow("Ses girişi", self.input_level)
+        self.input_level.setTextVisible(False)
+        self.input_level.setFixedHeight(6)
+        self.input_level.setAccessibleName("Ses girişi seviyesi")
+        self.level_value = QLabel("%0")
+        self.level_value.setObjectName("meta")
+        self.level_value.setMinimumWidth(32)
+        self.level_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        self.input_level.valueChanged.connect(lambda value: self.level_value.setText(f"%{value}"))
+        level_row = QHBoxLayout()
+        level_row.setSpacing(12)
+        level_row.addWidget(self.input_level, 1)
+        level_row.addWidget(self.level_value)
+        field(wake, "Ses girişi", level_row, "Konuşunca çubuk dolar.")
         self.last_heard = QLabel("Henüz konuşma algılanmadı.")
         self.last_heard.setTextFormat(Qt.TextFormat.PlainText)
         self.last_heard.setWordWrap(True)
-        form.addRow("Son duyulan", self.last_heard)
-        stt_box = QWidget()
-        stt_layout = QVBoxLayout(stt_box)
-        stt_layout.setContentsMargins(0, 0, 0, 0)
+        field(wake, "Son duyulan", self.last_heard)
+        # Tanıma
+        stt_card, stt_layout = group("Tanıma")
+        voice.addWidget(stt_card)
         stt_controls = QHBoxLayout()
-        stt_controls.setContentsMargins(0, 0, 0, 0)
+        stt_controls.setSpacing(8)
         self.stt_combo = QComboBox()
         self.stt_combo.setAccessibleName("Tanıma modeli")
         self.stt_download = QPushButton("İndir")
+        self.stt_download.setMinimumWidth(88)
         stt_controls.addWidget(self.stt_combo, 1)
         stt_controls.addWidget(self.stt_download)
-        stt_layout.addLayout(stt_controls)
-        self.stt_status = QLabel()
-        self.stt_status.setWordWrap(True)
-        self.stt_status.setTextFormat(Qt.TextFormat.PlainText)
+        field(stt_layout, "Tanıma modeli", stt_controls)
+        self.stt_status = meta_label("")
         stt_layout.addWidget(self.stt_status)
-        form.addRow("Tanıma modeli", stt_box)
+        self.precision_combo = QComboBox()
+        self.precision_combo.setAccessibleName("Tanıma hassasiyeti")
+        self.precision_combo.setToolTip(
+            "Dengeli ölçümde En yüksek hassasiyetle aynı doğrulukta, yaklaşık 1,8 GB daha az "
+            "ekran kartı belleği kullanır. İşlemcide çalışırken seçici kapalıdır. Değişiklik ses "
+            "yeniden başlayınca uygulanır."
+        )
+        self.precision_combo.addItem("Dengeli (az bellek)", "int8_float16")
+        self.precision_combo.addItem("En yüksek hassasiyet", "float16")
+        field(stt_layout, "Tanıma hassasiyeti", self.precision_combo)
+        self.hybrid_stt = QCheckBox("Karma tanıma (komutları bulutta çöz)")
+        self.hybrid_stt.setToolTip(
+            "Uyandırma bu bilgisayarda kalır; komut olan sözün sesi seçtiğin bulut sunucusuna "
+            "gider. Değişiklik ses yeniden başlayınca uygulanır."
+        )
+        stt_layout.addWidget(self.hybrid_stt)
+        self.cloud_stt_hint = meta_label("")
+        stt_layout.addWidget(self.cloud_stt_hint)
+        self.hybrid_stt.toggled.connect(self._update_cloud_hint)
+        self._cloud_configured = False
+        # Konuşma
+        speech_card, speech = group("Konuşma")
+        voice.addWidget(speech_card)
         self.tts_combo = QComboBox()
         self.tts_combo.setAccessibleName("Konuşma sesi")
         self.tts_combo.setToolTip("Değişiklik ses yeniden başlayınca uygulanır.")
@@ -370,28 +622,47 @@ class SettingsPanel(QWidget):
         if ema_missing:
             ema_index = self.tts_combo.count() - 1
             self.tts_combo.model().item(ema_index).setEnabled(False)  # type: ignore[attr-defined]
-        form.addRow("Konuşma sesi", self.tts_combo)
-        self.stt_combo.currentIndexChanged.connect(self._stt_selection_changed)
-        self.stt_download.clicked.connect(self._download_stt)
-        self._populate_stt_choices(None)
-        voice_layout.addLayout(form)
-        self.continuous_mode = QCheckBox("Kesintisiz sohbet (Artemis demeden dinle)")
-        voice_layout.addWidget(self.continuous_mode)
+        field(speech, "Konuşma sesi", self.tts_combo)
+        self.continuous_mode = QCheckBox("Kesintisiz sohbet")
+        speech.addWidget(self.continuous_mode)
+        speech.addWidget(_check_hint("Uyandırma adı söylemeden sürekli dinler."))
+        self.barge_in_box = QCheckBox("Konuşurken sesimle sustur")
+        speech.addWidget(self.barge_in_box)
+        self.followup_box = QCheckBox("Yanıttan sonra adsız dinle")
+        speech.addWidget(self.followup_box)
+        speech.addWidget(_check_hint(
+            "Cevap bitince ya da sesinle susturunca, bir süre uyandırma adı söylemeden dinler."
+        ))
+        # Ses temizleme ve canlı yazı
+        clean_card, clean = group("Canlı yazı ve ses temizleme")
+        voice.addWidget(clean_card)
+        self.live_transcript = QCheckBox("Canlı yazı (konuşurken)")
+        self.live_transcript.setToolTip(
+            "Konuşurken metin pet balonunda akar; yalnız gösterimdir, komutu etkilemez. "
+            "Kurulum: pip install .[stream] ve ayar dosyasında model/revision. "
+            "Değişiklik ses yeniden başlayınca uygulanır."
+        )
+        clean.addWidget(self.live_transcript)
+        # Lisans atfı (mihu Community License): "Powered by mihu" arayüzde görünür kalmalı.
+        clean.addWidget(
+            meta_label("Yerel, işlemcide çalışır. Powered by mihu · mihu Community License")
+        )
         self.noise_suppression = QCheckBox("Gürültü engelleme")
         self.noise_suppression.setToolTip(
             "DeepFilterNet3; işlemcide çalışır, ekran kartı gerekmez. Yankı gidermez. "
             "Model pakete dahildir; indirme gerekmez. "
             "Değişiklik ses yeniden başlayınca uygulanır."
         )
-        voice_layout.addWidget(self.noise_suppression)
-        self.echo_cancellation = QCheckBox("Yankı engelleme (hoparlörle kullanırken)")
+        clean.addWidget(self.noise_suppression)
+        self.echo_cancellation = QCheckBox("Yankı engelleme")
         self.echo_cancellation.setToolTip(
             "WebRTC yankı giderici; Artemis'in hoparlörden çıkan kendi sesini mikrofondan "
             "siler, böylece konuşurken araya girmek ve kendi sesini komut sanmamak güvenilir "
             "olur. Yerelde çalışır. Kulaklıkla gerekmez. Değişiklik ses yeniden başlayınca "
             "uygulanır."
         )
-        voice_layout.addWidget(self.echo_cancellation)
+        clean.addWidget(self.echo_cancellation)
+        clean.addWidget(_check_hint("Hoparlörle kullanırken aç; kulaklıkta gerekmez."))
         self.advanced_toggle = QToolButton()
         self.advanced_toggle.setText("Gelişmiş ses ayarları")
         self.advanced_toggle.setCheckable(True)
@@ -400,14 +671,9 @@ class SettingsPanel(QWidget):
             Qt.ToolButtonStyle.ToolButtonTextBesideIcon
         )
         self.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
-        voice_layout.addWidget(self.advanced_toggle)
-        self.advanced_box = QWidget()
-        advanced_layout = QVBoxLayout(self.advanced_box)
-        advanced_layout.setContentsMargins(0, 0, 0, 0)
-        advanced_layout.setSpacing(10)
-        noise_level_label = QLabel("Gürültü engelleme düzeyi")
-        noise_level_label.setObjectName("muted")
-        noise_level_label.setStyleSheet("font-size: 12px;")
+        voice.addWidget(divider())
+        voice.addWidget(self.advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self.advanced_box, advanced_layout = group("Gelişmiş ses ayarları", divided=False)
         self.noise_level = QComboBox()
         for label, key in (("Hafif", "hafif"), ("Orta", "orta"), ("Güçlü", "guclu")):
             self.noise_level.addItem(label, key)
@@ -417,10 +683,7 @@ class SettingsPanel(QWidget):
         )
         self.noise_level.setEnabled(False)
         self.noise_suppression.toggled.connect(self.noise_level.setEnabled)
-        level_row = QHBoxLayout()
-        level_row.addWidget(noise_level_label)
-        level_row.addWidget(self.noise_level, 1)
-        advanced_layout.addLayout(level_row)
+        field(advanced_layout, "Gürültü engelleme düzeyi", self.noise_level)
         self.noise_stt = QCheckBox("Tanımaya da temizlenmiş ses ver")
         self.noise_stt.setToolTip(
             "Kapalıyken (önerilen) temizlenmiş ses yalnız konuşma algılamaya, cümle bitişine ve "
@@ -435,43 +698,69 @@ class SettingsPanel(QWidget):
         advanced_layout.addWidget(self.advanced_devices)
         self.refresh_button = QPushButton("Mikrofon listesini yenile")
         self.refresh_button.clicked.connect(self.refresh)
-        advanced_layout.addWidget(self.refresh_button)
-        voice_layout.addWidget(self.advanced_box)
+        advanced_layout.addLayout(button_row(self.refresh_button))
+        voice.addWidget(self.advanced_box)
         self.advanced_box.setVisible(False)
-        voice_layout.addStretch(1)
+        voice.addStretch(1)
+        self.stt_combo.currentIndexChanged.connect(self._stt_selection_changed)
+        self.stt_download.clicked.connect(self._download_stt)
+        self._populate_stt_choices(None)
         self.advanced_toggle.toggled.connect(self._toggle_advanced)
-        app_scroll, app_layout = tab_page()
-        self.sections.addTab(app_scroll, "Uygulamalar")
+
+        # Model: bağlantılar ve modeller ProviderSection'dadır.
+        model_page = page(
+            "Model", "Beyin modelini seç. Model ve bağlantı değişiklikleri hemen kaydedilir; "
+            "Uygula gerekmez."
+        )
+        self.providers = ProviderSection(config_path, demo=demo)
+        model_page.addWidget(self.providers)
+        model_page.addStretch(1)
+
+        apps = page(
+            "Uygulamalar",
+            "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı. "
+            "Değişiklikler Uygula ile kaydedilir.",
+        )
+        access_box, access = group("Erişim", divided=False)
+        apps.addWidget(access_box)
         self.all_applications = QCheckBox("Bütün kurulu uygulamalara erişim")
         self.all_applications.toggled.connect(self._sync_application_access)
-        app_layout.addWidget(self.all_applications)
-        self.computer_auto = QCheckBox("Bilgisayar kullanımında otomatik kip (adımları sormaz)")
+        access.addWidget(self.all_applications)
+        self.computer_auto = QCheckBox("Otomatik bilgisayar kullanımı")
         self.computer_auto.setToolTip(
             "Hassas adımlar ve temiz turda başlangıç sorulmaz; Esc her an durdurur. Terminal, "
             "Artemis ve parola yöneticisi engeli ile dış içerikten sonraki onay yine geçerlidir."
         )
-        app_layout.addWidget(self.computer_auto)
+        access.addWidget(self.computer_auto)
+        access.addWidget(_check_hint(
+            "Adımları sormadan yapar; Esc her an durdurur. Üst çubuktaki otomatik onay düğmesi "
+            "hemen uygulanır, bu kutu Uygula ile kaydedilir."
+        ))
+        list_box, listing = group("İzinli uygulamalar")
+        apps.addWidget(list_box)
         self.application_list = QListWidget()
-        self.application_list.setMaximumHeight(140)
+        self.application_list.setMaximumHeight(144)
         self.application_list.setAccessibleName("İzinli uygulamalar")
-        app_layout.addWidget(self.application_list)
-        app_actions = QHBoxLayout()
+        listing.addWidget(self.application_list)
         self.add_application_button = QPushButton("Uygulama ekle")
+        self.add_application_button.setObjectName("primary")
         self.add_application_button.clicked.connect(self._add_application)
         self.remove_application_button = QPushButton("Listeden çıkar")
         self.remove_application_button.clicked.connect(self._remove_application)
-        app_actions.addWidget(self.add_application_button)
-        app_actions.addWidget(self.remove_application_button)
-        app_layout.addLayout(app_actions)
-        self.application_hint = QLabel(
+        listing.addLayout(button_row(self.remove_application_button, self.add_application_button))
+        self.application_hint = meta_label(
             "Artemis listedeki uygulamaları açabilir. Yeni uygulama ekleyip Uygula'ya bas."
         )
-        self.application_hint.setWordWrap(True)
-        app_layout.addWidget(self.application_hint)
-        app_layout.addStretch(1)
-        github_scroll, github_layout = tab_page()
-        self.sections.addTab(github_scroll, "GitHub")
-        github_form = QFormLayout()
+        listing.addWidget(self.application_hint)
+        apps.addStretch(1)
+
+        github = page(
+            "GitHub",
+            "Kendi repolarını kod ajanının erişimine bağla ve hangi ajanın çalışacağını seç. "
+            "“Bağla” düğmesi hemen kaydeder; diğer alanlar Uygula ile.",
+        )
+        account_box, account = group("Hesap", divided=False)
+        github.addWidget(account_box)
         self.github_owner = QLineEdit()
         self.github_owner.setAccessibleName("GitHub kullanıcı adı")
         self.github_owner.setPlaceholderText("kullanıcı-adı")
@@ -479,43 +768,126 @@ class SettingsPanel(QWidget):
         self.repos_dir.setAccessibleName("Repo klasörü")
         self.repos_dir.setPlaceholderText(default_repos_dir())
         self.repos_browse = QPushButton("Klasör seç")
+        self.repos_browse.setMinimumWidth(88)
         self.repos_browse.clicked.connect(self._browse_repos_dir)
         folder_row = QHBoxLayout()
+        folder_row.setSpacing(8)
         folder_row.addWidget(self.repos_dir, 1)
         folder_row.addWidget(self.repos_browse)
-        github_form.addRow("Kullanıcı adı", self.github_owner)
-        github_form.addRow("Repo klasörü", folder_row)
-        github_layout.addLayout(github_form)
+        field(account, "Kullanıcı adı", self.github_owner)
+        field(account, "Repo klasörü", folder_row)
         self.github_auto = QCheckBox("Otomatik eşitle")
         self.github_auto.setChecked(True)
-        github_layout.addWidget(self.github_auto)
+        account.addWidget(self.github_auto)
         self.github_button = QPushButton("Bağla ve repoları çek")
         self.github_button.clicked.connect(self._bind_github)
-        github_layout.addWidget(self.github_button)
-        self.github_status = QLabel(
+        account.addLayout(button_row(self.github_button))
+        result_box, result = group("Eşitleme")
+        github.addWidget(result_box)
+        self.github_status = meta_label(
             "Kendi repoların (fork ve arşivlenmişler hariç) kod ajanının erişimine girer. "
-            "Kimlik doğrulamayı gh yapar; Artemis token görmez."
+            "Giriş GitHub CLI (gh) ile yapılır; Artemis anahtarını görmez."
         )
-        self.github_status.setWordWrap(True)
-        self.github_status.setTextFormat(Qt.TextFormat.PlainText)
-        github_layout.addWidget(self.github_status)
+        result.addWidget(self.github_status)
         self.github_list = QListWidget()
-        self.github_list.setMaximumHeight(120)
+        self.github_list.setMaximumHeight(144)
         self.github_list.setAccessibleName("GitHub eşitleme sonuçları")
-        github_layout.addWidget(self.github_list)
-        github_layout.addStretch(1)
-        self.sections.setCurrentIndex(0)
-        self.notice = QLabel(
-            "Uygula mikrofon, uygulama ve GitHub ayarlarını kaydeder; yeni sohbet başlar."
+        result.addWidget(self.github_list)
+        # Kod ajanları GitHub sayfasında: aynı `code_agent` config bölümü ve aynı "kod ajanı"
+        # bağlamı; Uygulamalar sayfası açılacak masaüstü uygulamalarını yönetir. Düz grup,
+        # Uygulamalar listesiyle aynı kirli-durum/Uygula akışı (ikinci kaydetme yolu yok).
+        agents_box, agents = group(
+            "Kod ajanları",
+            "Arka plan proje işinde çalışacak ajanlar. Değişiklikler Uygula ile kaydedilir.",
         )
-        self.notice.setWordWrap(True)
-        self.notice.setTextFormat(Qt.TextFormat.PlainText)
+        github.addWidget(agents_box)
+        self.agent_list = QListWidget()
+        self.agent_list.setMaximumHeight(144)
+        self.agent_list.setAccessibleName("Kod ajanları")
+        agents.addWidget(self.agent_list)
+        self.default_agent_combo = QComboBox()
+        self.default_agent_combo.setAccessibleName("Varsayılan kod ajanı")
+        field(agents, "Varsayılan ajan", self.default_agent_combo,
+              "Projede ayrıca seçilmediyse bu ajan çalışır.")
+        self.add_custom_agent_button = QPushButton("Özel ajan ekle…")
+        self.add_custom_agent_button.clicked.connect(self._add_custom_agent)
+        agents.addLayout(button_row(self.add_custom_agent_button))
+        self.agent_hint = meta_label("")
+        agents.addWidget(self.agent_hint)
+        self.code_agents: dict[str, dict[str, Any]] = {}
+        self.default_agent = BUILTIN_AGENT
+        self._builtin_command = "claude"
+        self._refresh_code_agents()
+        self.default_agent_combo.activated.connect(self._default_agent_picked)
+        github.addStretch(1)
+
+        # Pet bölümü ayarlarda gösterilmez; app.py kendi sayfasında barındırır.
+        self.pet = PetSection(
+            pets_dir if pets_dir is not None else pets_dir_for(config_path),
+            codex_pets_dir,
+            demo=demo,
+            config_path=config_path,
+        )
+
+        look = page(
+            "Görünüm",
+            "Arayüz renkleri. Hemen uygulanır; Uygula gerekmez, sohbet yeniden başlamaz.",
+        )
+        theme_box, theme = group("Tema", divided=False)
+        look.addWidget(theme_box)
+        # app.py ve testler bu seçiciyi okur/yazar; kartlar ona bağlı, kendisi görünmez.
+        self.theme_combo = QComboBox(self)
+        self.theme_combo.setAccessibleName("Arayüz teması")
+        self.theme_combo.setVisible(False)
+        for key, label in THEME_LABELS.items():
+            self.theme_combo.addItem(label, key)
+        self.theme_combo.setCurrentIndex(self.theme_combo.findData(DEFAULT_THEME))
+        self.theme_cards: dict[str, _ThemeCard] = {}
+        theme_group = QButtonGroup(self)
+        self._theme_grid = QGridLayout()
+        self._theme_grid.setSpacing(12)
+        for key, label in THEME_LABELS.items():
+            theme_card = _ThemeCard(key, label)
+            theme_card.radio.toggled.connect(partial(self._theme_picked, key))
+            theme_group.addButton(theme_card.radio)
+            self.theme_cards[key] = theme_card
+        theme.addLayout(self._theme_grid)
+        self._theme_columns = 0
+        self._layout_theme_cards(2)
+        self.theme_combo.currentIndexChanged.connect(
+            lambda: self.theme_changed.emit(str(self.theme_combo.currentData()))
+        )
+        self.theme_combo.currentIndexChanged.connect(self._sync_theme_cards)
+        self._sync_theme_cards()
+        look.addStretch(1)
+
+        self.sections.currentRowChanged.connect(self._on_section)
+        self.sections.setCurrentRow(0)
+        self._on_section(0)
+
+        # Yapışkan alt çubuk kaydırma bölgesinin dışındadır: uzun sayfada da görünür kalır.
+        bar = QFrame()
+        bar.setObjectName("card")
+        bar.setFixedHeight(_BAR_HEIGHT)
+        bar_row = QHBoxLayout(bar)
+        bar_row.setContentsMargins(16, 12, 16, 12)
+        bar_row.setSpacing(12)
+        self.notice = meta_label(
+            "Uygula; ses, uygulama ve GitHub ayarlarını kaydeder ve yeni sohbet başlatır."
+        )
         self.current_device.setTextFormat(Qt.TextFormat.PlainText)
-        layout.addWidget(self.notice)
-        self.apply_button = QPushButton("Uygula")
+        self.dirty_label = QLabel("Kaydedilmemiş değişiklik")
+        self.dirty_label.setObjectName("meta")
+        self.dirty_label.setVisible(False)
+        self.apply_button = _ApplyButton("Uygula")
         self.apply_button.setObjectName("primary")
+        self.apply_button.setFixedHeight(36)
+        self.apply_button.setMinimumWidth(88)
         self.apply_button.clicked.connect(self._apply)
-        layout.addWidget(self.apply_button)
+        bar_row.addWidget(self.notice, 1)
+        bar_row.addWidget(self.dirty_label)
+        bar_row.addWidget(self.apply_button)
+        layout.addWidget(bar)
         if demo:
             self.notice.setText("Demo modunda ayarlar değiştirilmez.")
             self.refresh_button.setEnabled(False)
@@ -528,10 +900,108 @@ class SettingsPanel(QWidget):
             for binding in PANEL_BINDINGS:
                 getattr(self, binding.widget).setEnabled(False)
             for widget in (self.github_owner, self.repos_dir, self.repos_browse,
-                           self.github_auto, self.github_button):
+                           self.github_auto, self.github_button, self.default_agent_combo,
+                           self.add_custom_agent_button):
                 widget.setEnabled(False)
         else:
             self.refresh()
+        # Açılır listeler en uzun öğeye göre genişlemesin: dar pencerede yatay kaydırma çıkarıyordu.
+        for combo in self.findChildren(QComboBox):
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(12)
+        # Değişiklik izleme yalnız kullanıcı girdisine bakar; yenileme sonunda temiz sayılır.
+        for edit in (self.wake_name, self.github_owner, self.repos_dir):
+            edit.textEdited.connect(self._mark_dirty)
+        for box in (*(getattr(self, b.widget) for b in PANEL_BINDINGS), self.github_auto):
+            if isinstance(box, QCheckBox):
+                box.toggled.connect(self._mark_dirty)
+            elif isinstance(box, QComboBox):
+                box.currentIndexChanged.connect(self._mark_dirty)
+        for combo in (self.device_combo, self.stt_combo):
+            combo.currentIndexChanged.connect(self._mark_dirty)
+
+    def section_names(self) -> list[str]:
+        return [self.sections.item(row).text() for row in range(self.sections.count())]
+
+    def show_section(self, index: int) -> None:
+        self.sections.setCurrentRow(index)
+
+    def _on_section(self, row: int) -> None:
+        if row < 0:
+            return
+        self.stack.setCurrentIndex(row)
+        # Önceki sayfanın kaydırma konumu yeni (kısa) sayfada alta düşmesin; programatik
+        # show_section() de buradan geçer.
+        self.sections.scroll_area.verticalScrollBar().setValue(0)
+        self._sync_theme_cards()
+
+    def set_theme(self, name: str) -> None:
+        """Seçimi sinyal yaymadan günceller (pencere temayı zaten kendisi uyguladı)."""
+        blocked = self.theme_combo.blockSignals(True)
+        self.theme_combo.setCurrentIndex(max(0, self.theme_combo.findData(name)))
+        self.theme_combo.blockSignals(blocked)
+        self._sync_theme_cards()
+
+    def _theme_picked(self, key: str, on: bool) -> None:
+        if on:
+            self.theme_combo.setCurrentIndex(self.theme_combo.findData(key))
+
+    def _sync_theme_cards(self, *_args: object) -> None:
+        card_for = self.theme_cards.get(str(self.theme_combo.currentData()))
+        if card_for is not None and not card_for.radio.isChecked():
+            card_for.radio.setChecked(True)
+
+    def _mark_dirty(self, *_args: object) -> None:
+        if not self._demo:
+            self._set_dirty(True)
+
+    def _set_dirty(self, dirty: bool) -> None:
+        """Uygula yalnız değişiklik varken açılır; tema gibi anında uygulananlar buraya uğramaz."""
+        self.dirty_label.setVisible(dirty)
+        self.apply_button.set_dirty(dirty)
+
+    def _layout_theme_cards(self, columns: int) -> None:
+        """İki sütunlu kart ızgarası ~510px ister; dar pencerede tek sütun, yoksa bütün sayfaların
+        genişliğini (QStackedWidget en büyük sayfaya uyar) yatay kaydırmaya iter."""
+        if columns == self._theme_columns:
+            return
+        self._theme_columns = columns
+        while self._theme_grid.count():
+            self._theme_grid.takeAt(0)
+        for position, theme_card in enumerate(self.theme_cards.values()):
+            self._theme_grid.addWidget(theme_card, position // columns, position % columns)
+        # Üst yerleşimlerin önbelleğindeki geniş asgari boyut düşsün.
+        # Gizli sayfanın iç içe yerleşimleri tembel güncellenir; ızgaradan yukarı hepsini düşür.
+        widget = self._theme_grid.parentWidget()
+        while widget is not None and widget is not self.stack:
+            layout = widget.layout()
+            if layout is not None:
+                layout.invalidate()
+                layout.activate()
+            widget = widget.parentWidget()
+        self.stack.updateGeometry()
+
+    def resizeEvent(self, event: Any) -> None:  # noqa: N802
+        """Dar pencerede bölüm listesi 160px'e iner; içerik kırpılmasın."""
+        super().resizeEvent(event)
+        self.sections.setFixedWidth(160 if self.width() < 760 else 200)
+        self._layout_theme_cards(1 if self.width() < 840 else 2)
+
+    def _update_cloud_hint(self, *_args: object) -> None:
+        """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0046)."""
+        if not self.hybrid_stt.isChecked():
+            self.cloud_stt_hint.setText("")
+            return
+        text = (
+            "Komut sesi seçtiğin bulut sunucusuna gönderilir; kesintisiz kipte her söz gider. "
+            "Teknik ayar: voice.stt_cloud_endpoint."
+        )
+        if not self._cloud_configured:
+            text += (
+                " Sunucu ve model config'te (stt_cloud_endpoint, stt_cloud_model) "
+                "tanımlı değil; tanımlanmadan Uygula reddedilir."
+            )
+        self.cloud_stt_hint.setText(text)
 
     def _toggle_advanced(self, checked: bool) -> None:
         """Gelişmiş ses ayarlarını açar ve ok yönünü duruma göre değiştirir."""
@@ -551,7 +1021,7 @@ class SettingsPanel(QWidget):
         try:
             self.stt_combo.clear()
             if selected_name is None:
-                self.stt_combo.addItem("Özel model (config'teki yol)", None)
+                self.stt_combo.addItem("Özel model (elle ayarlı)", None)
             for choice in stt_catalog.CATALOG:
                 text = f"{choice.label} · {self._stt_size_text(choice)}"
                 if choice.name == self._recommended_stt:
@@ -585,7 +1055,9 @@ class SettingsPanel(QWidget):
     def _stt_selection_changed(self, *_args: object) -> None:
         choice = self._selected_stt_choice()
         if choice is None:
-            self.stt_status.setText("Config'teki özel model yolu kullanılıyor.")
+            self.stt_status.setText(
+                "Özel model (elle ayarlı): ayar dosyasındaki model yolu kullanılıyor."
+            )
         else:
             self.stt_status.setText(choice.note)
         self._update_stt_download_button()
@@ -664,6 +1136,15 @@ class SettingsPanel(QWidget):
                 binding.write(widget, setting_value(settings, binding.path))
                 if binding.quiet:
                     widget.blockSignals(False)
+            voice = settings.voice
+            self._cloud_configured = (
+                voice.stt_cloud_endpoint in settings.endpoints and bool(voice.stt_cloud_model)
+            )
+            self._update_cloud_hint()
+            # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
+            self.precision_combo.setEnabled(
+                settings.voice.stt_device != "cpu" and not self._demo
+            )
             self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self.noise_stt.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self._sync_application_access()
@@ -671,12 +1152,30 @@ class SettingsPanel(QWidget):
             self.github_owner.setText(agent.github_owner or "")
             self.repos_dir.setText(str(agent.repos_dir) if agent.repos_dir else "")
             self.github_auto.setChecked(agent.auto_sync)
+            self.code_agents = {
+                name: profile.model_dump(mode="json", exclude_defaults=True)
+                for name, profile in agent.agents.items()
+            }
+            self.default_agent = agent.default_agent
+            self._builtin_command = agent.command
+            self._refresh_code_agents()
+            self._set_dirty(False)
         except (OSError, ValueError, KeyError):
             self.notice.setText("Ayarlar okunamadı.")
             return
 
+    def _no_device(self) -> None:
+        """Giriş yoksa liste boş kalmaz: soluk, kapalı satır nedenini söyler."""
+        self.device_combo.clear()
+        self.device_combo.addItem("Mikrofon bulunamadı", None)
+        self.device_combo.setEnabled(False)
+
+    def _set_current_device(self, text: str) -> None:
+        self.current_device.setText(text.strip() or "Seçilmedi")
+
     def _refresh_devices(self, settings: Settings) -> None:
         self.device_combo.clear()
+        self.device_combo.setEnabled(not self._demo)
         self.device_combo.addItem("Sistem varsayılanı", None)
         audio_errors: tuple[type[Exception], ...] = (ImportError, OSError, RuntimeError, ValueError)
         try:
@@ -692,6 +1191,10 @@ class SettingsPanel(QWidget):
                 list(devices), list(hosts), active,
                 advanced=self.advanced_devices.isChecked(),
             )
+            if not choices:
+                self._no_device()
+                self._set_current_device("")
+                return
             for label, index, indices in choices:
                 self.device_combo.addItem(label, index)
                 if active in indices or (isinstance(active, str) and active in label):
@@ -701,19 +1204,21 @@ class SettingsPanel(QWidget):
             if active_name == str(active):
                 self.device_combo.addItem(f"Mevcut giriş ({active})", settings.voice.input_device)
                 self.device_combo.setCurrentIndex(self.device_combo.count() - 1)
-            if self.device_combo.count() > 1:
-                self.device_combo.setItemText(0, "Sistem varsayılanı")
-            self.current_device.setText(active_name)
+            self._set_current_device(active_name)
         except audio_errors:
-            self.current_device.setText("Mikrofon aygıtları okunamadı.")
+            self._no_device()
+            self.current_device.setText("Seçilmedi (mikrofon aygıtları okunamadı)")
 
     def _toggle_device_detail(self) -> None:
         if self._demo:
             return
+        was_dirty = not self.dirty_label.isHidden()
         try:
             self._refresh_devices(load_settings(self.config_path))
         except (OSError, ValueError):
             self.notice.setText("Mikrofon ayarı okunamadı.")
+        # Listeyi yeniden kurmak kullanıcı değişikliği değildir.
+        self._set_dirty(was_dirty)
 
     def _refresh_applications(self) -> None:
         friendly = {"brave": "Brave", "notepad": "Not Defteri", "calculator": "Hesap Makinesi",
@@ -753,6 +1258,7 @@ class SettingsPanel(QWidget):
             return
         self.applications[alias] = str(path)
         self._refresh_applications()
+        self._mark_dirty()
         self.notice.setText("Uygulama eklendi; kaydetmek için Uygula'ya bas.")
 
     def _remove_application(self) -> None:
@@ -760,6 +1266,7 @@ class SettingsPanel(QWidget):
         if item is not None:
             del self.applications[item.data(Qt.ItemDataRole.UserRole)]
             self._refresh_applications()
+            self._mark_dirty()
             self.notice.setText("Uygulama listeden çıkarıldı; kaydetmek için Uygula'ya bas.")
 
     def _apply(self) -> None:
@@ -780,6 +1287,57 @@ class SettingsPanel(QWidget):
             "repos_dir": folder or None,
             "auto_sync": self.github_auto.isChecked(),
         }
+
+    def code_agent_values(self) -> dict[str, Any]:
+        """Uygula için: GitHub alanları + ajan profilleri. None değer anahtarı config'ten siler."""
+        return {
+            **self.github_values(),
+            "agents": dict(self.code_agents) or None,
+            "default_agent": None if self.default_agent == BUILTIN_AGENT else self.default_agent,
+        }
+
+    def _refresh_code_agents(self) -> None:
+        self.agent_list.clear()
+        # Yerleşikler (claude, codex) her zaman listededir; kullanıcı codex'i tanımladıysa onun
+        # profili (örn. açık mutlak yol) gösterilir. Ardından özel ajanlar.
+        rows = [(BUILTIN_AGENT, "claude", self._builtin_command)]
+        codex_command = (self.code_agents.get("codex") or {}).get("command", "codex")
+        rows.append(("codex", "codex", codex_command))
+        rows += [
+            (n, p["kind"], p.get("command"))
+            for n, p in self.code_agents.items()
+            if n not in BUILTIN_AGENTS
+        ]
+        for name, kind, command in rows:
+            # Yalnız PATH/önbellek bakılır; arayüz iş parçacığında süreç başlatılmaz.
+            status = command_status(command)
+            note = " · yerleşik" if name in BUILTIN_AGENTS and name not in self.code_agents else ""
+            self.agent_list.addItem(f"{name} · {kind} · {command or '—'} · {status}{note}")
+        blocked = self.default_agent_combo.blockSignals(True)
+        self.default_agent_combo.clear()
+        for name, _kind, _command in rows:
+            self.default_agent_combo.addItem(name, name)
+        current = self.default_agent_combo.findData(self.default_agent)
+        self.default_agent_combo.setCurrentIndex(max(0, current))
+        self.default_agent_combo.blockSignals(blocked)
+        self.agent_hint.setText(
+            "Giriş her ajanın kendi CLI'sindedir (Claude/Codex login); Artemis sır saklamaz."
+        )
+
+    def _default_agent_picked(self, index: int) -> None:
+        self.default_agent = str(self.default_agent_combo.itemData(index))
+        self._mark_dirty()
+
+    def _stage_agent(self, name: str, profile: dict[str, Any]) -> None:
+        self.code_agents[name] = profile
+        self._refresh_code_agents()
+        self._mark_dirty()
+        self.agent_hint.setText(f"'{name}' eklendi; kaydetmek için Uygula'ya bas.")
+
+    def _add_custom_agent(self) -> None:
+        dialog = AgentDialog((*BUILTIN_AGENTS, *self.code_agents), self)
+        if dialog.exec() == QDialog.DialogCode.Accepted and dialog.result_profile:
+            self._stage_agent(*dialog.result_profile)
 
     def _browse_repos_dir(self) -> None:
         start = self.repos_dir.text().strip() or default_repos_dir()

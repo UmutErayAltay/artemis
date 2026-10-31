@@ -15,6 +15,7 @@ from artemis.channels.voice.adapters import (
     EmaSynthesizer,
     FallbackSynthesizer,
     FasterWhisperRecognizer,
+    OpenAICompatibleTranscriber,
     PiperSynthesizer,
     SoundDeviceMicrophone,
     SoundDeviceSink,
@@ -33,6 +34,7 @@ from artemis.channels.voice.echo import (
     EchoCanceller,
     EchoReference,
 )
+from artemis.channels.voice.live_text import SherpaLiveTranscriber
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 from artemis.config.settings import Settings, VoiceConfig
@@ -76,6 +78,15 @@ def _denoise_reason(error: Exception) -> str:
     if isinstance(error, ValueError):
         return "model:model dosyası sha256 doğrulamasından geçmedi"
     return "model:model yüklenemedi (dosya bozuk olabilir)"
+
+
+def _live_reason(error: Exception) -> str:
+    """``denoise`` ile aynı ``kind:metin`` kalıbı; deps ve model farklı çözüm ister."""
+    if isinstance(error, ImportError) or (
+        isinstance(error, RuntimeError) and "pip install" in str(error)
+    ):
+        return "deps:sherpa-onnx veya huggingface-hub kurulu değil"
+    return "model:canlı yazı modeli indirilemedi veya yüklenemedi"
 
 
 RunCommand = Callable[[str], Awaitable[RunResult]]
@@ -154,7 +165,21 @@ async def build_voice_controller(
                 on_echo_failure=lambda: report_echo_state("echo:off"),
             )
         cleanup.push_async_callback(_close_optional, sink)
-        recognizer = FasterWhisperRecognizer(alias_hotword_config(settings))
+        cloud_recognizer: OpenAICompatibleTranscriber | None = None
+        if settings.voice.stt_mode == "hybrid":
+            endpoint_id = settings.voice.stt_cloud_endpoint
+            cloud_recognizer = OpenAICompatibleTranscriber(
+                alias_hotword_config(settings), endpoint_id,
+                settings.endpoints[endpoint_id], runtime.audit,
+            )
+        local_voice = alias_hotword_config(settings)
+        if cloud_recognizer is not None:
+            # Hybrid'de yerel tanıyıcı yalnız uyandırmaya karar verir; tam hotword listesi
+            # "Artemis tarayıcı" gibi kuyruk halüsinasyonu üretiyordu (ADR 0046 eki).
+            local_voice = VoiceConfig.model_validate(
+                {**local_voice.model_dump(), "stt_hotwords": (local_voice.wake_word,)}
+            )
+        recognizer = FasterWhisperRecognizer(local_voice)
         await _prepare(recognizer)
         synthesizer: SpeechSynthesizer
         if settings.voice.tts_backend == "edge":
@@ -185,6 +210,22 @@ async def build_voice_controller(
             await _prepare(local_tts)
             cleanup.push_async_callback(_close_optional, local_tts)
             synthesizer = local_tts
+        live: SherpaLiveTranscriber | None = None
+        if settings.voice.live_transcript:
+            # Canlı yazı yalnız gösterimdir (ADR 0047): kurulamazsa ses hattı onsuz sürer.
+            voice = settings.voice
+            if not (voice.live_transcript_model and voice.live_transcript_revision):
+                on_state("live:unavailable:model:live_transcript_model/revision boş")
+            else:
+                candidate = SherpaLiveTranscriber(
+                    voice.live_transcript_model, voice.live_transcript_revision
+                )
+                try:
+                    await _prepare(candidate)
+                    live = candidate
+                except (OSError, ValueError, RuntimeError, ImportError) as error:
+                    logger.warning("Canlı yazı açılamadı, onsuz sürülüyor: %s", error)
+                    on_state("live:unavailable:" + _live_reason(error))
         controller = VoiceController(
             runtime.runner,
             settings.voice,
@@ -200,6 +241,9 @@ async def build_voice_controller(
             on_event=on_event,
             on_input_level=lambda level: on_state(f"level:{level}"),
             on_transcript=lambda text: on_state("heard:" + text[:200]),
+            cloud_recognizer=cloud_recognizer,
+            live_transcriber=live,
+            on_live_text=lambda text: on_state("live:" + text[:200]),
         )
         cleanup.pop_all()
         return controller

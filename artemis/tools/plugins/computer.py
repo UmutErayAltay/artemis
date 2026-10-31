@@ -2,8 +2,10 @@
 
 Varsayılan kapalıdır (`computer_use.enabled`). Açıkken çağrı CONFIRM_REQUIRED'dır; oturum
 yalnız masaüstü uygulamasında çalışır çünkü Esc ile durdurma ve hassas adım onayı orada
-vardır (`services["computer_host"]`). Sonuç `sent`'tir: modelin "bitti" demesi işin
-yapıldığını kanıtlamaz (kural 5).
+vardır (`services["computer_host"]`). Modelin "bitti" demesi işin yapıldığını kanıtlamaz:
+oturum bitince taze ekran görüntüsüyle ayrı bir doğrulama yapılır. Yalnız ekranda doğrulanan
+`done` `ok`/`success=True` olur; bu bir model yargısıdır, "kesin" değildir (kural 5, ADR 0039
+ek karar 3). Doğrulanamayan her sonuç `sent` kalır.
 """
 
 from __future__ import annotations
@@ -20,13 +22,13 @@ from artemis.brain.errors import ProviderError, RateLimitedError, RetryableProvi
 from artemis.brain.models import Completion, Message
 from artemis.brain.providers import Provider
 from artemis.brain.router import ProviderRouter
-from artemis.computer.session import ComputerSession, SessionResult
+from artemis.computer.session import ComputerSession, SessionMemory, SessionResult
 from artemis.config.settings import Settings
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
 
 _REASON_TEXT = {
-    "done": "Model işi bitirdiğini bildirdi (doğrulanmadı)",
+    "done": "Model işi bitirdiğini bildirdi",
     "ask_user": "Model size bir soru soruyor",
     "limit": "Adım sınırına ulaşıldı",
     "timeout": "Süre doldu",
@@ -119,6 +121,15 @@ class ComputerUse(BaseTool):
 
             backend = windows
 
+        # Eylem belleği yalnız AYNI kullanıcı mesajı (turn_id) içinde çağrılar arasında taşınır;
+        # yeni mesajda taze başlar (kullanıcı kararı). Yalnız RAM'de, services dict'inde durur.
+        slot = context.services.get("computer_memory")
+        if isinstance(slot, dict) and slot.get("turn_id") == context.turn_id:
+            memory = cast(SessionMemory, slot["memory"])
+        else:
+            memory = SessionMemory()
+            context.services["computer_memory"] = {"turn_id": context.turn_id, "memory": memory}
+
         with host.session() as (stop, on_step, approve):
             session = ComputerSession(
                 provider=cast(Provider, provider),
@@ -132,6 +143,7 @@ class ComputerUse(BaseTool):
                 stop=stop,
                 on_step=on_step,
                 provider_timeout=settings.provider_timeout_seconds,
+                memory=memory,
             )
             # İptal asyncio.Event'tir, durdurma threading.Event: küçük bir görev köprüler.
             watcher = asyncio.create_task(_relay_cancel(context.cancelled, stop))
@@ -199,6 +211,21 @@ async def _relay_cancel(cancelled: asyncio.Event, stop: threading.Event) -> None
 
 def _to_tool_result(result: SessionResult) -> ToolResult:
     detail = f" {result.summary}" if result.summary else ""
+    if result.reason == "done":
+        verified = result.verified is True
+        head = (
+            f"Ekranda doğrulandı: {result.evidence}"
+            if verified
+            else f"Model bitirdi ama ekranda doğrulanamadı: {result.evidence}"
+        )
+        return ToolResult(
+            success=verified,
+            status="ok" if verified else "sent",
+            message=f"{head} ({result.steps} adım).{detail}",
+            data={"reason": "done", "steps": result.steps, "verified": verified},
+            external=True,
+            content_kind="screen",
+        )
     return ToolResult(
         success=False,
         status="sent",

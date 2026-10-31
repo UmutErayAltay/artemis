@@ -44,7 +44,9 @@ async def _speaking_controller(texts, **config):
 
 
 async def test_plain_speech_silences_output_without_running_it():
-    controller, events = await _speaking_controller(["bir saniye bekle", "hava nasıl"])
+    controller, events = await _speaking_controller(
+        ["bir saniye bekle", "hava nasıl"], followup_listening=True
+    )
     try:
         active = controller._active
         await controller._handle_utterance(_segment(controller.clock(), 0.4))
@@ -64,6 +66,22 @@ async def test_plain_speech_silences_output_without_running_it():
         # Sahte TTS bitmeden konuşur; komutun runner'a ulaşması yeterli, close turu iptal eder.
         await asyncio.wait_for(_until(lambda: len(controller.runner.commands) == 2), 1)
         assert controller.runner.commands == ["uzun anlat", "hava nasıl"]
+    finally:
+        await controller.close()
+
+
+async def test_barge_in_without_followup_option_only_stops_output():
+    controller, events = await _speaking_controller(["bir saniye bekle", "hava nasıl"])
+    try:
+        await controller._handle_utterance(_segment(controller.clock(), 0.4))
+        assert not controller._output_active
+        assert [e.reason for e in events if e.outcome == "interrupted"] == ["barge_in"]
+        assert not controller._awaiting_followup and controller._followup_until == 0.0
+        # Uyandırmasız sonraki söz yok sayılır.
+        await controller._handle_utterance(_segment(controller.clock(), 0.4))
+        await asyncio.sleep(0.01)
+        assert controller.runner.commands == ["uzun anlat"]
+        assert events[-1].reason == "no_wake"
     finally:
         await controller.close()
 

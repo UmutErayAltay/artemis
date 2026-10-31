@@ -49,6 +49,23 @@ Pet ekranın köşesinde durur ve Artemis'in o an ne yaptığını gösterir: ha
 düşünüyor ya da onayını bekliyor. Yanıtlar ve iş bitişleri kısa bir balonla görünür
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)).
 
+#### Pet seçimi
+
+Varsayılan görünüm depodaki çizilmiş küredir. **Ayarlar > Pet** sekmesinden Codex uyumlu
+sprite pet'ler de seçilir ([ADR 0048](docs/adr/0048-sprite-pets-quick-box-and-pet-creator.md)):
+klasörde `pet.json` (`id`, `displayName`, `description`, `spritesheetPath`) ve
+`spritesheet.webp` ya da `.png` (1536×1872 ya da 1536×2288, 8×9 hücre) bulunur. Pet'ler
+`state_dir/pets/<id>/` (Artemis'in) ve varsa `~/.codex/pets/` (`CODEX_HOME` ile değişir, salt
+okunur) altından listelenir. **Pet yükle…** bir klasörü ya da `.zip` dosyasını `state_dir/pets/`
+içine kurar; yalnız `pet.json` + tek görsel kabul edilir, boyut ve yol sınırları denetlenir.
+Silme yalnız Artemis'e yüklenen pet'lerde çalışır. Windows'ta "animasyon efektleri" kapalıysa
+ya da `ARTEMIS_REDUCE_MOTION=1` ise pet ilk kareyi gösterir.
+
+**Pet üret:** Ayarlar > Pet sekmesindeki sohbette bir model seçip "turuncu bir kedi" gibi yazarsın; ücretsiz bir metin modeli tek bir SVG karakter çizer, SVG beyaz listeyle temizlenir (script, href, style, olay öznitelikleri atılır), Artemis 9 durumluk Codex spritesheet'ini kendisi animasyonlar ve önizlemeyi gösterir. "daha mavi yap" gibi düzeltmelerden sonra **Kaydet ve seç** pet'i `state_dir/pets/` içine kurar. Çağrı `ProviderRouter` üzerinden gider; ücretli model seçersen uyarı çıkar, `allow_paid` ve bütçe geçerlidir. Resim modeliyle üretim sonraki pakettir (arayüzde "yakında").
+
+**Lisans:** Depoya hiçbir topluluk pet'i konmaz. İndirdiğin pet'lerin (galeri siteleri dahil)
+lisansı ve içeriği, bazıları marka karakteridir, senin sorumluluğundadır.
+
 Python 3.12 ortamında arayüzü kurup ücretsiz, ağsız demoyu açın:
 
 ```powershell
@@ -87,7 +104,7 @@ Tek başına **Artemis** dediğinizde yerel **Dinliyorum** yanıtı ve komut bek
 durumu gelir. Ayarlar'daki mikrofon seviyesi ve **Son duyulan** göstergesi, sesin
 girdiğini ve nasıl tanındığını gösterir; ayrı ses kaydı tutulmaz.
 Tepsi menüsündeki **Peti göster/gizle** köşede duran animasyonlu masaüstü petini açar;
-pete tıklamak sesi açıp kapatır, kod ajanı bitince pet balonu ve bildirim gösterilir
+pete bir kez tıklamak altında hızlı yazma kutusu açar, iki tık sesi açıp kapatır, üç tık menüyü açar, kod ajanı bitince pet balonu ve bildirim gösterilir
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). Pet kendi komut veya onay
 yolu taşımaz.
 Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.
@@ -137,6 +154,20 @@ kurulum: [ses rehberi](docs/VOICE_SETUP.md)).
 İsteğe bağlı **yankı engelleme**, Artemis'in hoparlörden çalan kendi sesinin mikrofon
 yolunda oluşturduğu yankıyı azaltır; işlem yereldir ve varsayılan kapalıdır
 ([ADR 0038](docs/adr/0038-echo-cancellation.md)).
+### Canlı yazı (isteğe bağlı) — Powered by mihu
+
+Varsayılan kapalı. `voice.live_transcript: true` ya da panelde "Canlı yazı (konuşurken)" ile
+konuşurken pet balonunda metin kelime kelime akar. **Yalnız gösterimdir**: komut hâlâ
+large-v3 sonucundan çıkar, canlı metin uyandırma/yankı/söz kesme kararına girmez
+([ADR 0047](docs/adr/0047-live-transcript.md)). Yerelde, işlemcide çalışır; ses makineden çıkmaz.
+Kurulum: `pip install -e ".[stream]"` ve config'te `live_transcript_model` /
+`live_transcript_revision` (örnek: `config/config.example.yaml`).
+
+Model [mihu turkish-stt-66m-v2](https://huggingface.co/mihuai/turkish-stt-66m-v2) olup
+**mihu Community License v1.0** ile lisanslıdır; **Powered by mihu**. Ağırlıklar bu depoda yoktur,
+özelliği açınca sabit revision'dan indirilir; lisans şartları (ticari kullanımda gelir sınırı, rakip
+model eğitimi yasağı) açan kişiye aittir. Ayrıntı: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
 Ortak ses ölçümünün ilk adımı ([ADR 0041](docs/adr/0041-common-voice-telemetry.md)):

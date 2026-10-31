@@ -88,6 +88,18 @@ seçip `voice.edge_voice` alanına yazın; `voice.tts_backend: edge`, FFmpeg yol
 `voice.allow_cloud_tts_text: true` gerekir. Bu ayar yanıt metninin dış servise
 gönderilmesine izin verir.
 
+### Canlı yazı (isteğe bağlı, ADR 0047) — Powered by mihu
+
+```powershell
+python -m pip install -e ".[stream]"   # sherpa-onnx + huggingface-hub
+```
+
+`config.yaml` içinde `voice.live_transcript: true` ile birlikte `live_transcript_model` ve
+`live_transcript_revision` değerlerini `config/config.example.yaml`'daki örnekten alın. Ağırlıklar
+ilk açılışta bu **sabit revision**'dan indirilir (model kimliği koda gömülü değildir); sonra
+önbellekten çalışır. Kurulum eksikse ses sürer, panel nedenini yazar. Model mihu Community
+License v1.0 altındadır: şartlar için [THIRD_PARTY_NOTICES.md](../THIRD_PARTY_NOTICES.md).
+
 ## Gürültü engelleme (isteğe bağlı, ADR 0037)
 
 DeepFilterNet3, işlemcide çalışır (ekran kartı gerekmez) ve mikrofon sesini STT/VAD'a
@@ -149,6 +161,9 @@ ham ses olduğu gibi iletilir ve sohbette `echo:off` durumu gösterilir. Hoparl�
 çıkışını referansa beslerken oluşan hata oynatma akışını kesmez.
 
 ## Gizlilik ve kullanım
+
+Canlı yazı açıkken ses yine makineden çıkmaz: model yerelde, işlemcide çalışır; yalnız ilk
+açılışta model dosyaları indirilir (ses gönderilmez).
 
 Uyandırma sözcüğü **artemis**. Ham mikrofon kaydı diske yazılmaz. Mikrofon yalnız
 ses komutu açıkken kullanılır; kendiliğinden başlangıçta açılmaz. STT kısmi
@@ -247,6 +262,9 @@ değerlendirin. Yanlış uyanma veya yanlış onay sayısı elle etiketlenmediys
 - [Türkçe Piper model dosyaları](https://huggingface.co/rhasspy/piper-voices/tree/main/tr/tr_TR/dfki/medium)
 - [Edge TTS](https://github.com/rany2/edge-tts)
 - [WebRTC VAD wheels](https://github.com/daanzu/py-webrtcvad-wheels)
+- [mihu turkish-stt-66m-v2](https://huggingface.co/mihuai/turkish-stt-66m-v2) ve
+  [mihu Community License v1.0](https://huggingface.co/mihuai/turkish-stt-66m-v2/blob/main/LICENSE)
+- [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx)
 
 PyPI sürümleri hazırlık sırasında doğrulandı: faster-whisper 1.2.1,
 sounddevice 0.5.6, edge-tts 7.3.0, piper-tts 1.8.0,

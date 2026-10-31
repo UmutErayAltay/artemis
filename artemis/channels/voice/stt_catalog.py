@@ -53,14 +53,14 @@ CATALOG: tuple[WhisperChoice, ...] = (
         "Large v3 Turbo",
         1620,
         2500,
-        "Large v3'e yakın doğruluk, birkaç kat hızlı. Önerilen.",
+        "Hızlı, ama gerçek konuşmada large-v3'ten belirgin zayıf (ADR 0045).",
     ),
     WhisperChoice(
         "large-v3",
         "Large v3",
         3100,
         4500,
-        "En doğru, turbodan belirgin yavaş.",
+        "En doğru; int8_float16 ile ~2,5 GB bellek yeter. Önerilen.",
     ),
 )
 
@@ -69,9 +69,10 @@ _CATALOG_NAMES = frozenset(choice.name for choice in CATALOG)
 
 def recommended(vram_mb: int | None) -> str:
     """GPU belleğine göre etkileşimli asistan için varsayılan modeli seçer."""
-    if vram_mb is None or vram_mb < 2500:
+    # Eşik 3000 MB: large-v3 int8_float16 ile ~2,5 GB tutar, payı bırakır (ADR 0046).
+    if vram_mb is None or vram_mb < 3000:
         return "small"
-    return "large-v3-turbo"
+    return "large-v3"
 
 
 def gpu_memory_mb() -> int | None:
