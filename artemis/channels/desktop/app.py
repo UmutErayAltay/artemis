@@ -115,6 +115,8 @@ _VOICE_TONES = {
 _STEP_TONES = {"ok": "success", "sent": "warning", "fail": "error", "denied": "error"}
 # Sohbet sütunu bu genişliği aşmaz; okunaklı satır uzunluğu için.
 _CHAT_MAX_WIDTH = 680
+# Balon sütununun iki yandaki eşit iç boşluğu (kaydırıcı ile balon arasındaki pay dahil).
+_BUBBLE_GUTTER = 8
 # Bu pencere genişliğinin altında adım paneli gizlenir, üst çubuk daralır.
 _STEP_PANEL_MIN_WINDOW = 1100
 _COMPACT_HEADER_WINDOW = 1000
@@ -534,7 +536,9 @@ class ChatTranscript(QWidget):
         self.content.setObjectName("flat")
         self.content.setMaximumWidth(_CHAT_MAX_WIDTH)
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(0, 0, 8, 0)
+        # Kenar boşluğu iki yanda eşit: yalnız sağda olsaydı balonlar yazma alanına göre sola
+        # kayık görünürdü (sağ sütun açıkken sohbet alanı dar olduğundan en çok o zaman).
+        self.content_layout.setContentsMargins(_BUBBLE_GUTTER, 0, _BUBBLE_GUTTER, 0)
         self.content_layout.setSpacing(16)
         self.content_layout.addStretch(1)
         self._scroll_area.setWidget(self.content)
@@ -656,7 +660,7 @@ class ChatTranscript(QWidget):
 
     def _resize_bubble(self, bubble: QFrame, speaker: str, text: str) -> None:
         available = max(200, self.width() - 28)
-        max_width = min(_CHAT_MAX_WIDTH - 8, available)
+        max_width = min(_CHAT_MAX_WIDTH - 2 * _BUBBLE_GUTTER, available)
         if not _is_user_speaker(speaker):
             # Artemis yanıtı tema/yazı tipine bağlı olmadan pet yüzünden kalan sütunu kullanır.
             bubble.setFixedWidth(max_width - _AVATAR_INDENT)

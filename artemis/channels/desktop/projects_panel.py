@@ -606,10 +606,12 @@ class ProjectsPanel(QWidget):
         self.mode_combo.setAccessibleName("Çalışma kipi")
         for label, value in MODE_LABELS:
             self.mode_combo.addItem(label, value)
-        # Üç seçici 1280x850'de (~1000px sayfa) tek satıra sığmalı: seçilen metin kısalmasın diye
-        # ajan ve kip daha uzun, klasör düğmesi kısa ("Ekle…").
+        # Üç seçici 1280x850'de (~1000px sayfa) tek satıra sığmalı ve en uzun seçenek metni
+        # ("Görünür pencerede", "Proje klasörü") kırpılmadan okunmalı. Karakter sayıları metinden
+        # birkaç harf bol: 'x' ortalama harften geniştir, açılır ok ve dolgu da payı yer.
+        # Kullanıcının eklediği uzun klasör adı yine de yalnız kendi satırında "…" ile kısalır.
         fit = QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        sizes = ((self.agent_combo, 14), (self.mode_combo, 12), (self.workdir_combo, 6))
+        sizes = ((self.agent_combo, 9), (self.mode_combo, 13), (self.workdir_combo, 9))
         for combo, chars in sizes:
             combo.setSizeAdjustPolicy(fit)
             combo.setMinimumContentsLength(chars)

@@ -13,10 +13,17 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QColor
+from PySide6.QtCore import QPoint, Qt
+from PySide6.QtGui import QColor, QFontDatabase
 from PySide6.QtTest import QTest
-from PySide6.QtWidgets import QApplication, QLabel
+from PySide6.QtWidgets import (
+    QApplication,
+    QComboBox,
+    QLabel,
+    QScrollArea,
+    QStyle,
+    QStyleOptionComboBox,
+)
 
 from artemis.channels.desktop.app import (
     ChatTranscript,
@@ -312,3 +319,104 @@ def test_messages_use_bubbles_and_pet_avatar(window: DesktopWindow) -> None:
     assert len(faces) == 1 and faces[0].width() == 28
     assert window.chat.content.maximumWidth() == 680
     assert window.chat._bubbles[-1][0].width() <= 680
+
+
+def _gaps(window: DesktopWindow) -> tuple[int, int, int, int]:
+    """Yazma alanının ve balon sütununun sohbet alanındaki (sol, sağ) boşlukları."""
+    area = window.chat
+    composer = window.prompt.parentWidget()
+    assert composer is not None
+    # Yazma alanı sohbetin kardeşidir (alt öğesi değil): ortak ata olan sayfaya göre ölçülür.
+    page = window.chat_page
+    left = composer.mapTo(page, QPoint(0, 0)).x() - area.mapTo(page, QPoint(0, 0)).x()
+    right = area.width() - left - composer.width()
+    viewport = area._scroll_area.viewport()
+    content_left = area.content.mapTo(viewport, QPoint(0, 0)).x()
+    content_right = viewport.width() - content_left - area.content.width()
+    return left, right, content_left, content_right
+
+
+def test_chat_column_centred_with_and_without_operations_column(
+    app: QApplication, window: DesktopWindow
+) -> None:
+    """Sohbet sütunu kendi alanında hem sağ sütun gizliyken hem açıkken ortalanır."""
+    window.resize(1280, 850)
+    _wait(app, lambda: window.chat.width() == 1008)  # yerleşim oturdu (kenar çubuğu+boşluklar)
+    window.chat.append("Siz", "selam")
+    window.chat.append("Artemis", "yanıt")
+    _wait(app, lambda: window.chat.content.width() > 0)
+    assert window.activity_panel.isHidden()  # işlem yok: sağ sütun çöker
+    hidden = _gaps(window)
+    assert hidden[0] > 100  # geniş alanda gerçekten ortalanıyor, kenara yapışmıyor
+
+    _card_events(window, "m1")
+    _wait(app, lambda: window.activity_panel.isVisible())
+    app.processEvents()
+    shown = _gaps(window)
+    assert window.chat.width() < 1008  # sağ sütun alanı daralttı
+    for left, right, content_left, content_right in (hidden, shown):
+        assert abs(left - right) <= 1, (left, right)
+        # Kaydırıcı görünürse görünüm alanı ~10px daralır; o pay dışında sütun ortada.
+        assert abs(content_left - content_right) <= 6, (content_left, content_right)
+    # Balon satırları sütunun iki yanından eşit içeride durur; yalnız sağda boşluk olsaydı
+    # balonlar yazma alanına göre sola kayardı.
+    row = window.chat.content_layout.itemAt(0).widget()
+    assert row is not None
+    left_gap = row.x()
+    right_gap = window.chat.content.width() - row.x() - row.width()
+    assert left_gap == right_gap and left_gap > 0
+
+
+def _text_room(combo: QComboBox) -> tuple[int, int]:
+    """(metin alanı genişliği, en uzun seçenek metni): ilki küçükse metin kırpılır."""
+    option = QStyleOptionComboBox()
+    combo.initStyleOption(option)
+    field = combo.style().subControlRect(
+        QStyle.ComplexControl.CC_ComboBox, option,
+        QStyle.SubControl.SC_ComboBoxEditField, combo,
+    )
+    metrics = combo.fontMetrics()
+    # Seçilebilir seçenekler ölçülür; pasif "Codex (bulunamadı)" yalnız ipucu satırıdır ve satırı
+    # genişletmez (1280px kartta üç seçici + "Ekle…" ancak bu payla sığar).
+    widest = max(
+        metrics.horizontalAdvance(combo.itemText(i))
+        for i in range(combo.count())
+        if combo.model().flags(combo.model().index(i, 0)) & Qt.ItemFlag.ItemIsEnabled
+    )
+    return field.width(), widest
+
+
+@pytest.fixture
+def segoe_ui(app: QApplication) -> Any:
+    """Offscreen ortamda yazı tipi yoktur ve sentetik ölçüler gerçek pencereyi yansıtmaz.
+
+    Tema yazı tipi Segoe UI'dır; genişlik denetimi ancak o yüklüyken anlamlıdır.
+    """
+    path = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "Fonts" / "segoeui.ttf"
+    font_id = QFontDatabase.addApplicationFont(str(path)) if path.is_file() else -1
+    if font_id < 0:
+        pytest.skip("Segoe UI yazı tipi yok; genişlik ölçümü anlamsız")
+    yield
+    QFontDatabase.removeApplicationFont(font_id)
+
+
+@pytest.mark.parametrize("width", [1280, 900])
+def test_projects_agent_row_combos_show_full_option_texts(
+    app: QApplication, segoe_ui: None, window: DesktopWindow, width: int
+) -> None:
+    """"Proje klasörü" ve "Görünür pencerede" üç seçicide de kırpılmadan okunur."""
+    window.resize(width, 850)
+    window.tabs.setCurrentWidget(window.projects_page)
+    _wait(app, lambda: window.projects_panel.isVisible())
+    app.processEvents()
+    panel = window.projects_panel
+    assert panel.workdir_combo.itemText(0) == "Proje klasörü"
+    assert panel.mode_combo.count() >= 2
+    for combo in (panel.agent_combo, panel.mode_combo, panel.workdir_combo):
+        room, widest = _text_room(combo)
+        assert room >= widest, (combo.accessibleName(), room, widest)
+    # Satırın sığdığı ölçülür: "Ekle…" düğmesi kaydırma görünümünün içinde kalır.
+    viewport = window.projects_page.findChild(QScrollArea).viewport()
+    button = panel.add_folder_button
+    right = button.mapTo(viewport, QPoint(0, 0)).x() + button.width()
+    assert right <= viewport.width()
