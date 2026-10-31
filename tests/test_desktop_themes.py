@@ -53,6 +53,7 @@ def test_stylesheet_builds_without_qt_warnings_for_all_themes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Qt ayrıştırma hatalarını (Could not parse stylesheet) qWarning olarak yazar."""
+    pytest.importorskip("PySide6")  # CI'nin `checks` işi masaüstü ekini kurmaz
     monkeypatch.setenv("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtCore import qInstallMessageHandler
     from PySide6.QtWidgets import QApplication, QFrame, QLabel, QPushButton

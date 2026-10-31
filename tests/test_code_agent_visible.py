@@ -86,6 +86,8 @@ def agent_script(out: Path, *, code: int = 0, before: str = "", sleep: float = 0
     """Sahte etkileşimli ajan: yönergedeki istem dosyasını kopyalar, argv'yi yazar, çıkar."""
     return (
         "import sys, re, pathlib, subprocess, time\n"
+        # CI'nin Windows koşucusu cp1252 kullanır; Türkçe harf yazmak süreci sıfır dışı bitirirdi.
+        "sys.stdout.reconfigure(encoding='utf-8', errors='replace')\n"
         f"out = pathlib.Path({str(out)!r})\n"
         "out.with_suffix('.argv').write_text('\\n'.join(sys.argv[1:]), encoding='utf-8')\n"
         "m = re.search(r'Read (.*?) and carry out', ' '.join(sys.argv[1:]))\n"

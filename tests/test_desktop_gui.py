@@ -60,6 +60,13 @@ def _window(app: QApplication, tmp_path: Path) -> DesktopWindow:
     return window
 
 
+def _card_at(window: Any, index: int) -> Any:
+    """İşlem kartı widget'ı; Qt'nin Optional dönüşünü testte daraltır."""
+    item = window.activity_cards.itemAt(index)
+    assert item is not None
+    return item.widget()
+
+
 def _close_cleanly(app: QApplication, window: DesktopWindow) -> None:
     if not window.bridge.stopped:
         window._request_exit()
@@ -195,7 +202,9 @@ def test_overlay_status_labels_are_separated(app: QApplication, tmp_path: Path) 
         app.processEvents()
         dividers = [w for w in window.overlay.findChildren(QLabel) if w.text() == "·"]
         assert len(dividers) == 1
-        x = lambda w: w.mapTo(window.overlay, w.rect().topLeft()).x()  # noqa: E731
+        def x(widget: QWidget) -> int:
+            return widget.mapTo(window.overlay, widget.rect().topLeft()).x()
+
         assert x(window.overlay.voice_state) < x(dividers[0]) < x(window.overlay.status)
     finally:
         _close_cleanly(app, window)
@@ -459,8 +468,8 @@ def test_live_text_goes_to_pet_and_final_overwrites(
     try:
         heard: list[str] = []
         live: list[str] = []
-        window.pet.heard = heard.append  # type: ignore[method-assign]
-        window.pet.live = live.append  # type: ignore[method-assign]
+        window.pet.heard = heard.append  # type: ignore[method-assign, assignment]
+        window.pet.live = live.append  # type: ignore[method-assign, assignment]
         before = window.settings_panel.last_heard.text()
         window._handle_event(State("voice_live", "merhaba dün"))
         assert live == ["merhaba dün"]
@@ -480,7 +489,11 @@ def test_pet_quick_box_forwards_to_submit_text(
     window = _window(app, tmp_path)
     try:
         sent: list[str] = []
-        monkeypatch.setattr(window, "_submit_text", lambda text: sent.append(text) or True)
+        def fake_submit(text: str) -> bool:
+            sent.append(text)
+            return True
+
+        monkeypatch.setattr(window, "_submit_text", fake_submit)
         window.pet._quick.open()
         window.pet._quick.input.setText("selam")
         window.pet._quick.send()
@@ -614,7 +627,11 @@ def test_settings_apply_during_active_turn_defers_rebuild_and_keeps_turn(
     window, path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
     events: list[Any] = []
     original = window._handle_event
-    monkeypatch.setattr(window, "_handle_event", lambda e: (events.append(e), original(e))[1])
+    def record(event: Any) -> Any:
+        events.append(event)
+        return original(event)
+
+    monkeypatch.setattr(window, "_handle_event", record)
     first_bridge = window.bridge
     try:
         assert window._submit_text("merhaba")
@@ -1199,7 +1216,8 @@ def test_approval_splits_warning_and_tool_note_into_separate_paragraphs(
     assert dialog.tool_note_label.text() == "Bellek kaydı yazar."
     # Ham ad başlık altında değil, kapalı teknik ayrıntılardadır; varsayılan cevap Hayır kalır.
     assert dialog.raw_name.isHidden() and dialog.no_button.isDefault()
-    assert dialog.findChild(QLabel, "title").text() == "Demo yazma"
+    title = dialog.findChild(QLabel, "title")
+    assert title is not None and title.text() == "Demo yazma"
     dialog._choose(False)
 
 
@@ -1287,7 +1305,7 @@ def test_message_operation_cards_group_per_request_and_theme_safe(
                 Activity(request, "t-" + request, 4, "turn_end", {"stop_reason": "completed"})
             )
         app.processEvents()
-        cards = [window.activity_cards.itemAt(i).widget() for i in range(2)]
+        cards = [_card_at(window, i) for i in range(2)]
         titles = [c.findChild(QLabel, "opTitle").text() for c in cards]
         assert titles == ["ikinci", "ilk <b>mesaj</b>"]
         assert cards[0].findChild(QLabel, "opChip").text() == "Doğrulanamadı"
@@ -1300,7 +1318,7 @@ def test_message_operation_cards_group_per_request_and_theme_safe(
         # Tema değişimi kartları yeniden boyar ama genişleme tercihini korur.
         window._apply_theme("dark")
         window._apply_theme("light")
-        again = window.activity_cards.itemAt(0).widget()
+        again = _card_at(window, 0)
         assert not again.details.isHidden()
     finally:
         _close_cleanly(app, window)
