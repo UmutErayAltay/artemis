@@ -132,6 +132,8 @@ class VoiceConfig(BaseModel):
     stt_mode: Literal["local", "hybrid"] = "local"
     stt_cloud_endpoint: str = ""
     stt_cloud_model: str = ""
+    # ADR 0050: xAI'nin STT REST ucu OpenAI uyumlu değildir (/stt, model alanı yok).
+    stt_cloud_protocol: Literal["openai", "xai"] = "openai"
     # ADR 0047: konuşurken akan YALNIZ GÖSTERİM metni (yerel, `pip install .[stream]`).
     # Model kimliği koda gömülmez; açıkken depo ve sabit revision config'ten gelir.
     live_transcript: bool = False
@@ -649,11 +651,12 @@ class Settings(BaseModel):
             raise ValueError("Modelin endpoint değeri endpoints içinde tanımlanmalı")
         voice = self.voice
         if voice.stt_mode == "hybrid" and (
-            voice.stt_cloud_endpoint not in self.endpoints or not voice.stt_cloud_model.strip()
+            voice.stt_cloud_endpoint not in self.endpoints
+            or (voice.stt_cloud_protocol == "openai" and not voice.stt_cloud_model.strip())
         ):
             raise ValueError(
                 "Karma tanıma için stt_cloud_endpoint endpoints içinde tanımlı ve "
-                "stt_cloud_model dolu olmalı"
+                "stt_cloud_model dolu olmalı (xai protokolünde model gerekmez)"
             )
         if any(name not in self.applications for name in self.close_without_confirmation):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")

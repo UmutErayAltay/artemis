@@ -23,7 +23,9 @@ def config(tmp_path: Path, *, local: bool = True, cloud: bool = False) -> Path:
         "models": {"first": {"provider": "openrouter", "model": "first-model",
                              "input_per_million": "0", "output_per_million": "0"}},
         # Karma tanıma kutusu açılınca doğrulama uç + model ister (ADR 0046).
-        **({"endpoints": {"bulut": {"base_url": "https://api.example.com/v1"}}} if cloud else {}),
+        **({"endpoints": {"bulut": {"base_url": "https://api.example.com/v1"},
+                          "bulut2": {"base_url": "https://api2.example.com/v1"}}}
+           if cloud else {}),
         "voice": {"stt_device": "cpu", "stt_model": "models/whisper",
                   **({"stt_cloud_endpoint": "bulut", "stt_cloud_model": "whisper-x"}
                      if cloud else {})},
@@ -365,7 +367,11 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
     defaults = first.values()
     assert set(defaults) == {binding.path for binding in PANEL_BINDINGS}
     for binding in PANEL_BINDINGS:
-        _flip(getattr(first, binding.widget))
+        widget = getattr(first, binding.widget)
+        if binding.widget == "cloud_server":  # "Seçilmedi" karma kipte geçersiz olurdu
+            widget.setCurrentIndex(widget.count() - 1)
+        else:
+            _flip(widget)
     chosen = first.values()
     changed = {key for key in chosen if chosen[key] != defaults[key]}
     assert changed == set(chosen), "her bağ varsayılandan farklı bir değerle denenmeli"
@@ -428,7 +434,8 @@ def test_hybrid_stt_checkboxes_round_trip_and_hint(tmp_path: Path) -> None:
     assert panel.cloud_stt_hint.text() == ""
     panel.hybrid_stt.setChecked(True)
     assert "kesintisiz kipte her söz gider" in panel.cloud_stt_hint.text()
-    assert "voice.stt_cloud_endpoint" in panel.cloud_stt_hint.text()
+    assert "Model sağlayıcıları" in panel.cloud_stt_hint.text()
+    assert "Grok" not in panel.cloud_stt_hint.text()
     save_choices(path, None, values=panel.values())
     saved = load_settings(path).voice
     assert saved.stt_mode == "hybrid"
@@ -441,10 +448,50 @@ def test_hybrid_without_endpoint_warns_and_save_is_rejected(tmp_path: Path) -> N
     _set_voice(path, stt_cloud_endpoint="", stt_cloud_model="")
     panel = _panel(path)
     panel.hybrid_stt.setChecked(True)
-    assert "config'te" in panel.cloud_stt_hint.text()
+    assert panel.cloud_server.currentData() == ""
     with pytest.raises(ValueError):
         save_choices(path, None, values=panel.values())
     assert load_settings(path).voice.stt_mode == "local"
+    panel.deleteLater()
+
+
+def test_cloud_stt_controls_visibility_server_list_and_xai_preselect(tmp_path: Path) -> None:
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"]["xai"] = {"base_url": "https://api.x.ai/v1"}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    panel = _panel(path)
+    panel.show()
+    assert not panel.cloud_box.isVisible()
+    panel.hybrid_stt.setChecked(True)
+    assert panel.cloud_box.isVisible()
+    servers = [panel.cloud_server.itemData(i) for i in range(panel.cloud_server.count())]
+    assert servers == ["", "bulut", "bulut2", "xai"]
+    assert panel.cloud_server.itemText(0) == "Seçilmedi"
+    assert panel.cloud_model.isEnabled()
+    panel.cloud_server.setCurrentIndex(servers.index("xai"))
+    panel.cloud_server.activated.emit(servers.index("xai"))
+    assert panel.cloud_protocol.currentData() == "xai"
+    assert not panel.cloud_model.isEnabled()
+    assert "Türkçeyi resmi olarak doğrulamıyor" in panel.cloud_stt_hint.text()
+    values = panel.values()
+    assert values[("voice", "stt_cloud_endpoint")] == "xai"
+    assert values[("voice", "stt_cloud_protocol")] == "xai"
+    values[("voice", "stt_cloud_model")] = ""
+    save_choices(path, None, values=values)  # xai: model boş olabilir
+    voice = load_settings(path).voice
+    assert (voice.stt_cloud_endpoint, voice.stt_cloud_protocol) == ("xai", "xai")
+    panel.deleteLater()
+
+
+def test_cloud_server_list_reloads_when_providers_change(tmp_path: Path) -> None:
+    path = config(tmp_path, cloud=True)
+    panel = _panel(path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"]["yeni"] = {"base_url": "https://y.example.com/v1"}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    panel.providers.changed.emit()
+    assert panel.cloud_server.findData("yeni") >= 0
     panel.deleteLater()
 
 

@@ -61,6 +61,17 @@ def test_preset_fills_fields(app: QApplication, tmp_path: Path) -> None:
     assert not section.needs_key.isChecked()
 
 
+def test_xai_preset_passes_endpoint_rules(app: QApplication, tmp_path: Path) -> None:
+    path = config(tmp_path)
+    section = ProviderSection(path)
+    section.preset.setCurrentIndex([p[0] for p in PRESETS].index("xAI (Grok)"))
+    section._apply_preset()
+    assert (section.endpoint_id.text(), section.base_url.text()) == ("xai", "https://api.x.ai/v1")
+    assert section.needs_key.isChecked()
+    section._save()
+    assert load_settings(path).endpoints["xai"].base_url == "https://api.x.ai/v1"
+
+
 def test_invalid_id_and_url_are_rejected(app: QApplication, tmp_path: Path) -> None:
     path = config(tmp_path)
     before = path.read_bytes()

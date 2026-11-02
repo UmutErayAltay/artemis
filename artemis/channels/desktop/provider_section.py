@@ -54,6 +54,7 @@ PRESETS: tuple[tuple[str, str, str, bool], ...] = (
     ("DeepSeek", "deepseek", "https://api.deepseek.com/v1", True),
     ("Z.ai GLM", "zai", "https://api.z.ai/api/paas/v4", True),
     ("Groq", "groq", "https://api.groq.com/openai/v1", True),
+    ("xAI (Grok)", "xai", "https://api.x.ai/v1", True),
     ("Mistral", "mistral", "https://api.mistral.ai/v1", True),
     ("LM Studio", "lmstudio", "http://127.0.0.1:1234/v1", False),
     ("Ollama", "ollama", "http://127.0.0.1:11434/v1", False),
