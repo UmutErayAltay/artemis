@@ -16,8 +16,9 @@ from typing import Any
 
 import httpx
 
-from artemis.config.settings import Settings
+from artemis.config.settings import Settings, TelegramConfig
 from artemis.safety.audit import AuditLog
+from artemis.tools.credentials import read_secret
 
 # httpx her isteği INFO seviyesinde `HTTP Request: POST https://.../bot<TOKEN>/...` diye
 # yazar; kök logger'a INFO açan herhangi bir uygulama token'ı log dosyasına düşürürdü.
@@ -37,6 +38,8 @@ logging.getLogger("httpx").addFilter(_DropTokenUrlRecords())
 # Telegram sendMessage sert sınırı. Uzun metni sessizce kesmek onay mesajında tehlikelidir,
 # bu yüzden aşan metin ağa çıkmadan ValueError verir; ne yapılacağına çağıran karar verir.
 TELEGRAM_TEXT_LIMIT = 4096
+# Ayarlar > Telegram panelinin yazdığı Windows Kimlik Bilgisi Yöneticisi kaydı (ADR 0051).
+TOKEN_TARGET = "Artemis/telegram"
 
 
 class TelegramError(RuntimeError):
@@ -125,6 +128,28 @@ class TelegramClient:
             raise
         return result
 
+    def get_me(self) -> str:
+        """Token'ı doğrular ve bot kullanıcı adını döner; hata mesajı token/URL taşımaz."""
+        error_type = ""
+        try:
+            result = self._call("getMe", {}, self._timeout)
+            username = result.get("username") if isinstance(result, dict) else None
+            if not isinstance(username, str) or not username:
+                raise TelegramError(
+                    "Telegram getMe başarısız (kullanıcı adı yok)", error_type="BadResult"
+                )
+        except TelegramError as error:
+            error_type = error.error_type
+            raise
+        finally:
+            fields: dict[str, Any] = {"ok": True} if not error_type else {
+                "ok": False, "error_type": error_type,
+            }
+            self._audit.emit(
+                "telegram_out", method="getMe", kind="probe", chat_id=None, text="", **fields
+            )
+        return username
+
     def _outbound(
         self,
         method: str,
@@ -210,6 +235,22 @@ class TelegramClient:
         self._outbound("answerCallbackQuery", payload, kind=kind, chat_id=None, text=text)
 
 
+def stored_telegram_token() -> str | None:
+    """Panelin kimlik kasasına yazdığı token; yoksa (ya da Windows dışında) None."""
+    return (read_secret(TOKEN_TARGET) or "").strip() or None
+
+
+def resolve_telegram_token(
+    config: TelegramConfig, env: Mapping[str, str] | None = None
+) -> str | None:
+    """Önce `token_env` ortam değişkeni, sonra kasa. Kasaya yalnız `env is None` iken (üretim
+    yolu) bakılır: testin enjekte ettiği `env` tek kaynaktır, gerçek kasa okunmaz."""
+    token = (os.environ if env is None else env).get(config.token_env, "").strip()
+    if token or env is not None:
+        return token or None
+    return stored_telegram_token()
+
+
 def build_telegram_client(
     settings: Settings,
     audit: AuditLog,
@@ -220,8 +261,7 @@ def build_telegram_client(
     config = settings.telegram
     if config.chat_id is None:
         return None
-    source = os.environ if env is None else env
-    token = source.get(config.token_env, "").strip()
+    token = resolve_telegram_token(config, env)
     if not token:
         return None
     return TelegramClient(

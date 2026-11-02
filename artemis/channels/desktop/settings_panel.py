@@ -53,6 +53,7 @@ from artemis.channels.desktop.provider_section import (
     meta_label,
     store_endpoint_key,
 )
+from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import (
@@ -769,6 +770,14 @@ class SettingsPanel(QWidget):
         self.providers.changed.connect(self._load_cloud_servers)
         model_page.addWidget(self.providers)
         model_page.addStretch(1)
+
+        telegram_page = page(
+            "Telegram",
+            "Bot token'ı ve sohbet eşleştirme. Değişiklikler hemen kaydedilir; Uygula gerekmez.",
+        )
+        self.telegram = TelegramSection(config_path, demo=demo)
+        telegram_page.addWidget(self.telegram)
+        telegram_page.addStretch(1)
 
         apps = page(
             "Uygulamalar",
@@ -1567,3 +1576,4 @@ class SettingsPanel(QWidget):
         # Model listesi isteği (en çok 5 sn zaman aşımı) çalışırken panel yıkılmasın.
         if self._cloud_fetch is not None and self._cloud_fetch.isRunning():
             self._cloud_fetch.wait(6000)
+        self.telegram.finish()

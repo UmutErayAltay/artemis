@@ -203,7 +203,7 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
-    assert panel.section_names() == ["Ses", "Model", "Uygulamalar", "GitHub", "Görünüm"]
+    assert panel.section_names() == ["Ses", "Model", "Telegram", "Uygulamalar", "GitHub", "Görünüm"]
     assert panel.sections.objectName() == "sectionList"
     assert panel.sections.currentRow() == 0
     # Tek kaydırma bölgesi: sayfa başına ikinci kaydırıcı yok.

@@ -1537,6 +1537,7 @@ class DesktopWindow(QMainWindow):
         self.settings_panel.computer_auto.toggled.connect(self._toggle_auto_mode)
         self.settings_panel.github_synced.connect(self._github_synced)
         self.settings_panel.providers.changed.connect(self._providers_changed)
+        self.settings_panel.telegram.changed.connect(self._telegram_changed)
         self.settings_panel.pet.skin_selected.connect(self._select_skin)
         self.settings_panel.pet.model_settings_requested.connect(self._open_model_settings)
         self.settings_scroll = self.settings_panel
@@ -1631,6 +1632,14 @@ class DesktopWindow(QMainWindow):
             )
             return
         self._request_restart(self.settings_panel.providers.status)
+
+    def _telegram_changed(self) -> None:
+        """chat_id/token değişti: proaktif Telegram teslimi yeniden kurulumla yeni durumu görür."""
+        status = self.settings_panel.telegram.message
+        if self._exiting or self._demo:
+            status.setText("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
+            return
+        self._request_restart(status)
 
     def _code_agent_config_saved(self) -> None:
         """Projeler'den yazılan ajan/klasör ayarı çalışma zamanına yeniden kurulumla ulaşır.

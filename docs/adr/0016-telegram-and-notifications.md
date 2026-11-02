@@ -56,3 +56,6 @@ okunur, toast betiği sabit tutulur ve metin ortam değişkeniyle verilir.
 - Gizli içerikli turların yanıtı Telegram'da görünmez.
 - Gerçek bot ve toast davranışı yalnız kullanıcının Windows makinesinde doğrulanır; testler
   yalnız loopback sahte Telegram sunucusu ve sahte PowerShell çalıştırıcısı kullanır.
+
+Ek (ADR 0051): token ortam değişkeninin yanında Windows kimlik kasasından (`Artemis/telegram`) da
+okunabilir; Ayarlar > Telegram paneli onu oraya yazar.

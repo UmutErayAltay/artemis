@@ -149,6 +149,8 @@ voice:
 # reddeder). Token yalnız ortam değişkeninden okunur; adını token_env belirler ve
 # _TOKEN ile bitmek zorundadır (denetim kaydı değeri bu sayede gizler).
 #   Windows: setx ARTEMIS_TELEGRAM_BOT_TOKEN "<BotFather'dan aldığınız token>"
+# KOLAY YOL: Ayarlar > Telegram paneli token'ı kimlik kasasına (Artemis/telegram) yazar, sohbeti
+# kodla eşleştirip `chat_id`'yi bu dosyaya kendisi ekler (ADR 0051). Ortam değişkeni önceliklidir.
 # Chat id'nizi @userinfobot'tan ya da bota mesaj yazdıktan sonra
 # https://api.telegram.org/bot<TOKEN>/getUpdates çıktısındaki message.chat.id'den bulun.
 # Yalnız bu kimliğe sahip ÖZEL sohbetten gelen mesaj çalıştırılır; grup, başka kullanıcı,

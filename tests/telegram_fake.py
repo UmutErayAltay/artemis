@@ -231,6 +231,9 @@ class FakeTelegram:
                 if failure.once:
                     del self._failures[method]
                 return failure.status, failure.payload
+            if method == "getMe":
+                bot = {"id": 1, "is_bot": True, "username": "test_bot"}
+                return 200, {"ok": True, "result": bot}
             if method == "getUpdates":
                 return 200, {"ok": True, "result": self._poll(body.get("offset"))}
             if method == "sendMessage":
