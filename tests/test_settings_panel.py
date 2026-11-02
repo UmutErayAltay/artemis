@@ -9,8 +9,23 @@ import yaml
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from artemis.brain import providers
+from artemis.channels.desktop import provider_section as section_module
 from artemis.channels.desktop.settings_panel import microphone_choices, save_choices
 from artemis.config.settings import load_settings
+
+SECRET = "sk-test-gizli"
+
+
+@pytest.fixture(autouse=True)
+def _vault(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Gerçek kimlik kasasına ne okuma ne yazma yapılır."""
+    store: dict[str, str] = {}
+    monkeypatch.setattr(providers, "read_secret", lambda target: store.get(target))
+    monkeypatch.setattr(section_module, "write_secret", lambda s, t: store.__setitem__(t, s))
+    for name in ("BULUT", "BULUT2", "XAI"):
+        monkeypatch.delenv(f"ARTEMIS_{name}_API_KEY", raising=False)
+    return store
 
 
 def config(tmp_path: Path, *, local: bool = True, cloud: bool = False) -> Path:
@@ -318,6 +333,9 @@ def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     if isinstance(widget, QLineEdit):
         widget.setText("Veli")
         return
+    if isinstance(widget, QComboBox) and widget.isEditable():
+        widget.setEditText("Veli")
+        return
     if isinstance(widget, QCheckBox):
         widget.setChecked(not widget.isChecked())
         return
@@ -508,4 +526,145 @@ def test_custom_wake_name_roundtrip_and_invalid_value_keeps_file(tmp_path: Path)
     with pytest.raises(ValueError):
         save_choices(path, None, values=panel.values())
     assert path.read_bytes() == original
+    panel.deleteLater()
+
+
+# ---- Bulut tanıma: API anahtarı ve model listesi ----
+
+
+def _hybrid_panel(path: Path, server: str = "bulut"):  # type: ignore[no-untyped-def]
+    panel = _panel(path)
+    panel.hybrid_stt.setChecked(True)
+    panel.cloud_server.setCurrentIndex(panel.cloud_server.findData(server))
+    panel._set_dirty(False)
+    return panel
+
+
+def test_cloud_key_is_stored_in_vault_only(tmp_path: Path, _vault: dict[str, str]) -> None:
+    path = config(tmp_path, cloud=True)
+    panel = _hybrid_panel(path)
+    assert panel.cloud_key.isEnabled() and panel.cloud_key.placeholderText() == ""
+    assert "kayıtlı değil" in panel.cloud_stt_hint.text()
+    panel.cloud_key.setText(SECRET)
+    # yazılmış ama saklanmamış anahtar değerlere ve YAML'a girmez
+    values = panel.values()
+    assert SECRET not in repr(values) and values[("voice", "stt_cloud_model")] == "whisper-x"
+    save_choices(path, None, values=values)
+    assert SECRET not in path.read_text(encoding="utf-8")
+    panel._set_dirty(False)
+    panel.cloud_key_button.click()
+    assert _vault == {"Artemis/bulut": SECRET}
+    assert panel.cloud_key.text() == "" and panel.cloud_key.placeholderText() == "kayıtlı"
+    assert "kaydedildi" in panel.cloud_stt_hint.text()
+    assert SECRET not in panel.cloud_stt_hint.text()
+    assert panel.dirty_label.isHidden()  # Uygula gerekmez
+    assert SECRET not in repr(panel.values())
+    assert SECRET not in path.read_text(encoding="utf-8")
+    panel.deleteLater()
+
+
+def test_cloud_key_follows_server_and_missing_key_hint(
+    tmp_path: Path, _vault: dict[str, str]
+) -> None:
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"]["yerel"] = {"base_url": "http://127.0.0.1:1/v1", "api_key": False}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    _vault["Artemis/bulut2"] = SECRET
+    panel = _hybrid_panel(path, server="")
+    assert not panel.cloud_key.isEnabled() and not panel.cloud_fetch_button.isEnabled()
+    panel.cloud_server.setCurrentIndex(panel.cloud_server.findData("bulut2"))
+    assert panel.cloud_key.isEnabled() and panel.cloud_key.placeholderText() == "kayıtlı"
+    assert "kayıtlı değil" not in panel.cloud_stt_hint.text()
+    panel.cloud_server.setCurrentIndex(panel.cloud_server.findData("bulut"))
+    assert panel.cloud_key.placeholderText() == ""
+    assert "kayıtlı değil" in panel.cloud_stt_hint.text()
+    panel.cloud_server.setCurrentIndex(panel.cloud_server.findData("yerel"))
+    assert not panel.cloud_key.isEnabled() and not panel.cloud_key_button.isEnabled()
+    assert panel.cloud_key.placeholderText() == "Bu sunucu anahtar istemiyor"
+    panel.deleteLater()
+
+
+def test_cloud_key_demo_disabled_and_vault_failure_leaks_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+
+    path = config(tmp_path, cloud=True)
+    QApplication.instance() or QApplication([])
+    demo = SettingsPanel(path, demo=True)
+    demo.hybrid_stt.setChecked(True)
+    assert not demo.cloud_key.isEnabled() and not demo.cloud_fetch_button.isEnabled()
+    demo.deleteLater()
+
+    def fail(secret: str, target: str) -> None:
+        raise OSError("yok")
+
+    monkeypatch.setattr(section_module, "write_secret", fail)
+    panel = _hybrid_panel(path)
+    panel.cloud_key.setText(SECRET)
+    panel._save_cloud_key()
+    assert "ARTEMIS_BULUT_API_KEY" in panel.cloud_stt_hint.text()
+    assert SECRET not in panel.cloud_stt_hint.text() and panel.cloud_key.text() == ""
+    panel.deleteLater()
+
+
+def test_cloud_models_fetch_fills_combo_and_keeps_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _vault: dict[str, str]
+) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_probe(url: str, key: str | None) -> tuple[str, list[str]]:
+        calls.append((url, key))
+        return "Bağlantı tamam, 2 model bulundu.", ["whisper-1", "whisper-x"]
+
+    monkeypatch.setattr(section_module, "probe_models", fake_probe)
+    path = config(tmp_path, cloud=True)
+    _vault["Artemis/bulut"] = "kayitli-anahtar"
+    panel = _hybrid_panel(path)
+    assert panel.cloud_fetch_button.isEnabled()
+    panel.cloud_model.setEditText("whisper-x")
+    panel._fetch_cloud_models()
+    assert panel._cloud_fetch is not None
+    panel._cloud_fetch.wait(3000)
+    QApplication.processEvents()
+    assert calls == [("https://api.example.com/v1", "kayitli-anahtar")]
+    assert [panel.cloud_model.itemText(i) for i in range(panel.cloud_model.count())] == [
+        "whisper-1", "whisper-x"
+    ]
+    assert panel.cloud_model.currentText() == "whisper-x"
+    assert "2 model" in panel.cloud_stt_hint.text()
+    assert panel.dirty_label.isHidden()
+    # yazılmış ama saklanmamış anahtar kayıtlıdan önce gelir
+    panel.cloud_key.setText(SECRET)
+    panel._fetch_cloud_models()
+    panel._cloud_fetch.wait(3000)
+    QApplication.processEvents()
+    assert calls[-1] == ("https://api.example.com/v1", SECRET)
+    assert SECRET not in panel.cloud_stt_hint.text()
+    # listede olmayan, elle yazılan model korunur ve kaydedilir
+    panel.cloud_model.setEditText("ozel-model")
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.stt_cloud_model == "ozel-model"
+    panel.deleteLater()
+
+
+def test_cloud_models_fetch_disabled_for_xai_and_ignored_without_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        section_module, "probe_models", lambda url, key: (calls.append(url) or "", [])
+    )
+    panel = _hybrid_panel(config(tmp_path, cloud=True))
+    panel.cloud_protocol.setCurrentIndex(panel.cloud_protocol.findData("xai"))
+    assert not panel.cloud_fetch_button.isEnabled() and not panel.cloud_model.isEnabled()
+    assert panel.cloud_key.isEnabled()  # xAI de anahtar ister
+    panel.cloud_server.setCurrentIndex(0)
+    panel._fetch_cloud_models()
+    assert panel._cloud_fetch is None and calls == []
     panel.deleteLater()

@@ -24,3 +24,20 @@ ve modeli yalnız YAML'da tanımlanabiliyordu.
 doğrulanmadı; arayüz ipucu bunu söyler, hata olursa yerel metne düşülür. Anahtar olmadığından
 canlı doğrulama yapılmadı; uyum yalnız loopback sahte sunucuyla sınandı. WebSocket akışı
 kullanılmaz (komut sesi tek parça gider).
+
+## Ek: anahtar girişi, model listesi, resim modeli (arayüz)
+
+- Ayarlar > Ses > Karma tanıma: seçili sunucu için parola kipli "API anahtarı" alanı ve
+  "Anahtarı kaydet" düğmesi. Anahtar Model sağlayıcıları ile aynı yere (`Artemis/<uç>`, kasa
+  yoksa `ARTEMIS_<UÇ>_API_KEY` uyarısı) yazılır; `PANEL_BINDINGS`'e, YAML'a ve kirli
+  izlemeye girmez, kayıttan sonra alan temizlenir, Uygula gerekmez. Anahtar isteyen sunucuda
+  kayıtlı anahtar yoksa ipucu söyler (Uygula engellenmez).
+- Model alanı düzenlenebilir açılır liste; "Modelleri getir" Model sağlayıcıları'ndaki
+  `ConnectionTest`/`probe_models`'i (tek HTTP yoklaması) arka plan iş parçacığında kullanır.
+  xAI protokolünde (REST'te model alanı yok) ve demo'da kapalıdır.
+- Model ekle formuna "Tür" (Sohbet/Resim) eklendi: Resim `kind: image` ve `image_cost_usd`
+  yazar, token fiyatları 0 kalır; Claude aboneliğinde seçilemez, beyin yapılamaz; listede
+  "· resim" etiketi görünür. Ücretli resim için `allow_paid` ve çağrı başına bütçe
+  rezervasyonu uyarısı verilir. Ekleme/kaldırma `providers.changed` ile pet üreticinin model
+  listesini yeniler (zaten bağlıydı).
+- Hâlâ gerçek xAI anahtarıyla canlı test yapılmadı; Grok STT'nin Türkçesi doğrulanmadı.
