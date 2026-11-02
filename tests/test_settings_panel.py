@@ -653,6 +653,37 @@ def test_cloud_models_fetch_fills_combo_and_keeps_choice(
     panel.deleteLater()
 
 
+def test_cloud_models_result_for_old_server_is_dropped(tmp_path: Path) -> None:
+    panel = _hybrid_panel(config(tmp_path, cloud=True))
+    other = panel.cloud_server.findData("bulut2")
+    assert other > 0
+    panel._cloud_fetch_for = "bulut"  # istek bulut için başladı
+    panel.cloud_server.setCurrentIndex(other)  # kullanıcı sunucuyu değiştirdi
+    panel.cloud_model.setEditText("benim-modelim")
+    panel._cloud_models_done("Bağlantı tamam, 1 model bulundu.", ["eski-sunucu-modeli"])
+    assert [panel.cloud_model.itemText(i) for i in range(panel.cloud_model.count())] == []
+    assert panel.cloud_model.currentText() == "benim-modelim"
+    panel.deleteLater()
+
+
+def test_finish_inventory_waits_for_running_model_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    def slow_probe(url: str, key: str | None) -> tuple[str, list[str]]:
+        time.sleep(0.4)
+        return "Bağlantı tamam, 0 model bulundu.", []
+
+    monkeypatch.setattr(section_module, "probe_models", slow_probe)
+    panel = _hybrid_panel(config(tmp_path, cloud=True))
+    panel._fetch_cloud_models()
+    assert panel._cloud_fetch is not None and panel._cloud_fetch.isRunning()
+    panel.finish_inventory()
+    assert not panel._cloud_fetch.isRunning()
+    panel.deleteLater()
+
+
 def test_cloud_models_fetch_disabled_for_xai_and_ignored_without_server(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

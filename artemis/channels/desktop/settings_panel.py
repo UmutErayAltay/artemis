@@ -650,6 +650,7 @@ class SettingsPanel(QWidget):
         model_row.addWidget(self.cloud_fetch_button)
         field(cloud_layout, "Bulut tanıma modeli", model_row)
         self._cloud_fetch: ConnectionTest | None = None
+        self._cloud_fetch_for = ""
         stt_layout.addWidget(self.cloud_box)
         self.cloud_stt_hint = meta_label("")
         stt_layout.addWidget(self.cloud_stt_hint)
@@ -1111,11 +1112,15 @@ class SettingsPanel(QWidget):
         if endpoint.api_key:
             key = self.cloud_key.text().strip() or stored_endpoint_key(name)
         self.cloud_stt_hint.setText("Model listesi alınıyor…")
+        self._cloud_fetch_for = name
         self._cloud_fetch = ConnectionTest(endpoint.base_url, key, self)
         self._cloud_fetch.done.connect(self._cloud_models_done)
         self._cloud_fetch.start()
 
     def _cloud_models_done(self, message: str, models: list[str]) -> None:
+        # İstek sürerken sunucu değiştiyse eski sunucunun listesi yeni sunucunun önerisi olmaz.
+        if self._cloud_fetch_for != str(self.cloud_server.currentData() or ""):
+            return
         self.cloud_stt_hint.setText(message)
         if not models:
             return
@@ -1559,3 +1564,6 @@ class SettingsPanel(QWidget):
         if self.github is not None and self.github.isRunning():
             self.github.requestInterruption()
             self.github.wait(6000)
+        # Model listesi isteği (en çok 5 sn zaman aşımı) çalışırken panel yıkılmasın.
+        if self._cloud_fetch is not None and self._cloud_fetch.isRunning():
+            self._cloud_fetch.wait(6000)
