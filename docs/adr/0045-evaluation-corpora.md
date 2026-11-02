@@ -145,3 +145,7 @@ Yanlış uyanma her satırda 0 ("artmış" eşleştirici düzeltmesi tutuyor; ka
 - Yanlış hedef 4 (taban, sentetik): hepsi "X değil, Y aç"; Y bozuk yazılınca ("Kobe C. Rona")
   tek tanınan ad olumsuzlanan X kalır. Bu ölçüm olumsuzluğu bilmez (`metric_scope`); canlıda
   modelin işidir ve `bench.run` intent kategorisinde sınanır. Gerçek kaynak Y'nin STT hatasıdır.
+
+## Ek (2026-11-03): varsayılan uygulandı
+
+Umut kararıyla `voice.stt_vad_filter` varsayılanı `false` yapıldı (kod ve `config.example.yaml`). Ölçülmeyenler değişmedi: >=1 saat komutsuz konuşmada yanlış uyanma. Önceki config'ler açıkça `true` yazdıysa o değer korunur.

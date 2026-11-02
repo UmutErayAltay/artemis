@@ -68,6 +68,7 @@ async def test_faster_whisper_uses_configured_final_and_partial_profiles(monkeyp
         stt_beam_size=6,
         stt_partial_beam_size=2,
         stt_hotwords=("artemis", "Visual Studio Code"),
+        stt_vad_filter=True,  # varsayılan false; yapılandırılan değer Whisper'a aynen geçer
     )
     recognizer = FasterWhisperRecognizer(config)
     assert await recognizer.transcribe(b"\x00\x00") == "test"
@@ -79,6 +80,11 @@ async def test_faster_whisper_uses_configured_final_and_partial_profiles(monkeyp
     assert "initial_prompt" not in options[0]
     assert all(call["vad_filter"] for call in options)
     assert all(call["condition_on_previous_text"] is False for call in options)
+
+
+def test_whisper_vad_filter_defaults_off() -> None:
+    # ADR 0045: Whisper VAD'i bant sınırlı seste baştaki "Artemis"i kesiyordu.
+    assert VoiceConfig().stt_vad_filter is False
 
 
 @pytest.mark.parametrize("text,ghost", [

@@ -93,7 +93,7 @@ voice:
   stt_compute_type: float16 # Panelden seçilir: int8_float16 (az bellek, aynı doğruluk) | float16; CPU'da yok sayılır.
   stt_language: tr_en # Türkçe öncelikli; güçlü İngilizce kanıtında en. auto tüm dilleri seçer.
   cuda_library_dirs: [] # Windows: gerektiğinde yerel cublas/cudnn DLL dizinleri.
-  stt_vad_filter: true # Sessiz bölümleri STT öncesinde ele.
+  stt_vad_filter: false # Whisper'ın kendi VAD süzgeci; kapalı (ADR 0045: bant sınırlı seste baştaki "Artemis"i kesiyor).
   stt_min_logprob: -1.0
   stt_max_no_speech: 0.6
   stt_beam_size: 5 # Kesin sonuç; daha yüksek değer daha yavaş olabilir.

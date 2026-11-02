@@ -120,7 +120,10 @@ class VoiceConfig(BaseModel):
     stt_beam_size: int = Field(default=5, ge=1, le=10)
     stt_partial_beam_size: int = Field(default=1, ge=1, le=10)
     stt_partial_enabled: bool = True
-    stt_vad_filter: bool = True
+    # Kapalı: Whisper'ın VAD süzgeci bant sınırlı seste baştaki uyandırma sözcüğünü kesiyor
+    # (ADR 0045: telefon bandında kaçırma %40 -> %0). Canlı döngüde STT'ye zaten webrtc VAD'in
+    # kestiği parça gider, boşta ek maliyet yoktur.
+    stt_vad_filter: bool = False
     stt_min_logprob: float = -1.0
     stt_max_no_speech: float = Field(default=0.6, ge=0, le=1)
     stt_hotwords: tuple[str, ...] = Field(default=(), max_length=100)
