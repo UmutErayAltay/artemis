@@ -390,26 +390,46 @@ class TelegramChannel:
                     # Tur gerçekleşti ve denetimde; yanıt iletilemese de döngü sürer.
                     break
 
-    async def serve(self, stop: asyncio.Event) -> None:
+    async def serve(self, stop: asyncio.Event, *, give_up_on_conflict: bool = False) -> str | None:
+        """Güncellemeleri işler. `give_up_on_conflict`: başka bir yoklayıcı (HTTP 409) varsa
+        yeniden denemeden çıkar ve "HTTP 409" döner (masaüstü kanalı, ADR 0052)."""
         backoff = 1.0
-        while not stop.is_set():
-            try:
-                updates = await asyncio.to_thread(
-                    self.client.get_updates, self._offset, self.poll_timeout
+        # Uzun yoklama iş parçacığında sürer; durdurma onu beklemeden fark edilir.
+        stopper = asyncio.ensure_future(stop.wait())
+        try:
+            while not stop.is_set():
+                poll = asyncio.ensure_future(
+                    asyncio.to_thread(self.client.get_updates, self._offset, self.poll_timeout)
                 )
-            except TelegramError:
-                # Hata istemcide denetlendi; kısa süre bekleyip yeniden dener.
-                with contextlib.suppress(TimeoutError):
-                    await asyncio.wait_for(stop.wait(), timeout=backoff)
-                backoff = min(backoff * 2, _MAX_BACKOFF)
-                continue
-            backoff = 1.0
-            for update in updates:
-                # Önce ilerlet: işlenirken çökse bile aynı komut ikinci kez çalışmaz.
-                self._advance(update)
-                await self.handle_update(update)
-                if stop.is_set():
+                await asyncio.wait({poll, stopper}, return_when=asyncio.FIRST_COMPLETED)
+                if not poll.done():
+                    # Terk edilen yoklama istemci kapanınca biter; sonucu hiç okunmaz.
+                    poll.add_done_callback(lambda task: task.cancelled() or task.exception())
                     break
+                try:
+                    updates = poll.result()
+                except TelegramError as error:
+                    if give_up_on_conflict and error.error_type == "HTTP 409":
+                        return error.error_type
+                    # Hata istemcide denetlendi; kısa süre bekleyip yeniden dener.
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(stop.wait(), timeout=backoff)
+                    backoff = min(backoff * 2, _MAX_BACKOFF)
+                    continue
+                backoff = 1.0
+                if not updates and self.poll_timeout == 0:
+                    # Zaman aşımı 0 ise sunucu hemen döner; boş döngü CPU'yu yakmasın.
+                    with contextlib.suppress(TimeoutError):
+                        await asyncio.wait_for(stop.wait(), timeout=_IDLE_SLEEP)
+                for update in updates:
+                    # Önce ilerlet: işlenirken çökse bile aynı komut ikinci kez çalışmaz.
+                    self._advance(update)
+                    await self.handle_update(update)
+                    if stop.is_set():
+                        break
+        finally:
+            stopper.cancel()
+        return None
 
 
 def _start_proactive(
@@ -432,20 +452,62 @@ def _start_proactive(
     return asyncio.create_task(scheduler.serve(stop))
 
 
+STATUS_STARTING = "Telegram kanalı başlıyor"
+STATUS_RUNNING = "Telegram kanalı açık"
+STATUS_STOPPED = "Telegram kanalı durdu"
+STATUS_CONFLICT = (
+    "Çakışma: botu başka bir süreç dinliyor (`artemis telegram` açık olabilir); "
+    "kanal durduruldu"
+)
+STATUS_ERROR = "Telegram hatası"
+CONFLICT_ERROR = "HTTP 409"
+_NOTICE_TEXT = "Artemis Telegram kanalı açık. Komut yazabilirsiniz; onaylar düğmeyle sorulur."
+
+
 async def run_telegram(config_path: Path) -> int:
+    """`artemis telegram` süreci: aynı çıktılar ve dönüş kodları, kendi proaktif zamanlayıcısı."""
+    return await serve_telegram(config_path, asyncio.Event(), embedded=False, status=print)
+
+
+async def serve_telegram(
+    config_path: Path,
+    stop: asyncio.Event,
+    *,
+    embedded: bool,
+    status: Callable[[str], None],
+    runtime_factory: Callable[..., Runtime] | None = None,
+) -> int:
+    """Kanalı `stop` kurulana dek sürdürür; 0 temiz, 1 bağlantı/çakışma, 2 kurulum eksiği.
+
+    `embedded=False` CLI'dır (`status` = print, proaktif zamanlayıcı bu süreçte). `embedded=True`
+    masaüstü içidir (ADR 0052): `status` kısa sabit Türkçe metin alır, ikinci proaktif
+    zamanlayıcı BAŞLATILMAZ (masaüstünün kendisi var), proje iş deposu alınmaz, çakışmada
+    (HTTP 409) yeniden denenmez. Onay, gizlilik ve denetim kuralları iki kipte aynıdır.
+    `runtime_factory` yalnız testler içindir: (config_path, approve, settings=, audit=).
+    """
+
+    def say(cli_text: str, embedded_text: str) -> None:
+        status(embedded_text if embedded else cli_text)
+
     settings = load_settings(config_path)
     config = settings.telegram
     if config.chat_id is None:
-        print("Telegram kapalı: config içinde telegram.chat_id tanımlayın.")
+        say("Telegram kapalı: config içinde telegram.chat_id tanımlayın.", STATUS_ERROR)
         return 2
     audit = AuditLog(settings.audit_path)
     client = build_telegram_client(settings, audit)
     if client is None:
-        print(f"Telegram token'ı bulunamadı: {config.token_env} ortam değişkenini ayarlayın.")
+        say(
+            f"Telegram token'ı bulunamadı: {config.token_env} ortam değişkenini ayarlayın.",
+            f"{STATUS_ERROR} (token yok)",
+        )
         return 2
-    if not settings.primary_model:
+    if not settings.primary_model and runtime_factory is None:
         client.close()
-        print("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.")
+        say(
+            "Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.",
+            f"{STATUS_ERROR} (model yok)",
+        )
         return 2
     channel = TelegramChannel(
         client,
@@ -457,27 +519,40 @@ async def run_telegram(config_path: Path) -> int:
     )
     # Gizlilik izlemesi: runtime kurulmadan önce de olaylar kaçmasın diye hemen bağlanır.
     audit.on_record = channel.observe
-    stop = asyncio.Event()
     runtime: Runtime | None = None
     try:
-        runtime = create_runtime(config_path, channel.approve, settings=settings, audit=audit)
+        if runtime_factory is not None:
+            runtime = runtime_factory(config_path, channel.approve, settings=settings, audit=audit)
+        else:
+            runtime = create_runtime(
+                config_path,
+                channel.approve,
+                settings=settings,
+                audit=audit,
+                with_code_agent=not embedded,
+            )
         channel.attach(runtime)
         # notify_telegram aracı aynı istemciyi kullanır; ikinci bağlantı havuzu açılmaz.
         runtime.context.services["telegram_client"] = client
         try:
             channel.skip_backlog()
-            client.send_message(
-                config.chat_id,
-                "Artemis Telegram kanalı açık. Komut yazabilirsiniz; onaylar düğmeyle sorulur.",
-                kind="notice",
-            )
+            client.send_message(config.chat_id, _NOTICE_TEXT, kind="notice")
         except TelegramError as error:
-            print(f"Telegram'a bağlanılamadı ({error.error_type}).")
+            if embedded and error.error_type == CONFLICT_ERROR:
+                status(STATUS_CONFLICT)
+            else:
+                say(
+                    f"Telegram'a bağlanılamadı ({error.error_type}).",
+                    f"{STATUS_ERROR} ({error.error_type})",
+                )
             return 1
-        print("Artemis Telegram kanalı açık. Durdurmak için Ctrl+C.")
-        proactive = _start_proactive(runtime, client, stop)
+        say("Artemis Telegram kanalı açık. Durdurmak için Ctrl+C.", STATUS_RUNNING)
+        # Gömülü kipte masaüstünün kendi zamanlayıcısı vardır; ikincisi çift teslim riskidir.
+        proactive = None if embedded else _start_proactive(runtime, client, stop)
         try:
-            await channel.serve(stop)
+            if await channel.serve(stop, give_up_on_conflict=embedded) == CONFLICT_ERROR:
+                status(STATUS_CONFLICT)
+                return 1
         finally:
             stop.set()
             if proactive is not None:

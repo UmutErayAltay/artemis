@@ -17,6 +17,7 @@ from telegram_fake import CHAT_ID, FAKE_TOKEN, FakeTelegram, make_message, metho
 
 from artemis.channels.telegram import api
 from artemis.channels.telegram.api import TOKEN_TARGET, TelegramClient, TelegramError
+from artemis.channels.telegram.channel import STATUS_CONFLICT, STATUS_RUNNING
 from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
 
@@ -376,4 +377,73 @@ def test_close_stops_running_pairing_thread(
     assert panel._job is not None and panel._job.isRunning()
     panel.finish()
     assert not panel._job.isRunning()
+    panel.deleteLater()
+
+
+# Masaüstü içi kanal (ADR 0052) --------------------------------------------------------------
+
+
+def test_channel_toggle_writes_yaml_and_emits_without_runtime_restart(
+    store: dict[str, str], fake: FakeTelegram, tmp_path: Path
+) -> None:
+    store[TOKEN_TARGET] = FAKE_TOKEN
+    path = make_config(tmp_path, fake, chat_id=CHAT_ID)
+    panel = section(path)
+    toggled: list[bool] = []
+    restarts: list[bool] = []
+    panel.channel_changed.connect(lambda: toggled.append(True))
+    panel.changed.connect(lambda: restarts.append(True))
+    assert panel.channel_check.isEnabled() and not panel.channel_check.isChecked()
+    panel.channel_check.setChecked(True)
+    assert raw(path)["telegram"]["run_in_desktop"] is True
+    assert load_settings(path).telegram.run_in_desktop is True
+    assert raw(path)["telegram"]["chat_id"] == CHAT_ID  # diğer anahtarlar korunur
+    assert toggled == [True] and restarts == []
+    panel.channel_check.setChecked(False)
+    assert raw(path)["telegram"]["run_in_desktop"] is False and len(toggled) == 2
+    panel.deleteLater()
+
+
+def test_channel_toggle_is_disabled_without_token_or_chat_and_in_demo(
+    store: dict[str, str], fake: FakeTelegram, tmp_path: Path
+) -> None:
+    panel = section(make_config(tmp_path, fake))
+    assert not panel.channel_check.isEnabled()
+    assert "Önce token kaydet" in panel.channel_label.text()
+    panel.deleteLater()
+    store[TOKEN_TARGET] = FAKE_TOKEN
+    QApplication.instance() or QApplication([])
+    demo = SettingsPanel(make_config(tmp_path, fake, chat_id=CHAT_ID), demo=True).telegram
+    assert not demo.channel_check.isEnabled() and "Demo" in demo.channel_label.text()
+    demo.deleteLater()
+
+
+def test_pairing_is_disabled_while_channel_runs_and_status_is_shown(
+    store: dict[str, str], fake: FakeTelegram, tmp_path: Path
+) -> None:
+    store[TOKEN_TARGET] = FAKE_TOKEN
+    path = make_config(tmp_path, fake, chat_id=CHAT_ID)
+    panel = section(path)
+    assert panel.pair_button.isEnabled()
+    panel._toggle_channel(True)
+    panel.channel_status.emit(STATUS_RUNNING)
+    QApplication.processEvents()
+    assert not panel.pair_button.isEnabled()
+    label = panel.channel_label.text()
+    assert "Çalışıyor" in label and "kanalı kapat" in label
+    panel.channel_status.emit(STATUS_CONFLICT)
+    QApplication.processEvents()
+    assert panel.pair_button.isEnabled() and "Çakışma" in panel.channel_label.text()
+    panel.channel_status.emit("Telegram hatası (ConnectError)")
+    QApplication.processEvents()
+    assert "ConnectError" in panel.channel_label.text()
+    panel.deleteLater()
+
+
+def test_panel_no_longer_says_two_way_channel_needs_separate_process(
+    store: dict[str, str], fake: FakeTelegram, tmp_path: Path
+) -> None:
+    panel = section(make_config(tmp_path, fake))
+    assert "bu panel onu başlatmaz" not in panel.hint.text()
+    assert "çakışma" in panel.hint.text()
     panel.deleteLater()

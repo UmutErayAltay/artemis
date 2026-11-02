@@ -220,6 +220,8 @@ class TelegramConfig(BaseModel):
     poll_timeout_seconds: int = Field(default=25, ge=0, le=50)
     approval_timeout_seconds: float = Field(default=120.0, gt=0, le=900)
     max_message_age_seconds: int = Field(default=120, ge=1, le=3600)
+    # İki yönlü kanalı masaüstü içinde çalıştırır (ADR 0052); varsayılan kapalı.
+    run_in_desktop: bool = False
 
     @field_validator("token_env")
     @classmethod

@@ -24,8 +24,9 @@ bulup düzenlemek gerekiyordu (ADR 0016). Bu, masaüstü kullanıcısı için zo
   (tam sayı) doğrulanmış atomik yazımla config'e yazılır, kod mesajı onaylanır (offset), "Artemis
   bağlandı." bildirimi gider. HTTP 409 (başka bir süreç botu dinliyor, örn. `artemis telegram`)
   döngüye girmeden açık bir mesajla bildirilir.
-- **Kapsam dışı:** iki yönlü kanalı (`artemis telegram`) arayüzden başlatmak/durdurmak ayrı
-  karardır; panel yalnız bunun ayrıca çalıştırılacağını söyler.
+- **Kanal başlatma:** başlangıçta kapsam dışıydı; ADR 0052 ile panel, kanalı masaüstü içinde
+  isteğe bağlı çalıştıran `telegram.run_in_desktop` anahtarını yazar. `artemis telegram` süreci
+  hâlâ ayrıca kullanılabilir.
 - **Çalışma zamanı:** `chat_id`/token değişince masaüstü, sağlayıcı kaydıyla aynı yoldan
   (`_request_restart`) çalışma zamanını yeniden kurar; proaktif Telegram teslimi Artemis'i elle
   kapatmadan yeni durumu kullanır (meşgulken iş bitince).

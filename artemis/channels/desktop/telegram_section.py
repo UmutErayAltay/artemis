@@ -1,8 +1,9 @@
 """Ayarlar > Telegram: token (kimlik kasası), sohbet eşleştirme, test ve bağlantıyı kesme.
 
 ADR 0051. Token YAML'a, log'a, denetime, `repr`'e ve durum metnine girmez; yalnız
-`Artemis/telegram` kasa kaydına (ya da `token_env` ortam değişkenine) yazılır. İki yönlü kanalın
-(`artemis telegram`) başlatılması bu panelin işi değildir.
+`Artemis/telegram` kasa kaydına (ya da `token_env` ortam değişkenine) yazılır. İki yönlü kanal
+(ADR 0052) isteğe bağlı olarak masaüstü içinde çalışır: panel yalnız `telegram.run_in_desktop`
+anahtarını yazar ve durumu gösterir; süreci uygulama (`TelegramService`) başlatır/durdurur.
 """
 
 from __future__ import annotations
@@ -15,16 +16,23 @@ from typing import Any
 
 import yaml
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtWidgets import QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
+from artemis.channels.desktop.telegram_service import channel_blocker
 from artemis.channels.telegram.api import (
     TOKEN_TARGET,
     TelegramClient,
     TelegramError,
     resolve_telegram_token,
 )
-from artemis.channels.telegram.channel import _FORWARD_KEYS
+from artemis.channels.telegram.channel import (
+    _FORWARD_KEYS,
+    STATUS_CONFLICT,
+    STATUS_RUNNING,
+    STATUS_STARTING,
+    STATUS_STOPPED,
+)
 from artemis.config.settings import TelegramConfig, load_settings
 from artemis.safety.audit import AuditLog
 from artemis.tools.credentials import delete_secret, write_secret
@@ -128,11 +136,15 @@ class TelegramJob(QThread):
 
 class TelegramSection(QWidget):
     changed = Signal()  # chat_id değişti: çalışma zamanı yeniden kurulmalı (proaktif teslim)
+    channel_changed = Signal()  # run_in_desktop değişti: yalnız kanal servisi eşitlenir
+    # Servis iş parçacığından gelir; Qt sinyali olduğu için arayüz iş parçacığına taşınır.
+    channel_status = Signal(str)
 
     def __init__(self, config_path: Path, *, demo: bool = False) -> None:
         super().__init__()
         self.config_path = config_path
         self._demo = demo
+        self._channel_text = STATUS_STOPPED
         self._username: str | None = None
         self._job: TelegramJob | None = None
         self._on_done: Callable[[Any], None] | None = None
@@ -171,13 +183,55 @@ class TelegramSection(QWidget):
         pair.addLayout(button_row(
             self.disconnect_button, self.test_button, self.cancel_button, self.pair_button
         ))
+        channel_box, channel = group("Telegram'dan komut")
+        layout.addWidget(channel_box)
+        self.channel_check = QCheckBox("Artemis açıkken Telegram'dan komut al")
+        self.channel_check.setAccessibleName("Telegram kanalı masaüstünde çalışsın")
+        self.channel_check.toggled.connect(self._toggle_channel)
+        channel.addWidget(self.channel_check)
+        self.channel_label = meta_label("")
+        self.channel_label.setAccessibleName("Telegram kanalı durumu")
+        channel.addWidget(self.channel_label)
         self.hint = meta_label(
-            "İki yönlü kanal (Telegram'dan komut) için `artemis telegram` komutunu ayrıca "
-            "çalıştır; bu panel onu başlatmaz."
+            "Komutlar bu sohbetin kendi geçmişinde çalışır; onaylar yalnız Telegram "
+            "düğmeleriyle sorulur. `artemis telegram` de açıksa bot tek dinleyiciye izin "
+            "verdiğinden çakışma olur."
         )
-        pair.addWidget(self.hint)
+        channel.addWidget(self.hint)
+        self.channel_status.connect(self.set_channel_status)
         layout.addStretch(1)
         self.refresh()
+
+    # Kanal ----------------------------------------------------------------------------------
+
+    def channel_active(self) -> bool:
+        return self._channel_text in {STATUS_RUNNING, STATUS_STARTING}
+
+    def set_channel_status(self, text: str) -> None:
+        self._channel_text = text
+        self.refresh()
+
+    def _channel_summary(self, blocker: str | None, enabled: bool) -> str:
+        if self._demo:
+            return "Demo kipinde Telegram kanalı çalışmaz."
+        if blocker is not None:
+            return blocker
+        if not enabled:
+            return "Kapalı."
+        return {
+            STATUS_RUNNING: "Çalışıyor",
+            STATUS_STARTING: "Başlıyor…",
+            STATUS_STOPPED: "Durdu",
+            STATUS_CONFLICT: STATUS_CONFLICT,
+        }.get(self._channel_text, self._channel_text)
+
+    def _toggle_channel(self, checked: bool) -> None:
+        if not self._write_telegram_key("run_in_desktop", checked):
+            self.channel_check.blockSignals(True)
+            self.channel_check.setChecked(not checked)
+            self.channel_check.blockSignals(False)
+            return
+        self.channel_changed.emit()
 
     # Durum ----------------------------------------------------------------------------------
 
@@ -194,6 +248,8 @@ class TelegramSection(QWidget):
 
     def refresh(self) -> None:
         loaded = self._config()
+        enabled = loaded is not None and loaded[0].run_in_desktop
+        blocker = channel_blocker(loaded[0]) if loaded is not None else "Ayarlar okunamadı."
         if loaded is None:
             self.status.setText("Ayarlar okunamadı.")
             token, chat_id = None, None
@@ -208,9 +264,19 @@ class TelegramSection(QWidget):
                 self.status.setText(f"Bağlı: {bot}sohbet {chat_id}")
         live = not self._demo and loaded is not None
         busy = self._busy()
+        active = self.channel_active()
+        self.channel_check.blockSignals(True)
+        self.channel_check.setChecked(enabled)
+        self.channel_check.blockSignals(False)
+        self.channel_check.setEnabled(live and (blocker is None or enabled))
+        summary = self._channel_summary(blocker, enabled)
+        if active:
+            # getUpdates tek tüketiciye izin verir: eşleştirme kanalla aynı anda yoklayamaz.
+            summary += " Eşleştirmek için önce kanalı kapat."
+        self.channel_label.setText(f"Kanal: {summary}")
         self.token.setEnabled(live and not busy)
         self.save_button.setEnabled(live and not busy)
-        self.pair_button.setEnabled(live and not busy and token is not None)
+        self.pair_button.setEnabled(live and not busy and not active and token is not None)
         self.test_button.setEnabled(live and not busy and token is not None and chat_id is not None)
         self.disconnect_button.setEnabled(
             live and not busy and (token is not None or chat_id is not None)
@@ -243,16 +309,20 @@ class TelegramSection(QWidget):
         )
 
     def _write_chat_id(self, chat_id: int | None) -> bool:
+        return self._write_telegram_key("chat_id", chat_id)
+
+    def _write_telegram_key(self, key: str, value: int | bool | None) -> bool:
+        """`telegram.<key>` yazar (None = sil); doğrulanmış atomik yazıcı, hatada dosya korunur."""
         # Döngüsel içe aktarmayı önlemek için geç alınır (settings_panel bu bölümü içerir).
         from artemis.channels.desktop.settings_panel import _write_validated
 
         try:
             raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
             section = raw.get("telegram") or {}
-            if chat_id is None:
-                section.pop("chat_id", None)
+            if value is None:
+                section.pop(key, None)
             else:
-                section["chat_id"] = chat_id
+                section[key] = value
             if section:
                 raw["telegram"] = section
             else:

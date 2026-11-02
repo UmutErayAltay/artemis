@@ -59,3 +59,5 @@ okunur, toast betiği sabit tutulur ve metin ortam değişkeniyle verilir.
 
 Ek (ADR 0051): token ortam değişkeninin yanında Windows kimlik kasasından (`Artemis/telegram`) da
 okunabilir; Ayarlar > Telegram paneli onu oraya yazar.
+
+Ek (ADR 0052): "ayrı süreç" artık isteğe bağlıdır; kanal `telegram.run_in_desktop` ile masaüstü içinde de çalışabilir (kendi geçmişi ve onay yolu aynı kalır).

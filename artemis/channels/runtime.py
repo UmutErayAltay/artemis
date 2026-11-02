@@ -59,8 +59,14 @@ def create_runtime(
     settings: Settings | None = None,
     provider_builder: ProviderBuilder | None = None,
     registry_builder: RegistryBuilder | None = None,
+    with_code_agent: bool = True,
 ) -> Runtime:
-    """CLI, ses ve masaüstü için aynı kapı ve sağlayıcı zincirini kurar."""
+    """CLI, ses ve masaüstü için aynı kapı ve sağlayıcı zincirini kurar.
+
+    `with_code_agent=False`: masaüstü içindeki Telegram kanalı (ADR 0052) proje iş deposunun
+    sahipliğini (süreç içi kilit) almasın; yoksa kanal masaüstünden önce kurulursa masaüstünün
+    proje araçları kapanırdı.
+    """
     loaded = settings if settings is not None else load_settings(config_path)
     if loaded.allow_all_applications:
         from artemis.tools.app_catalog import installed_applications
@@ -88,6 +94,8 @@ def create_runtime(
     with ExitStack() as cleanup:
         # Kod işleri turdan uzun yaşar; servis runtime ömrünce tutulur.
         try:
+            if not with_code_agent:
+                raise CodeAgentError("Bu kanalda proje araçları kapalı; masaüstünden kullanın.")
             jobs = CodeAgentJobs(log, store_path=loaded.state_dir / "code_agent.sqlite3")
             cleanup.callback(jobs.shutdown)
             context.services["code_agent_jobs"] = jobs
