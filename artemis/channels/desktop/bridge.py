@@ -48,6 +48,10 @@ VoiceFactory = Callable[
 ]
 
 _BUSY_TEXT = "Şu an başka bir işlem sürüyor; komut çalıştırılmadı."
+# Kapanışta temizliği beklemenin üst sınırı. İptali yutan bir görev uygulamayı sonsuza dek
+# "Temizleniyor…"da tutmasın; aşılırsa neyin beklendiği denetime yazılıp döngü durdurulur.
+SHUTDOWN_CLEANUP_SECONDS = 15.0
+SHUTDOWN_EXECUTOR_SECONDS = 5.0
 _VOICE_ERROR_TEXT = "Ses açılamadı; ses paketini, model dosyalarını ve mikrofonu kontrol edin."
 
 
@@ -296,6 +300,7 @@ class DesktopBridge:
         self._active_task: asyncio.Task[Any] | None = None
         self._cleanup_pending = False
         self._shutdown = False
+        self._shutdown_deadline: float | None = None
         # Ses durumu _lock altında okunur/yazılır; mikrofon yalnız start_voice ile açılır.
         self._voice_starting = False
         self._voice_stop_requested = False
@@ -616,7 +621,12 @@ class DesktopBridge:
             loop.run_forever()
         finally:
             loop.run_until_complete(loop.shutdown_asyncgens())
-            loop.run_until_complete(loop.shutdown_default_executor())
+            # Takılmış bir thread işçinin "durdu" demesini sonsuza dek engellemesin. Araç
+            # thread'leri kendi zaman aşımlarıyla biter; süre aşılırsa join edilmeden geçilir.
+            with suppress(TimeoutError):
+                loop.run_until_complete(
+                    asyncio.wait_for(loop.shutdown_default_executor(), SHUTDOWN_EXECUTOR_SECONDS)
+                )
             loop.close()
             self._stopped.set()
             self._events.put(State("stopped", "İşçi durdu."))
@@ -733,7 +743,9 @@ class DesktopBridge:
 
     async def _finish_cleanup(self, request_id: str) -> None:
         runtime = self._runtime
-        while runtime is not None and runtime.agent.cleanup_pending:
+        # Kapanışta bekleme `_stop_loop_when_clean`'e devredilir: o hâlâ temizliği bekler ama
+        # üst süreyle sınırlıdır; burada sınırsız döngü uygulamayı kapanmaz bırakırdı.
+        while runtime is not None and runtime.agent.cleanup_pending and not self._shutdown:
             await asyncio.sleep(0.05)
         with self._lock:
             self._cleanup_pending = False
@@ -962,13 +974,25 @@ class DesktopBridge:
             voice_busy = self._voice_starting or self._voice_task is not None
         proactive = self._proactive_task
         proactive_busy = proactive is not None and not proactive.done()
-        if runtime is not None and (
-            runtime.agent.cleanup_pending
-            or active_request is not None
-            or voice_busy
-            or proactive_busy
-        ):
-            asyncio.get_running_loop().call_later(0.05, self._stop_loop_when_clean)
-            return
+        busy = {
+            "turn_cleanup": runtime is not None and runtime.agent.cleanup_pending,
+            "active_request": active_request is not None,
+            "voice": voice_busy,
+            "proactive": proactive_busy,
+        }
+        if runtime is not None and any(busy.values()):
+            if self._shutdown_deadline is None:
+                self._shutdown_deadline = monotonic() + SHUTDOWN_CLEANUP_SECONDS
+            if monotonic() < self._shutdown_deadline:
+                asyncio.get_running_loop().call_later(0.05, self._stop_loop_when_clean)
+                return
+            # Temizlik doğrulanamadan çıkılıyor: "temiz kapandı" denmez, bekleyen parçalar
+            # kayda geçer. Süreç çıkınca thread'ler de biter; OS'ye gitmiş işlem geri alınmaz.
+            with suppress(OSError):
+                runtime.audit.emit(
+                    "shutdown_cleanup_timeout",
+                    seconds=SHUTDOWN_CLEANUP_SECONDS,
+                    pending=sorted(name for name, value in busy.items() if value),
+                )
         self._close_proactive_client()
         asyncio.get_running_loop().stop()

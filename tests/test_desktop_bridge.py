@@ -398,6 +398,41 @@ def test_shutdown_waits_for_cancelled_provider_cleanup(tmp_path):
         assert bridge._stopped.wait(2)
 
 
+def test_shutdown_gives_up_on_stuck_cleanup_after_bound_and_audits(tmp_path, monkeypatch):
+    """Hiç bitmeyen temizlik uygulamayı sonsuza dek "Temizleniyor…"da tutmamalı."""
+    from artemis.channels.desktop import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "SHUTDOWN_CLEANUP_SECONDS", 0.3)
+    monkeypatch.setattr(bridge_module, "SHUTDOWN_EXECUTOR_SECONDS", 0.3)
+    started = threading.Event()
+    release = threading.Event()
+
+    class NeverCleans:
+        async def complete(self, *_args: Any, **_kwargs: Any) -> Completion:
+            started.set()
+            while True:
+                try:
+                    await asyncio.to_thread(release.wait)
+                    return Completion(content="bitti")
+                except asyncio.CancelledError:
+                    continue
+
+    bridge = _fixture(tmp_path, [], provider_override=NeverCleans())
+    try:
+        request_id = bridge.submit("bekle")
+        assert request_id is not None
+        assert started.wait(2)
+        bridge.cancel(request_id)
+        bridge.shutdown()
+        assert bridge._stopped.wait(3)
+        assert "shutdown_cleanup_timeout" in (tmp_path / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+    finally:
+        release.set()
+        bridge.shutdown()
+
+
 def test_approval_timeout_fails_closed_and_cleanup_completes(tmp_path):
     bridge = _fixture(tmp_path, _tool_scenario(), max_seconds=0.5)
     try:
