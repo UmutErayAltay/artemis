@@ -127,10 +127,12 @@ def test_service_handles_message_with_buttons_and_stops_cleanly(harness: Harness
     service = TelegramService(
         statuses.append, runtime_factory=runtime_factory(provider, registry_with(ConfirmWriteTool))
     )
-    assert service.start(write_config(harness)) is True
-    assert service.start(write_config(harness)) is False  # ikinci başlatma yeni iş parçacığı açmaz
     try:
+        assert service.start(write_config(harness)) is True
         assert wait_until(lambda: running(harness, statuses)), statuses
+        # İkinci başlatma yeni iş parçacığı açmaz; kontrol kanal açıldıktan sonra yapılır
+        # (yavaş koşucuda iş parçacığı bitmişse neden `statuses` ile görünür, iş parçacığı sızmaz).
+        assert service.start(write_config(harness)) is False, statuses
         assert statuses[0] == STATUS_STARTING
         # Kanal açılırken biriken komutlar atlanır; mesaj ve düğme açılıştan SONRA kuyruğa girer.
         harness.fake.queue_message("onay.txt oluştur")
