@@ -77,6 +77,7 @@ class ComputerBackend(Protocol):
     def monitors(self) -> list[tuple[int, int, int, int]]: ...
     def capture(self, left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]: ...
     def foreground_process(self) -> tuple[str, int]: ...
+    def foreground_window(self) -> tuple[int, tuple[int, int, int, int]]: ...
     def process_at(self, x: int, y: int) -> tuple[str, int]: ...
     def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None: ...
     def scroll(self, x: int, y: int, notches: int) -> None: ...
@@ -106,6 +107,14 @@ class _Screen:
     size: tuple[int, int]
     shot: tuple[int, int]
     png: bytes
+
+
+@dataclass(frozen=True)
+class _Layout:
+    """Yakalama anındaki monitörler ve ön plan penceresi (hwnd, sol-üst-sağ-alt)."""
+
+    monitors: list[tuple[int, int, int, int]]
+    window: tuple[int, tuple[int, int, int, int]]
 
 
 @dataclass
@@ -254,6 +263,7 @@ class ComputerSession:
         self._steps = 0
         # Son taze kare (yalnız RAM); sahibi karar verir, burada diske/denetime yazılmaz.
         self._on_frame = on_frame
+        self._layout: _Layout | None = None
 
     async def run(self, goal: str, turn_id: str, deadline: float | None) -> SessionResult:
         limit = self._clock() + self._config.max_minutes * 60
@@ -289,6 +299,8 @@ class ComputerSession:
             if isinstance(captured, SessionResult):
                 return captured
             screens = captured
+            # Yakalama anındaki düzen: girdi gönderilmeden hemen önce karşılaştırılır (_act).
+            layout = self._layout
 
             # Görüntüler ayrı kullanıcı iletilerinde, etiketleriyle: sağlayıcılar ardışık
             # kullanıcı iletilerini birleştirir ve "Ekran N" eşlemesi korunur.
@@ -337,7 +349,9 @@ class ComputerSession:
             signature = _signature(action)
             repeat = signature is not None and memory.is_repeat(signature)
             # Tekrar, mevcut engel sayacından geçer; hiçbir güvenlik denetimi atlanmaz/gevşetilmez.
-            outcome = _REPEAT_BLOCK if repeat else await self._act(action, turn_id, screens, limit)
+            outcome = _REPEAT_BLOCK if repeat else await self._act(
+                action, turn_id, screens, layout, limit
+            )
             if isinstance(outcome, SessionResult):
                 return outcome
             if outcome is not None:
@@ -371,6 +385,13 @@ class ComputerSession:
             # yazıyı okunmaz yapardı (ADR 0039 ek karar).
             screens: list[_Screen] = []
             monitor_rects = await asyncio.to_thread(self._backend.monitors)
+            self._layout = None
+            try:
+                window = await asyncio.to_thread(self._backend.foreground_window)
+                self._layout = _Layout(list(monitor_rects), window)
+            except (OSError, RuntimeError):
+                # Düzen kaydedilemedi: _act bunu "doğrulanamadı" sayıp girdi göndermez.
+                pass
             for left, top, width, height in monitor_rects:
                 if self._clock() >= limit:
                     return self._result("timeout", "Oturum süresi doldu.")
@@ -471,6 +492,7 @@ class ComputerSession:
         action: Action,
         turn_id: str,
         screens: list[_Screen],
+        layout: _Layout | None,
         limit: float,
     ) -> SessionResult | str | None:
         """Eylemi denetler ve uygular. Oturum bitecekse sonucu, adım engellendiyse nedeni
@@ -539,6 +561,12 @@ class ComputerSession:
 
         if self._clock() >= limit:
             return self._result("timeout", "Oturum süresi doldu.")
+        if action.type != "wait":
+            # Onay penceresi odağı kendisi değiştirir; onaylı adımda yalnız ön plan karşılaştırması
+            # atlanır (hedef yukarıda yeniden denetlendi), monitör düzeni yine denetlenir.
+            stale = await self._stale_reason(layout, check_window=approved is not True)
+            if stale:
+                return stale
         try:
             executed = await self._execute(action, point, limit)
             if not executed:
@@ -579,6 +607,27 @@ class ComputerSession:
             observed=(action.observed or "")[:200] or None,
             progress=(action.progress or "")[:200] or None,
         )
+        return None
+
+    async def _stale_reason(self, layout: _Layout | None, *, check_window: bool) -> str | None:
+        """Görüntü alındıktan beri ekran düzeni/ön plan değiştiyse engel nedeni döner.
+
+        Model saniyelerce düşünür; bu sürede monitör çıkarılmış/taşınmış, DPI değişmiş, bir
+        açılır pencere odağı almış ya da hedef pencere kaymış olabilir. Koordinatlar yakalama
+        anındaki düzene göre ölçeklendiği için girdi modelin görmediği yere düşerdi; süreç
+        denylist'i bunu yakalamaz (pencere hâlâ "izinli"). Okunamıyorsa güvenli sayılmaz.
+        """
+        if layout is None:
+            return "Ekran düzeni doğrulanamadı; yeni görüntü alınıyor"
+        try:
+            monitors = await asyncio.to_thread(self._backend.monitors)
+            window = await asyncio.to_thread(self._backend.foreground_window)
+        except (OSError, RuntimeError) as error:
+            return f"Ekran düzeni okunamadı ({error}); yeni görüntü alınıyor"
+        if monitors != layout.monitors:
+            return "Ekran düzeni değişti; yeni görüntü alınıyor"
+        if check_window and window != layout.window:
+            return "Ön plandaki pencere değişti veya taşındı; yeni görüntü alınıyor"
         return None
 
     async def _target(

@@ -212,6 +212,8 @@ def _libs() -> tuple[Any, Any, Any]:
     user32.GetMonitorInfoW.argtypes = [vp, ctypes.POINTER(_MONITORINFO)]
     user32.GetMonitorInfoW.restype = wintypes.BOOL
     user32.GetForegroundWindow.restype = vp
+    user32.GetWindowRect.argtypes = [vp, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowRect.restype = wintypes.BOOL
     user32.WindowFromPoint.argtypes = [wintypes.POINT]
     user32.WindowFromPoint.restype = vp
     user32.GetAncestor.argtypes = [vp, wintypes.UINT]
@@ -355,6 +357,18 @@ def foreground_process() -> tuple[str, int]:
     çağıran boş yolu engelli sayar (okunamayan pencereye güvenilmez)."""
     _require_windows()
     return _window_process(_libs()[0].GetForegroundWindow())
+
+
+def foreground_window() -> tuple[int, tuple[int, int, int, int]]:
+    """Ön plandaki pencerenin (hwnd, (sol, üst, sağ, alt)); yakalama ile girdi arasında
+    pencerenin değişip değişmediğini anlamak için (session._stale_reason)."""
+    _require_windows()
+    user32 = _libs()[0]
+    hwnd = user32.GetForegroundWindow()
+    rect = wintypes.RECT()
+    if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        raise OSError("Ön plandaki pencere okunamadı (GetForegroundWindow/GetWindowRect).")
+    return int(hwnd), (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
 
 
 def process_at(x: int, y: int) -> tuple[str, int]:

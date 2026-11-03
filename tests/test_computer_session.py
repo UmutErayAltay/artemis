@@ -39,6 +39,8 @@ class FakeBackend:
         self.captured_rects: list[tuple[int, int, int, int]] = []
         self.captures = 0
         self.fail: Exception | None = None
+        self.window: tuple[int, tuple[int, int, int, int]] = (7, (0, 0, size[0], size[1]))
+        self.window_error: Exception | None = None
 
     def monitors(self) -> list[tuple[int, int, int, int]]:
         return list(self.monitor_rects)
@@ -52,6 +54,11 @@ class FakeBackend:
 
     def foreground_process(self) -> tuple[str, int]:
         return self.foreground
+
+    def foreground_window(self) -> tuple[int, tuple[int, int, int, int]]:
+        if self.window_error is not None:
+            raise self.window_error
+        return self.window
 
     def process_at(self, x: int, y: int) -> tuple[str, int]:
         return self.at if self.at is not None else self.foreground
@@ -79,9 +86,13 @@ class ScriptedVision:
         self.contents = list(contents)
         self.seen: list[list[Message]] = []
         self.timeouts: list[float] = []
+        # Model beklenirken ekranın değişmesini simüle eder (çağrı numarası 1'den başlar).
+        self.on_call: Callable[[int], None] | None = None
 
     async def complete(self, messages: list[Message], tools: list[Any], *, timeout: float):
         self.seen.append(list(messages))
+        if self.on_call is not None:
+            self.on_call(len(self.seen))
         self.timeouts.append(timeout)
         # Betik biterse son yanıt tekrarlanır (sınır testleri için).
         content = self.contents.pop(0) if len(self.contents) > 1 else self.contents[0]
@@ -138,6 +149,7 @@ class Env:
         mode: Callable[[], str] | None = None,
     ) -> None:
         self.esc_after_step = esc_after_step
+        self.on_approve: Callable[[], None] | None = None
         self.mode = mode
         self.backend = backend or FakeBackend()
         self.provider = ScriptedVision(*contents)
@@ -154,6 +166,8 @@ class Env:
 
     def _approve(self, name: str, arguments: dict[str, Any]) -> bool:
         self.approvals.append((name, arguments))
+        if self.on_approve is not None:
+            self.on_approve()
         return self.approve_result
 
     def _on_step(self, text: str) -> None:
@@ -448,6 +462,86 @@ async def test_sensitive_approved_executes_and_audits() -> None:
     step = env.audit.named("computer_step")[0]
     assert step["sensitive"] is True and step["approved"] is True
     assert step["auto_approved"] is False
+
+
+def _drift_once(env: Env, change: Callable[[FakeBackend], None]) -> None:
+    """İlk model çağrısı sürerken (görüntü alındıktan sonra) düzeni bozar."""
+    env.provider.on_call = lambda n: change(env.backend) if n == 1 else None
+
+
+def _move_monitor(backend: FakeBackend) -> None:
+    backend.monitor_rects = [(10, 0, 8, 4)]
+
+
+async def test_monitor_layout_change_blocks_click_audits_and_recaptures() -> None:
+    env = Env(click(), click(), DONE, YES)
+    _drift_once(env, _move_monitor)
+    result = await env.run()
+    assert result.reason == "done"
+    # İlk tıklama gönderilmedi; yeni görüntüden sonraki tıklama yeni orijine göre gitti.
+    assert env.backend.calls == [("click", 12, 1, "left", False)]
+    blocked = env.audit.named("computer_blocked")
+    assert len(blocked) == 1 and "Ekran düzeni değişti" in blocked[0]["reason"]
+    assert env.backend.captures == 4  # ilk + yeniden + tıklama sonrası + doğrulama
+
+
+async def test_foreground_window_change_blocks_type() -> None:
+    env = Env(act(type="type", text=TYPED_TEXT), DONE, YES)
+    _drift_once(env, lambda b: setattr(b, "window", (99, b.window[1])))
+    assert (await env.run()).reason == "done"
+    assert env.backend.calls == []
+    reasons = [e["reason"] for e in env.audit.named("computer_blocked")]
+    assert reasons == ["Ön plandaki pencere değişti veya taşındı; yeni görüntü alınıyor"]
+
+
+async def test_foreground_window_moved_blocks_click() -> None:
+    env = Env(click(), DONE, YES)
+    _drift_once(env, lambda b: setattr(b, "window", (b.window[0], (5, 5, 9, 9))))
+    assert (await env.run()).reason == "done"
+    assert env.backend.calls == []
+    assert len(env.audit.named("computer_blocked")) == 1
+
+
+async def test_unchanged_layout_sends_as_before() -> None:
+    env = Env(click(), DONE, YES)
+    assert (await env.run()).reason == "done"
+    assert env.backend.calls == [("click", 2, 1, "left", False)]
+    assert env.audit.named("computer_blocked") == []
+
+
+async def test_wait_does_not_check_layout() -> None:
+    env = Env(act(type="wait", seconds=1), DONE, YES)
+    _drift_once(env, _move_monitor)
+    assert (await env.run()).reason == "done"
+    assert env.audit.named("computer_blocked") == []
+
+
+async def test_approved_sensitive_step_ignores_focus_change_by_dialog() -> None:
+    env = Env(click(sensitive=True), DONE, YES)
+    env.on_approve = lambda: setattr(env.backend, "window", (99, (0, 0, 1, 1)))
+    assert (await env.run()).reason == "done"
+    assert env.backend.calls == [("click", 2, 1, "left", False)]
+
+
+async def test_approved_sensitive_step_still_blocked_on_monitor_change() -> None:
+    env = Env(click(sensitive=True), DONE, YES)
+    env.on_approve = lambda: _move_monitor(env.backend)
+    assert (await env.run()).reason == "done"
+    assert env.backend.calls == []
+    assert "Ekran düzeni değişti" in env.audit.named("computer_blocked")[0]["reason"]
+
+
+async def test_layout_read_error_blocks_instead_of_crashing() -> None:
+    env = Env(click(), click(), click(), DONE, YES)
+
+    def fail(n: int) -> None:
+        env.backend.window_error = OSError("pencere okunamadı")
+
+    env.provider.on_call = fail
+    result = await env.run()
+    assert result.reason == "blocked"
+    assert env.backend.calls == []
+    assert len(env.audit.named("computer_blocked")) == 3
 
 
 async def test_alt_f4_is_always_sensitive() -> None:
