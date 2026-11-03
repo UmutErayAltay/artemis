@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -82,6 +83,7 @@ from artemis.channels.desktop.settings_panel import (
 )
 from artemis.channels.desktop.shell_assets import greeting_for_hour
 from artemis.channels.desktop.steps import StepLine, step_line
+from artemis.channels.desktop.telegram_service import TelegramService, should_run
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
@@ -1537,6 +1539,11 @@ class DesktopWindow(QMainWindow):
         self.settings_panel.computer_auto.toggled.connect(self._toggle_auto_mode)
         self.settings_panel.github_synced.connect(self._github_synced)
         self.settings_panel.providers.changed.connect(self._providers_changed)
+        self.settings_panel.telegram.changed.connect(self._telegram_changed)
+        # İki yönlü kanal masaüstü içinde isteğe bağlı çalışır (ADR 0052); kendi iş parçacığı.
+        self._telegram_service = TelegramService(self.settings_panel.telegram.channel_status.emit)
+        self.settings_panel.telegram.channel_changed.connect(self._sync_telegram_service)
+        self._sync_telegram_service()
         self.settings_panel.pet.skin_selected.connect(self._select_skin)
         self.settings_panel.pet.model_settings_requested.connect(self._open_model_settings)
         self.settings_scroll = self.settings_panel
@@ -1631,6 +1638,30 @@ class DesktopWindow(QMainWindow):
             )
             return
         self._request_restart(self.settings_panel.providers.status)
+
+    def _telegram_changed(self) -> None:
+        """chat_id/token değişti: proaktif Telegram teslimi yeniden kurulumla yeni durumu görür."""
+        status = self.settings_panel.telegram.message
+        # Kanal servisi çalışma zamanından bağımsızdır: yeni sohbet/token hemen eşitlenir.
+        self._sync_telegram_service()
+        if self._exiting or self._demo:
+            status.setText("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
+            return
+        self._request_restart(status)
+
+    def _sync_telegram_service(self) -> None:
+        """Config'e göre kanal servisini durdurup (gerekirse) yeniden başlatır; canlı, yeniden
+        kurulum gerektirmez. Demo'da ve çıkışta asla başlamaz."""
+        service = self._telegram_service
+        service.stop()
+        if self._demo or self._exiting:
+            return
+        try:
+            config = load_settings(self._config_path).telegram
+        except (OSError, ValueError, yaml.YAMLError):
+            return
+        if should_run(config):
+            service.start(self._config_path)
 
     def _code_agent_config_saved(self) -> None:
         """Projeler'den yazılan ajan/klasör ayarı çalışma zamanına yeniden kurulumla ulaşır.
@@ -1954,6 +1985,14 @@ class DesktopWindow(QMainWindow):
         """
         mode = "auto" if checked else "accept"
         saved = True
+        if checked and not self._demo and not self._confirm_auto_mode():
+            # Vazgeçilirse iki denetim de kapalı kalır; kip hiç değişmez.
+            for control in (self.settings_panel.computer_auto, self.auto_button):
+                control.blockSignals(True)
+                control.setChecked(False)
+                control.blockSignals(False)
+            self._show_auto_state(False)
+            return
         if not self._demo:
             # Önce config: yazılamayan kip runtime'a uygulanırsa güvenlik ayarı sessizce
             # diskten ayrışırdı (yeniden açılışta eski kip döner).
@@ -1975,6 +2014,26 @@ class DesktopWindow(QMainWindow):
         self._show_auto_state(shown)
         if saved and not self._demo:
             self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
+
+    def _confirm_auto_mode(self) -> bool:
+        """Otomatik kip bilinçli açılır: varsayılan cevap hayır (kural 2'nin ruhu)."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Otomatik onayı aç?")
+        box.setText(
+            "Otomatik onayda Artemis ekranı okur, tıklar ve yazar; hassas adımları da "
+            "sana sormadan yapar. Esc her an durdurur."
+        )
+        box.setInformativeText(
+            "Yanlış anlaşılan bir komut ya da ekrandaki zararlı bir metin, istemediğin bir "
+            "işlemi tetikleyebilir. Terminal, Artemis ve parola yöneticisi yine engelli."
+        )
+        yes = box.addButton("Riski anlıyorum, aç", QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("Vazgeç", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.setEscapeButton(no)
+        box.exec()
+        return box.clickedButton() is yes
 
     def _show_auto_state(self, on: bool) -> None:
         """Simge anahtarı metin taşımaz; durum erişilebilir açıklamada ve ipucunda okunur."""
@@ -2405,6 +2464,8 @@ class DesktopWindow(QMainWindow):
     def _finish_exit(self) -> None:
         if not self._exiting:
             return
+        # Kanal kendi runtime'ını kapatır; iş parçacığı çıkıştan sonra kalmasın.
+        self._telegram_service.stop()
         self._timer.stop()
         if self._hotkey is not None:
             self._hotkey.stop()

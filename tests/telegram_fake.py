@@ -14,6 +14,8 @@ import threading
 import time
 from collections import deque
 from dataclasses import dataclass, field
+from email.parser import BytesParser
+from email.policy import HTTP
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any
@@ -28,7 +30,7 @@ from artemis.tools.registry import ToolRegistry
 # Sahte değer: yalnız bu sunucunun kabul ettiği biçimde, gerçek bir bota ait değildir.
 FAKE_TOKEN = "123456:TEST-not-a-real-token-abcdefghijklmn"
 CHAT_ID = 42
-OUT_METHODS = ("sendMessage", "editMessageText", "answerCallbackQuery")
+OUT_METHODS = ("sendMessage", "sendPhoto", "editMessageText", "answerCallbackQuery")
 _LOOPBACK_NO_PROXY = "127.0.0.1,localhost"
 
 
@@ -106,6 +108,8 @@ class FakeTelegram:
         self._lock = threading.Lock()
         self._queue: deque[dict[str, Any] | _Press] = deque()
         self._failures: dict[str, _Failure] = {}
+        # sendPhoto ile gelen dosya baytları; Recorded gövdesine yalnız uzunluk girer.
+        self.photos: list[bytes] = []
         self._next_update_id = 1000
         self._next_message_id = 100
         self._next_callback = 0
@@ -130,11 +134,15 @@ class FakeTelegram:
                 if len(parts) != 3 or not parts[1].startswith("bot"):
                     self._reply(404, {"ok": False, "description": "Not Found"})
                     return
-                try:
-                    decoded = json.loads(raw)
-                except ValueError:
-                    decoded = {}
-                body = decoded if isinstance(decoded, dict) else {}
+                content_type = self.headers.get("Content-Type", "")
+                if content_type.startswith("multipart/form-data"):
+                    body = fake.parse_multipart(content_type, raw)
+                else:
+                    try:
+                        decoded = json.loads(raw)
+                    except ValueError:
+                        decoded = {}
+                    body = decoded if isinstance(decoded, dict) else {}
                 status, payload = fake.dispatch(parts[2], parts[1][3:], body)
                 self._reply(status, payload)
 
@@ -231,13 +239,35 @@ class FakeTelegram:
                 if failure.once:
                     del self._failures[method]
                 return failure.status, failure.payload
+            if method == "getMe":
+                bot = {"id": 1, "is_bot": True, "username": "test_bot"}
+                return 200, {"ok": True, "result": bot}
             if method == "getUpdates":
                 return 200, {"ok": True, "result": self._poll(body.get("offset"))}
-            if method == "sendMessage":
+            if method in {"sendMessage", "sendPhoto"}:
                 return 200, {"ok": True, "result": self._send(body)}
             if method in {"editMessageText", "answerCallbackQuery"}:
                 return 200, {"ok": True, "result": True}
             return 404, {"ok": False, "description": "Not Found"}
+
+    def parse_multipart(self, content_type: str, raw: bytes) -> dict[str, Any]:
+        """Dosya baytları `photos` listesine gider; gövdede yalnız uzunluk ve PNG imzası kalır."""
+        head = (f"Content-Type: {content_type}"+"\r\n\r\n").encode()
+        message = BytesParser(policy=HTTP).parsebytes(head + raw)
+        body: dict[str, Any] = {}
+        for part in message.iter_parts():
+            name = part.get_param("name", header="content-disposition")
+            data = part.get_payload(decode=True)
+            if not isinstance(name, str) or not isinstance(data, bytes):
+                continue
+            if part.get_filename():
+                self.photos.append(data)
+                body[f"{name}_len"] = len(data)
+                body[f"{name}_is_png"] = data.startswith(b"\x89PNG")
+            else:
+                text = data.decode()
+                body[name] = int(text) if text.lstrip("-").isdigit() else text
+        return body
 
     def _send(self, body: dict[str, Any]) -> dict[str, Any]:
         self._next_message_id += 1
@@ -407,6 +437,7 @@ def build_harness(
     chat_id: int | None = CHAT_ID,
     approval_timeout: float = 5.0,
     max_message_age: int = 120,
+    send_computer_screenshot: bool = False,
     **settings_fields: Any,
 ) -> Harness:
     """Loopback sunucu, sahte token ortamı ve gerçek AuditLog ile kurulum yapar."""
@@ -424,6 +455,7 @@ def build_harness(
         poll_timeout_seconds=0,
         approval_timeout_seconds=approval_timeout,
         max_message_age_seconds=max_message_age,
+        send_computer_screenshot=send_computer_screenshot,
     )
     settings = Settings(
         workspace=workspace,

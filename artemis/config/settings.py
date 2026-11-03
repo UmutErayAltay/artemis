@@ -120,7 +120,10 @@ class VoiceConfig(BaseModel):
     stt_beam_size: int = Field(default=5, ge=1, le=10)
     stt_partial_beam_size: int = Field(default=1, ge=1, le=10)
     stt_partial_enabled: bool = True
-    stt_vad_filter: bool = True
+    # Kapalı: Whisper'ın VAD süzgeci bant sınırlı seste baştaki uyandırma sözcüğünü kesiyor
+    # (ADR 0045: telefon bandında kaçırma %40 -> %0). Canlı döngüde STT'ye zaten webrtc VAD'in
+    # kestiği parça gider, boşta ek maliyet yoktur.
+    stt_vad_filter: bool = False
     stt_min_logprob: float = -1.0
     stt_max_no_speech: float = Field(default=0.6, ge=0, le=1)
     stt_hotwords: tuple[str, ...] = Field(default=(), max_length=100)
@@ -132,6 +135,8 @@ class VoiceConfig(BaseModel):
     stt_mode: Literal["local", "hybrid"] = "local"
     stt_cloud_endpoint: str = ""
     stt_cloud_model: str = ""
+    # ADR 0050: xAI'nin STT REST ucu OpenAI uyumlu değildir (/stt, model alanı yok).
+    stt_cloud_protocol: Literal["openai", "xai"] = "openai"
     # ADR 0047: konuşurken akan YALNIZ GÖSTERİM metni (yerel, `pip install .[stream]`).
     # Model kimliği koda gömülmez; açıkken depo ve sabit revision config'ten gelir.
     live_transcript: bool = False
@@ -215,6 +220,12 @@ class TelegramConfig(BaseModel):
     poll_timeout_seconds: int = Field(default=25, ge=0, le=50)
     approval_timeout_seconds: float = Field(default=120.0, gt=0, le=900)
     max_message_age_seconds: int = Field(default=120, ge=1, le=3600)
+    # İki yönlü kanalı masaüstü içinde çalıştırır (ADR 0052); varsayılan kapalı.
+    run_in_desktop: bool = False
+    # Telegram'dan çalışan `computer_use` bitince son ekran karesini sohbete yollar (ADR 0053).
+    # Kare buluta (Telegram) gider: gizli tur/geçmişte ve `perception.allow_cloud_screen`
+    # kapalıyken hiç gönderilmez.
+    send_computer_screenshot: bool = False
 
     @field_validator("token_env")
     @classmethod
@@ -649,11 +660,12 @@ class Settings(BaseModel):
             raise ValueError("Modelin endpoint değeri endpoints içinde tanımlanmalı")
         voice = self.voice
         if voice.stt_mode == "hybrid" and (
-            voice.stt_cloud_endpoint not in self.endpoints or not voice.stt_cloud_model.strip()
+            voice.stt_cloud_endpoint not in self.endpoints
+            or (voice.stt_cloud_protocol == "openai" and not voice.stt_cloud_model.strip())
         ):
             raise ValueError(
                 "Karma tanıma için stt_cloud_endpoint endpoints içinde tanımlı ve "
-                "stt_cloud_model dolu olmalı"
+                "stt_cloud_model dolu olmalı (xai protokolünde model gerekmez)"
             )
         if any(name not in self.applications for name in self.close_without_confirmation):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")

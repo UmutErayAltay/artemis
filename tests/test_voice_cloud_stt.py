@@ -382,6 +382,45 @@ def test_hybrid_requires_known_endpoint_and_model() -> None:
             _settings(**bad)
 
 
+def test_xai_protocol_allows_empty_model_openai_does_not() -> None:
+    ok = {"stt_mode": "hybrid", "stt_cloud_endpoint": "bulut", "stt_cloud_protocol": "xai"}
+    assert _settings(**ok).voice.stt_cloud_protocol == "xai"
+    with pytest.raises(ValidationError):
+        _settings(**{**ok, "stt_cloud_protocol": "openai"})
+    with pytest.raises(ValidationError):
+        _settings(**{**ok, "stt_cloud_endpoint": "yok"})
+    assert VoiceConfig().stt_cloud_protocol == "openai"
+
+
+async def test_xai_protocol_posts_to_stt_with_file_last_and_no_model(server: Server) -> None:
+    audit = Audit()
+    config = VoiceConfig(stt_mode="hybrid", stt_cloud_endpoint="bulut", stt_cloud_protocol="xai")
+    transcriber = OpenAICompatibleTranscriber(
+        config, "bulut", EndpointConfig(base_url=server.url, api_key=False), audit,  # type: ignore[arg-type]
+    )
+    assert await transcriber.transcribe(b"\x01\x00" * 160) == "bulut metni"
+    path, _, body = server.requests[0]
+    assert path == "/v1/stt"
+    assert b'name="model"' not in body and b'name="response_format"' not in body
+    assert b'name="language"\r\n\r\ntr' in body
+    assert body.index(b'name="language"') < body.index(b'name="file"')
+    assert body.count(b"Content-Disposition") == 2  # file son ve tek dosya parçası
+    assert audit.records[0][0] == "cloud_stt_transfer"
+
+
+async def test_xai_protocol_errors_leak_nothing(server: Server) -> None:
+    server.status = 500
+    server.body = b"gizli-govde"
+    config = VoiceConfig(stt_mode="hybrid", stt_cloud_endpoint="bulut", stt_cloud_protocol="xai")
+    transcriber = OpenAICompatibleTranscriber(
+        config, "bulut", EndpointConfig(base_url=server.url, api_key=False), Audit(),  # type: ignore[arg-type]
+    )
+    with pytest.raises(RuntimeError) as info:
+        await transcriber.transcribe(b"\x01\x00" * 160)
+    assert "HTTP 500" in str(info.value) and "gizli-govde" not in str(info.value)
+    assert server.url not in str(info.value)
+
+
 def _runtime(settings: Settings) -> SimpleNamespace:
     return SimpleNamespace(settings=settings, audit=Audit(), runner=object())
 

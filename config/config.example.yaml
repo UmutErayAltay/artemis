@@ -93,7 +93,7 @@ voice:
   stt_compute_type: float16 # Panelden seçilir: int8_float16 (az bellek, aynı doğruluk) | float16; CPU'da yok sayılır.
   stt_language: tr_en # Türkçe öncelikli; güçlü İngilizce kanıtında en. auto tüm dilleri seçer.
   cuda_library_dirs: [] # Windows: gerektiğinde yerel cublas/cudnn DLL dizinleri.
-  stt_vad_filter: true # Sessiz bölümleri STT öncesinde ele.
+  stt_vad_filter: false # Whisper'ın kendi VAD süzgeci; kapalı (ADR 0045: bant sınırlı seste baştaki "Artemis"i kesiyor).
   stt_min_logprob: -1.0
   stt_max_no_speech: 0.6
   stt_beam_size: 5 # Kesin sonuç; daha yüksek değer daha yavaş olabilir.
@@ -111,6 +111,7 @@ voice:
   stt_mode: local # local | hybrid
   # stt_cloud_endpoint: groq # Üstteki `endpoints` içinde tanımlı bir kimlik (hybrid için zorunlu).
   # stt_cloud_model: whisper-large-v3 # Sağlayıcının güncel belgesinden doğrulayın (hybrid için zorunlu).
+  # stt_cloud_protocol: openai # openai (Whisper uyumlu /audio/transcriptions) | xai (/stt, model gerekmez; ADR 0050)
   # Canlı yazı (ADR 0047): konuşurken pet balonunda akan YALNIZ GÖSTERİM metni; komutu,
   # uyandırmayı, yankıyı ve söz kesmeyi etkilemez. Yerel, işlemcide çalışır (`pip install .[stream]`).
   # Model Artemis ile gelmez; ilk açılışta aşağıdaki SABİT revision'dan indirilir. Powered by mihu:
@@ -148,12 +149,17 @@ voice:
 # reddeder). Token yalnız ortam değişkeninden okunur; adını token_env belirler ve
 # _TOKEN ile bitmek zorundadır (denetim kaydı değeri bu sayede gizler).
 #   Windows: setx ARTEMIS_TELEGRAM_BOT_TOKEN "<BotFather'dan aldığınız token>"
+# KOLAY YOL: Ayarlar > Telegram paneli token'ı kimlik kasasına (Artemis/telegram) yazar, sohbeti
+# kodla eşleştirip `chat_id`'yi bu dosyaya kendisi ekler (ADR 0051). Ortam değişkeni önceliklidir.
 # Chat id'nizi @userinfobot'tan ya da bota mesaj yazdıktan sonra
 # https://api.telegram.org/bot<TOKEN>/getUpdates çıktısındaki message.chat.id'den bulun.
 # Yalnız bu kimliğe sahip ÖZEL sohbetten gelen mesaj çalıştırılır; grup, başka kullanıcı,
 # iletilmiş (forward) ve max_message_age_seconds'tan eski mesajlar çalıştırılmaz.
-# Onaylar düğmeyle sorulur; süre dolarsa cevap hayırdır. `artemis telegram` ile başlatılır.
+# Onaylar düğmeyle sorulur; süre dolarsa cevap hayırdır. `artemis telegram` ile başlatılır;
+# ya da run_in_desktop: true ile masaüstü açıkken onun içinde çalışır (ADR 0052). İkisi aynı
+# anda açıksa bot tek yoklayıcıya izin verdiğinden çakışır (HTTP 409).
 # telegram:
+#   run_in_desktop: false            # true: Artemis açıkken Telegram'dan komut al
 #   chat_id: 123456789
 #   token_env: ARTEMIS_TELEGRAM_BOT_TOKEN
 #   api_base: https://api.telegram.org
@@ -161,6 +167,10 @@ voice:
 #   poll_timeout_seconds: 25
 #   approval_timeout_seconds: 120
 #   max_message_age_seconds: 120
+#   # computer_use Telegram'dan da çalışır (yalnız run_in_desktop; ADR 0053). Bitince son ekran
+#   # karesini sohbete yollar. Kare buluta (Telegram) gider: gizli turda ve
+#   # perception.allow_cloud_screen kapalıyken ASLA gönderilmez. /dur oturumu durdurur.
+#   send_computer_screenshot: false
 
 # Kod ajanı (ADR 0023/0026). KAPALI gelir: projects boşsa araçlar çalışmaz. Her iş
 # tam taslak için onay ister; ajan headless `claude -p` olarak çalışır, yerel commit

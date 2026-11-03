@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
 from PySide6.QtCore import QRectF, QSize, Qt, QThread, Signal
@@ -37,24 +38,29 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.projects_panel import CurrentPageStack
 from artemis.channels.desktop.provider_section import (
+    ConnectionTest,
     ProviderSection,
     button_row,
     divider,
     field,
     group,
     meta_label,
+    store_endpoint_key,
 )
+from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import (
     BUILTIN_AGENT,
     BUILTIN_AGENTS,
     GITHUB_OWNER_RE,
+    EndpointConfig,
     Settings,
     load_settings,
 )
@@ -134,6 +140,17 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         ("voice", "stt_mode"), "hybrid_stt",
         lambda box: "hybrid" if box.isChecked() else "local",
         lambda box, value: box.setChecked(value == "hybrid"),
+    ),
+    PanelBinding(
+        ("voice", "stt_cloud_endpoint"), "cloud_server",
+        lambda combo: str(combo.currentData() or ""),
+        lambda combo, value: combo.setCurrentIndex(max(0, combo.findData(value))),
+    ),
+    _combo(("voice", "stt_cloud_protocol"), "cloud_protocol", fallback_first=True),
+    PanelBinding(
+        ("voice", "stt_cloud_model"), "cloud_model",
+        lambda combo: combo.currentText().strip(),
+        lambda combo, value: combo.setEditText(str(value)),
     ),
     _checkbox(("voice", "barge_in_without_wake"), "barge_in_box"),
     _checkbox(("voice", "followup_listening"), "followup_box"),
@@ -602,10 +619,47 @@ class SettingsPanel(QWidget):
             "gider. Değişiklik ses yeniden başlayınca uygulanır."
         )
         stt_layout.addWidget(self.hybrid_stt)
+        self.cloud_box = QWidget()
+        cloud_layout = QVBoxLayout(self.cloud_box)
+        cloud_layout.setContentsMargins(0, 0, 0, 0)
+        self.cloud_server = QComboBox()
+        self.cloud_server.setAccessibleName("Bulut tanıma sunucusu")
+        field(cloud_layout, "Tanıma sunucusu", self.cloud_server)
+        self.cloud_protocol = QComboBox()
+        self.cloud_protocol.setAccessibleName("Bulut tanıma protokolü")
+        self.cloud_protocol.addItem("OpenAI uyumlu (Whisper)", "openai")
+        self.cloud_protocol.addItem("xAI Grok", "xai")
+        field(cloud_layout, "Protokol", self.cloud_protocol)
+        self.cloud_key = QLineEdit()
+        self.cloud_key.setAccessibleName("Bulut tanıma API anahtarı")
+        self.cloud_key.setEchoMode(QLineEdit.EchoMode.Password)
+        self.cloud_key_button = QPushButton("Anahtarı kaydet")
+        self.cloud_key_button.clicked.connect(self._save_cloud_key)
+        key_row = QHBoxLayout()
+        key_row.setSpacing(8)
+        key_row.addWidget(self.cloud_key, 1)
+        key_row.addWidget(self.cloud_key_button)
+        field(cloud_layout, "API anahtarı", key_row)
+        self.cloud_model = QComboBox()
+        self.cloud_model.setEditable(True)
+        self.cloud_model.setAccessibleName("Bulut tanıma modeli")
+        self.cloud_fetch_button = QPushButton("Modelleri getir")
+        self.cloud_fetch_button.clicked.connect(self._fetch_cloud_models)
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
+        model_row.addWidget(self.cloud_model, 1)
+        model_row.addWidget(self.cloud_fetch_button)
+        field(cloud_layout, "Bulut tanıma modeli", model_row)
+        self._cloud_fetch: ConnectionTest | None = None
+        self._cloud_fetch_for = ""
+        stt_layout.addWidget(self.cloud_box)
         self.cloud_stt_hint = meta_label("")
         stt_layout.addWidget(self.cloud_stt_hint)
         self.hybrid_stt.toggled.connect(self._update_cloud_hint)
-        self._cloud_configured = False
+        self.cloud_protocol.currentIndexChanged.connect(self._update_cloud_hint)
+        self.cloud_server.activated.connect(self._cloud_server_picked)
+        self.cloud_server.currentIndexChanged.connect(self._update_cloud_hint)
+        self._update_cloud_hint()
         # Konuşma
         speech_card, speech = group("Konuşma")
         voice.addWidget(speech_card)
@@ -713,8 +767,17 @@ class SettingsPanel(QWidget):
             "Uygula gerekmez."
         )
         self.providers = ProviderSection(config_path, demo=demo)
+        self.providers.changed.connect(self._load_cloud_servers)
         model_page.addWidget(self.providers)
         model_page.addStretch(1)
+
+        telegram_page = page(
+            "Telegram",
+            "Bot token'ı ve sohbet eşleştirme. Değişiklikler hemen kaydedilir; Uygula gerekmez.",
+        )
+        self.telegram = TelegramSection(config_path, demo=demo)
+        telegram_page.addWidget(self.telegram)
+        telegram_page.addStretch(1)
 
         apps = page(
             "Uygulamalar",
@@ -912,6 +975,7 @@ class SettingsPanel(QWidget):
         # Değişiklik izleme yalnız kullanıcı girdisine bakar; yenileme sonunda temiz sayılır.
         for edit in (self.wake_name, self.github_owner, self.repos_dir):
             edit.textEdited.connect(self._mark_dirty)
+        self.cloud_model.lineEdit().textEdited.connect(self._mark_dirty)  # type: ignore[union-attr]
         for box in (*(getattr(self, b.widget) for b in PANEL_BINDINGS), self.github_auto):
             if isinstance(box, QCheckBox):
                 box.toggled.connect(self._mark_dirty)
@@ -989,19 +1053,121 @@ class SettingsPanel(QWidget):
 
     def _update_cloud_hint(self, *_args: object) -> None:
         """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0046)."""
-        if not self.hybrid_stt.isChecked():
+        on = self.hybrid_stt.isChecked()
+        xai = self.cloud_protocol.currentData() == "xai"
+        self.cloud_box.setVisible(on)
+        live = on and not self._demo
+        self.cloud_model.setEnabled(live and not xai)
+        self.cloud_fetch_button.setEnabled(live and not xai and bool(self._cloud_endpoint()[0]))
+        edit = self.cloud_model.lineEdit()
+        if edit is not None:
+            edit.setPlaceholderText("xAI için model gerekmez" if xai else "Örneğin: whisper-1")
+        name, endpoint = self._cloud_endpoint()
+        needs_key = endpoint is not None and endpoint.api_key
+        self.cloud_key.setEnabled(live and needs_key)
+        self.cloud_key_button.setEnabled(live and needs_key)
+        self.cloud_key.setPlaceholderText(
+            "" if not name else "Bu sunucu anahtar istemiyor" if not needs_key
+            else "kayıtlı" if stored_endpoint_key(name) else ""
+        )
+        if not on:
             self.cloud_stt_hint.setText("")
             return
         text = (
             "Komut sesi seçtiğin bulut sunucusuna gönderilir; kesintisiz kipte her söz gider. "
-            "Teknik ayar: voice.stt_cloud_endpoint."
+            "Sunucu eklemek için Model sağlayıcıları bölümünü kullan."
         )
-        if not self._cloud_configured:
+        if xai:
             text += (
-                " Sunucu ve model config'te (stt_cloud_endpoint, stt_cloud_model) "
-                "tanımlı değil; tanımlanmadan Uygula reddedilir."
+                " Grok tanıma Türkçeyi resmi olarak doğrulamıyor; hata olursa yerel metne düşer."
+            )
+        if needs_key and not stored_endpoint_key(name) and not self.cloud_key.text().strip():
+            text += (
+                " Bu sunucu için API anahtarı kayıtlı değil; yukarıya yazıp "
+                "'Anahtarı kaydet'e bas, yoksa tanıma çalışmaz."
             )
         self.cloud_stt_hint.setText(text)
+
+    def _cloud_endpoint(self) -> tuple[str, EndpointConfig | None]:
+        """Seçili sunucunun kimliği ve config kaydı; seçilmemiş ya da okunamazsa (\"\", None)."""
+        name = str(self.cloud_server.currentData() or "")
+        if not name:
+            return "", None
+        try:
+            return name, load_settings(self.config_path).endpoints.get(name)
+        except (OSError, ValueError):
+            return name, None
+
+    def _save_cloud_key(self) -> None:
+        """Anahtarı kasaya yazar; YAML, bağlar ve Uygula'ya girmez, alan hemen temizlenir."""
+        name, endpoint = self._cloud_endpoint()
+        typed = self.cloud_key.text().strip()
+        if not name or endpoint is None or not endpoint.api_key or not typed:
+            self.cloud_stt_hint.setText("Önce bir sunucu seç ve anahtarı yaz.")
+            return
+        failure = store_endpoint_key(name, typed)
+        self.cloud_key.clear()
+        self._update_cloud_hint()
+        self.cloud_stt_hint.setText(
+            f"Anahtar saklanamadı; {failure}" if failure else f"{name} için anahtar kaydedildi."
+        )
+
+    def _fetch_cloud_models(self) -> None:
+        """Seçili sunucunun /models listesini arka planda getirir; bir seferde tek istek."""
+        name, endpoint = self._cloud_endpoint()
+        if endpoint is None or (self._cloud_fetch is not None and self._cloud_fetch.isRunning()):
+            return
+        key = None
+        if endpoint.api_key:
+            key = self.cloud_key.text().strip() or stored_endpoint_key(name)
+        self.cloud_stt_hint.setText("Model listesi alınıyor…")
+        self._cloud_fetch_for = name
+        self._cloud_fetch = ConnectionTest(endpoint.base_url, key, self)
+        self._cloud_fetch.done.connect(self._cloud_models_done)
+        self._cloud_fetch.start()
+
+    def _cloud_models_done(self, message: str, models: list[str]) -> None:
+        # İstek sürerken sunucu değiştiyse eski sunucunun listesi yeni sunucunun önerisi olmaz.
+        if self._cloud_fetch_for != str(self.cloud_server.currentData() or ""):
+            return
+        self.cloud_stt_hint.setText(message)
+        if not models:
+            return
+        current = self.cloud_model.currentText()
+        self.cloud_model.blockSignals(True)  # liste yenilemesi kirli sayılmasın
+        self.cloud_model.clear()
+        self.cloud_model.addItems(models)
+        self.cloud_model.setCurrentIndex(max(0, self.cloud_model.findText(current)))
+        if current:
+            self.cloud_model.setEditText(current)
+        self.cloud_model.blockSignals(False)
+
+    def _load_cloud_servers(self) -> None:
+        """Sunucu listesini config'teki endpoints'ten yeniler; seçimi korur."""
+        try:
+            endpoints = list(load_settings(self.config_path).endpoints)
+        except (OSError, ValueError):
+            return
+        current = self.cloud_server.currentData()
+        self.cloud_server.blockSignals(True)
+        self.cloud_server.clear()
+        self.cloud_server.addItem("Seçilmedi", "")
+        for name in endpoints:
+            self.cloud_server.addItem(name, name)
+        self.cloud_server.setCurrentIndex(max(0, self.cloud_server.findData(current)))
+        self.cloud_server.blockSignals(False)
+        self._update_cloud_hint()
+
+    def _cloud_server_picked(self, *_args: object) -> None:
+        """xAI sunucusu seçilince protokol xAI'ye önayarlanır (kullanıcı değiştirebilir)."""
+        name = str(self.cloud_server.currentData() or "")
+        try:
+            endpoint = load_settings(self.config_path).endpoints.get(name)
+        except (OSError, ValueError):
+            return
+        host = urlparse(endpoint.base_url).hostname or "" if endpoint else ""
+        if name == "xai" or host == "x.ai" or host.endswith(".x.ai"):
+            self.cloud_protocol.setCurrentIndex(self.cloud_protocol.findData("xai"))
 
     def _toggle_advanced(self, checked: bool) -> None:
         """Gelişmiş ses ayarlarını açar ve ok yönünü duruma göre değiştirir."""
@@ -1122,6 +1288,7 @@ class SettingsPanel(QWidget):
         try:
             settings = load_settings(self.config_path)
             self.providers.reload()
+            self._load_cloud_servers()
             self._refresh_devices(settings)
             self._populate_stt_choices(
                 stt_catalog.choice_for_path(settings.voice.stt_model)
@@ -1136,10 +1303,6 @@ class SettingsPanel(QWidget):
                 binding.write(widget, setting_value(settings, binding.path))
                 if binding.quiet:
                     widget.blockSignals(False)
-            voice = settings.voice
-            self._cloud_configured = (
-                voice.stt_cloud_endpoint in settings.endpoints and bool(voice.stt_cloud_model)
-            )
             self._update_cloud_hint()
             # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
             self.precision_combo.setEnabled(
@@ -1410,3 +1573,7 @@ class SettingsPanel(QWidget):
         if self.github is not None and self.github.isRunning():
             self.github.requestInterruption()
             self.github.wait(6000)
+        # Model listesi isteği (en çok 5 sn zaman aşımı) çalışırken panel yıkılmasın.
+        if self._cloud_fetch is not None and self._cloud_fetch.isRunning():
+            self._cloud_fetch.wait(6000)
+        self.telegram.finish()

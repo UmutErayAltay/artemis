@@ -30,6 +30,8 @@ def isolated_credentials(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+    # Telegram token'ı için gerçek Windows kasası okunmaz (ADR 0051); testler kendi sahtesini koyar.
+    monkeypatch.setattr("artemis.channels.telegram.api.read_secret", lambda target: None)
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -83,3 +85,13 @@ def qt_widgets_deleted_by_qt():
     for widget in app.topLevelWidgets():
         widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
+def auto_mode_warning_accepted(monkeypatch):
+    # Uyarı modal olduğundan testte asılı kalırdı; onay/ret yolları kendi testinde ayrıca sınanır.
+    try:
+        from artemis.channels.desktop.app import DesktopWindow
+    except ImportError:
+        return
+    monkeypatch.setattr(DesktopWindow, "_confirm_auto_mode", lambda self: True)

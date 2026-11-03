@@ -1,6 +1,7 @@
 """Ayarlar > Model sağlayıcıları (ADR 0034): ağsız, gerçek kasa ve gerçek HTTP yok."""
 
 import os
+from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,17 @@ def test_preset_fills_fields(app: QApplication, tmp_path: Path) -> None:
     assert section.base_url.text() == "http://127.0.0.1:1234/v1"
     assert section.endpoint_id.text() == "lmstudio"
     assert not section.needs_key.isChecked()
+
+
+def test_xai_preset_passes_endpoint_rules(app: QApplication, tmp_path: Path) -> None:
+    path = config(tmp_path)
+    section = ProviderSection(path)
+    section.preset.setCurrentIndex([p[0] for p in PRESETS].index("xAI (Grok)"))
+    section._apply_preset()
+    assert (section.endpoint_id.text(), section.base_url.text()) == ("xai", "https://api.x.ai/v1")
+    assert section.needs_key.isChecked()
+    section._save()
+    assert load_settings(path).endpoints["xai"].base_url == "https://api.x.ai/v1"
 
 
 def test_invalid_id_and_url_are_rejected(app: QApplication, tmp_path: Path) -> None:
@@ -400,3 +412,138 @@ def test_subscription_connection_writes_valid_cli_model(
     assert settings.primary_model == "claude-cli-sonnet"
     model = settings.models["claude-cli-sonnet"]
     assert (model.provider, model.model, model.endpoint) == ("claude_cli", "sonnet", None)
+
+
+def _image_section(tmp_path: Path) -> ProviderSection:
+    section = ProviderSection(config(tmp_path))
+    _fill(section, "yerel", "https://x.example/v1")
+    section._save()
+    section.kind.setCurrentIndex(section.kind.findData("image"))
+    return section
+
+
+def test_image_model_free_writes_kind_and_zero_prices(app: QApplication, tmp_path: Path) -> None:
+    section = _image_section(tmp_path)
+    section.model_name.setEditText("resim-modeli")
+    section._add_model()
+    model = load_settings(section.config_path).models["resim-modeli"]
+    assert (model.kind, model.image_cost_usd) == ("image", 0)
+    assert (model.input_per_million, model.output_per_million) == (0, 0)
+    assert model.endpoint == "yerel"
+    rows = dict(section.model_rows())
+    assert "· resim" in rows["resim-modeli"] and "· resim" not in rows["first"]
+
+
+def test_paid_image_model_shows_image_price_field_and_budget_warning(
+    app: QApplication, tmp_path: Path
+) -> None:
+    section = _image_section(tmp_path)
+    section.paid.setChecked(True)
+    assert not section.image_box.isHidden() and section.price_box.isHidden()
+    section.model_name.setEditText("resim-modeli")
+    section.image_price.setText("0.04")
+    section.input_price.setText("9")  # resimde yok sayılır
+    section._add_model()
+    model = load_settings(section.config_path).models["resim-modeli"]
+    assert model.image_cost_usd == Decimal("0.04")
+    assert (model.input_per_million, model.output_per_million) == (0, 0)
+    text = section.status.text()
+    assert "allow_paid" in text and "rezervasyon" in text
+    section.kind.setCurrentIndex(0)  # Sohbet'e dönünce eski fiyat alanları
+    assert section.image_box.isHidden() and not section.price_box.isHidden()
+
+
+def test_image_price_must_be_a_non_negative_number(app: QApplication, tmp_path: Path) -> None:
+    section = _image_section(tmp_path)
+    section.paid.setChecked(True)
+    section.model_name.setEditText("resim-modeli")
+    before = section.config_path.read_bytes()
+    for bad in ("abc", "-1"):
+        section.image_price.setText(bad)
+        section._add_model()
+        assert "Fiyat sayı olmalı" in section.status.text()
+        assert section.config_path.read_bytes() == before
+
+
+def test_image_model_refused_with_claude_subscription(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(section_module.shutil, "which", lambda name: "/bin/claude")
+    section = _image_section(tmp_path)
+    assert section.kind.currentData() == "image"
+    section.add_connection.setCurrentIndex(section.add_connection.findData(section_module.CLI_KEY))
+    assert section.kind.currentData() == "chat"  # abonelikte Sohbet'e döner
+    assert not section.kind.model().item(1).isEnabled()  # type: ignore[attr-defined]
+    section.kind.setCurrentIndex(1)  # zorla seçilse bile ekleme reddedilir
+    section.model_name.setEditText("haiku")
+    before = section.config_path.read_bytes()
+    section._add_model()
+    assert "Claude aboneliğiyle" in section.status.text()
+    assert section.config_path.read_bytes() == before
+
+
+def test_make_primary_is_ignored_for_image_and_primary_button_refuses(
+    app: QApplication, tmp_path: Path
+) -> None:
+    section = _image_section(tmp_path)
+    assert not section.make_primary.isEnabled() and not section.make_primary.isChecked()
+    section.make_primary.setChecked(True)  # kod yolu zorlasa bile
+    section.model_name.setEditText("resim-modeli")
+    section._add_model()
+    settings = load_settings(section.config_path)
+    assert settings.primary_model == "first" and "resim-modeli" in settings.models
+    assert "Beyin modeli yapıldı" not in section.status.text()
+    section.select_model("resim-modeli")
+    before = section.config_path.read_bytes()
+    section._make_primary()
+    assert "Resim modeli beyin olamaz" in section.status.text()
+    assert section.config_path.read_bytes() == before
+    section.kind.setCurrentIndex(0)
+    assert section.make_primary.isEnabled()
+
+
+def test_fetch_models_works_for_image_kind(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(
+        section_module, "probe_models", lambda url, key: ("tamam", ["img-1", "img-2"])
+    )
+    section = _image_section(tmp_path)
+    section._fetch_models()
+    assert section._fetch is not None
+    section._fetch.wait(3000)
+    app.processEvents()
+    assert [section.model_name.itemText(i) for i in range(2)] == ["img-1", "img-2"]
+
+
+def test_adding_image_model_refreshes_pet_creator_combo(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """providers.changed -> app._providers_changed -> CreatorPanel.reload_models zinciri."""
+
+    def factory(config_path: Path, approve: Any, **kwargs: Any) -> Any:
+        return create_runtime(
+            config_path, approve, settings=load_settings(config_path),
+            provider=ScriptedProvider([]), **kwargs,
+        )
+
+    monkeypatch.setattr(bridge_module, "create_runtime", factory)
+    monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
+    path = config(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"] = {"yerel": {"base_url": "http://127.0.0.1:1/v1", "api_key": False}}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    window = build_window(path, app=app)
+    try:
+        _wait(app, lambda: window._worker_ready)
+        creator = window.settings_panel.pet.creator
+        assert creator is not None
+        creator.method.setCurrentIndex(1)  # resim yolu yalnız resim modellerini listeler
+        assert creator.model_combo.findData("resim-modeli") < 0
+        providers_ui = window.settings_panel.providers
+        providers_ui.kind.setCurrentIndex(providers_ui.kind.findData("image"))
+        providers_ui.model_name.setEditText("resim-modeli")
+        providers_ui._add_model()
+        assert creator.model_combo.findData("resim-modeli") >= 0
+    finally:
+        _close_cleanly(app, window)

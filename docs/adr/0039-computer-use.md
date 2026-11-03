@@ -158,3 +158,9 @@ hedef sekme ayırt edilmeden üç sekmeyi kapattı ve sonuç hep "doğrulanmadı
      `context.services["computer_memory"]` ile taşınır; yeni mesajda atılır. Diske, SQLite'a ya da
      mesajlar arasına yazılmaz: kullanıcı kararı "bellek her yeni mesajda sıfırlanabilir, yalnız
      yaptıklarını ve sonuçlarını unutmasın"; kalıcı bellek ekran verisini diskte biriktirirdi.
+
+## Ek (ADR 0053)
+
+`computer_use` gömülü Telegram kanalında da çalışır: oradaki host onayı Telegram düğmelerine
+götürür, `/dur` Esc'in karşılığıdır, ekran kilidi masaüstü ve Telegram oturumları arasında
+ortaktır. CLI `artemis telegram` host taşımaz.

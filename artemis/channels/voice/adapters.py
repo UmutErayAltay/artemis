@@ -371,7 +371,11 @@ CLOUD_STT_TIMEOUT_SECONDS = 8.0
 
 
 class OpenAICompatibleTranscriber:
-    """Karma tanıma (ADR 0046): komut sesini OpenAI uyumlu uca gönderir, metni döndürür.
+    """Karma tanıma (ADR 0046): komut sesini buluttaki uca gönderir, metni döndürür.
+
+    Sınıf adı geçmişten kaldı. `stt_cloud_protocol: openai` OpenAI uyumlu
+    `/audio/transcriptions` ucunu kullanır; `xai` xAI'nin uyumsuz `/stt` ucunu kullanır
+    (model alanı yok, `file` son alan; ADR 0050). Hayalet/tekrar süzgeci ortaktır.
 
     Yalnız VoiceController'ın "komut olacak" dediği sözde çağrılır. Hata metnine URL, yanıt
     gövdesi veya anahtar konmaz; istisna zinciri de taşınmaz (sır sızdırmasın). Yönlendirme
@@ -403,9 +407,11 @@ class OpenAICompatibleTranscriber:
             if not key:
                 raise RuntimeError("Bulut tanıma için API anahtarı kayıtlı değil.")
             headers["Authorization"] = f"Bearer {key}"
-        data = {"model": self.config.stt_cloud_model, "response_format": "json"}
+        xai = self.config.stt_cloud_protocol == "xai"
+        data = {} if xai else {"model": self.config.stt_cloud_model, "response_format": "json"}
         if self.config.stt_language == "tr":
             data["language"] = "tr"
+        path = "/stt" if xai else "/audio/transcriptions"
         # prompt yok: Whisper gürültüde prompt metnini yankılıyor (ADR 0046 eki).
         # Gizlilik denetimi sesi göndermeden önce yazılır; ses ve metin kaydedilmez.
         self.audit.emit(
@@ -420,7 +426,7 @@ class OpenAICompatibleTranscriber:
                 follow_redirects=False, timeout=CLOUD_STT_TIMEOUT_SECONDS
             ) as client:
                 response = await client.post(
-                    f"{self.endpoint.base_url}/audio/transcriptions",
+                    f"{self.endpoint.base_url}{path}",
                     data=data, files=files, headers=headers,
                 )
         except httpx.HTTPError:

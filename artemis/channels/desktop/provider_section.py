@@ -54,6 +54,7 @@ PRESETS: tuple[tuple[str, str, str, bool], ...] = (
     ("DeepSeek", "deepseek", "https://api.deepseek.com/v1", True),
     ("Z.ai GLM", "zai", "https://api.z.ai/api/paas/v4", True),
     ("Groq", "groq", "https://api.groq.com/openai/v1", True),
+    ("xAI (Grok)", "xai", "https://api.x.ai/v1", True),
     ("Mistral", "mistral", "https://api.mistral.ai/v1", True),
     ("LM Studio", "lmstudio", "http://127.0.0.1:1234/v1", False),
     ("Ollama", "ollama", "http://127.0.0.1:11434/v1", False),
@@ -214,6 +215,15 @@ class CliTest(QThread):
         )
 
 
+def store_endpoint_key(name: str, typed: str) -> str | None:
+    """Anahtarı kasaya yazar (YAML'a asla); kasa yoksa "ortamda X tanımlayın." döner."""
+    try:
+        write_secret(typed, f"Artemis/{name}")
+    except OSError:
+        return f"ortamda {endpoint_key_variable(name)} tanımlayın."
+    return None
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "-", text).strip("-")[:40]
 
@@ -230,7 +240,7 @@ class ProviderSection(QWidget):
         self._auto_alias = ""
         self._problem: str | None = None
         self._colors = {key: themes.THEMES[themes.DEFAULT_THEME][key] for key in _COLOR_KEYS}
-        self._model_data: list[tuple[str, bool, bool, str, str]] = []
+        self._model_data: list[tuple[str, bool, bool, str, str, bool]] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
@@ -291,13 +301,31 @@ class ProviderSection(QWidget):
         field(prices, "Girdi fiyatı (USD / milyon jeton)", self.input_price)
         field(prices, "Çıktı fiyatı (USD / milyon jeton)", self.output_price)
         self.price_box.setVisible(False)
-        self.paid.toggled.connect(self.price_box.setVisible)
+        self.kind = QComboBox()
+        self.kind.setAccessibleName("Model türü")
+        self.kind.addItem("Sohbet", "chat")
+        self.kind.addItem("Resim", "image")
+        self.image_price = QLineEdit("0")
+        self.image_price.setAccessibleName("Resim başına USD")
+        self.image_box = QWidget()
+        self.image_box.setObjectName("cardRow")
+        image_layout = QVBoxLayout(self.image_box)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        field(
+            image_layout, "Resim başına fiyat (USD)", self.image_price,
+            "Her çağrıda bütçeden bu tutar ayrılır (rezervasyon).",
+        )
+        self.image_box.setVisible(False)
         self.make_primary = QCheckBox("Beyin modeli yap")
+        self.kind.currentIndexChanged.connect(self._sync_kind)
+        self.paid.toggled.connect(self._sync_kind)
         field(add, "Bağlantı", self.add_connection)
+        field(add, "Tür", self.kind)
         field(add, "Model", model_row)
         field(add, "Takma ad", self.alias)
         add.addWidget(self.paid)
         add.addWidget(self.price_box)
+        add.addWidget(self.image_box)
         add.addWidget(self.make_primary)
         self.add_button = QPushButton("Ekle")
         self.add_button.setObjectName("primary")
@@ -422,6 +450,7 @@ class ProviderSection(QWidget):
                 model.provider not in {"openai_compatible", "claude_cli"},
                 self._connection_label(model),
                 model.model,
+                model.kind == "image",
             )
             for alias, model in settings.models.items()
         ]
@@ -459,7 +488,7 @@ class ProviderSection(QWidget):
         selected = self.model_list.currentItem()
         chosen = selected.data(Qt.ItemDataRole.UserRole) if selected is not None else None
         self.model_list.clear()
-        for alias, is_brain, legacy, connection, model_id in self._model_data:
+        for alias, is_brain, legacy, connection, model_id, image in self._model_data:
             brain = (
                 f"&nbsp;&nbsp;<span style='color:{self._colors['accent']}'>&#9679; Beyin</span>"
                 if is_brain
@@ -469,10 +498,11 @@ class ProviderSection(QWidget):
                 f"&nbsp;&nbsp;<span style='color:{self._colors['warning']}'>eski ayar</span>"
                 if legacy else ""
             )
+            kind = " · resim" if image else ""
             label = QLabel(
                 f"<b>{html.escape(alias)}</b>{brain}{tag}<br>"
                 f"<span style='color:{self._colors['muted']}'>"
-                f"{html.escape(connection)} · {html.escape(model_id)}</span>"
+                f"{html.escape(connection)} · {html.escape(model_id)}{kind}</span>"
             )
             label.setTextFormat(Qt.TextFormat.RichText)
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -600,6 +630,22 @@ class ProviderSection(QWidget):
 
     def _sync_cli_button(self) -> None:
         self.cli_test_button.setVisible(self.add_connection.currentData() == CLI_KEY)
+        # Resim modeli openai_compatible uç ister; Claude aboneliğinde seçilemez.
+        cli = self.add_connection.currentData() == CLI_KEY
+        self.kind.model().item(1).setEnabled(not cli)  # type: ignore[attr-defined]
+        if cli:
+            self.kind.setCurrentIndex(0)
+        self.kind.setToolTip("Resim modeli Claude aboneliğiyle kullanılamaz." if cli else "")
+
+    def _sync_kind(self, *_args: object) -> None:
+        image = self.kind.currentData() == "image"
+        paid = self.paid.isChecked()
+        self.price_box.setVisible(paid and not image)
+        self.image_box.setVisible(paid and image)
+        # Resim modeli beyin olamaz (settings doğrular); seçenek kapalı ve işaretsiz.
+        self.make_primary.setEnabled(not image)
+        if image:
+            self.make_primary.setChecked(False)
 
     def _default_alias(self, model: str) -> str:
         slug = _slug(model)
@@ -640,13 +686,9 @@ class ProviderSection(QWidget):
         message = "Bağlantı kaydedildi."
         typed = self.key.text().strip()
         if typed and self.needs_key.isChecked():
-            try:
-                write_secret(typed, f"Artemis/{name}")
-            except OSError:
-                message = (
-                    "Bağlantı kaydedildi ama anahtar saklanamadı; "
-                    f"ortamda {endpoint_key_variable(name)} tanımlayın."
-                )
+            failure = store_endpoint_key(name, typed)
+            if failure:
+                message = f"Bağlantı kaydedildi ama anahtar saklanamadı; {failure}"
         self.key.clear()
         self.reload()
         # Yeni model eklerken kaydedilen bağlantı hazır seçili gelir.
@@ -701,12 +743,23 @@ class ProviderSection(QWidget):
         if not model or not alias:
             self.status.setText("Model adı yazın veya listeden seçin.")
             return
+        image = self.kind.currentData() == "image"
+        if image and connection == CLI_KEY:
+            self.status.setText("Resim modeli Claude aboneliğiyle kullanılamaz; bir uç seçin.")
+            return
         try:
             prices = (
                 [Decimal(self.input_price.text() or "0"), Decimal(self.output_price.text() or "0")]
-                if self.paid.isChecked() and connection != CLI_KEY
+                if self.paid.isChecked() and connection != CLI_KEY and not image
                 else [Decimal(0), Decimal(0)]
             )
+            image_cost = (
+                Decimal(self.image_price.text() or "0")
+                if image and self.paid.isChecked()
+                else Decimal(0)
+            )
+            if image_cost < 0 or not image_cost.is_finite():
+                raise InvalidOperation
             settings = load_settings(self.config_path)
         except InvalidOperation:
             self.status.setText("Fiyat sayı olmalı (ücretsiz için 0).")
@@ -730,19 +783,27 @@ class ProviderSection(QWidget):
         }
         if connection != CLI_KEY:
             entry["endpoint"] = connection
+        if image:
+            entry["kind"] = "image"
+            entry["image_cost_usd"] = str(image_cost)
         models[alias] = entry
-        primary = self.make_primary.isChecked()
+        primary = self.make_primary.isChecked() and not image
         if primary:
             raw["primary_model"] = alias
         if not self._write(raw):
             return
         self.reload()
-        paid = any(price > 0 for price in prices) and not settings.allow_paid
+        paid = (any(price > 0 for price in prices) or image_cost > 0) and not settings.allow_paid
         self.status.setText(
             "Model eklendi."
             + (
                 " Ücretli model bütçe korumasınca engellenir; izin için allow_paid gerekir."
                 if paid
+                else ""
+            )
+            + (
+                " Resim başına fiyat her çağrıda bütçeden ayrılan bir rezervasyondur."
+                if image_cost > 0
                 else ""
             )
             + (" Beyin modeli yapıldı." if primary else "")
@@ -764,6 +825,9 @@ class ProviderSection(QWidget):
             raw = self._raw()
         except (OSError, yaml.YAMLError):
             self.status.setText("Ayarlar okunamadı.")
+            return
+        if any(row[0] == alias and row[5] for row in self._model_data):
+            self.status.setText("Resim modeli beyin olamaz; bir sohbet modeli seçin.")
             return
         # Takma ada göre yazılır: aynı model kimliğini paylaşan modeller karışmaz.
         raw["primary_model"] = alias
