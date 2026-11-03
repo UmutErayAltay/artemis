@@ -1624,6 +1624,18 @@
     no_tools: true
   responses:
   - content: Tamam, açmıyorum.
+- id: intent_negation_then_command
+  # Sahte yanıtla yalnız beklenti şemasını sınar; canlı modelde gerçek ölçümdür.
+  category: intent
+  text: Brave'i açma, Spotify'ı aç.
+  setup:
+    applications: *apps
+  expected:
+    opened: [Spotify]
+  responses:
+  - tool_calls:
+    - {id: negmix-0, name: open_application, arguments: {name: Spotify}}
+  - content: Spotify açılıyor.
 - id: intent_mention_not_command
   category: intent
   text: Dün Spotify'da çok güzel bir şarkı dinledim.

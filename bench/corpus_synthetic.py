@@ -122,7 +122,8 @@ def utterances(templates: Templates, seed: int = 0) -> list[Utterance]:
                         "intent": template.intent,
                         "target_app": app.name if template.target else None,
                         "expected_apps": sorted(
-                            {app.name, other.name} if template.correction else {app.name}
+                            # Cümlede geçen her uygulama adı tanınmalı (düzeltme, karma olumsuzluk).
+                            {app.name, other.name} if "{other}" in template.text else {app.name}
                         ),
                         "negation": template.negation, "correction": template.correction,
                     },
