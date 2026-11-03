@@ -23,7 +23,7 @@ from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate, TurnState
 from artemis.tools.base import Risk, ToolContext
 from artemis.tools.registry import discover_tools
-from tests.test_computer_session import DONE, FakeBackend, ScriptedVision, click
+from tests.test_computer_session import DONE, NO, YES, FakeBackend, ScriptedVision, click
 
 CALL = ToolCall(id="c", name="computer_use", arguments={"goal": "Not Defteri'ni aç"})
 
@@ -57,7 +57,7 @@ def env(
     provider: str = "ollama",
     allow_cloud: bool = False,
     host: bool = True,
-    replies: tuple[str, ...] = (click(), DONE),
+    replies: tuple[str, ...] = (click(), DONE, YES),
     mode: Literal["accept", "auto"] = "accept",
 ) -> tuple[SafetyGate, ToolContext, FakeHost, FakeBackend, ScriptedVision]:
     settings = Settings(
@@ -107,7 +107,7 @@ async def test_auto_mode_skips_the_start_and_its_taint(tmp_path: Path) -> None:
     for state in (TurnState(), TurnState(tainted=True), TurnState(history_external=True)):
         gate, context, *_ = env(tmp_path, mode="auto")
         result = await gate.dispatch(CALL, context, state, never)
-        assert result.status == "sent"
+        assert result.status == "ok"
 
 
 async def test_auto_mode_does_not_relax_other_tools(tmp_path: Path) -> None:
@@ -168,10 +168,10 @@ async def test_cloud_screen_refused_before_capture(tmp_path: Path) -> None:
 async def test_cloud_allowed_with_permission(tmp_path: Path) -> None:
     gate, context, *_ = env(tmp_path, provider="openrouter", allow_cloud=True)
     result = await gate.dispatch(CALL, context, TurnState(), lambda *_: True)
-    assert result.status == "sent"
+    assert result.status == "ok"
 
 
-async def test_happy_path_is_sent_never_success(tmp_path: Path) -> None:
+async def test_happy_path_is_verified_on_screen(tmp_path: Path) -> None:
     gate, context, host, backend, _ = env(tmp_path)
     asked: list[dict[str, Any]] = []
 
@@ -182,13 +182,23 @@ async def test_happy_path_is_sent_never_success(tmp_path: Path) -> None:
     state = TurnState()
     result = await gate.dispatch(CALL, context, state, approve)
     assert asked == [{"goal": "Not Defteri'ni aç"}]
-    assert result.status == "sent" and result.success is False
+    assert result.status == "ok" and result.success is True
     assert result.external is True and result.content_kind == "screen"
-    assert result.data == {"reason": "done", "steps": 1}
-    assert "Bitti." in result.message and "doğrulanmadı" in result.message
+    assert result.data == {"reason": "done", "steps": 1, "verified": True}
+    assert "Bitti." in result.message and "Ekranda doğrulandı" in result.message
     assert backend.calls == [("click", 2, 1, "left", False)]
     assert host.sessions == 1 and host.steps == ["Adım 1: deneme"]
     assert state.tainted is True
+
+
+async def test_unverified_done_stays_sent(tmp_path: Path) -> None:
+    for replies in ((click(), DONE, NO), (click(), DONE, "sacma", "sacma")):
+        gate, context, *_ = env(tmp_path, replies=replies)
+        result = await gate.dispatch(CALL, context, TurnState(), lambda *_: True)
+        assert result.status == "sent" and result.success is False
+        assert result.data == {"reason": "done", "steps": 1, "verified": False}
+        assert "ekranda doğrulanamadı" in result.message
+        assert result.external is True and result.content_kind == "screen"
 
 
 async def test_cancelled_context_stops_before_next_action(tmp_path: Path) -> None:
@@ -549,10 +559,28 @@ async def test_approval_skipped_only_when_approval_was_actually_needed(tmp_path:
     # Temiz turda computer_use otomatik kipte zaten SIDE_EFFECT: sorulacak onay yoktu.
     gate, context, *_ = env(tmp_path, mode="auto")
     result = await gate.dispatch(CALL, context, TurnState(), never)
-    assert result.status == "sent"
+    assert result.status == "ok"
     assert "approval_skipped" not in events()
 
     # Lekeli turda onay gerekirdi: atlama denetime yazılır.
     gate, context, *_ = env(tmp_path, mode="auto")
     await gate.dispatch(CALL, context, TurnState(tainted=True), never)
     assert "approval_skipped" in events()
+
+
+async def test_memory_is_shared_within_same_turn_and_reset_for_new_turn(tmp_path: Path) -> None:
+    gate, context, _host, _backend, vision = env(
+        tmp_path, mode="auto", replies=(click(), DONE, YES, DONE, YES, DONE, YES)
+    )
+    state = TurnState()  # aynı kullanıcı mesajı = aynı turn_id
+    await gate.dispatch(CALL, context, state, never)  # ilk çağrı: tık + done
+    await gate.dispatch(CALL, context, state, never)  # aynı mesaj: bellek taşınır
+    seen = [str(call[1].content) for call in vision.seen]
+    first_prompt_of_second_call = next(
+        text for text in seen if "Aynı mesajdaki önceki computer_use çağrısı" in text
+    )
+    assert "Adım 1: click" in first_prompt_of_second_call
+    before = len(vision.seen)
+    await gate.dispatch(CALL, context, TurnState(), never)  # yeni mesaj: bellek düşer
+    fresh = str(vision.seen[before][1].content)
+    assert "Aynı mesajdaki önceki" not in fresh and "Adım 1" not in fresh

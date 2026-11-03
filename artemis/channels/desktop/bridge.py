@@ -37,6 +37,7 @@ from artemis.proactive.scheduler import ProactiveScheduler
 from artemis.proactive.store import ProactiveStore
 from artemis.safety.gate import remember_site, trusted_sites_path
 from artemis.tools.base import ToolResult
+from artemis.tools.code_agent_jobs import ACTIVE, CodeAgentJobs
 
 RuntimeFactory = Callable[[Path, ApprovalCallback, AuditObserver], Runtime]
 # İşçi döngüsünde çalışır: runtime, köprünün istek modelinden geçen komut çalıştırıcısı
@@ -315,6 +316,19 @@ class DesktopBridge:
     def stopped(self) -> bool:
         return self._stopped.is_set()
 
+    def active_job_count(self) -> int:
+        """Sürmekte olan kod ajanı işi sayısı; GUI listesi bayatken doğrudan kaynaktır.
+
+        `status()` kilit altında kopya verir, GUI thread'inden çağırmak güvenlidir.
+        """
+        runtime = self._runtime
+        jobs = runtime.context.services.get("code_agent_jobs") if runtime is not None else None
+        if not isinstance(jobs, CodeAgentJobs):
+            return 0
+        return sum(
+            1 for job in jobs.status() if job["status"] in ACTIVE or job.get("cleanup_pending")
+        )
+
     def labels(self) -> dict[str, tuple[str, str]]:
         """Araç adından (onay başlığı, adım satırı) çiftine kopya; GUI bunu değiştiremez."""
         return dict(self._labels)
@@ -387,8 +401,11 @@ class DesktopBridge:
         loop.call_soon_threadsafe(self._start_turn, request_id, text)
         return request_id
 
-    def submit_tool(self, name: str, arguments: BaseModel) -> str | None:
-        """Tipli GUI isteği aynı worker ve onay aracısından geçer; model çağrılmaz."""
+    def submit_tool(self, name: str, arguments: BaseModel, quiet: bool = False) -> str | None:
+        """Tipli GUI isteği aynı worker ve onay aracısından geçer; model çağrılmaz.
+
+        `quiet` arka plan yoklaması içindir: "Çalışıyor" durumu yayınlanmaz, böylece
+        pet ve düğmeler her yoklamada meşgule dönmez."""
         if len(arguments.model_dump_json().encode("utf-8")) > 32 * 1024:
             return None
         request_id = str(uuid4())
@@ -408,7 +425,8 @@ class DesktopBridge:
             with self._lock:
                 self._active_request = None
             return None
-        self._events.put(State("running", "Araç isteği çalışıyor.", request_id))
+        if not quiet:
+            self._events.put(State("running", "Araç isteği çalışıyor.", request_id))
         loop.call_soon_threadsafe(
             self._start_tool, request_id, name, arguments.model_copy(deep=True)
         )
@@ -780,6 +798,14 @@ class DesktopBridge:
             return
         if state.startswith("denoise:"):
             self._events.put(State("voice_denoise", state.removeprefix("denoise:")))
+            return
+        if state.startswith("live:unavailable:"):
+            self._events.put(
+                State("voice_live_unavailable", state.removeprefix("live:unavailable:"))
+            )
+            return
+        if state.startswith("live:"):
+            self._events.put(State("voice_live", state.removeprefix("live:")))
             return
         if state.startswith("echo:"):
             self._events.put(State("voice_echo", state.removeprefix("echo:")))

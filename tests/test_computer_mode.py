@@ -97,7 +97,7 @@ def test_toggle_writes_config_first_then_applies_runtime(
 
     assert order == ["save", "runtime"]
     assert window.settings_panel.computer_auto.isChecked() is True
-    assert window.auto_button.text() == "Oto onay: açık"
+    assert window.auto_button.accessibleDescription() == "Oto onay açık"
 
 
 def test_failed_save_leaves_runtime_untouched_and_restores_both_controls(
@@ -115,7 +115,7 @@ def test_failed_save_leaves_runtime_untouched_and_restores_both_controls(
     assert window.calls == []  # config yazılamadı: runtime kipi değişmedi
     assert window.auto_button.isChecked() is False
     assert window.settings_panel.computer_auto.isChecked() is False
-    assert window.auto_button.text() == "Oto onay: kapalı"
+    assert window.auto_button.accessibleDescription() == "Oto onay kapalı"
 
 
 def test_settings_checkbox_keeps_header_button_in_sync(

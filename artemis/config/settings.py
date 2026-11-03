@@ -4,7 +4,7 @@ import re
 from datetime import time
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal, Self
+from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -52,11 +52,17 @@ class ModelConfig(BaseModel):
     output_per_million: Decimal = Field(ge=0)
     context_window: int = Field(default=32768, ge=1024)
     endpoint: str | None = None
+    # "image": resim üretim modeli (pet üretici, ADR 0048 eki); sohbet modeli olarak kullanılamaz.
+    kind: Literal["chat", "image"] = "chat"
+    # Resim çağrısı başına bütçeden ayrılan sabit üst tutar (USD); token fiyatı resimde anlamsız.
+    image_cost_usd: Decimal = Field(default=Decimal(0), ge=0)
 
     @model_validator(mode="after")
     def validate_endpoint_use(self) -> Self:
         if (self.provider == "openai_compatible") != (self.endpoint is not None):
             raise ValueError("endpoint yalnız ve her zaman openai_compatible modelde verilir")
+        if self.kind == "image" and self.provider != "openai_compatible":
+            raise ValueError("Resim modeli openai_compatible sağlayıcı ve uç gerektirir")
         return self
 
 
@@ -77,6 +83,11 @@ class VoiceConfig(BaseModel):
     require_wake_during_output: bool = True
     # ADR 0042: konuşurken uyandırmasız doğrulanmış söz yalnız susturur, komut çalıştırmaz.
     barge_in_without_wake: bool = True
+    # ADR 0046 eki: False iken söz kesme ve yanıt sonu takip penceresi açmaz (Artemis demeden
+    # dinleme yok); tek başına "Artemis" karşılığı takibi her zaman açar. True: eski davranış.
+    followup_listening: bool = False
+    # Uyandırma karşılığı; çok kısa metin EMA TTS'te bozuk çıkıyordu (ADR 0046 eki).
+    wake_ack_text: str = Field(default="Seni dinliyorum.", min_length=1, max_length=40)
     # ADR 0043: model yazarken cümle cümle seslendir; sağlayıcı akmıyorsa tam yanıt beklenir.
     streaming: bool = True
     continuous_mode: bool = False
@@ -116,6 +127,16 @@ class VoiceConfig(BaseModel):
     # Öğretilmiş uygulama takma adlarının hedef adları STT ipucuna eklenir (ADR 0044).
     # Varsayılan kapalı: geniş hotword listesi uyandırmada yan etki verdi (CPA_LOCAL_TEST).
     stt_alias_hotwords: bool = False
+    # ADR 0046: hybrid'de uyandırma/yankı kararları yerel metinle verilir, yalnız komut olacak
+    # sözün sesi `stt_cloud_endpoint` ucuna (üst düzey `endpoints` kimliği) gider.
+    stt_mode: Literal["local", "hybrid"] = "local"
+    stt_cloud_endpoint: str = ""
+    stt_cloud_model: str = ""
+    # ADR 0047: konuşurken akan YALNIZ GÖSTERİM metni (yerel, `pip install .[stream]`).
+    # Model kimliği koda gömülmez; açıkken depo ve sabit revision config'ten gelir.
+    live_transcript: bool = False
+    live_transcript_model: str = ""
+    live_transcript_revision: str = ""
     tts_backend: Literal["piper", "edge", "ema"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True
@@ -125,6 +146,15 @@ class VoiceConfig(BaseModel):
     edge_voice: str = ""
     allow_cloud_tts_text: bool = False
     ffmpeg: str = "ffmpeg"
+
+    @model_validator(mode="before")
+    @classmethod
+    def drop_legacy_cloud_consent(cls, data: Any) -> Any:
+        # Eski config'lerdeki allow_cloud_stt_audio kaldırıldı (hybrid seçmek açık izindir);
+        # yalnız bu anahtar yutulur, diğer bilinmeyen alanlar yine reddedilir.
+        if isinstance(data, dict) and "allow_cloud_stt_audio" in data:
+            data = {k: v for k, v in data.items() if k != "allow_cloud_stt_audio"}
+        return data
 
     @field_validator("stt_hotwords")
     @classmethod
@@ -205,12 +235,83 @@ class TelegramConfig(BaseModel):
         return Settings.validate_endpoint(value)
 
 
-class CodeAgentConfig(BaseModel):
-    """Kod ajanı (ADR 0023): izinli proje takma adları; liste boşsa özellik kapalıdır."""
+ALIAS_RE = re.compile(r"[a-z0-9_-]{1,32}")
+ENV_NAME_RE = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+# Başlangıç klasörü takma adları: "proje" hedef reponun kendisidir (varsayılan), "ikinci-beyin"
+# memory.vault_path verilince örtük vardır (ADR 0049).
+OWN_REPO_ALIAS = "proje"
+VAULT_ALIAS = "ikinci-beyin"
+BUILTIN_AGENT = "claude"
+# Yerleşik ajanlar (ADR 0049 eki): claude yeniden tanımlanamaz; codex kullanıcı profili
+# tanımlamadıkça `AgentProfile(kind="codex")` sayılır (komut `locate_codex` ile bulunur).
+BUILTIN_AGENTS = (BUILTIN_AGENT, "codex")
+RunMode = Literal["background", "visible"]
+
+
+class ConfigChoiceError(ValueError):
+    """Bilinmeyen ajan/klasör takma adı; model yalnız yapılandırılmış adları seçebilir."""
+
+
+class AgentProfile(BaseModel):
+    """Kullanıcının tanımladığı kod ajanı profili (ADR 0049); sır değeri burada tutulmaz."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
-    projects: dict[str, Path] = Field(default_factory=dict)
+    kind: Literal["claude", "codex", "generic"]
+    command: str | None = Field(default=None, min_length=1)
+    # Yalnız generic: {prompt_file} {prompt} {workdir} {repo} yer tutucuları.
+    args: tuple[str, ...] = ()
+    prompt_via: Literal["stdin", "file", "arg"] | None = None
+    # Çocuğa ek geçirilecek ortam değişkeni ADLARI; değerler asla yazılmaz/loglanmaz.
+    env: tuple[str, ...] = ()
+    # Yalnız generic: görünür pencere kipinin argümanları (args ile aynı yer tutucular; `{prompt}`
+    # kısa yönergedir, tam istem `{prompt_file}` dosyasındadır). Boşsa görünür kip desteklenmez.
+    visible_args: tuple[str, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_profile(self) -> Self:
+        for name in self.env:
+            if not ENV_NAME_RE.fullmatch(name):
+                raise ValueError(f"env adı büyük harfli ortam değişkeni adı olmalı: {name!r}")
+        if self.kind == "generic":
+            if self.command is None:
+                raise ValueError("generic ajan için command gerekli")
+            if self.prompt_via == "file" and not any("{prompt_file}" in a for a in self.args):
+                raise ValueError("prompt_via=file için args içinde {prompt_file} gerekli")
+            if self.prompt_via == "arg" and not any("{prompt}" in a for a in self.args):
+                raise ValueError("prompt_via=arg için args içinde {prompt} gerekli")
+            if self.visible_args and not any(
+                "{prompt_file}" in a or "{prompt}" in a for a in self.visible_args
+            ):
+                raise ValueError("visible_args içinde {prompt_file} veya {prompt} gerekli")
+        elif self.args or self.prompt_via or self.visible_args:
+            raise ValueError("args, prompt_via ve visible_args yalnız generic ajanda kullanılır")
+        return self
+
+
+class ProjectEntry(BaseModel):
+    """Proje girdisi: eski biçim yalnız yol, yeni biçim ajan/klasör varsayılanı da taşır."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    path: Path
+    agent: str | None = None
+    workdir: str | None = None
+    mode: RunMode | None = None
+
+
+class CodeAgentConfig(BaseModel):
+    """Kod ajanı (ADR 0023, 0049): izinli proje takma adları; liste boşsa özellik kapalıdır."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, populate_by_name=True)
+
+    # YAML anahtarı `projects`dir; eski `alias: yol` ve yeni `alias: {path, agent, workdir}`
+    # biçimleri kabul edilir. `.projects` özelliği eski alias->Path görünümünü korur.
+    project_entries: dict[str, ProjectEntry] = Field(default_factory=dict, alias="projects")
+    agents: dict[str, AgentProfile] = Field(default_factory=dict)
+    default_agent: str = BUILTIN_AGENT
+    default_mode: RunMode = "background"
+    workdirs: dict[str, Path] = Field(default_factory=dict)
     command: str = Field(default="claude", min_length=1)
     max_minutes: float = Field(default=20.0, ge=1, le=120)
     model: str | None = None  # Eski yönetici modeli ayarı; manager_model kazanır.
@@ -230,12 +331,97 @@ class CodeAgentConfig(BaseModel):
             raise ValueError("GitHub kullanıcı adı harf, rakam veya - içermeli (en çok 39)")
         return value
 
-    @field_validator("projects")
+    @field_validator("project_entries", mode="before")
     @classmethod
-    def validate_projects(cls, values: dict[str, Path]) -> dict[str, Path]:
-        if any(not re.fullmatch(r"[a-z0-9_-]{1,32}", alias) for alias in values):
-            raise ValueError("Proje takma adı 1-32 küçük harf, rakam, _ veya - olmalı")
+    def normalise_projects(cls, values: Any) -> Any:
+        if isinstance(values, dict):
+            return {
+                alias: {"path": value} if isinstance(value, str | Path) else value
+                for alias, value in values.items()
+            }
         return values
+
+    @model_validator(mode="after")
+    def validate_references(self) -> Self:
+        if any(not ALIAS_RE.fullmatch(alias) for alias in self.project_entries):
+            raise ValueError("Proje takma adı 1-32 küçük harf, rakam, _ veya - olmalı")
+        if any(not ALIAS_RE.fullmatch(name) for name in self.agents):
+            raise ValueError("Ajan adı 1-32 küçük harf, rakam, _ veya - olmalı")
+        if BUILTIN_AGENT in self.agents:
+            raise ValueError("'claude' yerleşik ajandır; yeniden tanımlanamaz")
+        if any(not ALIAS_RE.fullmatch(alias) for alias in self.workdirs):
+            raise ValueError("Klasör takma adı 1-32 küçük harf, rakam, _ veya - olmalı")
+        if OWN_REPO_ALIAS in self.workdirs:
+            raise ValueError(f"'{OWN_REPO_ALIAS}' ayrılmış takma addır (projenin kendi reposu)")
+        agent_names = set(self.agent_names())
+        if self.default_agent not in agent_names:
+            raise ValueError(f"default_agent tanımsız ajan: {self.default_agent!r}")
+        # Örtük ikinci-beyin burada doğrulanamaz (vault_path başka bölümde); çözümleme
+        # anında hata verir.
+        folders = {OWN_REPO_ALIAS, VAULT_ALIAS, *self.workdirs}
+        for alias, entry in self.project_entries.items():
+            if entry.agent is not None and entry.agent not in agent_names:
+                raise ValueError(f"Proje '{alias}' tanımsız ajan kullanıyor: {entry.agent!r}")
+            if entry.workdir is not None and entry.workdir not in folders:
+                raise ValueError(f"Proje '{alias}' tanımsız klasör kullanıyor: {entry.workdir!r}")
+        return self
+
+    @property
+    def projects(self) -> dict[str, Path]:
+        """Eski görünüm: alias -> yol (arayüz ve eski çağıranlar bunu okur)."""
+        return {alias: entry.path for alias, entry in self.project_entries.items()}
+
+    def project_path(self, alias: str) -> Path | None:
+        entry = self.project_entries.get(alias)
+        return entry.path if entry else None
+
+    def project_agent(self, alias: str) -> str:
+        entry = self.project_entries.get(alias)
+        return entry.agent if entry and entry.agent else self.default_agent
+
+    def project_workdir(self, alias: str) -> str:
+        entry = self.project_entries.get(alias)
+        return entry.workdir if entry and entry.workdir else OWN_REPO_ALIAS
+
+    def project_mode(self, alias: str) -> RunMode:
+        entry = self.project_entries.get(alias)
+        return entry.mode if entry and entry.mode else self.default_mode
+
+    def agent_names(self) -> tuple[str, ...]:
+        """Seçilebilir ajan adları: yerleşikler (claude, codex) sonra kullanıcı ajanları."""
+        custom = sorted(name for name in self.agents if name not in BUILTIN_AGENTS)
+        return (*BUILTIN_AGENTS, *custom)
+
+    def resolve_agent(self, name: str | None) -> tuple[str, AgentProfile]:
+        """Yerleşik claude her zaman vardır (komutu eski `command` alanından gelir). codex'i
+        kullanıcı tanımladıysa onun profili (örn. açık mutlak yol), yoksa varsayılan profil."""
+        name = name or self.default_agent
+        if name == BUILTIN_AGENT:
+            return name, AgentProfile(kind="claude", command=self.command)
+        profile = self.agents.get(name)
+        if profile is None and name == "codex":
+            profile = AgentProfile(kind="codex")
+        if profile is None:
+            known = ", ".join(self.agent_names())
+            raise ConfigChoiceError(f"Bilinmeyen ajan '{name}'. Tanımlı ajanlar: {known}.")
+        return name, profile
+
+    def workdir_choices(self, vault_path: Path | None) -> dict[str, Path | None]:
+        """Seçilebilir klasörler; None = projenin kendi reposu (çözümleme repo'ya bağlı)."""
+        choices: dict[str, Path | None] = {OWN_REPO_ALIAS: None}
+        if vault_path is not None:
+            choices[VAULT_ALIAS] = vault_path
+        return {**choices, **self.workdirs}
+
+    def resolve_workdir(self, name: str | None, repo: Path, vault_path: Path | None = None) -> Path:
+        """Takma ad -> yol. Model yol veremez; yalnız bu tablodaki adlar çözülür."""
+        name = name or OWN_REPO_ALIAS
+        choices = self.workdir_choices(vault_path)
+        if name not in choices:
+            known = ", ".join(sorted(choices))
+            raise ConfigChoiceError(f"Bilinmeyen başlangıç klasörü '{name}'. Tanımlılar: {known}.")
+        chosen = choices[name]
+        return repo if chosen is None else chosen
 
 
 class BriefingConfig(BaseModel):
@@ -389,7 +575,7 @@ class ComputerUseConfig(BaseModel):
     max_steps: int = Field(default=25, ge=1, le=100)
     max_minutes: float = Field(default=5.0, ge=0.5, le=30)
     screenshot_width: int = Field(default=1280, ge=640, le=2560)
-    step_delay_seconds: float = Field(default=0.6, ge=0, le=3)
+    step_delay_seconds: float = Field(default=0.3, ge=0, le=3)
     # ADR 0039 ek karar: "auto" oturum içi hassas adımları ve başlangıcı sormaz
     # (`computer_use`, `window_control`, `screen_read` `auto_mode_ok` ile lekeli turda da
     # onaylanmaz,
@@ -461,10 +647,26 @@ class Settings(BaseModel):
             for m in self.models.values()
         ):
             raise ValueError("Modelin endpoint değeri endpoints içinde tanımlanmalı")
+        voice = self.voice
+        if voice.stt_mode == "hybrid" and (
+            voice.stt_cloud_endpoint not in self.endpoints or not voice.stt_cloud_model.strip()
+        ):
+            raise ValueError(
+                "Karma tanıma için stt_cloud_endpoint endpoints içinde tanımlı ve "
+                "stt_cloud_model dolu olmalı"
+            )
         if any(name not in self.applications for name in self.close_without_confirmation):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")
         if self.primary_model and self.primary_model not in self.models:
             raise ValueError("Birincil model models içinde tanımlanmalı")
+        if any(
+            self.models[name].kind == "image"
+            for name in (
+                self.primary_model, self.computer_use.model, *self.computer_use.fallback_models
+            )
+            if name in self.models
+        ):
+            raise ValueError("Resim modeli birincil ya da bilgisayar kullanımı modeli olamaz")
         if self.fallback_model:
             fallback = self.models.get(self.fallback_model)
             if fallback is None or fallback.provider != "ollama":
@@ -516,10 +718,17 @@ def load_settings(path: Path) -> Settings:
     if agent.repos_dir is not None:
         repos = agent.repos_dir
         agent_updates["repos_dir"] = repos if repos.is_absolute() else (base / repos).resolve()
-    if agent.projects:
-        agent_updates["projects"] = {
+    if agent.project_entries:
+        agent_updates["project_entries"] = {
+            alias: entry
+            if entry.path.is_absolute()
+            else entry.model_copy(update={"path": (base / entry.path).resolve()})
+            for alias, entry in agent.project_entries.items()
+        }
+    if agent.workdirs:
+        agent_updates["workdirs"] = {
             alias: value if value.is_absolute() else (base / value).resolve()
-            for alias, value in agent.projects.items()
+            for alias, value in agent.workdirs.items()
         }
     if agent_updates:
         updates["code_agent"] = agent.model_copy(update=agent_updates)

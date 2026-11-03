@@ -37,6 +37,7 @@ STAGES = (
     "terminal",
     "stop_requested",
     "playback_stopped",
+    "stt_cloud_fallback",
 )
 # Çok adımlı turda model ve araç birden çok kez çağrılır; bu aşamalar tekrar edebilir.
 REPEATABLE = {"model_request", "model_first_token", "model_response", "tool_start", "tool_end"}
@@ -190,6 +191,8 @@ def _sample(uid: int, items: list[VoiceTimingEvent]) -> dict[str, Any]:
     profile = "unknown"
     for item in items:
         stamp = item.timestamp
+        if item.stage == "stt_cloud_fallback":
+            continue  # bilgi olayı: süre çiftlerine ve aşama sırasına girmez
         if item.stage not in STAGES or not _valid_stamp(stamp):
             invalid = True
             continue

@@ -59,6 +59,7 @@ def make_pet(app: QApplication, ini: Path, **state: object) -> PetWidget:
         on_quick=lambda: None,
         on_approval=lambda: None,
         on_quit=lambda: None,
+        on_submit=lambda text: True,
         settings=QSettings(str(ini), QSettings.Format.IniFormat),
         reduced_motion=True,  # rastgele göz kırpma/bakış yok: çıktı tekrarlanabilir
     )

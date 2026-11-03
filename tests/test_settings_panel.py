@@ -13,7 +13,7 @@ from artemis.channels.desktop.settings_panel import microphone_choices, save_cho
 from artemis.config.settings import load_settings
 
 
-def config(tmp_path: Path, *, local: bool = True) -> Path:
+def config(tmp_path: Path, *, local: bool = True, cloud: bool = False) -> Path:
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump({
         "workspace": "desktop", "state_dir": "state", "audit_path": "audit.jsonl",
@@ -22,7 +22,11 @@ def config(tmp_path: Path, *, local: bool = True) -> Path:
         "applications": {"brave": "brave.exe"}, "close_without_confirmation": ["brave"],
         "models": {"first": {"provider": "openrouter", "model": "first-model",
                              "input_per_million": "0", "output_per_million": "0"}},
-        "voice": {"stt_device": "cpu", "stt_model": "models/whisper"},
+        # Karma tanıma kutusu açılınca doğrulama uç + model ister (ADR 0046).
+        **({"endpoints": {"bulut": {"base_url": "https://api.example.com/v1"}}} if cloud else {}),
+        "voice": {"stt_device": "cpu", "stt_model": "models/whisper",
+                  **({"stt_cloud_endpoint": "bulut", "stt_cloud_model": "whisper-x"}
+                     if cloud else {})},
     }), encoding="utf-8")
     return path
 
@@ -176,21 +180,56 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
-def test_settings_panel_tabs_are_grouped_by_topic(tmp_path: Path, qt_app) -> None:
-    from PySide6.QtWidgets import QFrame, QScrollArea
+def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtWidgets import QScrollArea
 
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
-    assert [
-        panel.sections.tabText(index) for index in range(panel.sections.count())
-    ] == ["Ses", "Model", "Uygulamalar", "GitHub"]
-    assert panel.sections.currentIndex() == 0
-    for index in range(panel.sections.count()):
-        page = panel.sections.widget(index)
-        assert isinstance(page, QScrollArea)
-        assert page.widgetResizable()
-        assert page.frameShape() == QFrame.Shape.NoFrame
+    assert panel.section_names() == ["Ses", "Model", "Uygulamalar", "GitHub", "Görünüm"]
+    assert panel.sections.objectName() == "sectionList"
+    assert panel.sections.currentRow() == 0
+    # Tek kaydırma bölgesi: sayfa başına ikinci kaydırıcı yok.
+    assert len(panel.findChildren(QScrollArea)) == 1
+    for index in range(len(panel.section_names())):
+        panel.show_section(index)
+        assert panel.stack.currentIndex() == index
+    assert panel.pet.parent() is not panel.stack.currentWidget()
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_theme_cards_follow_combo_and_emit_once(tmp_path: Path, qt_app) -> None:
+    from artemis.channels.desktop import settings_panel
+    from artemis.channels.desktop.themes import THEME_LABELS
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    seen: list[str] = []
+    panel.theme_changed.connect(seen.append)
+    assert set(panel.theme_cards) == set(THEME_LABELS)
+    panel.theme_cards["dark"].radio.click()
+    assert seen == ["dark"]
+    assert panel.theme_combo.currentData() == "dark"
+    panel.set_theme("light")  # sinyal yaymaz, kartı eşler
+    assert seen == ["dark"]
+    assert panel.theme_cards["light"].radio.isChecked()
+    assert panel.theme_cards["light"].property("selected") is True
+    panel.theme_combo.setCurrentIndex(panel.theme_combo.findData("dark-mixed"))
+    assert panel.theme_cards["dark-mixed"].radio.isChecked()
+    assert seen[-1] == "dark-mixed"
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_dirty_notice_shows_after_edit_and_clears_on_refresh(tmp_path: Path, qt_app) -> None:
+    from artemis.channels.desktop import settings_panel
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    assert panel.dirty_label.isHidden()
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    assert not panel.dirty_label.isHidden()
+    panel.refresh()
+    assert panel.dirty_label.isHidden()
     panel.deleteLater()
     qt_app.processEvents()
 
@@ -252,10 +291,12 @@ def test_save_computer_mode_writes_only_the_mode(tmp_path: Path) -> None:
 # Bilinçli olarak PANEL_BINDINGS dışında kalan seçim widget'ları ve nedenleri. Yeni bir kutu ya da
 # liste eklenip bağlanmazsa aşağıdaki test kırılır: ya bağ ekleyin ya da buraya gerekçe yazın.
 _UNBOUND_WIDGETS = {
+    "theme_combo": "yalnız görünüm; QSettings ile anında kaydedilir, ses config'ine yazılmaz",
     "device_combo": "input_device: aygıt listesi ve 'sistem varsayılanı' özel yenilenir",
     "stt_combo": "stt_model: katalog seçimi yola çevrilir, indirme durumu taşır",
     "github_auto": "code_agent.auto_sync: github_values ile birlikte, save_code_agent de yazar",
     "advanced_devices": "yalnız görünüm; config'e yazılmaz",
+    "default_agent_combo": "code_agent.default_agent: code_agent_values ile ajanlarla yazılır",
 }
 
 
@@ -270,8 +311,11 @@ def _panel(path: Path):  # type: ignore[no-untyped-def]
 
 def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     """Widget'ı varsayılandan farklı, seçilebilir bir değere getirir."""
-    from PySide6.QtWidgets import QCheckBox, QComboBox
+    from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit
 
+    if isinstance(widget, QLineEdit):
+        widget.setText("Veli")
+        return
     if isinstance(widget, QCheckBox):
         widget.setChecked(not widget.isChecked())
         return
@@ -316,7 +360,7 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
     """Uygula → diske yaz → yeni panel: her bağ değeri aynı göstermeli (yenile/kaydet simetrisi)."""
     from artemis.channels.desktop.settings_panel import PANEL_BINDINGS, setting_value
 
-    path = config(tmp_path)
+    path = config(tmp_path, cloud=True)
     first = _panel(path)
     defaults = first.values()
     assert set(defaults) == {binding.path for binding in PANEL_BINDINGS}
@@ -336,9 +380,85 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
     second.deleteLater()
 
 
+def _set_voice(path: Path, **voice: str) -> None:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["voice"].update(voice)
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+
+def test_precision_combo_round_trips_and_keeps_custom_value(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    key = ("voice", "stt_compute_type")
+    panel = _panel(path)
+    assert panel.values()[key] == "float16"  # kod varsayılanı değişmez
+    panel.precision_combo.setCurrentIndex(panel.precision_combo.findData("int8_float16"))
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.stt_compute_type == "int8_float16"
+    # Elle yazılmış eski değer panelde görünür ve Uygula ile ezilmez.
+    _set_voice(path, stt_compute_type="int8")
+    panel.refresh()
+    assert panel.values()[key] == "int8"
+    panel.refresh()  # tekrar yenileme özel öğeyi çoğaltmaz
+    assert panel.precision_combo.count() == 3
+    panel.deleteLater()
+
+
+def test_precision_combo_disabled_on_cpu_only(tmp_path: Path) -> None:
+    path = config(tmp_path)  # stt_device: cpu
+    panel = _panel(path)
+    assert not panel.precision_combo.isEnabled()
+    _set_voice(path, stt_device="cuda")
+    panel.refresh()
+    assert panel.precision_combo.isEnabled()
+    panel.deleteLater()
+
+
 def test_save_choices_rejects_paths_without_a_panel_binding(tmp_path: Path) -> None:
     path = config(tmp_path)
     before = path.read_text(encoding="utf-8")
     with pytest.raises(KeyError):
         save_choices(path, None, values={("voice", "echo_cancelation"): True})  # yazım hatası
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_hybrid_stt_checkboxes_round_trip_and_hint(tmp_path: Path) -> None:
+    path = config(tmp_path, cloud=True)
+    panel = _panel(path)
+    assert panel.values()[("voice", "stt_mode")] == "local"
+    assert panel.cloud_stt_hint.text() == ""
+    panel.hybrid_stt.setChecked(True)
+    assert "kesintisiz kipte her söz gider" in panel.cloud_stt_hint.text()
+    assert "voice.stt_cloud_endpoint" in panel.cloud_stt_hint.text()
+    save_choices(path, None, values=panel.values())
+    saved = load_settings(path).voice
+    assert saved.stt_mode == "hybrid"
+    assert _panel(path).hybrid_stt.isChecked()
+    panel.deleteLater()
+
+
+def test_hybrid_without_endpoint_warns_and_save_is_rejected(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    _set_voice(path, stt_cloud_endpoint="", stt_cloud_model="")
+    panel = _panel(path)
+    panel.hybrid_stt.setChecked(True)
+    assert "config'te" in panel.cloud_stt_hint.text()
+    with pytest.raises(ValueError):
+        save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.stt_mode == "local"
+    panel.deleteLater()
+
+
+def test_custom_wake_name_roundtrip_and_invalid_value_keeps_file(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    panel.wake_name.setText("  Ali  ")
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.wake_word == "Ali"
+    panel.refresh()
+    assert panel.wake_name.text() == "Ali"
+    original = path.read_bytes()
+    panel.wake_name.setText("   ")
+    with pytest.raises(ValueError):
+        save_choices(path, None, values=panel.values())
+    assert path.read_bytes() == original
+    panel.deleteLater()

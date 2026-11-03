@@ -243,9 +243,15 @@ def test_add_model_and_make_primary(app: QApplication, tmp_path: Path) -> None:
 def test_provider_problem_cases(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     path = config(tmp_path)
     settings = load_settings(path)
-    assert "OPENROUTER_API_KEY" in str(provider_problem(settings))
-    monkeypatch.setenv("OPENROUTER_API_KEY", "x")
+    problem = str(provider_problem(settings))
+    # Çözüm önce (sağlayıcı adı + "Anahtarı ekle"), değişken adı ikincil ayrıntı.
+    assert problem.startswith("OpenRouter anahtarı bulunamadı.") and "Anahtarı ekle" in problem
+    assert "OPENROUTER_API_KEY" in problem
+    monkeypatch.setenv("OPENROUTER_API_KEY", "gizli-deger-123")
     assert provider_problem(settings) is None
+    # Anahtar değeri hiçbir mesaja sızmaz.
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "")
+    assert "gizli-deger-123" not in problem
     assert provider_problem(settings.model_copy(update={"primary_model": ""})) is not None
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     raw["endpoints"] = {

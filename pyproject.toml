@@ -38,6 +38,8 @@ voice = [
 ]
 # EMA Lightning yerel Türkçe TTS; torch'u CPU sürümüyle kur: --extra-index-url https://download.pytorch.org/whl/cpu
 ema = ["ema-lightning==1.1.2"]
+# ADR 0047: isteğe bağlı canlı yazı; ağırlıklar paketle gelmez, çalışmada sabit revision'dan iner.
+stream = ["sherpa-onnx==2.0.1", "huggingface-hub==1.33.0"]
 desktop = ["PySide6-Essentials==6.12.0"]
 # ADR 0045: Common Voice parquet okuma (değerlendirme corpus'u); uygulama çalışırken gerekmez.
 eval = ["pyarrow==25.0.1"]
@@ -86,6 +88,10 @@ module = ["ema_lightning.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = ["sherpa_onnx.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["livekit.*"]
 ignore_missing_imports = true
 
@@ -100,14 +106,7 @@ ignore_missing_imports = true
 # PySide6 yalnız `[desktop]` ekiyle kurulur; `checks` işinde Qt tipleri Any olur ve
 # QWidget/QThread alt sınıfları `misc` hatası verir.
 [[tool.mypy.overrides]]
-module = [
-  "artemis.channels.desktop.app",
-  "artemis.channels.desktop.pet",
-  "artemis.channels.desktop.settings_panel",
-  "artemis.channels.desktop.projects_panel",
-  "artemis.channels.desktop.data_panel",
-  "artemis.channels.desktop.instance",
-  "artemis.channels.desktop.provider_section",
-]
+# Tek tek modül listesi yeni masaüstü dosyalarında (pet_section, pet_quick...) unutuluyordu.
+module = ["artemis.channels.desktop.*"]
 # Qt yokken Any olan ifadelerdeki ignore'lar `unused-ignore` olur; Qt varken gerekir.
 disable_error_code = ["misc", "no-any-return", "unused-ignore"]
