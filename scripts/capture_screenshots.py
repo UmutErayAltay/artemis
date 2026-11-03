@@ -24,7 +24,7 @@ if sys.platform == "win32":
 
 from PySide6.QtCore import QPoint, QRect, QSettings, Qt  # noqa: E402
 from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPixmap  # noqa: E402
-from PySide6.QtWidgets import QApplication, QTabWidget  # noqa: E402
+from PySide6.QtWidgets import QApplication, QScrollArea, QTabWidget  # noqa: E402
 
 from artemis.channels.desktop.app import _STYLE, ApprovalDialog, build_window  # noqa: E402
 from artemis.channels.desktop.pet import BODY, PetWidget  # noqa: E402
@@ -132,7 +132,45 @@ def capture_projects(app: QApplication) -> None:
     tabs.close()
 
 
+def capture_settings(app: QApplication, window: object) -> None:
+    """Ayarlar'ın Ses (karma tanıma) ve Telegram sayfaları ile Oto onay risk uyarısı."""
+    panel = window.settings_panel  # type: ignore[attr-defined]
+    window.tabs.setCurrentWidget(window.settings_scroll)  # type: ignore[attr-defined]
+    for title, name in (("Ses", "settings-ses.png"), ("Telegram", "settings-telegram.png")):
+        row = next(
+            i for i in range(panel.sections.count()) if panel.sections.item(i).text() == title
+        )
+        panel.sections.setCurrentRow(row)
+        if title == "Ses":
+            # Karma tanıma alanları kutu işaretlenince açılır; sayfa o bölüme kaydırılır.
+            panel.hybrid_stt.setChecked(True)
+            app.processEvents()
+            area = panel.cloud_box.parentWidget()
+            while area is not None and not isinstance(area, QScrollArea):
+                area = area.parentWidget()
+            if area is not None:
+                area.ensureWidgetVisible(panel.cloud_box, 0, 120)
+        app.processEvents()
+        save(window, name)
+    window.tabs.setCurrentIndex(0)  # type: ignore[attr-defined]
+    box, _yes = window._auto_mode_box()  # type: ignore[attr-defined]
+    box.show()
+    app.processEvents()
+    save(box, "auto-warning.png")
+    box.close()
+
+
+def hide_real_credentials() -> None:
+    """Görüntüde gerçek kullanıcının kayıtlı token/anahtar durumu görünmesin (kasa okunmaz)."""
+    import artemis.brain.providers as providers
+    import artemis.channels.telegram.api as telegram_api
+
+    providers.read_secret = lambda *_args, **_kw: None  # type: ignore[assignment]
+    telegram_api.read_secret = lambda *_args, **_kw: None  # type: ignore[assignment]
+
+
 def main() -> int:
+    hide_real_credentials()
     app = QApplication.instance() or QApplication([])
     assert isinstance(app, QApplication)
     app.setFont(QFont("Segoe UI", 10))
@@ -143,7 +181,10 @@ def main() -> int:
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, name)
         OUT.mkdir(parents=True, exist_ok=True)
 
-        window = build_window(tmp / "ignored.yaml", demo=True, app=app)
+        # Telegram sayfası config'i okur; örnek config yoksa "Ayarlar okunamadı" görünür.
+        demo_config = tmp / "demo.yaml"
+        demo_config.write_bytes((OUT.parents[2] / "config" / "config.example.yaml").read_bytes())
+        window = build_window(demo_config, demo=True, app=app)
         # 1180 px'te başlık çubuğu (Oto onay düğmesi eklendi) "DEMO" rozetini kırpıyor.
         window.resize(1280, 780)
         window.show()
@@ -170,6 +211,7 @@ def main() -> int:
         save(window.overlay, "overlay.png")
         window.overlay.hide()
 
+        capture_settings(app, window)
         capture_pet(app, tmp)
         capture_projects(app)
 

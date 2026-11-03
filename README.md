@@ -57,6 +57,16 @@ kullanıcının dosyalarına veya uygulamalarına erişmez. Aşağıdaki görün
 
 ![Araç adı, argümanlar ve dış içerik uyarısıyla işlem onayı](docs/assets/desktop/approval.png)
 
+### Ayarlar: karma tanıma ve Telegram
+
+![Ayarlar > Ses: karma tanıma sunucusu, protokol, API anahtarı ve model listesi](docs/assets/desktop/settings-ses.png)
+
+![Ayarlar > Telegram: token, eşleştirme ve masaüstü içinde komut alma](docs/assets/desktop/settings-telegram.png)
+
+### Otomatik onay uyarısı
+
+![Otomatik onay açılırken çıkan risk uyarısı; varsayılan seçim Vazgeç](docs/assets/desktop/auto-warning.png)
+
 ### Hızlı komut penceresi
 
 ![Ana panelle aynı çalışma katmanını kullanan hızlı komut penceresi](docs/assets/desktop/overlay.png)

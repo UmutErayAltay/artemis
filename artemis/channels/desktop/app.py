@@ -2015,8 +2015,8 @@ class DesktopWindow(QMainWindow):
         if saved and not self._demo:
             self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
 
-    def _confirm_auto_mode(self) -> bool:
-        """Otomatik kip bilinçli açılır: varsayılan cevap hayır (kural 2'nin ruhu)."""
+    def _auto_mode_box(self) -> tuple[QMessageBox, QPushButton]:
+        """Uyarı kutusu ve "aç" düğmesi; ayrı kurulur ki README görüntüsü bloklamadan alınsın."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle("Otomatik onayı aç?")
@@ -2032,6 +2032,11 @@ class DesktopWindow(QMainWindow):
         no = box.addButton("Vazgeç", QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(no)
         box.setEscapeButton(no)
+        return box, yes
+
+    def _confirm_auto_mode(self) -> bool:
+        """Otomatik kip bilinçli açılır: varsayılan cevap hayır (kural 2'nin ruhu)."""
+        box, yes = self._auto_mode_box()
         box.exec()
         return box.clickedButton() is yes
 
