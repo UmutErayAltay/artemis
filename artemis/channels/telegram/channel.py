@@ -67,6 +67,7 @@ _REJECTION_NOTICES = {
 # Boş poll'larda CPU'yu yakmamak için kısa bekleme (yalnız zaman aşımı 0 ise gerekir).
 _IDLE_SLEEP = 0.1
 _MAX_BACKOFF = 30.0
+_MAX_FRAMES = 4  # tek turda en çok bu kadar monitör karesi gönderilir
 
 
 @dataclass(frozen=True)
@@ -166,7 +167,7 @@ class TelegramChannel:
         # Yoklamada görülen /dur güncellemeleri (onaylanmadı): sonra normal akışta atlanır.
         self._stop_seen: set[int] = set()
         # Son ekran karesi: yalnız RAM, tur başında ve gönderimden sonra atılır.
-        self._frame: bytes | None = None
+        self._frame: tuple[bytes, ...] | None = None
 
     def observe(self, record: dict[str, Any]) -> None:
         """AuditLog.on_record'a bağlanır: hangi turun gizli içerik gördüğünü izler.
@@ -215,8 +216,8 @@ class TelegramChannel:
         )
         runtime.context.services["computer_host"] = self.computer_host
 
-    def remember_frame(self, png: bytes) -> None:
-        self._frame = png
+    def remember_frame(self, pngs: tuple[bytes, ...]) -> None:
+        self._frame = pngs
 
     def cancel_turn(self) -> None:
         """Her iş parçacığından çağrılabilir: yürüyen turu iptal ettirir (Esc ve /dur)."""
@@ -533,13 +534,15 @@ class TelegramChannel:
                     # Tur gerçekleşti ve denetimde; yanıt iletilemese de döngü sürer.
                     break
 
-    def _send_frame(self, runtime: Runtime, frame: bytes | None, answer_private: bool) -> None:
+    def _send_frame(
+        self, runtime: Runtime, frames: tuple[bytes, ...] | None, answer_private: bool
+    ) -> None:
         """Son ekran karesi (ADR 0053): üç kapı da açık olmadıkça HİÇ gönderilmez.
 
         Bayrak, `perception.allow_cloud_screen` (Telegram buluttur) ve tur/geçmiş gizliliği.
         Kare yalnız RAM'de durdu; denetime baytlar değil yalnız `telegram_out` olayı yazılır.
         """
-        if frame is None:
+        if not frames:
             return
         settings = runtime.context.settings
         allowed = settings.telegram.send_computer_screenshot
@@ -547,8 +550,10 @@ class TelegramChannel:
             return
         if answer_private or self._private_reason(runtime) is not None:
             return
-        with contextlib.suppress(TelegramError, ValueError):
-            self.client.send_photo(self.chat_id, frame, kind="photo")
+        # Her monitör ayrı fotoğraf (en çok _MAX_FRAMES); biri başarısız olsa diğerleri gider.
+        for frame in frames[:_MAX_FRAMES]:
+            with contextlib.suppress(TelegramError, ValueError):
+                self.client.send_photo(self.chat_id, frame, kind="photo")
 
     async def serve(self, stop: asyncio.Event, *, give_up_on_conflict: bool = False) -> str | None:
         """Güncellemeleri işler. `give_up_on_conflict`: başka bir yoklayıcı (HTTP 409) varsa
