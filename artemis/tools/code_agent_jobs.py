@@ -614,6 +614,9 @@ class CodeAgentJobs:
         with self._lock:
             job = self._jobs[job_id]
             if job_id in self._cancelled and clean:
+                if status != "cancelled":
+                    # Kontrol sürerken iptal: özetteki kontrol cümlesi artık geçersiz.
+                    summary += " Sonra iş iptal edildi; sonuç doğrulanmış sayılmaz."
                 status = "cancelled"
             elif late and status in {"done", "waiting"}:
                 status = "timeout"
