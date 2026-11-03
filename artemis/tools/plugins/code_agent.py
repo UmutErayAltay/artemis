@@ -57,6 +57,11 @@ class CancelArguments(BaseModel):
     job_id: str = Field(min_length=1, max_length=32)
 
 
+class ReleaseArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=1, max_length=32)
+
+
 class DiscardArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
     spec_id: str = Field(min_length=1, max_length=64)
@@ -314,6 +319,38 @@ class CodeAgentCancel(BaseTool):
             status="sent",
             message=f"İş {args.job_id} için durdurma gönderildi. "
             "Yarım değişiklikler diskte kalır; süreç temizliği doğrulanacak.",
+        )
+
+
+@register_tool
+class CodeAgentRelease(BaseTool):
+    name = "code_agent_release"
+    label = "Depo kilidini bırak"
+    done_label = "Depo kilidi bırakıldı"
+    description = (
+        "Artemis çöktükten sonra kalan belirsiz depo kilidini bırakır; ajanı durdurmaz, "
+        "dosyalara dokunmaz. Önce o repoda hiçbir ajan penceresi veya süreci çalışmadığından "
+        "emin ol."
+    )
+    args_model = ReleaseArguments
+    # Yetim bir ajan süreci kuramsal olarak hâlâ repoyu düzenliyor olabilir. Windows'ta
+    # Artemis ölünce Job Object süreç ağacını öldürür, ama bunu doğrulayamayız; bu yüzden
+    # kilidi bırakmak kullanıcının açık onayını ister.
+    risk = Risk.CONFIRM_REQUIRED
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        args = cast(ReleaseArguments, arguments)
+        jobs = _jobs(context)
+        released = None if jobs is None else jobs.release(args.job_id)
+        if released is None:
+            return ToolResult(message=f"Kilidi bırakılabilir iş bulunamadı: {args.job_id}.")
+        leftover = {True: "var", False: "yok", None: "bilinmiyor"}[released["leftover_changes"]]
+        return ToolResult(
+            success=True,
+            status="ok",
+            message=f"İş {args.job_id} için depo kilidi bırakıldı; "
+            f"commitlenmemiş değişiklik {leftover}.",
+            data={"job_id": args.job_id, "leftover_changes": released["leftover_changes"]},
         )
 
 

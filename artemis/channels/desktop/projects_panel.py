@@ -50,6 +50,7 @@ from artemis.tools.plugins.code_agent import (
     CancelArguments,
     DiscardArguments,
     PrepareArguments,
+    ReleaseArguments,
     StartArguments,
     StatusArguments,
 )
@@ -544,9 +545,13 @@ class ProjectsPanel(QWidget):
         # Taslağı sil: yalnız taslak seçiliyken görünür (iptal düğmesiyle aynı satır, ikisi
         # birlikte görünmez); yıkıcı olduğu için birincil eylemden ayrı satırdadır.
         self.discard_button = QPushButton("Taslağı sil")
+        # Çökme sonrası kalan belirsiz depo kilidini (cleanup_pending) onayla bırakır.
+        self.release_button = QPushButton("Kilidi bırak")
+        self.release_button.setObjectName("danger")
         self.discard_button.setObjectName("danger")
         cancel_row = QHBoxLayout()
         cancel_row.addWidget(self.cancel_button)
+        cancel_row.addWidget(self.release_button)
         cancel_row.addWidget(self.discard_button)
         cancel_row.addStretch()
         right_lay.addSpacing(8)
@@ -566,6 +571,7 @@ class ProjectsPanel(QWidget):
         self.refresh_button.clicked.connect(self._manual_refresh)
         self.answer_button.clicked.connect(self._answer)
         self.cancel_button.clicked.connect(self._cancel)
+        self.release_button.clicked.connect(self._release)
         self.discard_button.clicked.connect(self._discard)
         self.project.currentTextChanged.connect(self._apply_project_defaults)
         self.agent_combo.currentIndexChanged.connect(self._sync_agent_ui)
@@ -1005,6 +1011,12 @@ class ProjectsPanel(QWidget):
                 "cancelling",
             }
         )
+        self.release_button.setVisible(kind == "job")
+        self.release_button.setEnabled(
+            enabled
+            and bool(record.get("cleanup_pending"))
+            and record.get("status") not in {"queued", "running", "waiting", "cancelling"}
+        )
         self._update_flow(kind, record)
         self._update_chip(kind, record)
 
@@ -1138,6 +1150,13 @@ class ProjectsPanel(QWidget):
         if selected and selected[0] == "draft":
             self.tool_requested.emit(
                 "code_agent_discard", DiscardArguments(spec_id=selected[1]["spec_id"])
+            )
+
+    def _release(self) -> None:
+        selected = self._selected()
+        if selected and selected[0] == "job":
+            self.tool_requested.emit(
+                "code_agent_release", ReleaseArguments(job_id=selected[1]["job_id"])
             )
 
     def _cancel(self) -> None:

@@ -494,7 +494,8 @@ def test_restart_active_interrupted_no_auto_spawn_and_uncertain_lock(
                 "SELECT value FROM records WHERE key=?", (job["job_id"],)
             ).fetchone()[0]
         )
-        record["status"] = "waiting"
+        # "running": süreç kesildi, canlı olup olmadığı bilinmez. ("waiting" artık kilitlemez.)
+        record["status"] = "running"
         record["pid"] = 1  # Kullanılmayan eski PID hiçbir öldürme işlemi yaratmaz.
         connection.execute(
             "UPDATE records SET value=? WHERE key=?", (json.dumps(record), job["job_id"])

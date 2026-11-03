@@ -145,36 +145,61 @@ class CodeAgentJobs:
                 ) from error
             with ExitStack() as initialization:
                 initialization.callback(ownership.close)
-                descriptor = os.open(store_path, os.O_CREAT | os.O_RDWR, 0o600)
-                os.close(descriptor)
-                with closing(sqlite3.connect(store_path)) as connection, connection:
-                    connection.execute(
-                        "CREATE TABLE IF NOT EXISTS records (key TEXT PRIMARY KEY, "
-                        "kind TEXT NOT NULL, value TEXT NOT NULL)"
-                    )
-                    for key, kind, value in connection.execute(
-                        "SELECT key, kind, value FROM records"
-                    ):
-                        record = json.loads(value)
-                        if kind == "draft":
-                            self._drafts[key] = ProjectSpec.model_validate(record)
-                        else:
-                            if record["status"] in ACTIVE or record["status"] == "cleanup_pending":
-                                record.update(
-                                    status="interrupted",
-                                    cleanup_pending=True,
-                                    summary="Önceki süreç kesildi; otomatik yeniden başlatılmadı. "
-                                    "Depo kilidi belirsiz süreç nedeniyle korunuyor.",
-                                )
-                            # Eski satırlar ajan/klasör taşımaz: claude + projenin kendi reposu.
-                            record.setdefault("agent", "claude")
-                            record.setdefault("mode", "background")
-                            record.setdefault("workdir", "proje")
-                            record.setdefault("workdir_path", record.get("repo", ""))
-                            self._jobs[key] = record
-                for record in self._jobs.values():
-                    self._save(record["job_id"], "job", record)
+                # Bozuk/kilitli depo asistanın tamamını düşürmemeli: runtime yalnız
+                # CodeAgentError'u "proje araçları kapalı" diye karşılar. Dosya ASLA silinmez
+                # veya yeniden adlandırılır; kullanıcı elle inceleyebilsin.
+                try:
+                    self._load_store(store_path)
+                except (
+                    sqlite3.Error,
+                    json.JSONDecodeError,
+                    KeyError,
+                    TypeError,
+                    ValidationError,
+                ) as error:
+                    raise CodeAgentError(
+                        f"Kod ajanı iş deposu okunamadı ({type(error).__name__}); "
+                        "dosya silinmedi, proje araçları kapalı."
+                    ) from error
                 initialization.pop_all()
+
+    def _load_store(self, store_path: Path) -> None:
+        descriptor = os.open(store_path, os.O_CREAT | os.O_RDWR, 0o600)
+        os.close(descriptor)
+        with closing(sqlite3.connect(store_path)) as connection, connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS records (key TEXT PRIMARY KEY, "
+                "kind TEXT NOT NULL, value TEXT NOT NULL)"
+            )
+            for key, kind, value in connection.execute("SELECT key, kind, value FROM records"):
+                record = json.loads(value)
+                if kind == "draft":
+                    self._drafts[key] = ProjectSpec.model_validate(record)
+                else:
+                    if record["status"] == "waiting":
+                        # Soru bekleyen işin süreci zaten çıkmıştı (cevapla yeni süreç açılır);
+                        # restart sonrası canlı süreç olamaz, depo kilidi gereksiz.
+                        record.update(
+                            status="interrupted",
+                            cleanup_pending=False,
+                            summary="Önceki süreç kesildi; bekleyen sorunun süresi doldu "
+                            "ve depo kilidi bırakıldı. Otomatik yeniden başlatılmadı.",
+                        )
+                    elif record["status"] in ACTIVE or record["status"] == "cleanup_pending":
+                        record.update(
+                            status="interrupted",
+                            cleanup_pending=True,
+                            summary="Önceki süreç kesildi; otomatik yeniden başlatılmadı. "
+                            "Depo kilidi belirsiz süreç nedeniyle korunuyor.",
+                        )
+                    # Eski satırlar ajan/klasör taşımaz: claude + projenin kendi reposu.
+                    record.setdefault("agent", "claude")
+                    record.setdefault("mode", "background")
+                    record.setdefault("workdir", "proje")
+                    record.setdefault("workdir_path", record.get("repo", ""))
+                    self._jobs[key] = record
+            for record in self._jobs.values():
+                self._save(record["job_id"], "job", record)
 
     def _save(self, key: str, kind: str, record: dict[str, Any]) -> None:
         if self._store_path is not None:
@@ -371,15 +396,22 @@ class CodeAgentJobs:
             self._settings[job_id] = start_dir, run
             self._began[job_id] = self._clock()
             self._deadlines[job_id] = self._began[job_id] + max_minutes * 60
-            self._audit.emit(
-                "code_agent_started",
-                job_id=job_id,
-                project=alias,
-                base=base,
-                agent=spec.agent,
-                workdir=spec.workdir,
-                mode=spec.mode,
-            )
+            try:
+                self._audit.emit(
+                    "code_agent_started",
+                    job_id=job_id,
+                    project=alias,
+                    base=base,
+                    agent=spec.agent,
+                    workdir=spec.workdir,
+                    mode=spec.mode,
+                )
+            except OSError as error:
+                # Denetimsiz iş başlatılmaz; "queued" bırakılırsa depo sonsuza dek kilitli kalırdı.
+                message = "Denetim kaydı yazılamadı; iş başlatılmadı."
+                self._update(job_id, status="error", summary=message)
+                run.cleanup()
+                raise CodeAgentError(message) from error
             self._launch(job_id, run.stdin_prompt)
             return job_id
 
@@ -649,6 +681,34 @@ class CodeAgentJobs:
             self._audit.emit("code_agent_answer", job_id=job_id, question_id=question_id)
             self._launch(job_id, answer)
             return True
+
+    def release(self, job_id: str) -> dict[str, Any] | None:
+        """Çökme sonrası kalan `cleanup_pending` kilidini kullanıcı onayıyla bırakır.
+
+        Yalnız bu süreçte canlı iş parçacığı olmayan, aktif olmayan bir iş için çalışır.
+        Yetim bir ajan süreci kuramsal olarak hâlâ düzenleme yapabilir; Windows'ta Artemis
+        ölünce Job Object süreç ağacını öldürür, ama bunu araç onayında kullanıcıya bırakırız.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            thread = self._threads.get(job_id)
+            if (
+                job is None
+                or not job.get("cleanup_pending")
+                or job["status"] in ACTIVE
+                or (thread is not None and thread.is_alive())
+            ):
+                return None
+            repo = Path(job["repo"])
+        try:
+            leftover: bool | None = bool(_checked_git(repo, "status", "--porcelain"))
+        except CodeAgentError:
+            leftover = None  # git okunamadı: kalan değişiklik bilinmiyor
+        with self._lock:
+            if not self._update(job_id, cleanup_pending=False, leftover_changes=leftover):
+                return None
+            self._audit.emit("code_agent_lock_released", job_id=job_id, leftover_changes=leftover)
+            return deepcopy(self._jobs[job_id])
 
     def cancel(self, job_id: str) -> bool:
         with self._lock:
