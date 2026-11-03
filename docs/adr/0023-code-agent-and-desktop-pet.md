@@ -1,6 +1,6 @@
 # ADR 0023 — Kod ajanına iş devri ve masaüstü pet
 
-**Durum:** Kabul. Kullanıcı (2026-10-14) Codex'in masaüstü "pet"ine benzer bir deneyim
+**Durum:** Kabul (ajan türü ve başlangıç klasörü için ADR 0049'a bakın). Kullanıcı (2026-10-14) Codex'in masaüstü "pet"ine benzer bir deneyim
 istedi: köşede duran, sesle konuşulan, işleri bir kod ajanına yaptıran asistan. Ajan
 yetkisi kullanıcı kararıyla **yerel commit**'tir; push yoktur.
 
@@ -33,7 +33,7 @@ içeriğinden üretilir, Artemis için dış veridir.
 
 **Karar — pet:** Çerçevesiz, şeffaf, hep üstte, sürüklenebilir küçük bir Qt penceresi;
 QPainter ile çizilir, yeni bağımlılık yoktur. Durumları mevcut ses durumu, ses seviyesi,
-tur, onay ve kod ajanı olaylarından türetir; kendi komut veya onay yolu yoktur. Tık sesi
+tur, onay ve kod ajanı olaylarından türetir; kendi komut veya onay yolu yoktur. (ADR 0048: tık eşlemesi değişti; 1 tık hızlı kutu, 2 tık ses, 3 tık menü.) Tık sesi
 açar/kapatır; komutlar ve onaylar mevcut runner ve onay penceresinden geçer.
 
 **Sonuçlar:** Ajan kullanıcı projesinde gerçek değişiklik yapar; geri alma taban commit

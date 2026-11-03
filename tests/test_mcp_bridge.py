@@ -519,3 +519,28 @@ def test_python_placeholder_means_artemis_interpreter_only_on_exact_match() -> N
     assert server_command(exact) == [sys.executable, "-m", "x"]
     other = MCPServerConfig(name="b", command="x{python}", content="text")
     assert server_command(other) == ["x{python}"]
+
+
+@pytest.mark.parametrize('tainted', [False, True])
+async def test_destructive_mcp_with_trusted_url_still_requires_approval(tmp_path, tainted):
+    from artemis.safety.gate import remember_site, trusted_sites_path
+
+    settings = Settings(workspace=tmp_path, state_dir=tmp_path / 'state')
+    remember_site(trusted_sites_path(settings.state_dir), 'example.com')
+    client = FakeClient()
+    remote = spec('delete_record', input_schema={
+        'type': 'object', 'properties': {'url': {'type': 'string'}}, 'required': ['url'],
+    }, annotations={'destructiveHint': True})
+    cls = build_tool_class(server(), remote, lambda _: client)
+    registry = ToolRegistry()
+    registry.register(cls)
+    gate = SafetyGate(registry)
+    context = ToolContext(tmp_path, settings, AuditLog(tmp_path / 'audit'))
+    approvals = []
+    result = await gate.dispatch(
+        ToolCall(id='c', name=cls.name, arguments={'url': 'https://example.com/record'}),
+        context, TurnState(tainted=tainted), lambda *args: approvals.append(args) or False,
+    )
+    assert cls.risk is Risk.CONFIRM_REQUIRED
+    assert len(approvals) == 1 and result.status == 'denied'
+    assert client.calls == []

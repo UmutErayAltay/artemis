@@ -545,7 +545,8 @@ async def test_reminder_cancel(tmp_path: Path) -> None:
     assert (await dispatch(env, "reminder_cancel", reminder_id=reminder_id)).status == "ok"
     again = await dispatch(env, "reminder_cancel", reminder_id=reminder_id)
     assert again.status == "error"
-    assert (await dispatch(env, "reminder_list")).data["reminders"] == []
+    records = (await dispatch(env, "reminder_list")).data["reminders"]
+    assert len(records) == 1 and records[0]["state"] == "cancelled"
 
 
 def test_runtime_creates_store_only_when_enabled(tmp_path: Path) -> None:

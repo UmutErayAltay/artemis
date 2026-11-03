@@ -23,8 +23,17 @@ def test_catalog_contains_only_multilingual_models() -> None:
 
 def test_recommended_model_depends_on_gpu_memory() -> None:
     assert stt_catalog.recommended(None) == "small"
-    assert stt_catalog.recommended(6141) == "large-v3-turbo"
+    assert stt_catalog.recommended(6141) == "large-v3"
+    assert stt_catalog.recommended(3000) == "large-v3"
+    assert stt_catalog.recommended(2999) == "small"
     assert stt_catalog.recommended(2000) == "small"
+
+
+def test_turbo_note_is_not_recommended_but_large_v3_is() -> None:
+    notes = {choice.name: choice.note for choice in stt_catalog.CATALOG}
+    assert "Önerilen" not in notes["large-v3-turbo"]
+    assert "zayıf" in notes["large-v3-turbo"]
+    assert "Önerilen" in notes["large-v3"]
 
 
 def test_gpu_memory_is_none_when_nvidia_smi_is_missing(

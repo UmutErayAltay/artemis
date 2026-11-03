@@ -9,11 +9,26 @@ import yaml
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from artemis.brain import providers
+from artemis.channels.desktop import provider_section as section_module
 from artemis.channels.desktop.settings_panel import microphone_choices, save_choices
 from artemis.config.settings import load_settings
 
+SECRET = "sk-test-gizli"
 
-def config(tmp_path: Path, *, local: bool = True) -> Path:
+
+@pytest.fixture(autouse=True)
+def _vault(monkeypatch: pytest.MonkeyPatch) -> dict[str, str]:
+    """Gerçek kimlik kasasına ne okuma ne yazma yapılır."""
+    store: dict[str, str] = {}
+    monkeypatch.setattr(providers, "read_secret", lambda target: store.get(target))
+    monkeypatch.setattr(section_module, "write_secret", lambda s, t: store.__setitem__(t, s))
+    for name in ("BULUT", "BULUT2", "XAI"):
+        monkeypatch.delenv(f"ARTEMIS_{name}_API_KEY", raising=False)
+    return store
+
+
+def config(tmp_path: Path, *, local: bool = True, cloud: bool = False) -> Path:
     path = tmp_path / "config.yaml"
     path.write_text(yaml.safe_dump({
         "workspace": "desktop", "state_dir": "state", "audit_path": "audit.jsonl",
@@ -22,7 +37,13 @@ def config(tmp_path: Path, *, local: bool = True) -> Path:
         "applications": {"brave": "brave.exe"}, "close_without_confirmation": ["brave"],
         "models": {"first": {"provider": "openrouter", "model": "first-model",
                              "input_per_million": "0", "output_per_million": "0"}},
-        "voice": {"stt_device": "cpu", "stt_model": "models/whisper"},
+        # Karma tanıma kutusu açılınca doğrulama uç + model ister (ADR 0046).
+        **({"endpoints": {"bulut": {"base_url": "https://api.example.com/v1"},
+                          "bulut2": {"base_url": "https://api2.example.com/v1"}}}
+           if cloud else {}),
+        "voice": {"stt_device": "cpu", "stt_model": "models/whisper",
+                  **({"stt_cloud_endpoint": "bulut", "stt_cloud_model": "whisper-x"}
+                     if cloud else {})},
     }), encoding="utf-8")
     return path
 
@@ -176,21 +197,56 @@ def qt_app():
     return QApplication.instance() or QApplication([])
 
 
-def test_settings_panel_tabs_are_grouped_by_topic(tmp_path: Path, qt_app) -> None:
-    from PySide6.QtWidgets import QFrame, QScrollArea
+def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtWidgets import QScrollArea
 
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
-    assert [
-        panel.sections.tabText(index) for index in range(panel.sections.count())
-    ] == ["Ses", "Model", "Uygulamalar", "GitHub"]
-    assert panel.sections.currentIndex() == 0
-    for index in range(panel.sections.count()):
-        page = panel.sections.widget(index)
-        assert isinstance(page, QScrollArea)
-        assert page.widgetResizable()
-        assert page.frameShape() == QFrame.Shape.NoFrame
+    assert panel.section_names() == ["Ses", "Model", "Telegram", "Uygulamalar", "GitHub", "Görünüm"]
+    assert panel.sections.objectName() == "sectionList"
+    assert panel.sections.currentRow() == 0
+    # Tek kaydırma bölgesi: sayfa başına ikinci kaydırıcı yok.
+    assert len(panel.findChildren(QScrollArea)) == 1
+    for index in range(len(panel.section_names())):
+        panel.show_section(index)
+        assert panel.stack.currentIndex() == index
+    assert panel.pet.parent() is not panel.stack.currentWidget()
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_theme_cards_follow_combo_and_emit_once(tmp_path: Path, qt_app) -> None:
+    from artemis.channels.desktop import settings_panel
+    from artemis.channels.desktop.themes import THEME_LABELS
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    seen: list[str] = []
+    panel.theme_changed.connect(seen.append)
+    assert set(panel.theme_cards) == set(THEME_LABELS)
+    panel.theme_cards["dark"].radio.click()
+    assert seen == ["dark"]
+    assert panel.theme_combo.currentData() == "dark"
+    panel.set_theme("light")  # sinyal yaymaz, kartı eşler
+    assert seen == ["dark"]
+    assert panel.theme_cards["light"].radio.isChecked()
+    assert panel.theme_cards["light"].property("selected") is True
+    panel.theme_combo.setCurrentIndex(panel.theme_combo.findData("dark-mixed"))
+    assert panel.theme_cards["dark-mixed"].radio.isChecked()
+    assert seen[-1] == "dark-mixed"
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_dirty_notice_shows_after_edit_and_clears_on_refresh(tmp_path: Path, qt_app) -> None:
+    from artemis.channels.desktop import settings_panel
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    assert panel.dirty_label.isHidden()
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    assert not panel.dirty_label.isHidden()
+    panel.refresh()
+    assert panel.dirty_label.isHidden()
     panel.deleteLater()
     qt_app.processEvents()
 
@@ -252,10 +308,12 @@ def test_save_computer_mode_writes_only_the_mode(tmp_path: Path) -> None:
 # Bilinçli olarak PANEL_BINDINGS dışında kalan seçim widget'ları ve nedenleri. Yeni bir kutu ya da
 # liste eklenip bağlanmazsa aşağıdaki test kırılır: ya bağ ekleyin ya da buraya gerekçe yazın.
 _UNBOUND_WIDGETS = {
+    "theme_combo": "yalnız görünüm; QSettings ile anında kaydedilir, ses config'ine yazılmaz",
     "device_combo": "input_device: aygıt listesi ve 'sistem varsayılanı' özel yenilenir",
     "stt_combo": "stt_model: katalog seçimi yola çevrilir, indirme durumu taşır",
     "github_auto": "code_agent.auto_sync: github_values ile birlikte, save_code_agent de yazar",
     "advanced_devices": "yalnız görünüm; config'e yazılmaz",
+    "default_agent_combo": "code_agent.default_agent: code_agent_values ile ajanlarla yazılır",
 }
 
 
@@ -270,8 +328,14 @@ def _panel(path: Path):  # type: ignore[no-untyped-def]
 
 def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     """Widget'ı varsayılandan farklı, seçilebilir bir değere getirir."""
-    from PySide6.QtWidgets import QCheckBox, QComboBox
+    from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit
 
+    if isinstance(widget, QLineEdit):
+        widget.setText("Veli")
+        return
+    if isinstance(widget, QComboBox) and widget.isEditable():
+        widget.setEditText("Veli")
+        return
     if isinstance(widget, QCheckBox):
         widget.setChecked(not widget.isChecked())
         return
@@ -316,12 +380,16 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
     """Uygula → diske yaz → yeni panel: her bağ değeri aynı göstermeli (yenile/kaydet simetrisi)."""
     from artemis.channels.desktop.settings_panel import PANEL_BINDINGS, setting_value
 
-    path = config(tmp_path)
+    path = config(tmp_path, cloud=True)
     first = _panel(path)
     defaults = first.values()
     assert set(defaults) == {binding.path for binding in PANEL_BINDINGS}
     for binding in PANEL_BINDINGS:
-        _flip(getattr(first, binding.widget))
+        widget = getattr(first, binding.widget)
+        if binding.widget == "cloud_server":  # "Seçilmedi" karma kipte geçersiz olurdu
+            widget.setCurrentIndex(widget.count() - 1)
+        else:
+            _flip(widget)
     chosen = first.values()
     changed = {key for key in chosen if chosen[key] != defaults[key]}
     assert changed == set(chosen), "her bağ varsayılandan farklı bir değerle denenmeli"
@@ -336,9 +404,298 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
     second.deleteLater()
 
 
+def _set_voice(path: Path, **voice: str) -> None:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["voice"].update(voice)
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+
+def test_precision_combo_round_trips_and_keeps_custom_value(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    key = ("voice", "stt_compute_type")
+    panel = _panel(path)
+    assert panel.values()[key] == "float16"  # kod varsayılanı değişmez
+    panel.precision_combo.setCurrentIndex(panel.precision_combo.findData("int8_float16"))
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.stt_compute_type == "int8_float16"
+    # Elle yazılmış eski değer panelde görünür ve Uygula ile ezilmez.
+    _set_voice(path, stt_compute_type="int8")
+    panel.refresh()
+    assert panel.values()[key] == "int8"
+    panel.refresh()  # tekrar yenileme özel öğeyi çoğaltmaz
+    assert panel.precision_combo.count() == 3
+    panel.deleteLater()
+
+
+def test_precision_combo_disabled_on_cpu_only(tmp_path: Path) -> None:
+    path = config(tmp_path)  # stt_device: cpu
+    panel = _panel(path)
+    assert not panel.precision_combo.isEnabled()
+    _set_voice(path, stt_device="cuda")
+    panel.refresh()
+    assert panel.precision_combo.isEnabled()
+    panel.deleteLater()
+
+
 def test_save_choices_rejects_paths_without_a_panel_binding(tmp_path: Path) -> None:
     path = config(tmp_path)
     before = path.read_text(encoding="utf-8")
     with pytest.raises(KeyError):
         save_choices(path, None, values={("voice", "echo_cancelation"): True})  # yazım hatası
     assert path.read_text(encoding="utf-8") == before
+
+
+def test_hybrid_stt_checkboxes_round_trip_and_hint(tmp_path: Path) -> None:
+    path = config(tmp_path, cloud=True)
+    panel = _panel(path)
+    assert panel.values()[("voice", "stt_mode")] == "local"
+    assert panel.cloud_stt_hint.text() == ""
+    panel.hybrid_stt.setChecked(True)
+    assert "kesintisiz kipte her söz gider" in panel.cloud_stt_hint.text()
+    assert "Model sağlayıcıları" in panel.cloud_stt_hint.text()
+    assert "Grok" not in panel.cloud_stt_hint.text()
+    save_choices(path, None, values=panel.values())
+    saved = load_settings(path).voice
+    assert saved.stt_mode == "hybrid"
+    assert _panel(path).hybrid_stt.isChecked()
+    panel.deleteLater()
+
+
+def test_hybrid_without_endpoint_warns_and_save_is_rejected(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    _set_voice(path, stt_cloud_endpoint="", stt_cloud_model="")
+    panel = _panel(path)
+    panel.hybrid_stt.setChecked(True)
+    assert panel.cloud_server.currentData() == ""
+    with pytest.raises(ValueError):
+        save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.stt_mode == "local"
+    panel.deleteLater()
+
+
+def test_cloud_stt_controls_visibility_server_list_and_xai_preselect(tmp_path: Path) -> None:
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"]["xai"] = {"base_url": "https://api.x.ai/v1"}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    panel = _panel(path)
+    panel.show()
+    assert not panel.cloud_box.isVisible()
+    panel.hybrid_stt.setChecked(True)
+    assert panel.cloud_box.isVisible()
+    servers = [panel.cloud_server.itemData(i) for i in range(panel.cloud_server.count())]
+    assert servers == ["", "bulut", "bulut2", "xai"]
+    assert panel.cloud_server.itemText(0) == "Seçilmedi"
+    assert panel.cloud_model.isEnabled()
+    panel.cloud_server.setCurrentIndex(servers.index("xai"))
+    panel.cloud_server.activated.emit(servers.index("xai"))
+    assert panel.cloud_protocol.currentData() == "xai"
+    assert not panel.cloud_model.isEnabled()
+    assert "Türkçeyi resmi olarak doğrulamıyor" in panel.cloud_stt_hint.text()
+    values = panel.values()
+    assert values[("voice", "stt_cloud_endpoint")] == "xai"
+    assert values[("voice", "stt_cloud_protocol")] == "xai"
+    values[("voice", "stt_cloud_model")] = ""
+    save_choices(path, None, values=values)  # xai: model boş olabilir
+    voice = load_settings(path).voice
+    assert (voice.stt_cloud_endpoint, voice.stt_cloud_protocol) == ("xai", "xai")
+    panel.deleteLater()
+
+
+def test_cloud_server_list_reloads_when_providers_change(tmp_path: Path) -> None:
+    path = config(tmp_path, cloud=True)
+    panel = _panel(path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"]["yeni"] = {"base_url": "https://y.example.com/v1"}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    panel.providers.changed.emit()
+    assert panel.cloud_server.findData("yeni") >= 0
+    panel.deleteLater()
+
+
+def test_custom_wake_name_roundtrip_and_invalid_value_keeps_file(tmp_path: Path) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    panel.wake_name.setText("  Ali  ")
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.wake_word == "Ali"
+    panel.refresh()
+    assert panel.wake_name.text() == "Ali"
+    original = path.read_bytes()
+    panel.wake_name.setText("   ")
+    with pytest.raises(ValueError):
+        save_choices(path, None, values=panel.values())
+    assert path.read_bytes() == original
+    panel.deleteLater()
+
+
+# ---- Bulut tanıma: API anahtarı ve model listesi ----
+
+
+def _hybrid_panel(path: Path, server: str = "bulut"):  # type: ignore[no-untyped-def]
+    panel = _panel(path)
+    panel.hybrid_stt.setChecked(True)
+    panel.cloud_server.setCurrentIndex(panel.cloud_server.findData(server))
+    panel._set_dirty(False)
+    return panel
+
+
+def test_cloud_key_is_stored_in_vault_only(tmp_path: Path, _vault: dict[str, str]) -> None:
+    path = config(tmp_path, cloud=True)
+    panel = _hybrid_panel(path)
+    assert panel.cloud_key.isEnabled() and panel.cloud_key.placeholderText() == ""
+    assert "kayıtlı değil" in panel.cloud_stt_hint.text()
+    panel.cloud_key.setText(SECRET)
+    # yazılmış ama saklanmamış anahtar değerlere ve YAML'a girmez
+    values = panel.values()
+    assert SECRET not in repr(values) and values[("voice", "stt_cloud_model")] == "whisper-x"
+    save_choices(path, None, values=values)
+    assert SECRET not in path.read_text(encoding="utf-8")
+    panel._set_dirty(False)
+    panel.cloud_key_button.click()
+    assert _vault == {"Artemis/bulut": SECRET}
+    assert panel.cloud_key.text() == "" and panel.cloud_key.placeholderText() == "kayıtlı"
+    assert "kaydedildi" in panel.cloud_stt_hint.text()
+    assert SECRET not in panel.cloud_stt_hint.text()
+    assert panel.dirty_label.isHidden()  # Uygula gerekmez
+    assert SECRET not in repr(panel.values())
+    assert SECRET not in path.read_text(encoding="utf-8")
+    panel.deleteLater()
+
+
+def test_cloud_key_follows_server_and_missing_key_hint(
+    tmp_path: Path, _vault: dict[str, str]
+) -> None:
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"]["yerel"] = {"base_url": "http://127.0.0.1:1/v1", "api_key": False}
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    _vault["Artemis/bulut2"] = SECRET
+    panel = _hybrid_panel(path, server="")
+    assert not panel.cloud_key.isEnabled() and not panel.cloud_fetch_button.isEnabled()
+    panel.cloud_server.setCurrentIndex(panel.cloud_server.findData("bulut2"))
+    assert panel.cloud_key.isEnabled() and panel.cloud_key.placeholderText() == "kayıtlı"
+    assert "kayıtlı değil" not in panel.cloud_stt_hint.text()
+    panel.cloud_server.setCurrentIndex(panel.cloud_server.findData("bulut"))
+    assert panel.cloud_key.placeholderText() == ""
+    assert "kayıtlı değil" in panel.cloud_stt_hint.text()
+    panel.cloud_server.setCurrentIndex(panel.cloud_server.findData("yerel"))
+    assert not panel.cloud_key.isEnabled() and not panel.cloud_key_button.isEnabled()
+    assert panel.cloud_key.placeholderText() == "Bu sunucu anahtar istemiyor"
+    panel.deleteLater()
+
+
+def test_cloud_key_demo_disabled_and_vault_failure_leaks_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+
+    path = config(tmp_path, cloud=True)
+    QApplication.instance() or QApplication([])
+    demo = SettingsPanel(path, demo=True)
+    demo.hybrid_stt.setChecked(True)
+    assert not demo.cloud_key.isEnabled() and not demo.cloud_fetch_button.isEnabled()
+    demo.deleteLater()
+
+    def fail(secret: str, target: str) -> None:
+        raise OSError("yok")
+
+    monkeypatch.setattr(section_module, "write_secret", fail)
+    panel = _hybrid_panel(path)
+    panel.cloud_key.setText(SECRET)
+    panel._save_cloud_key()
+    assert "ARTEMIS_BULUT_API_KEY" in panel.cloud_stt_hint.text()
+    assert SECRET not in panel.cloud_stt_hint.text() and panel.cloud_key.text() == ""
+    panel.deleteLater()
+
+
+def test_cloud_models_fetch_fills_combo_and_keeps_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, _vault: dict[str, str]
+) -> None:
+    from PySide6.QtWidgets import QApplication
+
+    calls: list[tuple[str, str | None]] = []
+
+    def fake_probe(url: str, key: str | None) -> tuple[str, list[str]]:
+        calls.append((url, key))
+        return "Bağlantı tamam, 2 model bulundu.", ["whisper-1", "whisper-x"]
+
+    monkeypatch.setattr(section_module, "probe_models", fake_probe)
+    path = config(tmp_path, cloud=True)
+    _vault["Artemis/bulut"] = "kayitli-anahtar"
+    panel = _hybrid_panel(path)
+    assert panel.cloud_fetch_button.isEnabled()
+    panel.cloud_model.setEditText("whisper-x")
+    panel._fetch_cloud_models()
+    assert panel._cloud_fetch is not None
+    panel._cloud_fetch.wait(3000)
+    QApplication.processEvents()
+    assert calls == [("https://api.example.com/v1", "kayitli-anahtar")]
+    assert [panel.cloud_model.itemText(i) for i in range(panel.cloud_model.count())] == [
+        "whisper-1", "whisper-x"
+    ]
+    assert panel.cloud_model.currentText() == "whisper-x"
+    assert "2 model" in panel.cloud_stt_hint.text()
+    assert panel.dirty_label.isHidden()
+    # yazılmış ama saklanmamış anahtar kayıtlıdan önce gelir
+    panel.cloud_key.setText(SECRET)
+    panel._fetch_cloud_models()
+    panel._cloud_fetch.wait(3000)
+    QApplication.processEvents()
+    assert calls[-1] == ("https://api.example.com/v1", SECRET)
+    assert SECRET not in panel.cloud_stt_hint.text()
+    # listede olmayan, elle yazılan model korunur ve kaydedilir
+    panel.cloud_model.setEditText("ozel-model")
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).voice.stt_cloud_model == "ozel-model"
+    panel.deleteLater()
+
+
+def test_cloud_models_result_for_old_server_is_dropped(tmp_path: Path) -> None:
+    panel = _hybrid_panel(config(tmp_path, cloud=True))
+    other = panel.cloud_server.findData("bulut2")
+    assert other > 0
+    panel._cloud_fetch_for = "bulut"  # istek bulut için başladı
+    panel.cloud_server.setCurrentIndex(other)  # kullanıcı sunucuyu değiştirdi
+    panel.cloud_model.setEditText("benim-modelim")
+    panel._cloud_models_done("Bağlantı tamam, 1 model bulundu.", ["eski-sunucu-modeli"])
+    assert [panel.cloud_model.itemText(i) for i in range(panel.cloud_model.count())] == []
+    assert panel.cloud_model.currentText() == "benim-modelim"
+    panel.deleteLater()
+
+
+def test_finish_inventory_waits_for_running_model_fetch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import time
+
+    def slow_probe(url: str, key: str | None) -> tuple[str, list[str]]:
+        time.sleep(0.4)
+        return "Bağlantı tamam, 0 model bulundu.", []
+
+    monkeypatch.setattr(section_module, "probe_models", slow_probe)
+    panel = _hybrid_panel(config(tmp_path, cloud=True))
+    panel._fetch_cloud_models()
+    assert panel._cloud_fetch is not None and panel._cloud_fetch.isRunning()
+    panel.finish_inventory()
+    assert not panel._cloud_fetch.isRunning()
+    panel.deleteLater()
+
+
+def test_cloud_models_fetch_disabled_for_xai_and_ignored_without_server(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        section_module, "probe_models", lambda url, key: (calls.append(url) or "", [])
+    )
+    panel = _hybrid_panel(config(tmp_path, cloud=True))
+    panel.cloud_protocol.setCurrentIndex(panel.cloud_protocol.findData("xai"))
+    assert not panel.cloud_fetch_button.isEnabled() and not panel.cloud_model.isEnabled()
+    assert panel.cloud_key.isEnabled()  # xAI de anahtar ister
+    panel.cloud_server.setCurrentIndex(0)
+    panel._fetch_cloud_models()
+    assert panel._cloud_fetch is None and calls == []
+    panel.deleteLater()

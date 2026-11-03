@@ -1,14 +1,13 @@
-"""F5: kalıcı taslak, toplam son tarih ve doğrulanmış headless Claude segmentleri.
+"""F5: kalıcı taslak, toplam son tarih ve doğrulanmış headless ajan segmentleri (ADR 0049).
 
 SQLite özel yerel metaveridir; restart yeni süreç veya eski PID öldürme üretmez.
-Artemis kapısı yalnız başlatma/cevap/iptali kapsar, Claude Bash'i OS sandbox değildir.
+Artemis kapısı yalnız başlatma/cevap/iptali kapsar, ajan Bash'i OS sandbox değildir.
 """
 
 from __future__ import annotations
 
 import json
 import os
-import shutil
 import sqlite3
 import subprocess
 import threading
@@ -22,31 +21,34 @@ from typing import Any
 
 from pydantic import ValidationError
 
+from artemis.config.settings import AgentProfile
 from artemis.safety.audit import AuditLog, redact
+from artemis.tools.code_agent_backends import (  # noqa: F401  (RULES/role_profile yeniden dışa aktarım)
+    BACKENDS,
+    RULES,
+    AgentRun,
+    BackendContext,
+    resolve_executable,
+    role_profile,
+    run_environment,
+    visible_supported,
+)
 from artemis.tools.code_agent_process import (
     CLEANUP_SECONDS,
     NO_WINDOW,
     ProcessCapture,
+    console_supported,
     kill_tree,
     process_options,
+    visible_options,
 )
 from artemis.tools.code_agent_store_lock import StoreOwnership
 from artemis.tools.platform import child_environment
-from artemis.tools.project_spec import AUTHORITY_BOUNDARY, ProjectSpec, SegmentOutput
+from artemis.tools.project_spec import ProjectSpec, SegmentOutput
 
 SUMMARY_LIMIT = 2000
 ProcessFactory = Callable[..., Any]
 ACTIVE = {"queued", "running", "waiting", "cancelling"}
-RULES = (
-    "Work only inside this trusted repository. Commit locally with clear messages. "
-    "NEVER push, change remotes, rewrite history or reset user changes. "
-    "Delegate implementation to coder and mechanical checks to tester when useful. "
-    "Do not call native AskUserQuestion in headless mode: if clarification is necessary, "
-    "finish this segment with structured_output kind=question, question=your full question "
-    "and summary=progress. Otherwise return kind=completed, question=null, summary=a brief "
-    "Turkish result. A question is not completion. User answers arrive in a resumed session. "
-    + AUTHORITY_BOUNDARY
-)
 
 
 class CodeAgentError(Exception):
@@ -78,36 +80,30 @@ def _checked_git(path: Path, *args: str) -> str:
     return result.stdout.strip()
 
 
-def role_profile(coder_model: str | None, tester_model: str | None) -> dict[str, Any]:
-    profile: dict[str, Any] = {}
-    for name, description, prompt, tools, model in (
-        (
-            "coder",
-            "Implementation agent",
-            "Implement the approved scope; report changes honestly.",
-            ["Read", "Edit", "Write", "Glob", "Grep", "Bash"],
-            coder_model,
-        ),
-        (
-            "tester",
-            "Mechanical verification agent",
-            "Run focused checks and report actual failures.",
-            ["Read", "Glob", "Grep", "Bash"],
-            tester_model,
-        ),
-        (
-            "coordinator",
-            "Project manager",
-            RULES,
-            ["Read", "Glob", "Grep", "Bash", "Agent(coder)", "Agent(tester)"],
-            None,
-        ),
-    ):
-        entry: dict[str, Any] = {"description": description, "prompt": prompt, "tools": tools}
-        if model:
-            entry["model"] = model
-        profile[name] = entry
-    return profile
+def _plain_summary(
+    code: int, commits: list[str], dirty: bool, last_message: str, *, visible: bool = False
+) -> str:
+    """Claude dışı ajan sonucu: yalnız git'ten doğrulanan olgular; ajan notu iddiadır."""
+    leftover = "var" if dirty else "yok"
+    facts = [f"{len(commits)} yeni commit", f"kalan commitlenmemiş değişiklik {leftover}"]
+    if not commits and not dirty:
+        facts.append("git'te değişiklik görülmedi")
+    if visible:
+        # Pencere elle kapatılırsa da süreç sıfır dışı bir kodla biter; bu iş başarı sayılmaz.
+        head = (
+            "Ajan penceresi 0 koduyla kapandı"
+            if code == 0
+            else f"Pencere kapandı veya ajan {code} koduyla çıktı; iş tamamlanmış sayılmadı"
+        )
+        text = f"{head}. Git: " + "; ".join(facts) + ". Görünür kipte ajan çıktısı okunmaz."
+    else:
+        head = (
+            "Ajan 0 koduyla çıktı" if code == 0 else f"Ajan {code} koduyla çıktı; başarısız sayıldı"
+        )
+        text = f"{head}. Git: " + "; ".join(facts) + "."
+    if last_message:
+        text += f" Ajan notu (doğrulanmamış iddia): {last_message}"
+    return text
 
 
 class CodeAgentJobs:
@@ -117,9 +113,13 @@ class CodeAgentJobs:
         *,
         process_factory: ProcessFactory = subprocess.Popen,
         store_path: Path | None = None,
+        clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self._audit = audit
         self._factory = process_factory
+        # Toplam süre sınırı bu saatle ölçülür; testler gerçek saniyeleri beklemeden
+        # (ve yük altında sınırı kaçırmadan) sahte saat enjekte eder.
+        self._clock = clock
         self._lock = threading.RLock()
         self._jobs: dict[str, dict[str, Any]] = {}
         self._drafts: dict[str, ProjectSpec] = {}
@@ -127,7 +127,7 @@ class CodeAgentJobs:
         self._threads: dict[str, threading.Thread] = {}
         self._all_threads: set[threading.Thread] = set()
         self._cancelled: set[str] = set()
-        self._settings: dict[str, tuple[Path, list[str]]] = {}
+        self._settings: dict[str, tuple[Path, AgentRun]] = {}
         self._shutdown = False
         self._deadlines: dict[str, float] = {}
         self._began: dict[str, float] = {}
@@ -166,6 +166,11 @@ class CodeAgentJobs:
                                     summary="Önceki süreç kesildi; otomatik yeniden başlatılmadı. "
                                     "Depo kilidi belirsiz süreç nedeniyle korunuyor.",
                                 )
+                            # Eski satırlar ajan/klasör taşımaz: claude + projenin kendi reposu.
+                            record.setdefault("agent", "claude")
+                            record.setdefault("mode", "background")
+                            record.setdefault("workdir", "proje")
+                            record.setdefault("workdir_path", record.get("repo", ""))
                             self._jobs[key] = record
                 for record in self._jobs.values():
                     self._save(record["job_id"], "job", record)
@@ -186,7 +191,17 @@ class CodeAgentJobs:
                 raise CodeAgentError("İş metaverisi yazılamadı; işlem başlatılmadı.") from error
 
     def prepare(
-        self, project: str, task: str, scope: tuple[str, ...], acceptance: tuple[str, ...]
+        self,
+        project: str,
+        task: str,
+        scope: tuple[str, ...],
+        acceptance: tuple[str, ...],
+        *,
+        agent: str = "claude",
+        workdir: str = "proje",
+        repo_path: str = "",
+        workdir_path: str = "",
+        mode: str = "background",
     ) -> ProjectSpec:
         spec = ProjectSpec(
             spec_id=str(uuid.uuid4()),
@@ -194,6 +209,11 @@ class CodeAgentJobs:
             task=task,
             scope=scope,
             acceptance=acceptance,
+            agent=agent,
+            workdir=workdir,
+            mode=mode,  # type: ignore[arg-type]  # değer ProjectSpec doğrulamasından geçer
+            repo_path=repo_path,
+            workdir_path=workdir_path,
         )
         with self._lock:
             self._save(spec.spec_id, "draft", spec.model_dump(mode="json"))
@@ -210,6 +230,32 @@ class CodeAgentJobs:
                 if spec.spec_id not in used
             ]
 
+    def discard(self, spec_id: str) -> bool:
+        """Başlatılmamış taslağı siler. İş kaydına ve başlamış taslağa asla dokunmaz."""
+        with self._lock:
+            if spec_id not in self._drafts or any(
+                job["spec"]["spec_id"] == spec_id for job in self._jobs.values()
+            ):
+                return False
+            self._delete_draft(spec_id)
+            del self._drafts[spec_id]
+        self._audit.emit("code_agent_draft_discarded", spec_id=spec_id)
+        return True
+
+    def _delete_draft(self, spec_id: str) -> None:
+        if self._store_path is not None:
+            try:
+                with (
+                    closing(sqlite3.connect(self._store_path, timeout=2)) as connection,
+                    connection,
+                ):
+                    # kind='draft' koşulu: anahtar ne olursa olsun bir iş satırı silinemez.
+                    connection.execute(
+                        "DELETE FROM records WHERE key = ? AND kind = 'draft'", (spec_id,)
+                    )
+            except sqlite3.Error as error:
+                raise CodeAgentError("Taslak silinemedi; kalıcı kayıt yazılamadı.") from error
+
     def start(
         self,
         alias: str,
@@ -223,22 +269,41 @@ class CodeAgentJobs:
         coder_model: str | None = None,
         tester_model: str | None = None,
         spec: ProjectSpec | None = None,
+        profile: AgentProfile | None = None,
+        workdir: Path | None = None,
     ) -> str:
-        exe = shutil.which(command)
+        # profile/workdir verilmezse eski davranış: Claude, cwd = proje reposu.
+        profile = profile or AgentProfile(kind="claude", command=command)
+        if spec is not None and spec.mode == "visible":
+            if not console_supported():
+                raise CodeAgentError("Görünür pencere kipi yalnız Windows'ta desteklenir.")
+            if not visible_supported(profile):
+                raise CodeAgentError("Bu ajan görünür pencere kipini desteklemiyor.")
+        exe = resolve_executable(profile)
         if exe is None:
-            raise CodeAgentError(f"'{command}' komutu bulunamadı (PATH).")
+            raise CodeAgentError(f"'{profile.command or profile.kind}' komutu bulunamadı.")
         if not _git(path, "rev-parse", "--is-inside-work-tree").returncode == 0:
             raise CodeAgentError(f"'{alias}' bir git deposu değil.")
         physical = str(Path(_checked_git(path, "rev-parse", "--show-toplevel")).resolve())
         path = Path(physical)
+        # Başlangıç klasörü kullanım anında doğrulanır: mutlak ve var olan dizin değilse
+        # hiçbir şey başlatılmaz (ayar yükleme anında değil, burada kontrol edilir).
+        start_dir = path if workdir is None else workdir
+        if workdir is not None and (not workdir.is_absolute() or not workdir.is_dir()):
+            raise CodeAgentError("Başlangıç klasörü mutlak ve var olan bir dizin olmalı.")
+        start_dir = start_dir.resolve()
         with self._lock:
             if self._shutdown:
                 raise CodeAgentError("İş servisi kapanıyor.")
-            if any(
-                job["repo"] == physical and (job["status"] in ACTIVE or job.get("cleanup_pending"))
+            busy = {
+                job["repo"]
                 for job in self._jobs.values()
-            ):
+                if job["status"] in ACTIVE or job.get("cleanup_pending")
+            }
+            if physical in busy:
                 raise CodeAgentError(f"'{alias}' için zaten çalışan veya belirsiz bir iş var.")
+            if str(start_dir) != physical and str(start_dir) in busy:
+                raise CodeAgentError("Başlangıç klasöründe zaten çalışan veya belirsiz bir iş var.")
             if spec is None:
                 # Eski project/task çağrısı da tam görev ve yetki sınırıyla gate onayı alır.
                 spec = self.prepare(alias, task, (task,), ("Görevin sonucu doğrulanmalı.",))
@@ -251,43 +316,37 @@ class CodeAgentJobs:
                 raise CodeAgentError(
                     f"'{alias}' çalışma ağacı kirli; önce değişiklikleri kaydedin."
                 )
-            argv = [
-                exe,
-                "-p",
-                "--output-format",
-                "json",
-                "--json-schema",
-                json.dumps(SegmentOutput.model_json_schema()),
-                "--permission-mode",
-                "acceptEdits",
-                "--allowedTools",
-                "Read",
-                "Edit",
-                "Write",
-                "Glob",
-                "Grep",
-                "Bash",
-                "Agent(coder)",
-                "Agent(tester)",
-                "--disallowedTools",
-                "Bash(git push:*)",
-                "WebFetch",
-                "WebSearch",
-                "AskUserQuestion",
-                "--append-system-prompt",
-                RULES,
-                "--agents",
-                json.dumps(role_profile(coder_model, tester_model)),
-                "--agent",
-                "coordinator",
-            ]
-            if selected := manager_model or model:
-                argv += ["--model", selected]
             job_id = uuid.uuid4().hex[:12]
+            context = BackendContext(
+                exe=exe,
+                profile=profile,
+                workdir=start_dir,
+                repo=path,
+                workdir_is_repo=start_dir == path
+                or _git(start_dir, "rev-parse", "--is-inside-work-tree").returncode == 0,
+                spec=spec,
+                manager_model=manager_model or model,
+                coder_model=coder_model,
+                tester_model=tester_model,
+                # Görünür kipte tam istem işin kendi state klasörüne yazılır.
+                job_dir=None
+                if self._store_path is None
+                else self._store_path.parent / "code_agent_jobs" / job_id,
+            )
+            try:
+                run = BACKENDS[profile.kind].build(context)
+            except (OSError, ValueError) as error:
+                raise CodeAgentError(
+                    f"Ajan istemi hazırlanamadı: {type(error).__name__}."
+                ) from error
             record: dict[str, Any] = {
                 "job_id": job_id,
                 "project": alias,
                 "repo": physical,
+                "agent": spec.agent,
+                "workdir": spec.workdir,
+                "workdir_path": str(start_dir),
+                "mode": spec.mode,
                 "base": base,
                 "spec": spec.model_dump(mode="json"),
                 "status": "queued",
@@ -303,13 +362,25 @@ class CodeAgentJobs:
                 "question": None,
                 "cleanup_pending": False,
             }
-            self._save(job_id, "job", record)
+            try:
+                self._save(job_id, "job", record)
+            except CodeAgentError:
+                run.cleanup()
+                raise
             self._jobs[job_id] = record
-            self._settings[job_id] = path, argv
-            self._began[job_id] = time.monotonic()
+            self._settings[job_id] = start_dir, run
+            self._began[job_id] = self._clock()
             self._deadlines[job_id] = self._began[job_id] + max_minutes * 60
-            self._audit.emit("code_agent_started", job_id=job_id, project=alias, base=base)
-            self._launch(job_id, "Approved project specification:\n" + spec.model_dump_json())
+            self._audit.emit(
+                "code_agent_started",
+                job_id=job_id,
+                project=alias,
+                base=base,
+                agent=spec.agent,
+                workdir=spec.workdir,
+                mode=spec.mode,
+            )
+            self._launch(job_id, run.stdin_prompt)
             return job_id
 
     def _launch(self, job_id: str, prompt: str) -> None:
@@ -344,7 +415,7 @@ class CodeAgentJobs:
             return (
                 not self._shutdown
                 and job_id not in self._cancelled
-                and time.monotonic() < self._deadlines[job_id]
+                and self._clock() < self._deadlines[job_id]
             )
 
     def _run(self, job_id: str, prompt: str) -> None:
@@ -354,38 +425,52 @@ class CodeAgentJobs:
         clean = True
         segment: SegmentOutput | None = None
         session: str | None = None
+        exit_code: int | None = None  # yalnız claude dışı ajanlarda yargı için
+        with self._lock:
+            cwd, run = self._settings[job_id]
+            repo = Path(self._jobs[job_id]["repo"])
+        visible = run.mode == "visible"
         try:
             with self._lock:
                 job = self._jobs[job_id]
-                path, configured = self._settings[job_id]
-                argv = list(configured)
-                if job["session_id"]:
+                argv = list(run.argv)
+                if run.kind == "claude" and not visible and job["session_id"]:
                     argv += ["--resume", job["session_id"]]
                 if job_id in self._cancelled or self._shutdown:
                     status = "cancelled"
-                elif time.monotonic() >= self._deadlines[job_id]:
+                elif self._clock() >= self._deadlines[job_id]:
                     status = "timeout"
                 else:
                     if not self._update(job_id, status="running"):
                         raise CodeAgentError("İş durumu kaydedilemedi.")
             if status not in {"cancelled", "timeout"}:
                 # İptal fabrikayı beklemez; spawn sonrası aynı işaret yeniden okunur.
+                # Görünür kipte boru yoktur: yeni konsol penceresi, çıktı okunmaz.
+                streams: dict[str, Any] = (
+                    {}
+                    if visible
+                    else {
+                        "stdin": subprocess.PIPE,
+                        "stdout": subprocess.PIPE,
+                        "stderr": subprocess.PIPE,
+                        "text": True,
+                        "encoding": "utf-8",
+                        "errors": "replace",
+                    }
+                )
                 proc = self._factory(
                     argv,
-                    cwd=path,
-                    env=child_environment(),
-                    stdin=subprocess.PIPE,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.PIPE,
-                    text=True,
-                    encoding="utf-8",
-                    errors="replace",
-                    **process_options(),
+                    cwd=cwd,
+                    env=run_environment(run.extra_env_names),
+                    **streams,
+                    **(visible_options() if visible else process_options()),
                 )
                 with self._lock:
                     self._procs[job_id] = proc
             if proc is not None:
-                capture = ProcessCapture(proc, prompt, resume_allowed=lambda: self._can_run(job_id))
+                capture = ProcessCapture(
+                    proc, prompt, resume_allowed=lambda: self._can_run(job_id), pipes=not visible
+                )
                 while not capture.exited():
                     with self._lock:
                         cancelled = job_id in self._cancelled
@@ -393,7 +478,7 @@ class CodeAgentJobs:
                     if cancelled:
                         status = "cancelled"
                         break
-                    if time.monotonic() >= deadline:
+                    if self._clock() >= deadline:
                         status = "timeout"
                         break
                     if capture.overflow.is_set():
@@ -402,14 +487,25 @@ class CodeAgentJobs:
                     time.sleep(0.02)
                 clean = capture.finish(kill=not capture.exited())
                 if clean and status not in {"cancelled", "timeout"}:
-                    status, summary, cost, segment, session = self._judge(
-                        proc.returncode,
-                        capture.output[0],
-                        capture.output[1],
-                        self._jobs[job_id]["session_id"],
-                    )
+                    if visible:
+                        # Pencere kapatılırsa süreç sıfır dışı çıkar: "interrupted", asla başarı
+                        # değil. Başarı yargısı yalnız git'ten (aşağıda); ajan metni okunmaz.
+                        exit_code = proc.returncode
+                        status = "done" if exit_code == 0 else "interrupted"
+                    elif run.kind == "claude":
+                        status, summary, cost, segment, session = self._judge(
+                            proc.returncode,
+                            capture.output[0],
+                            capture.output[1],
+                            self._jobs[job_id]["session_id"],
+                        )
+                    else:
+                        # Ajanın kendi beyanı başarı değildir: çıkış kodu + git durumu yargılar.
+                        exit_code = proc.returncode
+                        status = "done" if exit_code == 0 else "error"
                     if capture.overflow.is_set() or capture.io_failed.is_set():
                         status, summary = "error", "Ajan çıktı aktarımı doğrulanamadı."
+                        exit_code = None
         except (OSError, ValueError, CodeAgentError) as error:
             summary = f"Kod ajanı yürütülemedi: {type(error).__name__}."
             if capture is not None:
@@ -426,20 +522,28 @@ class CodeAgentJobs:
                 "Süreç ağacı temizliği doğrulanamadı; depo kilitli.",
             )
         try:
+            # Git doğrulaması her zaman HEDEF repoda yapılır; cwd başka klasör olabilir.
             commits = _checked_git(
-                path, "log", "--format=%h %s", f"{self._jobs[job_id]['base']}..HEAD"
+                repo, "log", "--format=%h %s", f"{self._jobs[job_id]['base']}..HEAD"
             )
-            dirty = bool(_checked_git(path, "status", "--porcelain"))
+            dirty = bool(_checked_git(repo, "status", "--porcelain"))
             commit_list = commits.splitlines()
+            if exit_code is not None and status in {"done", "error", "interrupted"}:
+                summary = _plain_summary(
+                    exit_code, commit_list, dirty, run.last_message(), visible=visible
+                )
         except CodeAgentError:
             commit_list, dirty = [], None
             if status in {"done", "waiting"}:
                 status, summary = "error", "Git sonucu doğrulanamadı; iş başarılı sayılmadı."
+        if clean:
+            # Temizlik doğrulanamadıysa süreç yaşıyor olabilir; dosyalar o durumda kalır.
+            run.cleanup()
         with self._lock:
             job = self._jobs[job_id]
             if job_id in self._cancelled and clean:
                 status = "cancelled"
-            elif time.monotonic() >= self._deadlines[job_id] and status in {"done", "waiting"}:
+            elif self._clock() >= self._deadlines[job_id] and status in {"done", "waiting"}:
                 status = "timeout"
             question_id = str(uuid.uuid4()) if status == "waiting" else None
             self._update(
@@ -450,7 +554,7 @@ class CodeAgentJobs:
                 commits=redact(commit_list),
                 leftover_changes=dirty,
                 cleanup_pending=not clean,
-                duration_seconds=round(time.monotonic() - self._began[job_id], 1),
+                duration_seconds=round(self._clock() - self._began[job_id], 1),
                 session_id=session or job["session_id"],
                 question_id=question_id,
                 question=redact(segment.question) if segment and status == "waiting" else None,
@@ -479,7 +583,7 @@ class CodeAgentJobs:
                 job = self._jobs[job_id]
                 if job["status"] != "waiting" or job["question_id"] != question_id:
                     return
-                if time.monotonic() >= self._deadlines[job_id]:
+                if self._clock() >= self._deadlines[job_id]:
                     self._update(
                         job_id,
                         status="timeout",
@@ -536,7 +640,7 @@ class CodeAgentJobs:
                 or job["status"] != "waiting"
                 or job["question_id"] != question_id
                 or job_id in self._cancelled
-                or time.monotonic() >= self._deadlines[job_id]
+                or self._clock() >= self._deadlines[job_id]
                 or not job["session_id"]
             ):
                 return False

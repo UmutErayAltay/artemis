@@ -1,5 +1,7 @@
 # Windows birleşik kontrol listesi
 
+Güncel sonuçların tek kaynağı: [Kabul ve güvenilirlik durumu](RELIABILITY_STATUS.md).
+
 Bulut oturumunda yapılamayan (gerçek ses, ekran, uygulama, canlı model) ve şimdiye dek
 "Windows'ta denenmedi" diye bırakılan her şey burada toplanır. Bulut oturumu sahte
 testlerle geçtiyse bile bu maddeler kabul sayılmaz. Faz 6–7'nin ayrıntılı listesi ve sonuç
@@ -45,9 +47,10 @@ kapanınca içeriksiz rapor `state_dir/voice-telemetry/` altına yazılır (ADR 
 - [ ] Uzun bir soru: ilk cümle model bitmeden duyuluyor; tur sonunda cümle tekrarlanmıyor.
 - [ ] "Not defterini aç" gibi araçlı komut: araç sonucu gelmeden "açtım" denmiyor.
 - [ ] Akış sırasında söz kesme: TTS ve model aynı anda duruyor, eski cümle yeni tura sızmıyor.
-- [ ] `claude_cli` profili: `stream-json` biçimi gerçek CLI'de belgeyle aynı mı? Denetimde
-  `model_first_token` yoksa metin akmıyor demektir (yanıt yine tamamı gelince söylenir).
-  Abonelik çağrısıdır; Umut'un açık izniyle.
+- [x] `claude_cli` profili: `stream-json` biçimi gerçek CLI'de belgeyle aynı mı? **Doğrulandı
+  (2026-10-31, Umut'un izniyle, Haiku, 2 çağrı):** akışlı çağrıda 162 metin parçası, ilk parça
+  1,64 sn, akan metin nihai yanıtla birebir aynı; akışsız çağrı 3,6 sn. Ayrıştırıcı gerçek
+  biçimle uyumlu. Denetimde `model_first_token` yoksa metin akmıyor demektir.
 - [ ] Yedek TTS farklı örnekleme hızıyla gelirse ses bozulmadan sürüyor.
 
 ### A4. Uygulama adı ve niyet (ADR 0044)
@@ -75,17 +78,19 @@ kapanınca içeriksiz rapor `state_dir/voice-telemetry/` altına yazılır (ADR 
   ([CPA_LOCAL_TEST.md](CPA_LOCAL_TEST.md)). Takma ad eklendikten sonra ses yeniden açılmalı.
 
 ### A6. Aşama 2 STT karşılaştırması (ADR 0045)
-- [ ] Corpus'ları kur (depo dışına yazılır):
+> Yapıldı 2026-10-26 (Windows, RTX 4050 6 GB); sonuçlar ve kararlar
+> [ADR 0045 §A6](adr/0045-evaluation-corpora.md). Gürültülü uyandırma (A7) sonuçları aynı ADR'dedir.
+- [x] Corpus'ları kur (depo dışına yazılır):
   `python -m pip install -e ".[voice,eval]"`,
   `python -m bench.corpus_common_voice --ornek 600 --parca 0 --parca 1`,
   `python -m bench.corpus_synthetic --piper <tr_TR-dfki-medium.onnx> --edge tr-TR-EmelNeural --edge tr-TR-AhmetNeural --bulut-tts-izni`.
-- [ ] Sabit baseline (bugünkü config), sonra tek değişken: `large-v3-turbo` ↔ `large-v3`,
+- [x] Sabit baseline (bugünkü config), sonra tek değişken: `large-v3-turbo` ↔ `large-v3`,
   sonra beam 5 ↔ 1, sonra `stt_language` tr ↔ tr_en. Her biri:
   `python -m bench.speech_accuracy --canli --corpus %USERPROFILE%\.cache\artemis-eval\common_voice_tr\corpus.yaml`
   ve sentetik corpus için aynısı. `nvidia-smi` ile VRAM'i not et.
-- [ ] Raporda `source_breakdown`, `condition_breakdown` ve `totals.wrong_target` /
+- [x] Raporda `source_breakdown`, `condition_breakdown` ve `totals.wrong_target` /
   `false_wake` değerleri; sentetik sonuç kabul sayılmaz.
-- [ ] "artmış" yanlış uyanma bulgusu (ADR 0045): eşleştirici değişsin mi? (karar)
+- [x] "artmış" yanlış uyanma bulgusu (ADR 0045): eşleştirici değişsin mi? (karar)
 
 ### A7. Gürültüde uyandırma deneyi (ADR 0045) — SIRADAKİ İŞ
 Bulutta sentetik ölçüm: temiz seste "Artemis" kaçırma %0, pembe gürültü 5 dB'de %29, telefon
@@ -125,6 +130,21 @@ bandında %19. Dört yolu karşılaştır; feature branch gerekir (main'de deği
 
 ## C. Umut'un kararı bekleyenler
 
-- [ ] `open_url` yol/sorgu sızıntısı (ADR 0036): bugünkü kural yalnız dış içerik varken
-  `?`/`#` taşıyan adreste sorar; yol bölümü sorulmuyor. Değişsin mi?
+- [x] `open_url` yol/sorgu sızıntısı (ADR 0036): bugünkü kural yalnız dış içerik varken
+  `?`/`#` taşıyan adreste sorar; yol bölümü sorulmuyor. **Karar (Umut, 2026-10-31): değişmesin.**
 - [ ] LinkedIn taslağı (2026-10-23).
+
+
+## D. Güvenilirlik düzeltmeleri kabulü (ADR 0046)
+
+- [ ] Güvenilen host'a destructive MCP çağrısı hâlâ tam argümanla onay istiyor; Hayır çalıştırmıyor.
+- [ ] Yavaş model ve uzun onay beklemesinde süre dolduktan sonra click/key gönderilmiyor; Esc çalışıyor.
+- [ ] STT sürerken peş peşe sözler yakalanıyor; yoğunlukta uyarı, kuyruk ve kayıp metrikleri var.
+- [ ] Onay sırasında/sesi kapatınca sıradaki eski sözler sonradan komut olmuyor.
+- [ ] Soğuk/sıcak GPU profillerinde ≥30 tur, A6/A7 gürültü setleri ve söz kesme tekrar ölçüldü.
+- [ ] Hafıza panelinde gerçek süre okunuyor; test verisiyle 0/30 gün ve reddedilen/onaylanan silme denendi.
+- [ ] /yeni arşivi koruyor; açık geçmiş silme arşivi ve bağlamı siliyor, öz notları koruyor.
+- [ ] Hatırlatma teslim geçmişi failed/uncertain gösteriyor; tekrar çift bildirim uyarısıyla yeni kayıt açıyor.
+- [ ] Ses/scheduler/kod işi açıkken kapatıp açma sonrası yetim süreç veya kalmış sahiplik kilidi yok.
+
+Sonuçları bu listede ikinci bir tablo açmadan kanonik durum tablosuna tarih/commit/kanıtla yazın.

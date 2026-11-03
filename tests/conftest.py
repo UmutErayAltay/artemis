@@ -30,6 +30,8 @@ def isolated_credentials(monkeypatch):
     monkeypatch.delenv("OPENROUTER_API_KEY", raising=False)
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
     monkeypatch.setenv("NO_PROXY", "localhost,127.0.0.1,::1")
+    # Telegram token'ı için gerçek Windows kasası okunmaz (ADR 0051); testler kendi sahtesini koyar.
+    monkeypatch.setattr("artemis.channels.telegram.api.read_secret", lambda target: None)
 
 
 @pytest.fixture(autouse=True, scope="session")
@@ -41,3 +43,55 @@ def isolated_qsettings(tmp_path_factory):
         return
     path = str(tmp_path_factory.mktemp("qsettings"))
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, path)
+
+
+@pytest.fixture(autouse=True)
+def no_real_codex_lookup(monkeypatch):
+    # code_agent_status artık yerleşik codex'i arar (PowerShell'e kadar gidebilir); testler gerçek
+    # makinede Appx sorgusu çalıştırmaz ve süreç geneli önbelleği kirletmez (kural 8).
+    import shutil
+
+    from artemis.tools.plugins import code_agent
+
+    monkeypatch.setattr(
+        code_agent,
+        "resolve_executable",
+        lambda profile: None if profile.kind == "codex" else shutil.which(profile.command or ""),
+    )
+
+
+@pytest.fixture(autouse=True)
+def qt_widgets_deleted_by_qt():
+    """Test biterken kalan üst düzey widget'ları Qt'ye sildirir (Windows çıkış çökmesi, ~%30-50).
+
+    Neden: paneller `lambda: self.set_busy(...)` gibi bağlantılarla referans döngüsüne girer;
+    döngüdeki PySide sarmalayıcıları `gc` tarafından (çoğu kez yorumlayıcı kapanışında) RASTGELE
+    sırada yıkılır ve çocuk widget'a erişim access violation verir (pytest "passed" yazdıktan
+    sonra exit 139). `deleteLater` + DeferredDelete C++ nesnelerini önce ve ebeveyn -> çocuk
+    sırasıyla yok eder; sarmalayıcılar sonradan geçersiz sayılıp zararsız toplanır.
+    """
+    yield
+    import sys
+
+    # Qt'yi hiç yüklemeyen testlerde PySide içe aktarma maliyeti ödenmez.
+    widgets = sys.modules.get("PySide6.QtWidgets")
+    if widgets is None:
+        return
+    from PySide6.QtCore import QCoreApplication, QEvent
+
+    app = widgets.QApplication.instance()
+    if app is None:
+        return
+    for widget in app.topLevelWidgets():
+        widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
+def auto_mode_warning_accepted(monkeypatch):
+    # Uyarı modal olduğundan testte asılı kalırdı; onay/ret yolları kendi testinde ayrıca sınanır.
+    try:
+        from artemis.channels.desktop.app import DesktopWindow
+    except ImportError:
+        return
+    monkeypatch.setattr(DesktopWindow, "_confirm_auto_mode", lambda self: True)

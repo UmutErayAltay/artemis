@@ -3,6 +3,9 @@
 Artemis, Windows 11 için Türkçe tek kullanıcılı masaüstü asistanıdır. Mimari için
 [ARCHITECTURE.md](ARCHITECTURE.md) ve [ADR'ler](adr/) geçerlidir.
 
+Güncel kabul durumu: [kanonik tablo](RELIABILITY_STATUS.md). Aşağıdaki fazlar
+tarihsel geliştirme kapsamını anlatır; Windows sonuçları için tabloyu kullanın.
+
 ## Özellik ekleme kuralı
 
 - Her özellik tek `SafetyGate` üzerinden çağrılır, `Risk` bildirir, yol argümanlarını
@@ -15,7 +18,7 @@ Artemis, Windows 11 için Türkçe tek kullanıcılı masaüstü asistanıdır. 
 
 Her oturum tek bir faz yapar. Sıra: kısa ADR (temel mimari değişiyorsa) → kod → test →
 `pytest -q`, `ruff check .`, `mypy`, `python -m bench.run --sahte` yeşil → faz raporu →
-commit ve push.
+yerel commit; push yalnız kullanıcı istediğinde.
 
 Durum etiketleri: **kodlandı** (kod ve testler yazıldı), **Linux'ta doğrulandı** (dört
 kontrol geçti), **Windows'ta denendi** (kullanıcı deneyip bildirdi), **tamamlandı** (yalnızca
@@ -43,7 +46,7 @@ Durum: kullanıcının işi. Bir oturum bu fazı "yapıldı" diye işaretlemez.
 
 ### Faz 1 — Konuşma bağlamı
 
-Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 0012](adr/0012-conversation-context.md).
+Durum: kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md). Karar: [ADR 0012](adr/0012-conversation-context.md).
 
 **Kapsam**
 - Modele son N tur (`context_turns`, varsayılan 6) verilir. Ekleme `CommandRunner`
@@ -63,7 +66,7 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 001
 
 ### Faz 2 — Ses ve masaüstü birleşimi
 
-Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 0014](adr/0014-voice-in-desktop.md).
+Durum: kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md). Karar: [ADR 0014](adr/0014-voice-in-desktop.md).
 
 **Kapsam**
 - Ses masaüstü uygulamasının içinde çalışır; durum göstergesi dinliyor, düşünüyor, konuşuyor
@@ -81,7 +84,7 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 001
 
 ### Faz 3 — Hafıza
 
-Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 0015](adr/0015-vault-memory.md).
+Durum: kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md). Karar: [ADR 0015](adr/0015-vault-memory.md).
 
 **Kapsam**
 - Vault köprüsü ve isteğe bağlı (varsayılan kapalı) embedding araması eklenir.
@@ -98,7 +101,7 @@ Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi. Karar: [ADR 001
 
 ### Faz 4 — Bildirim ve iki yönlü Telegram
 
-Durum: kodlandı ve Linux'ta doğrulandı; Windows'ta ve gerçek botla denenmedi. Karar: [ADR 0016](adr/0016-telegram-and-notifications.md).
+Durum: kodlandı; güncel Windows/gerçek bot kabulü için [durum tablosu](RELIABILITY_STATUS.md). Karar: [ADR 0016](adr/0016-telegram-and-notifications.md).
 
 **Kapsam**
 - Giden bildirim: Telegram ve Windows toast. Telegram token'ı yalnız ortam değişkeninden
@@ -144,9 +147,9 @@ koduna geçilebilir, fakat "tamamlandı" yalnız kendi kabulüyle yazılır.
 
 | Sıra | Kalem | Durum | Karar |
 | --- | --- | --- | --- |
-| 6a | Proaktiflik: hatırlatma ve sabah brifingi | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0027](adr/0027-proactive-events.md) |
-| 6b | MCP istemcisi (stdio) | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0028](adr/0028-mcp-client.md) |
-| 6c | Ekran algısı | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0029](adr/0029-screen-perception.md) |
+| 6a | Proaktiflik: hatırlatma ve sabah brifingi | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0027](adr/0027-proactive-events.md) |
+| 6b | MCP istemcisi (stdio) | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0028](adr/0028-mcp-client.md) |
+| 6c | Ekran algısı | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0029](adr/0029-screen-perception.md) |
 
 Sıranın gerekçesi: 6a, F4 bildirimleri ve F5 SQLite/süreç altyapısını yeniden kullanır ve
 yeni bir dış veri kaynağı açmaz. 6b yeni bir dış araç yüzeyi açar; risk ve taint kuralları
@@ -175,9 +178,9 @@ Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla)
 
 | Sıra | Kalem | Durum | Karar |
 | --- | --- | --- | --- |
-| 7a | Windows açılışında başlama ve tek örnek | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0030](adr/0030-autostart-single-instance.md) |
-| 7b | Pencere ve sistem kontrolü | kodlandı ve Linux'ta doğrulandı; Windows'ta denenmedi | [ADR 0031](adr/0031-window-and-system-control.md) |
-| 7c | Tarayıcı otomasyonu (MCP üzerinden) | kodlandı ve Linux'ta doğrulandı (sahte arka uç); gerçek Chromium ve Windows'ta denenmedi | [ADR 0032](adr/0032-browser-automation-mcp.md) |
+| 7a | Windows açılışında başlama ve tek örnek | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0030](adr/0030-autostart-single-instance.md) |
+| 7b | Pencere ve sistem kontrolü | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0031](adr/0031-window-and-system-control.md) |
+| 7c | Tarayıcı otomasyonu (MCP üzerinden) | kodlandı; gerçek Chromium/Windows kısmi sonuçları [durum tablosunda](RELIABILITY_STATUS.md) | [ADR 0032](adr/0032-browser-automation-mcp.md) |
 
 Sıranın gerekçesi: 7a, 6a hatırlatmalarının gerçekten çalışmasının ön koşuludur (Artemis
 kapalıyken hatırlatma gelmez) ve yeni araç yüzeyi açmaz. 7b pencere ve sistem

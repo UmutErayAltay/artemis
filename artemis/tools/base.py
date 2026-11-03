@@ -82,6 +82,8 @@ class ToolContext:
     # bunu taşır ki sonradan Telegram'a gönderilmesin (ADR 0016/0027). Döngü doldurur.
     turn_private: bool = False
     services: dict[str, Any] = field(default_factory=dict, repr=False)
+    # Yalnız runner.dispatch_tool süresince True; paylaşılan servis sözlüğünde tutulmaz.
+    control_request: bool = False
 
 
 class BaseTool(ABC):

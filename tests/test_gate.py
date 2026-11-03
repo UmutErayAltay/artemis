@@ -585,3 +585,26 @@ async def test_open_url_asks_only_for_data_bearing_url_after_external_content(
     await SafetyGate(registry).dispatch(call("open_url", url=url), context, state, reject)
     assert asked == ([url] if asks else [])
     assert (opened == []) is asks
+
+
+@pytest.mark.parametrize('tainted,history', [(False, False), (True, False), (False, True)])
+@pytest.mark.parametrize('steps', [[], [{'action': 'read_text'}], [{'action': 'fill'}]])
+async def test_trusted_site_never_waives_mandatory_approval(
+    site_gate, monkeypatch, tainted, history, steps,
+):
+    gate, context = site_gate
+    monkeypatch.setattr(SiteReadTool, 'risk', Risk.CONFIRM_REQUIRED)
+    remember_site(trusted_sites_path(context.settings.state_dir), 'example.com')
+    seen = []
+
+    def reject(name, args):
+        seen.append(name)
+        assert gate.pending_site == ''
+        return False
+
+    result = await gate.dispatch(
+        call('site_read_test', url='https://example.com/', steps=steps), context,
+        TurnState(tainted=tainted, history_external=history), reject,
+    )
+    assert result.status == 'denied'
+    assert seen == ['site_read_test']

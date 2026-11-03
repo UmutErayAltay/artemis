@@ -1,0 +1,336 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-27T15:30:22.893082+00:00",
+  "title": "Design System: Artemis",
+  "extensions": {
+    "colorMeta": {
+      "light-bg": {
+        "role": "neutral",
+        "displayName": "light bg"
+      },
+      "light-surface": {
+        "role": "neutral",
+        "displayName": "light surface"
+      },
+      "light-soft": {
+        "role": "neutral",
+        "displayName": "light soft"
+      },
+      "light-text": {
+        "role": "neutral",
+        "displayName": "light text"
+      },
+      "light-muted": {
+        "role": "neutral",
+        "displayName": "light muted"
+      },
+      "light-border": {
+        "role": "neutral",
+        "displayName": "light border"
+      },
+      "light-accent": {
+        "role": "primary",
+        "displayName": "light accent"
+      },
+      "light-accent-text": {
+        "role": "primary",
+        "displayName": "light accent text"
+      },
+      "light-nav": {
+        "role": "neutral",
+        "displayName": "light nav"
+      },
+      "light-nav-text": {
+        "role": "neutral",
+        "displayName": "light nav text"
+      },
+      "light-nav-muted": {
+        "role": "neutral",
+        "displayName": "light nav muted"
+      },
+      "light-nav-selected": {
+        "role": "neutral",
+        "displayName": "light nav selected"
+      },
+      "light-warning": {
+        "role": "neutral",
+        "displayName": "light warning"
+      },
+      "light-error": {
+        "role": "neutral",
+        "displayName": "light error"
+      },
+      "light-success": {
+        "role": "neutral",
+        "displayName": "light success"
+      },
+      "dark-bg": {
+        "role": "neutral",
+        "displayName": "dark bg"
+      },
+      "dark-surface": {
+        "role": "neutral",
+        "displayName": "dark surface"
+      },
+      "dark-soft": {
+        "role": "neutral",
+        "displayName": "dark soft"
+      },
+      "dark-text": {
+        "role": "neutral",
+        "displayName": "dark text"
+      },
+      "dark-muted": {
+        "role": "neutral",
+        "displayName": "dark muted"
+      },
+      "dark-border": {
+        "role": "neutral",
+        "displayName": "dark border"
+      },
+      "dark-accent": {
+        "role": "primary",
+        "displayName": "dark accent"
+      },
+      "dark-accent-text": {
+        "role": "primary",
+        "displayName": "dark accent text"
+      },
+      "dark-nav": {
+        "role": "neutral",
+        "displayName": "dark nav"
+      },
+      "dark-nav-text": {
+        "role": "neutral",
+        "displayName": "dark nav text"
+      },
+      "dark-nav-muted": {
+        "role": "neutral",
+        "displayName": "dark nav muted"
+      },
+      "dark-nav-selected": {
+        "role": "neutral",
+        "displayName": "dark nav selected"
+      },
+      "dark-warning": {
+        "role": "neutral",
+        "displayName": "dark warning"
+      },
+      "dark-error": {
+        "role": "neutral",
+        "displayName": "dark error"
+      },
+      "dark-success": {
+        "role": "neutral",
+        "displayName": "dark success"
+      },
+      "light-mixed-bg": {
+        "role": "neutral",
+        "displayName": "light mixed bg"
+      },
+      "light-mixed-surface": {
+        "role": "neutral",
+        "displayName": "light mixed surface"
+      },
+      "light-mixed-soft": {
+        "role": "neutral",
+        "displayName": "light mixed soft"
+      },
+      "light-mixed-text": {
+        "role": "neutral",
+        "displayName": "light mixed text"
+      },
+      "light-mixed-muted": {
+        "role": "neutral",
+        "displayName": "light mixed muted"
+      },
+      "light-mixed-border": {
+        "role": "neutral",
+        "displayName": "light mixed border"
+      },
+      "light-mixed-accent": {
+        "role": "primary",
+        "displayName": "light mixed accent"
+      },
+      "light-mixed-accent-text": {
+        "role": "primary",
+        "displayName": "light mixed accent text"
+      },
+      "light-mixed-nav": {
+        "role": "neutral",
+        "displayName": "light mixed nav"
+      },
+      "light-mixed-nav-text": {
+        "role": "neutral",
+        "displayName": "light mixed nav text"
+      },
+      "light-mixed-nav-muted": {
+        "role": "neutral",
+        "displayName": "light mixed nav muted"
+      },
+      "light-mixed-nav-selected": {
+        "role": "neutral",
+        "displayName": "light mixed nav selected"
+      },
+      "light-mixed-warning": {
+        "role": "neutral",
+        "displayName": "light mixed warning"
+      },
+      "light-mixed-error": {
+        "role": "neutral",
+        "displayName": "light mixed error"
+      },
+      "light-mixed-success": {
+        "role": "neutral",
+        "displayName": "light mixed success"
+      },
+      "dark-mixed-bg": {
+        "role": "neutral",
+        "displayName": "dark mixed bg"
+      },
+      "dark-mixed-surface": {
+        "role": "neutral",
+        "displayName": "dark mixed surface"
+      },
+      "dark-mixed-soft": {
+        "role": "neutral",
+        "displayName": "dark mixed soft"
+      },
+      "dark-mixed-text": {
+        "role": "neutral",
+        "displayName": "dark mixed text"
+      },
+      "dark-mixed-muted": {
+        "role": "neutral",
+        "displayName": "dark mixed muted"
+      },
+      "dark-mixed-border": {
+        "role": "neutral",
+        "displayName": "dark mixed border"
+      },
+      "dark-mixed-accent": {
+        "role": "primary",
+        "displayName": "dark mixed accent"
+      },
+      "dark-mixed-accent-text": {
+        "role": "primary",
+        "displayName": "dark mixed accent text"
+      },
+      "dark-mixed-nav": {
+        "role": "neutral",
+        "displayName": "dark mixed nav"
+      },
+      "dark-mixed-nav-text": {
+        "role": "neutral",
+        "displayName": "dark mixed nav text"
+      },
+      "dark-mixed-nav-muted": {
+        "role": "neutral",
+        "displayName": "dark mixed nav muted"
+      },
+      "dark-mixed-nav-selected": {
+        "role": "neutral",
+        "displayName": "dark mixed nav selected"
+      },
+      "dark-mixed-warning": {
+        "role": "neutral",
+        "displayName": "dark mixed warning"
+      },
+      "dark-mixed-error": {
+        "role": "neutral",
+        "displayName": "dark mixed error"
+      },
+      "dark-mixed-success": {
+        "role": "neutral",
+        "displayName": "dark mixed success"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Heading",
+        "purpose": "Native screen and brand headings"
+      },
+      "body": {
+        "displayName": "Body",
+        "purpose": "Native controls and readable content"
+      },
+      "label": {
+        "displayName": "Status",
+        "purpose": "Execution state labels"
+      }
+    },
+    "shadows": [],
+    "motion": [],
+    "breakpoints": []
+  },
+  "components": [
+    {
+      "name": "Primary button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Documentation-only browser approximation of the native Qt default palette; production remains PySide6.",
+      "html": "<button class=\"ds-primary\">Gönder</button>",
+      "css": ".ds-primary{font-family:'Segoe UI';font-size:14px;background:#365c9e;color:#ffffff;border:1px solid #365c9e;border-radius:7px;padding:8px 13px;min-height:22px;font-weight:650}.ds-primary:hover{border-color:#365c9e}.ds-primary:focus-visible{border:2px solid #365c9e}"
+    },
+    {
+      "name": "Secondary button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Documentation-only browser approximation of the native Qt default palette; production remains PySide6.",
+      "html": "<button class=\"ds-secondary\">Yeni sohbet</button>",
+      "css": ".ds-secondary{font-family:'Segoe UI';font-size:14px;background:#f4f7fb;color:#0b1f3f;border:1px solid #d5e0ec;border-radius:7px;padding:8px 13px;min-height:22px}.ds-secondary:hover{border-color:#365c9e}.ds-secondary:focus-visible{border:2px solid #365c9e}.ds-secondary:disabled{color:#51637c}"
+    },
+    {
+      "name": "Input",
+      "kind": "input",
+      "refersTo": "input",
+      "description": "Documentation-only browser approximation of the native Qt default palette; production remains PySide6.",
+      "html": "<input class=\"ds-input\" aria-label=\"Pet adı\" placeholder=\"Pet adı\">",
+      "css": ".ds-input{font-family:'Segoe UI';font-size:14px;background:#ffffff;color:#0b1f3f;border:1px solid #d5e0ec;border-radius:7px;padding:8px}.ds-input:focus-visible{border:2px solid #365c9e}.ds-input::selection{background:#365c9e;color:#ffffff}"
+    },
+    {
+      "name": "Navigation",
+      "kind": "nav",
+      "refersTo": "navigation",
+      "description": "Documentation-only browser approximation of the native Qt default palette; production remains PySide6.",
+      "html": "<nav class=\"ds-nav\"><button class=\"ds-route\" aria-current=\"page\">Sohbet</button><button class=\"ds-route\">Petler</button></nav>",
+      "css": ".ds-nav{background:#25344d;border-radius:10px;width:166px;padding:18px 12px}.ds-route{font-family:'Segoe UI';font-size:14px;display:block;background:#25344d;color:#f2f5fc;border:none;border-radius:7px;padding:10px 12px;text-align:left}.ds-route:hover,.ds-route[aria-current]{background:#405777}.ds-route:focus-visible{border:2px solid #365c9e}"
+    },
+    {
+      "name": "Surface",
+      "kind": "card",
+      "refersTo": "surface",
+      "description": "Documentation-only browser approximation of the native Qt default palette; production remains PySide6.",
+      "html": "<section class=\"ds-surface\">Sohbet</section>",
+      "css": ".ds-surface{font-family:'Segoe UI';font-size:14px;background:#ffffff;color:#0b1f3f;border:1px solid #d5e0ec;border-radius:10px;padding:16px 18px}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Practical workspace, warm companion",
+    "overview": "Artemis is a practical native Windows workspace with warm Turkish companion language. Slate and blue establish clear surfaces, compact controls and readable task areas. The selected existing pet sits beside the Artemis brand; the configurable wake name never replaces the app identity.\n\nThe system uses PySide6 widgets and semantic Qt styles. Four selectable palettes recolor the same structure. The current default is Açık ağırlıklı (light-mixed).",
+    "keyCharacteristics": [
+      "Native Qt controls and Segoe UI",
+      "Four semantic palettes with independent navigation roles",
+      "Flat bordered surfaces and restrained blue emphasis",
+      "Existing pet imagery as the companion signature"
+    ],
+    "rules": [
+      {
+        "name": "The Semantic Pair Rule",
+        "body": "Switch foregrounds and backgrounds together; navigation uses its own paired roles.",
+        "section": "colors"
+      }
+    ],
+    "dos": [
+      "Do apply semantic workspace and navigation colors together when switching themes.",
+      "Do keep Artemis as the app brand and show the selected pet beside it.",
+      "Do use 7px control corners, 10px surface corners and the extracted typography.",
+      "Do preserve existing pet assets and their established interactions."
+    ],
+    "donts": [
+      "Don't introduce gradients or glows into this workspace.",
+      "Don't infer a web migration or replace native widgets with HTML previews.",
+      "Don't invent extra motion, new pet artwork or responsive breakpoints from this document."
+    ]
+  }
+}

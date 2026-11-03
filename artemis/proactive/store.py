@@ -57,6 +57,10 @@ CREATE TABLE IF NOT EXISTS reminders (
     created_private INTEGER NOT NULL DEFAULT 0,
     cancelled_at TEXT
 );
+CREATE TABLE IF NOT EXISTS reminder_retries (
+    original_id INTEGER PRIMARY KEY,
+    new_id INTEGER NOT NULL UNIQUE
+);
 CREATE TABLE IF NOT EXISTS occurrences (
     event_id TEXT NOT NULL,
     scheduled_for TEXT NOT NULL,
@@ -178,6 +182,76 @@ class ProactiveStore:
             raise ProactiveStoreError(f"get_reminder failed: {e}") from e
         except OSError as e:
             raise ProactiveStoreError(f"get_reminder failed: {e}") from e
+
+    def list_reminders(self, state: str = "all", limit: int = 100) -> list[Reminder]:
+        """Teslim geçmişini de gösterir; eski pending sorgusunun anlamı korunur."""
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    """SELECT r.*, (SELECT o.state FROM occurrences o
+                    WHERE o.event_id = 'reminder:' || r.id
+                    ORDER BY scheduled_for DESC LIMIT 1) AS occurrence_state
+                    FROM reminders r
+                    WHERE ? = 'all'
+                       OR (? = 'pending' AND r.cancelled_at IS NULL AND NOT EXISTS (
+                           SELECT 1 FROM occurrences o WHERE o.event_id = 'reminder:' || r.id))
+                       OR (? = 'cancelled' AND r.cancelled_at IS NOT NULL)
+                       OR (? NOT IN ('pending', 'cancelled') AND r.cancelled_at IS NULL
+                           AND occurrence_state = ?)
+                    ORDER BY r.id DESC LIMIT ?""",
+                    (state, state, state, state, state, min(max(limit, 1), 100)),
+                ).fetchall()
+                return [_row_to_reminder(row, row["occurrence_state"]) for row in rows]
+        except (sqlite3.Error, OSError) as error:
+            raise ProactiveStoreError("Teslim geçmişi okunamadı.") from error
+
+    def retry_reminder(self, reminder_id: int, now: datetime) -> Reminder:
+        """Eski oluşumu değiştirmez; bir kaynak kayıt için atomik tek yeni hatırlatma."""
+        _require_aware(now, "now")
+        try:
+            with self._connect() as db, db:
+                db.execute("BEGIN IMMEDIATE")
+                row = db.execute("SELECT * FROM reminders WHERE id = ?", (reminder_id,)).fetchone()
+                state = db.execute(
+                    "SELECT state FROM occurrences WHERE event_id = ? "
+                    "ORDER BY scheduled_for DESC LIMIT 1",
+                    (reminder_event_id(reminder_id),),
+                ).fetchone()
+                if (
+                    row is None
+                    or row["cancelled_at"]
+                    or state is None
+                    or state[0]
+                    not in {
+                        "failed",
+                        "uncertain",
+                        "missed",
+                    }
+                ):
+                    raise ProactiveStoreError(
+                        "Yalnız başarısız, belirsiz veya kaçırılan kayıt yinelenir."
+                    )
+                if db.execute(
+                    "SELECT 1 FROM reminder_retries WHERE original_id = ?",
+                    (reminder_id,),
+                ).fetchone():
+                    raise ProactiveStoreError("Bu kayıt için tekrar girişimi zaten oluşturuldu.")
+                stamp = _to_utc_iso(now)
+                cursor = db.execute(
+                    "INSERT INTO reminders (text, due_at, created_at, created_tainted, "
+                    "created_private) VALUES (?,?,?,?,?)",
+                    (row["text"], stamp, stamp, row["created_tainted"], row["created_private"]),
+                )
+                new_id = cursor.lastrowid
+                if new_id is None:
+                    raise ProactiveStoreError("Tekrar girişimi doğrulanamadı.")
+                db.execute("INSERT INTO reminder_retries VALUES (?, ?)", (reminder_id, new_id))
+                new_row = db.execute("SELECT * FROM reminders WHERE id = ?", (new_id,)).fetchone()
+                if new_row is None:
+                    raise ProactiveStoreError("Tekrar girişimi okunamadı.")
+                return _row_to_reminder(new_row, None)
+        except (sqlite3.Error, OSError) as error:
+            raise ProactiveStoreError("Tekrar girişimi kaydedilemedi.") from error
 
     def pending_reminders(self) -> list[Reminder]:
         """İptal edilmemiş ve henüz occurrence'ı olmayan hatırlatmalar (due_at, id sırasıyla)."""

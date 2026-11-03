@@ -84,6 +84,7 @@ class CommandRunner:
                 history_external=self.conversation.render().external,
             )
             context.audit.emit("turn_start", turn_id=state.turn_id, channel="typed_tool")
+            context.control_request = True
             try:
                 return await self.loop.gate.dispatch(
                     ToolCall(
@@ -94,6 +95,7 @@ class CommandRunner:
                     self.loop.approve,
                 )
             finally:
+                context.control_request = False
                 self._active_task = None
                 if not self.loop.cleanup_pending:
                     context.cancelled.clear()

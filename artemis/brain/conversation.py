@@ -142,6 +142,7 @@ class ConversationContext:
         # maxlen=0 hiçbir şey saklamaz: bağlam kapalıyken bellek de tutulmaz.
         self._turns: deque[TurnRecord] = deque(maxlen=max_turns)
         # Kalıcı depo bozulsa bile tur belleğe yazılıp sürer (ADR 0025); hata bildirilir.
+        self._store_dirty = False
         self._store = store
         self._on_error = on_error
         if store is not None:
@@ -160,7 +161,9 @@ class ConversationContext:
         if self._store is not None:
             try:
                 self._store.add_turn(turn)
+                self.refresh_memory()
             except (OSError, sqlite3.Error) as error:
+                self._store_dirty = True
                 self._report(error)
 
     def reset(self) -> int:
@@ -176,12 +179,25 @@ class ConversationContext:
     def __len__(self) -> int:
         return len(self._turns)
 
+    def refresh_memory(self, *, force: bool = False) -> None:
+        """Saklama/silme sonucunu ve diğer kanalların değişikliklerini önbelleğe yansıtır."""
+        if self._store is not None and (force or not self._store_dirty):
+            self._store.apply_retention()
+            records = self._store.recent_turns(self.max_turns)
+            self._turns.clear()
+            self._turns.extend(records)
+            self._store_dirty = False
+
     def render(self) -> ContextWindow:
         """Bütçeye sığana dek önce eski çıktıları kısaltır, sonra eski turları atar.
 
         Tur asla bölünmez: yarım tur, sonucu olmayan araç çağrısı veya yetim sonuç
         demektir ve sağlayıcılar bunu reddeder.
         """
+        try:
+            self.refresh_memory()
+        except (OSError, sqlite3.Error) as error:
+            self._report(error)
         records = list(self._turns)
         shortened = [False] * len(records)
         rendered = [_render_turn(record, False) for record in records]

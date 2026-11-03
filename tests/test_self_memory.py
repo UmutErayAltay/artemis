@@ -192,3 +192,89 @@ def test_runtime_wires_store_and_persist_off_writes_nothing(tmp_path: Path) -> N
     off = build(tmp_path / "off", False)
     assert "memory_store" not in off.context.services
     assert not (tmp_path / "off" / "memory.sqlite3").exists()
+
+
+def test_retention_is_opt_in_preserves_notes_and_reset_boundary(store):
+    context = ConversationContext(3, 6000, store)
+    context.record(turn('eski'))
+    context.reset()
+    context.record(turn('yeni', tainted=True, private=True))
+    store.add_note('kalıcı not', 't1', 200)
+    with store._connect() as db, db:
+        db.execute(
+            "UPDATE turns SET created_at = '2000-01-01T00:00:00+00:00' "
+            "WHERE user_text = 'eski'"
+        )
+    assert store.apply_retention() == 0
+    assert store.history_status() == {'turns': 2, 'retention_days': 0}
+    assert store.set_retention(30) == 1
+    assert len(store.list_notes()) == 1
+    restored = ConversationContext(3, 6000, store)
+    assert restored._turns[0].tainted and restored._turns[0].answer_private
+    assert [t.user_text for t in restored._turns] == ['yeni']
+    assert store.delete_history() == 1
+    assert context.render().turns == 0  # Diğer yerel önbellek de eski metni göstermez.
+    assert len(store.list_notes()) == 1
+    assert store.search_turns('yeni', 10) == []
+    context.record(turn('silme sonrası'))
+    assert [t.user_text for t in store.recent_turns(3)] == ['silme sonrası']
+
+
+async def test_history_changes_require_typed_request_and_gate_approval(tmp_path):
+    from artemis.tools.plugins.history import HistoryArguments
+
+    approvals = []
+    runtime = create_runtime(
+        tmp_path / 'unused', lambda *args: approvals.append(args) or False,
+        settings=Settings(workspace=tmp_path, state_dir=tmp_path / 'state'),
+        provider=ScriptedProvider([]),
+    )
+    try:
+        runtime.runner.conversation.record(turn('koru'))
+        result = await runtime.runner.dispatch_tool(
+            'conversation_history', HistoryArguments(action='delete'),
+        )
+        assert result.status == 'denied' and len(approvals) == 1
+        assert runtime.context.services['memory_store'].history_status()['turns'] == 1
+        runtime.agent.approve = lambda *_: True
+        result = await runtime.runner.dispatch_tool(
+            'conversation_history', HistoryArguments(action='delete'),
+        )
+        assert result.success and result.data['turns'] == 0
+        assert len(runtime.runner.conversation) == 0
+        assert not runtime.context.control_request
+    finally:
+        runtime.shutdown()
+
+
+def test_retention_and_full_delete_roll_back_on_database_failure(store):
+    store.add_turn(turn('eski'))
+    with store._connect() as db, db:
+        db.execute("UPDATE turns SET created_at = '2000-01-01T00:00:00+00:00'")
+        db.execute("CREATE TRIGGER stop_delete BEFORE DELETE ON turns "
+                   "BEGIN SELECT RAISE(ABORT, 'blocked'); END")
+    with pytest.raises(sqlite3.Error):
+        store.set_retention(30)
+    assert store.history_status() == {'turns': 1, 'retention_days': 0}
+    with pytest.raises(sqlite3.Error):
+        store.delete_history()
+    assert len(store.recent_turns(3)) == 1
+
+
+async def test_history_control_is_not_shared_with_proactive_context(tmp_path):
+    from artemis.tools.plugins.history import HistoryArguments, HistoryTool
+
+    runtime = create_runtime(
+        tmp_path / 'unused', lambda *_: True,
+        settings=Settings(workspace=tmp_path, state_dir=tmp_path / 'state'),
+        provider=ScriptedProvider([]),
+    )
+    try:
+        runtime.context.control_request = True
+        background = ToolContext(
+            tmp_path, runtime.settings, runtime.audit, services=runtime.context.services,
+        )
+        result = await HistoryTool().execute(HistoryArguments(action='list'), background)
+        assert not result.success and result.data == {}
+    finally:
+        runtime.shutdown()

@@ -13,8 +13,8 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QPoint, QRect, QSettings, Qt
-from PySide6.QtGui import QImage
+from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSettings, Qt
+from PySide6.QtGui import QImage, QMouseEvent
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication
 
@@ -39,6 +39,12 @@ def app() -> QApplication:
 class Calls:
     def __init__(self) -> None:
         self.log: list[str] = []
+        self.sent: list[str] = []
+        self.accept = True
+
+    def submit(self, text: str) -> bool:
+        self.sent.append(text)
+        return self.accept
 
     def cb(self, name: str) -> Callable[[], None]:
         return lambda: self.log.append(name)
@@ -56,6 +62,7 @@ def made(app: QApplication, tmp_path: Path) -> Any:
             on_quick=calls.cb("quick"),
             on_approval=calls.cb("approval"),
             on_quit=calls.cb("quit"),
+            on_submit=calls.submit,
             settings=QSettings(str(tmp_path / "pet.ini"), QSettings.Format.IniFormat),
             **kwargs,
         )
@@ -201,6 +208,17 @@ def test_bubble_heard_answer_and_autohide(made: Any) -> None:
     assert pet._bubble_text == "" and pet.width() == BODY
 
 
+def test_live_bubble_shows_latest_words(made: Any) -> None:
+    pet, _ = made()
+    pet.live("  ")
+    assert pet._bubble_text == ""
+    pet.live("artemis saat")
+    assert pet._bubble_text == "artemis saat" and pet._bubble_kind == "heard"
+    pet.live("baş " + "x" * 300 + " son")
+    assert len(pet._bubble_text) == 140
+    assert pet._bubble_text.startswith("…") and pet._bubble_text.endswith(" son")
+
+
 def test_bubble_is_plain_text_not_markup(made: Any) -> None:
     pet, _ = made()
     pet.answer("<b>kalın</b>")
@@ -227,18 +245,74 @@ def test_code_agent_events_update_jobs_and_bubble(made: Any) -> None:
     assert pet.code_agent_event("tool_result", {}) is None
 
 
-def test_click_vs_drag(app: QApplication, made: Any) -> None:
+def _mouse_event(kind: QEvent.Type, pos: QPoint) -> QMouseEvent:
+    point = QPointF(pos)
+    return QMouseEvent(
+        kind, point, point, Qt.MouseButton.LeftButton, Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+
+
+def _click(pet: PetWidget, times: int = 1) -> None:
+    center = QPoint(BODY // 2, BODY // 2)
+    for _ in range(times):
+        QTest.mouseClick(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
+
+
+def test_one_click_opens_quick_box_below_pet(app: QApplication, made: Any) -> None:
     pet, calls = made()
     pet._click_delay_ms = 0
     pet.show()
     pet.move_anchor(QPoint(200, 200))
     start = QPoint(pet.pos())
-    center = QPoint(BODY // 2, BODY // 2)
-    QTest.mouseClick(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
-    _wait(app, lambda: calls.log == ["voice"])
-    assert pet.pos() == start
+    _click(pet)
+    _wait(app, lambda: pet._quick.isVisible())
+    assert calls.log == [] and pet.pos() == start
+    assert pet._quick.y() >= 200 + BODY  # gövdenin altında
+    pet.move_anchor(QPoint(300, 220))  # pet taşınınca kutu izler
+    assert pet._quick.y() >= 220 + BODY and pet._quick.x() != 200
+    _click(pet)  # ikinci tek tık kapatır
+    _wait(app, lambda: not pet._quick.isVisible())
 
-    calls.log.clear()
+
+def test_quick_box_flips_above_near_screen_bottom(made: Any) -> None:
+    pet, _ = made()
+    pet.show()
+    area = pet._area(pet._anchor)
+    pet.move_anchor(QPoint(300, area.bottom()))
+    pet._quick.open()
+    pet._place_quick()
+    assert pet._quick.y() + pet._quick.height() <= pet._anchor.y()
+
+
+def test_two_clicks_toggle_voice_three_open_menu(
+    app: QApplication, made: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pet, calls = made()
+    pet._click_delay_ms = 0
+    pet.show()
+    menus: list[QPoint] = []
+    monkeypatch.setattr(pet, "_open_menu", menus.append)
+    # Qt'nin gerçek çift-tık dizisi: basış, bırakış, çift-tık olayı (ikinci basış), bırakış.
+    center = QPoint(BODY // 2, BODY // 2)
+    _click(pet)
+    QApplication.sendEvent(pet, _mouse_event(QEvent.Type.MouseButtonDblClick, center))
+    QTest.mouseRelease(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
+    _wait(app, lambda: calls.log == ["voice"])
+    assert not pet._quick.isVisible() and menus == []
+
+    pet._click_delay_ms = 10_000  # 3. tık zamanlayıcıyı beklemeden gönderilir
+    _click(pet, 3)
+    assert len(menus) == 1 and calls.log == ["voice"] and pet._clicks == 0
+    assert not pet._quick.isVisible()
+
+
+def test_click_vs_drag(app: QApplication, made: Any) -> None:
+    pet, calls = made()
+    pet._click_delay_ms = 0
+    pet.show()
+    pet.move_anchor(QPoint(200, 200))
+    center = QPoint(BODY // 2, BODY // 2)
     QTest.mousePress(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
     QTest.mouseMove(pet, center + QPoint(40, 30))
     QTest.mouseRelease(
@@ -246,19 +320,63 @@ def test_click_vs_drag(app: QApplication, made: Any) -> None:
     )
     time.sleep(0.05)
     app.processEvents()
-    assert calls.log == []  # sürükleme tık sayılmaz
+    assert calls.log == [] and pet._clicks == 0 and not pet._quick.isVisible()  # tık sayılmaz
     assert pet._anchor != QPoint(200, 200)
     assert pet._settings.value("x", type=int) == pet._anchor.x()
 
 
-def test_double_click_opens_panel_not_voice(app: QApplication, made: Any) -> None:
+def test_quick_box_submit_outcomes(made: Any) -> None:
+    pet, calls = made()
+    box = pet._quick
+    box.open()
+    box.input.setText("   ")
+    box.send()
+    assert calls.sent == [] and box.isVisible()  # boş metin bir şey yapmaz
+
+    calls.accept = False
+    box.input.setText("merhaba")
+    box.send()
+    assert calls.sent == ["merhaba"] and box.input.text() == "merhaba"
+    assert not box.hint.isHidden() and box.isVisible()  # metin korunur, ipucu görünür
+
+    calls.accept = True
+    box.send()
+    assert box.input.text() == "" and not box.isVisible() and box.hint.isHidden()
+
+    box.open()
+    QTest.keyClick(box, Qt.Key.Key_Escape)
+    assert not box.isVisible()
+    assert box.input.maxLength() == 2000 and box.accessibleName()
+
+
+def test_quick_box_hides_with_pet_and_never_gives_pet_command_logic(made: Any) -> None:
     pet, calls = made()
     pet.show()
-    center = QPoint(BODY // 2, BODY // 2)
-    QTest.mouseDClick(pet, Qt.MouseButton.LeftButton, Qt.KeyboardModifier.NoModifier, center)
-    time.sleep(0.4)
-    app.processEvents()
-    assert "panel" in calls.log and "voice" not in calls.log
+    pet._quick.open()
+    pet.hide()
+    assert not pet._quick.isVisible() and calls.log == []
+
+
+def test_job_list_states_hover_and_drop(made: Any) -> None:
+    pet, _ = made()
+    pet.show()
+    pet.code_agent_event("code_agent_started", {"job_id": "1", "project": "web"})
+    assert pet._bubble_text == "web · çalışıyor"
+    pet.code_agent_event("code_agent_started", {"job_id": "2", "project": "api"})
+    pet.code_agent_event("code_agent_waiting", {"job_id": "2", "project": "api"})
+    assert pet._bubble_text == "web · çalışıyor\napi · girdi bekliyor"
+    assert pet.jobs == 2  # dişli sayısı = etkin işler (bekleyen de etkin)
+    pet._bubble_text = ""
+    gear = pet._body_rect().topLeft() + QPoint(BODY // 2 + 32, 60 - 30)
+    QTest.mouseMove(pet, QPoint(5, 5))
+    QTest.mouseMove(pet, gear)
+    assert "api · girdi bekliyor" in pet._bubble_text  # rozet üstüne gelme listeyi açar
+    text = pet.code_agent_event(
+        "code_agent_done", {"job_id": "1", "project": "web", "status": "done"}
+    )
+    assert text == "web: bitti, commit yok" and pet.jobs == 1
+    pet.code_agent_event("code_agent_done", {"job_id": "2", "project": "api", "status": "error"})
+    assert pet.jobs == 0 and pet.job_lines() == []
 
 
 def test_click_during_approval_focuses_approval(made: Any) -> None:
@@ -328,6 +446,7 @@ def test_position_restored_from_settings(app: QApplication, tmp_path: Path) -> N
         on_quick=lambda: None,
         on_approval=lambda: None,
         on_quit=lambda: None,
+        on_submit=lambda text: True,
         settings=settings,
     )
     assert pet._anchor == QPoint(33, 44)
@@ -387,3 +506,172 @@ def test_particles_sleep_z_and_success_burst(made: Any) -> None:
         quiet.tick(0.05)
     quiet.code_agent_event("code_agent_done", {"job_id": "1", "status": "done"})
     assert quiet._particles == []
+
+
+# ------------------------------------------------------------- sprite pet (ADR 0048)
+
+
+def _pet_widget(made: Any, tmp_path: Path, **kwargs: Any) -> tuple[PetWidget, Calls]:
+    from tests.test_pet_sprite import make_pet
+
+    pets = tmp_path / "pets"
+    make_pet(pets, "blob")
+    return made(pets_dir=pets, **kwargs)
+
+
+def _center(pet: PetWidget) -> tuple[int, int, int]:
+    color = render(pet).pixelColor(BODY // 2, BODY // 2)
+    return color.red(), color.green(), color.alpha()
+
+
+@pytest.mark.parametrize("name", STATES)
+def test_sprite_renders_pixels_in_every_state(made: Any, tmp_path: Path, name: str) -> None:
+    pet, _ = _pet_widget(made, tmp_path, reduced_motion=False)
+    assert pet.set_skin("blob") is None and pet.skin == "blob"
+    apply_state(pet, name)
+    _settle(pet, 0.2)
+    assert _opaque(render(pet)) > 200, name
+
+
+def test_sprite_rows_follow_state_and_reduced_motion_is_frame_zero(
+    made: Any, tmp_path: Path
+) -> None:
+    from artemis.channels.desktop import pet_sprite as ps
+
+    pet, _ = _pet_widget(made, tmp_path, reduced_motion=True)
+    pet.set_skin("blob")
+    for name, row in (("listening", ps.REVIEW), ("thinking", ps.RUNNING),
+                      ("speaking", ps.WAVING), ("approval", ps.WAITING), ("error", ps.FAILED)):
+        fresh, _ = _pet_widget_reuse(made, pet)
+        apply_state(fresh, name)
+        _settle(fresh, 0.3)
+        assert fresh._sprite_row == row, name
+        # Hücre rengi R=satır*25, G=sütun*25: azaltılmış harekette hep sütun 0
+        assert _center(fresh)[:2] == (row * 25, 0), name
+
+
+def _pet_widget_reuse(made: Any, template: PetWidget) -> tuple[PetWidget, Calls]:
+    fresh, calls = made(pets_dir=template._pets_dir, reduced_motion=template._reduced)
+    fresh.set_skin("blob")
+    return fresh, calls
+
+
+def test_sprite_animates_when_motion_allowed(made: Any, tmp_path: Path) -> None:
+    pet, _ = _pet_widget(made, tmp_path, reduced_motion=False)
+    pet.set_skin("blob")
+    pet.say("x")
+    pet.tick(0.016)
+    first = _center(pet)
+    _settle(pet, 0.2)  # >1 kare ilerler
+    assert _center(pet)[1] != first[1]
+
+
+def test_sprite_jump_once_and_drag_direction(made: Any, tmp_path: Path) -> None:
+    from artemis.channels.desktop import pet_sprite as ps
+
+    pet, _ = _pet_widget(made, tmp_path, reduced_motion=False)
+    pet.set_skin("blob")
+    apply_state(pet, "happy")
+    pet.tick(0.016)
+    assert pet._sprite_row == ps.JUMPING
+    _settle(pet, 5 / ps.FPS + 0.3)  # zıplamanın 5 karesi bitince idle
+    assert pet._sprite_row == ps.IDLE
+    pet._dragging, pet._run_right = True, False
+    pet.tick(0.016)
+    assert pet._sprite_row == ps.RUN_LEFT
+    pet._run_right = True
+    pet.tick(0.016)
+    assert pet._sprite_row == ps.RUN_RIGHT
+
+
+def test_broken_or_missing_pet_falls_back_to_orb(made: Any, tmp_path: Path) -> None:
+    pet, _ = _pet_widget(made, tmp_path)
+    assert "bulunamadı" in (pet.set_skin("yok") or "") and pet.skin == "orb"
+    (tmp_path / "pets" / "blob" / "spritesheet.png").write_bytes(b"bozuk")
+    assert pet.set_skin("blob") is not None and pet._sprite is None
+    assert _opaque(render(pet)) > 200  # küre çizilmeye devam eder
+    assert pet.set_skin(None) is None and pet.skin == "orb"
+
+
+def test_skin_is_persisted_and_loaded_on_start(made: Any, tmp_path: Path) -> None:
+    pet, _ = _pet_widget(made, tmp_path)
+    pet.set_skin("blob")
+    assert pet._settings.value("skin") == "blob"
+    again, _ = made(pets_dir=tmp_path / "pets")  # aynı pet.ini
+    assert again.skin == "orb"  # start() öncesi
+    again.start()
+    assert again.skin == "blob"
+    (tmp_path / "pets" / "blob" / "pet.json").unlink()
+    broken, _ = made(pets_dir=tmp_path / "pets")
+    broken.start()
+    assert broken.skin == "orb" and pet._settings.value("skin") == "blob"  # kayıt silinmez
+
+
+def test_os_reduced_motion_used_only_without_explicit_setting(
+    made: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.channels.desktop import pet as pet_module
+
+    monkeypatch.setattr(pet_module, "os_reduced_motion", lambda: True)
+    assert made()[0]._reduced is True
+    explicit, _ = made()
+    explicit._settings.setValue("reduced_motion", False)
+    again, _ = made()
+    assert again._reduced is False  # açık ayar işletim sistemini yener
+    monkeypatch.setattr(pet_module, "os_reduced_motion", lambda: False)
+    again._settings.remove("reduced_motion")
+    assert made()[0]._reduced is False
+
+
+def test_pet_has_no_hard_coded_hex() -> None:
+    """Renkler tema jetonlarından gelir; sprite sanatı pet_sprite.py'de, burada hex yasak."""
+    import re
+
+    from artemis.channels.desktop import pet as pet_module
+
+    source = Path(pet_module.__file__).read_text(encoding="utf-8")
+    assert re.findall(r"#[0-9A-Fa-f]{6}\b", source) == []
+
+
+def _bubble_fill(pet: PetWidget) -> str:
+    pet.say("merhaba", "answer")
+    _settle(pet, 0.6)
+    image = render(pet)
+    # Metin 12 px içeriden başlar: balonun sol kenarına yakın orta nokta düz dolgudur.
+    body = pet._body_rect()
+    x = body.left() - 6 - 210 + 6 if pet._bubble_side_left else body.right() + 7 + 6
+    return str(image.pixelColor(x, 60).name())
+
+
+def test_apply_theme_changes_bubble_colors(made: Any) -> None:
+    from PySide6.QtGui import QColor
+
+    from artemis.channels.desktop import themes
+
+    pet, _ = made()
+    pet.apply_theme("light")
+    light = _bubble_fill(pet)
+    pet.apply_theme("dark")
+    dark = _bubble_fill(pet)
+    # Dolgu yüzey jetonu (%96 opak, bu yüzden birkaç birim sapma payı)
+    for got, name in ((light, "light"), (dark, "dark")):
+        want, have = QColor(themes.THEMES[name]["surface"]), QColor(got)
+        assert abs(want.red() - have.red()) < 12 and abs(want.blue() - have.blue()) < 12
+    assert light != dark
+    assert pet._quick._palette is themes.THEMES["dark"]
+    pet.apply_theme("nope")  # bilinmeyen ad varsayılana düşer
+    assert pet._theme == themes.DEFAULT_THEME
+
+
+@pytest.mark.parametrize("name", ["light", "dark", "light-mixed", "dark-mixed"])
+def test_bubble_text_contrast_is_aa(name: str) -> None:
+    from artemis.channels.desktop import themes
+
+    def lum(h: str) -> float:
+        ch = [int(h[i:i + 2], 16) / 255 for i in (1, 3, 5)]
+        lin = [c / 12.92 if c <= 0.03928 else ((c + 0.055) / 1.055) ** 2.4 for c in ch]
+        return 0.2126 * lin[0] + 0.7152 * lin[1] + 0.0722 * lin[2]
+
+    t = themes.THEMES[name]
+    hi, lo = sorted((lum(t["text"]), lum(t["surface"])), reverse=True)
+    assert (hi + 0.05) / (lo + 0.05) >= 4.5

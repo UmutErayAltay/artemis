@@ -161,6 +161,23 @@ def test_wake_word_uses_word_boundaries_and_casefold():
     assert controller._wake_command("saat kaç") is None
 
 
+@pytest.mark.parametrize("transcript", [
+    "Artemis. Abone olmayı unutmayın.",
+    "Artemis, bu videoyu izlediğiniz için teşekkür ederim",
+    "Artemis Altyazı M.K.",
+])
+def test_ghost_tail_after_wake_is_wake_only(transcript: str):
+    # Canlı 2026-10-26: Whisper kısa "Artemis"e altyazı kalıbı ekledi, kuyruk komut sanıldı.
+    controller = object.__new__(VoiceController)
+    controller.config = VoiceConfig(wake_word="artemis", followup_seconds=8)
+    controller.clock = lambda: 10.0
+    controller._followup_until = 0.0
+    controller.continuous = False
+
+    assert controller._wake_command(transcript) == ""
+    assert controller._followup_until == 18.0
+
+
 @pytest.mark.parametrize(
     ("transcript", "command"),
     [
@@ -301,11 +318,47 @@ async def test_partial_transcript_never_dispatches():
     assert runner.commands == []
 
 
+async def test_reply_end_does_not_open_followup_by_default():
+    class StreamRunner(FakeRunner):
+        async def run(self, text, stream=None):
+            return await super().run(text)
+
+    for streaming in (False, True):
+        controller = VoiceController(
+            StreamRunner(), VoiceConfig(followup_seconds=5), FakeMic(), FakeVAD([]),
+            FakeRecognizer([]), FakeTTS(), FakeSink(), clock=lambda: 100.0,
+            stream_responses=streaming,
+        )
+        await controller._run_and_speak("saat kaç")
+        assert controller._followup_until == 0.0
+        assert controller._wake_command("hava nasıl") is None
+
+
+async def test_ack_is_synthesized_once_and_replayed():
+    calls = []
+
+    class CountingTTS(FakeTTS):
+        async def stream(self, text, cancelled):
+            calls.append(text)
+            async for chunk in super().stream(text, cancelled):
+                yield chunk
+
+    sink = FakeSink()
+    controller = VoiceController(
+        FakeRunner(), VoiceConfig(), FakeMic(), FakeVAD([]), FakeRecognizer([]),
+        CountingTTS(), sink,
+    )
+    await controller._acknowledge_wake()
+    await controller._acknowledge_wake()
+    assert calls == ["Seni dinliyorum."]
+    assert len(sink.chunks) == 2 and sink.chunks[0] == sink.chunks[1] != b""
+
+
 async def test_successful_reply_renews_followup_window():
     now = [100.0]
     controller = VoiceController(
         FakeRunner(),
-        VoiceConfig(followup_seconds=5),
+        VoiceConfig(followup_seconds=5, followup_listening=True),
         FakeMic(),
         FakeVAD([]),
         FakeRecognizer([]),
@@ -373,7 +426,7 @@ async def test_wake_ack_does_not_require_repeating_wake_for_followup():
     try:
         await controller._handle_utterance(AudioSegment(b"\x00\x00", 10, 11))
         await controller._settle_active()
-        assert controller._spoken_text == "Dinliyorum."
+        assert controller._spoken_text == "Seni dinliyorum."
         await controller._handle_utterance(AudioSegment(b"\x00\x00", 12.1, 13))
         await controller._settle_active()
         assert runner.commands == ["tarayıcı aç"]
@@ -528,6 +581,7 @@ async def test_run_interrupts_playback_only_after_accepted_final_transcript(
         assert controller._followup_until == followup_until
         allow_final.set()
         await asyncio.wait_for(processed.wait(), 1)
+        await asyncio.wait_for(controller._segments.join(), 1)
         await asyncio.sleep(0)
         if command is None:
             assert not sink.aborted
@@ -560,7 +614,7 @@ async def test_run_accepts_followup_during_dinliyorum_without_repeating_wake():
                 yield AudioFrame(b"\x01\x00", monotonic())
             await sink.started.wait()
             acknowledgements.append(controller._active)
-            assert controller._spoken_text == "Dinliyorum."
+            assert controller._spoken_text == "Seni dinliyorum."
             for _ in range(60 + 5):
                 yield AudioFrame(b"\x01\x00", monotonic())
             processed.set()
@@ -569,11 +623,12 @@ async def test_run_accepts_followup_during_dinliyorum_without_repeating_wake():
     controller = VoiceController(
         runner, VoiceConfig(pre_roll_ms=0, end_silence_ms=100), Mic(),
         FakeVAD([True] * 2 + [False] * 5 + [True] * 60 + [False] * 5),
-        FakeRecognizer(["Artemis", "Dinliyorum, saat kaç"]), FakeTTS(), sink,
+        FakeRecognizer(["Artemis", "Seni dinliyorum, saat kaç"]), FakeTTS(), sink,
     )
     listening = asyncio.create_task(controller.run())
     try:
         await asyncio.wait_for(processed.wait(), 1)
+        await asyncio.wait_for(controller._segments.join(), 1)
         await asyncio.sleep(0)
         assert acknowledgements[0].cancelled()
         assert sink.aborted
@@ -756,7 +811,7 @@ async def test_continuous_wake_alone_still_acknowledges():
     try:
         await _say(controller)
         assert runner.commands == []
-        assert controller._spoken_text == "Dinliyorum."
+        assert controller._spoken_text == "Seni dinliyorum."
         assert sink.chunks
     finally:
         await controller.close()
@@ -872,7 +927,7 @@ async def test_wake_ack_keeps_microphone_open_and_strips_own_words():
     runner = FakeRunner()
     controller = VoiceController(
         runner, VoiceConfig(), mic, FakeVAD([]),
-        FakeRecognizer(["Artemis", "Dinliyorum, saat kaç"]),
+        FakeRecognizer(["Artemis", "Seni dinliyorum, saat kaç"]),
         FakeTTS(), FakeSink(), clock=lambda: 12.0,
     )
     try:
@@ -958,3 +1013,57 @@ async def test_early_sink_return_closes_underlying_synthesizer_iterator():
         assert finalized.is_set()
     finally:
         await controller.close()
+
+
+async def test_capture_continues_during_slow_final_and_overload_is_visible():
+    started, release, captured = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    events, heard = [], []
+    runner = FakeRunner()
+
+    class Slow(FakeRecognizer):
+        async def transcribe(self, pcm):
+            started.set()
+            await release.wait()
+            return 'Artemis saat kaç'
+
+    class Mic(FakeMic):
+        dropped_frames = 3
+
+        async def frames(self):
+            for _ in range(7):
+                yield AudioFrame(b'a', monotonic())
+            await started.wait()
+            # STT hâlâ beklerken 4 söz daha yakalanır; son ikisi açıkça reddedilir.
+            for _ in range(28):
+                yield AudioFrame(b'a', monotonic())
+            captured.set()
+            await asyncio.Future()
+
+    controller = VoiceController(
+        runner, VoiceConfig(pre_roll_ms=0, end_silence_ms=100), Mic(),
+        FakeVAD(([True] * 2 + [False] * 5) * 5), Slow([]), FakeTTS(), FakeSink(),
+        on_event=events.append, on_transcript=heard.append,
+    )
+    task = asyncio.create_task(controller.run())
+    try:
+        await asyncio.wait_for(captured.wait(), 1)
+        assert not release.is_set()
+        assert controller._segments.qsize() == 2
+        assert sum(e.reason == 'stt_queue_full' for e in events) == 2
+        assert any('ses karesi kayboldu' in text for text in heard)
+        controller.pause_for_approval()
+        controller.resume_after_approval()
+        release.set()
+        await asyncio.wait_for(controller._segments.join(), 1)
+        assert runner.commands == []  # Onay öncesi çözülen eski söz yürütülmez.
+        assert any(e.reason == 'capture_invalidated' for e in events)
+    finally:
+        controller.request_stop()
+        await asyncio.wait_for(task, 1)
+
+
+@pytest.mark.parametrize("wake", ["Ali", "Veli", "Mavi Ada"])
+def test_custom_name_is_independent_from_artemis_brand(wake: str) -> None:
+    assert find_wake_word(f"{wake} tarayıcı aç", wake) == (0, len(wake))
+    assert find_wake_word("Artemis tarayıcı aç", wake) is None
+    assert find_wake_word("Alim tarayıcı aç", "Ali") is None

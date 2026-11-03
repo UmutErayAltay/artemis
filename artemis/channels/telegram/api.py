@@ -16,8 +16,9 @@ from typing import Any
 
 import httpx
 
-from artemis.config.settings import Settings
+from artemis.config.settings import Settings, TelegramConfig
 from artemis.safety.audit import AuditLog
+from artemis.tools.credentials import read_secret
 
 # httpx her isteği INFO seviyesinde `HTTP Request: POST https://.../bot<TOKEN>/...` diye
 # yazar; kök logger'a INFO açan herhangi bir uygulama token'ı log dosyasına düşürürdü.
@@ -37,6 +38,8 @@ logging.getLogger("httpx").addFilter(_DropTokenUrlRecords())
 # Telegram sendMessage sert sınırı. Uzun metni sessizce kesmek onay mesajında tehlikelidir,
 # bu yüzden aşan metin ağa çıkmadan ValueError verir; ne yapılacağına çağıran karar verir.
 TELEGRAM_TEXT_LIMIT = 4096
+# Ayarlar > Telegram panelinin yazdığı Windows Kimlik Bilgisi Yöneticisi kaydı (ADR 0051).
+TOKEN_TARGET = "Artemis/telegram"
 
 
 class TelegramError(RuntimeError):
@@ -80,11 +83,21 @@ class TelegramClient:
         if self._owns_http:
             self._http.close()
 
-    def _call(self, method: str, payload: dict[str, Any], timeout: float) -> Any:
+    def _call(
+        self,
+        method: str,
+        payload: dict[str, Any],
+        timeout: float,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
+    ) -> Any:
         """Başarıyı yalnız HTTP 200 + `ok: true` kanıtlar; gerisi TelegramError'dır."""
         url = f"{self._api_base}/bot{self._token}/{method}"
         try:
-            response = self._http.post(url, json=payload, timeout=timeout)
+            if files is None:
+                response = self._http.post(url, json=payload, timeout=timeout)
+            else:
+                # Dosya yüklemede alanlar form olarak gider (multipart); JSON kabul edilmez.
+                response = self._http.post(url, data=payload, files=files, timeout=timeout)
         except (httpx.HTTPError, httpx.InvalidURL, ValueError) as error:
             # str(error) istek URL'sini (yani token'ı) taşıyabilir; yalnız tür adı yazılır.
             name = type(error).__name__
@@ -125,6 +138,28 @@ class TelegramClient:
             raise
         return result
 
+    def get_me(self) -> str:
+        """Token'ı doğrular ve bot kullanıcı adını döner; hata mesajı token/URL taşımaz."""
+        error_type = ""
+        try:
+            result = self._call("getMe", {}, self._timeout)
+            username = result.get("username") if isinstance(result, dict) else None
+            if not isinstance(username, str) or not username:
+                raise TelegramError(
+                    "Telegram getMe başarısız (kullanıcı adı yok)", error_type="BadResult"
+                )
+        except TelegramError as error:
+            error_type = error.error_type
+            raise
+        finally:
+            fields: dict[str, Any] = {"ok": True} if not error_type else {
+                "ok": False, "error_type": error_type,
+            }
+            self._audit.emit(
+                "telegram_out", method="getMe", kind="probe", chat_id=None, text="", **fields
+            )
+        return username
+
     def _outbound(
         self,
         method: str,
@@ -134,13 +169,14 @@ class TelegramClient:
         chat_id: int | None,
         text: str,
         need_message_id: bool = False,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
     ) -> int | None:
         """Her giden çağrı sonuç ne olursa olsun, deneme SONRASI denetime yazılır."""
         if len(text) > TELEGRAM_TEXT_LIMIT:
             raise ValueError("Telegram metni 4096 karakter sınırını aşıyor")
         message_id: int | None = None
         try:
-            result = self._call(method, payload, self._timeout)
+            result = self._call(method, payload, self._timeout, files)
             if need_message_id:
                 raw_id = result.get("message_id") if isinstance(result, dict) else None
                 if not isinstance(raw_id, int) or isinstance(raw_id, bool):
@@ -195,6 +231,18 @@ class TelegramClient:
             raise TelegramError("Telegram sendMessage başarısız (message_id yok)")
         return SentMessage(message_id)
 
+    def send_photo(self, chat_id: int, png: bytes, *, kind: str) -> None:
+        """PNG'yi fotoğraf olarak yollar. Baytlar denetime GİRMEZ (metin alanı boştur); çağıran
+        gizlilik kapılarını geçmeden bunu çağırmamalıdır (ADR 0053)."""
+        self._outbound(
+            "sendPhoto",
+            {"chat_id": chat_id},
+            kind=kind,
+            chat_id=chat_id,
+            text="",
+            files={"photo": ("screen.png", png, "image/png")},
+        )
+
     def edit_message_text(self, chat_id: int, message_id: int, text: str, *, kind: str) -> None:
         # reply_markup verilmediği için düğmeler de kaldırılır: eski onay tekrar basılamaz.
         payload: dict[str, Any] = {
@@ -210,6 +258,22 @@ class TelegramClient:
         self._outbound("answerCallbackQuery", payload, kind=kind, chat_id=None, text=text)
 
 
+def stored_telegram_token() -> str | None:
+    """Panelin kimlik kasasına yazdığı token; yoksa (ya da Windows dışında) None."""
+    return (read_secret(TOKEN_TARGET) or "").strip() or None
+
+
+def resolve_telegram_token(
+    config: TelegramConfig, env: Mapping[str, str] | None = None
+) -> str | None:
+    """Önce `token_env` ortam değişkeni, sonra kasa. Kasaya yalnız `env is None` iken (üretim
+    yolu) bakılır: testin enjekte ettiği `env` tek kaynaktır, gerçek kasa okunmaz."""
+    token = (os.environ if env is None else env).get(config.token_env, "").strip()
+    if token or env is not None:
+        return token or None
+    return stored_telegram_token()
+
+
 def build_telegram_client(
     settings: Settings,
     audit: AuditLog,
@@ -220,8 +284,7 @@ def build_telegram_client(
     config = settings.telegram
     if config.chat_id is None:
         return None
-    source = os.environ if env is None else env
-    token = source.get(config.token_env, "").strip()
+    token = resolve_telegram_token(config, env)
     if not token:
         return None
     return TelegramClient(

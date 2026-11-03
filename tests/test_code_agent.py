@@ -10,6 +10,7 @@ import sys
 import threading
 import time
 import uuid
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -98,14 +99,29 @@ def reply(data: Any = None, *, code: int = 0, before: str = "") -> str:
     )
 
 
+class FakeClock:
+    """Toplam süre testleri gerçek saniye beklemez: süreç açılışı yük altında dar sınırı aşardı."""
+
+    def __init__(self) -> None:
+        self.now = 1000.0
+
+    def __call__(self) -> float:
+        return self.now
+
+
 def make_jobs(
-    tmp_path: Path, script: str, *, persistent: bool = False
+    tmp_path: Path,
+    script: str,
+    *,
+    persistent: bool = False,
+    clock: Callable[[], float] = time.monotonic,
 ) -> tuple[CodeAgentJobs, FakeCLI]:
     factory = FakeCLI(script)
     jobs = CodeAgentJobs(
         AuditLog(tmp_path / "audit.jsonl"),
         process_factory=factory,
         store_path=tmp_path / "jobs.sqlite3" if persistent else None,
+        clock=clock,
     )
     return jobs, factory
 
@@ -286,9 +302,11 @@ def test_resume_other_uuid_rejected(tmp_path: Path, repo: Path) -> None:
 
 
 def test_waiting_deadline_and_cancel_reject_answers(tmp_path: Path, repo: Path) -> None:
-    jobs, _ = make_jobs(tmp_path, reply(payload("question")))
-    job_id = jobs.start("proj", repo, "görev", command=sys.executable, max_minutes=0.006)
+    clock = FakeClock()
+    jobs, _ = make_jobs(tmp_path, reply(payload("question")), clock=clock)
+    job_id = jobs.start("proj", repo, "görev", command=sys.executable, max_minutes=1)
     waiting = wait_job(jobs, job_id, {"waiting"})
+    clock.now += 61
     assert wait_job(jobs, job_id)["status"] == "timeout"
     assert not jobs.answer(job_id, waiting["question_id"], "geç")
     job_id = jobs.start("proj", repo, "görev", command=sys.executable)
@@ -302,18 +320,31 @@ def test_waiting_deadline_and_cancel_reject_answers(tmp_path: Path, repo: Path) 
 def test_monotonic_total_deadline_survives_wall_clock_rollback(
     tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    jobs, _ = make_jobs(tmp_path, reply(payload("question")))
-    job_id = jobs.start("proj", repo, "görev", command=sys.executable, max_minutes=0.006)
+    clock = FakeClock()
+    jobs, _ = make_jobs(tmp_path, reply(payload("question")), clock=clock)
+    job_id = jobs.start("proj", repo, "görev", command=sys.executable, max_minutes=1)
     wait_job(jobs, job_id, {"waiting"})
+    # Duvar saati geri sarılsa da sınır yalnız monotonik saatle ölçülür: bekleme sürer...
     monkeypatch.setattr("artemis.tools.code_agent_jobs.time.time", lambda: 0)
+    clock.now += 30
+    time.sleep(0.2)  # İzleyici iş parçacığına yanlış timeout verme şansı tanır.
+    assert next(j for j in jobs.status() if j["job_id"] == job_id)["status"] == "waiting"
+    # ...ve monotonik süre dolunca duvar saatinden bağımsız timeout olur.
+    clock.now += 31
     assert wait_job(jobs, job_id)["status"] == "timeout"
     jobs.shutdown()
 
 
 def test_running_timeout_and_cancel_bounded(tmp_path: Path, repo: Path) -> None:
-    jobs, factory = make_jobs(tmp_path, "import sys,time\nsys.stdin.read()\ntime.sleep(60)\n")
+    clock = FakeClock()
+    jobs, factory = make_jobs(
+        tmp_path, "import sys,time\nsys.stdin.read()\ntime.sleep(60)\n", clock=clock
+    )
+    job_id = jobs.start("proj", repo, "görev", command=sys.executable, max_minutes=1)
+    wait_job(jobs, job_id, {"running"})
     before = time.monotonic()
-    assert run_job(jobs, repo, max_minutes=0.002)["status"] == "timeout"
+    clock.now += 61
+    assert wait_job(jobs, job_id)["status"] == "timeout"
     assert time.monotonic() - before < 3
     assert factory.procs[0].poll() is not None
     job_id = jobs.start("proj", repo, "görev", command=sys.executable)

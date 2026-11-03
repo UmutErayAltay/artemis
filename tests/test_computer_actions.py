@@ -403,3 +403,42 @@ def test_parse_action_accepts_action_key_as_type() -> None:
 
 def test_system_prompt_names_the_type_key() -> None:
     assert '"type": "click"' in SYSTEM_PROMPT and '"type" (not "action")' in SYSTEM_PROMPT
+
+
+def test_observed_and_progress_are_optional_and_length_limited() -> None:
+    base = {"type": "wait", "seconds": 1, "reason": "bekle"}
+    assert Action.model_validate(base).observed is None
+    ok = Action.model_validate({**base, "observed": "o" * 200, "progress": "p" * 400})
+    assert ok.observed == "o" * 200 and ok.progress == "p" * 400
+    with pytest.raises(ValidationError):
+        Action.model_validate({**base, "observed": "o" * 201})
+    with pytest.raises(ValidationError):
+        Action.model_validate({**base, "progress": "p" * 401})
+    with pytest.raises(ValueError):
+        parse_action(json.dumps({**base, "progress": "p" * 401}))
+    assert parse_action(json.dumps({**base, "observed": "x"})).observed == "x"
+
+
+def test_verdict_masks_quoted_screen_secrets() -> None:
+    from artemis.computer.actions import parse_verdict
+
+    # Sahte değerler çalışma anında birleştirilir: kaynakta anahtar/JWT kalıbı kalmasın
+    # (push öncesi sır tarayıcısı gerçek sır sanıp engelliyor).
+    fake_key = "s" + "k-proj-" + "A" * 20
+    fake_jwt = ".".join(["e" + "yJ" + "a" * 12, "e" + "yJ" + "b" * 12, "c" * 12])
+    raw = json.dumps(
+        {
+            "verified": True,
+            "evidence": f"Sayfada token: abc123xyz ve {fake_key} görünüyor, {fake_jwt} de var.",
+        }
+    )
+    evidence = parse_verdict(raw).evidence
+    assert "abc123xyz" not in evidence and fake_key not in evidence and fake_jwt not in evidence
+    assert evidence.count("[GİZLENDİ]") == 3
+    for ordinary in (
+        "Video sayfası açık.",
+        "Anahtar: Tamam düğmesi görünüyor.",
+        "https://site.com/how-to-fix-the-printer-problem-in-windows-11",
+    ):
+        raw_ok = json.dumps({"verified": True, "evidence": ordinary})
+        assert parse_verdict(raw_ok).evidence == ordinary

@@ -15,6 +15,7 @@ from artemis.tools.platform import child_environment
 OUTPUT_LIMIT = 256 * 1024
 CLEANUP_SECONDS = 2.0
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 
 
 def process_options() -> dict[str, Any]:
@@ -23,6 +24,19 @@ def process_options() -> dict[str, Any]:
             "creationflags": NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) | 0x4
         }
     return {"start_new_session": True, "creationflags": NO_WINDOW}
+
+
+def console_supported() -> bool:
+    """Görünür pencere kipi yalnız Windows'ta vardır (yeni konsol penceresi)."""
+    return os.name == "nt"
+
+
+def visible_options() -> dict[str, Any]:
+    """Görünür kip: yeni konsol penceresi, boru yok. Süreç grubu ayrılmaz (kullanıcı pencerede
+    Ctrl+C ile ajanı durdurabilsin); askıya alınmış başlatma headless ile aynıdır (job önce)."""
+    if os.name == "nt":
+        return {"creationflags": NEW_CONSOLE | 0x4}
+    return {"start_new_session": True}  # yalnız testler: gerçek pencere Windows'a özgüdür
 
 
 def kill_tree(proc: Any) -> bool:
@@ -55,7 +69,12 @@ class ProcessCapture:
     """Boruları sürekli boşaltır; taşan çıktıyı tutmaz ve başarı diye yorumlamaz."""
 
     def __init__(
-        self, proc: Any, prompt: str, *, resume_allowed: Callable[[], bool] | None = None
+        self,
+        proc: Any,
+        prompt: str,
+        *,
+        resume_allowed: Callable[[], bool] | None = None,
+        pipes: bool = True,
     ) -> None:
         self.proc = proc
         self._windows_tree = None
@@ -66,11 +85,16 @@ class ProcessCapture:
         self.output: list[str] = ["", ""]
         self.overflow = threading.Event()
         self.io_failed = threading.Event()
-        self.threads = [
-            threading.Thread(target=self._read, args=(proc.stdout, 0), daemon=True),
-            threading.Thread(target=self._read, args=(proc.stderr, 1), daemon=True),
-            threading.Thread(target=self._write, args=(prompt,), daemon=True),
-        ]
+        # Görünür pencere kipinde boru yoktur: yalnız süreç ağacı sahipliği ve çıkış izlenir.
+        self.threads = (
+            [
+                threading.Thread(target=self._read, args=(proc.stdout, 0), daemon=True),
+                threading.Thread(target=self._read, args=(proc.stderr, 1), daemon=True),
+                threading.Thread(target=self._write, args=(prompt,), daemon=True),
+            ]
+            if pipes
+            else []
+        )
         for thread in self.threads:
             thread.start()
 

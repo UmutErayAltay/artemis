@@ -19,14 +19,15 @@ from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
-    QFormLayout,
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -39,6 +40,7 @@ from artemis.brain.providers import (
     provider_problem,
     stored_endpoint_key,
 )
+from artemis.channels.desktop import themes
 from artemis.config.settings import ENDPOINT_ID_RE, EndpointConfig, ModelConfig, load_settings
 from artemis.tools.credentials import delete_secret, write_secret
 
@@ -52,6 +54,7 @@ PRESETS: tuple[tuple[str, str, str, bool], ...] = (
     ("DeepSeek", "deepseek", "https://api.deepseek.com/v1", True),
     ("Z.ai GLM", "zai", "https://api.z.ai/api/paas/v4", True),
     ("Groq", "groq", "https://api.groq.com/openai/v1", True),
+    ("xAI (Grok)", "xai", "https://api.x.ai/v1", True),
     ("Mistral", "mistral", "https://api.mistral.ai/v1", True),
     ("LM Studio", "lmstudio", "http://127.0.0.1:1234/v1", False),
     ("Ollama", "ollama", "http://127.0.0.1:11434/v1", False),
@@ -61,14 +64,78 @@ CLI_KEY = ""  # bağlantı seçicide Claude aboneliğinin verisi (uç kimlikleri
 CLI_NAME = "Claude aboneliği"
 _BAD_URL = "Adres geçersiz: https:// ile başlamalı (http yalnız yerel sunucu için)."
 
-# Renkler uygulamanın ana temasındakilerle aynı (app.py); yalnız bu bölümün kartları için.
-_STYLE = """
-QFrame#block { background: #0F1A2B; border: 1px solid #2A3E58; border-radius: 16px; }
-QFrame#block QLabel, QFrame#block QCheckBox { background: transparent; }
-QLabel#blockTitle { color: #E6EDF5; font-size: 15px; font-weight: 700; }
-QLabel#hint { color: #B4C3D4; }
-"""
-_MUTED, _ACCENT, _AMBER, _WARN = "#B4C3D4", "#53D6C7", "#FFD78C", "#F0B2AA"
+# Satır içi renkler (HTML etiketleri) temadan gelir; sabit onaltılık renk yok, tema değişince
+# set_theme yeniden çizer.
+_COLOR_KEYS = ("muted", "accent", "warning", "error")
+
+
+def divider() -> QFrame:
+    line = QFrame()
+    line.setObjectName("divider")
+    line.setFixedHeight(1)
+    return line
+
+
+def group(
+    title: str, hint: str | None = None, *, divided: bool = True
+) -> tuple[QWidget, QVBoxLayout]:
+    """Düz ayar grubu: ince çizgi + başlık + kısa ipucu. Kart içinde kart olmaması için çerçeve yok;
+    çizgi grubun içinde olduğundan grup gizlenince çizgi de gider."""
+    box = QWidget()
+    box.setObjectName("group")
+    outer = QVBoxLayout(box)
+    outer.setContentsMargins(0, 0, 0, 0)
+    outer.setSpacing(12)
+    if divided:
+        outer.addWidget(divider())
+        outer.addSpacing(12)  # çizginin altı da üstü gibi 24px (sayfa aralığı 12 + bu 12)
+    heading = QVBoxLayout()
+    heading.setSpacing(4)
+    head = QLabel(title)
+    head.setObjectName("sectionTitle")
+    heading.addWidget(head)
+    if hint:
+        heading.addWidget(meta_label(hint))
+    outer.addLayout(heading)
+    return box, outer
+
+
+def meta_label(text: str) -> QLabel:
+    label = QLabel(text)
+    label.setObjectName("meta")
+    label.setWordWrap(True)
+    label.setTextFormat(Qt.TextFormat.PlainText)
+    return label
+
+
+def field(
+    parent: QVBoxLayout, label: str, control: QWidget | QLayout, hint: str | None = None
+) -> None:
+    """Etiket alanın üstünde (13px, 4px boşluk); ipucu altta 12px soluk."""
+    group = QVBoxLayout()
+    group.setSpacing(4)
+    caption = QLabel(label)
+    caption.setObjectName("fieldLabel")
+    group.addWidget(caption)
+    if isinstance(control, QWidget):
+        caption.setBuddy(control)
+        group.addWidget(control)
+    else:
+        group.addLayout(control)
+    if hint:
+        group.addWidget(meta_label(hint))
+    parent.addLayout(group)
+
+
+def button_row(*buttons: QPushButton) -> QHBoxLayout:
+    """Sağa yaslı düğme satırı; birincil düğme en sonda verilir, içeriğe göre genişler."""
+    row = QHBoxLayout()
+    row.setSpacing(8)
+    row.addStretch(1)
+    for button in buttons:
+        button.setMinimumWidth(88)
+        row.addWidget(button)
+    return row
 
 
 def probe_models(base_url: str, key: str | None) -> tuple[str, list[str]]:
@@ -148,6 +215,15 @@ class CliTest(QThread):
         )
 
 
+def store_endpoint_key(name: str, typed: str) -> str | None:
+    """Anahtarı kasaya yazar (YAML'a asla); kasa yoksa "ortamda X tanımlayın." döner."""
+    try:
+        write_secret(typed, f"Artemis/{name}")
+    except OSError:
+        return f"ortamda {endpoint_key_variable(name)} tanımlayın."
+    return None
+
+
 def _slug(text: str) -> str:
     return re.sub(r"[^A-Za-z0-9_-]", "-", text).strip("-")[:40]
 
@@ -163,23 +239,120 @@ class ProviderSection(QWidget):
         self._cli_test: CliTest | None = None
         self._auto_alias = ""
         self._problem: str | None = None
-        self.setStyleSheet(_STYLE)
+        self._colors = {key: themes.THEMES[themes.DEFAULT_THEME][key] for key in _COLOR_KEYS}
+        self._model_data: list[tuple[str, bool, bool, str, str, bool]] = []
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(12)
-        # A: bağlantılar (sunucular ve anahtarları)
-        conn_box, conn = self._block(
+        layout.setSpacing(24)
+        # A: modeller önce (tek liste; beyin modeli yalnız buradan seçilir)
+        model_box, models = group(
+            "Modeller", "Eklediğin modeller. Beyin olan model sohbetlere cevap verir.",
+            divided=False,
+        )
+        layout.addWidget(model_box)
+        self.banner = QLabel()  # "Beyin: ..." satırı veya sağlayıcı sorunu
+        self.banner.setWordWrap(True)
+        self.banner.setVisible(False)  # _render_banner metin varsa gösterir
+        models.addWidget(self.banner)
+        self.model_list = QListWidget()
+        self.model_list.setAccessibleName("Eklenen modeller")
+        models.addWidget(self.model_list)
+        self.model_list.setVisible(False)  # reload() dolu olunca gösterir
+        self.model_empty = meta_label("Henüz model eklenmedi. Aşağıdan bir model ekle.")
+        models.addWidget(self.model_empty)
+        self.primary_button = QPushButton("Beyin yap")
+        self.primary_button.setObjectName("primary")
+        self.primary_button.clicked.connect(self._make_primary)
+        self.remove_button = QPushButton("Kaldır")
+        self.remove_button.setObjectName("danger")
+        self.remove_button.clicked.connect(self._remove_model)
+        self.remove_button.setVisible(False)  # reload() model varsa gösterir
+        self.primary_button.setVisible(False)
+        models.addLayout(button_row(self.remove_button, self.primary_button))
+        # B: model ekle
+        add_box, add = group("Model ekle")
+        layout.addWidget(add_box)
+        self.add_connection = QComboBox()
+        self.add_connection.setAccessibleName("Modelin bağlantısı")
+        self.add_connection.currentIndexChanged.connect(self._connection_changed)
+        self.model_name = QComboBox()
+        self.model_name.setEditable(True)
+        self.model_name.setAccessibleName("Model")
+        self.model_hint = self.model_name.lineEdit()
+        self.model_name.editTextChanged.connect(self._model_text_changed)
+        self.fetch_button = QPushButton("Listeyi getir")
+        self.fetch_button.clicked.connect(self._fetch_models)
+        model_row = QHBoxLayout()
+        model_row.setSpacing(8)
+        model_row.addWidget(self.model_name, 1)
+        model_row.addWidget(self.fetch_button)
+        self.alias = QLineEdit()
+        self.alias.setAccessibleName("Model takma adı")
+        self.paid = QCheckBox("Ücretli model")
+        self.input_price = QLineEdit("0")
+        self.input_price.setAccessibleName("Girdi USD/milyon")
+        self.output_price = QLineEdit("0")
+        self.output_price.setAccessibleName("Çıktı USD/milyon")
+        self.price_box = QWidget()
+        self.price_box.setObjectName("cardRow")
+        prices = QVBoxLayout(self.price_box)
+        prices.setContentsMargins(0, 0, 0, 0)
+        prices.setSpacing(12)
+        field(prices, "Girdi fiyatı (USD / milyon jeton)", self.input_price)
+        field(prices, "Çıktı fiyatı (USD / milyon jeton)", self.output_price)
+        self.price_box.setVisible(False)
+        self.kind = QComboBox()
+        self.kind.setAccessibleName("Model türü")
+        self.kind.addItem("Sohbet", "chat")
+        self.kind.addItem("Resim", "image")
+        self.image_price = QLineEdit("0")
+        self.image_price.setAccessibleName("Resim başına USD")
+        self.image_box = QWidget()
+        self.image_box.setObjectName("cardRow")
+        image_layout = QVBoxLayout(self.image_box)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        field(
+            image_layout, "Resim başına fiyat (USD)", self.image_price,
+            "Her çağrıda bütçeden bu tutar ayrılır (rezervasyon).",
+        )
+        self.image_box.setVisible(False)
+        self.make_primary = QCheckBox("Beyin modeli yap")
+        self.kind.currentIndexChanged.connect(self._sync_kind)
+        self.paid.toggled.connect(self._sync_kind)
+        field(add, "Bağlantı", self.add_connection)
+        field(add, "Tür", self.kind)
+        field(add, "Model", model_row)
+        field(add, "Takma ad", self.alias)
+        add.addWidget(self.paid)
+        add.addWidget(self.price_box)
+        add.addWidget(self.image_box)
+        add.addWidget(self.make_primary)
+        self.add_button = QPushButton("Ekle")
+        self.add_button.setObjectName("primary")
+        self.add_button.clicked.connect(self._add_model)
+        self.cli_test_button = QPushButton("Aboneliği test et")
+        self.cli_test_button.setToolTip("Küçük bir gerçek istek atar; kotadan az harcar.")
+        self.cli_test_button.clicked.connect(self._test_cli)
+        add.addLayout(button_row(self.cli_test_button, self.add_button))
+        # C: bağlantı ekle/düzenle; modeller önde kalsın diye varsayılan kapalı
+        self.connection_toggle = QPushButton("Bağlantı ekle veya düzenle")
+        self.connection_toggle.setObjectName("ghost")
+        self.connection_toggle.setCheckable(True)
+        layout.addWidget(divider())
+        layout.addWidget(self.connection_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+        self.connection_box, conn = group(
             "Bağlantılar",
             "Modellerin çalıştığı sunucular. Listeden seçip düzenle ya da yenisini yaz.",
+            divided=False,
         )
-        layout.addWidget(conn_box)
+        self.connection_box.setVisible(False)
+        self.connection_toggle.toggled.connect(self.connection_box.setVisible)
+        layout.addWidget(self.connection_box)
         self.endpoint_list = QListWidget()
-        self.endpoint_list.setMaximumHeight(110)
+        self.endpoint_list.setMaximumHeight(112)
         self.endpoint_list.setAccessibleName("Tanımlı bağlantılar")
         self.endpoint_list.currentItemChanged.connect(self._select)
         conn.addWidget(self.endpoint_list)
-        form = QFormLayout()
-        form.setVerticalSpacing(8)
         self.preset = QComboBox()
         self.preset.setAccessibleName("Bağlantı şablonu")
         for index, (label, *_rest) in enumerate(PRESETS):
@@ -195,117 +368,35 @@ class ProviderSection(QWidget):
         self.key = QLineEdit()
         self.key.setAccessibleName("API anahtarı")
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
-        form.addRow("Şablon", self.preset)
-        form.addRow("Kimlik", self.endpoint_id)
-        form.addRow("Adres", self.base_url)
-        form.addRow("", self.needs_key)
-        form.addRow("API anahtarı", self.key)
-        conn.addLayout(form)
-        buttons = QHBoxLayout()
+        field(conn, "Şablon", self.preset)
+        field(conn, "Kimlik (kısa ad)", self.endpoint_id)
+        field(conn, "Adres", self.base_url)
+        conn.addWidget(self.needs_key)
+        field(conn, "API anahtarı", self.key)
         self.test_button = QPushButton("Bağlantıyı test et")
         self.test_button.clicked.connect(self._test_connection)
         self.save_button = QPushButton("Kaydet")
+        self.save_button.setObjectName("primary")
         self.save_button.clicked.connect(self._save)
         self.delete_button = QPushButton("Sil")
         self.delete_button.setObjectName("danger")
         self.delete_button.clicked.connect(self._delete)
-        for button in (self.test_button, self.save_button, self.delete_button):
-            buttons.addWidget(button)
-        conn.addLayout(buttons)
-        # B: modeller (tek liste; beyin modeli yalnız buradan seçilir)
-        model_box, models = self._block(
-            "Modeller", "Eklediğin modeller. Beyin olan model sohbetlere cevap verir."
-        )
-        layout.addWidget(model_box)
-        self.banner = QLabel()  # "Beyin: ..." satırı veya sağlayıcı sorunu
-        self.banner.setWordWrap(True)
-        models.addWidget(self.banner)
-        self.model_list = QListWidget()
-        self.model_list.setAccessibleName("Eklenen modeller")
-        models.addWidget(self.model_list)
-        row = QHBoxLayout()
-        self.primary_button = QPushButton("Beyin yap")
-        self.primary_button.setObjectName("primary")
-        self.primary_button.clicked.connect(self._make_primary)
-        self.remove_button = QPushButton("Kaldır")
-        self.remove_button.setObjectName("danger")
-        self.remove_button.clicked.connect(self._remove_model)
-        row.addWidget(self.primary_button)
-        row.addWidget(self.remove_button)
-        models.addLayout(row)
-        add_title = QLabel("Model ekle")
-        add_title.setObjectName("blockTitle")
-        models.addWidget(add_title)
-        add_form = QFormLayout()
-        add_form.setVerticalSpacing(8)
-        self.add_connection = QComboBox()
-        self.add_connection.setAccessibleName("Modelin bağlantısı")
-        self.add_connection.currentIndexChanged.connect(self._connection_changed)
-        self.model_name = QComboBox()
-        self.model_name.setEditable(True)
-        self.model_name.setAccessibleName("Model")
-        self.model_name.editTextChanged.connect(self._model_text_changed)
-        self.fetch_button = QPushButton("Listeyi getir")
-        self.fetch_button.clicked.connect(self._fetch_models)
-        model_row = QHBoxLayout()
-        model_row.addWidget(self.model_name, 1)
-        model_row.addWidget(self.fetch_button)
-        self.alias = QLineEdit()
-        self.alias.setAccessibleName("Model takma adı")
-        self.paid = QCheckBox("Ücretli model")
-        self.input_price = QLineEdit("0")
-        self.input_price.setAccessibleName("Girdi USD/milyon")
-        self.output_price = QLineEdit("0")
-        self.output_price.setAccessibleName("Çıktı USD/milyon")
-        self.price_box = QWidget()
-        prices = QFormLayout(self.price_box)
-        prices.setContentsMargins(0, 0, 0, 0)
-        prices.addRow("Girdi USD/milyon", self.input_price)
-        prices.addRow("Çıktı USD/milyon", self.output_price)
-        self.price_box.setVisible(False)
-        self.paid.toggled.connect(self.price_box.setVisible)
-        self.make_primary = QCheckBox("Beyin modeli yap")
-        add_form.addRow("Bağlantı", self.add_connection)
-        add_form.addRow("Model", model_row)
-        add_form.addRow("Takma ad", self.alias)
-        add_form.addRow("", self.paid)
-        add_form.addRow(self.price_box)
-        add_form.addRow("", self.make_primary)
-        models.addLayout(add_form)
-        add_row = QHBoxLayout()
-        self.add_button = QPushButton("Ekle")
-        self.add_button.setObjectName("primary")
-        self.add_button.clicked.connect(self._add_model)
-        self.cli_test_button = QPushButton("Aboneliği test et (kotadan az harcar)")
-        self.cli_test_button.clicked.connect(self._test_cli)
-        add_row.addWidget(self.add_button)
-        add_row.addWidget(self.cli_test_button)
-        models.addLayout(add_row)
+        conn.addLayout(button_row(self.delete_button, self.test_button, self.save_button))
         self.status = QLabel()
         self.status.setWordWrap(True)
+        # Uzun yol/adres tek "sözcük" sayılıp sütunu genişletmesin (yatay kaydırma çıkmasın).
+        self.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         layout.addWidget(self.status)
         self._sync_cli_button()
+        self._sync_model_field()
         if demo:
+            # Demo'da reload çalışmaz; boş açılır liste yerine ne yapılacağını söyleyen soluk satır.
+            self.add_connection.addItem("Bağlantı yok — aşağıdan ekle", None)
+            self._sync_model_field()
             self.setEnabled(False)
             self.status.setText("Demo modunda bağlantılar ve modeller değiştirilmez.")
         else:
             self.reload()
-
-    @staticmethod
-    def _block(title: str, hint: str) -> tuple[QFrame, QVBoxLayout]:
-        frame = QFrame()
-        frame.setObjectName("block")
-        box = QVBoxLayout(frame)
-        box.setContentsMargins(16, 16, 16, 16)
-        box.setSpacing(8)
-        head = QLabel(title)
-        head.setObjectName("blockTitle")
-        sub = QLabel(hint)
-        sub.setObjectName("hint")
-        sub.setWordWrap(True)
-        box.addWidget(head)
-        box.addWidget(sub)
-        return frame, box
 
     def show_problem(self, reason: str | None) -> None:
         self._problem = reason
@@ -317,6 +408,12 @@ class ProviderSection(QWidget):
             return str(model.endpoint)
         return CLI_NAME if model.provider == "claude_cli" else model.provider
 
+    def set_theme(self, palette: dict[str, str]) -> None:
+        """Satır içi renkleri yeniden çizer; bağlantı taslağına (reload) dokunmaz."""
+        self._colors = {key: palette[key] for key in _COLOR_KEYS}
+        self._render_banner()
+        self._render_models()
+
     def _render_banner(self) -> None:
         try:
             settings = load_settings(self.config_path)
@@ -324,13 +421,14 @@ class ProviderSection(QWidget):
             return
         model = settings.models.get(settings.primary_model)
         if self._problem:
-            text, color = self._problem, _WARN
+            text, color = self._problem, self._colors["error"]
         elif model is not None:
             text = f"Beyin: {settings.primary_model} ({self._connection_label(model)})"
-            color = _ACCENT
+            color = self._colors["accent"]
         else:
-            text, color = "Henüz beyin modeli seçilmedi.", _WARN
+            text, color = "Henüz beyin modeli seçilmedi.", self._colors["error"]
         self.banner.setText(text)
+        self.banner.setVisible(bool(text))
         self.banner.setStyleSheet(f"color: {color}; font-weight: 600;")
 
     def reload(self) -> None:
@@ -342,31 +440,28 @@ class ProviderSection(QWidget):
         self._problem = provider_problem(settings)
         self._render_banner()
         self.make_primary.setChecked(self._problem is not None)
-        self.model_list.clear()
-        for alias, model in settings.models.items():
-            # Eski openrouter/anthropic/ollama modelleri (CPA yolu) taşınmaz; kullanıcı kaldırır.
-            legacy = model.provider not in {"openai_compatible", "claude_cli"}
-            brain = (
-                f"&nbsp;&nbsp;<span style='color:{_ACCENT}'>&#9679; Beyin</span>"
-                if alias == settings.primary_model
-                else ""
+        if self._problem and not settings.endpoints:
+            self.connection_toggle.setChecked(True)  # ilk kurulumda form gizli kalmasın
+        self._model_data = [
+            (
+                alias,
+                alias == settings.primary_model,
+                # Eski openrouter/anthropic/ollama modelleri (CPA yolu) taşınmaz; kullanıcı siler.
+                model.provider not in {"openai_compatible", "claude_cli"},
+                self._connection_label(model),
+                model.model,
+                model.kind == "image",
             )
-            tag = f"&nbsp;&nbsp;<span style='color:{_AMBER}'>eski ayar</span>" if legacy else ""
-            label = QLabel(
-                f"<b>{html.escape(alias)}</b>{brain}{tag}<br>"
-                f"<span style='color:{_MUTED}'>{html.escape(self._connection_label(model))}"
-                f" · {html.escape(model.model)}</span>"
-            )
-            label.setTextFormat(Qt.TextFormat.RichText)
-            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
-            label.setStyleSheet("background: transparent; padding: 2px 0;")
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, alias)
-            item.setSizeHint(label.sizeHint() + QSize(0, 16))
-            self.model_list.addItem(item)
-            self.model_list.setItemWidget(item, label)
+            for alias, model in settings.models.items()
+        ]
+        self._render_models()
         # Liste kendi içinde kaydırılmasın: en çok 6 satır kadar uzar.
-        self.model_list.setFixedHeight(min(max(self.model_list.count(), 2), 6) * 62 + 12)
+        self.model_list.setFixedHeight(min(max(self.model_list.count(), 1), 6) * 70 + 12)
+        self.model_list.setVisible(self.model_list.count() > 0)
+        self.model_empty.setVisible(self.model_list.count() == 0)
+        # Boş listede "Kaldır"/"Beyin yap" işlenecek bir şey bulamaz; gizlenir.
+        self.remove_button.setVisible(self.model_list.count() > 0)
+        self.primary_button.setVisible(self.model_list.count() > 0)
         self.endpoint_list.clear()
         for name, endpoint in settings.endpoints.items():
             if not endpoint.api_key:
@@ -388,6 +483,38 @@ class ProviderSection(QWidget):
         if self.add_connection.currentData() != chosen:
             self._connection_changed()
         self._sync_cli_button()
+
+    def _render_models(self) -> None:
+        selected = self.model_list.currentItem()
+        chosen = selected.data(Qt.ItemDataRole.UserRole) if selected is not None else None
+        self.model_list.clear()
+        for alias, is_brain, legacy, connection, model_id, image in self._model_data:
+            brain = (
+                f"&nbsp;&nbsp;<span style='color:{self._colors['accent']}'>&#9679; Beyin</span>"
+                if is_brain
+                else ""
+            )
+            tag = (
+                f"&nbsp;&nbsp;<span style='color:{self._colors['warning']}'>eski ayar</span>"
+                if legacy else ""
+            )
+            kind = " · resim" if image else ""
+            label = QLabel(
+                f"<b>{html.escape(alias)}</b>{brain}{tag}<br>"
+                f"<span style='color:{self._colors['muted']}'>"
+                f"{html.escape(connection)} · {html.escape(model_id)}{kind}</span>"
+            )
+            label.setTextFormat(Qt.TextFormat.RichText)
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+            label.setStyleSheet("background: transparent; padding: 2px 0;")
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, alias)
+            # +24: öğe dolgusu (8px) etiketi kırpmasın
+            item.setSizeHint(label.sizeHint() + QSize(0, 24))
+            self.model_list.addItem(item)
+            self.model_list.setItemWidget(item, label)
+            if alias == chosen:
+                self.model_list.setCurrentItem(item)
 
     def model_rows(self) -> list[tuple[str, str]]:
         """(takma ad, düz metin satırı); testler ve erişilebilirlik için."""
@@ -479,8 +606,19 @@ class ProviderSection(QWidget):
         self.model_name.clear()
         self.model_name.addItems(models)
 
+    def _sync_model_field(self) -> None:
+        """Bağlantı yokken model alanı soluk ve kapalı; neden boş olduğunu placeholder söyler."""
+        ready = self.add_connection.currentData() is not None
+        self.model_name.setEnabled(ready)
+        self.fetch_button.setEnabled(ready)
+        if self.model_hint is not None:
+            self.model_hint.setPlaceholderText(
+                "Model adı yaz veya listeyi getir" if ready else "Önce bağlantı seç"
+            )
+
     def _connection_changed(self) -> None:
         self._sync_cli_button()
+        self._sync_model_field()
         self._fill_models(list(CLI_MODELS) if self.add_connection.currentData() == CLI_KEY else [])
         if self.add_connection.currentData() == CLI_KEY:
             found = shutil.which("claude")
@@ -492,6 +630,22 @@ class ProviderSection(QWidget):
 
     def _sync_cli_button(self) -> None:
         self.cli_test_button.setVisible(self.add_connection.currentData() == CLI_KEY)
+        # Resim modeli openai_compatible uç ister; Claude aboneliğinde seçilemez.
+        cli = self.add_connection.currentData() == CLI_KEY
+        self.kind.model().item(1).setEnabled(not cli)  # type: ignore[attr-defined]
+        if cli:
+            self.kind.setCurrentIndex(0)
+        self.kind.setToolTip("Resim modeli Claude aboneliğiyle kullanılamaz." if cli else "")
+
+    def _sync_kind(self, *_args: object) -> None:
+        image = self.kind.currentData() == "image"
+        paid = self.paid.isChecked()
+        self.price_box.setVisible(paid and not image)
+        self.image_box.setVisible(paid and image)
+        # Resim modeli beyin olamaz (settings doğrular); seçenek kapalı ve işaretsiz.
+        self.make_primary.setEnabled(not image)
+        if image:
+            self.make_primary.setChecked(False)
 
     def _default_alias(self, model: str) -> str:
         slug = _slug(model)
@@ -532,13 +686,9 @@ class ProviderSection(QWidget):
         message = "Bağlantı kaydedildi."
         typed = self.key.text().strip()
         if typed and self.needs_key.isChecked():
-            try:
-                write_secret(typed, f"Artemis/{name}")
-            except OSError:
-                message = (
-                    "Bağlantı kaydedildi ama anahtar saklanamadı; "
-                    f"ortamda {endpoint_key_variable(name)} tanımlayın."
-                )
+            failure = store_endpoint_key(name, typed)
+            if failure:
+                message = f"Bağlantı kaydedildi ama anahtar saklanamadı; {failure}"
         self.key.clear()
         self.reload()
         # Yeni model eklerken kaydedilen bağlantı hazır seçili gelir.
@@ -593,12 +743,23 @@ class ProviderSection(QWidget):
         if not model or not alias:
             self.status.setText("Model adı yazın veya listeden seçin.")
             return
+        image = self.kind.currentData() == "image"
+        if image and connection == CLI_KEY:
+            self.status.setText("Resim modeli Claude aboneliğiyle kullanılamaz; bir uç seçin.")
+            return
         try:
             prices = (
                 [Decimal(self.input_price.text() or "0"), Decimal(self.output_price.text() or "0")]
-                if self.paid.isChecked() and connection != CLI_KEY
+                if self.paid.isChecked() and connection != CLI_KEY and not image
                 else [Decimal(0), Decimal(0)]
             )
+            image_cost = (
+                Decimal(self.image_price.text() or "0")
+                if image and self.paid.isChecked()
+                else Decimal(0)
+            )
+            if image_cost < 0 or not image_cost.is_finite():
+                raise InvalidOperation
             settings = load_settings(self.config_path)
         except InvalidOperation:
             self.status.setText("Fiyat sayı olmalı (ücretsiz için 0).")
@@ -622,19 +783,27 @@ class ProviderSection(QWidget):
         }
         if connection != CLI_KEY:
             entry["endpoint"] = connection
+        if image:
+            entry["kind"] = "image"
+            entry["image_cost_usd"] = str(image_cost)
         models[alias] = entry
-        primary = self.make_primary.isChecked()
+        primary = self.make_primary.isChecked() and not image
         if primary:
             raw["primary_model"] = alias
         if not self._write(raw):
             return
         self.reload()
-        paid = any(price > 0 for price in prices) and not settings.allow_paid
+        paid = (any(price > 0 for price in prices) or image_cost > 0) and not settings.allow_paid
         self.status.setText(
             "Model eklendi."
             + (
                 " Ücretli model bütçe korumasınca engellenir; izin için allow_paid gerekir."
                 if paid
+                else ""
+            )
+            + (
+                " Resim başına fiyat her çağrıda bütçeden ayrılan bir rezervasyondur."
+                if image_cost > 0
                 else ""
             )
             + (" Beyin modeli yapıldı." if primary else "")
@@ -656,6 +825,9 @@ class ProviderSection(QWidget):
             raw = self._raw()
         except (OSError, yaml.YAMLError):
             self.status.setText("Ayarlar okunamadı.")
+            return
+        if any(row[0] == alias and row[5] for row in self._model_data):
+            self.status.setText("Resim modeli beyin olamaz; bir sohbet modeli seçin.")
             return
         # Takma ada göre yazılır: aynı model kimliğini paylaşan modeller karışmaz.
         raw["primary_model"] = alias

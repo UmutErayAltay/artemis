@@ -1,9 +1,29 @@
 # Artemis
 
-Windows 11 için Türkçe kişisel masaüstü asistanı. CLI ve isteğe bağlı masaüstü
-paneli, sağlayıcıdan bağımsız ajan döngüsünü, tek güvenlik kapısını ve araçları
-paylaşır. F3 ses kanalı kodu hazırdır; biçimsel Windows ses kabulü bekler.
-Vault hafızası, Telegram, bildirimler ve kod ajanı isteğe bağlıdır, varsayılan kapalıdır.
+Windows 11 için Türkçe kişisel masaüstü asistanı. Masaüstü paneli, sesli komut, pet,
+Telegram kanalı ve CLI; sağlayıcıdan bağımsız ajan döngüsünü, **tek güvenlik kapısını** ve
+araçları paylaşır. Yan etkili her adım ekranda tam argümanlarla onay ister; varsayılan cevap
+hayırdır.
+
+> **Durum: teknik önizleme.** Çekirdek (güvenlik kapısı, araçlar, ajan döngüsü, UI, ses hattı)
+> testlidir (2400+ test, Windows ve Ubuntu CI). Windows'ta gerçek cihaz kabulü kısmendir; neyin
+> doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Hazır kurulum
+> paketi (.exe) yoktur, kaynaktan kurulur ([Kurulum](#kurulum)).
+
+Neler var:
+
+- **Sohbet ve araçlar:** dosya, uygulama, web, pano, hafıza, vault, kod ajanı, MCP, pencere ve sistem
+  kontrolü; her biri aynı `SafetyGate` üzerinden geçer.
+- **Bilgisayar kullanımı:** ekranı görüp fare ve klavyeyle iş yapar, Esc her an durdurur
+  ([ADR 0039](docs/adr/0039-computer-use.md); [aşağıda](#bilgisayar-kullanımı-ve-otomatik-onay)).
+- **Ses:** "artemis" uyandırma sözcüğü, yerel Türkçe STT (faster-whisper), isteğe bağlı bulut/karma
+  tanıma (Groq, xAI), Piper/Edge TTS, gürültü engelleme.
+- **Telegram:** panelden bağlanır, uzaktan komut alır, onaylar düğmeyle sorulur
+  ([aşağıda](#telegram-ve-bildirimler)).
+- **Sağlayıcılar:** OpenRouter, Anthropic, Ollama, OpenAI uyumlu uçlar (Groq, xAI Grok, LM Studio…),
+  Claude abonelik CLI'si; sağlayıcı ve model Ayarlar'dan eklenir.
+- **Gizlilik:** sırlar yalnız ortam değişkeninde ya da Windows Kimlik Bilgisi Yöneticisi'nde;
+  ham ses saklanmaz; ekran görüntüsü diske yazılmaz.
 
 Konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012). Artemis'in kendi kalıcı hafızası
 (geçmiş, öz notlar, konuşma araması) varsayılan açıktır ve `state_dir/memory.sqlite3`'te
@@ -37,6 +57,16 @@ kullanıcının dosyalarına veya uygulamalarına erişmez. Aşağıdaki görün
 
 ![Araç adı, argümanlar ve dış içerik uyarısıyla işlem onayı](docs/assets/desktop/approval.png)
 
+### Ayarlar: karma tanıma ve Telegram
+
+![Ayarlar > Ses: karma tanıma sunucusu, protokol, API anahtarı ve model listesi](docs/assets/desktop/settings-ses.png)
+
+![Ayarlar > Telegram: token, eşleştirme ve masaüstü içinde komut alma](docs/assets/desktop/settings-telegram.png)
+
+### Otomatik onay uyarısı
+
+![Otomatik onay açılırken çıkan risk uyarısı; varsayılan seçim Vazgeç](docs/assets/desktop/auto-warning.png)
+
 ### Hızlı komut penceresi
 
 ![Ana panelle aynı çalışma katmanını kullanan hızlı komut penceresi](docs/assets/desktop/overlay.png)
@@ -48,6 +78,23 @@ kullanıcının dosyalarına veya uygulamalarına erişmez. Aşağıdaki görün
 Pet ekranın köşesinde durur ve Artemis'in o an ne yaptığını gösterir: hazır, dinliyor,
 düşünüyor ya da onayını bekliyor. Yanıtlar ve iş bitişleri kısa bir balonla görünür
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)).
+
+#### Pet seçimi
+
+Varsayılan görünüm depodaki çizilmiş küredir. **Ayarlar > Pet** sekmesinden Codex uyumlu
+sprite pet'ler de seçilir ([ADR 0048](docs/adr/0048-sprite-pets-quick-box-and-pet-creator.md)):
+klasörde `pet.json` (`id`, `displayName`, `description`, `spritesheetPath`) ve
+`spritesheet.webp` ya da `.png` (1536×1872 ya da 1536×2288, 8×9 hücre) bulunur. Pet'ler
+`state_dir/pets/<id>/` (Artemis'in) ve varsa `~/.codex/pets/` (`CODEX_HOME` ile değişir, salt
+okunur) altından listelenir. **Pet yükle…** bir klasörü ya da `.zip` dosyasını `state_dir/pets/`
+içine kurar; yalnız `pet.json` + tek görsel kabul edilir, boyut ve yol sınırları denetlenir.
+Silme yalnız Artemis'e yüklenen pet'lerde çalışır. Windows'ta "animasyon efektleri" kapalıysa
+ya da `ARTEMIS_REDUCE_MOTION=1` ise pet ilk kareyi gösterir.
+
+**Pet üret:** Ayarlar > Pet sekmesindeki sohbette bir model seçip "turuncu bir kedi" gibi yazarsın; ücretsiz bir metin modeli tek bir SVG karakter çizer, SVG beyaz listeyle temizlenir (script, href, style, olay öznitelikleri atılır), Artemis 9 durumluk Codex spritesheet'ini kendisi animasyonlar ve önizlemeyi gösterir. "daha mavi yap" gibi düzeltmelerden sonra **Kaydet ve seç** pet'i `state_dir/pets/` içine kurar. Çağrı `ProviderRouter` üzerinden gider; ücretli model seçersen uyarı çıkar, `allow_paid` ve bütçe geçerlidir. Resim modeliyle üretim sonraki pakettir (arayüzde "yakında").
+
+**Lisans:** Depoya hiçbir topluluk pet'i konmaz. İndirdiğin pet'lerin (galeri siteleri dahil)
+lisansı ve içeriği, bazıları marka karakteridir, senin sorumluluğundadır.
 
 Python 3.12 ortamında arayüzü kurup ücretsiz, ağsız demoyu açın:
 
@@ -87,7 +134,7 @@ Tek başına **Artemis** dediğinizde yerel **Dinliyorum** yanıtı ve komut bek
 durumu gelir. Ayarlar'daki mikrofon seviyesi ve **Son duyulan** göstergesi, sesin
 girdiğini ve nasıl tanındığını gösterir; ayrı ses kaydı tutulmaz.
 Tepsi menüsündeki **Peti göster/gizle** köşede duran animasyonlu masaüstü petini açar;
-pete tıklamak sesi açıp kapatır, kod ajanı bitince pet balonu ve bildirim gösterilir
+pete bir kez tıklamak altında hızlı yazma kutusu açar, iki tık sesi açıp kapatır, üç tık menüyü açar, kod ajanı bitince pet balonu ve bildirim gösterilir
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). Pet kendi komut veya onay
 yolu taşımaz.
 Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.
@@ -137,6 +184,34 @@ kurulum: [ses rehberi](docs/VOICE_SETUP.md)).
 İsteğe bağlı **yankı engelleme**, Artemis'in hoparlörden çalan kendi sesinin mikrofon
 yolunda oluşturduğu yankıyı azaltır; işlem yereldir ve varsayılan kapalıdır
 ([ADR 0038](docs/adr/0038-echo-cancellation.md)).
+**Bulut ve karma tanıma** (isteğe bağlı, `voice.stt_mode: hybrid`): yerel tanıyıcı yalnız
+uyandırmaya karar verir, komut sesi seçtiğiniz buluta gider. Sunucu **Ayarlar > Ses > Karma
+tanıma** bölümünden seçilir: sunucu adresi, protokol (`openai`: Whisper uyumlu
+`/audio/transcriptions`, örn. Groq; `xai`: xAI `/v1/stt`), model ve API anahtarı (Kimlik
+Bilgisi Yöneticisi'ne yazılır, YAML'a girmez). "Modelleri getir" sunucudan model listesini çeker.
+Komut sesi buluta gider, gizlilik denetimine yazılır ([ADR 0046](docs/adr/0046-stt-precision-and-hybrid-cloud.md),
+[ADR 0050](docs/adr/0050-xai-grok-ve-stt-protokolu.md)). xAI ucu Türkçe ile denenmedi.
+
+Bir geliştiricinin kendi sesiyle ölçüm (47 klip, Razer BlackShark V2, GPU): yerel large-v3 kelime
+hata oranı %9,3, Groq whisper-large-v3 %7,8 (iki kelimelik fark, anlamlı değil); medyan gecikme
+525 ms yerel, 593 ms Groq. Uygulama adlarını `voice.stt_hotwords` listesine eklemek doğru hedef
+bulmayı %93'ten %100'e çıkardı, genel hata oranını biraz artırdı; liste uyandırmaya duyarlıdır,
+değiştirince yeniden ölçün. Tek konuşmacı, kulaklıklı oda: sonuçlar sizin sesiniz için aynı olmayabilir.
+
+### Canlı yazı (isteğe bağlı) — Powered by mihu
+
+Varsayılan kapalı. `voice.live_transcript: true` ya da panelde "Canlı yazı (konuşurken)" ile
+konuşurken pet balonunda metin kelime kelime akar. **Yalnız gösterimdir**: komut hâlâ
+large-v3 sonucundan çıkar, canlı metin uyandırma/yankı/söz kesme kararına girmez
+([ADR 0047](docs/adr/0047-live-transcript.md)). Yerelde, işlemcide çalışır; ses makineden çıkmaz.
+Kurulum: `pip install -e ".[stream]"` ve config'te `live_transcript_model` /
+`live_transcript_revision` (örnek: `config/config.example.yaml`).
+
+Model [mihu turkish-stt-66m-v2](https://huggingface.co/mihuai/turkish-stt-66m-v2) olup
+**mihu Community License v1.0** ile lisanslıdır; **Powered by mihu**. Ağırlıklar bu depoda yoktur,
+özelliği açınca sabit revision'dan indirilir; lisans şartları (ticari kullanımda gelir sınırı, rakip
+model eğitimi yasağı) açan kişiye aittir. Ayrıntı: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
 
 Ortak ses ölçümünün ilk adımı ([ADR 0041](docs/adr/0041-common-voice-telemetry.md)):
@@ -160,7 +235,8 @@ başından sink yazımının bitmesine) yalnız hoparlöre yazım sürerken üre
 (sohbet p50 < 1.5 sn, p90 < 3 sn, stop p90 < 300 ms) en az 30 geçerli örnek olmadan ve
 sahte kipte hiç değerlendirilmez (`met: null`). Canlı kip PortAudio'nun bildirdiği çıkış
 gecikmesini, süreç bellek tepe değerini ve varsa `nvidia-smi` ile aygıt geneli VRAM'i
-yazar. Sağlayıcılar streaming kullanmadığından ilk token null'dır. Masaüstünde
+yazar. Streaming açık ve sağlayıcı metin akıtıyorsa ilk token ölçülür; akışsız
+kipte null kalır. Masaüstünde
 `voice.telemetry_report: true` iken ses kapanınca aynı rapor
 `state_dir/voice-telemetry/` altına yazılır. Donanım profilindeki `requested_*` ayardır;
 bilinmeyen fiilî değerler null kalır. `collection_complete` yalnız olay tamponunun taşmadığını
@@ -244,6 +320,10 @@ Terminalsiz yol: masaüstünde **Ayarlar > Model sağlayıcıları** bölümünd
 ve API anahtarını girin, **Bağlantıyı test et** ile doğrulayın, modeli ekleyip **Birincil model
 yap** deyin. Anahtar yalnız Kimlik Bilgisi Yöneticisi'ne yazılır, YAML'a girmez. Çalışan bir
 sağlayıcı yoksa Artemis açılışta Ayarlar'ı bu bölümde açar (ADR 0034).
+
+Groq ve xAI Grok için şablon hazırdır: **Ayarlar > Model sağlayıcıları** > şablon seçin, anahtarı
+girin, "Modelleri getir" ile listeyi çekin. Model eklerken **Tür** olarak *Sohbet* ya da *Resim*
+(pet üretimi için) seçilir; resim modeli birincil model olamaz ([ADR 0050](docs/adr/0050-xai-grok-ve-stt-protokolu.md)).
 
 Claude Pro/Max aboneliğiniz varsa API anahtarı olmadan kullanabilirsiniz: Claude Code CLI'yi
 kurup `claude` ile giriş yapın, sonra Ayarlar > Model sağlayıcıları > **Abonelik: Claude
@@ -380,6 +460,22 @@ verir. Bu sürüm sonuç sayfalarının içeriğini ayrıca açıp indiren bir a
 Arama sorgusu dış servise gönderildiğinden araç yan etkili sayılır: temiz turda
 onaysız çalışır, dış içerik okunduktan sonraki turda kullanıcı onayı ister.
 
+## Bilgisayar kullanımı ve otomatik onay
+
+`computer_use.enabled: true` iken `computer_use` aracı tek onayla bir oturum başlatır: her adımda
+ekranın görüntüsü modele gider, model fare/klavye eylemi döner, bitişte sonuç ekrandan
+doğrulanır. Görüntü kabul eden bir model gerekir; ekran buluta yalnız `perception.allow_cloud_screen:
+true` iken gider, Ollama modeli yerel kalır. Terminal, Artemis'in kendisi ve parola yöneticisi
+engelli uygulamalardır; **Esc** her an oturumu durdurur.
+
+**Otomatik onay** (üst çubuktaki düğme ya da Ayarlar > Uygulamalar > "Otomatik bilgisayar
+kullanımı"): bilgisayar kullanımı adımları sormadan çalışır. Açarken risk uyarısı çıkar,
+varsayılan seçim *Vazgeç*'tir. Bunu açmak, yanlış anlaşılan bir komutun ya da ekrandaki zararlı
+bir metnin istemediğiniz bir işlemi tetikleyebileceği riskini kabul etmek demektir. Bilinen
+sınır: otomatik kipte Ctrl+W onaysızdır, hedef dışı tarayıcı sekmeleri de kapanabilir
+([ADR 0039](docs/adr/0039-computer-use.md)). Telegram'dan başlatılan oturumlar için
+[Telegram bölümüne](#telegram-ve-bildirimler) bakın.
+
 ## Kendi hafızası
 
 `persist_memory` varsayılan açıktır ([ADR 0025](docs/adr/0025-persistent-self-memory.md)).
@@ -395,6 +491,17 @@ CLI, masaüstü ve Telegram aynı `state_dir/memory.sqlite3` deposunu kullanır:
   turların yanıtını göstermez.
 
 Depo hatası turu bozmaz; konuşma bellekte sürer ve denetime `memory_error` yazılır.
+
+Masaüstünde **Hafıza ve hatırlatmalar** sekmesi konuşma geçmişini ve saklama süresini
+kontrol eder. Önce geçmişi yükleyin; varsayılan **0 gün: otomatik silme kapalı**.
+Pozitif süre seçimi eski turları hemen siler ve açık onay ister. Öz notlar ayrı kalır.
+CLI karşılıkları: `/hafıza durum`, `/hafıza göster`, `/hafıza sil`, `/hafıza sakla 30`
+(otomatik silmeyi kapatmak için `/hafıza sakla 0`). Uygulama kapalıyken budama yapılmaz.
+Silme yalnız konuşma deposunu kapsar; audit, disk/WAL ve yedeklerden güvenli silme değildir.
+
+Aynı sekmede hatırlatmaların teslim geçmişi görülür. **Teslim doğrulanamadı**, bildirimin
+ulaşmış da olabileceğini belirtir. Yeniden deneme açık onayla yeni hatırlatma oluşturur;
+otomatik tekrar yapılmaz ve çift bildirim ihtimali gösterilir.
 
 ## Hafıza (Obsidian vault)
 
@@ -419,7 +526,14 @@ Paket veya model yoksa sözcük aramasına dönülür ve sonuçta bu yazılır. 
 Varsayılan kapalıdır; config'te `telegram.chat_id` verilmedikçe hiçbir şey açılmaz.
 Gerekçe [ADR 0016](docs/adr/0016-telegram-and-notifications.md) içindedir.
 
-Kurulum:
+**Panelden bağlama (önerilen):** **Ayarlar > Telegram** sayfasında @BotFather'dan aldığınız token'ı
+girip "Kaydet ve doğrula"ya basın (önce `getMe` ile doğrulanır, token Windows Kimlik Bilgisi
+Yöneticisi'ne yazılır), sonra "Eşleştir" ile ekrandaki 6 haneli kodu bota yazın. Beş yanlış kodda
+eşleştirme kilitlenir. "Test mesajı" ve "Bağlantıyı kes" aynı sayfadadır ([ADR 0051](docs/adr/0051-telegram-baglama-paneli.md)).
+**Kanalı masaüstü içinde çalıştırmak** için aynı sayfadaki kutuyu (`telegram.run_in_desktop`,
+varsayılan kapalı) işaretleyin; Artemis açıkken Telegram'dan komut alırsınız ([ADR 0052](docs/adr/0052-telegram-kanali-masaustunde.md)).
+
+Elle kurulum (terminal):
 
 1. Telegram'da **@BotFather**'a `/newbot` yazın ve size verilen token'ı alın.
 2. Token'ı kullanıcı ortam değişkenine yazın, sonra terminali kapatıp yeniden açın (değer
@@ -465,6 +579,13 @@ Davranış:
   işlemi masaüstünden onaylayın ya da `/yeni` ile yeni sohbet başlatın. Bu turların yanıtı da
   Telegram'a gelmez.
 - `/yeni` yeni sohbet başlatır; `/yardım` kısa komut özetini gösterir.
+- Bilgisayar kullanımı (`computer_use.enabled`) yalnız masaüstü içinde çalışan kanalda
+  (`run_in_desktop`) Telegram'dan da çalışır (ADR 0053); `artemis telegram` sürecinde çalışmaz.
+  Onay masaüstü kipini izler: `auto` iken adımlar sorulmaz, `accept` iken düğmeyle sorulur.
+  `/dur` çalışan oturumu durdurur (masaüstünde Esc de çalışır). Masaüstü ve Telegram oturumu aynı
+  anda çalışmaz. `telegram.send_computer_screenshot: true` oturum bitince son ekran karesini
+  sohbete yollar; gizli turda ya da `perception.allow_cloud_screen` kapalıyken hiç gönderilmez.
+  Kullanıcı başında değilken ekranın uzaktan sürülebileceğini unutmayın.
 - Kalıcı hafıza açıkken Telegram, masaüstü ve CLI aynı geçmiş deposunu kullanır: açılışta
   diğer kanalların son turları da geri yüklenir ve Telegram'daki `/yeni` hepsi için
   sıfırlama işareti koyar. `persist_memory: false` ile her kanalın geçmişi süreç içinde kalır.
@@ -476,8 +597,8 @@ Windows bildirimleri (`notify_desktop`):
   bildirim izni verilmelidir. Kapalıysa araç bunu söyler ve başarılı saymaz.
 - Windows dışında araç "yalnız Windows'ta çalışır" hatası döner.
 
-Bu kanal Linux'ta test edildi; gerçek bot ve Windows toast'ı henüz denenmedi
-([yol haritası](docs/ROADMAP.md), Faz 4).
+Kanal sahte Telegram sunucusuyla test edilmiştir; gerçek botla uçtan uca deneme ve Windows
+toast kabulü sınırlıdır ([Güvenilirlik durumu](docs/RELIABILITY_STATUS.md)).
 
 ## Kod ajanı ve GitHub
 
@@ -679,3 +800,16 @@ Yeni araç tek bir `artemis/tools/plugins/` dosyasına argüman modeli ve
 üretilir. Onay mantığını araca eklemeyin; örnek ve kurallar
 [CLAUDE.md](CLAUDE.md) içindedir. Yeni davranış için izole test ve kabul senaryosu
 ekleyin.
+
+
+## Kabul durumu
+
+Güncel kod ve Windows kabul durumu tek tabloda: [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md).
+Streaming mevcuttur; gerçek cihazda geçilmeyen senaryolar bu tabloda açık kalır.
+
+**Henüz gerçek cihazda doğrulanmayanlar:** xAI Grok STT'nin Türkçesi; gerçek bot ile Telegram'dan
+bilgisayar kullanımı; Windows oturum kapatma/açma, tepsi menüsü ve çoklu ölçekli monitör
+kabulü; temiz bir Windows'ta ilk kurulum deneyimi.
+Ses tanıma beklerken yakalama devam eder; iki bekleyen segment sınırı aşılırsa uyarı verilir.
+Ses raporu STT kuyruk/çözüm sürelerini ve mikrofon düşmelerini gösterir; sınırsız yükte
+kayıpsız ses veya çalışan native STT'yi anında kesme garantisi yoktur.

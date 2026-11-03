@@ -962,6 +962,10 @@ class DenoisedMicrophone:
         with self._state_lock:
             return self._generation, self._reset_time
 
+    @property
+    def dropped_frames(self) -> int:
+        return int(getattr(self._inner, "dropped_frames", 0))
+
     async def frames(self) -> AsyncIterator[AudioFrame]:
         async for frame in self._inner.frames():
             generation, reset_time = self._snapshot()
