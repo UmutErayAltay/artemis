@@ -231,7 +231,7 @@ class ComputerSession:
         clock: Callable[[], float] = monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         memory: SessionMemory | None = None,
-        on_frame: Callable[[bytes], None] | None = None,
+        on_frame: Callable[[tuple[bytes, ...]], None] | None = None,
     ) -> None:
         # Verilen bellek aynı mesajdaki önceki çağrıdan gelir: kayıtları "önceki çağrı" olur.
         self._memory = memory if memory is not None else SessionMemory()
@@ -392,7 +392,8 @@ class ComputerSession:
         if not screens:
             return self._result("error", "Ekran bulunamadı.")
         if self._on_frame is not None:
-            self._on_frame(screens[0].png)
+            # Bütün monitörler gider: model hepsini görür, kullanıcı da hepsini görmeli.
+            self._on_frame(tuple(screen.png for screen in screens))
         return screens
 
     async def _verify(self, goal: str, turn_id: str, done_text: str, limit: float) -> SessionResult:

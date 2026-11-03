@@ -139,7 +139,7 @@ class ComputerUse(BaseTool):
             context.services["computer_memory"] = {"turn_id": context.turn_id, "memory": memory}
 
         sink = context.services.get("computer_frame_sink")
-        frame_sink = cast(Callable[[bytes], None] | None, sink)
+        frame_sink = cast(Callable[[tuple[bytes, ...]], None] | None, sink)
         stack = ExitStack()
         try:
             stop, on_step, approve = stack.enter_context(host.session())

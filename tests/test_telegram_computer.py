@@ -342,7 +342,7 @@ def test_cloud_screen_off_blocks_the_photo(make) -> None:
     harness = make(mode="auto", allow_cloud=False)
     channel, runtime, _, _ = build(harness, mode="auto")
 
-    channel._send_frame(runtime, b"\x89PNG-fake", False)
+    channel._send_frame(runtime, (b"\x89PNG-fake",), False)
     assert photos(harness) == []
 
 
@@ -350,10 +350,22 @@ def test_all_gates_open_sends_the_photo_control(make) -> None:
     harness = make(mode="auto", allow_cloud=True)
     channel, runtime, _, _ = build(harness, mode="auto")
 
-    channel._send_frame(runtime, b"\x89PNG-fake", False)
+    channel._send_frame(runtime, (b"\x89PNG-fake",), False)
     assert len(photos(harness)) == 1
-    channel._send_frame(runtime, b"\x89PNG-fake", True)  # gizli yanıt
+    channel._send_frame(runtime, (b"\x89PNG-fake",), True)  # gizli yanıt
     assert len(photos(harness)) == 1
+
+
+async def test_every_monitor_is_sent_as_its_own_photo(make) -> None:
+    harness = make(mode="auto")
+    channel, runtime, backend, _ = build(harness, mode="auto")
+    backend.monitor_rects = [(0, 0, 8, 4), (8, 0, 8, 4)]
+
+    await channel.handle_update(say("not defterini aç"))
+
+    assert len(photos(harness)) == 2  # yalnız ilk ekran değil, ikisi de
+    assert all(photo.startswith(b"\x89PNG") for photo in harness.fake.photos)
+    assert channel._frame is None
 
 
 async def test_photo_audit_has_no_image_bytes_and_frame_is_dropped(make) -> None:
