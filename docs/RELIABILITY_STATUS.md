@@ -1,6 +1,65 @@
 # Artemis kabul ve güvenilirlik durumu
 
-Güncelleme: 2026-10-27. Bu tablo güncel durumun kanonik kaynağıdır. Önceki Windows
+Bu dosya güncel durumun kanonik kaynağıdır. Her satır üç durumu ayırır: **Kodlandı**,
+**Otomatik test** (sahte arka uçla; gerçek cihaz değildir) ve **Gerçek cihaz** (Windows,
+tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.md).
+
+## Güvenilirlik turu — 2026-11-03 (dal `fix/guvenilirlik-turu`, base `aa70baf`)
+
+Ürünleştirme öncesi inceleme; yeni özellik yok. Bulgular güncel kodda yeniden doğrulandı.
+
+| Bulgu (sınıf) | Kodlandı | Otomatik test | Gerçek cihaz |
+|---|---|---|---|
+| Çökme sonrası kod ajanı depo kilidi hiç kalkmıyordu (doğrulanmış hata) | `13b994d` | geçti | bekliyor |
+| Bozuk `code_agent.sqlite3` tüm asistanı açtırmıyordu (doğrulanmış hata) | `13b994d` | geçti | bekliyor |
+| İş başlarken audit hatası işi sonsuza dek `queued` bırakıyordu (doğrulanmış hata) | `13b994d` | geçti | — |
+| Sonuç audit'i yazılamazsa gerçekleşmiş işlem "tamamlanamadı" görünüyordu (doğrulanmış hata) | `9975083` | geçti | — |
+| İptalde thread'deki PowerShell/OS işi sürerken yeni tur başlıyordu (doğrulanmış hata) | `9975083` | geçti | bekliyor |
+| Telegram kapanışı süren turu iptal etmiyordu; GUI 10 sn donuyordu (doğrulanmış hata) | `52d793b` | geçti | bekliyor |
+| Masaüstü ayar değişikliği gömülü Telegram'a ulaşmıyordu (doğrulanmış hata) | `52d793b` | geçti | bekliyor |
+| Telegram yanıtı "gönderildi ama doğrulanmadı"yı gizliyordu (doğrulanmış hata) | `52d793b` | geçti | bekliyor |
+| Bilgisayar kullanımı eski koordinat/odakla girdi gönderebiliyordu (doğrulanmış hata) | `d05cc5d` | geçti | bekliyor (DPI, çok monitör) |
+| Kod ajanı "Doğrulandı" = çıkış kodu/öz beyan (doğrulanmış hata) | `01df2f5`, `7732ba5` | geçti | bekliyor |
+| Audit dosyası sınırsız büyüyordu (bakım) | `31f3887` | geçti | bekliyor |
+| Geçmiş silme WAL/boş sayfada metin bırakıyordu; kapsam belirsizdi (doğrulanmış hata) | `df090a0` | geçti | bekliyor |
+| Kapanış temizliği süresiz bekleyebiliyordu (doğrulanmış hata) | `c274f5a` | geçti | bekliyor |
+| Karma olumsuzluk senaryosu yoktu (doğrulama eksikliği) | `fc42c95` | sahte bench 53/53 | canlı model bekliyor |
+| Konuşma sonu → eylem bitişi gecikmesi ölçülmüyordu (doğrulama eksikliği) | `831dfad` | geçti | canlı ölçüm bekliyor |
+| auto_mode_ok kapsamı kayıt geneli testsizdi (doğrulama eksikliği) | `9975083` | geçti | — |
+| app.py / voice/core.py sorumluluk ayrımı, salt taşıma (bakım) | `b945876` | geçti | — |
+
+Zaten giderilmiş bulunanlar (değişiklik yapılmadı): geç model yanıtı iptalden sonra araç
+çalıştırmıyor; iptal/süre aşımında bekleyen onaylar geçersiz; iptal edilen iş "done"
+görünmüyor; kod ajanı süreç ağacı Windows Job Object ile kapanıyor; hatırlatma talepleri
+çökme sonrası `uncertain` oluyor, iki kez çalışmıyor; SafetyGate dışında araç yürütme yolu yok.
+
+Bilerek değiştirilmeyenler / açık sınırlar:
+- `open_url` yol/alt alan adı sızıntısı (ADR 0036): Umut kararıyla aynı kaldı.
+- `read_only_tools` listesindeki MCP aracı, outbound olsa da geçmiş leke onayını atlar
+  (kullanıcının açık seçimi; `test_gate.py` bunu kilitler).
+- Claude kod ajanı Bash'i OS sandbox değildir; `Bash(git push:*)` reddi aşılabilir önek
+  kuralıdır. Bağımsız kontroller ajanın değiştirdiği depoda çalışır.
+- `computer_use` "ok" sonucu hâlâ ikinci model yargısıdır; UIA/OS durum doğrulaması yok.
+- MCP ve `claude_cli` süreçleri `taskkill /T` ile kapanır; ebeveyn önce ölürse torun yetim
+  kalabilir (Job Object yok).
+- Silme günlüğünde `prepared` satırları açılışta uzlaştırılmıyor (dürüstçe "çözülmemiş" görünür).
+- Hafıza varsayılan açık, SQLite şifresiz, geçmiş saklama varsayılan sınırsız (0 gün);
+  değiştirilmedi, README'de yazılı. Şema sürümü (`user_version`) ve yedek/geri yükleme yok.
+
+Bu turun yerel doğrulaması (Windows 11, Python 3.12.9, gerçek cihaza dokunulmadı):
+
+| | Commit | pytest | ruff | mypy | Sahte bench |
+|---|---|---|---|---|---|
+| Başlangıç | `aa70baf` | 2421 geçti / 22 atlandı / 4 seçilmedi | temiz | temiz | tehlikeli/onaysız/yanlış hedef 0 |
+| Tur sonu | `b945876` | 2466 geçti / 22 atlandı / 4 seçilmedi | temiz | temiz (135 dosya) | 53/53; tehlikeli/onaysız/yanlış hedef 0 |
+
+Her düzeltmenin regresyon testi, düzeltme geçici kaldırılınca kırıldı (mutasyon kontrolü).
+Atlamaların dökümü [TESTING.md](TESTING.md#bu-makinedeki-gerçek-atlamalar-2026-11-03-windows-11-b945876):
+8 symlink güvenlik testi bu Windows'ta yetki yüzünden koşmadı (doğrulama eksikliği).
+
+## Önceki tur (2026-10-27)
+
+Önceki Windows
 sonuçları base `737a661` içindeki kabul notlarından aktarılmıştır; bu değişikliğin
 Windows'ta tekrar doğrulandığı anlamına gelmez. Eski notlar gözlem kanıtı olarak korunur.
 
@@ -17,7 +76,7 @@ Kod commitleri: `1de710a` (onay/deadline), `c3d15a8` (ses), `8158e59` (hafıza/b
 | Geçmiş listesi/silme/saklama | SQLite ve tipli onay testleri; 0 gün varsayılan | Panel/CLI kabulü bekliyor |
 | failed/uncertain listeleme ve tekrar | Eski kayıt ve gizlilik korunur; tek atomik tekrar | Bildirim teslim denemesi bekliyor |
 | Kanal/Runtime kapanış sahipliği | Tekrarlı shutdown, kurulum hatası, mevcut bridge testleri | Aç/kapat ve süreç kontrolü bekliyor |
-| Streaming | Sağlayıcılarda kod ve test mevcut; akışsız kipte first token boş | claude_cli canlı biçim doğrulaması bekliyor |
+| Streaming | Sağlayıcılarda kod ve test mevcut; akışsız kipte first token boş | claude_cli `stream-json` biçimi 2026-10-31 canlı doğrulandı ([A3](WINDOWS_CHECKLIST.md)); diğer profiller bekliyor |
 
 Karar ve sınırlar: [ADR 0046](adr/0046-reliability-controls.md).
 
@@ -57,7 +116,7 @@ Tarih: eski kayıtlarda 2026-10-15–19; tek tek commit her kayıtta yok, uyduru
 bu tabloya tarih, test edilen commit, cihaz/ortam, geçti/kısmi/kaldı ve kanıt yolu yazılır.
 Gerçek cihaz kabulü tamamlanmadan güvenilir günlük ürün veya Windows kabulü tamamlandı denmez.
 
-## Bu sürümün yerel doğrulaması
+## 2026-10-27 yerel doğrulaması (geçmiş kayıt; güncel sürümün sonucu değildir)
 
 2026-10-27, Linux/Python 3.12, kod başı `8158e59`:
 

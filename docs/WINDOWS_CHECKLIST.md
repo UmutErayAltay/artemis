@@ -127,4 +127,34 @@ kapanınca içeriksiz rapor `state_dir/voice-telemetry/` altına yazılır (ADR 
 - [ ] Hatırlatma teslim geçmişi failed/uncertain gösteriyor; tekrar çift bildirim uyarısıyla yeni kayıt açıyor.
 - [ ] Ses/scheduler/kod işi açıkken kapatıp açma sonrası yetim süreç veya kalmış sahiplik kilidi yok.
 
+## E. Güvenilirlik turu (dal `fix/guvenilirlik-turu`, 2026-11-03)
+
+Hepsi kodlandı ve otomatik testte geçti; hiçbiri gerçek Windows'ta denenmedi. Etkili
+adımlarda (mesaj, kapatma) yalnız zararsız hedef kullanın.
+
+- [ ] **Telegram kapanışı:** Telegram'dan onay isteyen bir komut gönder (ör. "Not Defteri'ni
+  kapat"), onaylamadan masaüstünden tepsi → Çık. Uygulama ~5 sn içinde kapanıyor; Telegram'daki
+  onay mesajı "Kanal kapanıyor, reddedildi" oluyor; işlem yapılmıyor.
+- [ ] **Telegram politika eşitlemesi:** Ayarlar'da tüm uygulama erişimini kapat → Uygula.
+  Telegram'dan izin listesinde olmayan bir uygulamayı açtır → reddediliyor.
+- [ ] **Telegram durum satırı:** Telegram'dan "kilitle" ya da bilgisayar kullanımı görevi →
+  yanıtın altında "Gönderildi, sonucu doğrulanmadı: …" satırı var.
+- [ ] **İptal + thread'li araç:** Ses düzeyi/pencere komutu verip hemen Esc → "temizleniyor"
+  görünüyor; PowerShell bitmeden yeni komut başlamıyor, sonra normal devam ediyor.
+- [ ] **Bilgisayar kullanımı eski koordinat:** Not Defteri'ne yazı görevi sırasında başka bir
+  pencereyi öne getir ya da Not Defteri'ni sürükle → adım engelleniyor ("Ön plandaki pencere
+  değişti…"), yeni görüntü alınıyor; yazı başka pencereye gitmiyor. İkinci monitörü
+  çıkar/tak ya da ölçeği değiştir → "Ekran düzeni değişti". Farklı DPI'lı iki monitörde
+  tıklama doğru yere gidiyor mu, yanlış engel çıkıyor mu not edin.
+- [ ] **Kod ajanı kilidi:** Bir proje işi çalışırken Görev Yöneticisi'nden Artemis'i öldür,
+  yeniden aç → iş "kesildi", depo kilitli; Projeler → "Kilidi bırak" onay sorup kilidi
+  kaldırıyor, yeni iş başlıyor. Ajan penceresi/süreci kalmadığını Görev Yöneticisi'nde doğrula.
+- [ ] **Kod ajanı bağımsız kontrol:** `code_agent.projects.<ad>.checks: [["python","-m","pytest","-q"]]`
+  tanımla; iş bitince durum "Doğrulandı" (geçerse) ya da "Bitti, kontrol başarısız"; tanımsız
+  projede "Bitti (doğrulanmadı)".
+- [ ] **Geçmiş silme:** Hafıza → geçmişi sil; `state_dir/memory.sqlite3` içinde silinen bir
+  cümle aranınca (`Select-String`) bulunmuyor; öz notlar duruyor.
+- [ ] **Audit döndürme:** `audit.jsonl` 20 MB'ı geçince `audit-<zaman>-<pid>.jsonl` oluşuyor,
+  eski dosya silinmiyor.
+
 Sonuçları bu listede ikinci bir tablo açmadan kanonik durum tablosuna tarih/commit/kanıtla yazın.
