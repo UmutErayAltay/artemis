@@ -508,6 +508,13 @@ Davranış:
   işlemi masaüstünden onaylayın ya da `/yeni` ile yeni sohbet başlatın. Bu turların yanıtı da
   Telegram'a gelmez.
 - `/yeni` yeni sohbet başlatır; `/yardım` kısa komut özetini gösterir.
+- Bilgisayar kullanımı (`computer_use.enabled`) yalnız masaüstü içinde çalışan kanalda
+  (`run_in_desktop`) Telegram'dan da çalışır (ADR 0053); `artemis telegram` sürecinde çalışmaz.
+  Onay masaüstü kipini izler: `auto` iken adımlar sorulmaz, `accept` iken düğmeyle sorulur.
+  `/dur` çalışan oturumu durdurur (masaüstünde Esc de çalışır). Masaüstü ve Telegram oturumu aynı
+  anda çalışmaz. `telegram.send_computer_screenshot: true` oturum bitince son ekran karesini
+  sohbete yollar; gizli turda ya da `perception.allow_cloud_screen` kapalıyken hiç gönderilmez.
+  Kullanıcı başında değilken ekranın uzaktan sürülebileceğini unutmayın.
 - Kalıcı hafıza açıkken Telegram, masaüstü ve CLI aynı geçmiş deposunu kullanır: açılışta
   diğer kanalların son turları da geri yüklenir ve Telegram'daki `/yeni` hepsi için
   sıfırlama işareti koyar. `persist_memory: false` ile her kanalın geçmişi süreç içinde kalır.

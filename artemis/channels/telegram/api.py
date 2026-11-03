@@ -83,11 +83,21 @@ class TelegramClient:
         if self._owns_http:
             self._http.close()
 
-    def _call(self, method: str, payload: dict[str, Any], timeout: float) -> Any:
+    def _call(
+        self,
+        method: str,
+        payload: dict[str, Any],
+        timeout: float,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
+    ) -> Any:
         """Başarıyı yalnız HTTP 200 + `ok: true` kanıtlar; gerisi TelegramError'dır."""
         url = f"{self._api_base}/bot{self._token}/{method}"
         try:
-            response = self._http.post(url, json=payload, timeout=timeout)
+            if files is None:
+                response = self._http.post(url, json=payload, timeout=timeout)
+            else:
+                # Dosya yüklemede alanlar form olarak gider (multipart); JSON kabul edilmez.
+                response = self._http.post(url, data=payload, files=files, timeout=timeout)
         except (httpx.HTTPError, httpx.InvalidURL, ValueError) as error:
             # str(error) istek URL'sini (yani token'ı) taşıyabilir; yalnız tür adı yazılır.
             name = type(error).__name__
@@ -159,13 +169,14 @@ class TelegramClient:
         chat_id: int | None,
         text: str,
         need_message_id: bool = False,
+        files: dict[str, tuple[str, bytes, str]] | None = None,
     ) -> int | None:
         """Her giden çağrı sonuç ne olursa olsun, deneme SONRASI denetime yazılır."""
         if len(text) > TELEGRAM_TEXT_LIMIT:
             raise ValueError("Telegram metni 4096 karakter sınırını aşıyor")
         message_id: int | None = None
         try:
-            result = self._call(method, payload, self._timeout)
+            result = self._call(method, payload, self._timeout, files)
             if need_message_id:
                 raw_id = result.get("message_id") if isinstance(result, dict) else None
                 if not isinstance(raw_id, int) or isinstance(raw_id, bool):
@@ -219,6 +230,18 @@ class TelegramClient:
         if message_id is None:  # need_message_id=True iken ulaşılmaz; mypy için dürüst dal
             raise TelegramError("Telegram sendMessage başarısız (message_id yok)")
         return SentMessage(message_id)
+
+    def send_photo(self, chat_id: int, png: bytes, *, kind: str) -> None:
+        """PNG'yi fotoğraf olarak yollar. Baytlar denetime GİRMEZ (metin alanı boştur); çağıran
+        gizlilik kapılarını geçmeden bunu çağırmamalıdır (ADR 0053)."""
+        self._outbound(
+            "sendPhoto",
+            {"chat_id": chat_id},
+            kind=kind,
+            chat_id=chat_id,
+            text="",
+            files={"photo": ("screen.png", png, "image/png")},
+        )
 
     def edit_message_text(self, chat_id: int, message_id: int, text: str, *, kind: str) -> None:
         # reply_markup verilmediği için düğmeler de kaldırılır: eski onay tekrar basılamaz.

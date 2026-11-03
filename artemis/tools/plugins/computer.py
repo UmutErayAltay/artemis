@@ -1,9 +1,10 @@
 """Bilgisayar kullanımı aracı (ADR 0039): tek onayla ekranı görüp fare/klavyeyle iş yapar.
 
 Varsayılan kapalıdır (`computer_use.enabled`). Açıkken çağrı CONFIRM_REQUIRED'dır; oturum
-yalnız masaüstü uygulamasında çalışır çünkü Esc ile durdurma ve hassas adım onayı orada
-vardır (`services["computer_host"]`). Modelin "bitti" demesi işin yapıldığını kanıtlamaz:
-oturum bitince taze ekran görüntüsüyle ayrı bir doğrulama yapılır. Yalnız ekranda doğrulanan
+yalnız masaüstü uygulamasında ve gömülü Telegram kanalında (ADR 0053) çalışır çünkü durdurma
+(Esc, Telegram'da `/dur`) ve hassas adım onayı orada vardır (`services["computer_host"]`).
+Modelin "bitti" demesi işin yapıldığını kanıtlamaz: oturum bitince taze ekran görüntüsüyle
+ayrı bir doğrulama yapılır. Yalnız ekranda doğrulanan
 `done` `ok`/`success=True` olur; bu bir model yargısıdır, "kesin" değildir (kural 5, ADR 0039
 ek karar 3). Doğrulanamayan her sonuç `sent` kalır.
 """
@@ -13,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import os
 import threading
+from collections.abc import Callable
+from contextlib import ExitStack
 from time import monotonic
 from typing import Any, cast
 
@@ -22,7 +25,12 @@ from artemis.brain.errors import ProviderError, RateLimitedError, RetryableProvi
 from artemis.brain.models import Completion, Message
 from artemis.brain.providers import Provider
 from artemis.brain.router import ProviderRouter
-from artemis.computer.session import ComputerSession, SessionMemory, SessionResult
+from artemis.computer.session import (
+    ComputerSession,
+    ScreenBusyError,
+    SessionMemory,
+    SessionResult,
+)
 from artemis.config.settings import Settings
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
@@ -89,8 +97,8 @@ class ComputerUse(BaseTool):
         host = context.services.get("computer_host")
         if host is None:
             return ToolResult(
-                message="Bilgisayar kullanımı yalnız masaüstü uygulamasında çalışır; "
-                "Esc ile durdurma ve adım onayı burada yok."
+                message="Bilgisayar kullanımı yalnız masaüstü uygulamasında (ve içinde çalışan "
+                "Telegram kanalında) çalışır; durdurma ve adım onayı burada yok."
             )
         names = vision_models(settings)
         # Görüntüyü yakalamadan ÖNCE reddedilir: ekran buluta yalnız açık izinle gider. Yedek
@@ -130,7 +138,17 @@ class ComputerUse(BaseTool):
             memory = SessionMemory()
             context.services["computer_memory"] = {"turn_id": context.turn_id, "memory": memory}
 
-        with host.session() as (stop, on_step, approve):
+        sink = context.services.get("computer_frame_sink")
+        frame_sink = cast(Callable[[bytes], None] | None, sink)
+        stack = ExitStack()
+        try:
+            stop, on_step, approve = stack.enter_context(host.session())
+        except ScreenBusyError:
+            return ToolResult(
+                message="Başka bir bilgisayar kullanımı oturumu (masaüstü ya da Telegram) "
+                "ekranı kullanıyor; o bitince yeniden deneyin."
+            )
+        with stack:
             session = ComputerSession(
                 provider=cast(Provider, provider),
                 backend=backend,
@@ -144,6 +162,8 @@ class ComputerUse(BaseTool):
                 on_step=on_step,
                 provider_timeout=settings.provider_timeout_seconds,
                 memory=memory,
+                # Telegram kanalı son kareyi (yalnız RAM) isteğe bağlı iletmek için kaydeder.
+                on_frame=frame_sink,
             )
             # İptal asyncio.Event'tir, durdurma threading.Event: küçük bir görev köprüler.
             watcher = asyncio.create_task(_relay_cancel(context.cancelled, stop))

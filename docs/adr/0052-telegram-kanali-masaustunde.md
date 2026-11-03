@@ -15,7 +15,7 @@ kullanıcısı için ikinci bir süreç ve terminal pratik değil (ADR 0051 pane
 - **Kendi iş parçacığı/döngü/runtime:** `TelegramService` daemon iş parçacığında kendi asyncio
   döngüsünü açar; runtime (SQLite, döngü ilişkisi) o iş parçacığında kurulur ve orada kapanır.
   Konuşma geçmişi panelinkinden ayrıdır (ADR 0016). Onay yalnız Telegram düğmesiyle (`channel.approve`)
-  sorulur; masaüstü onay penceresi kullanılmaz. `computer_use` burada yoktur.
+  sorulur; masaüstü onay penceresi kullanılmaz. `computer_use` ADR 0053 ile eklendi (yalnız gömülü kip).
 - **İkinci proaktif zamanlayıcı yok:** masaüstünün zamanlayıcısı vardır; gömülü kip kendi
   zamanlayıcısını başlatmaz (çift teslim riski). Proje iş deposunun süreç içi kilidi de alınmaz,
   yoksa kanal önce kurulursa masaüstünün proje araçları kapanırdı (`with_code_agent=False`).

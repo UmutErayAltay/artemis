@@ -60,6 +60,15 @@ _POINTER_ACTIONS = frozenset({"click", "scroll"})
 # Deadline'a yaklaşırken son modelin ve ana döngünün yanıt verebilmesi için bırakılan pay.
 _DEADLINE_MARGIN = 2.0
 
+# Tek fiziksel ekran, tek süreç: masaüstü ve Telegram oturumları aynı fare/klavyeyi sürer
+# (ADR 0053). Kilit süreç genelindedir çünkü iki host ayrı iş parçacıklarında, birbirinden
+# habersiz kurulur; kilidin sahibi `ComputerHost.session()`'dır.
+SCREEN_LOCK = threading.Lock()
+
+
+class ScreenBusyError(RuntimeError):
+    """Başka bir bilgisayar kullanımı oturumu (masaüstü ya da Telegram) ekranı kullanıyor."""
+
 
 class ComputerBackend(Protocol):
     """`artemis.computer.windows` modülünün kullanılan yüzeyi; testler sahtesini verir."""
@@ -222,6 +231,7 @@ class ComputerSession:
         clock: Callable[[], float] = monotonic,
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         memory: SessionMemory | None = None,
+        on_frame: Callable[[bytes], None] | None = None,
     ) -> None:
         # Verilen bellek aynı mesajdaki önceki çağrıdan gelir: kayıtları "önceki çağrı" olur.
         self._memory = memory if memory is not None else SessionMemory()
@@ -241,6 +251,8 @@ class ComputerSession:
         self._clock = clock
         self._sleep = sleep
         self._steps = 0
+        # Son taze kare (yalnız RAM); sahibi karar verir, burada diske/denetime yazılmaz.
+        self._on_frame = on_frame
 
     async def run(self, goal: str, turn_id: str, deadline: float | None) -> SessionResult:
         limit = self._clock() + self._config.max_minutes * 60
@@ -379,6 +391,8 @@ class ComputerSession:
             return self._result("error", f"Ekran görüntüsü alınamadı: {error}")
         if not screens:
             return self._result("error", "Ekran bulunamadı.")
+        if self._on_frame is not None:
+            self._on_frame(screens[0].png)
         return screens
 
     async def _verify(self, goal: str, turn_id: str, done_text: str, limit: float) -> SessionResult:

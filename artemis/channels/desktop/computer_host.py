@@ -2,7 +2,8 @@
 
 Qt'siz tutulur; bridge işçi iş parçacığı bunu `services["computer_host"]` olarak kaydeder,
 `computer_use` aracı yalnız burada bulunan Esc kısayoluna ve onay köprüsüne güvenir. Başka
-kanalda (CLI, Telegram) host yoktur ve araç çalışmayı reddeder.
+kanalda (CLI) host yoktur ve araç çalışmayı reddeder. Gömülü Telegram kanalı kendi
+host'unu kurar (ADR 0053); ekran kilidi (`SCREEN_LOCK`) iki host arasında ortaktır.
 """
 
 from __future__ import annotations
@@ -13,6 +14,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from artemis.channels.desktop.hotkey import GlobalHotkey
+from artemis.computer.session import SCREEN_LOCK, ScreenBusyError
 
 # (durdurma olayı, adım bildirimi, onay) — oturum boyunca araca verilen üçlü.
 SessionHandles = tuple[
@@ -32,25 +34,37 @@ class ComputerHost:
         self._approve = approve
         self._emit_status = emit_status
         self._on_escape = on_escape
-        self._lock = threading.Lock()
-        self._active = False
+        self._stop: threading.Event | None = None
+
+    @property
+    def active(self) -> bool:
+        return self._stop is not None
+
+    def stop_active(self) -> bool:
+        """Esc kısayolunun yaptığı: oturum bayrağını kaldırır ve turu iptal ettirir.
+
+        Bayrak adım arasında bakılır; süren model çağrısını ve beklemeyi kesmek için tur da
+        İptal düğmesiyle aynı yoldan iptal edilir. Oturum yoksa False döner.
+        """
+        stop = self._stop
+        if stop is None:
+            return False
+        stop.set()
+        if self._on_escape is not None:
+            self._on_escape()
+        return True
+
+    def _escape(self) -> None:
+        self.stop_active()
 
     @contextmanager
     def session(self) -> Iterator[SessionHandles]:
-        with self._lock:
-            if self._active:
-                raise RuntimeError("Zaten bir bilgisayar kullanımı oturumu sürüyor.")
-            self._active = True
+        # Ekran süreç genelinde tek oturumludur (masaüstü + Telegram); ikincisi reddedilir.
+        if not SCREEN_LOCK.acquire(blocking=False):
+            raise ScreenBusyError("Zaten bir bilgisayar kullanımı oturumu sürüyor.")
         stop = threading.Event()
-
-        def escape() -> None:
-            # Bayrak tek başına adım arasında bakılır; süren model çağrısını ve beklemeyi
-            # kesmek için tur da İptal düğmesiyle aynı yoldan iptal edilir.
-            stop.set()
-            if self._on_escape is not None:
-                self._on_escape()
-
-        hotkey = GlobalHotkey("escape", escape)
+        self._stop = stop
+        hotkey = GlobalHotkey("escape", self._escape)
         try:
             # Kayıt başarısızsa oturum yine çalışır ama kullanıcı bunu bilmelidir.
             if not hotkey.start():
@@ -59,5 +73,5 @@ class ComputerHost:
         finally:
             hotkey.stop()
             self._emit_status("")
-            with self._lock:
-                self._active = False
+            self._stop = None
+            SCREEN_LOCK.release()

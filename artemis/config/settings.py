@@ -222,6 +222,10 @@ class TelegramConfig(BaseModel):
     max_message_age_seconds: int = Field(default=120, ge=1, le=3600)
     # İki yönlü kanalı masaüstü içinde çalıştırır (ADR 0052); varsayılan kapalı.
     run_in_desktop: bool = False
+    # Telegram'dan çalışan `computer_use` bitince son ekran karesini sohbete yollar (ADR 0053).
+    # Kare buluta (Telegram) gider: gizli tur/geçmişte ve `perception.allow_cloud_screen`
+    # kapalıyken hiç gönderilmez.
+    send_computer_screenshot: bool = False
 
     @field_validator("token_env")
     @classmethod
