@@ -89,7 +89,7 @@ Tarih: eski kayıtlarda 2026-10-15–19; tek tek commit her kayıtta yok, uyduru
 |---|---|---|
 | 1 | Kısmi geçti | Toast kullanıcı ayarında kapalı |
 | 2 | Yapılmadı | Yeniden açılışta kaçan hatırlatma |
-| 3 | Kısmi geçti | Gerçek gözetimsiz yazma reddi tetiklenmedi |
+| 3 | Kısmi geçti | Gerçek gözetimsiz yazma reddi hâlâ tetiklenmedi. 2026-11-04 00:04 (`b945876`, Windows 11, `claude-haiku-5-5`): «kabul» brifingi gözetimsiz koştu (`unattended: true`), yalnız `reminder_list` (READ_ONLY) çağrıldı, teslim `panel: ok`. Model istem önekine uyup yazma aracını hiç çağırmadı; kapının reddi (`approval`, `unattended=True`) audit'te yok. Kanıt: `.jarvis/audit.jsonl` turn `d6465dc3`. Brifing sonra config'ten kaldırıldı. |
 | 4–6 | Geçti | MCP okuma/onay/süreç temizliği; bu sürümde tekrar bekliyor |
 | 7 | Odak düzeltmesi canlı denendi | Türkçe OCR harf hataları sürüyor |
 | 8 | Yapılmadı | Farklı ekran ölçeği |
