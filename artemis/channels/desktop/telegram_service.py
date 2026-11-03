@@ -117,6 +117,7 @@ class TelegramService:
                     embedded=True,
                     status=self._report,
                     runtime_factory=self._runtime_factory,
+                    stop_flag=self._stop_requested,
                 )
             )
         except Exception as error:  # noqa: BLE001 - iş parçacığı sınırı: yutulmaz, panele bildirilir

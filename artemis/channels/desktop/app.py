@@ -1011,6 +1011,7 @@ class DesktopWindow(QMainWindow):
         self._app = app_instance
         self._config_path = config_path
         self._restart_settings = False
+        self._telegram_resynced = False
         self._config_restart_pending = False
         self._config_restart_serial = -1
         # Ertelenen yeniden kurulumun "neden bekliyor" notu isteği yapan panelde görünür.
@@ -1642,12 +1643,17 @@ class DesktopWindow(QMainWindow):
     def _telegram_changed(self) -> None:
         """chat_id/token değişti: proaktif Telegram teslimi yeniden kurulumla yeni durumu görür."""
         status = self.settings_panel.telegram.message
-        # Kanal servisi çalışma zamanından bağımsızdır: yeni sohbet/token hemen eşitlenir.
-        self._sync_telegram_service()
         if self._exiting or self._demo:
+            self._sync_telegram_service()
             status.setText("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
             return
+        # Kanal servisi çalışma zamanından bağımsızdır: yeni sohbet/token hemen eşitlenir.
+        # Yeniden kurulum hemen yapıldıysa o zaten eşitlemiştir (çift yeniden başlatma olmasın);
+        # ertelendiyse (meşgul) ya da sürüyorsa burada eşitlenir.
+        self._telegram_resynced = False
         self._request_restart(status)
+        if not self._telegram_resynced:
+            self._sync_telegram_service()
 
     def _sync_telegram_service(self) -> None:
         """Config'e göre kanal servisini durdurup (gerekirse) yeniden başlatır; canlı, yeniden
@@ -1754,6 +1760,10 @@ class DesktopWindow(QMainWindow):
         """Config değişince çalışma zamanını yeniden kurar (Uygula ve sağlayıcı kaydı)."""
         if self.settings_panel.pet.creator is not None:
             self.settings_panel.pet.creator.reload_models()
+        # Gömülü Telegram kanalı kendi runtime'ını açılışta okunan ayarla kurmuştu (örn. izinli
+        # uygulamalar); yeniden kurulmazsa eski, gevşek politikayla çalışmaya devam ederdi.
+        self._sync_telegram_service()
+        self._telegram_resynced = True
         self._voice_on_ready = self.bridge.voice_active
         self._restart_settings = True
         self._worker_ready = False

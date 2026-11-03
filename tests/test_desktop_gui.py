@@ -696,6 +696,44 @@ def test_settings_apply_when_idle_rebuilds_immediately_and_pending_approval_defe
         _close_cleanly(app, window)
 
 
+class _FakeTelegramService:
+    """Gerçek iş parçacığı/ağ yok: yalnız stop/start çağrılarını sayar."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def stop(self) -> None:
+        self.calls.append("stop")
+
+    def start(self, _config_path: Path) -> bool:
+        self.calls.append("start")
+        return True
+
+
+def test_settings_apply_resyncs_embedded_telegram_once(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import artemis.channels.desktop.app as app_module
+
+    window, _path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    fake = _FakeTelegramService()
+    window._telegram_service = fake  # type: ignore[assignment]
+    monkeypatch.setattr(app_module, "should_run", lambda _config: True)
+    try:
+        # Uygula: gömülü kanal runtime'ı eski ayarla kalmasın, durup config'ten yeniden başlar.
+        window.settings_panel._apply()
+        _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
+        assert fake.calls == ["stop", "start"]
+        # Telegram ayarı değişince hemen yeniden kurulum da olsa çift yeniden başlatma olmaz.
+        fake.calls.clear()
+        window._telegram_changed()
+        _wait(app, lambda: len(seen) == 3 and window._worker_ready, timeout=8)
+        assert fake.calls == ["stop", "start"]
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
 def test_rebuild_waits_for_background_job_even_when_panel_list_is_stale(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
