@@ -38,6 +38,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QMenu,
+    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
@@ -1984,6 +1985,14 @@ class DesktopWindow(QMainWindow):
         """
         mode = "auto" if checked else "accept"
         saved = True
+        if checked and not self._demo and not self._confirm_auto_mode():
+            # Vazgeçilirse iki denetim de kapalı kalır; kip hiç değişmez.
+            for control in (self.settings_panel.computer_auto, self.auto_button):
+                control.blockSignals(True)
+                control.setChecked(False)
+                control.blockSignals(False)
+            self._show_auto_state(False)
+            return
         if not self._demo:
             # Önce config: yazılamayan kip runtime'a uygulanırsa güvenlik ayarı sessizce
             # diskten ayrışırdı (yeniden açılışta eski kip döner).
@@ -2005,6 +2014,26 @@ class DesktopWindow(QMainWindow):
         self._show_auto_state(shown)
         if saved and not self._demo:
             self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
+
+    def _confirm_auto_mode(self) -> bool:
+        """Otomatik kip bilinçli açılır: varsayılan cevap hayır (kural 2'nin ruhu)."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Otomatik onayı aç?")
+        box.setText(
+            "Otomatik onayda Artemis ekranı okur, tıklar ve yazar; hassas adımları da "
+            "sana sormadan yapar. Esc her an durdurur."
+        )
+        box.setInformativeText(
+            "Yanlış anlaşılan bir komut ya da ekrandaki zararlı bir metin, istemediğin bir "
+            "işlemi tetikleyebilir. Terminal, Artemis ve parola yöneticisi yine engelli."
+        )
+        yes = box.addButton("Riski anlıyorum, aç", QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton("Vazgeç", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.setEscapeButton(no)
+        box.exec()
+        return box.clickedButton() is yes
 
     def _show_auto_state(self, on: bool) -> None:
         """Simge anahtarı metin taşımaz; durum erişilebilir açıklamada ve ipucunda okunur."""

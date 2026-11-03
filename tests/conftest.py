@@ -85,3 +85,13 @@ def qt_widgets_deleted_by_qt():
     for widget in app.topLevelWidgets():
         widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+
+
+@pytest.fixture(autouse=True)
+def auto_mode_warning_accepted(monkeypatch):
+    # Uyarı modal olduğundan testte asılı kalırdı; onay/ret yolları kendi testinde ayrıca sınanır.
+    try:
+        from artemis.channels.desktop.app import DesktopWindow
+    except ImportError:
+        return
+    monkeypatch.setattr(DesktopWindow, "_confirm_auto_mode", lambda self: True)
