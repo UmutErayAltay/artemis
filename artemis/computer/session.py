@@ -33,6 +33,7 @@ from artemis.computer.actions import (
     scale_point,
 )
 from artemis.config.settings import ComputerUseConfig
+from artemis.tools.base import run_blocking
 
 Reason = Literal[
     "done", "ask_user", "limit", "timeout", "rejected", "stopped", "blocked", "invalid", "error"
@@ -626,4 +627,5 @@ class ComputerSession:
                 backend.press_keys(parse_keys(action.keys or ""))
             return True
 
-        return await asyncio.to_thread(send)
+        # İptalde de girdi thread'i bitene dek görev açık kalır (temizlik sürüyor sayılır).
+        return await run_blocking(send)

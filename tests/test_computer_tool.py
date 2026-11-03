@@ -584,3 +584,16 @@ async def test_memory_is_shared_within_same_turn_and_reset_for_new_turn(tmp_path
     await gate.dispatch(CALL, context, TurnState(), never)  # yeni mesaj: bellek düşer
     fresh = str(vision.seen[before][1].content)
     assert "Aynı mesajdaki önceki" not in fresh and "Adım 1" not in fresh
+
+
+def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
+    """ADR 0039: onay atlaması yalnız bu üç araçta; dördüncüsü ADR'siz eklenirse kırılır."""
+    from artemis.tools.registry import discover_tools
+
+    registry = discover_tools()
+    skipping = {
+        definition.name
+        for definition in registry.definitions()
+        if getattr(registry.get(definition.name), "auto_mode_ok", False)
+    }
+    assert skipping == {"computer_use", "window_control", "screen_read"}

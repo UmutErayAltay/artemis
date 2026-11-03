@@ -6,7 +6,6 @@ dış içerikle lekeli turda onay ister. Böylece web/dosya metni kullanıcı ad
 "anı" yazamaz (anti-injection). Kapıya özel durum eklenmez.
 """
 
-import asyncio
 import sqlite3
 from typing import cast
 
@@ -14,7 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from artemis.memory.store import MemoryStore
 from artemis.memory.vault import make_excerpt
-from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.registry import register_tool
 
 MAX_NOTE_CHARS = 300
@@ -78,7 +77,7 @@ class MemoryRemember(BaseTool):
         if store is None:
             return ToolResult(status="error", message=_DISABLED)
         try:
-            outcome, note_id = await asyncio.to_thread(
+            outcome, note_id = await run_blocking(
                 store.add_note, args.text, context.turn_id, MAX_NOTES
             )
         except (OSError, sqlite3.Error) as error:
@@ -110,7 +109,7 @@ class MemoryForget(BaseTool):
         if store is None:
             return ToolResult(status="error", message=_DISABLED)
         try:
-            deleted = await asyncio.to_thread(store.delete_note, args.note_id)
+            deleted = await run_blocking(store.delete_note, args.note_id)
         except (OSError, sqlite3.Error) as error:
             return _error(error)
         if not deleted:
@@ -132,7 +131,7 @@ class MemoryList(BaseTool):
         if store is None:
             return ToolResult(status="error", message=_DISABLED)
         try:
-            notes = await asyncio.to_thread(store.list_notes)
+            notes = await run_blocking(store.list_notes)
         except (OSError, sqlite3.Error) as error:
             return _error(error)
         items = [{"id": n.id, "text": n.text, "created_at": n.created_at} for n in notes]
@@ -161,7 +160,7 @@ class ConversationSearch(BaseTool):
         if store is None:
             return ToolResult(status="error", message=_DISABLED)
         try:
-            hits = await asyncio.to_thread(store.search_turns, args.query, args.limit)
+            hits = await run_blocking(store.search_turns, args.query, args.limit)
         except (OSError, sqlite3.Error) as error:
             return _error(error)
         results = [

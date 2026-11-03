@@ -4,12 +4,16 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar, Literal
+from typing import TYPE_CHECKING, Any, ClassVar, Literal, ParamSpec, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 if TYPE_CHECKING:
     from artemis.config.settings import Settings
@@ -31,6 +35,28 @@ def normalize_risk(value: object) -> Risk:
         return Risk(value)
     except (ValueError, TypeError):
         return Risk.SIDE_EFFECT
+
+
+async def run_blocking(func: Callable[_P, _T], /, *args: _P.args, **kwargs: _P.kwargs) -> _T:
+    """`asyncio.to_thread` gibi, ama iptal edilince thread bitene dek görevi bitirmez.
+
+    İptal yalnız beklemeyi keser; thread'deki PowerShell/OS çağrısı sürer. Görev hemen
+    "iptal edildi" diye biterse tur temizlenmiş sayılır ve yan etki sürerken yeni tur başlar.
+    Görev canlı kaldıkça AgentLoop onu temizliği süren iş olarak tutar (`cleanup_pending`).
+    Yan etkili araçlar thread'e bu yardımcıyla çıkar.
+    """
+    future = asyncio.ensure_future(asyncio.to_thread(func, *args, **kwargs))
+    try:
+        return await asyncio.shield(future)
+    except asyncio.CancelledError:
+        while not future.done():
+            try:
+                await asyncio.wait((future,))
+            except asyncio.CancelledError:
+                continue  # Tekrarlanan iptal de thread'i durduramaz; bitişini beklemeye devam.
+        if not future.cancelled():
+            future.exception()  # Sonuç okunmazsa "never retrieved" uyarısı kalır.
+        raise
 
 
 class ToolResult(BaseModel):
