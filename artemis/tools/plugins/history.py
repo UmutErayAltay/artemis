@@ -24,8 +24,10 @@ class HistoryTool(BaseTool):
     done_label = "Geçmiş işlemi tamamlandı"
     description = (
         "Yerel konuşma geçmişi yönetimi; yalnız panel/CLI kontrolü içindir. "
-        "delete tüm konuşma arşivini siler; öz notlar kalır. retention 0 otomatik silmeyi "
-        "kapatır, pozitif gün sayısı eski turları hemen siler. Güvenli disk silme değildir."
+        "delete memory.sqlite3'teki tüm konuşma arşivini siler ve dosyayı yeniden yazar; öz "
+        "notlar, denetim günlüğü (audit*.jsonl, kullanıcı girdilerini de içerir) ve proje işi "
+        "kayıtları SİLİNMEZ. retention 0 otomatik silmeyi kapatır, pozitif gün sayısı eski "
+        "turları hemen siler. Güvenli disk silme değildir (SSD/yedek kopyaları kapsamaz)."
     )
     args_model = HistoryArguments
     risk = Risk.CONFIRM_REQUIRED
@@ -59,5 +61,6 @@ class HistoryTool(BaseTool):
             success=True,
             status="ok",
             data=data,
-            message=f"Geçmiş işlemi doğrulandı; {removed} tur silindi. Kalıcı öz notlar korundu.",
+            message=f"Geçmiş işlemi doğrulandı; {removed} tur silindi. Kalıcı öz notlar ve "
+            "denetim günlüğü korundu.",
         )

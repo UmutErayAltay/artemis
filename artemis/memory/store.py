@@ -119,9 +119,16 @@ class MemoryStore:
 
     def delete_history(self) -> int:
         # Tek transaction: notlara dokunma; sıfırlama işaretleri artık gereksizdir.
-        with self._connect() as db, db:
-            count = db.execute("DELETE FROM turns").rowcount
-            db.execute("DELETE FROM resets")
+        with self._connect() as db:
+            with db:
+                count = db.execute("DELETE FROM turns").rowcount
+                db.execute("DELETE FROM resets")
+            # DELETE yalnız satırı işaretler: metin WAL'da ve boş sayfalarda kalır. Kullanıcı
+            # "sil" dediğinde dosyada okunabilir iz bırakmamak için WAL ana dosyaya işlenip
+            # kesilir, dosya VACUUM ile yeniden yazılır. (SSD/yedek kopyalarını kapsamaz.)
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            db.execute("VACUUM")
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             return count
 
     def history_page(self, limit: int = 50) -> list[dict[str, str]]:

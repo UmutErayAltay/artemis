@@ -278,3 +278,13 @@ async def test_history_control_is_not_shared_with_proactive_context(tmp_path):
         assert not result.success and result.data == {}
     finally:
         runtime.shutdown()
+
+
+def test_deleted_history_text_does_not_linger_in_database_files(store: MemoryStore) -> None:
+    """Silinen tur metni WAL/serbest sayfalarda kalmasın: dosya baytlarında aranır."""
+    store.add_turn(turn("gizli-iz-7c1e", "yanıt-iz-7c1e"))
+    assert store.delete_history() == 1
+    files = [store.path, store.path.with_name(store.path.name + "-wal")]
+    blob = b"".join(path.read_bytes() for path in files if path.exists())
+    assert b"gizli-iz-7c1e" not in blob
+    assert b"yan\xc4\xb1t-iz-7c1e" not in blob
