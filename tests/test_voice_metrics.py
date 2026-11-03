@@ -124,6 +124,10 @@ def test_repeated_model_and_tool_phases_are_summed_not_invalid():
     assert sample["derived_ms"]["model_total_ms"] == pytest.approx(450)
     assert sample["derived_ms"]["tool_total_ms"] == pytest.approx(150)
     assert sample["derived_ms"]["model_first_response_ms"] == pytest.approx(300)
+    # Konuşma bitişinden son araç dönüşüne (eylemin tamamlandığı an): 2.0 → 3.6.
+    assert sample["derived_ms"]["speech_end_to_tool_end_ms"] == pytest.approx(1600)
+    tool_stages = report["by_command_class"]["tool"]["stages"]
+    assert tool_stages["speech_end_to_tool_end_ms"]["samples"] == 1
     assert report["by_command_class"]["tool"]["completed"] == 1
     assert report["by_command_class"]["chat"]["utterances"] == 0
     # Akışsız sağlayıcı: ilk token örneği yok, uydurulmaz.
