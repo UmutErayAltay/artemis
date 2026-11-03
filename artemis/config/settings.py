@@ -309,6 +309,18 @@ class ProjectEntry(BaseModel):
     agent: str | None = None
     workdir: str | None = None
     mode: RunMode | None = None
+    # Bağımsız kontroller (test/build/lint): her biri argv listesidir, kabuk yoktur. Ajan
+    # bittikten sonra Artemis çalıştırır; ajanın "bitti" beyanı tek başına doğrulama sayılmaz.
+    # Yalnız YAML'dan gelir; model/araç bu listeyi kuramaz ve değiştiremez.
+    checks: tuple[tuple[str, ...], ...] = ()
+
+    @field_validator("checks")
+    @classmethod
+    def validate_checks(cls, value: tuple[tuple[str, ...], ...]) -> tuple[tuple[str, ...], ...]:
+        for argv in value:
+            if not argv or any(not part.strip() for part in argv):
+                raise ValueError("checks girdisi boş olmayan metinlerden oluşan argv olmalı")
+        return value
 
 
 class CodeAgentConfig(BaseModel):
@@ -325,6 +337,8 @@ class CodeAgentConfig(BaseModel):
     workdirs: dict[str, Path] = Field(default_factory=dict)
     command: str = Field(default="claude", min_length=1)
     max_minutes: float = Field(default=20.0, ge=1, le=120)
+    # Her bağımsız kontrol komutu için üst süre (sn); aşılırsa kontrol başarısız sayılır.
+    check_timeout_seconds: float = Field(default=600.0, ge=1, le=3600)
     model: str | None = None  # Eski yönetici modeli ayarı; manager_model kazanır.
     manager_model: str | None = Field(default=None, min_length=1, max_length=128)
     coder_model: str | None = Field(default=None, min_length=1, max_length=128)

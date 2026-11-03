@@ -10,10 +10,11 @@ import json
 import os
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack, closing, suppress
 from copy import deepcopy
 from pathlib import Path
@@ -47,6 +48,8 @@ from artemis.tools.platform import child_environment
 from artemis.tools.project_spec import ProjectSpec, SegmentOutput
 
 SUMMARY_LIMIT = 2000
+CHECK_TAIL = 400
+STDERR_TAIL = 300
 ProcessFactory = Callable[..., Any]
 ACTIVE = {"queued", "running", "waiting", "cancelling"}
 
@@ -128,6 +131,8 @@ class CodeAgentJobs:
         self._all_threads: set[threading.Thread] = set()
         self._cancelled: set[str] = set()
         self._settings: dict[str, tuple[Path, AgentRun]] = {}
+        # Bağımsız kontroller config'ten gelir, iş kaydına yalnız SONUÇLARI yazılır.
+        self._checks: dict[str, tuple[tuple[tuple[str, ...], ...], float]] = {}
         self._shutdown = False
         self._deadlines: dict[str, float] = {}
         self._began: dict[str, float] = {}
@@ -197,6 +202,10 @@ class CodeAgentJobs:
                     record.setdefault("mode", "background")
                     record.setdefault("workdir", "proje")
                     record.setdefault("workdir_path", record.get("repo", ""))
+                    # Eski satırlar bağımsız kontrol bilmez: "doğrulandı" iddiası taşıyamazlar.
+                    record.setdefault("verification", "unverified")
+                    record.setdefault("checks", [])
+                    record.setdefault("changes", "none")
                     self._jobs[key] = record
             for record in self._jobs.values():
                 self._save(record["job_id"], "job", record)
@@ -296,6 +305,8 @@ class CodeAgentJobs:
         spec: ProjectSpec | None = None,
         profile: AgentProfile | None = None,
         workdir: Path | None = None,
+        checks: Sequence[Sequence[str]] = (),
+        check_timeout: float = 600.0,
     ) -> str:
         # profile/workdir verilmezse eski davranış: Claude, cwd = proje reposu.
         profile = profile or AgentProfile(kind="claude", command=command)
@@ -377,6 +388,10 @@ class CodeAgentJobs:
                 "status": "queued",
                 "commits": [],
                 "leftover_changes": None,
+                # Üç ayrı olgu: süreç bitti (status) / değişiklik (changes) / bağımsız kontrol.
+                "changes": "none",
+                "verification": "unverified",
+                "checks": [],
                 "summary": "",
                 "duration_seconds": 0.0,
                 "cost_usd": None,
@@ -394,6 +409,7 @@ class CodeAgentJobs:
                 raise
             self._jobs[job_id] = record
             self._settings[job_id] = start_dir, run
+            self._checks[job_id] = tuple(tuple(argv) for argv in checks), check_timeout
             self._began[job_id] = self._clock()
             self._deadlines[job_id] = self._began[job_id] + max_minutes * 60
             try:
@@ -568,6 +584,30 @@ class CodeAgentJobs:
             commit_list, dirty = [], None
             if status in {"done", "waiting"}:
                 status, summary = "error", "Git sonucu doğrulanamadı; iş başarılı sayılmadı."
+        changes = (
+            "unknown"
+            if dirty is None
+            else "commits"
+            if commit_list
+            else "uncommitted"
+            if dirty
+            else "none"
+        )
+        if status == "done" and changes == "uncommitted":
+            # Örn. Codex workspace-write'ta .git yazılamayabilir; "commit'li bitti" denmez.
+            summary += " Değişiklikler commitlenmedi (diskte duruyor)."
+        verification: str = "unverified"
+        check_results: list[dict[str, Any]] = []
+        # Süre aşımı kararı kontrol süresinden ÖNCE alınır: kontroller ajanın süre bütçesinden
+        # yemez, yoksa uzun bir test paketi biten işi "timeout"a çevirirdi.
+        late = self._clock() >= self._deadlines[job_id]
+        if status == "done":
+            verification, check_results = self._verify(job_id, repo)
+            summary += {
+                "accepted": " Bağımsız kontroller geçti.",
+                "failed": " Bağımsız kontrol BAŞARISIZ; sonuç kabul edilmedi.",
+                "unverified": " Bağımsız kontrol çalışmadı veya tanımlı değil; doğrulanmadı.",
+            }[verification]
         if clean:
             # Temizlik doğrulanamadıysa süreç yaşıyor olabilir; dosyalar o durumda kalır.
             run.cleanup()
@@ -575,7 +615,7 @@ class CodeAgentJobs:
             job = self._jobs[job_id]
             if job_id in self._cancelled and clean:
                 status = "cancelled"
-            elif self._clock() >= self._deadlines[job_id] and status in {"done", "waiting"}:
+            elif late and status in {"done", "waiting"}:
                 status = "timeout"
             question_id = str(uuid.uuid4()) if status == "waiting" else None
             self._update(
@@ -585,6 +625,9 @@ class CodeAgentJobs:
                 cost_usd=cost,
                 commits=redact(commit_list),
                 leftover_changes=dirty,
+                changes=changes,
+                verification=verification if status == "done" else "unverified",
+                checks=check_results if status == "done" else [],
                 cleanup_pending=not clean,
                 duration_seconds=round(self._clock() - self._began[job_id], 1),
                 session_id=session or job["session_id"],
@@ -608,6 +651,85 @@ class CodeAgentJobs:
                 self._threads[job_id] = watcher
                 self._all_threads.add(watcher)
                 watcher.start()
+
+    def _verify(self, job_id: str, repo: Path) -> tuple[str, list[dict[str, Any]]]:
+        """Artemis'in kendi çalıştırdığı kontroller; ajanın beyanı bunun yerine geçmez."""
+        argvs, timeout = self._checks.get(job_id, ((), 0.0))
+        results: list[dict[str, Any]] = []
+        for argv in argvs:
+            if not self._may_check(job_id):
+                return "unverified", results  # iptal/kapanış: kontrol başlatılmaz
+            result = self._run_check(job_id, repo, argv, timeout)
+            results.append(result)
+            self._audit.emit(
+                "code_agent_checks",
+                job_id=job_id,
+                command=result["command"],
+                exit_code=result["exit_code"],
+                passed=result["passed"],
+            )
+        if not argvs or len(results) < len(argvs):
+            return "unverified", results
+        return ("accepted" if all(r["passed"] for r in results) else "failed"), results
+
+    def _may_check(self, job_id: str) -> bool:
+        with self._lock:
+            return not self._shutdown and job_id not in self._cancelled
+
+    def _run_check(
+        self, job_id: str, repo: Path, argv: tuple[str, ...], timeout: float
+    ) -> dict[str, Any]:
+        """Kabuksuz, `child_environment()` ile; çıktı geçici dosyada (bellek sınırsız şişmesin)."""
+        command = redact(" ".join(argv))[:200]
+        exit_code: int | None = None
+        note = ""
+        with tempfile.TemporaryFile() as sink:
+            try:
+                proc = subprocess.Popen(
+                    list(argv),
+                    cwd=repo,
+                    env=child_environment(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=sink,
+                    stderr=subprocess.STDOUT,
+                    creationflags=NO_WINDOW,
+                    start_new_session=os.name != "nt",
+                )
+            except (OSError, ValueError) as error:
+                return {
+                    "command": command,
+                    "exit_code": None,
+                    "passed": False,
+                    "output_tail": f"Kontrol başlatılamadı: {type(error).__name__}.",
+                }
+            end = time.monotonic() + timeout
+            while True:
+                try:
+                    exit_code = proc.wait(timeout=0.1)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+                cancelled = not self._may_check(job_id)
+                if cancelled or time.monotonic() >= end:
+                    kill_tree(proc)
+                    with suppress(OSError, subprocess.TimeoutExpired):
+                        proc.wait(timeout=CLEANUP_SECONDS)
+                    note = (
+                        "Kontrol iptal nedeniyle durduruldu."
+                        if cancelled
+                        else "Kontrol zaman aşımına uğradı."
+                    )
+                    break
+            sink.seek(0, os.SEEK_END)
+            sink.seek(max(0, sink.tell() - CHECK_TAIL * 4))
+            tail = sink.read().decode("utf-8", errors="replace")
+        tail = redact((note + " " + tail.strip()).strip())[-CHECK_TAIL:]
+        return {
+            "command": command,
+            "exit_code": exit_code,
+            "passed": exit_code == 0 and not note,
+            "output_tail": tail,
+        }
 
     def _expire_waiting(self, job_id: str, question_id: str | None) -> None:
         while True:
@@ -656,8 +778,14 @@ class CodeAgentJobs:
                 segment,
                 session,
             )
-        except (ValueError, TypeError, ValidationError):
-            return "error", "CLI çıkışı veya structured_output doğrulanamadı.", None, None, None
+        except (ValueError, TypeError, ValidationError) as error:
+            # Teşhis için: neden türü + çıkış kodu + kısa, sırları temizlenmiş stderr.
+            detail = f"{type(error).__name__}, çıkış kodu {code}"
+            tail = redact(stderr.strip()[-STDERR_TAIL:])
+            message = f"CLI çıkışı veya structured_output doğrulanamadı ({detail})."
+            if tail:
+                message += f" stderr: {tail}"
+            return "error", message, None, None, None
 
     def status(self) -> list[dict[str, Any]]:
         with self._lock:

@@ -206,6 +206,7 @@ class CodeAgentStart(BaseTool):
             return ToolResult(
                 message="Ayarlar değişti; onaylanan yollar geçersiz. Yeni taslak hazırlayın."
             )
+        entry = config.project_entries.get(alias)
         try:
             job_id = jobs.start(
                 alias,
@@ -215,6 +216,8 @@ class CodeAgentStart(BaseTool):
                 workdir=None if workdir_alias == OWN_REPO_ALIAS else workdir,
                 command=config.command,
                 max_minutes=config.max_minutes,
+                checks=entry.checks if entry else (),
+                check_timeout=config.check_timeout_seconds,
                 model=config.model,
                 manager_model=config.manager_model,
                 coder_model=config.coder_model,
