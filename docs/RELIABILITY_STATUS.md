@@ -14,7 +14,7 @@ tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.
 | Bozuk `code_agent.sqlite3` tüm asistanı açtırmıyordu (doğrulanmış hata) | `13b994d` | geçti | bekliyor |
 | İş başlarken audit hatası işi sonsuza dek `queued` bırakıyordu (doğrulanmış hata) | `13b994d` | geçti | — |
 | Sonuç audit'i yazılamazsa gerçekleşmiş işlem "tamamlanamadı" görünüyordu (doğrulanmış hata) | `9975083` | geçti | — |
-| İptalde thread'deki PowerShell/OS işi sürerken yeni tur başlıyordu (doğrulanmış hata) | `9975083` | geçti | bekliyor. 2026-11-04 deneme geçersiz: kontrol listesi yanlışlıkla Esc dedi; Esc yalnız bilgisayar kullanımı oturumunu durdurur, turlar (`aada1a`, `547dcf`, `7f1cea`) iptal almadan bitti. İptal düğmesiyle tekrar |
+| İptalde thread'deki PowerShell/OS işi sürerken yeni tur başlıyordu (doğrulanmış hata) | `9975083` | geçti | kısmi 2026-11-04 (Umut, turn `367cfe`): İptal düğmesi model çağrısını 0,56 sn'de kesti, hiçbir araç çalışmadı, `stop=cancelled`. PowerShell thread'i sürerken iptal anı elle yakalanamadı (pencere ~0,4 sn); **sonra**. (İlk üç deneme Esc ile yapıldığı için geçersizdi.) |
 | Telegram kapanışı süren turu iptal etmiyordu; GUI 10 sn donuyordu (doğrulanmış hata) | `52d793b` | geçti | geçti 2026-11-04 (Umut): onay beklerken Çık → kapandı, onay reddedildi; audit `edbc01` `close_application denied`, `stop=cancelled` |
 | Masaüstü ayar değişikliği gömülü Telegram'a ulaşmıyordu (doğrulanmış hata) | `52d793b` | geçti | geçti 2026-11-04 (Umut): tüm uygulama erişimi kapalıyken Telegram'dan "Operayı aç" reddedildi (`ee6a1f`, araç çağrılmadı) |
 | Telegram yanıtı "gönderildi ama doğrulanmadı"yı gizliyordu (doğrulanmış hata) | `52d793b` | geçti | geçti 2026-11-04 (Umut): "Ekranı kilitle" → `power sent` (`71dacf`), yanıtta durum satırı |
