@@ -146,7 +146,8 @@ adımlarda (mesaj, kapatma) yalnız zararsız hedef kullanın.
   Defteri penceresine yaz" diye ver; yoksa model dosya oluşturup açmayı seçebilir ve oturum
   hiç başlamaz.) Not Defteri'ne yazı görevi sırasında başka bir
   pencereyi öne getir ya da Not Defteri'ni sürükle → adım engelleniyor ("Ön plandaki pencere
-  değişti…"), yeni görüntü alınıyor; yazı başka pencereye gitmiyor. İkinci monitörü
+  değişti…"), yeni görüntü alınıyor; yazı başka pencereye gitmiyor. Not Defteri'ni Artemis'in
+  arkasına saklamayın: Artemis'e tıklama da engel sayılır, 3 engelde oturum biter. İkinci monitörü
   çıkar/tak ya da ölçeği değiştir → "Ekran düzeni değişti". Farklı DPI'lı iki monitörde
   tıklama doğru yere gidiyor mu, yanlış engel çıkıyor mu not edin.
 - [ ] **Kod ajanı kilidi:** Bir proje işi çalışırken Görev Yöneticisi'nden Artemis'i öldür,

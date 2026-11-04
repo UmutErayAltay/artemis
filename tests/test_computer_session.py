@@ -491,7 +491,18 @@ async def test_foreground_window_change_blocks_type() -> None:
     assert (await env.run()).reason == "done"
     assert env.backend.calls == []
     reasons = [e["reason"] for e in env.audit.named("computer_blocked")]
-    assert reasons == ["Ön plandaki pencere değişti veya taşındı; yeni görüntü alınıyor"]
+    assert reasons == ["Ön plandaki pencere değişti veya taşındı"]
+
+
+async def test_stale_block_asks_model_to_replan_not_to_avoid_the_window() -> None:
+    # Canlı (2026-11-04): Not Defteri sürüklenince model "bu pencereye girdi gönderilemez"
+    # notunu alıyordu; oysa pencere yasak değil, yalnız görüntü eskiydi.
+    env = Env(act(type="type", text=TYPED_TEXT), DONE, YES)
+    _drift_once(env, lambda b: setattr(b, "window", (99, b.window[1])))
+    await env.run()
+    second_prompt = env.provider.seen[1][1].content
+    assert "ATLANDI (type)" in second_prompt and "Yeni görüntüye bakıp" in second_prompt
+    assert "girdi gönderilemez" not in second_prompt
 
 
 async def test_foreground_window_moved_blocks_click() -> None:
