@@ -14,11 +14,11 @@ tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.
 | Bozuk `code_agent.sqlite3` tüm asistanı açtırmıyordu (doğrulanmış hata) | `13b994d` | geçti | bekliyor |
 | İş başlarken audit hatası işi sonsuza dek `queued` bırakıyordu (doğrulanmış hata) | `13b994d` | geçti | — |
 | Sonuç audit'i yazılamazsa gerçekleşmiş işlem "tamamlanamadı" görünüyordu (doğrulanmış hata) | `9975083` | geçti | — |
-| İptalde thread'deki PowerShell/OS işi sürerken yeni tur başlıyordu (doğrulanmış hata) | `9975083` | geçti | bekliyor |
-| Telegram kapanışı süren turu iptal etmiyordu; GUI 10 sn donuyordu (doğrulanmış hata) | `52d793b` | geçti | bekliyor |
-| Masaüstü ayar değişikliği gömülü Telegram'a ulaşmıyordu (doğrulanmış hata) | `52d793b` | geçti | bekliyor |
-| Telegram yanıtı "gönderildi ama doğrulanmadı"yı gizliyordu (doğrulanmış hata) | `52d793b` | geçti | bekliyor |
-| Bilgisayar kullanımı eski koordinat/odakla girdi gönderebiliyordu (doğrulanmış hata) | `d05cc5d` | geçti | bekliyor (DPI, çok monitör) |
+| İptalde thread'deki PowerShell/OS işi sürerken yeni tur başlıyordu (doğrulanmış hata) | `9975083` | geçti | bekliyor. 2026-11-04 deneme geçersiz: kontrol listesi yanlışlıkla Esc dedi; Esc yalnız bilgisayar kullanımı oturumunu durdurur, turlar (`aada1a`, `547dcf`, `7f1cea`) iptal almadan bitti. İptal düğmesiyle tekrar |
+| Telegram kapanışı süren turu iptal etmiyordu; GUI 10 sn donuyordu (doğrulanmış hata) | `52d793b` | geçti | geçti 2026-11-04 (Umut): onay beklerken Çık → kapandı, onay reddedildi; audit `edbc01` `close_application denied`, `stop=cancelled` |
+| Masaüstü ayar değişikliği gömülü Telegram'a ulaşmıyordu (doğrulanmış hata) | `52d793b` | geçti | geçti 2026-11-04 (Umut): tüm uygulama erişimi kapalıyken Telegram'dan "Operayı aç" reddedildi (`ee6a1f`, araç çağrılmadı) |
+| Telegram yanıtı "gönderildi ama doğrulanmadı"yı gizliyordu (doğrulanmış hata) | `52d793b` | geçti | geçti 2026-11-04 (Umut): "Ekranı kilitle" → `power sent` (`71dacf`), yanıtta durum satırı |
+| Bilgisayar kullanımı eski koordinat/odakla girdi gönderebiliyordu (doğrulanmış hata) | `d05cc5d` | geçti | bekliyor. 2026-11-04 deneme oturum başlatmadı: model `create_file` + `open_application` seçti (`d8e8bc`, `55002f`); komut "bilgisayar kullanımıyla" verilerek tekrar (DPI, çok monitör dahil) |
 | Kod ajanı "Doğrulandı" = çıkış kodu/öz beyan (doğrulanmış hata) | `01df2f5`, `7732ba5` | geçti | geçti 2026-11-04, betik¹ (generic ajan, gerçek git): kontrol geçti → `accepted`, çıkış 3 → `failed`, kontrolsüz → `unverified`. Claude/Codex ile ve panelde bekliyor |
 | Audit dosyası sınırsız büyüyordu (bakım) | `31f3887` | geçti | geçti 2026-11-04: gerçek 21,25 MB `audit.jsonl` ilk yazımda `audit-20261103T213402271373-5224.jsonl` oldu, boyutu aynı, silinmedi |
 | Geçmiş silme WAL/boş sayfada metin bırakıyordu; kapsam belirsizdi (doğrulanmış hata) | `df090a0` | geçti | geçti 2026-11-04, gerçek `memory.sqlite3`'ün **kopyasında**¹: 23 tur silindi, 3 not kaldı, 130 karakterlik silinen cümle dosya baytlarında yok. Panel düğmesi elle denenmedi |

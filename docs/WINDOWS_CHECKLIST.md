@@ -139,9 +139,12 @@ adımlarda (mesaj, kapatma) yalnız zararsız hedef kullanın.
   Telegram'dan izin listesinde olmayan bir uygulamayı açtır → reddediliyor.
 - [ ] **Telegram durum satırı:** Telegram'dan "kilitle" ya da bilgisayar kullanımı görevi →
   yanıtın altında "Gönderildi, sonucu doğrulanmadı: …" satırı var.
-- [ ] **İptal + thread'li araç:** Ses düzeyi/pencere komutu verip hemen Esc → "temizleniyor"
-  görünüyor; PowerShell bitmeden yeni komut başlamıyor, sonra normal devam ediyor.
-- [ ] **Bilgisayar kullanımı eski koordinat:** Not Defteri'ne yazı görevi sırasında başka bir
+- [ ] **İptal + thread'li araç:** Ses düzeyi/pencere komutu verip hemen panelin **İptal**
+  düğmesine bas (Esc yalnız bilgisayar kullanımı oturumunu durdurur, normal turu iptal etmez)
+  → "temizleniyor" görünüyor; PowerShell bitmeden yeni komut başlamıyor, sonra normal devam ediyor.
+- [ ] **Bilgisayar kullanımı eski koordinat:** (Komutu "bilgisayar kullanımıyla, açık Not
+  Defteri penceresine yaz" diye ver; yoksa model dosya oluşturup açmayı seçebilir ve oturum
+  hiç başlamaz.) Not Defteri'ne yazı görevi sırasında başka bir
   pencereyi öne getir ya da Not Defteri'ni sürükle → adım engelleniyor ("Ön plandaki pencere
   değişti…"), yeni görüntü alınıyor; yazı başka pencereye gitmiyor. İkinci monitörü
   çıkar/tak ya da ölçeği değiştir → "Ekran düzeni değişti". Farklı DPI'lı iki monitörde
