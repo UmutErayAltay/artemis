@@ -10,7 +10,7 @@ tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.
 
 | Bulgu (sınıf) | Kodlandı | Otomatik test | Gerçek cihaz |
 |---|---|---|---|
-| Çökme sonrası kod ajanı depo kilidi hiç kalkmıyordu (doğrulanmış hata) | `13b994d` | geçti | bekliyor |
+| Çökme sonrası kod ajanı depo kilidi hiç kalkmıyordu (doğrulanmış hata) | `13b994d` | geçti | geçti 2026-11-04, betik¹: servis süreci zorla öldürüldü → ajan süreci de kapandı (Job Object); yeniden açılışta `interrupted` + kilitli, yeni iş reddedildi; `release` sonrası yeni iş `done`. Panel düğmesi elle denenmedi |
 | Bozuk `code_agent.sqlite3` tüm asistanı açtırmıyordu (doğrulanmış hata) | `13b994d` | geçti | bekliyor |
 | İş başlarken audit hatası işi sonsuza dek `queued` bırakıyordu (doğrulanmış hata) | `13b994d` | geçti | — |
 | Sonuç audit'i yazılamazsa gerçekleşmiş işlem "tamamlanamadı" görünüyordu (doğrulanmış hata) | `9975083` | geçti | — |
@@ -19,14 +19,17 @@ tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.
 | Masaüstü ayar değişikliği gömülü Telegram'a ulaşmıyordu (doğrulanmış hata) | `52d793b` | geçti | bekliyor |
 | Telegram yanıtı "gönderildi ama doğrulanmadı"yı gizliyordu (doğrulanmış hata) | `52d793b` | geçti | bekliyor |
 | Bilgisayar kullanımı eski koordinat/odakla girdi gönderebiliyordu (doğrulanmış hata) | `d05cc5d` | geçti | bekliyor (DPI, çok monitör) |
-| Kod ajanı "Doğrulandı" = çıkış kodu/öz beyan (doğrulanmış hata) | `01df2f5`, `7732ba5` | geçti | bekliyor |
-| Audit dosyası sınırsız büyüyordu (bakım) | `31f3887` | geçti | bekliyor |
-| Geçmiş silme WAL/boş sayfada metin bırakıyordu; kapsam belirsizdi (doğrulanmış hata) | `df090a0` | geçti | bekliyor |
+| Kod ajanı "Doğrulandı" = çıkış kodu/öz beyan (doğrulanmış hata) | `01df2f5`, `7732ba5` | geçti | geçti 2026-11-04, betik¹ (generic ajan, gerçek git): kontrol geçti → `accepted`, çıkış 3 → `failed`, kontrolsüz → `unverified`. Claude/Codex ile ve panelde bekliyor |
+| Audit dosyası sınırsız büyüyordu (bakım) | `31f3887` | geçti | geçti 2026-11-04: gerçek 21,25 MB `audit.jsonl` ilk yazımda `audit-20261103T213402271373-5224.jsonl` oldu, boyutu aynı, silinmedi |
+| Geçmiş silme WAL/boş sayfada metin bırakıyordu; kapsam belirsizdi (doğrulanmış hata) | `df090a0` | geçti | geçti 2026-11-04, gerçek `memory.sqlite3`'ün **kopyasında**¹: 23 tur silindi, 3 not kaldı, 130 karakterlik silinen cümle dosya baytlarında yok. Panel düğmesi elle denenmedi |
 | Kapanış temizliği süresiz bekleyebiliyordu (doğrulanmış hata) | `c274f5a` | geçti | bekliyor |
 | Karma olumsuzluk senaryosu yoktu (doğrulama eksikliği) | `fc42c95` | sahte bench 53/53 | canlı model bekliyor |
 | Konuşma sonu → eylem bitişi gecikmesi ölçülmüyordu (doğrulama eksikliği) | `831dfad` | geçti | canlı ölçüm bekliyor |
 | auto_mode_ok kapsamı kayıt geneli testsizdi (doğrulama eksikliği) | `9975083` | geçti | — |
 | app.py / voice/core.py sorumluluk ayrımı, salt taşıma (bakım) | `b945876` | geçti | — |
+
+¹ Windows 11, kod `b945876`, `.venv` Python 3.12.9. Betikler geçici klasörde gerçek süreç, git
+ve SQLite kullandı; GUI'den geçmedi, kullanıcının depo ve kayıtlarına yazmadı.
 
 Zaten giderilmiş bulunanlar (değişiklik yapılmadı): geç model yanıtı iptalden sonra araç
 çalıştırmıyor; iptal/süre aşımında bekleyen onaylar geçersiz; iptal edilen iş "done"
