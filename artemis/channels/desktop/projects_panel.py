@@ -45,9 +45,11 @@ from artemis.config.settings import (
 )
 from artemis.tools.base import ToolResult
 from artemis.tools.code_agent_backends import visible_supported
+from artemis.tools.code_agent_jobs import FINISHED
 from artemis.tools.plugins.code_agent import (
     AnswerArguments,
     CancelArguments,
+    ClearFinishedArguments,
     DiscardArguments,
     PrepareArguments,
     ReleaseArguments,
@@ -586,10 +588,13 @@ class ProjectsPanel(QWidget):
         self.release_button = QPushButton("Kilidi bırak")
         self.release_button.setObjectName("danger")
         self.discard_button.setObjectName("danger")
+        # Listeyi sadeleştirir; yalnız bitmiş ve kilidi serbest iş varken etkin.
+        self.clear_button = QPushButton("Biten işleri temizle")
         cancel_row = QHBoxLayout()
         cancel_row.addWidget(self.cancel_button)
         cancel_row.addWidget(self.release_button)
         cancel_row.addWidget(self.discard_button)
+        cancel_row.addWidget(self.clear_button)
         cancel_row.addStretch()
         right_lay.addSpacing(8)
         right_lay.addLayout(cancel_row)
@@ -610,6 +615,7 @@ class ProjectsPanel(QWidget):
         self.cancel_button.clicked.connect(self._cancel)
         self.release_button.clicked.connect(self._release)
         self.discard_button.clicked.connect(self._discard)
+        self.clear_button.clicked.connect(self._clear_finished)
         self.project.currentTextChanged.connect(self._apply_project_defaults)
         self.agent_combo.currentIndexChanged.connect(self._sync_agent_ui)
         self.workdir_combo.currentIndexChanged.connect(self._sync_agent_ui)
@@ -1058,6 +1064,13 @@ class ProjectsPanel(QWidget):
         self._set_prepare_primary(kind != "draft")
         self.question_box.setVisible(record.get("status") == "waiting")
         self.answer_button.setEnabled(enabled and record.get("status") == "waiting")
+        self.clear_button.setEnabled(
+            enabled
+            and any(
+                k == "job" and i.get("status") in FINISHED and not i.get("cleanup_pending")
+                for k, i in self._items
+            )
+        )
         self.discard_button.setVisible(kind == "draft")
         self.discard_button.setEnabled(enabled and kind == "draft")
         self.cancel_button.setVisible(kind == "job")
@@ -1137,6 +1150,16 @@ class ProjectsPanel(QWidget):
             ]
             self._last_status = None
             self._render_items(None, row)
+        elif tool_name == "code_agent_clear_finished" and result.success:
+            # Silinenler hemen listeden düşer; önbellek boşalır ki sonraki yoklama yeniden kursun.
+            gone = set(result.data.get("job_ids", []))
+            self._items = [
+                (kind, item)
+                for kind, item in self._items
+                if not (kind == "job" and item.get("job_id") in gone)
+            ]
+            self._last_status = None
+            self._render_items(None, self.items.currentRow())
         elif tool_name == "code_agent_prepare" and result.success:
             spec = result.data["spec"]
             self._items.append(("draft", spec))
@@ -1206,6 +1229,9 @@ class ProjectsPanel(QWidget):
             self.tool_requested.emit(
                 "code_agent_discard", DiscardArguments(spec_id=selected[1]["spec_id"])
             )
+
+    def _clear_finished(self) -> None:
+        self.tool_requested.emit("code_agent_clear_finished", ClearFinishedArguments())
 
     def _release(self) -> None:
         selected = self._selected()

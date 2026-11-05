@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import tempfile
@@ -52,6 +53,8 @@ CHECK_TAIL = 400
 STDERR_TAIL = 300
 ProcessFactory = Callable[..., Any]
 ACTIVE = {"queued", "running", "waiting", "cancelling"}
+# Listeden temizlenebilen bitmiş durumlar; `cleanup_pending` işi ayrıca korunur (depo kilidi).
+FINISHED = {"done", "error", "interrupted", "cancelled", "timeout"}
 
 
 class CodeAgentError(Exception):
@@ -107,6 +110,17 @@ def _plain_summary(
     if last_message:
         text += f" Ajan notu (doğrulanmamış iddia): {last_message}"
     return text
+
+
+def job_folder(root: Path, job_id: str) -> Path | None:
+    """İşin state klasöründeki dizini; kimlik `uuid4().hex[:12]` biçiminde değilse None.
+
+    Kimlik SQLite'tan okunur; elle bozulmuş bir kayıt `..` taşıyıp silmeyi state klasörü
+    dışına çıkaramasın diye yol kurulmadan önce biçim denetlenir.
+    """
+    if len(job_id) != 12 or any(char not in "0123456789abcdef" for char in job_id):
+        return None
+    return root / "code_agent_jobs" / job_id
 
 
 class CodeAgentJobs:
@@ -848,6 +862,53 @@ class CodeAgentJobs:
                 return None
             self._audit.emit("code_agent_lock_released", job_id=job_id, leftover_changes=leftover)
             return deepcopy(self._jobs[job_id])
+
+    def clear_finished(self) -> list[str]:
+        """Bitmiş ve kilidi serbest işlerin kaydını (ve iş klasörünü) siler; id'leri döner.
+
+        Aktif, bekleyen ya da `cleanup_pending` iş asla silinmez. Denetim olayları kalır.
+        Başlatıldığı taslak da silinir, yoksa silinen iş taslak olarak listeye geri düşerdi.
+        """
+        with self._lock:
+            ids = [
+                job_id
+                for job_id, job in self._jobs.items()
+                if job["status"] in FINISHED
+                and not job.get("cleanup_pending")
+                and not (self._threads.get(job_id) and self._threads[job_id].is_alive())
+            ]
+            if not ids:
+                return []
+            specs = {self._jobs[job_id]["spec"]["spec_id"] for job_id in ids}
+            if self._store_path is not None:
+                try:
+                    with (
+                        closing(sqlite3.connect(self._store_path, timeout=2)) as connection,
+                        connection,
+                    ):
+                        # kind koşulu: yalnız iş (ve onların taslağı) satırları silinir.
+                        connection.executemany(
+                            "DELETE FROM records WHERE key = ? AND kind IN ('job', 'draft')",
+                            [(key,) for key in (*ids, *specs)],
+                        )
+                except sqlite3.Error as error:
+                    raise CodeAgentError(
+                        "İş kayıtları silinemedi; kalıcı kayıt yazılamadı."
+                    ) from error
+            for job_id in ids:
+                del self._jobs[job_id]
+                self._threads.pop(job_id, None)
+            for spec_id in specs:
+                self._drafts.pop(spec_id, None)
+            root = None if self._store_path is None else self._store_path.parent
+        if root is not None:
+            for job_id in ids:
+                folder = job_folder(root, job_id)
+                # Yalnız state klasörü altındaki gerçek dizin; symlink izlenmez.
+                if folder is not None and folder.is_dir() and not folder.is_symlink():
+                    shutil.rmtree(folder, ignore_errors=True)
+        self._audit.emit("code_agent_jobs_cleared", job_ids=ids)
+        return ids
 
     def cancel(self, job_id: str) -> bool:
         with self._lock:

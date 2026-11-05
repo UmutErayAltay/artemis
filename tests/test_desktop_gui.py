@@ -1431,6 +1431,34 @@ def test_code_agent_terminal_events_show_chat_notice_once(
         _close_cleanly(app, window)
 
 
+def test_job_notice_uses_injected_toast_off_gui_thread_and_reports_failure(
+    app: QApplication, tmp_path: Path
+) -> None:
+    import threading
+
+    from artemis.tools.toast import ToastOutcome
+
+    window = _window(app, tmp_path)
+    calls: list[tuple[str, str, bool]] = []
+
+    def fake_toast(title: str, body: str) -> ToastOutcome:
+        calls.append((title, body, threading.current_thread() is threading.main_thread()))
+        return ToastOutcome("disabled", "Windows bildirimleri bu uygulama için kapalı.")
+
+    window._toast = fake_toast
+    try:
+        fields = {"job_id": "j1", "project": "web", "status": "done", "summary": "Bitti."}
+        for _ in range(2):  # aynı iş/durum bir kez bildirilir
+            window._handle_event(Activity(None, None, 1, "code_agent_done", fields))
+        cancelled = {**fields, "job_id": "j2", "status": "cancelled"}
+        window._handle_event(Activity(None, None, 2, "code_agent_done", cancelled))
+        _wait(app, lambda: "bildirimi gösterilmedi" in window.chat.toPlainText())
+        assert len(calls) == 1 and calls[0][2] is False and "web" in calls[0][1]
+        assert "Windows bildirimleri bu uygulama için kapalı" in window.chat.toPlainText()
+    finally:
+        _close_cleanly(app, window)
+
+
 def test_projects_poll_interval_follows_active_jobs_and_locked_repo_blocks_start(
     app: QApplication, tmp_path: Path
 ) -> None:

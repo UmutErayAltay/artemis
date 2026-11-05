@@ -67,6 +67,10 @@ class DiscardArguments(BaseModel):
     spec_id: str = Field(min_length=1, max_length=64)
 
 
+class ClearFinishedArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
 class AnswerArguments(CancelArguments):
     question_id: str = Field(min_length=1, max_length=64)
     answer: str = Field(min_length=1, max_length=4000, repr=False)
@@ -385,4 +389,33 @@ class CodeAgentDiscard(BaseTool):
             status="ok",
             message="Taslak silindi.",
             data={"spec_id": args.spec_id},
+        )
+
+
+@register_tool
+class CodeAgentClearFinished(BaseTool):
+    name = "code_agent_clear_finished"
+    label = "Biten işleri temizle"
+    done_label = "Biten işler temizlendi"
+    description = (
+        "Bitmiş (tamamlandı, hata, kesildi, iptal, zaman aşımı) ve depo kilidi serbest "
+        "iş kayıtlarını listeden siler. Aktif, bekleyen veya kilitli işlere ve repoya dokunmaz."
+    )
+    args_model = ClearFinishedArguments
+    # Yalnız yerel iş üstverisini siler; denetim günlüğündeki olaylar kalır.
+    risk = Risk.SIDE_EFFECT
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        jobs = _jobs(context)
+        try:
+            removed = [] if jobs is None else jobs.clear_finished()
+        except CodeAgentError as error:
+            return ToolResult(message=str(error))
+        if not removed:
+            return ToolResult(message="Temizlenecek bitmiş iş yok.")
+        return ToolResult(
+            success=True,
+            status="ok",
+            message=f"{len(removed)} bitmiş iş kaydı silindi.",
+            data={"job_ids": removed},
         )

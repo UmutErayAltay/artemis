@@ -813,6 +813,25 @@ def test_release_button_only_for_pending_lock_and_emits_typed_request(
     panel.close()
 
 
+def test_clear_finished_button_enabled_only_with_removable_job_and_emits_request(
+    tmp_path: Path, app: QApplication
+) -> None:
+    panel = _panel(_old_shape(tmp_path), ["alfa"])
+    seen: list[Any] = []
+    panel.tool_requested.connect(lambda name, args: seen.append((name, args)))
+    panel.show()
+    job = {"job_id": "j", "project": "alfa", "status": "running", "spec": _spec()}
+    _status_with(panel, jobs=[job])
+    assert not panel.clear_button.isEnabled()  # aktif iş
+    _status_with(panel, jobs=[{**job, "status": "interrupted", "cleanup_pending": True}])
+    assert not panel.clear_button.isEnabled()  # kilitli iş
+    _status_with(panel, jobs=[{**job, "status": "done"}])
+    assert panel.clear_button.isEnabled()
+    panel.clear_button.click()
+    assert seen[-1][0] == "code_agent_clear_finished"
+    panel.close()
+
+
 def test_discard_success_removes_item_moves_selection_and_forces_next_refresh(
     tmp_path: Path, app: QApplication
 ) -> None:

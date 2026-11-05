@@ -6,6 +6,7 @@ import html
 import json
 import sys
 import tempfile
+import threading
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -91,6 +92,7 @@ from artemis.channels.desktop.widgets import PetFace
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
+from artemis.tools.toast import ToastOutcome, show_toast
 
 _STYLE = themes.stylesheet(themes.DEFAULT_THEME)
 PROJECTS_POLL_ACTIVE_MS = 2000
@@ -723,6 +725,7 @@ class _ChatPage(QWidget):
 class DesktopWindow(QMainWindow):
     # Kısayol kendi iş parçacığından yayar; Qt bunu ana iş parçacığına sıraya alır.
     _hotkey_pressed = Signal()
+    _toast_failed = Signal(str)
 
     def __init__(
         self,
@@ -1253,6 +1256,9 @@ class DesktopWindow(QMainWindow):
         self.projects_panel.config_saved.connect(self._code_agent_config_saved)
         self._projects_timer = QTimer(self)
         self._notified_jobs: set[tuple[str, str, str]] = set()
+        # Demo gerçek makineye bildirim göndermez; testler sahte işlev enjekte eder.
+        self._toast: Callable[[str, str], ToastOutcome] | None = None if self._demo else show_toast
+        self._toast_failed.connect(self._show_toast_failure)
         self._projects_timer.setInterval(PROJECTS_POLL_ACTIVE_MS)
         self._projects_timer.timeout.connect(self._refresh_projects)
         self._projects_timer.start()
@@ -2098,7 +2104,9 @@ class DesktopWindow(QMainWindow):
             self._notify_job(event.fields)
 
     def _notify_job(self, fields: dict[str, Any]) -> None:
-        """Sekme açık olmasa da görünür bildirim: sohbet satırı + tepsi balonu (Windows toast).
+        """Sekme açık olmasa da görünür bildirim: sohbet satırı + Windows toast.
+
+        Tepsi balonu Windows bildirimleri kapalıyken sonuçsuz kayboluyordu; toast sonucu verir.
 
         Aynı iş/durum çifti bir kez bildirilir (kilit bırakma ve zaman aşımı yolları da
         `code_agent_done` yazar). Kullanıcının kendi iptali bildirim gerektirmez.
@@ -2112,10 +2120,22 @@ class DesktopWindow(QMainWindow):
         summary = str(fields.get("summary") or "").strip()
         text = f"Kod işi · {project}: {status_label(fields)}" + (f". {summary}" if summary else "")
         self._append_chat("Artemis", text)
-        if self._tray is not None:
-            self._tray.showMessage(
-                "Artemis", text[:240], QSystemTrayIcon.MessageIcon.Information, 6000
-            )
+        toast = self._toast
+        if toast is None:
+            return
+
+        def deliver() -> None:
+            # powershell çalıştırır (15 sn'ye dek): arayüz iş parçacığını dondurmamak için ayrı
+            # iş parçacığı; sonuç sinyalle ana iş parçacığına döner.
+            outcome = toast("Artemis", text[:240])
+            if outcome.status != "ok":
+                self._toast_failed.emit(outcome.message)
+
+        threading.Thread(target=deliver, name="job-toast", daemon=True).start()
+
+    def _show_toast_failure(self, message: str) -> None:
+        # Sohbet satırı zaten gösterildi; bildirimin neden görünmediği dürüstçe eklenir.
+        self._append_chat("Sistem", f"(Windows bildirimi gösterilmedi: {message})")
 
     def _show_approval(self, item: Approval) -> None:
         if item.request_id != self._active_request:

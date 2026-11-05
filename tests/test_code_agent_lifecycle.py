@@ -347,6 +347,57 @@ def test_release_tool_is_confirm_required_and_reports_result(tmp_path: Path, rep
     jobs.shutdown()
 
 
+def test_clear_finished_removes_only_finished_unlocked_jobs_and_their_folders(
+    tmp_path: Path, repo: Path
+) -> None:
+    import asyncio
+
+    from test_code_agent import context
+
+    from artemis.tools.plugins.code_agent import ClearFinishedArguments, CodeAgentClearFinished
+
+    first, _ = make_jobs(tmp_path, reply(), persistent=True)
+    done = first.start("proj", repo, "görev", command=sys.executable)
+    wait_job(first, done)
+    first.shutdown()
+    pending = _persist_status(tmp_path, repo, "running")  # yeniden açılışta cleanup_pending
+    jobs, _ = make_jobs(tmp_path, reply(), persistent=True)
+    folder = tmp_path / "code_agent_jobs" / done
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "prompt.txt").write_text("x", encoding="utf-8")
+    other = tmp_path / "code_agent_jobs" / pending
+    other.mkdir(parents=True, exist_ok=True)
+    tool = CodeAgentClearFinished()
+    assert tool.risk is Risk.SIDE_EFFECT
+    result = asyncio.run(tool.execute(ClearFinishedArguments(), context(tmp_path, repo, jobs)))
+    assert result.success and result.data["job_ids"] == [done]
+    assert not folder.exists() and other.exists()  # kilitli işin klasörüne dokunulmaz
+    left = {j["job_id"] for j in jobs.status()}
+    assert left == {pending} and jobs.drafts() == []
+    assert jobs.clear_finished() == []
+    import sqlite3
+
+    with sqlite3.connect(tmp_path / "jobs.sqlite3") as connection:  # kalıcı kayıt da silindi
+        keys = {row[0] for row in connection.execute("SELECT key FROM records WHERE kind='job'")}
+    connection.close()
+    assert keys == {pending}
+    jobs.shutdown()
+
+
+def test_clear_finished_keeps_active_job(tmp_path: Path, repo: Path) -> None:
+    jobs, _ = make_jobs(tmp_path, "import sys,time\nsys.stdin.read()\ntime.sleep(60)")
+    job_id = jobs.start("proj", repo, "görev", command=sys.executable)
+    wait_job(jobs, job_id, {"running"})
+    assert jobs.clear_finished() == []
+    jobs.cancel(job_id)
+    assert wait_job(jobs, job_id)["status"] == "cancelled"
+    jobs._jobs[job_id]["status"] = "waiting"  # iş parçacığı yok ama soru bekliyor: korunur
+    assert jobs.clear_finished() == []
+    jobs._jobs[job_id]["status"] = "cancelled"
+    assert jobs.clear_finished() == [job_id]
+    jobs.shutdown()
+
+
 def test_audit_failure_at_start_marks_job_error_and_frees_repo(tmp_path: Path, repo: Path) -> None:
     jobs, cli = make_jobs(tmp_path, reply())
     real_emit = jobs._audit.emit
@@ -366,3 +417,11 @@ def test_audit_failure_at_start_marks_job_error_and_frees_repo(tmp_path: Path, r
     job_id = jobs.start("proj", repo, "görev", command=sys.executable)  # depo meşgul değil
     assert wait_job(jobs, job_id)["status"] == "done"
     jobs.shutdown()
+
+
+def test_job_folder_rejects_ids_that_could_escape_state_dir(tmp_path: Path) -> None:
+    from artemis.tools.code_agent_jobs import job_folder
+
+    assert job_folder(tmp_path, "0123456789ab") == tmp_path / "code_agent_jobs" / "0123456789ab"
+    for bad in ("..", "../../x", "..\0123456789", "0123456789AB", "abc", ""):
+        assert job_folder(tmp_path, bad) is None
