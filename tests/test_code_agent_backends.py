@@ -95,7 +95,8 @@ def test_claude_default_argv_snapshot_unchanged(tmp_path: Path, repo: Path) -> N
         "--permission-mode", "acceptEdits", "--allowedTools", "Read", "Edit", "Write", "Glob",
         "Grep", "Bash", "Agent(coder)", "Agent(tester)", "--disallowedTools",
         "Bash(git push:*)", "WebFetch", "WebSearch", "AskUserQuestion",
-        "--append-system-prompt", RULES, "--agents", json.dumps(role_profile("c", None)),
+        "--append-system-prompt", RULES,
+        "--agents", json.dumps(role_profile("c", None, structured_output=True)),
         "--agent", "coordinator", "--model", "m",
     ]  # fmt: skip
     assert argv == expected and "--add-dir" not in argv
@@ -595,3 +596,12 @@ def test_locate_codex_failures_and_non_windows(tmp_path: Path) -> None:
     assert boom.calls == 0  # Windows dışında PowerShell çalıştırılmaz
     assert locate_codex("baska", runner=boom, is_windows=True, cache={}, **base) is None
     assert boom.calls == 0  # yalnız "codex" adı için Appx aranır
+
+
+def test_background_coordinator_can_call_structured_output() -> None:
+    # Gerçek CLI'de --agent araç listesi StructuredOutput'u dışarıda bırakınca sonuç hiç
+    # gelmiyordu (2026-11-05). Görünür kipte şema yok, araç da eklenmez.
+    background = role_profile(None, None, structured_output=True)["coordinator"]
+    visible = role_profile(None, None)["coordinator"]
+    assert "StructuredOutput" in background["tools"]  # type: ignore[index,operator]
+    assert "StructuredOutput" not in visible["tools"]  # type: ignore[index,operator]

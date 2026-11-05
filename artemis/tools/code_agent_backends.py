@@ -149,8 +149,18 @@ def visible_supported(profile: AgentProfile) -> bool:
 
 
 def role_profile(
-    coder_model: str | None, tester_model: str | None, coordinator_rules: str = RULES
+    coder_model: str | None,
+    tester_model: str | None,
+    coordinator_rules: str = RULES,
+    *,
+    structured_output: bool = False,
 ) -> dict[str, object]:
+    # --agent ile ana oturumun araçları bu listeyle sınırlanır: --json-schema'nın eklediği
+    # StructuredOutput listede yoksa model çağıramaz ("No such tool available"), sonuç
+    # structured_output'suz döner ve iş "error" olur (gerçek CLI 2.1.318, 2026-11-05).
+    coordinator_tools = ["Read", "Glob", "Grep", "Bash", "Agent(coder)", "Agent(tester)"]
+    if structured_output:
+        coordinator_tools.append("StructuredOutput")
     profile: dict[str, object] = {}
     for name, description, prompt, tools, model in (
         (
@@ -171,7 +181,7 @@ def role_profile(
             "coordinator",
             "Project manager",
             coordinator_rules,
-            ["Read", "Glob", "Grep", "Bash", "Agent(coder)", "Agent(tester)"],
+            coordinator_tools,
             None,
         ),
     ):
@@ -379,7 +389,9 @@ class ClaudeBackend:
             "--append-system-prompt",
             RULES,
             "--agents",
-            json.dumps(role_profile(ctx.coder_model, ctx.tester_model)),
+            json.dumps(
+                role_profile(ctx.coder_model, ctx.tester_model, structured_output=True)
+            ),
             "--agent",
             "coordinator",
         ]

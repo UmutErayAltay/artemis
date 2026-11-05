@@ -28,7 +28,7 @@ tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.
 | Geçmiş silme sohbet ekranını temizlemiyordu; kullanıcı iki kez sildi (doğrulanmış hata, 2026-11-05 canlıda) | bu tur | geçti | silme geçti 2026-11-05 (Umut: 9 tur silindi, 3 not kaldı, metin dosya baytlarında yok); ekran temizliği bekliyor |
 | Kilitli depoda önce onay sorulup sonra reddediliyordu (2026-11-05 canlıda) | bu tur | geçti | kilit + Kilidi bırak geçti 2026-11-05 (Umut, gerçek çökme: iş `8ed35ad` interrupted, başlatma 3 kez reddedildi, bırakınca iş `5bed53b` başladı); düğme pasifliği bekliyor |
 | Geri yüklenen geçmişte zaman yoktu: model 8 saatlik kapatmayı "az önce" sandı (2026-11-05 canlıda) | bu tur | geçti | canlı model bekliyor |
-| Arka plan kod ajanı varsayılan modelde (Haiku 4.5) StructuredOutput çağırmıyor → `error`, iş commitlenmeden kalıyor (2026-11-05 canlıda) | config `manager/coder/tester_model` + hata özetinde artık değişiklik | geçti | yeni modelle bekliyor |
+| Arka plan kod ajanı her işte `error`: `--agent coordinator` araç listesi StructuredOutput'u dışarıda bırakıyordu ("No such tool available"); ilk teşhis (model) yanlıştı (doğrulanmış hata, 2026-11-05 canlıda) | bu commit + hata özetinde artık değişiklik; config modelleri sonnet/sonnet/haiku 5.5 | geçti | CLI 2.1.318 ile doğrudan sonda: listesiz `structured_output=None`, listeli dolu. Artemis içinden bekliyor |
 | Projeler paneli her 2 sn bir denetlenen tur üretiyordu (bakım) | bu tur | geçti | — |
 | Karma olumsuzluk senaryosu yoktu (doğrulama eksikliği) | `fc42c95` | sahte bench 53/53 | canlı model bekliyor |
 | Konuşma sonu → eylem bitişi gecikmesi ölçülmüyordu (doğrulama eksikliği) | `831dfad` | geçti | canlı ölçüm bekliyor |
