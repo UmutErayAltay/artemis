@@ -174,14 +174,16 @@ class MemoryStore:
             return []
         with self._connect() as db:
             rows = db.execute(
-                "SELECT record_json FROM turns WHERE id > "
+                "SELECT record_json, created_at FROM turns WHERE id > "
                 "COALESCE((SELECT MAX(last_turn_id) FROM resets), 0) ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         records: list[TurnRecord] = []
-        for (raw,) in reversed(rows):
+        for raw, created_at in reversed(rows):
             try:
-                records.append(TurnRecord.model_validate_json(raw))
+                # Sütun kaynaktır: eski kayıtların JSON'unda zaman yoktur.
+                record = TurnRecord.model_validate_json(raw)
+                records.append(record.model_copy(update={"created_at": created_at}))
             except ValidationError:
                 continue  # şeması eskimiş tek bir satır geri kalanını düşürmesin
         return records

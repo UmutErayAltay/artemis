@@ -574,12 +574,20 @@ class CodeAgentJobs:
             commits = _checked_git(
                 repo, "log", "--format=%h %s", f"{self._jobs[job_id]['base']}..HEAD"
             )
-            dirty = bool(_checked_git(repo, "status", "--porcelain"))
+            porcelain = _checked_git(repo, "status", "--porcelain")
+            dirty = bool(porcelain)
             commit_list = commits.splitlines()
             if exit_code is not None and status in {"done", "error", "interrupted"}:
                 summary = _plain_summary(
                     exit_code, commit_list, dirty, run.last_message(), visible=visible
                 )
+            if status == "error" and exit_code is None and (commit_list or dirty):
+                # Ajan dosyaları değiştirip yapılandırılmış çıktıyı vermemiş olabilir: iş
+                # "error" kalır (başarı sayılmaz) ama kullanıcı diskteki izi görür.
+                summary += f" Depoda {len(commit_list)} yeni commit var." if commit_list else ""
+                if dirty:
+                    names = ", ".join(line[2:].strip() for line in porcelain.splitlines()[:5])
+                    summary += f" Depoda commitlenmemiş değişiklik kaldı: {names}."
         except CodeAgentError:
             commit_list, dirty = [], None
             if status in {"done", "waiting"}:

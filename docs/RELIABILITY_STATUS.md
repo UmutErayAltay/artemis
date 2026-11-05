@@ -24,6 +24,12 @@ tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.
 | Audit dosyası sınırsız büyüyordu (bakım) | `31f3887` | geçti | geçti 2026-11-04: gerçek 21,25 MB `audit.jsonl` ilk yazımda `audit-20261103T213402271373-5224.jsonl` oldu, boyutu aynı, silinmedi |
 | Geçmiş silme WAL/boş sayfada metin bırakıyordu; kapsam belirsizdi (doğrulanmış hata) | `df090a0` | geçti | geçti 2026-11-04, gerçek `memory.sqlite3`'ün **kopyasında**¹: 23 tur silindi, 3 not kaldı, 130 karakterlik silinen cümle dosya baytlarında yok. Panel düğmesi elle denenmedi |
 | Kapanış temizliği süresiz bekleyebiliyordu (doğrulanmış hata) | `c274f5a` | geçti | bekliyor |
+| Kod ajanı işi bitince hiç bildirim yoktu; görünür kip pencere kapanana dek "çalışıyor" (doğrulanmış hata, 2026-11-05 canlıda) | bu tur | geçti | bekliyor |
+| Geçmiş silme sohbet ekranını temizlemiyordu; kullanıcı iki kez sildi (doğrulanmış hata, 2026-11-05 canlıda) | bu tur | geçti | silme geçti 2026-11-05 (Umut: 9 tur silindi, 3 not kaldı, metin dosya baytlarında yok); ekran temizliği bekliyor |
+| Kilitli depoda önce onay sorulup sonra reddediliyordu (2026-11-05 canlıda) | bu tur | geçti | kilit + Kilidi bırak geçti 2026-11-05 (Umut, gerçek çökme: iş `8ed35ad` interrupted, başlatma 3 kez reddedildi, bırakınca iş `5bed53b` başladı); düğme pasifliği bekliyor |
+| Geri yüklenen geçmişte zaman yoktu: model 8 saatlik kapatmayı "az önce" sandı (2026-11-05 canlıda) | bu tur | geçti | canlı model bekliyor |
+| Arka plan kod ajanı varsayılan modelde (Haiku 4.5) StructuredOutput çağırmıyor → `error`, iş commitlenmeden kalıyor (2026-11-05 canlıda) | config `manager/coder/tester_model` + hata özetinde artık değişiklik | geçti | yeni modelle bekliyor |
+| Projeler paneli her 2 sn bir denetlenen tur üretiyordu (bakım) | bu tur | geçti | — |
 | Karma olumsuzluk senaryosu yoktu (doğrulama eksikliği) | `fc42c95` | sahte bench 53/53 | canlı model bekliyor |
 | Konuşma sonu → eylem bitişi gecikmesi ölçülmüyordu (doğrulama eksikliği) | `831dfad` | geçti | canlı ölçüm bekliyor |
 | auto_mode_ok kapsamı kayıt geneli testsizdi (doğrulama eksikliği) | `9975083` | geçti | — |
