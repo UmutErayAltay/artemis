@@ -74,7 +74,11 @@ from artemis.channels.desktop.operations import (
 )
 from artemis.channels.desktop.pet import PetWidget, level_from_message
 from artemis.channels.desktop.pet_sprite import pets_dir_for
-from artemis.channels.desktop.projects_panel import ProjectsPanel, make_page_header
+from artemis.channels.desktop.projects_panel import (
+    ProjectsPanel,
+    make_page_header,
+    status_label,
+)
 from artemis.channels.desktop.settings_panel import (
     SettingsPanel,
     save_choices,
@@ -89,6 +93,8 @@ from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
 
 _STYLE = themes.stylesheet(themes.DEFAULT_THEME)
+PROJECTS_POLL_ACTIVE_MS = 2000
+PROJECTS_POLL_IDLE_MS = 15000
 
 
 # Köprü ses durumunu makine okunur taşır; Türkçe metne ekran çevirir.
@@ -1246,7 +1252,8 @@ class DesktopWindow(QMainWindow):
         self.projects_panel.tool_requested.connect(self._submit_project_tool)
         self.projects_panel.config_saved.connect(self._code_agent_config_saved)
         self._projects_timer = QTimer(self)
-        self._projects_timer.setInterval(2000)
+        self._notified_jobs: set[tuple[str, str, str]] = set()
+        self._projects_timer.setInterval(PROJECTS_POLL_ACTIVE_MS)
         self._projects_timer.timeout.connect(self._refresh_projects)
         self._projects_timer.start()
         self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
@@ -1673,6 +1680,11 @@ class DesktopWindow(QMainWindow):
         self._set_controls()
 
     def _refresh_projects(self) -> None:
+        # Her yoklama denetime yazılan tam bir turdur; etkin iş yokken seyrek yoklanır.
+        idle = self.projects_panel.active_job_count() == 0 and not self._config_restart_pending
+        want = PROJECTS_POLL_IDLE_MS if idle else PROJECTS_POLL_ACTIVE_MS
+        if self._projects_timer.interval() != want:
+            self._projects_timer.setInterval(want)
         if self._config_restart_pending:
             # Ertelenmiş yeniden kurulum: iş listesi sekmeden bağımsız tazelenir, son durumu
             # (status_serial arttıktan sonra) boşsa tek kez yeniden kurulur.
@@ -1990,12 +2002,7 @@ class DesktopWindow(QMainWindow):
             elif event.state == "context_reset":
                 # Adım blokları eski balonlarla birlikte silinir; kayıt da sıfırlanır.
                 # Karşılama geri gelir; işlem kartları da sıfırlanır (denetim günlüğü değişmez).
-                self._turn_steps.clear()
-                self._reset_cards()
-                self.chat.clear()
-                if not self._busy:
-                    self._set_status("Hazır", "ready")
-                self._set_controls()
+                self._clear_chat_view()
             elif event.state == "cancelling":
                 self._set_status("İptal ediliyor…", "running")
             elif event.state == "stopping":
@@ -2023,6 +2030,14 @@ class DesktopWindow(QMainWindow):
                 panel = (self.projects_panel if event.tool_name.startswith("code_agent_")
                          else self.data_panel)
                 panel.accept_result(event.tool_name, event.result)
+                # Silinen geçmişin balonları ekranda kalırsa kullanıcı silmenin başarısız
+                # olduğunu sanır; "Yeni sohbet" ile aynı temizlik yapılır.
+                if (
+                    event.tool_name == "conversation_history"
+                    and event.result.success
+                    and event.result.data.get("action") == "delete"
+                ):
+                    self._clear_chat_view()
             return
         if isinstance(event, Finished):
             if event.request_id == self._active_request:
@@ -2065,10 +2080,42 @@ class DesktopWindow(QMainWindow):
             self._feed_card(event)
             self._collect_step(event)
 
+    def _clear_chat_view(self) -> None:
+        self._turn_steps.clear()
+        self._reset_cards()
+        self.chat.clear()
+        if not self._busy:
+            self._set_status("Hazır", "ready")
+        self._set_controls()
+
     def _pet_activity(self, event: Activity) -> None:
-        text = self.pet.code_agent_event(event.event, event.fields)
-        if text is not None and self._tray is not None:
-            self._tray.showMessage("Artemis", text, QSystemTrayIcon.MessageIcon.Information, 6000)
+        self.pet.code_agent_event(event.event, event.fields)
+        if event.event in {"code_agent_started", "code_agent_waiting", "code_agent_done"}:
+            # Liste yoklaması etkin işte 2 sn, değilse 15 sn; durum değişince hemen hızlanır.
+            self._projects_timer.setInterval(PROJECTS_POLL_ACTIVE_MS)
+            self._projects_timer.start()
+        if event.event in {"code_agent_waiting", "code_agent_done"}:
+            self._notify_job(event.fields)
+
+    def _notify_job(self, fields: dict[str, Any]) -> None:
+        """Sekme açık olmasa da görünür bildirim: sohbet satırı + tepsi balonu (Windows toast).
+
+        Aynı iş/durum çifti bir kez bildirilir (kilit bırakma ve zaman aşımı yolları da
+        `code_agent_done` yazar). Kullanıcının kendi iptali bildirim gerektirmez.
+        """
+        status = str(fields.get("status", ""))
+        key = (str(fields.get("job_id", "")), status, str(fields.get("question_id") or ""))
+        if status == "cancelled" or key in self._notified_jobs:
+            return
+        self._notified_jobs.add(key)
+        project = str(fields.get("project") or "kod ajanı")
+        summary = str(fields.get("summary") or "").strip()
+        text = f"Kod işi · {project}: {status_label(fields)}" + (f". {summary}" if summary else "")
+        self._append_chat("Artemis", text)
+        if self._tray is not None:
+            self._tray.showMessage(
+                "Artemis", text[:240], QSystemTrayIcon.MessageIcon.Information, 6000
+            )
 
     def _show_approval(self, item: Approval) -> None:
         if item.request_id != self._active_request:

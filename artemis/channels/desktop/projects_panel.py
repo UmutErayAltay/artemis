@@ -1013,6 +1013,18 @@ class ProjectsPanel(QWidget):
             return "Kabul ölçütünü yaz (her satır bir madde)."
         return ""
 
+    def _lock_block(self, draft: dict[str, Any]) -> str:
+        """Taslağın deposunda çalışan/kilitli iş varsa nedeni; sunucu kontrolü ayrıca durur,
+        bu yalnız kullanıcıya boşuna onay penceresi göstermemek içindir."""
+        for kind, job in self._items:
+            if kind != "job" or job.get("project") != draft.get("project"):
+                continue
+            if job.get("cleanup_pending"):
+                return "Bu projede kilitli/çalışan iş var; önce Kilidi bırak."
+            if job.get("status") in ACTIVE_JOB_STATUSES:
+                return "Bu projede çalışan iş var; bitmesini bekleyin."
+        return ""
+
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         enabled = not busy and not self._demo
@@ -1022,11 +1034,20 @@ class ProjectsPanel(QWidget):
         self.refresh_button.setEnabled(enabled)
         selected = self._selected()
         kind, record = selected if selected else ("", {})
-        self.start_button.setEnabled(enabled and kind == "draft")
+        lock_reason = self._lock_block(record) if kind == "draft" else ""
+        self.start_button.setEnabled(enabled and kind == "draft" and not lock_reason)
         if self._demo:
             start_reason = "Demo modunda proje süreçleri kapalı."
         elif busy:
             start_reason = "Artemis meşgul; hazır olunca açılır."
+        elif lock_reason:
+            start_reason = lock_reason
+        elif (
+            kind == "job" and record.get("mode") == "visible" and record.get("status") == "running"
+        ):
+            start_reason = (
+                "Ajan penceresi açık: iş bitince pencereyi kapatın, sonuç o zaman kaydedilir."
+            )
         elif kind == "job":
             start_reason = "Bu bir iş; yeni iş için bir taslak seç."
         elif kind != "draft":

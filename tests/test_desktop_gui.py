@@ -1388,3 +1388,91 @@ def test_pet_workshop_model_button_opens_settings_model(app: QApplication, tmp_p
         assert window.settings_panel.sections.currentRow() == 1
     finally:
         _close_cleanly(app, window)
+
+
+def test_history_delete_clears_chat_bubbles_but_list_does_not(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from artemis.channels.desktop.bridge import ToolFinished
+    from artemis.tools.base import ToolResult
+
+    window = _window(app, tmp_path)
+    try:
+        window._active_request = "r"
+        window._append_chat("Siz", "eski balon")
+        for action, cleared in (("list", False), ("delete", True)):
+            result = ToolResult(
+                success=True, status="ok", message="ok",
+                data={"action": action, "retention_days": 0, "turns": 0},
+            )
+            window._handle_event(ToolFinished("r", "conversation_history", result))
+            assert ("eski balon" not in window.chat.toPlainText()) is cleared
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_code_agent_terminal_events_show_chat_notice_once(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        fields = {
+            "job_id": "j1", "project": "web", "status": "done", "verification": "accepted",
+            "summary": "Form düzeltildi.", "commits": ["abc"],
+        }
+        for _ in range(2):  # kilit bırakma gibi yollar aynı olayı tekrar yazabilir
+            window._handle_event(Activity(None, None, 1, "code_agent_done", fields))
+        text = window.chat.toPlainText()
+        assert text.count("Kod işi · web: Doğrulandı. Form düzeltildi.") == 1
+        window._handle_event(Activity(None, None, 2, "code_agent_done", {**fields, "job_id": "j2",
+                                      "status": "interrupted", "verification": "unverified"}))
+        assert "Kod işi · web: Kesintiye uğradı" in window.chat.toPlainText()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_projects_poll_interval_follows_active_jobs_and_locked_repo_blocks_start(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from artemis.channels.desktop.projects_panel import ProjectsPanel
+    from artemis.tools.base import ToolResult
+
+    window = _window(app, tmp_path)
+    try:
+        window._refresh_projects()
+        assert window._projects_timer.interval() == 15000
+        window.projects_panel._items = [("job", {"project": "p", "status": "running"})]
+        window._refresh_projects()
+        assert window._projects_timer.interval() == 2000
+    finally:
+        _close_cleanly(app, window)
+
+    panel = ProjectsPanel()
+    panel.set_busy(False)
+    panel._demo = False
+    spec = {"project": "p", "spec_id": "s"}
+    locked = {"job_id": "j", "project": "p", "status": "interrupted", "cleanup_pending": True,
+              "spec": {}}
+    panel.accept_result("code_agent_status", ToolResult(
+        success=True, status="ok", message="ok",
+        data={"projects": ["p"], "drafts": [spec], "jobs": [locked]},
+    ))
+    panel.items.setCurrentRow(0)  # taslak
+    assert not panel.start_button.isEnabled()
+    assert "Kilidi bırak" in panel.start_reason.text()
+    panel.close()
+
+
+def test_running_visible_job_shows_honest_close_window_line(app: QApplication) -> None:
+    from artemis.channels.desktop.projects_panel import ProjectsPanel
+    from artemis.tools.base import ToolResult
+
+    panel = ProjectsPanel()
+    panel.set_busy(False)
+    job = {"job_id": "j", "project": "p", "status": "running", "mode": "visible", "spec": {}}
+    panel.accept_result("code_agent_status", ToolResult(
+        success=True, status="ok", message="ok",
+        data={"projects": ["p"], "drafts": [], "jobs": [job]},
+    ))
+    assert "pencereyi kapatın" in panel.start_reason.text()
+    panel.close()
