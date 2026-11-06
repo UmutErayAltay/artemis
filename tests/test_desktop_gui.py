@@ -20,15 +20,16 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QWidget
 
+import artemis.channels.desktop.app as app_module
 import artemis.channels.desktop.bridge as bridge_module
 from artemis.brain.agent_loop import RunResult
 from artemis.channels.desktop.app import (
     _STYLE,
-    ApprovalDialog,
     DesktopWindow,
     StepBlock,
     build_window,
 )
+from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.bridge import Activity, Finished, State, VoiceCommand
 from artemis.channels.desktop.demo import DemoReadTool, DemoWriteTool
 from artemis.channels.desktop.themes import THEMES
@@ -606,9 +607,12 @@ def _deferred_settings_window(
 
     monkeypatch.setattr(bridge_module, "create_runtime", factory)
     monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
+    # Yoklama aralığı her tikte bu sabitlerden yeniden kurulur; zamanlayıcıya doğrudan
+    # setInterval ilk tikte 2 sn'ye geri döner ve yavaş CI'da 8 sn bekleme yetmez.
+    monkeypatch.setattr(app_module, "PROJECTS_POLL_ACTIVE_MS", 20)
+    monkeypatch.setattr(app_module, "PROJECTS_POLL_IDLE_MS", 20)
     window = build_window(path, app=app)
     _wait(app, lambda: window._worker_ready)
-    # Ertelenen kuruluşun boşta-yoklaması 2 sn; testte hızlandırılır.
     window._projects_timer.setInterval(20)
     return window, path, seen, blocker
 

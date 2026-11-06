@@ -884,7 +884,9 @@ def test_live_states_become_their_own_events(tmp_path):
     bridge = DesktopBridge(tmp_path / "unused.yaml", lambda *_a, **_k: None)
     for state in ("live:merhaba dünya", "live:unavailable:deps:eksik", "heard:merhaba"):
         bridge._on_voice_state(state)
-    events = [(e.state, e.message) for e in bridge.poll_events()]
+    # Kurucu işçiyi başlatır; config yoksa Failed olayı araya girebilir (yarış). Test yalnız
+    # ses durumlarının kendi olayına dönüştüğünü ölçer.
+    events = [(e.state, e.message) for e in bridge.poll_events() if isinstance(e, State)]
     assert events == [
         ("voice_live", "merhaba dünya"),
         ("voice_live_unavailable", "deps:eksik"),
