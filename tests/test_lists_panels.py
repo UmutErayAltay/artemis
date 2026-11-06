@@ -24,6 +24,7 @@ from artemis.channels.desktop.projects_panel import (
     make_page_header,
 )
 from artemis.tools.base import ToolResult
+from artemis.tools.plugins.companion import UndoArguments
 from artemis.tools.plugins.history import HistoryArguments
 
 
@@ -330,3 +331,51 @@ def test_list_qss_uses_tokens_in_every_theme() -> None:
         css = themes.stylesheet(name)
         for selector in ("QLabel#statusChip", "QFrame#dangerZone", "QPushButton#disclosure"):
             assert selector in css
+
+
+# --- Hafıza değişiklikleri -----------------------------------------------------------------
+
+
+def _change(change_id: int, tainted: bool = False) -> dict[str, Any]:
+    return {
+        "id": change_id, "at": "2026-11-06T10:00:00+00:00", "file": "isler",
+        "source": "job_receipt", "before": "eski", "after": "yeni", "tainted": tainted,
+    }
+
+
+def test_memory_changes_render_rows_and_badge(app: QApplication) -> None:
+    panel = DataPanel()
+    panel.set_busy(False)
+    assert panel.memory_stack.currentIndex() == 1
+    panel.accept_result("memory_changes", _ok({"changes": [_change(3), _change(2, True)]}))
+    assert panel.memory_stack.currentIndex() == 0
+    assert len(panel._undo_buttons) == 2
+    texts = [label.text() for label in panel.findChildren(QLabel)]
+    assert any("Isler · makbuz" in text for text in texts)
+    assert any("eski → yeni" in text for text in texts)
+    assert texts.count("dış içerik") == 1
+    panel.accept_result("memory_changes", _ok({"changes": []}))
+    assert panel.memory_stack.currentIndex() == 1
+    assert panel.memory_empty.title_label.text() == "Kayıt yok"
+
+
+def test_memory_undo_emits_id_then_reloads_keeping_message(app: QApplication) -> None:
+    panel = DataPanel()
+    panel.set_busy(False)
+    panel.accept_result("memory_changes", _ok({"changes": [_change(7)]}))
+    seen: list[Any] = []
+    panel.tool_requested.connect(lambda name, args: seen.append((name, args)))
+    panel._undo_buttons[0].click()
+    assert seen == [("memory_change_undo", UndoArguments(change_id=7))]
+    seen.clear()
+    panel.set_busy(True)
+    panel.accept_result(
+        "memory_change_undo",
+        ToolResult(success=False, status="error", message="Dosya sonradan değişti."),
+    )
+    assert seen == []  # meşgulken istenmez
+    panel.set_busy(False)
+    app.processEvents()
+    assert [name for name, _ in seen] == ["memory_changes"]
+    panel.accept_result("memory_changes", _ok({"changes": []}))
+    assert panel.notice.text() == "Dosya sonradan değişti."
