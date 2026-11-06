@@ -114,7 +114,10 @@ class CodeAgentPrepare(BaseTool):
     description = (
         "Proje, görev, kapsam ve kabul ölçütlerini içeren değişmez yerel taslak hazırlar. "
         "İsteğe bağlı agent ve workdir yalnız yapılandırılmış takma adlardır (yol verme). "
-        "Eksik ayrıntıları önce kullanıcıya sorun. Kodlayıcı veya subprocess başlatmaz. "
+        "Çağırmadan önce eksik ayrıntıları kullanıcıya TEK TEK, her mesajda bir soru olarak "
+        "sorun: önce görev (ne yapılacak), sonra kapsam (hangi dosya/klasör), sonra kabul "
+        "ölçütleri (nasıl anlaşılır); kullanıcı zaten verdiyse o soruyu atlayın, uydurmayın. "
+        "Kodlayıcı veya subprocess başlatmaz. "
         "Sonraki code_agent_start çağrısı dönen spec'in tam kopyasını taşımalıdır."
     )
     args_model = PrepareArguments

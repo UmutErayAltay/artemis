@@ -894,6 +894,7 @@ class ProjectsPanel(QWidget):
                 project_path=self._project_repo(),
                 mode=self.selected_mode(),
                 default_mode=self._config().default_mode,
+                default_workdir=self._config().default_workdir,
             )
         except (OSError, ValueError):
             self.notice.setText("Varsayılan kaydedilemedi; mevcut ayarlar korunuyor.")

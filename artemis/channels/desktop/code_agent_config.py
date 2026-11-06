@@ -96,6 +96,7 @@ def save_project_default(
     project_path: Path | None,
     mode: str | None = None,
     default_mode: str = "background",
+    default_workdir: str = OWN_REPO_ALIAS,
 ) -> None:
     """Projenin varsayılanını yazar; eski `alias: yol` yalnız gerektiğinde sözlüğe çevrilir.
 
@@ -111,7 +112,7 @@ def save_project_default(
     else:
         raise ValueError("Projenin klasörü bilinmiyor.")
     # Varsayılanla aynı seçim anahtar olarak yazılmaz: proje genel varsayılanı izlemeye devam eder.
-    choices = [("agent", agent, default_agent), ("workdir", workdir, OWN_REPO_ALIAS)]
+    choices = [("agent", agent, default_agent), ("workdir", workdir, default_workdir)]
     if mode is not None:
         choices.append(("mode", mode, default_mode))
     for key, value, fallback in choices:
