@@ -202,6 +202,9 @@ class MemoryConfig(BaseModel):
     max_note_chars: int = Field(default=20000, ge=1000, le=200000)
     embedding_model: str | None = None
     embedding_cache_dir: Path | None = None
+    # Kullanıcının açıkça seçtiği vault'a göreli dosyalar (örn. Threads.md); yalnız
+    # memory_open_work aracından, safe_join ile okunur. exclude'u aşar (açık tercih).
+    companion_vault_files: tuple[str, ...] = ()
 
 
 class TelegramConfig(BaseModel):
