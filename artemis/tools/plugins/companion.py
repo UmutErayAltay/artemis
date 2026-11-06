@@ -266,7 +266,8 @@ class MemoryChangeUndo(BaseTool):
         "sonra yeniden değiştiyse reddeder."
     )
     args_model = UndoArguments
-    risk = Risk.SIDE_EFFECT
+    # Kalıcı kuralı/kartı geri sarar; model tek başına yapamasın (panelde de onay sorulur).
+    risk = Risk.CONFIRM_REQUIRED
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = UndoArguments.model_validate(arguments)

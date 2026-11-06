@@ -230,7 +230,7 @@ def test_registry_discovers_faz_b_tools_with_risks() -> None:
         "memory_session_update": Risk.SIDE_EFFECT,
         "memory_rule_add": Risk.CONFIRM_REQUIRED,
         "memory_changes": Risk.READ_ONLY,
-        "memory_change_undo": Risk.SIDE_EFFECT,
+        "memory_change_undo": Risk.CONFIRM_REQUIRED,
         "memory_job_receipt": Risk.CONFIRM_REQUIRED,
     }
     for name, risk in expected.items():
@@ -286,7 +286,54 @@ async def test_undo_restoring_tainted_text_keeps_mark(tmp_path: Path) -> None:
     ensure = __import__("artemis.memory.companion", fromlist=["ensure_skeleton"])
     ensure.ensure_skeleton(state_dir)
     write_companion(state_dir, "isler", "dış", source="t", turn_id="1", tainted=True)
-    clean = write_companion(state_dir, "isler", "temiz", source="t", turn_id="2", tainted=False)
-    assert not content_tainted(state_dir, "isler")
-    undo_change(state_dir, clean, turn_id="3", tainted=False)
+    later = write_companion(state_dir, "isler", "sonra", source="t", turn_id="2", tainted=False)
+    # Temiz turdaki geri alma lekeli metni geri getirirse işaret de gelir.
+    undo_change(state_dir, later, turn_id="3", tainted=False)
     assert content_tainted(state_dir, "isler")
+
+
+async def test_taint_is_sticky_across_preserving_rewrites(tmp_path: Path) -> None:
+    from artemis.memory.companion import content_tainted, ensure_skeleton
+
+    state_dir = tmp_path / "state"
+    ensure_skeleton(state_dir)
+    assert not content_tainted(state_dir, "isler")  # günlük yok: şablon temiz
+    first = write_companion(state_dir, "isler", "dış emir", source="t", turn_id="1", tainted=True)
+    # Temiz turdaki yeniden yazım (ör. makbuz eski bölümü korur) lekeyi silmez.
+    write_companion(state_dir, "isler", "dış emir\n- yeni", source="t", turn_id="2", tainted=False)
+    assert content_tainted(state_dir, "isler")
+    # Kullanıcının geri alması lekeli yazımdan önceki temiz içeriğe dönerse leke düşer.
+    undo_change(state_dir, first + 1, turn_id="3", tainted=False)
+    undo_change(state_dir, first, turn_id="4", tainted=False)
+    assert not content_tainted(state_dir, "isler")
+
+
+def test_undo_requires_confirmation() -> None:
+    tool = discover_tools().get("memory_change_undo")
+    assert tool is not None and tool.risk is Risk.CONFIRM_REQUIRED
+
+
+async def test_tainted_memory_marks_turn_history_external(tmp_path: Path) -> None:
+    from artemis.brain.agent_loop import AgentLoop
+    from artemis.brain.fake import ScriptedProvider
+    from artemis.brain.models import Completion
+    from artemis.memory.companion import ensure_skeleton
+
+    context = make_context(tmp_path)
+    ensure_skeleton(context.settings.state_dir)
+    write_companion(context.settings.state_dir, "isler", "x", source="t", turn_id="1", tainted=True)
+    seen: list[bool] = []
+    gate = SafetyGate(discover_tools())
+    original = gate.dispatch
+
+    async def spy(call: Any, ctx: Any, state: TurnState, approve: Any) -> Any:
+        seen.append(state.history_external)
+        return await original(call, ctx, state, approve)
+
+    gate.dispatch = spy  # type: ignore[method-assign]
+    provider = ScriptedProvider(
+        [Completion(tool_calls=[ToolCall(id="c", name="memory_changes", arguments={})]),
+         Completion(content="tamam")]
+    )
+    await AgentLoop(provider, gate, context, lambda *_: True).run("değişikliklere bak")
+    assert seen == [True]

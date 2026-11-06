@@ -409,7 +409,9 @@ class AgentLoop:
         state = TurnState(unattended=unattended)
         # Taint yeni tura taşınmaz (ADR 0012) ama bağlamda kalan dış içerik dışarı giden
         # araçlar için onay nedenidir (ADR 0013).
-        state.history_external = history is not None and history.external
+        state.history_external = (history is not None and history.external) or any(
+            content_tainted(self.context.settings.state_dir, key) for key, _ in _COMPANION_SHARES
+        )
         start = time.monotonic()
         settings = self.context.settings
         state.deadline = start + settings.max_seconds

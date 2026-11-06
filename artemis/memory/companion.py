@@ -127,6 +127,10 @@ def write_companion(
     if source != "undo" and len(text) > MAX_CHARS[key]:
         raise ValueError(f"{COMPANION_FILES[key]} en çok {MAX_CHARS[key]} karakter olabilir.")
     before = _read_exact(path)
+    if source != "undo" and content_tainted(state_dir, key):
+        # Makbuz/oturum güncellemesi eski bölümleri korur; lekeli metin temiz bir yazımla
+        # "aklanmasın". Leke yalnız kullanıcının geri alma işlemiyle (kendi geçmişinden) düşer.
+        tainted = True
     with _connect(state_dir) as db:
         with db:
             cursor = db.execute(
@@ -199,7 +203,13 @@ def undo_change(state_dir: Path, change_id: int, *, turn_id: str, tainted: bool)
 
 
 def content_tainted(state_dir: Path, key: str) -> bool:
-    """Dosyanın şu anki içeriği dış içerik okunan bir turda mı yazıldı (son tamamlanan yazım)."""
+    """Dosyanın şu anki içeriği dış içerik okunan bir turda mı yazıldı (son tamamlanan yazım).
+
+    Günlük hiç oluşmadıysa yazım da olmamıştır: iskelet şablonu temizdir (yeni kurulumda her tur
+    lekeli sayılmasın). Var olan günlük okunamazsa güvenli taraf lekeli kabul etmektir.
+    """
+    if not (companion_dir(state_dir) / "degisiklikler.sqlite3").is_file():
+        return False
     try:
         with _connect(state_dir) as db:
             row = db.execute(
