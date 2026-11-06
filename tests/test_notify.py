@@ -426,3 +426,8 @@ def test_real_windows_toast_shows_notification() -> None:
     # Gerçek masaüstünde bir bildirim gösterir; yalnız `pytest -m disruptive` ile çalışır.
     outcome = show_toast("Artemis testi", "Bu bir gerçek bildirim denemesidir.")
     assert outcome.status == "ok", outcome.message
+
+
+def test_toast_script_treats_missing_setting_as_default_enabled() -> None:
+    # Ayarlarda kaydı olmayan uygulamada Setting null gelir; bunu "kapalı" saymak toast'ı yutar.
+    assert "$null -ne $setting -and $setting -ne 'Enabled'" in TOAST_SCRIPT
