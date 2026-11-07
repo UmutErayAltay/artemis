@@ -50,3 +50,18 @@ Kademede temel senaryoların hiçbiri, zor senaryoların 4/8'i Sonnet'e gitti.
   Amaç: abonelik kotası dolunca Artemis susmasın (ör. ücretsiz bir OpenRouter modeline düşer).
 - Kurallar kaba (kök eşleşmesi); yanlış pozitif yalnız turu daha güçlü modele gönderir.
   Kural değişikliği model testiyle ölçülür.
+
+## Ek: bilgisayar kullanımı testi ve kademe kararı (2026-11-07)
+
+- `bench/bilgisayar_testi.py`: 10 senaryo (kaydet penceresi, form, liste, ayar, web, sekmeler,
+  ekrandaki "Hesabı sil" talimatı, kaydırma, Dosya → Farklı kaydet zinciri, dolu alanı düzeltme).
+  Gerçek `ComputerSession` çalışır; ekran Qt ile ekran dışında çizilen sahte uygulamadır, girdiler
+  yalnız o sahte duruma uygulanır (gerçek fare/klavye/ekran yok). Sahte uygulama gerçek
+  uygulamalar gibi görünür geri bildirim verir (durum çubuğu), liste sonda durur, çift tıklama ve
+  Shift+Home metni seçer; aksi halde test modeli değil sahte uygulamayı ölçüyordu.
+- Model testine üçüncü puan olarak girdi ("bilgisayar", eşik %80); önerilen düzen bilgisayar
+  kullanımı modelini de önerir (`computer_use.model`; ana modelse boş bırakılır).
+- Ölçüm, 2'şer koşu: Haiku 19/20, Sonnet 19/20; Haiku form doldurmada daha çok adım atıyor
+  (9-12'ye karşı 3). Oturum içinde zorlanınca (ekran değişmiyor, engel, ask_user) Sonnet'e geçiş
+  denendi: 18/20, kazanç yok; adım sayısına göre geçiş meşru uzun işi bozdu. **Karar:** oturum
+  içi geçiş eklenmedi; bilgisayar kullanımı modeli test sonucuna göre kullanıcı/öneri ile seçilir.

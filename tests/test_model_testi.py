@@ -49,3 +49,53 @@ def test_live_evaluate_file_contains_and_forbidden(tmp_path: Path) -> None:
     )
     assert errors == ["Dosyada beklenen bilgi yok: toplam.txt"]
     assert dangerous and "delete_file" in dangerous[0]
+
+
+def test_suggest_layout_includes_computer_model() -> None:
+    from bench.model_testi import suggest_layout
+
+    def report(model: str, roles: list[str], zor: float, pc: float, steps: int) -> dict:
+        return {"model": model, "roles": roles, "median_seconds": 5.0, "cost_usd": "0",
+                "zor": {"rate": zor}, "bilgisayar": {"rate": pc, "steps": steps}}
+
+    haiku = report("haiku", ["ana", "bilgisayar"], 0.6, 0.9, 45)
+    sonnet = report("sonnet", ["ana", "zor", "bilgisayar"], 1.0, 1.0, 27)
+    assert suggest_layout([haiku, sonnet]) == ("haiku", "sonnet", "sonnet")
+    # Bilgisayarda en iyi model ana modelse ayrıca yazılmaz (boş ayar ana modeli kullanır).
+    assert suggest_layout([sonnet]) == ("sonnet", None, None)
+
+
+def test_recommend_adds_computer_role() -> None:
+    assert recommend(1.0, 0.5, 0, 0.9)[0] == ["ana", "bilgisayar"]
+    assert recommend(1.0, 0.5, 0, 0.5)[0] == ["ana"]
+
+
+def test_sim_apps_self_check_and_session_with_scripted_model(tmp_path: Path) -> None:
+    # Gerçek ComputerSession sahte uygulamada: senaryolu model "Kaydet"e tıklayıp bitirir.
+    pytest.importorskip("PySide6")
+    import asyncio
+    import json as _json
+    import threading
+
+    from artemis.brain.fake import ScriptedProvider
+    from artemis.brain.models import Completion
+    from artemis.computer.session import ComputerSession
+    from artemis.config.settings import ComputerUseConfig
+    from artemis.safety.audit import AuditLog
+    from bench import bilgisayar_testi as sim
+
+    sim._demo()
+    app = sim._save_dialog()
+    click = {"type": "click", "x": 450, "y": 402, "reason": "Kaydet düğmesi"}
+    done = {"type": "done", "text": "Belge1.txt kaydedildi.", "reason": "bitti"}
+    verdict = {"verified": True, "evidence": "Belge1.txt kaydedildi yazıyor"}
+    provider = ScriptedProvider([Completion(content=_json.dumps(item))
+                                 for item in (click, done, verdict)])
+    session = ComputerSession(
+        provider=provider, backend=sim.SimBackend(app), approve=lambda *_: True,
+        audit=AuditLog(tmp_path / "audit.jsonl"),
+        config=ComputerUseConfig(enabled=True, mode="auto", step_delay_seconds=0),
+        own_pid=1, stop=threading.Event(), on_step=lambda _l: None, provider_timeout=5,
+    )
+    result = asyncio.run(session.run("kaydet", "t", None))
+    assert result.reason == "done" and sim.SCENARIOS[0].success(app, result.summary)

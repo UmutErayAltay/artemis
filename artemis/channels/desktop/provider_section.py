@@ -58,9 +58,9 @@ from bench.model_testi import suggest_layout
 
 # Model testi bir koşuda yaklaşık bu kadar token harcar (2026-11-07 ölçümü: ~340 bin giriş);
 # ücretli modelde tahmini maliyet ve bütçe tavanı bundan hesaplanır.
-TEST_INPUT_TOKENS = 360_000
+TEST_INPUT_TOKENS = 520_000  # + bilgisayar senaryoları (ekran görüntüleri)
 TEST_OUTPUT_TOKENS = 20_000
-_ROLE_TEXT = {"ana": "ana model", "zor": "zor işler"}
+_ROLE_TEXT = {"ana": "ana model", "zor": "zor işler", "bilgisayar": "bilgisayar kullanımı"}
 
 # (görünen ad, önerilen kimlik, adres, anahtar gerekli mi)
 PRESETS: tuple[tuple[str, str, str, bool], ...] = (
@@ -265,7 +265,7 @@ class ProviderSection(QWidget):
         self._testing = ""
         self._fallback = ""
         self._test_report = Path()
-        self._suggested: tuple[str | None, str | None] = (None, None)
+        self._suggested: tuple[str | None, str | None, str | None] = (None, None, None)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
@@ -519,16 +519,19 @@ class ProviderSection(QWidget):
         ]
         self._render_models()
         self._suggested = suggest_layout(list(reports.values()))
-        ana, zor = self._suggested
-        current = (settings.primary_model, settings.hard_model or None)
+        ana, zor, pc = self._suggested
+        current = (
+            settings.primary_model, settings.hard_model or None, settings.computer_use.model or None
+        )
         self.layout_label.setText(
             f"Önerilen düzen (test sonuçlarına göre): Ana: {ana}"
             + (f" · Zor işler: {zor}" if zor else "")
-            + (" — şu anki düzen bu." if (ana, zor) == current else "")
+            + (f" · Bilgisayar kullanımı: {pc}" if pc else "")
+            + (" — şu anki düzen bu." if (ana, zor, pc) == current else "")
             if ana else ""
         )
         self.layout_label.setVisible(bool(ana))
-        self.apply_layout_button.setVisible(bool(ana) and (ana, zor) != current)
+        self.apply_layout_button.setVisible(bool(ana) and (ana, zor, pc) != current)
         self._sync_hard_button()
         # Liste kendi içinde kaydırılmasın: en çok 6 satır kadar uzar.
         heights = [
@@ -1138,7 +1141,7 @@ class ProviderSection(QWidget):
         self.status.setText(f"{alias}: {_test_summary(report)}. {report.get('summary', '')}")
 
     def _apply_layout(self) -> None:
-        ana, zor = self._suggested
+        ana, zor, pc = self._suggested
         if not ana:
             return
         try:
@@ -1151,11 +1154,16 @@ class ProviderSection(QWidget):
             raw["hard_model"] = zor
         else:
             raw.pop("hard_model", None)
+        # Boş computer_use.model ana modeli kullanır; öneri ana modelse boş bırakılır.
+        computer = raw.setdefault("computer_use", {})
+        if isinstance(computer, dict):
+            computer["model"] = pc or ""
         if not self._write(raw):
             return
         self.reload()
         self.status.setText(
-            f"Düzen uygulandı. Beyin: {ana}" + (f", zor işler: {zor}." if zor else ".")
+            f"Düzen uygulandı. Beyin: {ana}" + (f", zor işler: {zor}" if zor else "")
+            + (f", bilgisayar kullanımı: {pc}" if pc else "") + "."
         )
         self.changed.emit()
 
@@ -1167,8 +1175,12 @@ def _test_summary(report: dict[str, object]) -> str:
         return ""
     text = (
         f"Test: temel {temel.get('passed')}/{temel.get('total')} · "
-        f"zor {zor.get('passed')}/{zor.get('total')} · ~{report.get('median_seconds')} sn"
+        f"zor {zor.get('passed')}/{zor.get('total')}"
     )
+    computer = report.get("bilgisayar")
+    if isinstance(computer, dict):
+        text += f" · bilgisayar {computer.get('passed')}/{computer.get('total')}"
+    text += f" · ~{report.get('median_seconds')} sn"
     if report.get("dangerous_errors"):
         return text + " · tehlikeli hata var → önerilmez"
     named = [_ROLE_TEXT[role] for role in roles if role in _ROLE_TEXT]
