@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from artemis.memory.companion import (
     CompanionConflictError,
+    content_private,
     content_tainted,
     list_changes,
     read_companion,
@@ -48,12 +49,13 @@ class MemoryOpenWork(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         settings = context.settings
         sections: dict[str, str] = {}
-        own_tainted = False
+        own_tainted = own_private = False
         for key in ("isler", "son_oturum"):
             text = read_companion(settings.state_dir, key, _OWN_CHARS).strip()
             if text:
                 sections[key] = text
                 own_tainted = own_tainted or content_tainted(settings.state_dir, key)
+                own_private = own_private or content_private(settings.state_dir, key)
         vault = settings.memory.vault_path
         vault_read: list[str] = []
         if vault is not None and vault.is_dir():
@@ -79,6 +81,7 @@ class MemoryOpenWork(BaseTool):
             data={"sources": list(sections), "vault_sources": vault_read, "content": sections},
             external=external,
             content_kind="file" if external else "text",
+            private=own_private,
         )
 
 
@@ -119,13 +122,19 @@ def _fail(message: str) -> ToolResult:
 
 
 def _write(
-    context: ToolContext, key: str, text: str, source: str, *, tainted: bool | None = None
+    context: ToolContext, key: str, text: str, source: str, *, tainted: bool | None = None,
+    private: bool | None = None,
 ) -> ToolResult | int:
-    """Yazar; hata varsa dürüst ToolResult, başarıda değişiklik kimliği döner."""
+    """Yazar; hata varsa dürüst ToolResult, başarıda değişiklik kimliği döner.
+
+    Gizlilik kökeni lekeden ayrı saklanır (ADR 0056): yerel hafızaya yazma onayı buluta
+    paylaşım izni değildir. Gizli turda yazılan metin sonraki turlarda buluta maskeli gider.
+    """
     try:
         return write_companion(
             context.settings.state_dir, key, text, source=source, turn_id=context.turn_id,
             tainted=context.turn_tainted if tainted is None else tainted,
+            private=context.turn_private if private is None else private,
         )
     except ValueError as error:
         return _fail(f"Yazılmadı: {error}")
@@ -211,6 +220,7 @@ class MemoryRuleAdd(BaseTool):
         current = read_companion(context.settings.state_dir, "kimlik", 10**6)
         # Onaylı tam metin kullanıcınındır: geçmişteki dış içerik yüzünden Kimlik lekeli
         # işaretlenmez (yoksa yapışkan leke sonraki her turu dış içerikli yapardı).
+        # Gizlilik ise düşürülmez (ADR 0056): onay yerel yazmanın onayıdır, bulut izni değildir.
         outcome = _write(
             context, "kimlik", _add_to_section(current, _RULES_HEADING, f"- {rule}"), "rule_add",
             tainted=False,
@@ -294,10 +304,10 @@ class MemoryRuleRemove(BaseTool):
             return _fail("Bu kural Kimlik'te yok; liste yenilenip tekrar denenmeli.")
         lines = section.split("\n")
         lines.remove(target)  # aynı metin iki kez varsa yalnız ilki
-        # Silme yeni metin eklemez: yapışkan leke dışında Kimlik'i lekelemez.
+        # Silme yeni metin eklemez: yapışkan leke/gizlilik dışında Kimlik'i lekelemez.
         outcome = _write(
             context, "kimlik", current.replace(section, "\n".join(lines), 1), "rule_remove",
-            tainted=False,
+            tainted=False, private=False,
         )
         if isinstance(outcome, ToolResult):
             return outcome
@@ -330,6 +340,7 @@ class MemoryChangeUndo(BaseTool):
             new_id = undo_change(
                 context.settings.state_dir, args.change_id,
                 turn_id=context.turn_id, tainted=context.turn_tainted,
+                private=context.turn_private,
             )
         except (LookupError, CompanionConflictError) as error:
             return _fail(str(error))

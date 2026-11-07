@@ -16,13 +16,24 @@ import pytest
 
 from artemis.brain.agent_loop import AgentLoop
 from artemis.brain.conversation import ConversationContext, TurnRecord
+from artemis.brain.errors import ProviderError, RetryableProviderError
 from artemis.brain.models import Completion, Message, ToolCall
 from artemis.brain.providers import _cloud_messages
 from artemis.brain.router import ProviderRouter
 from artemis.config.settings import ModelConfig, Settings
+from artemis.memory.companion import (
+    companion_dir,
+    content_private,
+    ensure_skeleton,
+    list_changes,
+    undo_change,
+    write_companion,
+)
+from artemis.memory.store import MemoryStore
 from artemis.safety.audit import AuditLog
-from artemis.safety.gate import SafetyGate
+from artemis.safety.gate import SafetyGate, TurnState
 from artemis.tools.base import ToolContext
+from artemis.tools.registry import discover_tools
 
 MARKER = f"GIZLI-{uuid4().hex[:10]}"  # her koşuda benzersiz özel işaret
 
@@ -35,7 +46,7 @@ def environment(monkeypatch: pytest.MonkeyPatch) -> None:
 class Scripted:
     """Router'ın çağırdığı sağlayıcı; gördüğü mesajları kaydeder, akışı da besler."""
 
-    def __init__(self, *responses: Completion) -> None:
+    def __init__(self, *responses: Completion | ProviderError) -> None:
         self.responses = list(responses)
         self.seen: list[list[Message]] = []
 
@@ -44,6 +55,8 @@ class Scripted:
     ) -> Completion:
         self.seen.append([message.model_copy(deep=True) for message in messages])
         completion = self.responses.pop(0)
+        if isinstance(completion, ProviderError):
+            raise completion
         if stream is not None and completion.content:
             stream.text(completion.content)
         return completion
@@ -175,3 +188,124 @@ def _empty_registry() -> Any:
     from artemis.tools.registry import ToolRegistry
 
     return ToolRegistry()
+
+
+# --- Bulgu 1: companion hafızası üzerinden buluta sızma ---------------------------------
+
+
+def _cloud_local_settings(tmp_path: Path) -> Settings:
+    workspace = tmp_path / "desktop"
+    workspace.mkdir(exist_ok=True)
+    return Settings(
+        workspace=workspace, state_dir=tmp_path / "state", audit_path=tmp_path / "audit.jsonl",
+        models={"main": _cloud("main"), "local": _local("local")}, primary_model="main",
+        fallback_model="local", max_output_tokens=100, allow_cloud_file_content=False,
+    )
+
+
+def _loop(settings: Settings, providers: dict[str, Any], approve: Any) -> AgentLoop:
+    audit = AuditLog(settings.audit_path)
+    router = ProviderRouter(settings, audit, providers=providers)
+    context = ToolContext(workspace=settings.workspace, settings=settings, audit=audit)
+    return AgentLoop(router, SafetyGate(discover_tools()), context, approve)
+
+
+async def test_private_file_saved_to_companion_is_masked_in_next_cloud_turn(
+    tmp_path: Path,
+) -> None:
+    settings = _cloud_local_settings(tmp_path)
+    ensure_skeleton(settings.state_dir)
+    (settings.workspace / "gizli.txt").write_text(f"parola ipucu {MARKER}", encoding="utf-8")
+    read = ToolCall(id="r1", name="read_file", arguments={"path": "gizli.txt"})
+    save = ToolCall(
+        id="w1", name="memory_session_update",
+        arguments={"son_oturum": f"Dosyada {MARKER} vardı."},
+    )
+    # Bulut dosyayı ister (sonuç ona maskeli gider), sonra kota hatası: yerel yedek tam içeriği
+    # görür ve onu hafızaya yazmak ister; tur lekeli olduğu için kapı onay sorar.
+    cloud = Scripted(Completion(tool_calls=[read]), RetryableProviderError("kota"))
+    local = Scripted(Completion(tool_calls=[save]), Completion(content="Kaydettim."))
+    approvals: list[str] = []
+
+    def approve(name: str, _arguments: dict[str, Any]) -> bool:
+        approvals.append(name)
+        return True
+
+    first = await _loop(settings, {"main": cloud, "local": local}, approve).run(
+        "gizli.txt'yi oku ve hafızaya yaz"
+    )
+    assert approvals == ["memory_session_update"]
+    assert first.record is not None and first.record.answer_private is True
+    assert content_private(settings.state_dir, "son_oturum")
+
+    # Yeniden başlatma: yeni yönlendirici ve döngü, geçmiş verilmeden.
+    fresh = Scripted(Completion(content="Merhaba."))
+    await _loop(settings, {"main": fresh, "local": Scripted()}, approve).run("merhaba")
+    request = fresh.seen[0]
+    assert MARKER not in request[0].content  # genel sistem istemi temiz
+    assert any(m.private and MARKER in m.content for m in request if m.role == "system")
+    assert not _leaks(request)
+
+
+async def test_companion_privacy_is_sticky_and_survives_undo(tmp_path: Path) -> None:
+    state = tmp_path / "state"
+    ensure_skeleton(state)
+    secret = write_companion(
+        state, "isler", f"- {MARKER}\n", source="t", turn_id="1", tainted=True, private=True
+    )
+    # Temiz turdaki sonraki yazım gizli metni korur: gizlilik düşmez.
+    later = write_companion(
+        state, "isler", f"- {MARKER}\n- yeni iş\n", source="t", turn_id="2", tainted=False
+    )
+    assert content_private(state, "isler")
+    undo_change(state, later, turn_id="3", tainted=False)  # gizli metne geri döner
+    assert content_private(state, "isler")
+    undo_change(state, secret, turn_id="4", tainted=False)  # iskelete döner
+    assert not content_private(state, "isler")
+
+
+def test_legacy_change_log_migrates_tainted_rows_to_private(tmp_path: Path) -> None:
+    import sqlite3
+
+    state = tmp_path / "state"
+    ensure_skeleton(state)
+    with sqlite3.connect(companion_dir(state) / "degisiklikler.sqlite3") as db:
+        db.execute(
+            "CREATE TABLE changes (id INTEGER PRIMARY KEY, at TEXT NOT NULL, file TEXT NOT NULL,"
+            " before TEXT NOT NULL, after TEXT NOT NULL, source TEXT NOT NULL,"
+            " turn_id TEXT NOT NULL, tainted INTEGER NOT NULL, state TEXT NOT NULL)"
+        )
+        db.execute(
+            "INSERT INTO changes VALUES (1, 'x', 'isler', '', 'a', 's', 't', 1, 'completed'),"
+            " (2, 'x', 'kimlik', '', 'b', 's', 't', 0, 'completed')"
+        )
+    assert content_private(state, "isler") is True  # lekeli eski kayıt gizli sayılır
+    assert content_private(state, "kimlik") is False
+    assert [row["private"] for row in list_changes(state, 5)] == [False, True]
+
+
+async def test_note_written_in_private_turn_is_masked_for_cloud(tmp_path: Path) -> None:
+    settings = _cloud_local_settings(tmp_path)
+    store = MemoryStore(settings.state_dir / "memory.sqlite3")
+    audit = AuditLog(settings.audit_path)
+    context = ToolContext(workspace=settings.workspace, settings=settings, audit=audit)
+    context.services["memory_store"] = store
+    context.turn_private = True
+    call = ToolCall(id="n1", name="memory_remember", arguments={"text": f"Kodum {MARKER}"})
+    result = await SafetyGate(discover_tools()).dispatch(
+        call, context, TurnState(tainted=True), lambda *_: True
+    )
+    assert result.success and store.list_notes()[0].private is True
+    listed = await SafetyGate(discover_tools()).dispatch(
+        ToolCall(id="n2", name="memory_list", arguments={}), context, TurnState(),
+        lambda *_: False,
+    )
+    assert listed.private is True
+
+    cloud = Scripted(Completion(content="Merhaba."))
+    router = ProviderRouter(settings, audit, providers={"main": cloud, "local": Scripted()})
+    fresh = ToolContext(workspace=settings.workspace, settings=settings, audit=audit)
+    fresh.services["memory_store"] = store
+    await AgentLoop(router, SafetyGate(discover_tools()), fresh, lambda *_: False).run("selam")
+    assert MARKER not in cloud.seen[0][0].content
+    assert not _leaks(cloud.seen[0])
