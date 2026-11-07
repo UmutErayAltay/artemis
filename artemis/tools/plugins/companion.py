@@ -260,17 +260,30 @@ class MemoryChanges(BaseTool):
             {
                 "id": row["id"], "at": row["at"], "file": row["file"], "source": row["source"],
                 "before": _preview(row["before"]), "after": _preview(row["after"]),
-                "tainted": row["tainted"],
+                "tainted": row["tainted"] or row["before_tainted"],
             }
             for row in rows
         ]
         # Panel geçmişi değil şu anki kural listesini gösterir: kural çoğalınca hangisinin
         # yürürlükte olduğu adım adım değişikliklerden okunmasın (Umut, 2026-11-07).
-        rules = _rules(read_companion(context.settings.state_dir, "kimlik", 10**6))
+        state_dir = context.settings.state_dir
+        rules = _rules(read_companion(state_dir, "kimlik", 10**6))
+        # Arşivdeki her anlık görüntü kendi kökenini taşır (ADR 0056): güncel dosya geri
+        # alınıp temizlenmiş olsa da dönen `before`/`after` metni dış ya da gizli olabilir.
+        # Sonuç dış içerikse kapı turu lekeler; gizliyse buluta maskeli gider.
+        external = any(row["tainted"] or row["before_tainted"] for row in rows) or (
+            bool(rules) and content_tainted(state_dir, "kimlik")
+        )
+        private = any(row["private"] or row["before_private"] for row in rows) or (
+            bool(rules) and content_private(state_dir, "kimlik")
+        )
         return ToolResult(
             success=True, status="ok",
             message=f"{len(rules)} kural, {len(items)} değişiklik.",
             data={"changes": items, "rules": rules},
+            external=external,
+            content_kind="file" if external else "text",
+            private=private,
         )
 
 
