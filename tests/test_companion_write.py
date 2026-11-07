@@ -181,6 +181,24 @@ async def test_rule_add_allowed_after_external_history(tmp_path: Path) -> None:
     assert content_tainted(state_dir, "kimlik") is False
 
 
+async def test_rule_list_and_remove(tmp_path: Path) -> None:
+    context = make_context(tmp_path)
+    state_dir = context.settings.state_dir
+    ensure_skeleton(state_dir)
+    for rule in ("Birinci.", "İkinci."):
+        await dispatch(context, TurnState(), "memory_rule_add", text=rule)
+    listed = await dispatch(context, TurnState(), "memory_changes")
+    assert listed.data["rules"] == ["Birinci.", "İkinci."]
+    removed = await dispatch(context, TurnState(), "memory_rule_remove", text="Birinci.")
+    assert removed.success is True
+    text = read_companion(state_dir, "kimlik", 1000)
+    assert "Birinci." not in text and text.endswith("## Kurallar\n- İkinci.\n")
+    missing = await dispatch(context, TurnState(), "memory_rule_remove", text="Birinci.")
+    assert missing.success is False
+    # Kimlik'in başlık dışındaki metni aynı kelimeyi içerse de dokunulmaz.
+    assert (await dispatch(context, TurnState(), "memory_changes")).data["rules"] == ["İkinci."]
+
+
 async def test_changes_and_undo_tools(tmp_path: Path) -> None:
     context = make_context(tmp_path)
     state_dir = context.settings.state_dir
@@ -247,6 +265,7 @@ def test_registry_discovers_faz_b_tools_with_risks() -> None:
         "memory_changes": Risk.READ_ONLY,
         "memory_change_undo": Risk.CONFIRM_REQUIRED,
         "memory_job_receipt": Risk.CONFIRM_REQUIRED,
+        "memory_rule_remove": Risk.CONFIRM_REQUIRED,
     }
     for name, risk in expected.items():
         tool = registry.get(name)

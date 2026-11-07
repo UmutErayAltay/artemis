@@ -254,8 +254,55 @@ class MemoryChanges(BaseTool):
             }
             for row in rows
         ]
+        # Panel geçmişi değil şu anki kural listesini gösterir: kural çoğalınca hangisinin
+        # yürürlükte olduğu adım adım değişikliklerden okunmasın (Umut, 2026-11-07).
+        rules = _rules(read_companion(context.settings.state_dir, "kimlik", 10**6))
         return ToolResult(
-            success=True, status="ok", message=f"{len(items)} değişiklik.", data={"changes": items}
+            success=True, status="ok",
+            message=f"{len(rules)} kural, {len(items)} değişiklik.",
+            data={"changes": items, "rules": rules},
+        )
+
+
+def _rules(kimlik: str) -> list[str]:
+    body = _section(kimlik, _RULES_HEADING).split("\n")[1:]
+    return [line[2:] for line in body if line.startswith("- ")]
+
+
+class RuleRemoveArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    text: str = Field(min_length=1, max_length=300)
+
+
+@register_tool
+class MemoryRuleRemove(BaseTool):
+    name = "memory_rule_remove"
+    label = "Kural kaldırma"
+    done_label = "Kural kaldırıldı"
+    description = (
+        "Kimlik'teki bir kuralı tam metniyle kaldırır (kullanıcı isterse; her zaman onay ister)."
+    )
+    args_model = RuleRemoveArguments
+    risk = Risk.CONFIRM_REQUIRED
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        args = RuleRemoveArguments.model_validate(arguments)
+        current = read_companion(context.settings.state_dir, "kimlik", 10**6)
+        section = _section(current, _RULES_HEADING)
+        target = f"- {args.text}"
+        if target not in section.split("\n")[1:]:
+            return _fail("Bu kural Kimlik'te yok; liste yenilenip tekrar denenmeli.")
+        lines = section.split("\n")
+        lines.remove(target)  # aynı metin iki kez varsa yalnız ilki
+        # Silme yeni metin eklemez: yapışkan leke dışında Kimlik'i lekelemez.
+        outcome = _write(
+            context, "kimlik", current.replace(section, "\n".join(lines), 1), "rule_remove",
+            tainted=False,
+        )
+        if isinstance(outcome, ToolResult):
+            return outcome
+        return ToolResult(
+            success=True, status="ok", message="Kural kaldırıldı.", data={"change_id": outcome}
         )
 
 

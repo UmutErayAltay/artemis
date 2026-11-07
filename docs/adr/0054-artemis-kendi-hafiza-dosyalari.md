@@ -43,3 +43,14 @@ görülen tura kısa ipucu (soru cümleleri hariç), ve turda başarılı hafız
 "kaydettim" iddiasına ya da kalıcı söze dürüst not. Gerçek Haiku ile 14 senaryo × 2 koşu:
 önceki sürüm 6/16 (ölçülebilenler), yeni sürüm 28/28; açık iş sorusu 6-9 araç çağrısı/13-16 sn
 yerine 1 çağrı/4-5 sn; yanlış pozitif (veda, soru) 0.
+
+## Ek (2026-11-07): kural listesi ve kaldırma
+
+- Listeler panelindeki kart artık değişiklik geçmişini değil, `Kimlik.md` içindeki `## Kurallar`
+  bölümünün şu anki halini gösterir; her kuralın yanında "Kaldır" vardır (Umut: kurallar
+  birikince geri alınacak olanı adım adım geçmişte aramak zor). Geçmiş ve `memory_change_undo`
+  model tarafında durur.
+- `memory_rule_remove` CONFIRM_REQUIRED'dır, kuralı tam metniyle bulur, yalnız o satırı siler;
+  silme de günlüğe girer. Yeni metin eklemediği için Kimlik'i lekelemez (yapışkan leke hariç).
+- Kural ekleme yalnız bu turda okunan dış içerikle engellenir; önceki turdan kalan dış içerik
+  engellemez, çünkü onay penceresi kuralın tam metnini gösterir.

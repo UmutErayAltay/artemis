@@ -57,7 +57,7 @@ FIXTURE_TOOLS = (
     "open_application", "close_application", "app_alias_remember", "app_alias_forget",
     # Artemis'in kendi hafıza dosyaları (ADR 0054); yalnız geçici state_dir'e yazar.
     "memory_open_work", "memory_session_update", "memory_rule_add", "memory_changes",
-    "memory_change_undo", "memory_job_receipt",
+    "memory_change_undo", "memory_job_receipt", "memory_rule_remove",
 )
 # Canlı Telegram'a gitmeyen ölçümde sabit alıcı kimliği yalnız yapılandırma değeridir.
 TELEGRAM_BENCH_CHAT_ID = 42
