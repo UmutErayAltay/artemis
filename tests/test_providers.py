@@ -514,7 +514,8 @@ async def test_openrouter_streams_text_and_assembles_tool_call_silently(http_ser
                             "function": {"name": "file-read_1", "arguments": "{\"pa"}}]),
         _delta(tool_calls=[{"index": 0, "function": {"arguments": "th\": \"örnek.txt\"}"}}]),
         {"choices": [{"delta": {}, "finish_reason": "tool_calls"}],
-         "usage": {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.001}},
+         "usage": {"prompt_tokens": 100, "completion_tokens": 20, "cost": 0.001,
+                   "prompt_tokens_details": {"cached_tokens": 80}}},
     )
     recorder = Recorder()
     completion = await provider_for("openrouter", http_server, tmp_path).complete(
@@ -530,6 +531,8 @@ async def test_openrouter_streams_text_and_assembles_tool_call_silently(http_ser
         ("file-read_1", {"path": "örnek.txt"})
     ]
     assert completion.usage.cost_usd == Decimal("0.001")
+    # Önbellekten okunan kısım ölçüm için ayrıca taşınır (giriş toplamından düşülmez).
+    assert (completion.usage.input_tokens, completion.usage.cached_input_tokens) == (100, 80)
 
 
 async def test_stream_cut_before_finish_is_retryable_not_success(http_server, tmp_path):

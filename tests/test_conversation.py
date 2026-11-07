@@ -33,6 +33,11 @@ NOTES_WITH_INJECTION = (
 )
 
 
+def _unstamped(content: str) -> str:
+    """Modele giden kullanıcı mesajındaki [tarih saat] önekini atar (önbellek biçimi)."""
+    return content.split("] ", 1)[1]
+
+
 def say(content: str) -> Completion:
     return Completion(content=content)
 
@@ -228,7 +233,15 @@ async def test_follow_up_command_uses_previous_turn(tmp_path):
     assert request[3].tool_call_id == "r1"
     assert request[3].content.startswith(HISTORY_PREFIX)
     assert request[4].content == "Rapor: Toplantı saat 14.00."
-    assert request[5].content == "onu arsiv klasörüne taşı"
+    assert _unstamped(request[5].content) == "onu arsiv klasörüne taşı"
+
+    # Önbellek değişmezi: yeni turun isteği, önceki turun son isteğinin birebir uzantısıdır
+    # (sistem istemi aynı, kullanıcı mesajı ve araç çerçevesi geçmişte aynı metinle gelir).
+    def shape(messages: list[Message]) -> list[tuple[str, str, str | None]]:
+        return [(m.role, m.content, m.tool_call_id) for m in messages]
+
+    previous = provider.requests[1]
+    assert shape(request[: len(previous)]) == shape(previous)
 
     starts = h.events_named("turn_start")
     assert starts[0]["context_turns"] == 0
@@ -323,7 +336,7 @@ async def test_reset_clears_context_and_is_audited(tmp_path):
     await h.runner.run("üçüncü")
 
     assert [m.role for m in provider.requests[2]] == ["system", "user"]
-    assert provider.requests[2][1].content == "üçüncü"
+    assert _unstamped(provider.requests[2][1].content) == "üçüncü"
     resets = h.events_named("context_reset")
     assert len(resets) == 1
     assert resets[0]["removed_turns"] == 2
@@ -359,7 +372,7 @@ async def test_cancelled_turn_is_not_recorded(tmp_path):
 
     assert h.events_named("turn_start")[-1]["context_turns"] == 0
     assert [m.role for m in provider.requests[1]] == ["system", "user"]
-    assert provider.requests[1][1].content == "sonraki"
+    assert _unstamped(provider.requests[1][1].content) == "sonraki"
 
 
 async def test_old_injection_is_framed_and_produces_no_side_effect(tmp_path):

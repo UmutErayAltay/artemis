@@ -150,7 +150,8 @@ class MemoryStore:
                 " search_text, answer_private, tainted) VALUES (?,?,?,?,?,?,?,?)",
                 (
                     record.turn_id,
-                    _now(),
+                    # Tur başı zamanı: modele giden [tarih saat] öneki geçmişte de aynı kalır.
+                    record.created_at or _now(),
                     record.model_dump_json(),
                     record.user_text,
                     record.answer,

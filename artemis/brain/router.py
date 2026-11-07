@@ -191,6 +191,7 @@ class ProviderRouter:
                 elapsed_seconds=self._clock() - started,
                 input_tokens=completion.usage.input_tokens,
                 output_tokens=completion.usage.output_tokens,
+                cached_input_tokens=completion.usage.cached_input_tokens,
                 cost_usd=str(completion.usage.cost_usd),
                 local_fallback=local_fallback,
             )
