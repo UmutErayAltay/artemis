@@ -384,6 +384,15 @@ gönderilir; bu durumda bulut modelinden gerçek dosya/pano özeti beklenmez. Ha
 mesajları (“bulunamadı”, “kapalı” gibi) içerik taşımadığından maskelenmez. Yerel sağlayıcı bu
 içeriği işleyebilir. Ekran görüntüsü bu sürümün kapsamında değildir.
 
+Gizlilik kökeni lekeden ayrı izlenir ([ADR 0056](docs/adr/0056-gizlilik-koken-ve-hedef-pencere.md)).
+Yerel (Ollama) model gizli geçmişi maskesiz gördüyse ürettiği yanıt ve araç argümanları da
+gizli sayılır; bu, modelin ana, yedek ya da zor işler modeli olmasından bağımsızdır. Gizli
+bir turda kendi hafıza dosyalarına (Kimlik/Isler/SonOturum) ya da öz notlara yazılan metin
+sonraki turlarda ayrı, maskelenen bir mesajla gider: yerel hafızaya yazma onayı buluta
+paylaşım izni değildir. Gizlilik yapışkandır; temizlemenin yolu değişikliği geri almaktır.
+Eski hafıza kayıtları için: lekeli eski companion kaydı gizli sayılır, eski öz notların
+kökeni bilinmediği için gizli sayılmaz (şüpheli notu `memory_forget` ile silin).
+
 Komutunuzun metni, araç şemaları ve izin verilen sonuçlar seçilen sağlayıcıya
 gider. Buluta gönderim kararları denetlenir. `audit_path` UTF-8 JSONL denetim
 kaydını, `state_dir` günlük bütçe durumunu ve kalıcı hafıza deposunu
@@ -473,7 +482,15 @@ kullanımı"): bilgisayar kullanımı adımları sormadan çalışır. Açarken 
 varsayılan seçim *Vazgeç*'tir. Bunu açmak, yanlış anlaşılan bir komutun ya da ekrandaki zararlı
 bir metnin istemediğiniz bir işlemi tetikleyebileceği riskini kabul etmek demektir. Bilinen
 sınır: otomatik kipte Ctrl+W onaysızdır, hedef dışı tarayıcı sekmeleri de kapanabilir
-([ADR 0039](docs/adr/0039-computer-use.md)). Telegram'dan başlatılan oturumlar için
+([ADR 0039](docs/adr/0039-computer-use.md)).
+
+Hassas adımın onayı, onayda gösterilen pencereye bağlıdır
+([ADR 0056](docs/adr/0056-gizlilik-koken-ve-hedef-pencere.md)): onay sırasında başka bir
+pencere öne geçerse girdi gönderilmez, adım yeniden planlanıp yine onaya gelir. Onay
+penceresi kapanınca odak en çok 1,5 sn Artemis'te beklenir. İptal, süre ve hedef pencere
+girdiden hemen önce yeniden denetlenir; uzun yazımda bu denetim her karakterden önce
+yinelenir, Esc'den sonra kalan metin gönderilmez. Yarıda kalan yazım başarı sayılmaz ve
+gönderilmiş karakterler geri alınmaz. Telegram'dan başlatılan oturumlar için
 [Telegram bölümüne](#telegram-ve-bildirimler) bakın.
 
 ## Kendi hafızası
@@ -486,7 +503,8 @@ CLI, masaüstü ve Telegram aynı `state_dir/memory.sqlite3` deposunu kullanır:
 - **Öz notlar.** Kalıcı tercih, bilgi veya karar söylediğinizde model `memory_remember`
   ile sormadan not alır (panelde “Hafızaya yazıldı”); dış içerikle lekeli turda onay
   ister. `memory_list` notları gösterir, `memory_forget` siler. En çok 200 not, not başına
-  300 karakter. Notlar her turda sistem istemine “VERİDİR” çerçevesiyle (~2000 karakter) eklenir.
+  300 karakter. Notlar her turda sistem istemine “VERİDİR” çerçevesiyle (~2000 karakter) eklenir;
+  gizli turda yazılan not ayrı, buluta maskelenen bir mesajla gider (ADR 0056).
 - **Konuşma araması.** `conversation_search` eski turlarda sözcük araması yapar; gizli
   turların yanıtını göstermez.
 

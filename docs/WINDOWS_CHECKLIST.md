@@ -161,4 +161,26 @@ adımlarda (mesaj, kapatma) yalnız zararsız hedef kullanın.
 - [ ] **Audit döndürme:** `audit.jsonl` 20 MB'ı geçince `audit-<zaman>-<pid>.jsonl` oluşuyor,
   eski dosya silinmiyor.
 
+## F. Gizlilik kökeni ve hedef pencere (ADR 0056, dal `fix/gizlilik-ve-hedef-pencere`)
+
+Kodlandı ve otomatik testte (sahte arka uç/sağlayıcı) geçti; gerçek Windows'ta denenmedi.
+Yalnız zararsız hedef (boş Not Defteri, taslak) kullanın; gönderilen girdi geri alınmaz.
+
+- [ ] **Onay sonrası odak:** Not Defteri'ne yazıp Enter'a basma görevi ver (Enter onay ister).
+  Onaylayınca ne olduğunu not edin: odak Not Defteri'ne kendiliğinden dönüyor mu (adım
+  çalışmalı), Artemis'te mi kalıyor (≈1,5 sn sonra "Onaylanan pencere yeniden öne gelmedi",
+  girdi yok)? Sonuç, 1,5 sn beklemenin yetip yetmediğini belirler.
+- [ ] **Onay sırasında hedef değişimi:** Enter onayı açıkken başka izinli bir pencereye
+  (ör. ikinci Not Defteri) tıklayıp sonra onaylayın → Enter hiçbir pencereye gitmiyor, oturum
+  "Onay verilen pencere değişti" notuyla yeniden planlıyor ve yeniden onay soruyor.
+- [ ] **Uzun yazımda Esc:** ~300 karakterlik bir metni Not Defteri'ne yazdırırken 1-2 sn
+  sonra Esc → yazım hemen duruyor; sonuç "Yazım yarıda kesildi … geri alınmadı"; audit'te
+  `computer_input_partial` (sent < total).
+- [ ] **Yazım sırasında odak değişimi:** uzun yazım sürerken başka bir pencereye tıklayın →
+  kalan metin o pencereye gitmiyor, oturum `blocked`.
+- [ ] **Emoji:** "deneme 😀 bitti" yazdırın → emoji tek karakter olarak doğru çıkıyor.
+- [ ] **Yerel model gizliliği (canlı model, Ollama):** bulut ana + Ollama `hard_model` ile
+  izinsiz bir dosyayı okutup "derin düşün" isteyin, sonra sıradan bir istek → audit
+  `cloud_transfer.masked_messages` > 0 ve bulut yanıtı dosya içeriğini bilmiyor.
+
 Sonuçları bu listede ikinci bir tablo açmadan kanonik durum tablosuna tarih/commit/kanıtla yazın.

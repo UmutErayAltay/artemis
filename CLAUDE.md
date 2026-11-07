@@ -99,6 +99,11 @@ turu lekeler. Vault `Core.md` hâlâ enjekte edilmez. Yazma yolu (Faz B): her ya
 `hafiza/degisiklikler.sqlite3`'e `prepared`→`completed` ile girer ve geri alınabilir.
 `memory_session_update` onaysız yazar; `memory_rule_add`, `memory_rule_remove` ve `memory_job_receipt` HER ZAMAN onaylıdır,
 kural lekeli turda yazılmaz, makbuz metni yalnız iş kaydından gelir. Bu kuralları gevşetmeyin.
+Gizlilik kökeni (ADR 0056) lekeden ve model rolünden ayrıdır: companion günlüğü ve notlar
+`private` saklar (yapışkan, geri almada geri gelir), gizli bölümler ayrı `private=True` sistem
+mesajıyla gider; yerel modelin yanıtı `Completion.local_model` ile gizli sayılır, bunun için
+`local_fallback` (tek-araç sınırı) açılmaz. Bilgisayar kullanımında onay hedef pencere
+kimliğine bağlıdır; iptal/süre/hedef girdiden hemen önce ve yazımda her karakterde denetlenir.
 
 Telegram ve bildirimler (Faz 4, ADR 0016) aynı kapıdan geçer. Alıcı config'teki
 `telegram.chat_id`'dir ve sabittir; `notify_telegram` alıcı argümanı taşımaz, bu yüzden

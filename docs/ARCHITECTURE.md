@@ -229,6 +229,9 @@ Bulutun bağlantı, kota, timeout veya sunucu hatasında yönlendirici belirli s
 yedeğine (`fallback_model`, herhangi bir sohbet modeli; ADR 0055) düşer; olay kayda girer.
 Kimlik/istek hataları sessizce gizlenmez. Yerel (Ollama) yedek yalnız basit, en fazla bir
 araçlı işler içindir; bulut yedeğe gizli içerik maskeli gider ve tur normal sınırlarla sürer.
+Gizlilik kökeni rolden ayrıdır (ADR 0056): hangi rolde olursa olsun yerel model gizli geçmişi
+maskesiz görür, bu yüzden yanıtı da gizli sayılır (`Completion.local_model`). Gizli turda
+yazılan kendi hafıza/not metni ayrı, `private=True` bir sistem mesajıyla gider.
 
 ## Doğrulama ve sınırlar
 
