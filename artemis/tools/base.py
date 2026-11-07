@@ -104,6 +104,9 @@ class ToolContext:
     # Çağrı anında turun lekeli olup olmadığı; kalıcı kayıt kuran araç (hatırlatma) bunu
     # kayda yazar ki dış içerikten doğan kayıt sonradan da öyle gösterilsin (ADR 0027).
     turn_tainted: bool = False
+    # Yalnız bu turda dış içerik okundu mu (geçmiş hariç). Kural ekleme bunu kullanır: önceki
+    # turda vault okunması, kullanıcının bu turda kendi yazdığı talimatı engellememeli.
+    turn_read_external: bool = False
     # Turda veya geçmişte buluta verilmeyecek (dosya/pano) içerik görüldü; kalıcı kayıt
     # bunu taşır ki sonradan Telegram'a gönderilmesin (ADR 0016/0027). Döngü doldurur.
     turn_private: bool = False

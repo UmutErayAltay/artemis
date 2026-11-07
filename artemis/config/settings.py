@@ -202,6 +202,9 @@ class MemoryConfig(BaseModel):
     max_note_chars: int = Field(default=20000, ge=1000, le=200000)
     embedding_model: str | None = None
     embedding_cache_dir: Path | None = None
+    # Kullanıcının açıkça seçtiği vault'a göreli dosyalar (örn. Threads.md); yalnız
+    # memory_open_work aracından, safe_join ile okunur. exclude'u aşar (açık tercih).
+    companion_vault_files: tuple[str, ...] = ()
 
 
 class TelegramConfig(BaseModel):
@@ -334,6 +337,9 @@ class CodeAgentConfig(BaseModel):
     agents: dict[str, AgentProfile] = Field(default_factory=dict)
     default_agent: str = BUILTIN_AGENT
     default_mode: RunMode = "background"
+    # Proje kendi seçmediyse ajanın başlangıç klasörü (takma ad). "ikinci-beyin": ajan vault'ta
+    # başlar, kuralları/CLAUDE.md'yi yükler; değişiklik yine projenin deposunda yapılır (ADR 0049).
+    default_workdir: str = Field(default=OWN_REPO_ALIAS, pattern=r"^[a-z0-9_-]{1,32}$")
     workdirs: dict[str, Path] = Field(default_factory=dict)
     command: str = Field(default="claude", min_length=1)
     max_minutes: float = Field(default=20.0, ge=1, le=120)
@@ -384,6 +390,8 @@ class CodeAgentConfig(BaseModel):
         # Örtük ikinci-beyin burada doğrulanamaz (vault_path başka bölümde); çözümleme
         # anında hata verir.
         folders = {OWN_REPO_ALIAS, VAULT_ALIAS, *self.workdirs}
+        if self.default_workdir not in folders:
+            raise ValueError(f"default_workdir tanımsız klasör: {self.default_workdir!r}")
         for alias, entry in self.project_entries.items():
             if entry.agent is not None and entry.agent not in agent_names:
                 raise ValueError(f"Proje '{alias}' tanımsız ajan kullanıyor: {entry.agent!r}")
@@ -406,7 +414,7 @@ class CodeAgentConfig(BaseModel):
 
     def project_workdir(self, alias: str) -> str:
         entry = self.project_entries.get(alias)
-        return entry.workdir if entry and entry.workdir else OWN_REPO_ALIAS
+        return entry.workdir if entry and entry.workdir else self.default_workdir
 
     def project_mode(self, alias: str) -> RunMode:
         entry = self.project_entries.get(alias)

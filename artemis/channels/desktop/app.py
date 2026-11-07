@@ -2119,7 +2119,9 @@ class DesktopWindow(QMainWindow):
         project = str(fields.get("project") or "kod ajanı")
         summary = str(fields.get("summary") or "").strip()
         text = f"Kod işi · {project}: {status_label(fields)}" + (f". {summary}" if summary else "")
-        self._append_chat("Artemis", text)
+        # Makbuz ipucu yalnız sohbet satırında; toast metni değişmez.
+        hint = " Makbuz için: “bu işin makbuzunu yaz”." if status == "done" else ""
+        self._append_chat("Artemis", text + hint)
         toast = self._toast
         if toast is None:
             return

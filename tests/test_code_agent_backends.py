@@ -362,12 +362,25 @@ def test_old_and_new_project_shapes_load(tmp_path: Path) -> None:
     assert new.resolve_agent("codex")[1].env == ("OPENAI_API_KEY",)
 
 
+def test_default_workdir_applies_unless_project_overrides(tmp_path: Path) -> None:
+    config = CodeAgentConfig.model_validate(
+        {
+            "default_workdir": "ikinci-beyin",
+            "projects": {"a": str(tmp_path), "b": {"path": str(tmp_path), "workdir": "proje"}},
+        }
+    )
+    assert config.project_workdir("a") == "ikinci-beyin"
+    assert config.project_workdir("kesfedilen") == "ikinci-beyin"
+    assert config.project_workdir("b") == "proje"
+
+
 @pytest.mark.parametrize(
     "raw",
     [
         {"projects": {"a": {"path": "/x", "agent": "yok"}}},
         {"projects": {"a": {"path": "/x", "workdir": "yok"}}},
         {"default_agent": "yok"},
+        {"default_workdir": "yok"},
         {"agents": {"claude": {"kind": "codex"}}},
         {"agents": {"Bad Name": {"kind": "codex"}}},
         {"agents": {"c": {"kind": "codex", "env": ["lower_case"]}}},

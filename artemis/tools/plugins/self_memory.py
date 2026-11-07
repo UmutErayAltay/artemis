@@ -65,8 +65,9 @@ class MemoryRemember(BaseTool):
     label = "Hafızaya yazma"
     done_label = "Hafızaya yazıldı"
     description = (
-        "Kullanıcının kalıcı tercihini, kendisi hakkındaki bilgiyi veya kararını kısa bir "
-        f"cümleyle (en çok {MAX_NOTE_CHARS} karakter) kalıcı hafızaya yazar."
+        "Kullanıcının KENDİSİ hakkındaki bilgiyi, tercihini veya kararını kısa bir "
+        f"cümleyle (en çok {MAX_NOTE_CHARS} karakter) kalıcı hafızaya yazar. Artemis'in "
+        "davranışına dair talimat (\"bundan sonra ... yapma\") için memory_rule_add kullan."
     )
     args_model = RememberArguments
     risk = Risk.SIDE_EFFECT

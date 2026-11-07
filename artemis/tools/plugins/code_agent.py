@@ -7,6 +7,7 @@ from typing import Literal, Self, cast
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from artemis.config.settings import OWN_REPO_ALIAS, CodeAgentConfig, ConfigChoiceError
+from artemis.safety.paths import safe_join
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.code_agent_backends import resolve_executable, visible_supported
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
@@ -26,6 +27,11 @@ class PrepareArguments(BaseModel):
     workdir: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,32}$")
     # Çalışma kipi: verilmezse projenin/genel varsayılanı (arka plan) kullanılır.
     mode: Literal["background", "visible"] | None = None
+
+
+class ProjectContextArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project: str = Field(pattern=r"^[a-z0-9_-]{1,32}$")
 
 
 class StartArguments(BaseModel):
@@ -114,7 +120,11 @@ class CodeAgentPrepare(BaseTool):
     description = (
         "Proje, görev, kapsam ve kabul ölçütlerini içeren değişmez yerel taslak hazırlar. "
         "İsteğe bağlı agent ve workdir yalnız yapılandırılmış takma adlardır (yol verme). "
-        "Eksik ayrıntıları önce kullanıcıya sorun. Kodlayıcı veya subprocess başlatmaz. "
+        "Kullanıcıya soru sormadan önce code_agent_project_context ile projeyi tanı. "
+        "Çağırmadan önce eksik ayrıntıları kullanıcıya TEK TEK, her mesajda bir soru olarak "
+        "sorun: önce görev (ne yapılacak), sonra kapsam (hangi dosya/klasör), sonra kabul "
+        "ölçütleri (nasıl anlaşılır); kullanıcı zaten verdiyse o soruyu atlayın, uydurmayın. "
+        "Kodlayıcı veya subprocess başlatmaz. "
         "Sonraki code_agent_start çağrısı dönen spec'in tam kopyasını taşımalıdır."
     )
     args_model = PrepareArguments
@@ -167,6 +177,63 @@ class CodeAgentPrepare(BaseTool):
             status="ok",
             message="Taslak hazır; kod ajanı başlamadı.",
             data={"spec": spec.model_dump(mode="json")},
+        )
+
+
+@register_tool
+class CodeAgentProjectContext(BaseTool):
+    name = "code_agent_project_context"
+    label = "Proje bağlamı oku"
+    done_label = "Proje bağlamı okundu"
+    description = (
+        "İzinli bir projenin CLAUDE.md ve README.md dosyalarının başını döndürür. "
+        "code_agent_prepare öncesi, kullanıcıya soru sormadan projeyi tanımak için kullan."
+    )
+    args_model = ProjectContextArguments
+    risk = Risk.READ_ONLY
+    # Proje dosyaları dış içeriktir (web'den yapıştırılmış metin içerebilir).
+    external = True
+    content_kind = "file"
+
+    _HEAD_CHARS = 1000
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        args = cast(ProjectContextArguments, arguments)
+        # Klasörden keşfedilen projeler de bulunsun (status çağrısı beklenmez); salt yerel tarama.
+        known = {
+            **context.services.get("code_agent_project_paths", {}),
+            **available_projects(context.settings.code_agent),
+        }
+        repo = known.get(args.project)
+        if repo is None:
+            return ToolResult(
+                message="İzinli proje bulunamadı; code_agent_status ile proje adlarına bakın."
+            )
+        heads: dict[str, str] = {}
+        for name in ("CLAUDE.md", "README.md"):
+            try:
+                path = safe_join(repo, name)
+                if not path.is_file():
+                    continue
+                with path.open("r", encoding="utf-8") as stream:
+                    heads[name] = stream.read(self._HEAD_CHARS)
+            except (OSError, ValueError, UnicodeError):
+                continue
+        if not heads:
+            return ToolResult(message="Projede okunabilir CLAUDE.md veya README.md yok.")
+        return ToolResult(
+            success=True,
+            status="ok",
+            # Sabit yönlendirme dosyadan değil araçtan gelir: Haiku açıklamadaki "tek tek sor"u
+            # atlayıp üç soruyu birden soruyordu (2026-11-07 gerçek deneme); sonuç anında hatırlat.
+            message=(
+                f"{', '.join(heads)} okundu. Sıradaki adım: bu mesajda YALNIZ bir soru sor "
+                "(önce görev; kullanıcı verdiyse kapsam, o da varsa kabul ölçütü). Liste yapma, "
+                "diğer soruları sonraki mesajlara bırak."
+            ),
+            data={"project": args.project, "files": heads},
+            external=True,
+            content_kind="file",
         )
 
 

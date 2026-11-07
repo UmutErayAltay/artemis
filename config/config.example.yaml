@@ -143,6 +143,9 @@ voice:
 #   # Paket veya model yoksa sözcük aramasına dönülür ve sonuçta bu yazılır.
 #   embedding_model: null
 #   embedding_cache_dir: null        # varsayılan: state_dir/embedding (vault DIŞINDA)
+#   # "Açık/yarım işimiz var mı" sorusunda memory_open_work'ün okuyacağı vault dosyaları
+#   # (vault'a göreli; exclude'u aşar ama yalnız bu araçtan okunur, tura eklenmez).
+#   companion_vault_files: ["850-Companion/Threads.md", "850-Companion/Last-Session.md"]
 
 # Telegram (ADR 0016). KAPALI gelir: chat_id verilmedikçe ne araç ne kanal çalışır.
 # Bot token'ı BURAYA YAZILMAZ ve YAML'da `token:` alanı yoktur (eklenirse doğrulama
