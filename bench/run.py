@@ -397,6 +397,7 @@ async def run_scenario(
     endpoints: dict[str, EndpointConfig] | None = None,
     allow_paid: bool = False,
     budget_usd: Decimal = Decimal("0"),
+    hard_model: ModelConfig | None = None,
 ) -> ScenarioResult:
     """`live`: kullanıcının kendi modeliyle model testi (bench/model_testi.py); onay araç
     adına göre verilir, web fixture sorgudan bağımsız döner. Makineye yine dokunulmaz."""
@@ -433,8 +434,12 @@ async def run_scenario(
         )
         settings = Settings(
             workspace=desktop, state_dir=root / "state", audit_path=root / "audit.jsonl",
-            models={"benchmark": model} if model else {},
+            models=(
+                {"benchmark": model, **({"benchmark_hard": hard_model} if hard_model else {})}
+                if model else {}
+            ),
             primary_model="benchmark" if model else "",
+            hard_model="benchmark_hard" if model and hard_model else None,
             endpoints=endpoints or {},
             allow_cloud_file_content=True, allow_paid=allow_paid, daily_budget_usd=budget_usd,
             memory=memory, telegram=telegram, applications=scenario.setup.applications,

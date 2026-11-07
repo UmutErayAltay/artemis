@@ -87,21 +87,25 @@ def build_report(
 
 async def run_model_test(
     config: Path, alias: str, *, allow_paid: bool = False, budget_usd: Decimal = Decimal("0"),
-    scenarios: Sequence[Scenario] | None = None,
+    scenarios: Sequence[Scenario] | None = None, hard_alias: str | None = None,
 ) -> dict[str, Any]:
     settings = load_settings(config)
-    model = settings.models.get(alias)
-    if model is None or model.kind != "chat":
+    picked = [settings.models.get(name) for name in (alias, hard_alias) if name]
+    if any(item is None or item.kind != "chat" for item in picked):
         raise ValueError("Test edilecek model ayarlarda tanımlı bir sohbet modeli olmalı.")
-    if (model.input_per_million or model.output_per_million) and not allow_paid:
+    if any(item and (item.input_per_million or item.output_per_million) for item in picked) and (
+        not allow_paid
+    ):
         raise ValueError("Ücretli model: test için açık onay (--ucretli-onay) gerekli.")
+    model = settings.models[alias]
+    hard = settings.models[hard_alias] if hard_alias else None
     chosen = list(scenarios) if scenarios is not None else load_scenarios(SCENARIOS_PATH)
     results: list[ScenarioResult] = []
     for index, scenario in enumerate(chosen, 1):
         try:
             result = await run_scenario(
                 scenario, model, live=True, endpoints=dict(settings.endpoints),
-                allow_paid=allow_paid, budget_usd=budget_usd,
+                allow_paid=allow_paid, budget_usd=budget_usd, hard_model=hard,
             )
         except ProviderError as error:
             # Sağlayıcı hatası (kota, bağlantı) senaryoyu başarısız sayar; test sürer.
@@ -116,7 +120,7 @@ async def run_model_test(
         results.append(result)
         mark = "geçti" if result.success else "kaldı"
         print(f"ilerleme {index}/{len(chosen)} {scenario.id} {mark}", flush=True)
-    return build_report(alias, chosen, results)
+    return build_report(f"{alias} + {hard_alias}" if hard_alias else alias, chosen, results)
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -127,6 +131,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--ucretli-onay", action="store_true")
     parser.add_argument("--butce", type=Decimal, default=Decimal("0"))
     parser.add_argument("--senaryo", action="append", help="yalnız bu kimlik(ler)")
+    parser.add_argument("--zor-model", help="kademe ölçümü: zor işler modeli anahtarı")
     args = parser.parse_args(arguments)
     chosen = load_scenarios(SCENARIOS_PATH)
     if args.senaryo:
@@ -134,7 +139,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
     try:
         report = asyncio.run(run_model_test(
             args.config, args.model, allow_paid=args.ucretli_onay, budget_usd=args.butce,
-            scenarios=chosen,
+            scenarios=chosen, hard_alias=args.zor_model,
         ))
     except (OSError, ValueError) as error:
         print(f"Model testi yapılamadı: {error}", file=sys.stderr)

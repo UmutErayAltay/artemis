@@ -629,6 +629,9 @@ class Settings(BaseModel):
     endpoints: dict[str, EndpointConfig] = Field(default_factory=dict)
     primary_model: str = ""
     fallback_model: str | None = None
+    # Zor işler modeli (model kademesi): boşsa her tur ana modelle gider. Tur başında
+    # brain/tiering.choose_model seçer; kullanılamazsa (ücret/bütçe/hata) ana modele düşülür.
+    hard_model: str | None = None
     max_steps: int = Field(default=8, ge=1, le=100)
     max_seconds: float = Field(default=60.0, gt=0, le=3600)
     provider_timeout_seconds: float = Field(default=15.0, gt=0, le=3600)
@@ -693,14 +696,19 @@ class Settings(BaseModel):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")
         if self.primary_model and self.primary_model not in self.models:
             raise ValueError("Birincil model models içinde tanımlanmalı")
+        if self.hard_model and self.hard_model not in self.models:
+            raise ValueError("Zor işler modeli models içinde tanımlanmalı")
         if any(
             self.models[name].kind == "image"
             for name in (
-                self.primary_model, self.computer_use.model, *self.computer_use.fallback_models
+                self.primary_model, self.hard_model or "", self.computer_use.model,
+                *self.computer_use.fallback_models,
             )
             if name in self.models
         ):
-            raise ValueError("Resim modeli birincil ya da bilgisayar kullanımı modeli olamaz")
+            raise ValueError(
+                "Resim modeli birincil, zor işler ya da bilgisayar kullanımı modeli olamaz"
+            )
         if self.fallback_model:
             fallback = self.models.get(self.fallback_model)
             if fallback is None or fallback.provider != "ollama":

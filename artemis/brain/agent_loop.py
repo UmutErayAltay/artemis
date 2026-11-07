@@ -8,7 +8,7 @@ import sqlite3
 import time
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from pydantic import BaseModel, Field, ValidationError
 
@@ -23,7 +23,9 @@ from artemis.brain.conversation import (
 from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.brain.models import Message, ToolCall, Usage
 from artemis.brain.providers import Provider
+from artemis.brain.router import ProviderRouter
 from artemis.brain.streaming import ResponseStream
+from artemis.brain.tiering import choose_model
 from artemis.memory.companion import content_tainted, read_companion
 from artemis.safety.gate import SafetyGate, TurnState
 from artemis.tools.base import Risk, ToolContext, ToolResult
@@ -461,6 +463,14 @@ class AgentLoop:
             context_external=state.history_external,
             unattended=unattended,
         )
+        # Model kademesi tur başında seçilir ve tur boyunca sabittir (önbellek, tutarlılık).
+        tier_model, tier_reason = choose_model(text, past, settings)
+        route: dict[str, str] = {}
+        if tier_model and isinstance(self.provider, ProviderRouter):
+            route = {"model": tier_model}
+            audit.emit(
+                "model_choice", turn_id=state.turn_id, model=tier_model, reason=tier_reason
+            )
 
         finished = False
 
@@ -515,15 +525,22 @@ class AgentLoop:
                 steps += 1
                 phases.append(PhaseTiming(stage="model_request", timestamp=time.monotonic()))
                 definitions = self.gate.registry.definitions()
-                if stream is None:
-                    request = self.provider.complete(messages, definitions, timeout=remaining())
-                else:
+                step_stream = None
+                if stream is not None:
                     # ADR 0043: akışa yalnız metin gider; araç çağrısı yine tam Completion'dan
                     # ayrıştırılır ve aşağıda SafetyGate'ten geçer.
                     stream.step_start()
+                    step_stream = _StepStream(stream, phases)
+                if route:
+                    request = cast(ProviderRouter, self.provider).complete(
+                        messages, definitions, timeout=remaining(), stream=step_stream,
+                        model=route["model"],
+                    )
+                elif step_stream is None:
+                    request = self.provider.complete(messages, definitions, timeout=remaining())
+                else:
                     request = self.provider.complete(
-                        messages, definitions, timeout=remaining(),
-                        stream=_StepStream(stream, phases),
+                        messages, definitions, timeout=remaining(), stream=step_stream,
                     )
                 completion = await _wait_for_turn(
                     request,
