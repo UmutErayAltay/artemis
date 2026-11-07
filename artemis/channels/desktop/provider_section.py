@@ -263,6 +263,8 @@ class ProviderSection(QWidget):
         self._model_data: list[tuple[str, bool, bool, str, str, bool, bool, str]] = []
         self._model_test: QProcess | None = None
         self._testing = ""
+        self._fallback = ""
+        self._test_report = Path()
         self._suggested: tuple[str | None, str | None] = (None, None)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -294,20 +296,26 @@ class ProviderSection(QWidget):
         # Model kademesi: seçili model zor işler (çok adımlı, planlama) turlarını üstlenir.
         self.hard_button = QPushButton("Zor işler yap")
         self.hard_button.setToolTip("Çok adımlı ve planlama isteyen turlar bu modelle çalışır.")
-        self.hard_button.clicked.connect(self._toggle_hard)
+        self.hard_button.clicked.connect(self._toggle_hard_role)
+        # Arıza yedeği: beyin modeli kota/bağlantı/sunucu hatası verince tur bununla sürer.
+        self.fallback_button = QPushButton("Arıza yedeği yap")
+        self.fallback_button.setToolTip(
+            "Beyin modeli kotaya takılır ya da yanıt vermezse Artemis bu modelle devam eder."
+        )
+        self.fallback_button.clicked.connect(self._toggle_fallback_role)
         self.model_test_button = QPushButton("Test et")
         self.model_test_button.setToolTip(
             "15 senaryoluk testi arka planda çalıştırır; bilgisayarına dokunmaz."
         )
         self.model_test_button.clicked.connect(self._test_model)
-        self.hard_button.setVisible(False)
-        self.model_test_button.setVisible(False)
+        for button in (self.hard_button, self.fallback_button, self.model_test_button):
+            button.setVisible(False)
+        # İki satır: beş düğme dar pencerede yatay taşmasın.
         models.addLayout(
-            button_row(
-                self.remove_button, self.model_test_button, self.hard_button, self.primary_button
-            )
+            button_row(self.remove_button, self.model_test_button, self.primary_button)
         )
-        self.model_list.currentItemChanged.connect(lambda *_: self._sync_hard_button())
+        models.addLayout(button_row(self.fallback_button, self.hard_button))
+        self.model_list.currentItemChanged.connect(self._selection_changed)
         # Test edilmiş modellerden çıkan önerilen düzen (ana + zor işler) ve tek tık uygulama.
         self.layout_label = meta_label("")
         self.layout_label.setVisible(False)
@@ -473,6 +481,8 @@ class ProviderSection(QWidget):
             text = f"Beyin: {settings.primary_model} ({self._connection_label(model)})"
             if settings.hard_model and settings.hard_model != settings.primary_model:
                 text += f" · Zor işler: {settings.hard_model}"
+            if settings.fallback_model and settings.fallback_model != settings.primary_model:
+                text += f" · Yedek: {settings.fallback_model}"
             color = self._colors["accent"]
         else:
             text, color = "Henüz beyin modeli seçilmedi.", self._colors["error"]
@@ -492,6 +502,7 @@ class ProviderSection(QWidget):
         if self._problem and not settings.endpoints:
             self.connection_toggle.setChecked(True)  # ilk kurulumda form gizli kalmasın
         reports = self._reports(settings)
+        self._fallback = settings.fallback_model or ""
         self._model_data = [
             (
                 alias,
@@ -531,6 +542,7 @@ class ProviderSection(QWidget):
         self.remove_button.setVisible(self.model_list.count() > 0)
         self.primary_button.setVisible(self.model_list.count() > 0)
         self.hard_button.setVisible(self.model_list.count() > 0)
+        self.fallback_button.setVisible(self.model_list.count() > 0)
         self.model_test_button.setVisible(self.model_list.count() > 0)
         self.endpoint_list.clear()
         for name, endpoint in settings.endpoints.items():
@@ -568,6 +580,11 @@ class ProviderSection(QWidget):
                 brain += (
                     f"&nbsp;&nbsp;<span style='color:{self._colors['accent']}'>"
                     "&#9679; Zor işler</span>"
+                )
+            if alias == self._fallback and not is_brain:
+                brain += (
+                    f"&nbsp;&nbsp;<span style='color:{self._colors['muted']}'>"
+                    "&#9679; Yedek</span>"
                 )
             if alias == self._testing:
                 tested = "Test sürüyor…"
@@ -912,8 +929,9 @@ class ProviderSection(QWidget):
             return
         # Takma ada göre yazılır: aynı model kimliğini paylaşan modeller karışmaz.
         raw["primary_model"] = alias
-        if raw.get("hard_model") == alias:
-            raw.pop("hard_model")  # beyin olan model ayrıca "zor işler" sayılmaz
+        for role in ("hard_model", "fallback_model"):
+            if raw.get(role) == alias:
+                raw.pop(role)  # beyin olan model ayrıca zor işler/yedek sayılmaz
         if not self._write(raw):
             return
         self.reload()
@@ -929,10 +947,11 @@ class ProviderSection(QWidget):
         except (OSError, ValueError):
             self.status.setText("Ayarlar okunamadı.")
             return
-        if alias in {settings.primary_model, settings.fallback_model}:
-            self.status.setText(
-                "Beyin veya yedek model kaldırılamaz; önce başka bir modeli beyin yapın."
-            )
+        if alias == settings.primary_model:
+            self.status.setText("Beyin modeli kaldırılamaz; önce başka bir modeli beyin yapın.")
+            return
+        if alias == settings.fallback_model:
+            self.status.setText("Arıza yedeği kaldırılamaz; önce 'Yedekten çıkar'.")
             return
         if alias == settings.hard_model:
             self.status.setText("Zor işler modeli kaldırılamaz; önce 'Zor işlerden çıkar'.")
@@ -969,16 +988,34 @@ class ProviderSection(QWidget):
                 found[alias] = report
         return found
 
+    # Bağlı yöntemler: self'i yakalayan lambda Qt bağlantısında referans döngüsü kurar ve gc
+    # paneli yanlış iş parçacığında toplayınca erişim ihlali çıkar (2026-10-31 bulgusu).
+    def _toggle_hard_role(self) -> None:
+        self._toggle_role("hard_model")
+
+    def _toggle_fallback_role(self) -> None:
+        self._toggle_role("fallback_model")
+
+    def _selection_changed(self, *_args: object) -> None:
+        self._sync_hard_button()
+
+    def _model_test_finished(self, *_args: object) -> None:
+        self._model_test_done(self._testing, self._test_report)
+
     def _sync_hard_button(self) -> None:
         item = self.model_list.currentItem()
         selected = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
         is_hard = any(row[0] == selected and row[6] for row in self._model_data)
         self.hard_button.setText("Zor işlerden çıkar" if is_hard else "Zor işler yap")
+        is_fallback = bool(selected) and selected == self._fallback
+        self.fallback_button.setText("Yedekten çıkar" if is_fallback else "Arıza yedeği yap")
 
-    def _toggle_hard(self) -> None:
+    def _toggle_role(self, key: str) -> None:
+        """Seçili modeli zor işler (hard_model) ya da arıza yedeği (fallback_model) yapar."""
         alias = self._selected_alias()
         if alias is None:
             return
+        name = "Zor işler" if key == "hard_model" else "Arıza yedeği"
         try:
             settings = load_settings(self.config_path)
             raw = self._raw()
@@ -987,24 +1024,34 @@ class ProviderSection(QWidget):
             return
         model = settings.models.get(alias)
         if model is None or model.kind == "image":
-            self.status.setText("Resim modeli zor işler modeli olamaz; bir sohbet modeli seçin.")
+            self.status.setText(f"Resim modeli {name.lower()} modeli olamaz; sohbet modeli seçin.")
             return
         if alias == settings.primary_model:
-            self.status.setText("Bu model zaten beyin; zor işler için başka bir model seçin.")
+            self.status.setText(f"Bu model zaten beyin; {name.lower()} için başka bir model seçin.")
             return
-        removing = settings.hard_model == alias
+        removing = raw.get(key) == alias
         if removing:
-            raw.pop("hard_model", None)
+            raw.pop(key, None)
         else:
-            raw["hard_model"] = alias
+            raw[key] = alias
         if not self._write(raw):
             return
         self.reload()
-        self.status.setText(
-            "Zor işler modeli kapatıldı; her tur beyin modeliyle çalışır."
-            if removing
-            else f"Zor işler modeli: {alias}. Çok adımlı ve planlama isteyen turlar bunu kullanır."
-        )
+        if key == "hard_model":
+            done = (
+                "Zor işler modeli kapatıldı; her tur beyin modeliyle çalışır."
+                if removing
+                else f"Zor işler modeli: {alias}. Çok adımlı ve planlama isteyen turlar bunu "
+                "kullanır."
+            )
+        else:
+            done = (
+                "Arıza yedeği kapatıldı; beyin modeli yanıt vermezse tur hata ile biter."
+                if removing
+                else f"Arıza yedeği: {alias}. Beyin modeli kotaya takılır ya da yanıt vermezse "
+                "Artemis bununla sürer."
+            )
+        self.status.setText(done)
         self.changed.emit()
 
     def _confirm_paid(self, alias: str, cost: Decimal) -> bool:
@@ -1061,7 +1108,8 @@ class ProviderSection(QWidget):
         process.setProcessEnvironment(environment)
         process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
         process.readyReadStandardOutput.connect(self._model_test_output)
-        process.finished.connect(lambda *_: self._model_test_done(alias, report))
+        self._test_report = report
+        process.finished.connect(self._model_test_finished)
         self._model_test, self._testing = process, alias
         self._render_models()
         self.status.setText(f"{alias} test ediliyor (15 senaryo, birkaç dakika sürer)…")

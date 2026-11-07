@@ -579,17 +579,17 @@ def test_hard_role_toggles_and_shows_in_rows_and_banner(app: QApplication, tmp_p
     path = _three_models(tmp_path)
     section = ProviderSection(path)
     section.select_model("haiku 5-5")
-    section._toggle_hard()  # beyin aynı zamanda zor işler olamaz
+    section._toggle_role("hard_model")  # beyin aynı zamanda zor işler olamaz
     assert load_settings(path).hard_model is None
     section.select_model("sonnet 5-5")
-    section._toggle_hard()
+    section._toggle_role("hard_model")
     assert load_settings(path).hard_model == "sonnet 5-5"
     assert "Zor işler" in dict(section.model_rows())["sonnet 5-5"]
     assert "Zor işler: sonnet 5-5" in section.banner.text()
     assert section.hard_button.text() == "Zor işlerden çıkar"
     section._remove_model()  # zor işler modeli kaldırılamaz
     assert "sonnet 5-5" in load_settings(path).models
-    section._toggle_hard()
+    section._toggle_role("hard_model")
     assert load_settings(path).hard_model is None
 
 
@@ -635,3 +635,37 @@ def test_model_test_done_reads_report(app: QApplication, tmp_path: Path) -> None
     assert "temel 7/7 · zor 8/8" in section.status.text()
     section._model_test_done("haiku 5-5", tmp_path / "yok.json")
     assert "tamamlanamadı" in section.status.text()
+
+
+def test_fallback_role_from_ui(app: QApplication, tmp_path: Path) -> None:
+    # Arayüzden eklenen (openai_compatible) model de arıza yedeği olabilir (ADR 0055).
+    path = _three_models(tmp_path)
+    section = ProviderSection(path)
+    section.select_model("sonnet 5-5")
+    section._toggle_role("fallback_model")
+    assert load_settings(path).fallback_model == "sonnet 5-5"
+    assert "Yedek" in dict(section.model_rows())["sonnet 5-5"]
+    assert "Yedek: sonnet 5-5" in section.banner.text()
+    assert section.fallback_button.text() == "Yedekten çıkar"
+    section._remove_model()
+    assert "sonnet 5-5" in load_settings(path).models  # yedek kaldırılamaz
+    section._make_primary()  # beyin olunca yedek rolü düşer
+    settings = load_settings(path)
+    assert (settings.primary_model, settings.fallback_model) == ("sonnet 5-5", None)
+
+
+def test_provider_section_has_no_reference_cycle(app: QApplication, tmp_path: Path) -> None:
+    # Lambda bağlantısı döngü kurar; gc paneli yanlış iş parçacığında toplayınca tam takım
+    # erişim ihlaliyle çöküyordu (2026-11-07, test_desktop_gui sırasında).
+    import gc
+    import weakref
+
+    section = ProviderSection(_three_models(tmp_path))
+    section.select_model("sonnet 5-5")  # seçim sinyali bağlı yöntemden çalışır
+    ref = weakref.ref(section)
+    gc.disable()
+    try:
+        del section
+        assert ref() is None
+    finally:
+        gc.enable()

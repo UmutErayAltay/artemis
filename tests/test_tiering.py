@@ -103,3 +103,18 @@ async def test_agent_loop_routes_multi_step_turn_and_audits(tmp_path: Path) -> N
         if '"model_choice"' in line
     ]
     assert [(c["model"], c["reason"]) for c in choices] == [("hard", "multi_step")]
+
+
+async def test_cloud_fallback_is_not_marked_local(tmp_path: Path) -> None:
+    # Arayüzden eklenen (bulut) yedek: tek araç sınırı ve "gizli içerik gördü" işareti yok;
+    # yalnız yerel ollama yedeği local_fallback'tir (ADR 0055).
+    from artemis.brain.errors import RetryableProviderError
+
+    settings = _settings(tmp_path, hard=None).model_copy(update={"fallback_model": "hard"})
+    main = Responses(RetryableProviderError("kota"))
+    backup = Responses(Completion(content="yedek"))
+    router = ProviderRouter(
+        settings, AuditLog(settings.audit_path), providers={"main": main, "hard": backup}
+    )
+    completion = await router.complete([], [], timeout=10)
+    assert (completion.content, completion.local_fallback) == ("yedek", False)

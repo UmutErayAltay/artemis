@@ -43,7 +43,10 @@ Kademede temel senaryoların hiçbiri, zor senaryoların 4/8'i Sonnet'e gitti.
 
 ## Sonuçlar
 
-- Arıza yedeği (`fallback_model`) yalnız yerel Ollama modelidir (gizli içerik buluta gitmez);
-  arayüzden eklenen modeller bu koşulu sağlamadığı için arayüzde rol olarak gösterilmez.
+- Arıza yedeği (`fallback_model`) artık herhangi bir sohbet modeli olabilir ve Ayarlar'da rol
+  olarak seçilir (eskiden yalnız yerel Ollama). Gizlilik değişmez: bulut yedeğe gizli içerik
+  sağlayıcı sınırında maskeli gider. Tek araç sınırı ve "gizli içerik gördü" işareti
+  (`local_fallback`) yalnız yerel Ollama yedeğinde kalır; bulut yedek turu normal sınırlarla sürer.
+  Amaç: abonelik kotası dolunca Artemis susmasın (ör. ücretsiz bir OpenRouter modeline düşer).
 - Kurallar kaba (kök eşleşmesi); yanlış pozitif yalnız turu daha güçlü modele gönderir.
   Kural değişikliği model testiyle ölçülür.

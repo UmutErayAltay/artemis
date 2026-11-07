@@ -710,9 +710,12 @@ class Settings(BaseModel):
                 "Resim modeli birincil, zor işler ya da bilgisayar kullanımı modeli olamaz"
             )
         if self.fallback_model:
+            # Arıza yedeği herhangi bir sohbet modeli olabilir (ADR 0055): bulut modeline giden
+            # gizli içerik sağlayıcı sınırında zaten maskelenir. Yerel (ollama) yedek tam içeriği
+            # alır ve tek araçla sınırlıdır (router.local_fallback).
             fallback = self.models.get(self.fallback_model)
-            if fallback is None or fallback.provider != "ollama":
-                raise ValueError("Yedek model tanımlı bir Ollama modeli olmalı")
+            if fallback is None or fallback.kind != "chat":
+                raise ValueError("Yedek model tanımlı bir sohbet modeli olmalı")
         # Boş model "ana beyni kullan" demektir; o zaman ana modelin kendisi doğrulanır.
         vision_model = self.computer_use.model or self.primary_model
         if self.computer_use.enabled and vision_model not in self.models:

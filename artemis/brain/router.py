@@ -73,6 +73,11 @@ class ProviderRouter:
                 else:
                     self._providers[alias] = OllamaProvider(settings, model)
 
+    def _local(self, alias: str) -> bool:
+        """Yerel yedek: tam (maskesiz) içeriği alır, tur tek araçla sınırlanır (ADR 0055).
+        Bulut yedeğe gizli içerik zaten maskeli gider; o tur normal sınırlarla sürer."""
+        return self.settings.models[alias].provider == "ollama"
+
     def _emit_audit(self, event: str, **fields: object) -> None:
         try:
             self.audit.emit(event, **fields)
@@ -232,7 +237,8 @@ class ProviderRouter:
         attempt_timeout = min(timeout, self.settings.provider_timeout_seconds)
         if fallback and started < self._fallback_until:
             return await self._call(
-                fallback, messages, tools, timeout=attempt_timeout, local_fallback=True,
+                fallback, messages, tools, timeout=attempt_timeout,
+                local_fallback=self._local(fallback),
                 stream=guard,
             )
         try:
@@ -272,5 +278,6 @@ class ProviderRouter:
                 timeout - (self._clock() - started), self.settings.provider_timeout_seconds
             )
             return await self._call(
-                fallback, messages, tools, timeout=remaining, local_fallback=True, stream=guard,
+                fallback, messages, tools, timeout=remaining,
+                local_fallback=self._local(fallback), stream=guard,
             )
