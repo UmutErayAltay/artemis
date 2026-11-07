@@ -1,5 +1,6 @@
 """Ayarlar > Model sağlayıcıları (ADR 0034): ağsız, gerçek kasa ve gerçek HTTP yok."""
 
+import json
 import os
 from decimal import Decimal
 from pathlib import Path
@@ -547,3 +548,90 @@ def test_adding_image_model_refreshes_pet_creator_combo(
         assert creator.model_combo.findData("resim-modeli") >= 0
     finally:
         _close_cleanly(app, window)
+
+
+# --- Model kademesi ve model testi -------------------------------------------------------
+
+
+def _three_models(tmp_path: Path, *, paid: str = "0") -> Path:
+    path = _two_same_id(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["primary_model"] = "haiku 5-5"
+    raw["models"]["sonnet 5-5"] = {
+        "provider": "openai_compatible", "endpoint": "proxy_cli", "model": "claude-sonnet-5-5",
+        "input_per_million": paid, "output_per_million": paid,
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    return path
+
+
+def _report(tmp_path: Path, alias: str, temel: int, zor: int, roles: list[str]) -> None:
+    folder = tmp_path / "state" / "model_testleri"
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / f"{section_module._slug(alias)}.json").write_text(json.dumps({
+        "model": alias, "temel": {"passed": temel, "total": 7, "rate": temel / 7},
+        "zor": {"passed": zor, "total": 8, "rate": zor / 8}, "dangerous_errors": 0,
+        "median_seconds": 5.0, "cost_usd": "0", "roles": roles, "summary": "",
+    }), encoding="utf-8")
+
+
+def test_hard_role_toggles_and_shows_in_rows_and_banner(app: QApplication, tmp_path: Path) -> None:
+    path = _three_models(tmp_path)
+    section = ProviderSection(path)
+    section.select_model("haiku 5-5")
+    section._toggle_hard()  # beyin aynı zamanda zor işler olamaz
+    assert load_settings(path).hard_model is None
+    section.select_model("sonnet 5-5")
+    section._toggle_hard()
+    assert load_settings(path).hard_model == "sonnet 5-5"
+    assert "Zor işler" in dict(section.model_rows())["sonnet 5-5"]
+    assert "Zor işler: sonnet 5-5" in section.banner.text()
+    assert section.hard_button.text() == "Zor işlerden çıkar"
+    section._remove_model()  # zor işler modeli kaldırılamaz
+    assert "sonnet 5-5" in load_settings(path).models
+    section._toggle_hard()
+    assert load_settings(path).hard_model is None
+
+
+def test_test_results_and_suggested_layout_apply(app: QApplication, tmp_path: Path) -> None:
+    path = _three_models(tmp_path)
+    _report(tmp_path, "haiku 5-5", 7, 5, ["ana"])
+    _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
+    section = ProviderSection(path)
+    rows = dict(section.model_rows())
+    assert "temel 7/7 · zor 5/8" in rows["haiku 5-5"] and "ana model" in rows["haiku 5-5"]
+    assert "zor işler" in rows["sonnet 5-5"]
+    assert "Ana: haiku 5-5 · Zor işler: sonnet 5-5" in section.layout_label.text()
+    assert not section.apply_layout_button.isHidden()
+    section._apply_layout()
+    settings = load_settings(path)
+    assert (settings.primary_model, settings.hard_model) == ("haiku 5-5", "sonnet 5-5")
+    assert section.apply_layout_button.isHidden()
+    # Bozuk rapor ekranı çökertmez, yalnız yok sayılır.
+    (tmp_path / "state" / "model_testleri" / "haiku-5-5.json").write_text("{", encoding="utf-8")
+    section.reload()
+    assert "Test:" not in dict(section.model_rows())["haiku 5-5"]
+
+
+def test_paid_model_test_needs_confirmation(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = _three_models(tmp_path, paid="3")
+    section = ProviderSection(path)
+    asked: list[Decimal] = []
+    monkeypatch.setattr(section, "_confirm_paid", lambda _a, cost: asked.append(cost) or False)
+    section.select_model("sonnet 5-5")
+    section._test_model()
+    assert asked and asked[0] > 0
+    assert section._model_test is None and section.status.text() == "Test başlatılmadı."
+
+
+def test_model_test_done_reads_report(app: QApplication, tmp_path: Path) -> None:
+    path = _three_models(tmp_path)
+    section = ProviderSection(path)
+    _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
+    report = tmp_path / "state" / "model_testleri" / "sonnet-5-5.json"
+    section._model_test_done("sonnet 5-5", report)
+    assert "temel 7/7 · zor 8/8" in section.status.text()
+    section._model_test_done("haiku 5-5", tmp_path / "yok.json")
+    assert "tamamlanamadı" in section.status.text()

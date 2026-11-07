@@ -49,6 +49,24 @@ def recommend(temel: float, zor: float, dangerous: int) -> tuple[list[str], str]
     return [], "Bu senaryolarda yeterince başarılı değil."
 
 
+def suggest_layout(reports: Sequence[dict[str, Any]]) -> tuple[str | None, str | None]:
+    """Test edilmiş modellerden (ana, zor işler) önerisi; zor işler ana ile aynıysa None.
+
+    Ana: "ana" rolü alanlardan en ucuz, eşitse en hızlı. Zor işler: "zor" rolü alanlardan
+    zor senaryoda en başarılı, eşitse en ucuz. Tek koşu ±1 senaryo oynar; öneri bir başlangıçtır.
+    """
+    def cost(report: dict[str, Any]) -> Decimal:
+        return Decimal(str(report.get("cost_usd", "0")))
+
+    main = [item for item in reports if "ana" in item.get("roles", [])]
+    hard = [item for item in reports if "zor" in item.get("roles", [])]
+    ana = min(main, key=lambda r: (cost(r), r["median_seconds"]))["model"] if main else None
+    zor = (
+        max(hard, key=lambda r: (r["zor"]["rate"], -cost(r)))["model"] if hard else None
+    )
+    return ana, (zor if zor != ana else None)
+
+
 def _level(
     results: Sequence[ScenarioResult], scenarios: Sequence[Scenario], level: str
 ) -> dict[str, Any]:
