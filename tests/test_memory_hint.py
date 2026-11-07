@@ -37,11 +37,13 @@ def test_memory_hint_patterns(text: str, tool: str | None) -> None:
     assert (tool in hint) if tool else hint == ""
 
 
-async def test_hint_reaches_system_prompt_only_for_that_turn(tmp_path: Path) -> None:
+async def test_hint_rides_on_user_message_not_system_prompt(tmp_path: Path) -> None:
+    # İpucu tura özeldir; sistem istemine girerse her turda önbellek bozulur.
     loop, provider = _loop(tmp_path, [Completion(content="Tamam.")])
     await loop.run("bundan sonra kısa yaz")
-    system = provider.requests[0][0].content
-    assert "memory_rule_add çağır" in system
+    system, user = provider.requests[0][0].content, provider.requests[0][-1].content
+    assert "kalıcı bir talimat olabilir" in user
+    assert "kalıcı bir talimat olabilir" not in system
 
 
 async def test_unsaved_claim_gets_honest_note(tmp_path: Path) -> None:

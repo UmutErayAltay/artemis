@@ -33,6 +33,7 @@ def _is_secret_key(key: str) -> bool:
         "maxtokens",
         "maxoutputtokens",
         "tokencount",
+        "cachedinputtokens",
         # Bağlam ölçüsü (ADR 0012) bir sayıdır, sır değildir.
         "contextestimatedtokens",
     }:

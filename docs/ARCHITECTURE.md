@@ -225,9 +225,10 @@ Fiyat yoksa bulut çağrısı yapılmaz. Günlük harcama SQLite'ta tutulur; her
 önce üst maliyet rezervasyonu alınır, gerçekleşen kullanım ile kapatılır. Ücretli
 çağrılar ayrıca açık config izni gerektirir ve varsayılan kapalıdır.
 
-Bulutun bağlantı, timeout veya sunucu hatasında yönlendirici belirli süre Ollama'ya
-düşer; olay kayda girer. Kimlik/istek hataları sessizce gizlenmez. Yerel yedek yalnız
-basit, en fazla bir araçlı işler içindir; çok adımlı iş daha güçlü bağlantı bekler.
+Bulutun bağlantı, kota, timeout veya sunucu hatasında yönlendirici belirli süre arıza
+yedeğine (`fallback_model`, herhangi bir sohbet modeli; ADR 0055) düşer; olay kayda girer.
+Kimlik/istek hataları sessizce gizlenmez. Yerel (Ollama) yedek yalnız basit, en fazla bir
+araçlı işler içindir; bulut yedeğe gizli içerik maskeli gider ve tur normal sınırlarla sürer.
 
 ## Doğrulama ve sınırlar
 
