@@ -98,6 +98,7 @@ class SafetyGate:
         # Kayıt bayrağı bağlamda kalan dış içeriği de kapsar (ADR 0013): önceki turda
         # okunan metinden kurulan hatırlatma da "dış içerikten" sayılır. Onay kuralı değişmez.
         context.turn_tainted = state.tainted or state.history_external
+        context.turn_read_external = state.tainted
         self.pending_notice = ""
         self.pending_site = ""
         context.audit.emit(

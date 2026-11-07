@@ -118,12 +118,14 @@ def _fail(message: str) -> ToolResult:
     return ToolResult(message=message)
 
 
-def _write(context: ToolContext, key: str, text: str, source: str) -> ToolResult | int:
+def _write(
+    context: ToolContext, key: str, text: str, source: str, *, tainted: bool | None = None
+) -> ToolResult | int:
     """Yazar; hata varsa dürüst ToolResult, başarıda değişiklik kimliği döner."""
     try:
         return write_companion(
-            context.settings.state_dir, key, text,
-            source=source, turn_id=context.turn_id, tainted=context.turn_tainted,
+            context.settings.state_dir, key, text, source=source, turn_id=context.turn_id,
+            tainted=context.turn_tainted if tainted is None else tainted,
         )
     except ValueError as error:
         return _fail(f"Yazılmadı: {error}")
@@ -198,14 +200,20 @@ class MemoryRuleAdd(BaseTool):
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = RuleAddArguments.model_validate(arguments)
-        if context.turn_tainted:
+        # Yalnız bu turda okunan dış içerik engeller. Önceki turdan kalan dış içerik engellemez:
+        # kural metni onay penceresinde harfiyen gösterilir ve kullanıcı onaylar; aksi halde
+        # oturumda bir kez vault okununca kural hiç eklenemiyordu (2026-11-07 gerçek deneme).
+        if context.turn_read_external:
             return _fail(
                 "Kural eklenmedi: bu turda dış içerik okundu; kurallar yalnız temiz turda eklenir."
             )
         rule = " ".join(args.text.split())
         current = read_companion(context.settings.state_dir, "kimlik", 10**6)
+        # Onaylı tam metin kullanıcınındır: geçmişteki dış içerik yüzünden Kimlik lekeli
+        # işaretlenmez (yoksa yapışkan leke sonraki her turu dış içerikli yapardı).
         outcome = _write(
-            context, "kimlik", _add_to_section(current, _RULES_HEADING, f"- {rule}"), "rule_add"
+            context, "kimlik", _add_to_section(current, _RULES_HEADING, f"- {rule}"), "rule_add",
+            tainted=False,
         )
         if isinstance(outcome, ToolResult):
             return outcome

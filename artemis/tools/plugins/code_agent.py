@@ -224,7 +224,13 @@ class CodeAgentProjectContext(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{', '.join(heads)} okundu.",
+            # Sabit yönlendirme dosyadan değil araçtan gelir: Haiku açıklamadaki "tek tek sor"u
+            # atlayıp üç soruyu birden soruyordu (2026-11-07 gerçek deneme); sonuç anında hatırlat.
+            message=(
+                f"{', '.join(heads)} okundu. Sıradaki adım: bu mesajda YALNIZ bir soru sor "
+                "(önce görev; kullanıcı verdiyse kapsam, o da varsa kabul ölçütü). Liste yapma, "
+                "diğer soruları sonraki mesajlara bırak."
+            ),
             data={"project": args.project, "files": heads},
             external=True,
             content_kind="file",

@@ -11,6 +11,7 @@ from artemis.brain.models import ToolCall
 from artemis.memory.companion import (
     CompanionConflictError,
     companion_dir,
+    content_tainted,
     ensure_skeleton,
     list_changes,
     read_companion,
@@ -164,6 +165,20 @@ async def test_rule_add_refused_in_tainted_turn(tmp_path: Path) -> None:
     assert result.success is False
     assert read_companion(state_dir, "kimlik", 1000) == before
     assert list_changes(state_dir, 5) == []
+
+
+async def test_rule_add_allowed_after_external_history(tmp_path: Path) -> None:
+    # Önceki turda vault okunmuş (history_external) ama bu tur temiz: onaylı kural yazılır,
+    # Kimlik lekeli işaretlenmez (2026-11-07 gerçek denemede kural hiç eklenemiyordu).
+    context = make_context(tmp_path)
+    state_dir = context.settings.state_dir
+    ensure_skeleton(state_dir)
+    state = TurnState()
+    state.history_external = True
+    result = await dispatch(context, state, "memory_rule_add", text="Emoji kullanma.")
+    assert result.success is True
+    assert "- Emoji kullanma." in read_companion(state_dir, "kimlik", 1000)
+    assert content_tainted(state_dir, "kimlik") is False
 
 
 async def test_changes_and_undo_tools(tmp_path: Path) -> None:
