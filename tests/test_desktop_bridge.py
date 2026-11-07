@@ -398,6 +398,41 @@ def test_shutdown_waits_for_cancelled_provider_cleanup(tmp_path):
         assert bridge._stopped.wait(2)
 
 
+def test_shutdown_gives_up_on_stuck_cleanup_after_bound_and_audits(tmp_path, monkeypatch):
+    """Hiç bitmeyen temizlik uygulamayı sonsuza dek "Temizleniyor…"da tutmamalı."""
+    from artemis.channels.desktop import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "SHUTDOWN_CLEANUP_SECONDS", 0.3)
+    monkeypatch.setattr(bridge_module, "SHUTDOWN_EXECUTOR_SECONDS", 0.3)
+    started = threading.Event()
+    release = threading.Event()
+
+    class NeverCleans:
+        async def complete(self, *_args: Any, **_kwargs: Any) -> Completion:
+            started.set()
+            while True:
+                try:
+                    await asyncio.to_thread(release.wait)
+                    return Completion(content="bitti")
+                except asyncio.CancelledError:
+                    continue
+
+    bridge = _fixture(tmp_path, [], provider_override=NeverCleans())
+    try:
+        request_id = bridge.submit("bekle")
+        assert request_id is not None
+        assert started.wait(2)
+        bridge.cancel(request_id)
+        bridge.shutdown()
+        assert bridge._stopped.wait(3)
+        assert "shutdown_cleanup_timeout" in (tmp_path / "audit.jsonl").read_text(
+            encoding="utf-8"
+        )
+    finally:
+        release.set()
+        bridge.shutdown()
+
+
 def test_approval_timeout_fails_closed_and_cleanup_completes(tmp_path):
     bridge = _fixture(tmp_path, _tool_scenario(), max_seconds=0.5)
     try:
@@ -849,7 +884,9 @@ def test_live_states_become_their_own_events(tmp_path):
     bridge = DesktopBridge(tmp_path / "unused.yaml", lambda *_a, **_k: None)
     for state in ("live:merhaba dünya", "live:unavailable:deps:eksik", "heard:merhaba"):
         bridge._on_voice_state(state)
-    events = [(e.state, e.message) for e in bridge.poll_events()]
+    # Kurucu işçiyi başlatır; config yoksa Failed olayı araya girebilir (yarış). Test yalnız
+    # ses durumlarının kendi olayına dönüştüğünü ölçer.
+    events = [(e.state, e.message) for e in bridge.poll_events() if isinstance(e, State)]
     assert events == [
         ("voice_live", "merhaba dünya"),
         ("voice_live_unavailable", "deps:eksik"),

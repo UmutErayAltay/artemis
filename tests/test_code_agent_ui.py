@@ -788,6 +788,50 @@ def test_discard_button_only_for_a_draft_and_emits_typed_request(
     panel.close()
 
 
+def test_release_button_only_for_pending_lock_and_emits_typed_request(
+    tmp_path: Path, app: QApplication
+) -> None:
+    panel = _panel(_old_shape(tmp_path), ["alfa"])
+    seen: list[Any] = []
+    panel.tool_requested.connect(lambda name, args: seen.append((name, args)))
+    panel.show()
+    assert panel.release_button.isHidden()  # hiçbir şey seçili değil
+    job = {"job_id": "j", "project": "alfa", "status": "interrupted", "spec": _spec(),
+           "cleanup_pending": True}
+    _status_with(panel, jobs=[job])
+    assert not panel.release_button.isHidden() and panel.release_button.isEnabled()
+    panel.release_button.click()
+    name, args = seen[-1]
+    assert name == "code_agent_release" and args.job_id == "j"
+    panel.set_busy(True)
+    assert not panel.release_button.isEnabled()
+    panel.set_busy(False)
+    _status_with(panel, jobs=[{**job, "cleanup_pending": False}])
+    assert not panel.release_button.isEnabled()  # kilit yoksa bırakılacak şey de yok
+    _status_with(panel, jobs=[{**job, "status": "running"}])
+    assert not panel.release_button.isEnabled()  # aktif iş kilidi bırakılamaz
+    panel.close()
+
+
+def test_clear_finished_button_enabled_only_with_removable_job_and_emits_request(
+    tmp_path: Path, app: QApplication
+) -> None:
+    panel = _panel(_old_shape(tmp_path), ["alfa"])
+    seen: list[Any] = []
+    panel.tool_requested.connect(lambda name, args: seen.append((name, args)))
+    panel.show()
+    job = {"job_id": "j", "project": "alfa", "status": "running", "spec": _spec()}
+    _status_with(panel, jobs=[job])
+    assert not panel.clear_button.isEnabled()  # aktif iş
+    _status_with(panel, jobs=[{**job, "status": "interrupted", "cleanup_pending": True}])
+    assert not panel.clear_button.isEnabled()  # kilitli iş
+    _status_with(panel, jobs=[{**job, "status": "done"}])
+    assert panel.clear_button.isEnabled()
+    panel.clear_button.click()
+    assert seen[-1][0] == "code_agent_clear_finished"
+    panel.close()
+
+
 def test_discard_success_removes_item_moves_selection_and_forces_next_refresh(
     tmp_path: Path, app: QApplication
 ) -> None:

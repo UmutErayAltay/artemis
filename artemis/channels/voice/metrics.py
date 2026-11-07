@@ -87,9 +87,11 @@ DERIVED = (
     "model_first_response_ms",
     "model_total_ms",
     "tool_total_ms",
+    "speech_end_to_tool_end_ms",
 )
 GROUP_METRICS = (
     "speech_end_to_first_pcm_ms",
+    "speech_end_to_tool_end_ms",
     "command_runner_ms",
     "model_first_token_ms",
     "model_first_response_ms",
@@ -254,6 +256,12 @@ def _sample(uid: int, items: list[VoiceTimingEvent]) -> dict[str, Any]:
         derived["model_total_ms"] = sum(end - start for start, end in model_spans) * 1000
     if tool_spans:
         derived["tool_total_ms"] = sum(end - start for start, end in tool_spans) * 1000
+        if "speech_end" in times:
+            # Sesli komutun kullanıcıya asıl maliyeti: susmasından eylemin dönüşüne kadar.
+            # İlk ses (first_pcm) bunu göstermez; "açıyorum" deyip araç sonra bitebilir.
+            derived["speech_end_to_tool_end_ms"] = (
+                max(end for _start, end in tool_spans) - times["speech_end"]
+            ) * 1000
     reason = terminal[-1].reason if terminal else None
     return {
         "utterance_id": uid,
@@ -387,6 +395,10 @@ def timing_report(events: Iterable[VoiceTimingEvent]) -> dict[str, Any]:
             "model_first_response_ms": "komut başlangıcından ilk tam model yanıtına",
             "model_first_token_ms": "akan ilk metin parçası; akışsız sağlayıcıda örnek yok",
             "tool_total_ms": "SafetyGate.dispatch süresi; onay bekleme süresi dahildir",
+            "speech_end_to_tool_end_ms": (
+                "konuşma bitişinden son aracın dönüşüne; araç 'sent' dönmüş olabilir, "
+                "OS'de doğrulanmış sonuç anlamına gelmez; onay bekleme dahildir"
+            ),
             "playback_stopped": "sink yazımının bittiği an; aygıt tamponu ölçülmez",
             "barge_in": "kesen sözün kimliğinde; speech_start'tan ölçüm algılamayı da içerir",
             "ids": "controller yerel utterance/generation; AgentLoop turn_id değildir",

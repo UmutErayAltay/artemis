@@ -11,6 +11,7 @@ import math
 import sqlite3
 from collections import deque
 from collections.abc import Callable, Sequence
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
@@ -50,6 +51,8 @@ class TurnRecord(BaseModel):
     answer: str
     answer_private: bool
     tainted: bool
+    # UTC ISO zamanı; modele yerel saatle gider (eski kayıtlarda boş: önek yok).
+    created_at: str = ""
 
 
 class ContextWindow(BaseModel):
@@ -95,9 +98,21 @@ def estimate_tokens(messages: Sequence[Message]) -> int:
     return _tokens_for(sum(_message_chars(message) for message in messages))
 
 
+def local_stamp(iso_utc: str) -> str:
+    """UTC ISO zamanını '2026-11-05 13:21' yerel biçimine çevirir; bozuksa boş döner."""
+    try:
+        return datetime.fromisoformat(iso_utc).astimezone().strftime("%Y-%m-%d %H:%M")
+    except ValueError:
+        return ""
+
+
 def _render_turn(record: TurnRecord, shortened: bool) -> list[Message]:
     limit = SHORT_OUTPUT_CHARS if shortened else NORMAL_BODY_CHARS
-    rendered = [Message(role="user", content=record.user_text)]
+    # Model eski turun ne zaman olduğunu bilmezse "az önce" sanır; kısa bir zaman öneki yeter.
+    stamp = local_stamp(record.created_at) if record.created_at else ""
+    rendered = [
+        Message(role="user", content=f"[{stamp}] {record.user_text}" if stamp else record.user_text)
+    ]
     for step in record.steps:
         if isinstance(step, ToolExchange):
             rendered.append(
@@ -157,6 +172,10 @@ class ConversationContext:
             self._on_error(error)
 
     def record(self, turn: TurnRecord) -> None:
+        if not turn.created_at:
+            turn = turn.model_copy(
+                update={"created_at": datetime.now(UTC).isoformat(timespec="seconds")}
+            )
         self._turns.append(turn)
         if self._store is not None:
             try:

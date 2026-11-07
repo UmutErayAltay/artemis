@@ -6,6 +6,7 @@ import html
 import json
 import sys
 import tempfile
+import threading
 from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -15,7 +16,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ValidationError
-from PySide6.QtCore import QPointF, QRectF, QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -26,12 +27,10 @@ from PySide6.QtGui import (
     QKeyEvent,
     QPainter,
     QPalette,
-    QPen,
     QPixmap,
 )
 from PySide6.QtWidgets import (
     QApplication,
-    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -51,6 +50,7 @@ from PySide6.QtWidgets import (
 from artemis.brain.providers import provider_problem
 from artemis.channels.autostart import Autostart
 from artemis.channels.desktop import pet_sprite, shell_assets, themes
+from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.bridge import (
     Activity,
     ActivityGap,
@@ -75,7 +75,11 @@ from artemis.channels.desktop.operations import (
 )
 from artemis.channels.desktop.pet import PetWidget, level_from_message
 from artemis.channels.desktop.pet_sprite import pets_dir_for
-from artemis.channels.desktop.projects_panel import ProjectsPanel, make_page_header
+from artemis.channels.desktop.projects_panel import (
+    ProjectsPanel,
+    make_page_header,
+    status_label,
+)
 from artemis.channels.desktop.settings_panel import (
     SettingsPanel,
     save_choices,
@@ -84,11 +88,15 @@ from artemis.channels.desktop.settings_panel import (
 from artemis.channels.desktop.shell_assets import greeting_for_hour
 from artemis.channels.desktop.steps import StepLine, step_line
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
+from artemis.channels.desktop.widgets import PetFace
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
+from artemis.tools.toast import ToastOutcome, show_toast
 
 _STYLE = themes.stylesheet(themes.DEFAULT_THEME)
+PROJECTS_POLL_ACTIVE_MS = 2000
+PROJECTS_POLL_IDLE_MS = 15000
 
 
 # Köprü ses durumunu makine okunur taşır; Türkçe metne ekran çevirir.
@@ -127,78 +135,6 @@ _DETAIL_LIMIT = 4000
 # Adım blokları yalnız son birkaç isteğin canlı bağlantısını tutar.
 _STEP_TURNS_KEPT = 8
 _STEP_EVENTS_PER_TURN = 200
-
-
-class PetFace(QWidget):
-    """Seçili petin sabit yüzü: gerçek pet görseli varsa o, yoksa tema renkli düz çizim.
-
-    Başlık (32px), karşılama (96px) ve asistan balonu (28px) aynı sınıfı kullanır; böylece
-    "uygulamanın yüzü" tek kaynaktan gelir. Yedek çizim sabit lacivert yerine tema
-    jetonlarını okur, bu yüzden dört temada da uyumlu kalır.
-    """
-
-    def __init__(self, size: int, palette: dict[str, str] | None = None) -> None:
-        super().__init__()
-        self._palette = palette or themes.THEMES[themes.DEFAULT_THEME]
-        self._pixmap: QPixmap | None = None
-        self.setFixedSize(size, size)
-        self.setAccessibleName("Seçili pet")
-
-    def has_image(self) -> bool:
-        return self._pixmap is not None
-
-    def set_pixmap(self, pixmap: QPixmap | None) -> None:
-        self._pixmap = pixmap
-        self.update()
-
-    def set_palette_tokens(self, palette: dict[str, str]) -> None:
-        self._palette = palette
-        self.update()
-
-    def paintEvent(self, event: Any) -> None:
-        p = QPainter(self)
-        p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
-        side = self.width()
-        if self._pixmap is not None:
-            scaled = self._pixmap.scaled(
-                self.size(), Qt.AspectRatioMode.KeepAspectRatio,
-                Qt.TransformationMode.SmoothTransformation,
-            )
-            ratio = scaled.devicePixelRatio() or 1.0
-            p.drawPixmap(
-                round((side - scaled.width() / ratio) / 2),
-                round((side - scaled.height() / ratio) / 2),
-                scaled,
-            )
-            p.end()
-            return
-        t = self._palette
-        # Çizim 54x56 koordinatlarında kalır; kutuya orantılı küçültülür.
-        scale = side / 56
-        p.translate((side - 54 * scale) / 2, 0)
-        p.scale(scale, scale)
-        p.setPen(QPen(QColor(t["muted"]), 2.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawLine(QPointF(27, 12), QPointF(27, 5))
-        p.setPen(Qt.PenStyle.NoPen)
-        p.setBrush(QColor(t["accent"]))
-        p.drawEllipse(QPointF(27, 5), 3.2, 3.2)
-        p.setBrush(QColor(t["accent_soft"]))
-        p.setPen(QPen(QColor(t["accent"]), 2))
-        p.drawEllipse(QRectF(3, 11, 48, 43))
-        p.setPen(Qt.PenStyle.NoPen)
-        cheek = QColor(t["warning"])
-        cheek.setAlpha(70)
-        p.setBrush(cheek)
-        for x in (11, 43):
-            p.drawEllipse(QPointF(x, 40), 4.5, 3)
-        p.setBrush(QColor(t["text"]))
-        for x in (19, 35):
-            p.drawEllipse(QPointF(x, 31), 3.6, 4.4)
-        p.setBrush(Qt.BrushStyle.NoBrush)
-        p.setPen(QPen(QColor(t["text"]), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
-        p.drawArc(QRectF(21, 34, 12, 8), 200 * 16, 140 * 16)
-        p.end()
 
 
 def _is_user_speaker(speaker: str) -> bool:
@@ -672,212 +608,6 @@ class ChatTranscript(QWidget):
         bubble.setFixedWidth(min(max_width, max(min(120, max_width), natural)))
 
 
-def _argument_text(value: Any) -> str:
-    """Onay özetinde tek satırlık değer; sözlük ve listeler JSON olarak gösterilir."""
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, ensure_ascii=False, default=str)
-
-
-# Özet satırı bu uzunluğu aşan değeri keser; tam metin ipucunda ve ayrıntıda durur.
-_SUMMARY_LIMIT = 80
-# Bundan uzun ya da yol/adres taşıyan değer varsa ayrıntı kutusu açık gelir (kural 2).
-_DETAIL_OPEN_LENGTH = 60
-
-
-def _needs_open_details(arguments: dict[str, Any]) -> bool:
-    for value in arguments.values():
-        text = _argument_text(value)
-        if len(text) > _DETAIL_OPEN_LENGTH or any(mark in text for mark in ("/", "\\", "://")):
-            return True
-    return False
-
-
-class ApprovalDialog(QDialog):
-    """İşçi beklerken Qt event loop'unu açık tutan açık seçim penceresi."""
-
-    def __init__(self, item: Approval, on_decision: Any, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.item = item
-        self._on_decision = on_decision
-        self._decided = False
-        self.setWindowTitle("Artemis · İşlem onayı")
-        self.setModal(True)
-        self.setMinimumSize(560, 380)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(16)
-
-        # Uzun argümanlı onayda düğmeler hep görünür kalsın diye gövde kayar.
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        body = QWidget()
-        body.setObjectName("flat")
-        body_layout = QVBoxLayout(body)
-        body_layout.setContentsMargins(0, 0, 8, 0)
-        body_layout.setSpacing(12)
-        scroll.setWidget(body)
-        layout.addWidget(scroll, 1)
-
-        # Okunur ad büyük başlıktır; snake_case ham ad gündelik kullanıcıya gürültüdür, bu yüzden
-        # "Teknik ayrıntılar" alanında durur (ADR 0014); etiketsiz araçta başlık ham ada düşer.
-        title = QLabel(item.tool_label or item.tool_name)
-        title.setObjectName("title")
-        title.setTextFormat(Qt.TextFormat.PlainText)
-        title.setWordWrap(True)
-        body_layout.addWidget(title)
-
-        # Kod ajanı: hangi ajanın nerede başlayacağı ilk düz dil bloğudur (ADR 0049). Metin
-        # arka uçtan gelir; proje dışı klasörde uyarı satırı uyarı tonlu kutuda ayrılır.
-        self.approval_text_label: QLabel | None = None
-        self.workdir_warning_box: QLabel | None = None
-        spec = item.arguments.get("spec")
-        if item.tool_name == "code_agent_start" and isinstance(spec, dict):
-            lines = str(spec.get("approval_text", "")).split("\n")
-            # İlk 4 satır sabit (ajan, klasör, repo, kip); sonrakiler uyarıdır (proje dışı
-            # klasör, görünür pencere kipi) ve uyarı tonlu kutuda ayrı gösterilir.
-            head, warn = lines[:4], lines[4:]
-            if head and any(head):
-                self.approval_text_label = QLabel("\n".join(head))
-                self.approval_text_label.setTextFormat(Qt.TextFormat.PlainText)
-                self.approval_text_label.setWordWrap(True)
-                self.approval_text_label.setAccessibleName("Ajan ve başlangıç klasörü")
-                body_layout.addWidget(self.approval_text_label)
-            if warn:
-                self.workdir_warning_box = QLabel("\n".join(warn))
-                self.workdir_warning_box.setObjectName("approvalNotice")
-                self.workdir_warning_box.setTextFormat(Qt.TextFormat.PlainText)
-                self.workdir_warning_box.setWordWrap(True)
-                body_layout.addWidget(self.workdir_warning_box)
-
-        # Özet: her argüman anahtarı görünür; uzun değer kısalır, tamamı ipucunda ve ayrıntıda.
-        intro = QLabel("Artemis bu aracı şu değerlerle çalıştırmak için izin istiyor:")
-        intro.setWordWrap(True)
-        body_layout.addWidget(intro)
-        rows = QVBoxLayout()
-        rows.setSpacing(4)
-        body_layout.addLayout(rows)
-        for key, value in item.arguments.items():
-            full = _argument_text(value)
-            shown = " ".join(full.split())
-            if len(shown) > _SUMMARY_LIMIT:
-                shown = shown[: _SUMMARY_LIMIT - 1] + "…"
-            row = QLabel(f"{key}: {shown}")
-            row.setTextFormat(Qt.TextFormat.PlainText)
-            row.setWordWrap(True)
-            row.setToolTip(f"<pre>{html.escape(f'{key}: {full}')}</pre>")
-            row.setAccessibleName(f"Argüman {key}")
-            rows.addWidget(row)
-        if not item.arguments:
-            rows.addWidget(QLabel("Argüman yok."))
-
-        # Geçit iki ayrı iletiyi ". " ile birleştirir (dış içerik/onay notu + aracın açıklaması);
-        # tek paragrafta okunmaz, bu yüzden uyarı kutusu ile açıklama ayrı satırlara bölünür.
-        warning, _sep, tool_note = (item.notice or "Bu işlem onay gerektirir.").partition(". ")
-        notice = QLabel(warning + ("." if tool_note else ""))
-        notice.setObjectName("approvalNotice")
-        notice.setTextFormat(Qt.TextFormat.PlainText)
-        notice.setWordWrap(True)
-        body_layout.addWidget(notice)
-        self.tool_note_label: QLabel | None = None
-        if tool_note:
-            self.tool_note_label = QLabel(tool_note)
-            self.tool_note_label.setTextFormat(Qt.TextFormat.PlainText)
-            self.tool_note_label.setWordWrap(True)
-            body_layout.addWidget(self.tool_note_label)
-
-        self.details_toggle = QPushButton("Teknik ayrıntılar")
-        self.details_toggle.setObjectName("ghost")
-        self.details_toggle.setCheckable(True)
-        self.details_toggle.setAccessibleName("Teknik ayrıntıları göster veya gizle")
-        body_layout.addWidget(self.details_toggle, 0, Qt.AlignmentFlag.AlignLeft)
-        self.raw_name = QLabel(f"Araç adı: {item.tool_name}")
-        self.raw_name.setObjectName("rawToolName")
-        self.raw_name.setTextFormat(Qt.TextFormat.PlainText)
-        self.raw_name.setAccessibleName("Ham araç adı")
-        body_layout.addWidget(self.raw_name)
-        label = QLabel("Doğrulanmış araç argümanları")
-        label.setObjectName("fieldLabel")
-        arguments = QPlainTextEdit()
-        arguments.setObjectName("approvalArguments")
-        arguments.setReadOnly(True)
-        arguments.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
-        arguments.setPlainText(json.dumps(item.arguments, ensure_ascii=False, indent=2))
-        arguments.setAccessibleName("Salt okunur doğrulanmış araç argümanları")
-        arguments.setMinimumHeight(120)
-        self.details_label = label
-        self.arguments_view = arguments
-        body_layout.addWidget(label)
-        body_layout.addWidget(arguments, 1)
-        self.details_toggle.toggled.connect(self._show_details)
-        # Uzun değer, yol ya da adres varsa ayrıntı tıklama beklemeden açıktır.
-        self.details_toggle.setChecked(_needs_open_details(item.arguments))
-        self._show_details(self.details_toggle.isChecked())
-
-        buttons = QHBoxLayout()
-        buttons.setSpacing(8)
-        buttons.addStretch(1)
-        self.no_button = QPushButton("Hayır")
-        self.no_button.setMinimumWidth(88)
-        self.no_button.setDefault(True)
-        self.no_button.setAutoDefault(True)
-        self.yes_button = QPushButton("Evet, onayla")
-        self.yes_button.setObjectName("primary")
-        self.yes_button.setMinimumWidth(88)
-        self.yes_button.setDefault(False)
-        self.yes_button.setAutoDefault(False)
-        buttons.addWidget(self.no_button)
-        self.site_button: QPushButton | None = None
-        if item.site:
-            self.site_button = QPushButton(f"Evet, {item.site} için bir daha sorma")
-            self.site_button.setAutoDefault(False)
-            self.site_button.clicked.connect(lambda: self._choose(True, remember_site=True))
-            buttons.addWidget(self.site_button)
-        buttons.addWidget(self.yes_button)
-        layout.addLayout(buttons)
-        self.no_button.clicked.connect(lambda: self._choose(False))
-        self.yes_button.clicked.connect(lambda: self._choose(True))
-        self.no_button.setFocus(Qt.FocusReason.OtherFocusReason)
-
-    def _show_details(self, on: bool) -> None:
-        self.raw_name.setVisible(on)
-        self.details_label.setVisible(on)
-        self.arguments_view.setVisible(on)
-
-    def _choose(self, approved: bool, remember_site: bool = False) -> None:
-        if self._decided:
-            return
-        self._decided = True
-        accepted = self._on_decision(self.item, approved, remember_site)
-        decision = approved and accepted
-        self.done(QDialog.DialogCode.Accepted if decision else QDialog.DialogCode.Rejected)
-
-    def reject(self) -> None:
-        self._choose(False)
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() in (
-            Qt.Key.Key_Escape,
-            Qt.Key.Key_Return,
-            Qt.Key.Key_Enter,
-        ):
-            self._choose(False)
-            event.accept()
-            return
-        super().keyPressEvent(event)
-
-    def closeEvent(self, event: QCloseEvent) -> None:
-        if not self._decided:
-            self._choose(False)
-        event.accept()
-
-    def showEvent(self, event: Any) -> None:
-        super().showEvent(event)
-        self.no_button.setFocus(Qt.FocusReason.ActiveWindowFocusReason)
-
-
 class QuickOverlay(QWidget):
     def __init__(
         self,
@@ -995,6 +725,7 @@ class _ChatPage(QWidget):
 class DesktopWindow(QMainWindow):
     # Kısayol kendi iş parçacığından yayar; Qt bunu ana iş parçacığına sıraya alır.
     _hotkey_pressed = Signal()
+    _toast_failed = Signal(str)
 
     def __init__(
         self,
@@ -1011,6 +742,7 @@ class DesktopWindow(QMainWindow):
         self._app = app_instance
         self._config_path = config_path
         self._restart_settings = False
+        self._telegram_resynced = False
         self._config_restart_pending = False
         self._config_restart_serial = -1
         # Ertelenen yeniden kurulumun "neden bekliyor" notu isteği yapan panelde görünür.
@@ -1523,7 +1255,11 @@ class DesktopWindow(QMainWindow):
         self.projects_panel.tool_requested.connect(self._submit_project_tool)
         self.projects_panel.config_saved.connect(self._code_agent_config_saved)
         self._projects_timer = QTimer(self)
-        self._projects_timer.setInterval(2000)
+        self._notified_jobs: set[tuple[str, str, str]] = set()
+        # Demo gerçek makineye bildirim göndermez; testler sahte işlev enjekte eder.
+        self._toast: Callable[[str, str], ToastOutcome] | None = None if self._demo else show_toast
+        self._toast_failed.connect(self._show_toast_failure)
+        self._projects_timer.setInterval(PROJECTS_POLL_ACTIVE_MS)
         self._projects_timer.timeout.connect(self._refresh_projects)
         self._projects_timer.start()
         self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
@@ -1642,12 +1378,17 @@ class DesktopWindow(QMainWindow):
     def _telegram_changed(self) -> None:
         """chat_id/token değişti: proaktif Telegram teslimi yeniden kurulumla yeni durumu görür."""
         status = self.settings_panel.telegram.message
-        # Kanal servisi çalışma zamanından bağımsızdır: yeni sohbet/token hemen eşitlenir.
-        self._sync_telegram_service()
         if self._exiting or self._demo:
+            self._sync_telegram_service()
             status.setText("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
             return
+        # Kanal servisi çalışma zamanından bağımsızdır: yeni sohbet/token hemen eşitlenir.
+        # Yeniden kurulum hemen yapıldıysa o zaten eşitlemiştir (çift yeniden başlatma olmasın);
+        # ertelendiyse (meşgul) ya da sürüyorsa burada eşitlenir.
+        self._telegram_resynced = False
         self._request_restart(status)
+        if not self._telegram_resynced:
+            self._sync_telegram_service()
 
     def _sync_telegram_service(self) -> None:
         """Config'e göre kanal servisini durdurup (gerekirse) yeniden başlatır; canlı, yeniden
@@ -1754,6 +1495,10 @@ class DesktopWindow(QMainWindow):
         """Config değişince çalışma zamanını yeniden kurar (Uygula ve sağlayıcı kaydı)."""
         if self.settings_panel.pet.creator is not None:
             self.settings_panel.pet.creator.reload_models()
+        # Gömülü Telegram kanalı kendi runtime'ını açılışta okunan ayarla kurmuştu (örn. izinli
+        # uygulamalar); yeniden kurulmazsa eski, gevşek politikayla çalışmaya devam ederdi.
+        self._sync_telegram_service()
+        self._telegram_resynced = True
         self._voice_on_ready = self.bridge.voice_active
         self._restart_settings = True
         self._worker_ready = False
@@ -1941,6 +1686,11 @@ class DesktopWindow(QMainWindow):
         self._set_controls()
 
     def _refresh_projects(self) -> None:
+        # Her yoklama denetime yazılan tam bir turdur; etkin iş yokken seyrek yoklanır.
+        idle = self.projects_panel.active_job_count() == 0 and not self._config_restart_pending
+        want = PROJECTS_POLL_IDLE_MS if idle else PROJECTS_POLL_ACTIVE_MS
+        if self._projects_timer.interval() != want:
+            self._projects_timer.setInterval(want)
         if self._config_restart_pending:
             # Ertelenmiş yeniden kurulum: iş listesi sekmeden bağımsız tazelenir, son durumu
             # (status_serial arttıktan sonra) boşsa tek kez yeniden kurulur.
@@ -2258,12 +2008,7 @@ class DesktopWindow(QMainWindow):
             elif event.state == "context_reset":
                 # Adım blokları eski balonlarla birlikte silinir; kayıt da sıfırlanır.
                 # Karşılama geri gelir; işlem kartları da sıfırlanır (denetim günlüğü değişmez).
-                self._turn_steps.clear()
-                self._reset_cards()
-                self.chat.clear()
-                if not self._busy:
-                    self._set_status("Hazır", "ready")
-                self._set_controls()
+                self._clear_chat_view()
             elif event.state == "cancelling":
                 self._set_status("İptal ediliyor…", "running")
             elif event.state == "stopping":
@@ -2291,6 +2036,14 @@ class DesktopWindow(QMainWindow):
                 panel = (self.projects_panel if event.tool_name.startswith("code_agent_")
                          else self.data_panel)
                 panel.accept_result(event.tool_name, event.result)
+                # Silinen geçmişin balonları ekranda kalırsa kullanıcı silmenin başarısız
+                # olduğunu sanır; "Yeni sohbet" ile aynı temizlik yapılır.
+                if (
+                    event.tool_name == "conversation_history"
+                    and event.result.success
+                    and event.result.data.get("action") == "delete"
+                ):
+                    self._clear_chat_view()
             return
         if isinstance(event, Finished):
             if event.request_id == self._active_request:
@@ -2333,10 +2086,56 @@ class DesktopWindow(QMainWindow):
             self._feed_card(event)
             self._collect_step(event)
 
+    def _clear_chat_view(self) -> None:
+        self._turn_steps.clear()
+        self._reset_cards()
+        self.chat.clear()
+        if not self._busy:
+            self._set_status("Hazır", "ready")
+        self._set_controls()
+
     def _pet_activity(self, event: Activity) -> None:
-        text = self.pet.code_agent_event(event.event, event.fields)
-        if text is not None and self._tray is not None:
-            self._tray.showMessage("Artemis", text, QSystemTrayIcon.MessageIcon.Information, 6000)
+        self.pet.code_agent_event(event.event, event.fields)
+        if event.event in {"code_agent_started", "code_agent_waiting", "code_agent_done"}:
+            # Liste yoklaması etkin işte 2 sn, değilse 15 sn; durum değişince hemen hızlanır.
+            self._projects_timer.setInterval(PROJECTS_POLL_ACTIVE_MS)
+            self._projects_timer.start()
+        if event.event in {"code_agent_waiting", "code_agent_done"}:
+            self._notify_job(event.fields)
+
+    def _notify_job(self, fields: dict[str, Any]) -> None:
+        """Sekme açık olmasa da görünür bildirim: sohbet satırı + Windows toast.
+
+        Tepsi balonu Windows bildirimleri kapalıyken sonuçsuz kayboluyordu; toast sonucu verir.
+
+        Aynı iş/durum çifti bir kez bildirilir (kilit bırakma ve zaman aşımı yolları da
+        `code_agent_done` yazar). Kullanıcının kendi iptali bildirim gerektirmez.
+        """
+        status = str(fields.get("status", ""))
+        key = (str(fields.get("job_id", "")), status, str(fields.get("question_id") or ""))
+        if status == "cancelled" or key in self._notified_jobs:
+            return
+        self._notified_jobs.add(key)
+        project = str(fields.get("project") or "kod ajanı")
+        summary = str(fields.get("summary") or "").strip()
+        text = f"Kod işi · {project}: {status_label(fields)}" + (f". {summary}" if summary else "")
+        self._append_chat("Artemis", text)
+        toast = self._toast
+        if toast is None:
+            return
+
+        def deliver() -> None:
+            # powershell çalıştırır (15 sn'ye dek): arayüz iş parçacığını dondurmamak için ayrı
+            # iş parçacığı; sonuç sinyalle ana iş parçacığına döner.
+            outcome = toast("Artemis", text[:240])
+            if outcome.status != "ok":
+                self._toast_failed.emit(outcome.message)
+
+        threading.Thread(target=deliver, name="job-toast", daemon=True).start()
+
+    def _show_toast_failure(self, message: str) -> None:
+        # Sohbet satırı zaten gösterildi; bildirimin neden görünmediği dürüstçe eklenir.
+        self._append_chat("Sistem", f"(Windows bildirimi gösterilmedi: {message})")
 
     def _show_approval(self, item: Approval) -> None:
         if item.request_id != self._active_request:

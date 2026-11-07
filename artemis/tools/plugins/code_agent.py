@@ -57,9 +57,18 @@ class CancelArguments(BaseModel):
     job_id: str = Field(min_length=1, max_length=32)
 
 
+class ReleaseArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=1, max_length=32)
+
+
 class DiscardArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
     spec_id: str = Field(min_length=1, max_length=64)
+
+
+class ClearFinishedArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class AnswerArguments(CancelArguments):
@@ -201,6 +210,7 @@ class CodeAgentStart(BaseTool):
             return ToolResult(
                 message="Ayarlar değişti; onaylanan yollar geçersiz. Yeni taslak hazırlayın."
             )
+        entry = config.project_entries.get(alias)
         try:
             job_id = jobs.start(
                 alias,
@@ -210,6 +220,8 @@ class CodeAgentStart(BaseTool):
                 workdir=None if workdir_alias == OWN_REPO_ALIAS else workdir,
                 command=config.command,
                 max_minutes=config.max_minutes,
+                checks=entry.checks if entry else (),
+                check_timeout=config.check_timeout_seconds,
                 model=config.model,
                 manager_model=config.manager_model,
                 coder_model=config.coder_model,
@@ -318,6 +330,38 @@ class CodeAgentCancel(BaseTool):
 
 
 @register_tool
+class CodeAgentRelease(BaseTool):
+    name = "code_agent_release"
+    label = "Depo kilidini bırak"
+    done_label = "Depo kilidi bırakıldı"
+    description = (
+        "Artemis çöktükten sonra kalan belirsiz depo kilidini bırakır; ajanı durdurmaz, "
+        "dosyalara dokunmaz. Önce o repoda hiçbir ajan penceresi veya süreci çalışmadığından "
+        "emin ol."
+    )
+    args_model = ReleaseArguments
+    # Yetim bir ajan süreci kuramsal olarak hâlâ repoyu düzenliyor olabilir. Windows'ta
+    # Artemis ölünce Job Object süreç ağacını öldürür, ama bunu doğrulayamayız; bu yüzden
+    # kilidi bırakmak kullanıcının açık onayını ister.
+    risk = Risk.CONFIRM_REQUIRED
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        args = cast(ReleaseArguments, arguments)
+        jobs = _jobs(context)
+        released = None if jobs is None else jobs.release(args.job_id)
+        if released is None:
+            return ToolResult(message=f"Kilidi bırakılabilir iş bulunamadı: {args.job_id}.")
+        leftover = {True: "var", False: "yok", None: "bilinmiyor"}[released["leftover_changes"]]
+        return ToolResult(
+            success=True,
+            status="ok",
+            message=f"İş {args.job_id} için depo kilidi bırakıldı; "
+            f"commitlenmemiş değişiklik {leftover}.",
+            data={"job_id": args.job_id, "leftover_changes": released["leftover_changes"]},
+        )
+
+
+@register_tool
 class CodeAgentDiscard(BaseTool):
     name = "code_agent_discard"
     label = "Taslağı sil"
@@ -345,4 +389,33 @@ class CodeAgentDiscard(BaseTool):
             status="ok",
             message="Taslak silindi.",
             data={"spec_id": args.spec_id},
+        )
+
+
+@register_tool
+class CodeAgentClearFinished(BaseTool):
+    name = "code_agent_clear_finished"
+    label = "Biten işleri temizle"
+    done_label = "Biten işler temizlendi"
+    description = (
+        "Bitmiş (tamamlandı, hata, kesildi, iptal, zaman aşımı) ve depo kilidi serbest "
+        "iş kayıtlarını listeden siler. Aktif, bekleyen veya kilitli işlere ve repoya dokunmaz."
+    )
+    args_model = ClearFinishedArguments
+    # Yalnız yerel iş üstverisini siler; denetim günlüğündeki olaylar kalır.
+    risk = Risk.SIDE_EFFECT
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        jobs = _jobs(context)
+        try:
+            removed = [] if jobs is None else jobs.clear_finished()
+        except CodeAgentError as error:
+            return ToolResult(message=str(error))
+        if not removed:
+            return ToolResult(message="Temizlenecek bitmiş iş yok.")
+        return ToolResult(
+            success=True,
+            status="ok",
+            message=f"{len(removed)} bitmiş iş kaydı silindi.",
+            data={"job_ids": removed},
         )

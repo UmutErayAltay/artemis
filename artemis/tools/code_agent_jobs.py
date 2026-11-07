@@ -8,12 +8,14 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
+import tempfile
 import threading
 import time
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import ExitStack, closing, suppress
 from copy import deepcopy
 from pathlib import Path
@@ -47,8 +49,12 @@ from artemis.tools.platform import child_environment
 from artemis.tools.project_spec import ProjectSpec, SegmentOutput
 
 SUMMARY_LIMIT = 2000
+CHECK_TAIL = 400
+STDERR_TAIL = 300
 ProcessFactory = Callable[..., Any]
 ACTIVE = {"queued", "running", "waiting", "cancelling"}
+# Listeden temizlenebilen bitmiş durumlar; `cleanup_pending` işi ayrıca korunur (depo kilidi).
+FINISHED = {"done", "error", "interrupted", "cancelled", "timeout"}
 
 
 class CodeAgentError(Exception):
@@ -106,6 +112,17 @@ def _plain_summary(
     return text
 
 
+def job_folder(root: Path, job_id: str) -> Path | None:
+    """İşin state klasöründeki dizini; kimlik `uuid4().hex[:12]` biçiminde değilse None.
+
+    Kimlik SQLite'tan okunur; elle bozulmuş bir kayıt `..` taşıyıp silmeyi state klasörü
+    dışına çıkaramasın diye yol kurulmadan önce biçim denetlenir.
+    """
+    if len(job_id) != 12 or any(char not in "0123456789abcdef" for char in job_id):
+        return None
+    return root / "code_agent_jobs" / job_id
+
+
 class CodeAgentJobs:
     def __init__(
         self,
@@ -128,6 +145,8 @@ class CodeAgentJobs:
         self._all_threads: set[threading.Thread] = set()
         self._cancelled: set[str] = set()
         self._settings: dict[str, tuple[Path, AgentRun]] = {}
+        # Bağımsız kontroller config'ten gelir, iş kaydına yalnız SONUÇLARI yazılır.
+        self._checks: dict[str, tuple[tuple[tuple[str, ...], ...], float]] = {}
         self._shutdown = False
         self._deadlines: dict[str, float] = {}
         self._began: dict[str, float] = {}
@@ -145,36 +164,65 @@ class CodeAgentJobs:
                 ) from error
             with ExitStack() as initialization:
                 initialization.callback(ownership.close)
-                descriptor = os.open(store_path, os.O_CREAT | os.O_RDWR, 0o600)
-                os.close(descriptor)
-                with closing(sqlite3.connect(store_path)) as connection, connection:
-                    connection.execute(
-                        "CREATE TABLE IF NOT EXISTS records (key TEXT PRIMARY KEY, "
-                        "kind TEXT NOT NULL, value TEXT NOT NULL)"
-                    )
-                    for key, kind, value in connection.execute(
-                        "SELECT key, kind, value FROM records"
-                    ):
-                        record = json.loads(value)
-                        if kind == "draft":
-                            self._drafts[key] = ProjectSpec.model_validate(record)
-                        else:
-                            if record["status"] in ACTIVE or record["status"] == "cleanup_pending":
-                                record.update(
-                                    status="interrupted",
-                                    cleanup_pending=True,
-                                    summary="Önceki süreç kesildi; otomatik yeniden başlatılmadı. "
-                                    "Depo kilidi belirsiz süreç nedeniyle korunuyor.",
-                                )
-                            # Eski satırlar ajan/klasör taşımaz: claude + projenin kendi reposu.
-                            record.setdefault("agent", "claude")
-                            record.setdefault("mode", "background")
-                            record.setdefault("workdir", "proje")
-                            record.setdefault("workdir_path", record.get("repo", ""))
-                            self._jobs[key] = record
-                for record in self._jobs.values():
-                    self._save(record["job_id"], "job", record)
+                # Bozuk/kilitli depo asistanın tamamını düşürmemeli: runtime yalnız
+                # CodeAgentError'u "proje araçları kapalı" diye karşılar. Dosya ASLA silinmez
+                # veya yeniden adlandırılır; kullanıcı elle inceleyebilsin.
+                try:
+                    self._load_store(store_path)
+                except (
+                    sqlite3.Error,
+                    json.JSONDecodeError,
+                    KeyError,
+                    TypeError,
+                    ValidationError,
+                ) as error:
+                    raise CodeAgentError(
+                        f"Kod ajanı iş deposu okunamadı ({type(error).__name__}); "
+                        "dosya silinmedi, proje araçları kapalı."
+                    ) from error
                 initialization.pop_all()
+
+    def _load_store(self, store_path: Path) -> None:
+        descriptor = os.open(store_path, os.O_CREAT | os.O_RDWR, 0o600)
+        os.close(descriptor)
+        with closing(sqlite3.connect(store_path)) as connection, connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS records (key TEXT PRIMARY KEY, "
+                "kind TEXT NOT NULL, value TEXT NOT NULL)"
+            )
+            for key, kind, value in connection.execute("SELECT key, kind, value FROM records"):
+                record = json.loads(value)
+                if kind == "draft":
+                    self._drafts[key] = ProjectSpec.model_validate(record)
+                else:
+                    if record["status"] == "waiting":
+                        # Soru bekleyen işin süreci zaten çıkmıştı (cevapla yeni süreç açılır);
+                        # restart sonrası canlı süreç olamaz, depo kilidi gereksiz.
+                        record.update(
+                            status="interrupted",
+                            cleanup_pending=False,
+                            summary="Önceki süreç kesildi; bekleyen sorunun süresi doldu "
+                            "ve depo kilidi bırakıldı. Otomatik yeniden başlatılmadı.",
+                        )
+                    elif record["status"] in ACTIVE or record["status"] == "cleanup_pending":
+                        record.update(
+                            status="interrupted",
+                            cleanup_pending=True,
+                            summary="Önceki süreç kesildi; otomatik yeniden başlatılmadı. "
+                            "Depo kilidi belirsiz süreç nedeniyle korunuyor.",
+                        )
+                    # Eski satırlar ajan/klasör taşımaz: claude + projenin kendi reposu.
+                    record.setdefault("agent", "claude")
+                    record.setdefault("mode", "background")
+                    record.setdefault("workdir", "proje")
+                    record.setdefault("workdir_path", record.get("repo", ""))
+                    # Eski satırlar bağımsız kontrol bilmez: "doğrulandı" iddiası taşıyamazlar.
+                    record.setdefault("verification", "unverified")
+                    record.setdefault("checks", [])
+                    record.setdefault("changes", "none")
+                    self._jobs[key] = record
+            for record in self._jobs.values():
+                self._save(record["job_id"], "job", record)
 
     def _save(self, key: str, kind: str, record: dict[str, Any]) -> None:
         if self._store_path is not None:
@@ -271,6 +319,8 @@ class CodeAgentJobs:
         spec: ProjectSpec | None = None,
         profile: AgentProfile | None = None,
         workdir: Path | None = None,
+        checks: Sequence[Sequence[str]] = (),
+        check_timeout: float = 600.0,
     ) -> str:
         # profile/workdir verilmezse eski davranış: Claude, cwd = proje reposu.
         profile = profile or AgentProfile(kind="claude", command=command)
@@ -352,6 +402,10 @@ class CodeAgentJobs:
                 "status": "queued",
                 "commits": [],
                 "leftover_changes": None,
+                # Üç ayrı olgu: süreç bitti (status) / değişiklik (changes) / bağımsız kontrol.
+                "changes": "none",
+                "verification": "unverified",
+                "checks": [],
                 "summary": "",
                 "duration_seconds": 0.0,
                 "cost_usd": None,
@@ -369,17 +423,25 @@ class CodeAgentJobs:
                 raise
             self._jobs[job_id] = record
             self._settings[job_id] = start_dir, run
+            self._checks[job_id] = tuple(tuple(argv) for argv in checks), check_timeout
             self._began[job_id] = self._clock()
             self._deadlines[job_id] = self._began[job_id] + max_minutes * 60
-            self._audit.emit(
-                "code_agent_started",
-                job_id=job_id,
-                project=alias,
-                base=base,
-                agent=spec.agent,
-                workdir=spec.workdir,
-                mode=spec.mode,
-            )
+            try:
+                self._audit.emit(
+                    "code_agent_started",
+                    job_id=job_id,
+                    project=alias,
+                    base=base,
+                    agent=spec.agent,
+                    workdir=spec.workdir,
+                    mode=spec.mode,
+                )
+            except OSError as error:
+                # Denetimsiz iş başlatılmaz; "queued" bırakılırsa depo sonsuza dek kilitli kalırdı.
+                message = "Denetim kaydı yazılamadı; iş başlatılmadı."
+                self._update(job_id, status="error", summary=message)
+                run.cleanup()
+                raise CodeAgentError(message) from error
             self._launch(job_id, run.stdin_prompt)
             return job_id
 
@@ -526,24 +588,59 @@ class CodeAgentJobs:
             commits = _checked_git(
                 repo, "log", "--format=%h %s", f"{self._jobs[job_id]['base']}..HEAD"
             )
-            dirty = bool(_checked_git(repo, "status", "--porcelain"))
+            porcelain = _checked_git(repo, "status", "--porcelain")
+            dirty = bool(porcelain)
             commit_list = commits.splitlines()
             if exit_code is not None and status in {"done", "error", "interrupted"}:
                 summary = _plain_summary(
                     exit_code, commit_list, dirty, run.last_message(), visible=visible
                 )
+            if status == "error" and exit_code is None and (commit_list or dirty):
+                # Ajan dosyaları değiştirip yapılandırılmış çıktıyı vermemiş olabilir: iş
+                # "error" kalır (başarı sayılmaz) ama kullanıcı diskteki izi görür.
+                summary += f" Depoda {len(commit_list)} yeni commit var." if commit_list else ""
+                if dirty:
+                    names = ", ".join(line[2:].strip() for line in porcelain.splitlines()[:5])
+                    summary += f" Depoda commitlenmemiş değişiklik kaldı: {names}."
         except CodeAgentError:
             commit_list, dirty = [], None
             if status in {"done", "waiting"}:
                 status, summary = "error", "Git sonucu doğrulanamadı; iş başarılı sayılmadı."
+        changes = (
+            "unknown"
+            if dirty is None
+            else "commits"
+            if commit_list
+            else "uncommitted"
+            if dirty
+            else "none"
+        )
+        if status == "done" and changes == "uncommitted":
+            # Örn. Codex workspace-write'ta .git yazılamayabilir; "commit'li bitti" denmez.
+            summary += " Değişiklikler commitlenmedi (diskte duruyor)."
+        verification: str = "unverified"
+        check_results: list[dict[str, Any]] = []
+        # Süre aşımı kararı kontrol süresinden ÖNCE alınır: kontroller ajanın süre bütçesinden
+        # yemez, yoksa uzun bir test paketi biten işi "timeout"a çevirirdi.
+        late = self._clock() >= self._deadlines[job_id]
+        if status == "done":
+            verification, check_results = self._verify(job_id, repo)
+            summary += {
+                "accepted": " Bağımsız kontroller geçti.",
+                "failed": " Bağımsız kontrol BAŞARISIZ; sonuç kabul edilmedi.",
+                "unverified": " Bağımsız kontrol çalışmadı veya tanımlı değil; doğrulanmadı.",
+            }[verification]
         if clean:
             # Temizlik doğrulanamadıysa süreç yaşıyor olabilir; dosyalar o durumda kalır.
             run.cleanup()
         with self._lock:
             job = self._jobs[job_id]
             if job_id in self._cancelled and clean:
+                if status != "cancelled":
+                    # Kontrol sürerken iptal: özetteki kontrol cümlesi artık geçersiz.
+                    summary += " Sonra iş iptal edildi; sonuç doğrulanmış sayılmaz."
                 status = "cancelled"
-            elif self._clock() >= self._deadlines[job_id] and status in {"done", "waiting"}:
+            elif late and status in {"done", "waiting"}:
                 status = "timeout"
             question_id = str(uuid.uuid4()) if status == "waiting" else None
             self._update(
@@ -553,6 +650,9 @@ class CodeAgentJobs:
                 cost_usd=cost,
                 commits=redact(commit_list),
                 leftover_changes=dirty,
+                changes=changes,
+                verification=verification if status == "done" else "unverified",
+                checks=check_results if status == "done" else [],
                 cleanup_pending=not clean,
                 duration_seconds=round(self._clock() - self._began[job_id], 1),
                 session_id=session or job["session_id"],
@@ -576,6 +676,85 @@ class CodeAgentJobs:
                 self._threads[job_id] = watcher
                 self._all_threads.add(watcher)
                 watcher.start()
+
+    def _verify(self, job_id: str, repo: Path) -> tuple[str, list[dict[str, Any]]]:
+        """Artemis'in kendi çalıştırdığı kontroller; ajanın beyanı bunun yerine geçmez."""
+        argvs, timeout = self._checks.get(job_id, ((), 0.0))
+        results: list[dict[str, Any]] = []
+        for argv in argvs:
+            if not self._may_check(job_id):
+                return "unverified", results  # iptal/kapanış: kontrol başlatılmaz
+            result = self._run_check(job_id, repo, argv, timeout)
+            results.append(result)
+            self._audit.emit(
+                "code_agent_checks",
+                job_id=job_id,
+                command=result["command"],
+                exit_code=result["exit_code"],
+                passed=result["passed"],
+            )
+        if not argvs or len(results) < len(argvs):
+            return "unverified", results
+        return ("accepted" if all(r["passed"] for r in results) else "failed"), results
+
+    def _may_check(self, job_id: str) -> bool:
+        with self._lock:
+            return not self._shutdown and job_id not in self._cancelled
+
+    def _run_check(
+        self, job_id: str, repo: Path, argv: tuple[str, ...], timeout: float
+    ) -> dict[str, Any]:
+        """Kabuksuz, `child_environment()` ile; çıktı geçici dosyada (bellek sınırsız şişmesin)."""
+        command = redact(" ".join(argv))[:200]
+        exit_code: int | None = None
+        note = ""
+        with tempfile.TemporaryFile() as sink:
+            try:
+                proc = subprocess.Popen(
+                    list(argv),
+                    cwd=repo,
+                    env=child_environment(),
+                    stdin=subprocess.DEVNULL,
+                    stdout=sink,
+                    stderr=subprocess.STDOUT,
+                    creationflags=NO_WINDOW,
+                    start_new_session=os.name != "nt",
+                )
+            except (OSError, ValueError) as error:
+                return {
+                    "command": command,
+                    "exit_code": None,
+                    "passed": False,
+                    "output_tail": f"Kontrol başlatılamadı: {type(error).__name__}.",
+                }
+            end = time.monotonic() + timeout
+            while True:
+                try:
+                    exit_code = proc.wait(timeout=0.1)
+                    break
+                except subprocess.TimeoutExpired:
+                    pass
+                cancelled = not self._may_check(job_id)
+                if cancelled or time.monotonic() >= end:
+                    kill_tree(proc)
+                    with suppress(OSError, subprocess.TimeoutExpired):
+                        proc.wait(timeout=CLEANUP_SECONDS)
+                    note = (
+                        "Kontrol iptal nedeniyle durduruldu."
+                        if cancelled
+                        else "Kontrol zaman aşımına uğradı."
+                    )
+                    break
+            sink.seek(0, os.SEEK_END)
+            sink.seek(max(0, sink.tell() - CHECK_TAIL * 4))
+            tail = sink.read().decode("utf-8", errors="replace")
+        tail = redact((note + " " + tail.strip()).strip())[-CHECK_TAIL:]
+        return {
+            "command": command,
+            "exit_code": exit_code,
+            "passed": exit_code == 0 and not note,
+            "output_tail": tail,
+        }
 
     def _expire_waiting(self, job_id: str, question_id: str | None) -> None:
         while True:
@@ -624,8 +803,14 @@ class CodeAgentJobs:
                 segment,
                 session,
             )
-        except (ValueError, TypeError, ValidationError):
-            return "error", "CLI çıkışı veya structured_output doğrulanamadı.", None, None, None
+        except (ValueError, TypeError, ValidationError) as error:
+            # Teşhis için: neden türü + çıkış kodu + kısa, sırları temizlenmiş stderr.
+            detail = f"{type(error).__name__}, çıkış kodu {code}"
+            tail = redact(stderr.strip()[-STDERR_TAIL:])
+            message = f"CLI çıkışı veya structured_output doğrulanamadı ({detail})."
+            if tail:
+                message += f" stderr: {tail}"
+            return "error", message, None, None, None
 
     def status(self) -> list[dict[str, Any]]:
         with self._lock:
@@ -649,6 +834,81 @@ class CodeAgentJobs:
             self._audit.emit("code_agent_answer", job_id=job_id, question_id=question_id)
             self._launch(job_id, answer)
             return True
+
+    def release(self, job_id: str) -> dict[str, Any] | None:
+        """Çökme sonrası kalan `cleanup_pending` kilidini kullanıcı onayıyla bırakır.
+
+        Yalnız bu süreçte canlı iş parçacığı olmayan, aktif olmayan bir iş için çalışır.
+        Yetim bir ajan süreci kuramsal olarak hâlâ düzenleme yapabilir; Windows'ta Artemis
+        ölünce Job Object süreç ağacını öldürür, ama bunu araç onayında kullanıcıya bırakırız.
+        """
+        with self._lock:
+            job = self._jobs.get(job_id)
+            thread = self._threads.get(job_id)
+            if (
+                job is None
+                or not job.get("cleanup_pending")
+                or job["status"] in ACTIVE
+                or (thread is not None and thread.is_alive())
+            ):
+                return None
+            repo = Path(job["repo"])
+        try:
+            leftover: bool | None = bool(_checked_git(repo, "status", "--porcelain"))
+        except CodeAgentError:
+            leftover = None  # git okunamadı: kalan değişiklik bilinmiyor
+        with self._lock:
+            if not self._update(job_id, cleanup_pending=False, leftover_changes=leftover):
+                return None
+            self._audit.emit("code_agent_lock_released", job_id=job_id, leftover_changes=leftover)
+            return deepcopy(self._jobs[job_id])
+
+    def clear_finished(self) -> list[str]:
+        """Bitmiş ve kilidi serbest işlerin kaydını (ve iş klasörünü) siler; id'leri döner.
+
+        Aktif, bekleyen ya da `cleanup_pending` iş asla silinmez. Denetim olayları kalır.
+        Başlatıldığı taslak da silinir, yoksa silinen iş taslak olarak listeye geri düşerdi.
+        """
+        with self._lock:
+            ids = [
+                job_id
+                for job_id, job in self._jobs.items()
+                if job["status"] in FINISHED
+                and not job.get("cleanup_pending")
+                and not (self._threads.get(job_id) and self._threads[job_id].is_alive())
+            ]
+            if not ids:
+                return []
+            specs = {self._jobs[job_id]["spec"]["spec_id"] for job_id in ids}
+            if self._store_path is not None:
+                try:
+                    with (
+                        closing(sqlite3.connect(self._store_path, timeout=2)) as connection,
+                        connection,
+                    ):
+                        # kind koşulu: yalnız iş (ve onların taslağı) satırları silinir.
+                        connection.executemany(
+                            "DELETE FROM records WHERE key = ? AND kind IN ('job', 'draft')",
+                            [(key,) for key in (*ids, *specs)],
+                        )
+                except sqlite3.Error as error:
+                    raise CodeAgentError(
+                        "İş kayıtları silinemedi; kalıcı kayıt yazılamadı."
+                    ) from error
+            for job_id in ids:
+                del self._jobs[job_id]
+                self._threads.pop(job_id, None)
+            for spec_id in specs:
+                self._drafts.pop(spec_id, None)
+            root = None if self._store_path is None else self._store_path.parent
+        if root is not None:
+            for job_id in ids:
+                folder = job_folder(root, job_id)
+                # Yalnız state klasörü altındaki gerçek dizin; symlink izlenmez.
+                if folder is not None and folder.is_dir() and not folder.is_symlink():
+                    shutil.rmtree(folder, ignore_errors=True)
+        self._audit.emit("code_agent_jobs_cleared", job_ids=ids)
+        return ids
 
     def cancel(self, job_id: str) -> bool:
         with self._lock:

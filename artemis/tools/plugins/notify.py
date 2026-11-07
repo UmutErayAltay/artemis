@@ -1,12 +1,11 @@
 """Bildirim araçları: sabit alıcıya Telegram mesajı ve yerel masaüstü toast'ı (ADR 0016)."""
 
-import asyncio
 from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.channels.telegram.api import TelegramClient, TelegramError, build_telegram_client
-from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.registry import register_tool
 from artemis.tools.toast import TOAST_BODY_LIMIT, TOAST_TITLE_LIMIT, show_toast
 
@@ -58,7 +57,7 @@ class NotifyTelegram(BaseTool):
                 "değişkeni gerekli.",
             )
         try:
-            sent = await asyncio.to_thread(
+            sent = await run_blocking(
                 client.send_message, chat_id, args.text, kind="notification"
             )
         except TelegramError as error:
@@ -92,7 +91,7 @@ class NotifyDesktop(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(DesktopNotifyArguments, arguments)
         toast = context.services.get("toast", show_toast)
-        outcome = await asyncio.to_thread(toast, args.title, args.body)
+        outcome = await run_blocking(toast, args.title, args.body)
         context.audit.emit(
             "desktop_notification", title=args.title, body=args.body, status=outcome.status
         )

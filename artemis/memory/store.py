@@ -119,9 +119,16 @@ class MemoryStore:
 
     def delete_history(self) -> int:
         # Tek transaction: notlara dokunma; sıfırlama işaretleri artık gereksizdir.
-        with self._connect() as db, db:
-            count = db.execute("DELETE FROM turns").rowcount
-            db.execute("DELETE FROM resets")
+        with self._connect() as db:
+            with db:
+                count = db.execute("DELETE FROM turns").rowcount
+                db.execute("DELETE FROM resets")
+            # DELETE yalnız satırı işaretler: metin WAL'da ve boş sayfalarda kalır. Kullanıcı
+            # "sil" dediğinde dosyada okunabilir iz bırakmamak için WAL ana dosyaya işlenip
+            # kesilir, dosya VACUUM ile yeniden yazılır. (SSD/yedek kopyalarını kapsamaz.)
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+            db.execute("VACUUM")
+            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             return count
 
     def history_page(self, limit: int = 50) -> list[dict[str, str]]:
@@ -167,14 +174,16 @@ class MemoryStore:
             return []
         with self._connect() as db:
             rows = db.execute(
-                "SELECT record_json FROM turns WHERE id > "
+                "SELECT record_json, created_at FROM turns WHERE id > "
                 "COALESCE((SELECT MAX(last_turn_id) FROM resets), 0) ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         records: list[TurnRecord] = []
-        for (raw,) in reversed(rows):
+        for raw, created_at in reversed(rows):
             try:
-                records.append(TurnRecord.model_validate_json(raw))
+                # Sütun kaynaktır: eski kayıtların JSON'unda zaman yoktur.
+                record = TurnRecord.model_validate_json(raw)
+                records.append(record.model_copy(update={"created_at": created_at}))
             except ValidationError:
                 continue  # şeması eskimiş tek bir satır geri kalanını düşürmesin
         return records

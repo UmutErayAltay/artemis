@@ -67,3 +67,38 @@ def test_audit_write_failure_is_not_swallowed(tmp_path: Path) -> None:
     audit = AuditLog(tmp_path)
     with pytest.raises(OSError):
         audit.emit("unwritable")
+
+
+def test_audit_rotates_by_size_without_deleting_records(tmp_path: Path) -> None:
+    """Sınırsız büyüyen tek dosya yerine boyutla döner; eski kayıt SİLİNMEZ (izinsiz silme yok)."""
+    path = tmp_path / "audit.jsonl"
+    log = AuditLog(path, max_bytes=200)
+    for index in range(20):
+        log.emit("tick", index=index)
+    rotated = sorted(tmp_path.glob("audit-*.jsonl"))
+    assert rotated, "boyut sınırı aşılınca dosya döndürülmeli"
+    indexes = [
+        json.loads(line)["index"]
+        for file in [*rotated, path]
+        for line in file.read_text(encoding="utf-8").splitlines()
+    ]
+    assert sorted(indexes) == list(range(20))
+    assert path.stat().st_size <= 200 + 200  # en çok bir kayıt taşar
+
+
+def test_audit_rotation_failure_keeps_appending(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Windows'ta başka süreç dosyayı açık tutarsa yeniden adlandırma başarısız olur;
+    kayıt kaybolmamalı, eski dosyaya yazılmaya devam edilmeli."""
+    import os
+
+    def locked(*_args: object) -> None:
+        raise PermissionError("in use")
+
+    monkeypatch.setattr(os, "rename", locked)
+    path = tmp_path / "audit.jsonl"
+    log = AuditLog(path, max_bytes=50)
+    for index in range(5):
+        log.emit("tick", index=index)
+    assert len(path.read_text(encoding="utf-8").splitlines()) == 5

@@ -604,14 +604,33 @@ toast kabulü sınırlıdır ([Güvenilirlik durumu](docs/RELIABILITY_STATUS.md)
 
 Kapalıdır; `code_agent.projects` boşsa ve GitHub bağlanmamışsa araç çalışmaz
 ([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). `code_agent_start` her seferinde
-proje ve görev metnini göstererek onay ister, görevi arka planda `claude -p` (headless
-Claude Code) ile çalıştırır ve hemen `status="sent"` döner. Ajan yalnız yerel commit
-atar; push ve web araçları yasaktır. Çalışma ağacı kirliyse görev başlamaz, böylece
-değişiklikler taban commit'e geri sarılabilir. Sonuç, çıkış kodu ve git'teki gerçek
-commit'lerle doğrulanır. Ayarlar: `projects` (takma ad → yol), `command`, `max_minutes`, `model`.
+proje ve görev metnini göstererek onay ister, görevi arka planda seçilen ajanla çalıştırır
+(varsayılan headless `claude -p`; yerleşik `codex` ve kullanıcı tanımlı `generic` arka uçlar da
+vardır, [ADR 0049](docs/adr/0049-code-agent-backends-and-workdir.md)) ve hemen `status="sent"`
+döner. Ajanın yalnız yerel commit atması istenir; push ve web araçları istemde yasaktır.
+Çalışma ağacı kirliyse görev başlamaz, böylece değişiklikler taban commit'e geri sarılabilir.
+Ayarlar: `projects` (takma ad → yol), `command`, `max_minutes`, `model`.
 
-Ajanın Bash'i kısıtsızdır: repo içeriğindeki bir enjeksiyon sizin yetkinizle komut
-çalıştırabilir. Yalnız güvendiğiniz kendi projelerinizi açın.
+Bir işin sonucu üç ayrı olgudur ve birbirinin yerine geçmez:
+
+- **Süreç bitti** (`status`): ajan süreci çıkış kodu 0 ile bitti (Claude'da ayrıca kendi
+  `completed` beyanı). Bu ajanın kendi beyanıdır, doğrulama değildir.
+- **Değişiklik** (`changes`): Artemis'in git'ten okuduğu olgu: `commits` (yeni commit var),
+  `uncommitted` (yalnız commitlenmemiş değişiklik; Codex `workspace-write` altında commit
+  atamayabilir) veya `none`.
+- **Bağımsız kontrol** (`verification`): `projects.<ad>.checks` altında tanımlı komutları
+  (argv listesi, kabuk yok; ör. `[["pytest", "-q"]]`) iş bittikten sonra Artemis kendisi
+  çalıştırır. Hepsi geçerse `accepted`, biri başarısızsa `failed` (iş yine `done` kalır),
+  kontrol tanımlı değilse ya da çalışamadıysa `unverified`. Panel "Doğrulandı" yalnız
+  `accepted` iken yazar. Kontrol zaman aşımı `code_agent.check_timeout_seconds` (varsayılan 600).
+  Sınır: kontroller ajanın değiştirdiği depoda çalışır; ajan testleri, `conftest`'i veya
+  betikleri de değiştirmiş olabilir. `accepted` "ajanın beyanı" değildir ama bağımsız bir
+  sandbox kanıtı da değildir; test dosyalarındaki değişikliği diff'te ayrıca gözden geçirin.
+
+Ajanın Bash'i kısıtsızdır ve OS sandbox'ı değildir: Claude'daki `Bash(git push:*)` reddi bir
+ön ek kuralıdır ve aşılabilir (örn. `git -C . push` veya bir betik içinden). Repo içeriğindeki
+bir enjeksiyon sizin yetkinizle komut çalıştırabilir. Yalnız güvendiğiniz kendi projelerinizi
+açın.
 
 ### Aşamalı proje işleri (Faz 5)
 

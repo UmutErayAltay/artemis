@@ -45,11 +45,14 @@ from artemis.config.settings import (
 )
 from artemis.tools.base import ToolResult
 from artemis.tools.code_agent_backends import visible_supported
+from artemis.tools.code_agent_jobs import FINISHED
 from artemis.tools.plugins.code_agent import (
     AnswerArguments,
     CancelArguments,
+    ClearFinishedArguments,
     DiscardArguments,
     PrepareArguments,
+    ReleaseArguments,
     StartArguments,
     StatusArguments,
 )
@@ -62,11 +65,34 @@ STATUS_LABELS = {
     "cancelling": "Durduruluyor",
     "cancelled": "İptal edildi",
     "timeout": "Süre doldu",
-    "done": "Doğrulandı",
+    "done": "Bitti",
     "error": "Başarısız",
     "interrupted": "Kesintiye uğradı",
     "cleanup_pending": "Süreç temizliği belirsiz",
 }
+
+# "done" yalnız süreç bitti demektir; "Doğrulandı" ancak Artemis'in bağımsız kontrolleri geçtiyse.
+DONE_LABELS = {
+    "accepted": "Doğrulandı",
+    "failed": "Bitti, kontrol başarısız",
+    "unverified": "Bitti (doğrulanmadı)",
+}
+
+
+def status_label(record: dict[str, Any]) -> str:
+    status = record.get("status", "")
+    if status == "done":
+        return DONE_LABELS.get(record.get("verification", "unverified"), DONE_LABELS["unverified"])
+    return STATUS_LABELS.get(status, "Bilinmiyor")
+
+
+def checks_text(record: dict[str, Any]) -> str:
+    rows = [
+        f"{'geçti' if c.get('passed') else 'BAŞARISIZ'}: {c.get('command', '')} "
+        f"(çıkış {c.get('exit_code')})"
+        for c in record.get("checks", [])
+    ]
+    return "; ".join(rows) or "yok"
 
 
 def make_label(text: str, name: str) -> QLabel:
@@ -284,16 +310,28 @@ STATUS_CHIPS = {
     "cancelling": ("Durduruluyor", "waiting"),
     "cancelled": ("Durduruldu", "neutral"),
     "timeout": ("Zaman aşımı", "error"),
-    "done": ("Bitti", "done"),
+    "done": ("Bitti", "done"),  # çip için status_chip() doğrulamaya göre ezer
     "error": ("Hata", "error"),
     "interrupted": ("Kesildi", "error"),
     "cleanup_pending": ("Temizleniyor", "error"),
 }
+DONE_CHIPS = {
+    "accepted": ("Doğrulandı", "done"),
+    "failed": ("Bitti, kontrol başarısız", "error"),
+    "unverified": ("Bitti (doğrulanmadı)", "neutral"),
+}
+
+
+def status_chip(record: dict[str, Any]) -> tuple[str, str]:
+    status = record.get("status", "")
+    if status == "done":
+        return DONE_CHIPS.get(record.get("verification", "unverified"), DONE_CHIPS["unverified"])
+    return STATUS_CHIPS.get(status, ("Bilinmiyor", "neutral"))
+
+
 # Yeniden kurulumun iptal edeceği, henüz bitmemiş işler.
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "waiting", "cancelling", "cleanup_pending"})
-WORKDIR_WARNING = (
-    "Ajan bu klasörde başlar ve oradaki kuralları yükler; dosyaları değiştirebilir."
-)
+WORKDIR_WARNING = "Ajan bu klasörde başlar ve oradaki kuralları yükler; dosyaları değiştirebilir."
 FLOW_STEPS = ("Hazırla", "İncele", "Başlat")
 # Seçicide gösterilen ad; saklanan takma ad değişmez (claude).
 AGENT_LABELS = {"claude": "Claude Code"}
@@ -378,11 +416,13 @@ def spec_to_html(kind: str, record: dict[str, Any]) -> str:
     if kind == "job":
         commits = json.dumps(record.get("commits", []), ensure_ascii=False)
         parts += [
-            section("Durum", STATUS_LABELS.get(record.get("status", ""), "Bilinmiyor")),
+            section("Durum", status_label(record)),
             section("Özet", str(record.get("summary", ""))),
             section("Soru", str(record.get("question") or "—")),
             section("Commit'ler", commits),
             section("Kalan değişiklikler", str(record.get("leftover_changes"))),
+            section("Değişiklik", str(record.get("changes", "none"))),
+            section("Bağımsız kontroller", checks_text(record)),
             section("İş kimliği", str(record.get("job_id", ""))),
         ]
     return "".join(parts)
@@ -544,10 +584,17 @@ class ProjectsPanel(QWidget):
         # Taslağı sil: yalnız taslak seçiliyken görünür (iptal düğmesiyle aynı satır, ikisi
         # birlikte görünmez); yıkıcı olduğu için birincil eylemden ayrı satırdadır.
         self.discard_button = QPushButton("Taslağı sil")
+        # Çökme sonrası kalan belirsiz depo kilidini (cleanup_pending) onayla bırakır.
+        self.release_button = QPushButton("Kilidi bırak")
+        self.release_button.setObjectName("danger")
         self.discard_button.setObjectName("danger")
+        # Listeyi sadeleştirir; yalnız bitmiş ve kilidi serbest iş varken etkin.
+        self.clear_button = QPushButton("Biten işleri temizle")
         cancel_row = QHBoxLayout()
         cancel_row.addWidget(self.cancel_button)
+        cancel_row.addWidget(self.release_button)
         cancel_row.addWidget(self.discard_button)
+        cancel_row.addWidget(self.clear_button)
         cancel_row.addStretch()
         right_lay.addSpacing(8)
         right_lay.addLayout(cancel_row)
@@ -566,7 +613,9 @@ class ProjectsPanel(QWidget):
         self.refresh_button.clicked.connect(self._manual_refresh)
         self.answer_button.clicked.connect(self._answer)
         self.cancel_button.clicked.connect(self._cancel)
+        self.release_button.clicked.connect(self._release)
         self.discard_button.clicked.connect(self._discard)
+        self.clear_button.clicked.connect(self._clear_finished)
         self.project.currentTextChanged.connect(self._apply_project_defaults)
         self.agent_combo.currentIndexChanged.connect(self._sync_agent_ui)
         self.workdir_combo.currentIndexChanged.connect(self._sync_agent_ui)
@@ -715,8 +764,11 @@ class ProjectsPanel(QWidget):
         return str(self.project.currentData() or "")
 
     def _project_names(self) -> list[str]:
-        return [str(self.project.itemData(i)) for i in range(self.project.count())
-                if self.project.itemData(i) is not None]
+        return [
+            str(self.project.itemData(i))
+            for i in range(self.project.count())
+            if self.project.itemData(i) is not None
+        ]
 
     def _set_projects(self, projects: list[str]) -> None:
         self.project.clear()
@@ -859,7 +911,9 @@ class ProjectsPanel(QWidget):
             return
         folder = Path(chosen)
         alias, accepted = QInputDialog.getText(
-            self, "Klasör takma adı", "Takma ad (küçük harf, rakam, _ veya -):",
+            self,
+            "Klasör takma adı",
+            "Takma ad (küçük harf, rakam, _ veya -):",
             text=slug_alias(folder.name),
         )
         if not accepted:
@@ -918,11 +972,7 @@ class ProjectsPanel(QWidget):
         if not kind:
             self.status_chip.setVisible(False)
             return
-        text, tone = (
-            ("Taslak", "neutral")
-            if kind == "draft"
-            else STATUS_CHIPS.get(record.get("status", ""), ("Bilinmiyor", "neutral"))
-        )
+        text, tone = ("Taslak", "neutral") if kind == "draft" else status_chip(record)
         self.status_chip.setText(text)
         if self.status_chip.property("tone") != tone:
             self.status_chip.setProperty("tone", tone)
@@ -938,7 +988,8 @@ class ProjectsPanel(QWidget):
     def active_job_count(self) -> int:
         """Arka planda sürmekte olan iş sayısı (son durum listesine göre)."""
         return sum(
-            1 for kind, item in self._items
+            1
+            for kind, item in self._items
             if kind == "job" and item.get("status") in ACTIVE_JOB_STATUSES
         )
 
@@ -968,6 +1019,18 @@ class ProjectsPanel(QWidget):
             return "Kabul ölçütünü yaz (her satır bir madde)."
         return ""
 
+    def _lock_block(self, draft: dict[str, Any]) -> str:
+        """Taslağın deposunda çalışan/kilitli iş varsa nedeni; sunucu kontrolü ayrıca durur,
+        bu yalnız kullanıcıya boşuna onay penceresi göstermemek içindir."""
+        for kind, job in self._items:
+            if kind != "job" or job.get("project") != draft.get("project"):
+                continue
+            if job.get("cleanup_pending"):
+                return "Bu projede kilitli/çalışan iş var; önce Kilidi bırak."
+            if job.get("status") in ACTIVE_JOB_STATUSES:
+                return "Bu projede çalışan iş var; bitmesini bekleyin."
+        return ""
+
     def set_busy(self, busy: bool) -> None:
         self._busy = busy
         enabled = not busy and not self._demo
@@ -977,11 +1040,20 @@ class ProjectsPanel(QWidget):
         self.refresh_button.setEnabled(enabled)
         selected = self._selected()
         kind, record = selected if selected else ("", {})
-        self.start_button.setEnabled(enabled and kind == "draft")
+        lock_reason = self._lock_block(record) if kind == "draft" else ""
+        self.start_button.setEnabled(enabled and kind == "draft" and not lock_reason)
         if self._demo:
             start_reason = "Demo modunda proje süreçleri kapalı."
         elif busy:
             start_reason = "Artemis meşgul; hazır olunca açılır."
+        elif lock_reason:
+            start_reason = lock_reason
+        elif (
+            kind == "job" and record.get("mode") == "visible" and record.get("status") == "running"
+        ):
+            start_reason = (
+                "Ajan penceresi açık: iş bitince pencereyi kapatın, sonuç o zaman kaydedilir."
+            )
         elif kind == "job":
             start_reason = "Bu bir iş; yeni iş için bir taslak seç."
         elif kind != "draft":
@@ -992,6 +1064,13 @@ class ProjectsPanel(QWidget):
         self._set_prepare_primary(kind != "draft")
         self.question_box.setVisible(record.get("status") == "waiting")
         self.answer_button.setEnabled(enabled and record.get("status") == "waiting")
+        self.clear_button.setEnabled(
+            enabled
+            and any(
+                k == "job" and i.get("status") in FINISHED and not i.get("cleanup_pending")
+                for k, i in self._items
+            )
+        )
         self.discard_button.setVisible(kind == "draft")
         self.discard_button.setEnabled(enabled and kind == "draft")
         self.cancel_button.setVisible(kind == "job")
@@ -1004,6 +1083,12 @@ class ProjectsPanel(QWidget):
                 "waiting",
                 "cancelling",
             }
+        )
+        self.release_button.setVisible(kind == "job")
+        self.release_button.setEnabled(
+            enabled
+            and bool(record.get("cleanup_pending"))
+            and record.get("status") not in {"queued", "running", "waiting", "cancelling"}
         )
         self._update_flow(kind, record)
         self._update_chip(kind, record)
@@ -1065,6 +1150,16 @@ class ProjectsPanel(QWidget):
             ]
             self._last_status = None
             self._render_items(None, row)
+        elif tool_name == "code_agent_clear_finished" and result.success:
+            # Silinenler hemen listeden düşer; önbellek boşalır ki sonraki yoklama yeniden kursun.
+            gone = set(result.data.get("job_ids", []))
+            self._items = [
+                (kind, item)
+                for kind, item in self._items
+                if not (kind == "job" and item.get("job_id") in gone)
+            ]
+            self._last_status = None
+            self._render_items(None, self.items.currentRow())
         elif tool_name == "code_agent_prepare" and result.success:
             spec = result.data["spec"]
             self._items.append(("draft", spec))
@@ -1079,12 +1174,7 @@ class ProjectsPanel(QWidget):
         row = fallback
         for i, (kind, item) in enumerate(self._items):
             self.items.addItem(
-                f"{item['project']} · "
-                + (
-                    "Taslak"
-                    if kind == "draft"
-                    else STATUS_LABELS.get(item.get("status", ""), "Bilinmiyor")
-                )
+                f"{item['project']} · " + ("Taslak" if kind == "draft" else status_label(item))
             )
             if identity is not None and item.get("job_id", item.get("spec_id")) == identity:
                 row = i
@@ -1138,6 +1228,16 @@ class ProjectsPanel(QWidget):
         if selected and selected[0] == "draft":
             self.tool_requested.emit(
                 "code_agent_discard", DiscardArguments(spec_id=selected[1]["spec_id"])
+            )
+
+    def _clear_finished(self) -> None:
+        self.tool_requested.emit("code_agent_clear_finished", ClearFinishedArguments())
+
+    def _release(self) -> None:
+        selected = self._selected()
+        if selected and selected[0] == "job":
+            self.tool_requested.emit(
+                "code_agent_release", ReleaseArguments(job_id=selected[1]["job_id"])
             )
 
     def _cancel(self) -> None:

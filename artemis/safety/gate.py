@@ -308,12 +308,21 @@ class SafetyGate:
         state: TurnState,
         started: float,
     ) -> ToolResult:
-        context.audit.emit(
-            "tool_result",
-            turn_id=state.turn_id,
-            tool=call.name,
-            result=result.model_dump(mode="json"),
-            tainted=state.tainted,
-            elapsed_seconds=monotonic() - started,
-        )
+        try:
+            context.audit.emit(
+                "tool_result",
+                turn_id=state.turn_id,
+                tool=call.name,
+                result=result.model_dump(mode="json"),
+                tainted=state.tainted,
+                elapsed_seconds=monotonic() - started,
+            )
+        except OSError:
+            # Araç bu noktada çalışmıştır (ya da kesin reddedilmiştir); disk dolu/kilitli diye
+            # sonucu atmak, olmuş bir yan etkiyi "tamamlanamadı" diye gösterir. Sonuç korunur,
+            # denetim açığı kullanıcıya dürüstçe söylenir. Yürütme öncesi `tool_dispatch`
+            # kaydı yazılamazsa araç hiç çalışmaz (o hata yukarı yayılır).
+            return result.model_copy(
+                update={"message": f"{result.message} (Denetim kaydı yazılamadı.)"}
+            )
         return result

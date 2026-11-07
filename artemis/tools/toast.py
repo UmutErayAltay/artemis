@@ -30,6 +30,9 @@ TOAST_BODY_LIMIT = 300
 # kimlikle gösterilen toast sessizce yutulur. `Setting` Enabled değilse (odak yardımı, kapalı
 # bildirimler) Show() hata vermeden hiçbir şey göstermez; bu yüzden önce sınanır ve çıkış
 # kodu 3 ile ayrı bildirilir: "gösterildi" demek ancak bundan sonra doğrudur.
+# Ayarlar'da henüz kaydı olmayan uygulamada `Setting` 0x80070490 (eleman bulunamadı) atar ve
+# PowerShell 5.1 bunu `$null`'a çevirir; bu "kapalı" değil, varsayılan (açık) demektir
+# (2026-11-06 cihazda ölçüldü: null'ı kapalı saymak toast'ı hiç göstermiyordu).
 TOAST_SCRIPT = "\n".join(
     [
         "$ErrorActionPreference = 'Stop'",
@@ -47,7 +50,8 @@ TOAST_SCRIPT = "\n".join(
         "\\WindowsPowerShell\\v1.0\\powershell.exe'",
         "$notifier = [Windows.UI.Notifications.ToastNotificationManager]"
         "::CreateToastNotifier($appId)",
-        "if ($notifier.Setting -ne 'Enabled') { exit 3 }",
+        "$setting = $notifier.Setting",
+        "if ($null -ne $setting -and $setting -ne 'Enabled') { exit 3 }",
         "$notifier.Show($toast)",
         "exit 0",
         "",

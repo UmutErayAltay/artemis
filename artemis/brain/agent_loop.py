@@ -6,11 +6,12 @@ import logging
 import sqlite3
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field, ValidationError
 
-from artemis.brain.conversation import ContextWindow, ToolExchange, TurnRecord
+from artemis.brain.conversation import ContextWindow, ToolExchange, TurnRecord, local_stamp
 from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.brain.models import Message, ToolCall, Usage
 from artemis.brain.providers import Provider
@@ -328,7 +329,11 @@ class AgentLoop:
         messages = [
             Message(
                 role="system",
-                content=SYSTEM_PROMPT + "\nİzinli uygulama takma adları (name argümanı): "
+                content=SYSTEM_PROMPT
+                + f"\nŞu an (yerel saat): {local_stamp(datetime.now(UTC).isoformat())}. "
+                "Geçmiş kullanıcı mesajlarındaki [tarih saat] önekleri o turun zamanıdır; "
+                "eski bir işi şimdi sürüyor sanma."
+                + "\nİzinli uygulama takma adları (name argümanı): "
                 + json.dumps(list(settings.applications), ensure_ascii=False)
                 + ". Yalnız bu adları kullan; listede bulunan bir uygulamayı izinsiz sanma."
                 + notes_block(self.context),

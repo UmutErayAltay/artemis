@@ -20,6 +20,8 @@ from typing import Any
 
 import yaml
 
+from artemis.brain.conversation import ToolExchange, TurnRecord
+from artemis.brain.models import Message
 from artemis.channels.desktop.computer_host import ComputerHost
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.channels.telegram.api import (
@@ -30,6 +32,7 @@ from artemis.channels.telegram.api import (
 )
 from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
+from artemis.tools.base import Risk, normalize_risk
 
 # İletilmiş mesajın herhangi bir alanı varsa metin başkasının yazdığıdır: kullanıcının
 # komutu değil, dış içeriktir (ADR 0016).
@@ -49,7 +52,15 @@ _PRIVATE_APPROVAL_NOTICE = (
 )
 _TURN_EXPIRED_NOTICE = "Turun süresi doldu; onay sorulmadı."
 _EXPIRED_SUFFIX = "\n\nKarar: Süre doldu, reddedildi"
+_CLOSING_SUFFIX = "\n\nKarar: Kanal kapanıyor, reddedildi"
+_APPROVAL_POLL_CAP = 2  # sn; onay beklerken durdurma bayrağı en geç bu sürede fark edilir
+_STOP_GRACE_SECONDS = 3.0  # durdurmada yürüyen turun normal iptal yoluyla bitmesi için süre
 _PRIVATE_WITHHELD = "Bu yanıt gizli içerik (dosya/pano) kullandığı için Telegram'a gönderilmedi."
+_FOOTER_TITLES = {
+    "sent": "Gönderildi, sonucu doğrulanmadı",
+    "error": "Başarısız",
+    "denied": "Çalıştırılmadı",
+}
 _HELP_TEXT = (
     "Artemis Telegram kanalı. Komutunuzu yazın; yan etkili işlemler için düğmeyle onay "
     "sorulur ve varsayılan cevap hayırdır. /yeni yeni sohbet başlatır; /dur çalışan "
@@ -144,8 +155,12 @@ class TelegramChannel:
         clock: Callable[[], float] = time.time,
         monotonic: Callable[[], float] = time.monotonic,
         stop_poll_seconds: float = _STOP_POLL_SECONDS,
+        stop_flag: threading.Event | None = None,
     ) -> None:
         self.client = client
+        # Onay bekleme döngüsü olay döngüsü iş parçacığını bloklar (SafetyGate.approve
+        # senkron); asyncio.Event orada görülemez, bu yüzden iş parçacığı güvenli bayrak.
+        self.stop_flag = stop_flag if stop_flag is not None else threading.Event()
         self.chat_id = chat_id
         self.audit = audit
         self.approval_timeout = approval_timeout
@@ -351,11 +366,15 @@ class TelegramChannel:
             return False
         deadline = self.monotonic() + wait_limit
         while True:
+            if self.stop_flag.is_set():
+                self._finish_approval(sent.message_id, text, _CLOSING_SUFFIX)
+                return False
             remaining = deadline - self.monotonic()
             if remaining <= 0:
                 self._finish_approval(sent.message_id, text, _EXPIRED_SUFFIX)
                 return False
-            wait = max(0, min(self.poll_timeout, int(remaining)))
+            # Uzun yoklama durdurma bayrağını geciktirmesin: her bekleme en çok birkaç sn.
+            wait = max(0, min(self.poll_timeout, _APPROVAL_POLL_CAP, int(remaining)))
             try:
                 with self._poll_lock:
                     updates = self.client.get_updates(self._offset, wait)
@@ -521,13 +540,47 @@ class TelegramChannel:
         # Kare yanıt metninden bağımsız karar verilir; kapılar `_send_frame` içindedir.
         self._send_frame(runtime, frame, answer_private)
 
+    def _status_footer(self, record: TurnRecord) -> str:
+        """Yan etkili araçların gerçek sonucunu modelin anlatısından bağımsız bildirir.
+
+        Kural 5: gönderildi != başarılı. Model "tamam, yaptım" dese bile doğrulanmamış,
+        başarısız veya çalışmamış bir yan etki kullanıcıya görünür. Kaynak yalnız turun
+        araç sonuçlarıdır; argüman ve çıktı metni asla eklenmez.
+        """
+        names = {
+            tool_call.id: tool_call.name
+            for step in record.steps
+            if isinstance(step, Message)
+            for tool_call in step.tool_calls
+        }
+        registry = self.runtime.registry if self.runtime is not None else None
+        groups: dict[str, list[str]] = {}
+        for step in record.steps:
+            if not isinstance(step, ToolExchange) or step.result.status == "ok":
+                continue
+            name = names.get(step.call_id, "araç")
+            tool = registry.get(name) if registry is not None else None
+            # Bilinmeyen araç yan etkili sayılır (kural 3); yalnız bilinen READ_ONLY atlanır.
+            if tool is not None and normalize_risk(tool.risk) is Risk.READ_ONLY:
+                continue
+            # Kayıtsız ad modelin ürettiği denetimsiz dizedir; Telegram'a yazılmaz.
+            label = (tool.label or name) if tool is not None else "bilinmeyen araç"
+            labels = groups.setdefault(_FOOTER_TITLES[step.result.status], [])
+            if label not in labels:
+                labels.append(label)
+        if not groups:
+            return ""
+        lines = (f"{title}: {', '.join(labels)}" for title, labels in groups.items())
+        return "\n\n" + "\n".join(lines)
+
     def _reply(self, result: Any) -> None:
         if result.record is None:
             self._notify(f"Tur tamamlanmadı ({result.stop_reason}).")
         elif result.record.answer_private:
             self._notify(_PRIVATE_WITHHELD)
         else:
-            for chunk in split_text(result.text or "(boş yanıt)"):
+            body = (result.text or "(boş yanıt)") + self._status_footer(result.record)
+            for chunk in split_text(body):
                 try:
                     self.client.send_message(self.chat_id, chunk, kind="reply")
                 except TelegramError:
@@ -554,6 +607,25 @@ class TelegramChannel:
         for frame in frames[:_MAX_FRAMES]:
             with contextlib.suppress(TelegramError, ValueError):
                 self.client.send_photo(self.chat_id, frame, kind="photo")
+
+    async def _handle_or_stop(
+        self, update: Mapping[str, Any], stop: asyncio.Event, stopper: asyncio.Future[Any]
+    ) -> None:
+        """Güncellemeyi işler; durdurma gelirse yürüyen turu iptal ettirip sınırlı bekler.
+
+        Beklemeden çıkmak turu denetimsiz bırakır (iş parçacığı öldürülünce `turn_end` yazılmaz);
+        normal iptal yolu kendi denetim kaydını yazsın diye kısa süre beklenir. Süre dolarsa
+        `wait_for` görevi iptal eder ve koşucu `turn_cancelled` yazar.
+        """
+        task = asyncio.ensure_future(self.handle_update(update))
+        await asyncio.wait({task, stopper}, return_when=asyncio.FIRST_COMPLETED)
+        if task.done():
+            task.result()  # beklenmeyen hata yutulmaz
+            return
+        if self.runtime is not None:
+            self.runtime.runner.cancel_current()
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(task, _STOP_GRACE_SECONDS)
 
     async def serve(self, stop: asyncio.Event, *, give_up_on_conflict: bool = False) -> str | None:
         """Güncellemeleri işler. `give_up_on_conflict`: başka bir yoklayıcı (HTTP 409) varsa
@@ -589,7 +661,7 @@ class TelegramChannel:
                 for update in updates:
                     # Önce ilerlet: işlenirken çökse bile aynı komut ikinci kez çalışmaz.
                     self._advance(update)
-                    await self.handle_update(update)
+                    await self._handle_or_stop(update, stop, stopper)
                     if stop.is_set():
                         break
         finally:
@@ -641,6 +713,7 @@ async def serve_telegram(
     embedded: bool,
     status: Callable[[str], None],
     runtime_factory: Callable[..., Runtime] | None = None,
+    stop_flag: threading.Event | None = None,
 ) -> int:
     """Kanalı `stop` kurulana dek sürdürür; 0 temiz, 1 bağlantı/çakışma, 2 kurulum eksiği.
 
@@ -681,6 +754,7 @@ async def serve_telegram(
         approval_timeout=config.approval_timeout_seconds,
         max_message_age=config.max_message_age_seconds,
         poll_timeout=config.poll_timeout_seconds,
+        stop_flag=stop_flag,
     )
     # Gizlilik izlemesi: runtime kurulmadan önce de olaylar kaçmasın diye hemen bağlanır.
     audit.on_record = channel.observe

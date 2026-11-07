@@ -137,6 +137,33 @@ async def test_clean_side_effect_does_not_request_approval(
     assert (context.workspace / "new.txt").read_text(encoding="utf-8") == "created"
 
 
+class _ResultAuditFails(AuditLog):
+    """Disk dolu/kilitli dosya: yalnız sonuç kaydı yazılamaz, yan etki zaten olmuştur."""
+
+    def emit(self, event: str, **fields: Any) -> None:
+        if event == "tool_result":
+            raise OSError("disk full")
+        super().emit(event, **fields)
+
+
+async def test_result_audit_failure_does_not_hide_completed_side_effect(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState], tmp_path: Path
+) -> None:
+    gate, context, state = setup_gate
+    context.audit = _ResultAuditFails(tmp_path / "audit.jsonl")
+
+    def unexpected_approval(name: str, arguments: dict[str, Any]) -> bool:
+        pytest.fail("Temiz yan etki için onay istenmez.")
+
+    result = await gate.dispatch(
+        call("write_test", path="new.txt"), context, state, unexpected_approval
+    )
+    # Dosya yazıldı: kullanıcı "tamamlanamadı" görmemeli, ama kaydın eksik olduğu söylenmeli.
+    assert (context.workspace / "new.txt").exists()
+    assert result.success and result.status == "ok"
+    assert "Denetim kaydı yazılamadı" in result.message
+
+
 async def test_external_read_taints_turn_and_blocks_unapproved_side_effect(
     setup_gate: tuple[SafetyGate, ToolContext, TurnState],
 ) -> None:
