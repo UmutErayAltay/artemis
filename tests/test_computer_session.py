@@ -41,6 +41,11 @@ class FakeBackend:
         self.fail: Exception | None = None
         self.window: tuple[int, tuple[int, int, int, int]] = (7, (0, 0, size[0], size[1]))
         self.window_error: Exception | None = None
+        # Noktadaki pencerenin kimliği; ön plan penceresinden bağımsızdır (onay penceresi odağı
+        # alınca tıklanacak pencere değişmez).
+        self.point_window = 7
+        # Yazımda her karakterden sonra çağrılır (karakter, o ana dek gönderilen sayı).
+        self.on_char: Callable[[str, int], None] | None = None
 
     def monitors(self) -> list[tuple[int, int, int, int]]:
         return list(self.monitor_rects)
@@ -63,6 +68,11 @@ class FakeBackend:
     def process_at(self, x: int, y: int) -> tuple[str, int]:
         return self.at if self.at is not None else self.foreground
 
+    def window_at(self, x: int, y: int) -> int:
+        if self.window_error is not None:
+            raise self.window_error
+        return self.point_window
+
     def _record(self, *call: Any) -> None:
         if self.fail is not None:
             raise self.fail
@@ -74,8 +84,18 @@ class FakeBackend:
     def scroll(self, x: int, y: int, notches: int) -> None:
         self._record("scroll", x, y, notches)
 
-    def type_text(self, text: str) -> None:
-        self._record("type", text)
+    def type_text(self, text: str, should_continue: Callable[[], bool]) -> int:
+        # Gerçek arka uç gibi her kod noktasından önce sorar; gönderilen kısım kaydedilir.
+        sent = ""
+        for char in text:
+            if not should_continue():
+                break
+            sent += char
+            if self.on_char is not None:
+                self.on_char(char, len(sent))
+        if sent:
+            self._record("type", sent)
+        return len(sent)
 
     def press_keys(self, keys: tuple[str, ...]) -> None:
         self._record("keys", keys)
@@ -992,3 +1012,150 @@ async def test_done_note_secrets_are_masked_like_evidence() -> None:
     note = act(type="done", text="Giriş yapıldı, token: abc123xyz9 ekranda.")
     result = await Env(note, YES).run()
     assert "abc123xyz9" not in result.summary and "[GİZLENDİ]" in result.summary
+
+
+# --- ADR 0056: onay hedef pencereye bağlı; gönderim anında iptal/süre/hedef denetimi ------
+
+BROWSER = (r"C:\Program Files\Browser\browser.exe", 100)
+MAIL = (r"C:\Program Files\Mail\mail.exe", 200)
+ENTER = act(type="key", keys="enter", reason="gönder")
+
+
+def _switch_to_mail(backend: FakeBackend) -> None:
+    backend.foreground = MAIL
+    backend.window = (99, backend.window[1])
+
+
+async def test_enter_approved_for_browser_is_not_sent_to_mail() -> None:
+    # Bulgu 4: onay tarayıcı için gösterildi; onay sırasında ön plan izinli posta uygulamasına
+    # geçti. Eskiden approved=True pencere karşılaştırmasını atlıyor ve Enter postaya gidiyordu.
+    env = Env(ENTER, DONE, YES, backend=FakeBackend(foreground=BROWSER))
+    env.on_approve = lambda: _switch_to_mail(env.backend)
+    await env.run()
+    assert [args["pencere"] for _, args in env.approvals] == ["browser.exe"]
+    assert env.backend.calls == []
+    assert "Onay verilen pencere değişti" in env.audit.named("computer_blocked")[0]["reason"]
+
+
+async def test_click_approval_is_bound_to_window_under_point() -> None:
+    env = Env(click(sensitive=True), DONE, YES, backend=FakeBackend(foreground=BROWSER))
+
+    def cover_point() -> None:  # nokta artık başka, izinli bir pencerenin üstünde
+        env.backend.at = MAIL
+        env.backend.point_window = 55
+
+    env.on_approve = cover_point
+    await env.run()
+    assert env.backend.calls == []
+    assert "Onay verilen pencere değişti" in env.audit.named("computer_blocked")[0]["reason"]
+
+
+async def test_dialog_focus_returning_to_approved_window_lets_step_run() -> None:
+    # Onay penceresi kapanınca odak kısa süre Artemis'te kalır; onaylanan pencere geri gelince
+    # adım çalışır (bütün pencere denetimi kaldırılmadan geçici odak tanınır).
+    env = Env(ENTER, DONE, YES, backend=FakeBackend(foreground=BROWSER))
+    original = env.backend.window
+
+    def focus_artemis() -> None:
+        env.backend.foreground = (r"C:\Artemis\pythonw.exe", OWN_PID)
+        env.backend.window = (500, original[1])
+
+    env.on_approve = focus_artemis
+    clock_sleep = env.clock.sleep
+
+    async def sleep(seconds: float) -> None:
+        env.backend.foreground, env.backend.window = BROWSER, original  # odak geri döndü
+        await clock_sleep(seconds)
+
+    env.clock.sleep = sleep  # type: ignore[method-assign]
+    assert (await env.run()).reason == "done"
+    assert env.backend.calls == [("keys", ("enter",))]
+
+
+async def test_dialog_focus_that_never_returns_blocks_after_short_wait() -> None:
+    env = Env(ENTER, DONE, YES, backend=FakeBackend(foreground=BROWSER))
+    env.on_approve = lambda: setattr(
+        env.backend, "foreground", (r"C:\Artemis\pythonw.exe", OWN_PID)
+    )
+    await env.run()
+    assert env.backend.calls == []
+    assert "öne gelmedi" in env.audit.named("computer_blocked")[0]["reason"]
+
+
+async def test_target_change_just_before_input_is_not_sent() -> None:
+    # Son denetim OS girdisinden hemen önce: denetimden sonra nokta başka pencereye geçerse
+    # tıklama gönderilmez (onaysız adım da hedefe bağlıdır).
+    backend = FakeBackend(foreground=BROWSER)
+    reads = {"n": 0}
+
+    def window_at(x: int, y: int) -> int:
+        reads["n"] += 1
+        return 7 if reads["n"] == 1 else 8  # ilk okuma denetim, ikincisi gönderim anı
+
+    backend.window_at = window_at  # type: ignore[method-assign]
+    env = Env(click(), DONE, YES, backend=backend)
+    await env.run()
+    assert backend.calls == []
+    assert "hemen önce değişti" in env.audit.named("computer_blocked")[0]["reason"]
+
+
+def _windows_typing(env: Env, monkeypatch: pytest.MonkeyPatch, sent: list[int]) -> None:
+    """Session → gerçek `windows.type_text` yolu; SendInput ve bekleme sahte (OS'ye dokunmaz)."""
+    from artemis.computer import windows
+
+    monkeypatch.setattr(windows, "_require_windows", lambda: None)
+    monkeypatch.setattr(
+        windows, "_send", lambda inputs: sent.extend(item.ki.wScan for item in inputs[::2])
+    )
+    env.backend.type_text = windows.type_text  # type: ignore[method-assign]
+
+
+async def test_esc_and_deadline_during_typing_stop_remaining_characters(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Bulgu 5: eskiden kontrol yalnız type_text'ten önceydi; 10 karakterin 9'u Esc ve süre
+    # sonrasında da gönderiliyordu (500 karakterde ~15 sn).
+    from artemis.computer import windows
+
+    env = Env(act(type="type", text="ABCDEFGHIJ"), DONE, deadline=3)
+    sent: list[int] = []
+    _windows_typing(env, monkeypatch, sent)
+
+    def first_pause(_seconds: float) -> None:
+        env.stop.set()  # Esc
+        env.clock.now = 100.0  # mutlak deadline geçti
+
+    monkeypatch.setattr(windows.time, "sleep", first_pause)
+    result = await env.run()
+    assert sent == [ord("A")]
+    assert result.reason == "stopped"
+    assert "10 karakterin 1 tanesi gönderildi" in result.summary
+    assert "geri alınmadı" in result.summary
+    assert env.audit.named("computer_input_partial")[0]["sent"] == 1
+
+
+async def test_deadline_alone_during_typing_stops_with_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from artemis.computer import windows
+
+    env = Env(act(type="type", text="ABCDEFGHIJ"), DONE, deadline=3)
+    sent: list[int] = []
+    _windows_typing(env, monkeypatch, sent)
+    monkeypatch.setattr(windows.time, "sleep", lambda _s: setattr(env.clock, "now", 100.0))
+    result = await env.run()
+    assert len(sent) == 1 and result.reason == "timeout"
+
+
+async def test_focus_change_during_typing_keeps_rest_out_of_other_window() -> None:
+    typing = act(type="type", text="ABCDEFGHIJ")
+    env = Env(typing, DONE, YES, backend=FakeBackend(foreground=BROWSER))
+
+    def after_char(_char: str, count: int) -> None:
+        if count == 3:
+            _switch_to_mail(env.backend)
+
+    env.backend.on_char = after_char
+    result = await env.run()
+    assert env.backend.calls == [("type", "ABC")]
+    assert result.reason == "blocked" and "10 karakterin 3 tanesi" in result.summary

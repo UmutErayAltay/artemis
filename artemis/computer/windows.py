@@ -17,6 +17,7 @@ import ctypes
 import functools
 import sys
 import time
+from collections.abc import Callable
 from ctypes import wintypes
 from typing import Any
 
@@ -384,6 +385,21 @@ def process_at(x: int, y: int) -> tuple[str, int]:
     return _window_process(user32.GetAncestor(hwnd, _GA_ROOT) if hwnd else None)
 
 
+def window_at(x: int, y: int) -> int:
+    """Fiziksel (x, y) noktasındaki üst düzey pencerenin kimliği (hwnd).
+
+    Tıklama onayı bu pencereye bağlanır (ADR 0056): aynı süreçteki başka bir pencere ya da
+    araya giren bir pencere onaylanan hedef sayılmaz. Okunamazsa OSError.
+    """
+    _require_windows()
+    user32 = _libs()[0]
+    hwnd = user32.WindowFromPoint(wintypes.POINT(x, y))
+    root = user32.GetAncestor(hwnd, _GA_ROOT) if hwnd else None
+    if not root:
+        raise OSError("Noktadaki pencere okunamadı (WindowFromPoint).")
+    return int(root)
+
+
 def _window_process(hwnd: Any) -> tuple[str, int]:
     user32, _, kernel32 = _libs()
     if not hwnd:
@@ -464,13 +480,27 @@ def scroll(x: int, y: int, notches: int) -> None:
 _TYPE_DELAY_SECONDS = 0.03
 
 
-def type_text(text: str) -> None:
-    """KEYEVENTF_UNICODE ile yazar: klavye düzenine bağlı değildir (ğüşıöç çalışır)."""
+def type_text(text: str, should_continue: Callable[[], bool] | None = None) -> int:
+    """KEYEVENTF_UNICODE ile yazar: klavye düzenine bağlı değildir (ğüşıöç çalışır).
+
+    Her kod noktasından önce `should_continue` sorulur (iptal, mutlak süre, hedef pencere);
+    False dönerse kalan metin gönderilmez (ADR 0056). Bir kod noktasının bütün birimleri (vekil
+    çifti dahil) basma/bırakma olaylarıyla tek SendInput'tadır: yarım karakter ya da basılı
+    kalan tuş olmaz. Gönderilen kod noktası sayısı döner; gönderilen geri alınmaz.
+    """
     _require_windows()
-    for unit in _unicode_units(text):
+    sent = 0
+    for char in text:
+        if should_continue is not None and not should_continue():
+            break
         up = _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP
-        _send([_key(0, unit, _KEYEVENTF_UNICODE), _key(0, unit, up)])
+        events: list[_INPUT] = []
+        for unit in _unicode_units(char):
+            events += [_key(0, unit, _KEYEVENTF_UNICODE), _key(0, unit, up)]
+        _send(events)
+        sent += 1
         time.sleep(_TYPE_DELAY_SECONDS)
+    return sent
 
 
 def press_keys(keys: tuple[str, ...]) -> None:

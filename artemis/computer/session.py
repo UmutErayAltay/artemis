@@ -64,6 +64,10 @@ class _Stale(str):
 _POINTER_ACTIONS = frozenset({"click", "scroll"})
 # Deadline'a yaklaşırken son modelin ve ana döngünün yanıt verebilmesi için bırakılan pay.
 _DEADLINE_MARGIN = 2.0
+# Onay penceresi kapanınca odak bir süre Artemis'te kalabilir; onaylanan pencerenin yeniden
+# öne gelmesi en çok bu kadar beklenir, sonra adım yeniden planlanır (ADR 0056).
+_REFOCUS_SECONDS = 1.5
+_REFOCUS_POLL_SECONDS = 0.1
 
 # Tek fiziksel ekran, tek süreç: masaüstü ve Telegram oturumları aynı fare/klavyeyi sürer
 # (ADR 0053). Kilit süreç genelindedir çünkü iki host ayrı iş parçacıklarında, birbirinden
@@ -83,9 +87,11 @@ class ComputerBackend(Protocol):
     def foreground_process(self) -> tuple[str, int]: ...
     def foreground_window(self) -> tuple[int, tuple[int, int, int, int]]: ...
     def process_at(self, x: int, y: int) -> tuple[str, int]: ...
+    def window_at(self, x: int, y: int) -> int: ...
     def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None: ...
     def scroll(self, x: int, y: int, notches: int) -> None: ...
-    def type_text(self, text: str) -> None: ...
+    # Her kod noktasından önce `should_continue` sorulur; gönderilen kod noktası sayısı döner.
+    def type_text(self, text: str, should_continue: Callable[[], bool]) -> int: ...
     def press_keys(self, keys: tuple[str, ...]) -> None: ...
 
 
@@ -511,6 +517,8 @@ class ComputerSession:
             return self._result("timeout", "Oturum süresi doldu.")
         point: tuple[int, int] | None = None
         window: str | None = None
+        # Girdinin düşeceği pencerenin kimliği (hwnd): onay ve gönderim buna bağlanır (ADR 0056).
+        target_id: int | None = None
         # Modelin koordinatı seçtiği ekranın görüntüsüne göredir; fare ise sanal masaüstü.
         # Yalnız işaretçi eyleminde anlamlı (type/key/wait koordinat kullanmaz); geçersiz
         # ekran oturumu bitirmez, model düzeltsin diye engel olarak geri bildirilir.
@@ -532,7 +540,7 @@ class ComputerSession:
                     point = (scaled[0] + screen.origin[0], scaled[1] + screen.origin[1])
                 except ValueError as error:
                     return self._result("invalid", str(error))
-            blocked, window = await self._target(action.type, point)
+            blocked, window, target_id = await self._target(action.type, point)
             if blocked:
                 return blocked
 
@@ -560,11 +568,11 @@ class ComputerSession:
             )
             if not approved:
                 return self._result("rejected", "Hassas adım kullanıcı tarafından reddedildi.")
-            # Onay penceresi kapanınca odak çoğu kez Artemis paneline geçer: hedef yeniden
-            # denetlenmezse onaylanan metin Artemis'in kendi penceresine yazılabilirdi.
-            blocked, _ = await self._target(action.type, point)
-            if blocked:
-                return blocked
+            # Onay, kullanıcının gördüğü pencereye verildi. Onay penceresi kapanınca odak bir süre
+            # Artemis'te kalabilir (beklenir); başka bir pencere öne geçtiyse onay ona geçmez.
+            changed = await self._await_approved_target(action.type, point, target_id, limit)
+            if changed:
+                return changed
         # Onay beklerken Esc'ye basılmış olabilir: sıradaki eylem çalışmamalı.
         if self._stop.is_set():
             return self._result("stopped", "Kullanıcı oturumu durdurdu.")
@@ -572,18 +580,33 @@ class ComputerSession:
         if self._clock() >= limit:
             return self._result("timeout", "Oturum süresi doldu.")
         if action.type != "wait":
-            # Onay penceresi odağı kendisi değiştirir; onaylı adımda yalnız ön plan karşılaştırması
-            # atlanır (hedef yukarıda yeniden denetlendi), monitör düzeni yine denetlenir.
+            # Onay penceresi odağı kendisi değiştirir; onaylı adımda yakalama anındaki ön plan
+            # karşılaştırması atlanır. Bunun yerine hedef, onaylanan pencere kimliğine bağlıdır
+            # (yukarıda ve gönderimden hemen önce denetlenir); monitör düzeni yine denetlenir.
             stale = await self._stale_reason(layout, check_window=approved is not True)
             if stale:
                 return stale
         try:
-            executed = await self._execute(action, point, limit)
-            if not executed:
-                reason: Reason = "stopped" if self._stop.is_set() else "timeout"
-                return self._result(reason, "İptal veya süre sınırı nedeniyle girdi gönderilmedi.")
+            outcome, typed = await self._execute(action, point, limit, target_id)
         except (OSError, RuntimeError) as error:
             return self._result("error", f"Eylem uygulanamadı: {error}")
+        if outcome != "sent":
+            stopped: Reason = "stopped" if outcome == "stopped" else "timeout"
+            if typed:
+                # Yarım yazım başarı değildir ve gönderilen girdi geri alınmış sayılmaz.
+                total = len(action.text or "")
+                self._audit.emit(
+                    "computer_input_partial", turn_id=turn_id, action=action.type,
+                    sent=typed, total=total, reason=outcome,
+                )
+                return self._result(
+                    "blocked" if outcome == "target" else stopped,
+                    f"Yazım yarıda kesildi ({outcome}): {total} karakterin {typed} tanesi "
+                    "gönderildi; gönderilen kısım geri alınmadı.",
+                )
+            if outcome == "target":
+                return _Stale("Hedef pencere girdi gönderilmeden hemen önce değişti")
+            return self._result(stopped, "İptal veya süre sınırı nedeniyle girdi gönderilmedi.")
 
         self._steps += 1
         self._memory.add(
@@ -640,10 +663,53 @@ class ComputerSession:
             return _Stale("Ön plandaki pencere değişti veya taşındı")
         return None
 
+    def _holder(self, action_type: str, point: tuple[int, int] | None) -> tuple[str, int]:
+        """Girdiyi alacak pencerenin (exe, pid): tıklama/kaydırma noktaya, yazma/tuş ön plana."""
+        if action_type in _POINTER_ACTIONS and point is not None:
+            return self._backend.process_at(point[0], point[1])
+        return self._backend.foreground_process()
+
+    def _current_window(self, action_type: str, point: tuple[int, int] | None) -> int | None:
+        """Girdiyi alacak pencerenin kimliği; okunamazsa None (güvenli sayılmaz)."""
+        try:
+            if action_type in _POINTER_ACTIONS and point is not None:
+                return self._backend.window_at(point[0], point[1])
+            return self._backend.foreground_window()[0]
+        except (OSError, RuntimeError):
+            return None
+
+    async def _await_approved_target(
+        self, action_type: str, point: tuple[int, int] | None, approved: int | None, limit: float
+    ) -> str | None:
+        """Onaylanan pencere yeniden girdi hedefi olana dek (kısa süre) bekler.
+
+        Artemis'in kendi penceresi (onay penceresi/panel) önde kaldıkça beklenir; bütün pencere
+        denetimini kaldırmak yerine yalnız bu geçici odak tanınır. Başka bir pencere öne geçtiyse
+        ya da süre dolduysa adım `_Stale` ile yeniden planlanır: sonraki adım yine onaya gelir.
+        """
+        give_up = min(limit, self._clock() + _REFOCUS_SECONDS)
+        while not self._stop.is_set():
+            try:
+                exe, pid = await asyncio.to_thread(self._holder, action_type, point)
+            except (OSError, RuntimeError):
+                return "Hedef pencere belirlenemedi."
+            current = await asyncio.to_thread(self._current_window, action_type, point)
+            if pid == self._own_pid:
+                if self._clock() >= give_up:
+                    return _Stale("Onaylanan pencere yeniden öne gelmedi; girdi gönderilmedi")
+                await self._sleep(_REFOCUS_POLL_SECONDS)
+                continue
+            if current is None or current != approved:
+                return _Stale(
+                    "Onay verilen pencere değişti; girdi gönderilmedi, adım yeniden onaya gelir"
+                )
+            return process_block_reason(exe, pid, self._own_pid)
+        return None  # durdurma çağıranda denetlenir
+
     async def _target(
         self, action_type: str, point: tuple[int, int] | None
-    ) -> tuple[str | None, str | None]:
-        """(engel nedeni, pencere adı): girdinin gerçekten düşeceği pencere denetlenir.
+    ) -> tuple[str | None, str | None, int | None]:
+        """(engel nedeni, pencere adı, pencere kimliği): girdinin düşeceği pencere denetlenir.
 
         Tıklama/kaydırma noktadaki pencereye gider (ve onu öne getirir); yazma/tuş ön plana.
         Tıklamada ön plana bakmak yanlıştı: panelden komut verilince ön plan hep Artemis'ti ve
@@ -652,39 +718,66 @@ class ComputerSession:
         # Seçim eylem türüne göredir, koordinatın varlığına göre değil: doğrulayıcı type/key
         # eyleminde x/y'yi reddetmiyor; modelin verdiği zararsız bir nokta yazmanın gittiği
         # ön planı (ör. terminal) denetimden kaçırmasın.
-        if action_type in _POINTER_ACTIONS:
-            if point is None:
-                return "İşaretçi eyleminde konum yok.", None
-            exe, pid = await asyncio.to_thread(self._backend.process_at, point[0], point[1])
-        else:
-            exe, pid = await asyncio.to_thread(self._backend.foreground_process)
+        if action_type in _POINTER_ACTIONS and point is None:
+            return "İşaretçi eyleminde konum yok.", None, None
+        exe, pid = await asyncio.to_thread(self._holder, action_type, point)
         if not exe:
-            return "Hedef pencere belirlenemedi.", None
+            return "Hedef pencere belirlenemedi.", None, None
         blocked = process_block_reason(exe, pid, self._own_pid)
         if blocked:
-            return blocked, None
-        return None, exe.replace("\\", "/").rsplit("/", 1)[-1]
+            return blocked, None, None
+        target_id = await asyncio.to_thread(self._current_window, action_type, point)
+        if target_id is None:
+            return "Hedef pencere belirlenemedi.", None, None
+        return None, exe.replace("\\", "/").rsplit("/", 1)[-1], target_id
 
     async def _execute(
         self,
         action: Action,
         point: tuple[int, int] | None,
         limit: float,
-    ) -> bool:
-        # Executor kuyruğunda beklenmiş olabilir: kontrol, OS çağrısını yapan thread'de.
-        def send() -> bool:
-            if self._stop.is_set() or self._clock() >= limit:
-                return False
+        target_id: int | None,
+    ) -> tuple[str, int]:
+        """(sonuç, yazılan kod noktası): "sent", "stopped", "timeout" ya da "target".
+
+        Son denetim OS girdisinden hemen önce, girdiyi gönderen thread'dedir (executor
+        kuyruğunda beklenmiş olabilir): iptal, mutlak süre ve hedef pencere kimliği. Yazımda
+        aynı denetim her karakterden önce yinelenir: Esc/süre sonrası ya da odak başka pencereye
+        geçince kalan metin gönderilmez (ADR 0056).
+        """
+
+        def check() -> str | None:
+            if self._stop.is_set():
+                return "stopped"
+            if self._clock() >= limit:
+                return "timeout"
+            if target_id is not None and self._current_window(action.type, point) != target_id:
+                return "target"
+            return None
+
+        def send() -> tuple[str, int]:
+            early = check()
+            if early:
+                return early, 0
             backend = self._backend
             if action.type == "click" and point:
                 backend.click(point[0], point[1], action.button, action.double)
             elif action.type == "scroll" and point:
                 backend.scroll(point[0], point[1], action.dy or 0)
             elif action.type == "type":
-                backend.type_text(action.text or "")
+                why: list[str] = []
+
+                def should_continue() -> bool:
+                    reason = check()
+                    if reason:
+                        why.append(reason)
+                    return reason is None
+
+                typed = backend.type_text(action.text or "", should_continue)
+                return (why[0] if why else "sent"), typed
             elif action.type == "key":
                 backend.press_keys(parse_keys(action.keys or ""))
-            return True
+            return "sent", 0
 
         # İptalde de girdi thread'i bitene dek görev açık kalır (temizlik sürüyor sayılır).
         return await run_blocking(send)
