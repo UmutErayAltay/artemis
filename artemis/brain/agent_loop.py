@@ -26,7 +26,7 @@ from artemis.brain.providers import Provider
 from artemis.brain.streaming import ResponseStream
 from artemis.memory.companion import content_tainted, read_companion
 from artemis.safety.gate import SafetyGate, TurnState
-from artemis.tools.base import ToolContext, ToolResult
+from artemis.tools.base import Risk, ToolContext, ToolResult
 
 SYSTEM_PROMPT = """Sen Artemis, Türkçe konuşan kişisel masaüstü asistanısın.
 Kodlama işi için önce proje, görev, kapsam ve kabul ölçütlerini kullanıcıyla netleştir;
@@ -613,6 +613,13 @@ class AgentLoop:
                         return finish("timeout", TIMEOUT_MESSAGE)
                     if result.status == "denied":
                         denied.add(fingerprint)
+                    elif result.success and tool is not None and tool.risk is not Risk.READ_ONLY:
+                        # Durum değişti (ör. klasör açıldı): önceki çağrıların aynısı artık
+                        # meşru yeniden deneme ya da doğrulamadır. Arada değişiklik yoksa aynı
+                        # çağrı yine "tekrar" sayılıp durdurulur (sonsuz döngü yok). Bu yan
+                        # etkinin kendisi yasak kalır: aynı ekleme/taşıma iki kez yürümez.
+                        seen.clear()
+                        seen.add(fingerprint)
                     if call.name in MEMORY_WRITE_TOOLS and result.success:
                         memory_saved = True
                     private = (
