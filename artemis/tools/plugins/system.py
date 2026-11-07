@@ -7,12 +7,11 @@ argüman doğrulaması, risk sınıfı ve dürüst sonuç eşlemesini yapar. Ser
 
 from __future__ import annotations
 
-import asyncio
 from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.registry import register_tool
 from artemis.tools.system_control import SystemControl, SystemOutcome
 
@@ -54,7 +53,7 @@ class WindowList(BaseTool):
     content_kind = "screen"
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
-        outcome = await asyncio.to_thread(_service(context).list_windows)
+        outcome = await run_blocking(_service(context).list_windows)
         if outcome.status != "ok":
             return _result(outcome)
         windows = [
@@ -124,7 +123,7 @@ class WindowControl(BaseTool):
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(WindowControlArguments, arguments)
-        outcome = await asyncio.to_thread(
+        outcome = await run_blocking(
             _service(context).control_window,
             args.window_id,
             args.action,
@@ -160,7 +159,7 @@ class VolumeSet(BaseTool):
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(VolumeArguments, arguments)
-        outcome = await asyncio.to_thread(_service(context).set_volume, args.level, args.muted)
+        outcome = await run_blocking(_service(context).set_volume, args.level, args.muted)
         return _result(outcome, {"level": outcome.level, "muted": outcome.muted})
 
 
@@ -181,7 +180,7 @@ class BrightnessSet(BaseTool):
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(BrightnessArguments, arguments)
-        outcome = await asyncio.to_thread(_service(context).set_brightness, args.level)
+        outcome = await run_blocking(_service(context).set_brightness, args.level)
         return _result(outcome, {"level": outcome.level})
 
 
@@ -218,7 +217,7 @@ class Power(BaseTool):
         args = cast(PowerArguments, arguments)
         delay = context.settings.system_control.shutdown_delay_seconds
         service = _service(context)
-        outcome = await asyncio.to_thread(lambda: service.power(args.action, delay_seconds=delay))
+        outcome = await run_blocking(lambda: service.power(args.action, delay_seconds=delay))
         context.audit.emit(
             "power",
             turn_id=context.turn_id,

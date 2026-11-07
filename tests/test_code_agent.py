@@ -247,6 +247,19 @@ def test_failures_never_done(tmp_path: Path, repo: Path, data: Any, code: int) -
     jobs.shutdown()
 
 
+def test_error_without_structured_output_still_reports_leftover_files(
+    tmp_path: Path, repo: Path
+) -> None:
+    # Zayıf model dosyayı düzenleyip yapılandırılmış çıktıyı düz metin yazar: iş error kalır
+    # (başarı sayılmaz) ama özet diskte kalan değişikliği söyler.
+    data = {"is_error": False, "session_id": SESSION, "result": "Yaptım"}
+    jobs, _ = make_jobs(tmp_path, reply(data, before="pathlib.Path('a.txt').write_text('x')"))
+    job = run_job(jobs, repo)
+    assert job["status"] == "error"
+    assert "commitlenmemiş değişiklik kaldı: a.txt" in job["summary"]
+    jobs.shutdown()
+
+
 def test_real_git_result_and_leftovers(tmp_path: Path, repo: Path) -> None:
     before = (
         "pathlib.Path('b.txt').write_text('b')\n"
@@ -494,7 +507,8 @@ def test_restart_active_interrupted_no_auto_spawn_and_uncertain_lock(
                 "SELECT value FROM records WHERE key=?", (job["job_id"],)
             ).fetchone()[0]
         )
-        record["status"] = "waiting"
+        # "running": süreç kesildi, canlı olup olmadığı bilinmez. ("waiting" artık kilitlemez.)
+        record["status"] = "running"
         record["pid"] = 1  # Kullanılmayan eski PID hiçbir öldürme işlemi yaratmaz.
         connection.execute(
             "UPDATE records SET value=? WHERE key=?", (json.dumps(record), job["job_id"])

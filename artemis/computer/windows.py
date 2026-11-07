@@ -16,6 +16,7 @@ import contextlib
 import ctypes
 import functools
 import sys
+import time
 from ctypes import wintypes
 from typing import Any
 
@@ -212,6 +213,8 @@ def _libs() -> tuple[Any, Any, Any]:
     user32.GetMonitorInfoW.argtypes = [vp, ctypes.POINTER(_MONITORINFO)]
     user32.GetMonitorInfoW.restype = wintypes.BOOL
     user32.GetForegroundWindow.restype = vp
+    user32.GetWindowRect.argtypes = [vp, ctypes.POINTER(wintypes.RECT)]
+    user32.GetWindowRect.restype = wintypes.BOOL
     user32.WindowFromPoint.argtypes = [wintypes.POINT]
     user32.WindowFromPoint.restype = vp
     user32.GetAncestor.argtypes = [vp, wintypes.UINT]
@@ -357,6 +360,18 @@ def foreground_process() -> tuple[str, int]:
     return _window_process(_libs()[0].GetForegroundWindow())
 
 
+def foreground_window() -> tuple[int, tuple[int, int, int, int]]:
+    """Ön plandaki pencerenin (hwnd, (sol, üst, sağ, alt)); yakalama ile girdi arasında
+    pencerenin değişip değişmediğini anlamak için (session._stale_reason)."""
+    _require_windows()
+    user32 = _libs()[0]
+    hwnd = user32.GetForegroundWindow()
+    rect = wintypes.RECT()
+    if not hwnd or not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        raise OSError("Ön plandaki pencere okunamadı (GetForegroundWindow/GetWindowRect).")
+    return int(hwnd), (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
+
+
 def process_at(x: int, y: int) -> tuple[str, int]:
     """Fiziksel (x, y) noktasındaki üst düzey pencerenin (exe yolu, pid).
 
@@ -443,15 +458,19 @@ def scroll(x: int, y: int, notches: int) -> None:
     _send([_move_event(x, y), _mouse(0, 0, -_WHEEL_DELTA * notches, _MOUSEEVENTF_WHEEL)])
 
 
+# Windows 11 Not Defteri (RichEditD2DPT) toplu/hızlı VK_PACKET girdisini bozuyor: 2026-11-05
+# ölçümü, toplu gönderim 0/6 ("merhaba dünya ttttttttttt"), 15 ms 5/6, 30 ms 10/10; Tk toplu 8/8.
+# ponytail: sabit hız, 500 karakter ≈ 15 sn; yavaş kalırsa uygulamaya göre hız ya da yapıştırma.
+_TYPE_DELAY_SECONDS = 0.03
+
+
 def type_text(text: str) -> None:
     """KEYEVENTF_UNICODE ile yazar: klavye düzenine bağlı değildir (ğüşıöç çalışır)."""
     _require_windows()
-    events: list[_INPUT] = []
     for unit in _unicode_units(text):
-        events.append(_key(0, unit, _KEYEVENTF_UNICODE))
-        events.append(_key(0, unit, _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP))
-    if events:
-        _send(events)
+        up = _KEYEVENTF_UNICODE | _KEYEVENTF_KEYUP
+        _send([_key(0, unit, _KEYEVENTF_UNICODE), _key(0, unit, up)])
+        time.sleep(_TYPE_DELAY_SECONDS)
 
 
 def press_keys(keys: tuple[str, ...]) -> None:

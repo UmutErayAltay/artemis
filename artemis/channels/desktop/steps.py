@@ -16,6 +16,8 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any, Literal
 
+from artemis.brain.tiering import REASONS
+
 StepKind = Literal["ok", "sent", "fail", "denied", "info"]
 
 
@@ -87,6 +89,13 @@ def step_line(
         return StepLine(f"{display} istendi", "info", True)
     if event == "tool_dispatch":
         return StepLine(f"{display} başlatıldı", "info", True)
+    if event == "model_choice":
+        # Görünür ama sessiz etiket: kullanıcıya soru sorulmaz, yalnız neyin seçildiği yazılır.
+        reason = REASONS.get(str(fields.get("reason", "")), "")
+        suffix = f" ({reason})" if reason else ""
+        return StepLine(f"Zor işler modeli: {fields.get('model', '')}{suffix}", "info", False)
+    if event == "model_tier_fallback":
+        return StepLine("Zor işler modeli kullanılamadı; ana modelle sürdü", "info", False)
     text = _INTERNAL_TEXT.get(event, event.replace("_", " "))
     return StepLine(text, "info", True)
 

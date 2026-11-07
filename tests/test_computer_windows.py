@@ -78,3 +78,14 @@ def test_capture_monitor_length() -> None:
     rect = w.monitors()[0]
     data, width, height = w.capture(*rect)
     assert len(data) == width * height * 4
+
+
+def test_type_text_sends_each_unit_separately_with_pause(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Win11 Not Defteri toplu gönderimde metni bozuyordu (gerçek cihaz, 2026-11-05).
+    calls: list[object] = []
+    monkeypatch.setattr(w, "_require_windows", lambda: None)
+    monkeypatch.setattr(w, "_send", lambda inputs: calls.append([i.ki.wScan for i in inputs]))
+    monkeypatch.setattr(w.time, "sleep", lambda s: calls.append(s))
+    w.type_text("aü")
+    assert calls == [[0x61, 0x61], w._TYPE_DELAY_SECONDS, [0xFC, 0xFC], w._TYPE_DELAY_SECONDS]
+    assert w._TYPE_DELAY_SECONDS >= 0.03

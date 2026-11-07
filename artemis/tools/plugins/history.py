@@ -24,8 +24,10 @@ class HistoryTool(BaseTool):
     done_label = "Geçmiş işlemi tamamlandı"
     description = (
         "Yerel konuşma geçmişi yönetimi; yalnız panel/CLI kontrolü içindir. "
-        "delete tüm konuşma arşivini siler; öz notlar kalır. retention 0 otomatik silmeyi "
-        "kapatır, pozitif gün sayısı eski turları hemen siler. Güvenli disk silme değildir."
+        "delete memory.sqlite3'teki tüm konuşma arşivini siler ve dosyayı yeniden yazar; öz "
+        "notlar, denetim günlüğü (audit*.jsonl, kullanıcı girdilerini de içerir) ve proje işi "
+        "kayıtları SİLİNMEZ. retention 0 otomatik silmeyi kapatır, pozitif gün sayısı eski "
+        "turları hemen siler. Güvenli disk silme değildir (SSD/yedek kopyaları kapsamaz)."
     )
     args_model = HistoryArguments
     risk = Risk.CONFIRM_REQUIRED
@@ -50,14 +52,23 @@ class HistoryTool(BaseTool):
                 removed = store.set_retention(args.retention_days)
             refresh = cast(Callable[[], None], context.services["memory_refresh"])
             refresh()
-            data: dict[str, object] = {**store.history_status(), "removed": removed}
+            # `action` masaüstünün silme sonrası sohbet ekranını temizlemesi içindir.
+            data: dict[str, object] = {
+                **store.history_status(),
+                "removed": removed,
+                "action": args.action,
+            }
             if args.action == "list":
                 data["recent_turns"] = store.history_page()
         except (OSError, sqlite3.Error) as error:
             return ToolResult(message=f"Geçmiş işlemi tamamlanamadı ({type(error).__name__}).")
-        return ToolResult(
-            success=True,
-            status="ok",
-            data=data,
-            message=f"Geçmiş işlemi doğrulandı; {removed} tur silindi. Kalıcı öz notlar korundu.",
-        )
+        if args.action == "status":
+            message = "Geçmiş durumu okundu."
+        elif args.action == "list":
+            message = f"{len(cast(list[object], data['recent_turns']))} tur listelendi."
+        else:
+            message = (
+                f"Geçmiş işlemi doğrulandı; {removed} tur silindi. Kalıcı öz notlar ve "
+                "denetim günlüğü korundu."
+            )
+        return ToolResult(success=True, status="ok", data=data, message=message)

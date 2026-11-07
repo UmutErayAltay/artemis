@@ -8,14 +8,17 @@ from __future__ import annotations
 
 import asyncio
 import html
+import json
+import os
 import re
 import shutil
-from decimal import Decimal, InvalidOperation
+import sys
+from decimal import ROUND_UP, Decimal, InvalidOperation
 from pathlib import Path
 
 import httpx
 import yaml
-from PySide6.QtCore import QSize, Qt, QThread, Signal
+from PySide6.QtCore import QProcess, QProcessEnvironment, QSize, Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,6 +29,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMessageBox,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -41,8 +45,22 @@ from artemis.brain.providers import (
     stored_endpoint_key,
 )
 from artemis.channels.desktop import themes
-from artemis.config.settings import ENDPOINT_ID_RE, EndpointConfig, ModelConfig, load_settings
+from artemis.config.settings import (
+    ENDPOINT_ID_RE,
+    EndpointConfig,
+    ModelConfig,
+    Settings,
+    load_settings,
+)
 from artemis.tools.credentials import delete_secret, write_secret
+from artemis.tools.platform import child_environment
+from bench.model_testi import suggest_layout
+
+# Model testi bir koşuda yaklaşık bu kadar token harcar (2026-11-07 ölçümü: ~340 bin giriş);
+# ücretli modelde tahmini maliyet ve bütçe tavanı bundan hesaplanır.
+TEST_INPUT_TOKENS = 520_000  # + bilgisayar senaryoları (ekran görüntüleri)
+TEST_OUTPUT_TOKENS = 20_000
+_ROLE_TEXT = {"ana": "ana model", "zor": "zor işler", "bilgisayar": "bilgisayar kullanımı"}
 
 # (görünen ad, önerilen kimlik, adres, anahtar gerekli mi)
 PRESETS: tuple[tuple[str, str, str, bool], ...] = (
@@ -240,7 +258,14 @@ class ProviderSection(QWidget):
         self._auto_alias = ""
         self._problem: str | None = None
         self._colors = {key: themes.THEMES[themes.DEFAULT_THEME][key] for key in _COLOR_KEYS}
-        self._model_data: list[tuple[str, bool, bool, str, str, bool]] = []
+        # (takma ad, beyin mi, eski ayar mı, bağlantı, model kimliği, resim mi, zor işler mi,
+        # son test özeti)
+        self._model_data: list[tuple[str, bool, bool, str, str, bool, bool, str]] = []
+        self._model_test: QProcess | None = None
+        self._testing = ""
+        self._fallback = ""
+        self._test_report = Path()
+        self._suggested: tuple[str | None, str | None, str | None] = (None, None, None)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
@@ -268,7 +293,37 @@ class ProviderSection(QWidget):
         self.remove_button.clicked.connect(self._remove_model)
         self.remove_button.setVisible(False)  # reload() model varsa gösterir
         self.primary_button.setVisible(False)
-        models.addLayout(button_row(self.remove_button, self.primary_button))
+        # Model kademesi: seçili model zor işler (çok adımlı, planlama) turlarını üstlenir.
+        self.hard_button = QPushButton("Zor işler yap")
+        self.hard_button.setToolTip("Çok adımlı ve planlama isteyen turlar bu modelle çalışır.")
+        self.hard_button.clicked.connect(self._toggle_hard_role)
+        # Arıza yedeği: beyin modeli kota/bağlantı/sunucu hatası verince tur bununla sürer.
+        self.fallback_button = QPushButton("Arıza yedeği yap")
+        self.fallback_button.setToolTip(
+            "Beyin modeli kotaya takılır ya da yanıt vermezse Artemis bu modelle devam eder."
+        )
+        self.fallback_button.clicked.connect(self._toggle_fallback_role)
+        self.model_test_button = QPushButton("Test et")
+        self.model_test_button.setToolTip(
+            "15 senaryoluk testi arka planda çalıştırır; bilgisayarına dokunmaz."
+        )
+        self.model_test_button.clicked.connect(self._test_model)
+        for button in (self.hard_button, self.fallback_button, self.model_test_button):
+            button.setVisible(False)
+        # İki satır: beş düğme dar pencerede yatay taşmasın.
+        models.addLayout(
+            button_row(self.remove_button, self.model_test_button, self.primary_button)
+        )
+        models.addLayout(button_row(self.fallback_button, self.hard_button))
+        self.model_list.currentItemChanged.connect(self._selection_changed)
+        # Test edilmiş modellerden çıkan önerilen düzen (ana + zor işler) ve tek tık uygulama.
+        self.layout_label = meta_label("")
+        self.layout_label.setVisible(False)
+        models.addWidget(self.layout_label)
+        self.apply_layout_button = QPushButton("Bu düzeni uygula")
+        self.apply_layout_button.clicked.connect(self._apply_layout)
+        self.apply_layout_button.setVisible(False)
+        models.addLayout(button_row(self.apply_layout_button))
         # B: model ekle
         add_box, add = group("Model ekle")
         layout.addWidget(add_box)
@@ -424,6 +479,10 @@ class ProviderSection(QWidget):
             text, color = self._problem, self._colors["error"]
         elif model is not None:
             text = f"Beyin: {settings.primary_model} ({self._connection_label(model)})"
+            if settings.hard_model and settings.hard_model != settings.primary_model:
+                text += f" · Zor işler: {settings.hard_model}"
+            if settings.fallback_model and settings.fallback_model != settings.primary_model:
+                text += f" · Yedek: {settings.fallback_model}"
             color = self._colors["accent"]
         else:
             text, color = "Henüz beyin modeli seçilmedi.", self._colors["error"]
@@ -442,6 +501,8 @@ class ProviderSection(QWidget):
         self.make_primary.setChecked(self._problem is not None)
         if self._problem and not settings.endpoints:
             self.connection_toggle.setChecked(True)  # ilk kurulumda form gizli kalmasın
+        reports = self._reports(settings)
+        self._fallback = settings.fallback_model or ""
         self._model_data = [
             (
                 alias,
@@ -451,17 +512,41 @@ class ProviderSection(QWidget):
                 self._connection_label(model),
                 model.model,
                 model.kind == "image",
+                alias == settings.hard_model and alias != settings.primary_model,
+                _test_summary(reports[alias]) if alias in reports else "",
             )
             for alias, model in settings.models.items()
         ]
         self._render_models()
+        self._suggested = suggest_layout(list(reports.values()))
+        ana, zor, pc = self._suggested
+        current = (
+            settings.primary_model, settings.hard_model or None, settings.computer_use.model or None
+        )
+        self.layout_label.setText(
+            f"Önerilen düzen (test sonuçlarına göre): Ana: {ana}"
+            + (f" · Zor işler: {zor}" if zor else "")
+            + (f" · Bilgisayar kullanımı: {pc}" if pc else "")
+            + (" — şu anki düzen bu." if (ana, zor, pc) == current else "")
+            if ana else ""
+        )
+        self.layout_label.setVisible(bool(ana))
+        self.apply_layout_button.setVisible(bool(ana) and (ana, zor, pc) != current)
+        self._sync_hard_button()
         # Liste kendi içinde kaydırılmasın: en çok 6 satır kadar uzar.
-        self.model_list.setFixedHeight(min(max(self.model_list.count(), 1), 6) * 70 + 12)
+        heights = [
+            self.model_list.item(index).sizeHint().height()
+            for index in range(min(self.model_list.count(), 6))
+        ]
+        self.model_list.setFixedHeight((sum(heights) or 70) + 12)
         self.model_list.setVisible(self.model_list.count() > 0)
         self.model_empty.setVisible(self.model_list.count() == 0)
         # Boş listede "Kaldır"/"Beyin yap" işlenecek bir şey bulamaz; gizlenir.
         self.remove_button.setVisible(self.model_list.count() > 0)
         self.primary_button.setVisible(self.model_list.count() > 0)
+        self.hard_button.setVisible(self.model_list.count() > 0)
+        self.fallback_button.setVisible(self.model_list.count() > 0)
+        self.model_test_button.setVisible(self.model_list.count() > 0)
         self.endpoint_list.clear()
         for name, endpoint in settings.endpoints.items():
             if not endpoint.api_key:
@@ -488,21 +573,37 @@ class ProviderSection(QWidget):
         selected = self.model_list.currentItem()
         chosen = selected.data(Qt.ItemDataRole.UserRole) if selected is not None else None
         self.model_list.clear()
-        for alias, is_brain, legacy, connection, model_id, image in self._model_data:
+        for alias, is_brain, legacy, connection, model_id, image, hard, tested in self._model_data:
             brain = (
                 f"&nbsp;&nbsp;<span style='color:{self._colors['accent']}'>&#9679; Beyin</span>"
                 if is_brain
                 else ""
             )
+            if hard:
+                brain += (
+                    f"&nbsp;&nbsp;<span style='color:{self._colors['accent']}'>"
+                    "&#9679; Zor işler</span>"
+                )
+            if alias == self._fallback and not is_brain:
+                brain += (
+                    f"&nbsp;&nbsp;<span style='color:{self._colors['muted']}'>"
+                    "&#9679; Yedek</span>"
+                )
+            if alias == self._testing:
+                tested = "Test sürüyor…"
             tag = (
                 f"&nbsp;&nbsp;<span style='color:{self._colors['warning']}'>eski ayar</span>"
                 if legacy else ""
             )
             kind = " · resim" if image else ""
+            test_line = (
+                f"<br><span style='color:{self._colors['muted']}'>{html.escape(tested)}</span>"
+                if tested else ""
+            )
             label = QLabel(
                 f"<b>{html.escape(alias)}</b>{brain}{tag}<br>"
                 f"<span style='color:{self._colors['muted']}'>"
-                f"{html.escape(connection)} · {html.escape(model_id)}{kind}</span>"
+                f"{html.escape(connection)} · {html.escape(model_id)}{kind}</span>{test_line}"
             )
             label.setTextFormat(Qt.TextFormat.RichText)
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -831,6 +932,9 @@ class ProviderSection(QWidget):
             return
         # Takma ada göre yazılır: aynı model kimliğini paylaşan modeller karışmaz.
         raw["primary_model"] = alias
+        for role in ("hard_model", "fallback_model"):
+            if raw.get(role) == alias:
+                raw.pop(role)  # beyin olan model ayrıca zor işler/yedek sayılmaz
         if not self._write(raw):
             return
         self.reload()
@@ -846,10 +950,14 @@ class ProviderSection(QWidget):
         except (OSError, ValueError):
             self.status.setText("Ayarlar okunamadı.")
             return
-        if alias in {settings.primary_model, settings.fallback_model}:
-            self.status.setText(
-                "Beyin veya yedek model kaldırılamaz; önce başka bir modeli beyin yapın."
-            )
+        if alias == settings.primary_model:
+            self.status.setText("Beyin modeli kaldırılamaz; önce başka bir modeli beyin yapın.")
+            return
+        if alias == settings.fallback_model:
+            self.status.setText("Arıza yedeği kaldırılamaz; önce 'Yedekten çıkar'.")
+            return
+        if alias == settings.hard_model:
+            self.status.setText("Zor işler modeli kaldırılamaz; önce 'Zor işlerden çıkar'.")
             return
         raw = self._raw()
         raw["models"].pop(alias, None)  # type: ignore[attr-defined]
@@ -858,3 +966,222 @@ class ProviderSection(QWidget):
         self.reload()
         self.status.setText("Model kaldırıldı.")
         self.changed.emit()
+
+    # --- Model kademesi ve model testi ---------------------------------------------------
+
+    def _reports(self, settings: Settings) -> dict[str, dict[str, object]]:
+        """Kaydedilmiş son test raporları (takma ad -> rapor); okunamayan rapor yok sayılır."""
+        folder = settings.state_dir / "model_testleri"
+        found: dict[str, dict[str, object]] = {}
+        for alias in settings.models:
+            path = folder / f"{_slug(alias) or 'model'}.json"
+            try:
+                report = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            # Eksik/bozuk rapor öneriyi (suggest_layout) çökertmesin: alanlar doğrulanır.
+            if (
+                isinstance(report, dict)
+                and report.get("model") == alias
+                and isinstance(report.get("zor"), dict)
+                and isinstance(report["zor"].get("rate"), int | float)
+                and isinstance(report.get("median_seconds"), int | float)
+                and isinstance(report.get("roles"), list)
+            ):
+                found[alias] = report
+        return found
+
+    # Bağlı yöntemler: self'i yakalayan lambda Qt bağlantısında referans döngüsü kurar ve gc
+    # paneli yanlış iş parçacığında toplayınca erişim ihlali çıkar (2026-10-31 bulgusu).
+    def _toggle_hard_role(self) -> None:
+        self._toggle_role("hard_model")
+
+    def _toggle_fallback_role(self) -> None:
+        self._toggle_role("fallback_model")
+
+    def _selection_changed(self, *_args: object) -> None:
+        self._sync_hard_button()
+
+    def _model_test_finished(self, *_args: object) -> None:
+        self._model_test_done(self._testing, self._test_report)
+
+    def _sync_hard_button(self) -> None:
+        item = self.model_list.currentItem()
+        selected = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        is_hard = any(row[0] == selected and row[6] for row in self._model_data)
+        self.hard_button.setText("Zor işlerden çıkar" if is_hard else "Zor işler yap")
+        is_fallback = bool(selected) and selected == self._fallback
+        self.fallback_button.setText("Yedekten çıkar" if is_fallback else "Arıza yedeği yap")
+
+    def _toggle_role(self, key: str) -> None:
+        """Seçili modeli zor işler (hard_model) ya da arıza yedeği (fallback_model) yapar."""
+        alias = self._selected_alias()
+        if alias is None:
+            return
+        name = "Zor işler" if key == "hard_model" else "Arıza yedeği"
+        try:
+            settings = load_settings(self.config_path)
+            raw = self._raw()
+        except (OSError, ValueError, yaml.YAMLError):
+            self.status.setText("Ayarlar okunamadı.")
+            return
+        model = settings.models.get(alias)
+        if model is None or model.kind == "image":
+            self.status.setText(f"Resim modeli {name.lower()} modeli olamaz; sohbet modeli seçin.")
+            return
+        if alias == settings.primary_model:
+            self.status.setText(f"Bu model zaten beyin; {name.lower()} için başka bir model seçin.")
+            return
+        removing = raw.get(key) == alias
+        if removing:
+            raw.pop(key, None)
+        else:
+            raw[key] = alias
+        if not self._write(raw):
+            return
+        self.reload()
+        if key == "hard_model":
+            done = (
+                "Zor işler modeli kapatıldı; her tur beyin modeliyle çalışır."
+                if removing
+                else f"Zor işler modeli: {alias}. Çok adımlı ve planlama isteyen turlar bunu "
+                "kullanır."
+            )
+        else:
+            done = (
+                "Arıza yedeği kapatıldı; beyin modeli yanıt vermezse tur hata ile biter."
+                if removing
+                else f"Arıza yedeği: {alias}. Beyin modeli kotaya takılır ya da yanıt vermezse "
+                "Artemis bununla sürer."
+            )
+        self.status.setText(done)
+        self.changed.emit()
+
+    def _confirm_paid(self, alias: str, cost: Decimal) -> bool:
+        """Ücretli modelde testten önce bir kez sorulur (varsayılan Hayır)."""
+        answer = QMessageBox.question(
+            self,
+            "Ücretli model testi",
+            f"{alias} ücretli. Test yaklaşık {cost} USD harcayabilir. Başlatılsın mı?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        return answer == QMessageBox.StandardButton.Yes
+
+    def _test_model(self) -> None:
+        alias = self._selected_alias()
+        if alias is None:
+            return
+        if self._model_test is not None:
+            self.status.setText(f"{self._testing} testi sürüyor; bitmesini bekleyin.")
+            return
+        try:
+            settings = load_settings(self.config_path)
+        except (OSError, ValueError):
+            self.status.setText("Ayarlar okunamadı.")
+            return
+        model = settings.models[alias]
+        if model.kind == "image":
+            self.status.setText("Resim modeli sohbet senaryolarıyla test edilmez.")
+            return
+        arguments = ["-m", "bench.model_testi", "--config", str(self.config_path), "--model", alias]
+        if model.input_per_million or model.output_per_million:
+            cost = (
+                Decimal(TEST_INPUT_TOKENS) * model.input_per_million
+                + Decimal(TEST_OUTPUT_TOKENS) * model.output_per_million
+            ) / Decimal(1_000_000)
+            cost = cost.quantize(Decimal("0.01"), rounding=ROUND_UP)
+            if not self._confirm_paid(alias, cost):
+                self.status.setText("Test başlatılmadı.")
+                return
+            # Bütçe tavanı tahminin iki katı: test bunu aşamaz (rezervasyon korur).
+            arguments += ["--ucretli-onay", "--butce", str(cost * 2)]
+        report = settings.state_dir / "model_testleri" / f"{_slug(alias) or 'model'}.json"
+        arguments += ["--rapor", str(report)]
+        process = QProcess(self)
+        environment = QProcessEnvironment()
+        # Alt sürece ortamın tamamı verilmez (CLAUDE.md): OS değişkenleri + bu ucun anahtarı.
+        variables = dict(child_environment(), PYTHONIOENCODING="utf-8")
+        if model.endpoint:
+            name = endpoint_key_variable(model.endpoint)
+            if name in os.environ:
+                variables[name] = os.environ[name]
+        for name, value in variables.items():
+            environment.insert(name, value)
+        process.setProcessEnvironment(environment)
+        process.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        process.readyReadStandardOutput.connect(self._model_test_output)
+        self._test_report = report
+        process.finished.connect(self._model_test_finished)
+        self._model_test, self._testing = process, alias
+        self._render_models()
+        self.status.setText(f"{alias} test ediliyor (15 senaryo, birkaç dakika sürer)…")
+        process.start(sys.executable, arguments)
+
+    def _model_test_output(self) -> None:
+        if self._model_test is None:
+            return
+        text = bytes(self._model_test.readAllStandardOutput().data()).decode("utf-8", "replace")
+        for line in text.splitlines():
+            if line.startswith("ilerleme "):
+                parts = line.split()
+                self.status.setText(f"{self._testing} test ediliyor: {parts[1]} senaryo bitti…")
+
+    def _model_test_done(self, alias: str, report_path: Path) -> None:
+        process, self._model_test, self._testing = self._model_test, None, ""
+        if process is not None:
+            process.deleteLater()
+        try:
+            report = json.loads(report_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            self.reload()
+            self.status.setText(f"{alias} testi tamamlanamadı (bağlantı veya ayar sorunu).")
+            return
+        self.reload()
+        self.status.setText(f"{alias}: {_test_summary(report)}. {report.get('summary', '')}")
+
+    def _apply_layout(self) -> None:
+        ana, zor, pc = self._suggested
+        if not ana:
+            return
+        try:
+            raw = self._raw()
+        except (OSError, yaml.YAMLError):
+            self.status.setText("Ayarlar okunamadı.")
+            return
+        raw["primary_model"] = ana
+        if zor:
+            raw["hard_model"] = zor
+        else:
+            raw.pop("hard_model", None)
+        # Boş computer_use.model ana modeli kullanır; öneri ana modelse boş bırakılır.
+        computer = raw.setdefault("computer_use", {})
+        if isinstance(computer, dict):
+            computer["model"] = pc or ""
+        if not self._write(raw):
+            return
+        self.reload()
+        self.status.setText(
+            f"Düzen uygulandı. Beyin: {ana}" + (f", zor işler: {zor}" if zor else "")
+            + (f", bilgisayar kullanımı: {pc}" if pc else "") + "."
+        )
+        self.changed.emit()
+
+
+def _test_summary(report: dict[str, object]) -> str:
+    """'Test: temel 7/7 · zor 5/8 · ~5 sn → ana model' biçiminde tek satır."""
+    temel, zor, roles = report.get("temel"), report.get("zor"), report.get("roles")
+    if not isinstance(temel, dict) or not isinstance(zor, dict) or not isinstance(roles, list):
+        return ""
+    text = (
+        f"Test: temel {temel.get('passed')}/{temel.get('total')} · "
+        f"zor {zor.get('passed')}/{zor.get('total')}"
+    )
+    computer = report.get("bilgisayar")
+    if isinstance(computer, dict):
+        text += f" · bilgisayar {computer.get('passed')}/{computer.get('total')}"
+    text += f" · ~{report.get('median_seconds')} sn"
+    if report.get("dangerous_errors"):
+        return text + " · tehlikeli hata var → önerilmez"
+    named = [_ROLE_TEXT[role] for role in roles if role in _ROLE_TEXT]
+    return text + (" → " + " + ".join(named) if named else " → önerilmez")

@@ -202,6 +202,9 @@ class MemoryConfig(BaseModel):
     max_note_chars: int = Field(default=20000, ge=1000, le=200000)
     embedding_model: str | None = None
     embedding_cache_dir: Path | None = None
+    # Kullanıcının açıkça seçtiği vault'a göreli dosyalar (örn. Threads.md); yalnız
+    # memory_open_work aracından, safe_join ile okunur. exclude'u aşar (açık tercih).
+    companion_vault_files: tuple[str, ...] = ()
 
 
 class TelegramConfig(BaseModel):
@@ -309,6 +312,18 @@ class ProjectEntry(BaseModel):
     agent: str | None = None
     workdir: str | None = None
     mode: RunMode | None = None
+    # Bağımsız kontroller (test/build/lint): her biri argv listesidir, kabuk yoktur. Ajan
+    # bittikten sonra Artemis çalıştırır; ajanın "bitti" beyanı tek başına doğrulama sayılmaz.
+    # Yalnız YAML'dan gelir; model/araç bu listeyi kuramaz ve değiştiremez.
+    checks: tuple[tuple[str, ...], ...] = ()
+
+    @field_validator("checks")
+    @classmethod
+    def validate_checks(cls, value: tuple[tuple[str, ...], ...]) -> tuple[tuple[str, ...], ...]:
+        for argv in value:
+            if not argv or any(not part.strip() for part in argv):
+                raise ValueError("checks girdisi boş olmayan metinlerden oluşan argv olmalı")
+        return value
 
 
 class CodeAgentConfig(BaseModel):
@@ -322,9 +337,14 @@ class CodeAgentConfig(BaseModel):
     agents: dict[str, AgentProfile] = Field(default_factory=dict)
     default_agent: str = BUILTIN_AGENT
     default_mode: RunMode = "background"
+    # Proje kendi seçmediyse ajanın başlangıç klasörü (takma ad). "ikinci-beyin": ajan vault'ta
+    # başlar, kuralları/CLAUDE.md'yi yükler; değişiklik yine projenin deposunda yapılır (ADR 0049).
+    default_workdir: str = Field(default=OWN_REPO_ALIAS, pattern=r"^[a-z0-9_-]{1,32}$")
     workdirs: dict[str, Path] = Field(default_factory=dict)
     command: str = Field(default="claude", min_length=1)
     max_minutes: float = Field(default=20.0, ge=1, le=120)
+    # Her bağımsız kontrol komutu için üst süre (sn); aşılırsa kontrol başarısız sayılır.
+    check_timeout_seconds: float = Field(default=600.0, ge=1, le=3600)
     model: str | None = None  # Eski yönetici modeli ayarı; manager_model kazanır.
     manager_model: str | None = Field(default=None, min_length=1, max_length=128)
     coder_model: str | None = Field(default=None, min_length=1, max_length=128)
@@ -370,6 +390,8 @@ class CodeAgentConfig(BaseModel):
         # Örtük ikinci-beyin burada doğrulanamaz (vault_path başka bölümde); çözümleme
         # anında hata verir.
         folders = {OWN_REPO_ALIAS, VAULT_ALIAS, *self.workdirs}
+        if self.default_workdir not in folders:
+            raise ValueError(f"default_workdir tanımsız klasör: {self.default_workdir!r}")
         for alias, entry in self.project_entries.items():
             if entry.agent is not None and entry.agent not in agent_names:
                 raise ValueError(f"Proje '{alias}' tanımsız ajan kullanıyor: {entry.agent!r}")
@@ -392,7 +414,7 @@ class CodeAgentConfig(BaseModel):
 
     def project_workdir(self, alias: str) -> str:
         entry = self.project_entries.get(alias)
-        return entry.workdir if entry and entry.workdir else OWN_REPO_ALIAS
+        return entry.workdir if entry and entry.workdir else self.default_workdir
 
     def project_mode(self, alias: str) -> RunMode:
         entry = self.project_entries.get(alias)
@@ -607,6 +629,9 @@ class Settings(BaseModel):
     endpoints: dict[str, EndpointConfig] = Field(default_factory=dict)
     primary_model: str = ""
     fallback_model: str | None = None
+    # Zor işler modeli (model kademesi): boşsa her tur ana modelle gider. Tur başında
+    # brain/tiering.choose_model seçer; kullanılamazsa (ücret/bütçe/hata) ana modele düşülür.
+    hard_model: str | None = None
     max_steps: int = Field(default=8, ge=1, le=100)
     max_seconds: float = Field(default=60.0, gt=0, le=3600)
     provider_timeout_seconds: float = Field(default=15.0, gt=0, le=3600)
@@ -671,18 +696,26 @@ class Settings(BaseModel):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")
         if self.primary_model and self.primary_model not in self.models:
             raise ValueError("Birincil model models içinde tanımlanmalı")
+        if self.hard_model and self.hard_model not in self.models:
+            raise ValueError("Zor işler modeli models içinde tanımlanmalı")
         if any(
             self.models[name].kind == "image"
             for name in (
-                self.primary_model, self.computer_use.model, *self.computer_use.fallback_models
+                self.primary_model, self.hard_model or "", self.computer_use.model,
+                *self.computer_use.fallback_models,
             )
             if name in self.models
         ):
-            raise ValueError("Resim modeli birincil ya da bilgisayar kullanımı modeli olamaz")
+            raise ValueError(
+                "Resim modeli birincil, zor işler ya da bilgisayar kullanımı modeli olamaz"
+            )
         if self.fallback_model:
+            # Arıza yedeği herhangi bir sohbet modeli olabilir (ADR 0055): bulut modeline giden
+            # gizli içerik sağlayıcı sınırında zaten maskelenir. Yerel (ollama) yedek tam içeriği
+            # alır ve tek araçla sınırlıdır (router.local_fallback).
             fallback = self.models.get(self.fallback_model)
-            if fallback is None or fallback.provider != "ollama":
-                raise ValueError("Yedek model tanımlı bir Ollama modeli olmalı")
+            if fallback is None or fallback.kind != "chat":
+                raise ValueError("Yedek model tanımlı bir sohbet modeli olmalı")
         # Boş model "ana beyni kullan" demektir; o zaman ana modelin kendisi doğrulanır.
         vision_model = self.computer_use.model or self.primary_model
         if self.computer_use.enabled and vision_model not in self.models:

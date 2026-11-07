@@ -104,6 +104,44 @@ async def test_repeated_normalized_call_is_not_executed_twice(tmp_path):
     assert result.tool_calls == 1
 
 
+class FlakyTool(BaseTool):
+    """İlk çağrıda başarısız (eksik koşul), sonra başarılı; bir kez yeniden deneme sınanır."""
+
+    name = "flaky"
+    description = "İlk denemede başarısız olur."
+    args_model = Args
+    risk = Risk.READ_ONLY
+    attempts = 0
+    failures = 1
+
+    async def execute(self, arguments, context):
+        type(self).attempts += 1
+        if type(self).attempts <= type(self).failures:
+            return ToolResult(message="hedef bulunamadı")
+        return ToolResult(success=True, status="ok", message="ok")
+
+
+async def test_same_call_allowed_again_only_after_a_state_change(tmp_path):
+    # Gerçek Haiku/Sonnet: taşıma klasör yokken başarısız, klasör açılınca aynı taşıma ya da
+    # doğrulama için aynı listeleme yeniden istenince tur "tekrar" diye duruyordu (2026-11-07).
+    script = [call("flaky"), call("write", value=1), call("flaky"), Completion(content="tamam")]
+    loop, _ = make_loop(tmp_path, script, approved=True)
+    loop.gate.registry.register(FlakyTool)
+    FlakyTool.attempts, FlakyTool.failures = 0, 1
+    result = await loop.run("dene")
+    assert (result.stop_reason, result.tool_calls) == ("completed", 3)
+    # Arada değişiklik yoksa aynı çağrı yine durdurulur (sınırsız döngü yok).
+    FlakyTool.attempts, FlakyTool.failures = 0, 99
+    loop, _ = make_loop(tmp_path, [call("flaky"), call("flaky")])
+    loop.gate.registry.register(FlakyTool)
+    result = await loop.run("dene")
+    assert (result.stop_reason, result.tool_calls) == ("repeated_call", 1)
+    # Yan etkinin kendisi iki kez yürümez: aynı yazma hemen tekrar istenirse durur.
+    loop, _ = make_loop(tmp_path, [call("write", value=2), call("write", value=2)], approved=True)
+    result = await loop.run("yaz")
+    assert (result.stop_reason, result.tool_calls) == ("repeated_call", 1)
+
+
 async def test_denied_repeat_stops_without_second_approval(tmp_path):
     loop, _ = make_loop(tmp_path, [call("write"), call("write")])
     prompts = []

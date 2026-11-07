@@ -20,15 +20,16 @@ from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QWidget
 
+import artemis.channels.desktop.app as app_module
 import artemis.channels.desktop.bridge as bridge_module
 from artemis.brain.agent_loop import RunResult
 from artemis.channels.desktop.app import (
     _STYLE,
-    ApprovalDialog,
     DesktopWindow,
     StepBlock,
     build_window,
 )
+from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.bridge import Activity, Finished, State, VoiceCommand
 from artemis.channels.desktop.demo import DemoReadTool, DemoWriteTool
 from artemis.channels.desktop.themes import THEMES
@@ -606,9 +607,12 @@ def _deferred_settings_window(
 
     monkeypatch.setattr(bridge_module, "create_runtime", factory)
     monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
+    # Yoklama aralığı her tikte bu sabitlerden yeniden kurulur; zamanlayıcıya doğrudan
+    # setInterval ilk tikte 2 sn'ye geri döner ve yavaş CI'da 8 sn bekleme yetmez.
+    monkeypatch.setattr(app_module, "PROJECTS_POLL_ACTIVE_MS", 20)
+    monkeypatch.setattr(app_module, "PROJECTS_POLL_IDLE_MS", 20)
     window = build_window(path, app=app)
     _wait(app, lambda: window._worker_ready)
-    # Ertelenen kuruluşun boşta-yoklaması 2 sn; testte hızlandırılır.
     window._projects_timer.setInterval(20)
     return window, path, seen, blocker
 
@@ -691,6 +695,44 @@ def test_settings_apply_when_idle_rebuilds_immediately_and_pending_approval_defe
         window.settings_panel._apply()
         _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
         assert not window._config_restart_pending
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
+class _FakeTelegramService:
+    """Gerçek iş parçacığı/ağ yok: yalnız stop/start çağrılarını sayar."""
+
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    def stop(self) -> None:
+        self.calls.append("stop")
+
+    def start(self, _config_path: Path) -> bool:
+        self.calls.append("start")
+        return True
+
+
+def test_settings_apply_resyncs_embedded_telegram_once(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import artemis.channels.desktop.app as app_module
+
+    window, _path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    fake = _FakeTelegramService()
+    window._telegram_service = fake  # type: ignore[assignment]
+    monkeypatch.setattr(app_module, "should_run", lambda _config: True)
+    try:
+        # Uygula: gömülü kanal runtime'ı eski ayarla kalmasın, durup config'ten yeniden başlar.
+        window.settings_panel._apply()
+        _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
+        assert fake.calls == ["stop", "start"]
+        # Telegram ayarı değişince hemen yeniden kurulum da olsa çift yeniden başlatma olmaz.
+        fake.calls.clear()
+        window._telegram_changed()
+        _wait(app, lambda: len(seen) == 3 and window._worker_ready, timeout=8)
+        assert fake.calls == ["stop", "start"]
     finally:
         blocker.release.set()
         _close_cleanly(app, window)
@@ -1350,3 +1392,119 @@ def test_pet_workshop_model_button_opens_settings_model(app: QApplication, tmp_p
         assert window.settings_panel.sections.currentRow() == 1
     finally:
         _close_cleanly(app, window)
+
+
+def test_history_delete_clears_chat_bubbles_but_list_does_not(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from artemis.channels.desktop.bridge import ToolFinished
+    from artemis.tools.base import ToolResult
+
+    window = _window(app, tmp_path)
+    try:
+        window._active_request = "r"
+        window._append_chat("Siz", "eski balon")
+        for action, cleared in (("list", False), ("delete", True)):
+            result = ToolResult(
+                success=True, status="ok", message="ok",
+                data={"action": action, "retention_days": 0, "turns": 0},
+            )
+            window._handle_event(ToolFinished("r", "conversation_history", result))
+            assert ("eski balon" not in window.chat.toPlainText()) is cleared
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_code_agent_terminal_events_show_chat_notice_once(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        fields = {
+            "job_id": "j1", "project": "web", "status": "done", "verification": "accepted",
+            "summary": "Form düzeltildi.", "commits": ["abc"],
+        }
+        for _ in range(2):  # kilit bırakma gibi yollar aynı olayı tekrar yazabilir
+            window._handle_event(Activity(None, None, 1, "code_agent_done", fields))
+        text = window.chat.toPlainText()
+        assert text.count("Kod işi · web: Doğrulandı. Form düzeltildi.") == 1
+        window._handle_event(Activity(None, None, 2, "code_agent_done", {**fields, "job_id": "j2",
+                                      "status": "interrupted", "verification": "unverified"}))
+        assert "Kod işi · web: Kesintiye uğradı" in window.chat.toPlainText()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_job_notice_uses_injected_toast_off_gui_thread_and_reports_failure(
+    app: QApplication, tmp_path: Path
+) -> None:
+    import threading
+
+    from artemis.tools.toast import ToastOutcome
+
+    window = _window(app, tmp_path)
+    calls: list[tuple[str, str, bool]] = []
+
+    def fake_toast(title: str, body: str) -> ToastOutcome:
+        calls.append((title, body, threading.current_thread() is threading.main_thread()))
+        return ToastOutcome("disabled", "Windows bildirimleri bu uygulama için kapalı.")
+
+    window._toast = fake_toast
+    try:
+        fields = {"job_id": "j1", "project": "web", "status": "done", "summary": "Bitti."}
+        for _ in range(2):  # aynı iş/durum bir kez bildirilir
+            window._handle_event(Activity(None, None, 1, "code_agent_done", fields))
+        cancelled = {**fields, "job_id": "j2", "status": "cancelled"}
+        window._handle_event(Activity(None, None, 2, "code_agent_done", cancelled))
+        _wait(app, lambda: "bildirimi gösterilmedi" in window.chat.toPlainText())
+        assert len(calls) == 1 and calls[0][2] is False and "web" in calls[0][1]
+        assert "Windows bildirimleri bu uygulama için kapalı" in window.chat.toPlainText()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_projects_poll_interval_follows_active_jobs_and_locked_repo_blocks_start(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from artemis.channels.desktop.projects_panel import ProjectsPanel
+    from artemis.tools.base import ToolResult
+
+    window = _window(app, tmp_path)
+    try:
+        window._refresh_projects()
+        assert window._projects_timer.interval() == 15000
+        window.projects_panel._items = [("job", {"project": "p", "status": "running"})]
+        window._refresh_projects()
+        assert window._projects_timer.interval() == 2000
+    finally:
+        _close_cleanly(app, window)
+
+    panel = ProjectsPanel()
+    panel.set_busy(False)
+    panel._demo = False
+    spec = {"project": "p", "spec_id": "s"}
+    locked = {"job_id": "j", "project": "p", "status": "interrupted", "cleanup_pending": True,
+              "spec": {}}
+    panel.accept_result("code_agent_status", ToolResult(
+        success=True, status="ok", message="ok",
+        data={"projects": ["p"], "drafts": [spec], "jobs": [locked]},
+    ))
+    panel.items.setCurrentRow(0)  # taslak
+    assert not panel.start_button.isEnabled()
+    assert "Kilidi bırak" in panel.start_reason.text()
+    panel.close()
+
+
+def test_running_visible_job_shows_honest_close_window_line(app: QApplication) -> None:
+    from artemis.channels.desktop.projects_panel import ProjectsPanel
+    from artemis.tools.base import ToolResult
+
+    panel = ProjectsPanel()
+    panel.set_busy(False)
+    job = {"job_id": "j", "project": "p", "status": "running", "mode": "visible", "spec": {}}
+    panel.accept_result("code_agent_status", ToolResult(
+        success=True, status="ok", message="ok",
+        data={"projects": ["p"], "drafts": [], "jobs": [job]},
+    ))
+    assert "pencereyi kapatın" in panel.start_reason.text()
+    panel.close()

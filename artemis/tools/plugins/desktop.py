@@ -1,6 +1,5 @@
 """Görünür masaüstü eylemlerinde doğrulanmış başarı ile isteği ayırır."""
 
-import asyncio
 import subprocess
 import webbrowser
 from typing import cast
@@ -16,7 +15,7 @@ from artemis.tools.app_resolver import (
     alias_store,
     resolve_application,
 )
-from artemis.tools.base import BaseTool, ContentKind, Risk, ToolContext, ToolResult
+from artemis.tools.base import BaseTool, ContentKind, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.platform import UnsupportedPlatformError, WindowsDesktop, desktop_service
 from artemis.tools.processes import DesktopProcessResult, run_desktop_action
 from artemis.tools.registry import register_tool
@@ -178,11 +177,11 @@ class OpenApplication(BaseTool):
                 payload["file_path"] = document
             if "desktop" in context.services:
                 if document is None:
-                    await asyncio.to_thread(
+                    await run_blocking(
                         desktop_service(context.services).open_application, executable
                     )
                 else:
-                    await asyncio.to_thread(
+                    await run_blocking(
                         desktop_service(context.services).open_document, executable, document
                     )
             else:
@@ -246,7 +245,7 @@ class CloseApplication(BaseTool):
             )
         try:
             if "desktop" in context.services:
-                closed = await asyncio.to_thread(
+                closed = await run_blocking(
                     desktop_service(context.services).close_application, executable
                 )
             else:
@@ -280,7 +279,7 @@ class ReadClipboard(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         try:
             if "desktop" in context.services:
-                value = await asyncio.to_thread(desktop_service(context.services).read_clipboard)
+                value = await run_blocking(desktop_service(context.services).read_clipboard)
             else:
                 return process_result(
                     await run_default_action("read_clipboard", {}, context),
@@ -312,7 +311,7 @@ class WriteClipboard(BaseTool):
         args = cast(ClipboardArguments, arguments)
         try:
             if "desktop" in context.services:
-                written = await asyncio.to_thread(
+                written = await run_blocking(
                     desktop_service(context.services).write_clipboard, args.text
                 )
             else:
@@ -356,7 +355,7 @@ class OpenURL(BaseTool):
             opener = context.services.get("url_opener")
             if opener is None:
                 if "desktop" in context.services:
-                    await asyncio.to_thread(
+                    await run_blocking(
                         desktop_service(context.services).open_browser, args.url
                     )
                 else:
@@ -364,7 +363,7 @@ class OpenURL(BaseTool):
                         await run_default_action("open_browser", {"url": args.url}, context)
                     )
             else:
-                submitted = await asyncio.to_thread(opener, args.url)
+                submitted = await run_blocking(opener, args.url)
                 if not submitted:
                     return ToolResult(
                         status="error", message="Tarayıcı açma isteğini kabul etmedi."

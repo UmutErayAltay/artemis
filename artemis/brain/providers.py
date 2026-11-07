@@ -498,6 +498,9 @@ def _chat_completion(
     else:
         raw = _object(data.get("usage"))
         usage = _usage(model, raw.get("prompt_tokens"), raw.get("completion_tokens"))
+        cached = _object(raw.get("prompt_tokens_details") or {}).get("cached_tokens")
+        if isinstance(cached, int) and not isinstance(cached, bool) and cached >= 0:
+            usage = usage.model_copy(update={"cached_input_tokens": cached})
         if openrouter and "cost" in raw:
             usage = usage.model_copy(update={"cost_usd": _reported_cost(raw["cost"])})
     return Completion(
@@ -1043,6 +1046,7 @@ class ClaudeCliProvider:
                     "input_tokens", "cache_creation_input_tokens", "cache_read_input_tokens"
                 ),
                 output_tokens=count("output_tokens"),
+                cached_input_tokens=count("cache_read_input_tokens"),
                 cost_usd=Decimal(0),  # abonelik; CLI'nin total_cost_usd'si API karşılığı tahmindir
             ),
             provider="claude_cli",

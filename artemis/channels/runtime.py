@@ -14,6 +14,7 @@ from artemis.brain.conversation import ConversationContext
 from artemis.brain.providers import Provider, build_provider
 from artemis.channels.runner import CommandRunner
 from artemis.config.settings import Settings, load_settings
+from artemis.memory.companion import ensure_skeleton
 from artemis.memory.store import MemoryStore
 from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 from artemis.safety.audit import AuditLog
@@ -118,6 +119,11 @@ def create_runtime(
         if primary is not None:
             # Geçmiş modelin penceresinin yarısını aşmamalı; yanıt ve araç şeması de sığmalı.
             budget = min(budget, primary.context_window // 2)
+        try:
+            # Artemis'in kendi hafıza iskeleti (ADR 0054); hata açılışı bozmaz.
+            ensure_skeleton(loaded.state_dir)
+        except OSError as error:
+            log.emit("companion_error", error=str(error))
         store: MemoryStore | None = None
         if loaded.persist_memory:
             try:

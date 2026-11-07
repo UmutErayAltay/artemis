@@ -31,6 +31,7 @@ from artemis.channels.desktop.projects_panel import (
     make_scroll_page,
 )
 from artemis.tools.base import ToolResult
+from artemis.tools.plugins.companion import ChangesArguments, RuleRemoveArguments
 from artemis.tools.plugins.history import HistoryArguments
 from artemis.tools.plugins.reminders import ReminderCancelArguments, ReminderListArguments
 
@@ -43,7 +44,6 @@ _STATES = {
     "uncertain": "Teslim doğrulanamadı",
     "cancelled": "İptal edildi",
 }
-
 
 def _fold(text: str) -> str:
     """Türkçe i/ı/İ/I ayrımını arama için eşitler; salt casefold 'IŞIK' ile 'ışık'ı eşlemez."""
@@ -65,6 +65,10 @@ class DataPanel(QWidget):
         self._loaded_days = 0
         self._turns: list[dict[str, Any]] = []
         self._turn_total = 0
+        self._memory_loaded = False
+        self._memory_pending = False
+        self._memory_keep_notice = False
+        self._undo_buttons: list[QPushButton] = []
         outer = make_scroll_page(self)
         body = QWidget()
         body.setMaximumWidth(self.MAX_CONTENT_WIDTH)
@@ -193,6 +197,35 @@ class DataPanel(QWidget):
         self.items_stack.setCurrentIndex(1)
         rem.addWidget(self.items_stack, 1)
         layout.addWidget(reminder_card)
+
+        # Kart 3: Artemis'in kendi hafıza dosyalarına yazdıkları; geri alma araç kapısından geçer.
+        memory_card, mem = make_card()
+        mem_header = QHBoxLayout()
+        mem_header.setSpacing(8)
+        mem_header.addWidget(make_label("Kurallar", "sectionTitle"))
+        mem_header.addStretch()
+        self.memory_refresh = QPushButton("Yenile")
+        self.memory_refresh.setAccessibleName("Kuralları yenile")
+        self.memory_refresh.clicked.connect(self._request_memory)
+        mem_header.addWidget(self.memory_refresh)
+        mem.addLayout(mem_header)
+        mem.addWidget(
+            make_label(
+                "Artemis'in şu an uyduğu kalıcı kurallar. Kaldır onay sorar ve kuralı siler.",
+                "fieldLabel",
+            )
+        )
+        self.memory_rows = QVBoxLayout()
+        self.memory_rows.setSpacing(8)
+        rows_box = QWidget()
+        rows_box.setLayout(self.memory_rows)
+        self.memory_empty = EmptyState("Henüz yüklenmedi", "Görmek için Yenile'ye bas.")
+        self.memory_stack = QStackedWidget()
+        self.memory_stack.addWidget(rows_box)
+        self.memory_stack.addWidget(self.memory_empty)
+        self.memory_stack.setCurrentIndex(1)
+        mem.addWidget(self.memory_stack)
+        layout.addWidget(memory_card)
         self.notice = make_label("Verileri görmek için ilgili yenileme düğmesini kullanın.", "meta")
         layout.addWidget(self.notice)
 
@@ -228,6 +261,51 @@ class DataPanel(QWidget):
 
     def _request_history(self) -> None:
         self.tool_requested.emit("conversation_history", HistoryArguments(action="list"))
+
+    def _request_memory(self) -> None:
+        self.tool_requested.emit("memory_changes", ChangesArguments(limit=20))
+
+    def _remove_clicked(self) -> None:
+        button = self.sender()
+        if button is not None:
+            self.tool_requested.emit(
+                "memory_rule_remove", RuleRemoveArguments(text=button.property("rule"))
+            )
+
+    def _render_memory(self, rules: list[str]) -> None:
+        while self.memory_rows.count():
+            child = self.memory_rows.takeAt(0)
+            widget = child.widget() if child is not None else None
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+        self._undo_buttons = []
+        for rule in rules:
+            row = QFrame()
+            row.setObjectName("card")
+            lay = QHBoxLayout(row)
+            lay.setContentsMargins(12, 8, 12, 8)
+            lay.setSpacing(8)
+            text = make_label(rule, "fieldLabel")
+            text.setWordWrap(True)
+            lay.addWidget(text, 1)
+            remove = QPushButton("Kaldır")
+            remove.setAccessibleName(f"Kuralı kaldır: {rule}")
+            remove.setProperty("rule", rule)
+            remove.clicked.connect(self._remove_clicked)
+            self._undo_buttons.append(remove)
+            lay.addWidget(remove, 0, Qt.AlignmentFlag.AlignTop)
+            self.memory_rows.addWidget(row)
+        if rules:
+            self.memory_stack.setCurrentIndex(0)
+        else:
+            self.memory_empty.set_text("Kural yok", "Artemis'e kalıcı bir kural söylemedin.")
+            self.memory_stack.setCurrentIndex(1)
+
+    def _flush_memory_request(self) -> None:
+        if self._memory_pending and not self._busy and not self._demo:
+            self._memory_pending = False
+            self._request_memory()
 
     def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt adı)
         super().showEvent(event)
@@ -316,8 +394,14 @@ class DataPanel(QWidget):
             }
         )
         self.retry_warning.setVisible(self.retry.isEnabled())
+        self.memory_refresh.setEnabled(enabled)
+        for button in self._undo_buttons:
+            button.setEnabled(enabled)
         if enabled:
             self._schedule_autoload()
+            if self._memory_pending:
+                # Tür/yeniden giriş nedeniyle doğrudan emit yok; olay döngüsüne ertelenir.
+                QTimer.singleShot(0, self._flush_memory_request)
 
     def _retry(self) -> None:
         item = self.items.currentItem()
@@ -328,10 +412,20 @@ class DataPanel(QWidget):
             )
 
     def accept_result(self, tool_name: str, result: ToolResult) -> None:
-        self.notice.setText(result.message)
+        if tool_name == "memory_changes" and self._memory_keep_notice:
+            self._memory_keep_notice = False  # geri alma mesajı liste mesajıyla ezilmesin
+        else:
+            self.notice.setText(result.message)
+        if tool_name in ("memory_change_undo", "memory_rule_remove", "memory_rule_add"):
+            # Çakışma dahil her sonuçta liste tazelenir; iş bitip meşguliyet kalkınca istenir.
+            self._memory_pending = True
+            self._memory_keep_notice = True
         if not result.success:
             return
         if tool_name == "conversation_history":
+            if not self._memory_loaded:
+                self._memory_loaded = True
+                self._memory_pending = True
             self._history_loaded = True
             self._loaded_days = result.data["retention_days"]
             self.days.setValue(result.data["retention_days"])
@@ -353,6 +447,8 @@ class DataPanel(QWidget):
             else:
                 self.items_empty.set_text("Kayıt yok", "Bu filtreye uyan hatırlatma yok.")
                 self.items_stack.setCurrentIndex(1)
+        elif tool_name == "memory_changes":
+            self._render_memory(list(result.data.get("rules", [])))
         elif tool_name == "reminder_retry":
             # Aynı eski kaydı ikinci kez tıklamayı önle; geçmiş yenilenince seçilebilir.
             self.items.setCurrentRow(-1)

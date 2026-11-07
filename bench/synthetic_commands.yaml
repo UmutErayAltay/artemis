@@ -28,6 +28,8 @@ templates:
   - {id: open_hesitant, text: "{wake}, şey, {app} uygulamasını aç.", wake: true, intent: open, target: true, category: hesitation}
   - {id: close, text: "{wake}, {app} uygulamasını kapat.", wake: true, intent: close, target: true, category: command}
   - {id: negation, text: "{wake}, {app} uygulamasını açma.", wake: true, intent: none, target: false, negation: true, category: negation}
+  # Karma olumsuzluk: hedef {app}; {other} reddedilir, açılırsa yanlış hedeftir.
+  - {id: negation_mixed, text: "{wake}, {other} uygulamasını açma, {app} uygulamasını aç.", wake: true, intent: open, target: true, negation: true, category: negation}
   - {id: correction, text: "{wake}, {other} değil, {app} uygulamasını aç.", wake: true, intent: open, target: true, correction: true, category: correction}
   - {id: question, text: "{wake}, {app} açık mı?", wake: true, intent: question, target: false, category: question}
   - {id: mention, text: "Dün {app} uygulamasında güzel bir şey izledim.", wake: false, intent: none, target: false, category: mention}

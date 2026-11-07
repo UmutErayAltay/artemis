@@ -331,7 +331,7 @@ async def test_briefing_runs_unattended_with_fresh_context_and_cannot_side_effec
     assert panel.items == [("Brifing · sabah", "Günaydın, bugün takvim boş.")]
     assert not (runtime.settings.workspace / "not.txt").exists()
     first_request: list[Message] = provider.requests[0]
-    assert first_request[-1].content.startswith(BRIEFING_PREFIX)
+    assert first_request[-1].content.split("] ", 1)[1].startswith(BRIEFING_PREFIX)
     assert "Bugünü özetle." in first_request[-1].content
     # Kullanıcının panel geçmişine eklenmez.
     assert runtime.runner.conversation.render().turns == 0

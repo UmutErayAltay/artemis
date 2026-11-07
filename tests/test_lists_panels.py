@@ -24,6 +24,7 @@ from artemis.channels.desktop.projects_panel import (
     make_page_header,
 )
 from artemis.tools.base import ToolResult
+from artemis.tools.plugins.companion import RuleRemoveArguments
 from artemis.tools.plugins.history import HistoryArguments
 
 
@@ -330,3 +331,43 @@ def test_list_qss_uses_tokens_in_every_theme() -> None:
         css = themes.stylesheet(name)
         for selector in ("QLabel#statusChip", "QFrame#dangerZone", "QPushButton#disclosure"):
             assert selector in css
+
+
+# --- Kurallar -----------------------------------------------------------------------------
+
+
+def test_memory_rules_render_rows(app: QApplication) -> None:
+    panel = DataPanel()
+    panel.set_busy(False)
+    assert panel.memory_stack.currentIndex() == 1
+    rules = ["Emoji kullanma.", "Kısa yaz."]
+    panel.accept_result("memory_changes", _ok({"changes": [], "rules": rules}))
+    assert panel.memory_stack.currentIndex() == 0
+    assert len(panel._undo_buttons) == 2
+    texts = [label.text() for label in panel.findChildren(QLabel)]
+    assert "Emoji kullanma." in texts and "Kısa yaz." in texts
+    panel.accept_result("memory_changes", _ok({"changes": [], "rules": []}))
+    assert panel.memory_stack.currentIndex() == 1
+    assert panel.memory_empty.title_label.text() == "Kural yok"
+
+
+def test_memory_rule_remove_emits_text_then_reloads_keeping_message(app: QApplication) -> None:
+    panel = DataPanel()
+    panel.set_busy(False)
+    panel.accept_result("memory_changes", _ok({"changes": [], "rules": ["Emoji kullanma."]}))
+    seen: list[Any] = []
+    panel.tool_requested.connect(lambda name, args: seen.append((name, args)))
+    panel._undo_buttons[0].click()
+    assert seen == [("memory_rule_remove", RuleRemoveArguments(text="Emoji kullanma."))]
+    seen.clear()
+    panel.set_busy(True)
+    panel.accept_result(
+        "memory_rule_remove",
+        ToolResult(success=False, status="error", message="Bu kural Kimlik'te yok."),
+    )
+    assert seen == []  # meşgulken istenmez
+    panel.set_busy(False)
+    app.processEvents()
+    assert [name for name, _ in seen] == ["memory_changes"]
+    panel.accept_result("memory_changes", _ok({"changes": [], "rules": []}))
+    assert panel.notice.text() == "Bu kural Kimlik'te yok."

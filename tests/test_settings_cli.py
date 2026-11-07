@@ -180,7 +180,9 @@ async def test_cli_yeni_resets_history_without_starting_a_turn(tmp_path, monkeyp
 
     # /yeni modele gitmez; yalnız sonraki turun geçmişini boşaltır.
     assert len(provider.requests) == 2
-    assert [m.content for m in provider.requests[1] if m.role == "user"] == ["ikinci"]
+    assert [m.content.split("] ", 1)[1] for m in provider.requests[1] if m.role == "user"] == [
+        "ikinci"
+    ]
     assert "Yeni sohbet başladı" in capsys.readouterr().out
     audit_lines = (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
     records = [json.loads(line) for line in audit_lines]

@@ -7,6 +7,7 @@ from typing import Literal, Self, cast
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from artemis.config.settings import OWN_REPO_ALIAS, CodeAgentConfig, ConfigChoiceError
+from artemis.safety.paths import safe_join
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.code_agent_backends import resolve_executable, visible_supported
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
@@ -26,6 +27,11 @@ class PrepareArguments(BaseModel):
     workdir: str | None = Field(default=None, pattern=r"^[a-z0-9_-]{1,32}$")
     # Çalışma kipi: verilmezse projenin/genel varsayılanı (arka plan) kullanılır.
     mode: Literal["background", "visible"] | None = None
+
+
+class ProjectContextArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    project: str = Field(pattern=r"^[a-z0-9_-]{1,32}$")
 
 
 class StartArguments(BaseModel):
@@ -57,9 +63,18 @@ class CancelArguments(BaseModel):
     job_id: str = Field(min_length=1, max_length=32)
 
 
+class ReleaseArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    job_id: str = Field(min_length=1, max_length=32)
+
+
 class DiscardArguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
     spec_id: str = Field(min_length=1, max_length=64)
+
+
+class ClearFinishedArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 class AnswerArguments(CancelArguments):
@@ -105,7 +120,11 @@ class CodeAgentPrepare(BaseTool):
     description = (
         "Proje, görev, kapsam ve kabul ölçütlerini içeren değişmez yerel taslak hazırlar. "
         "İsteğe bağlı agent ve workdir yalnız yapılandırılmış takma adlardır (yol verme). "
-        "Eksik ayrıntıları önce kullanıcıya sorun. Kodlayıcı veya subprocess başlatmaz. "
+        "Kullanıcıya soru sormadan önce code_agent_project_context ile projeyi tanı. "
+        "Çağırmadan önce eksik ayrıntıları kullanıcıya TEK TEK, her mesajda bir soru olarak "
+        "sorun: önce görev (ne yapılacak), sonra kapsam (hangi dosya/klasör), sonra kabul "
+        "ölçütleri (nasıl anlaşılır); kullanıcı zaten verdiyse o soruyu atlayın, uydurmayın. "
+        "Kodlayıcı veya subprocess başlatmaz. "
         "Sonraki code_agent_start çağrısı dönen spec'in tam kopyasını taşımalıdır."
     )
     args_model = PrepareArguments
@@ -162,6 +181,63 @@ class CodeAgentPrepare(BaseTool):
 
 
 @register_tool
+class CodeAgentProjectContext(BaseTool):
+    name = "code_agent_project_context"
+    label = "Proje bağlamı oku"
+    done_label = "Proje bağlamı okundu"
+    description = (
+        "İzinli bir projenin CLAUDE.md ve README.md dosyalarının başını döndürür. "
+        "code_agent_prepare öncesi, kullanıcıya soru sormadan projeyi tanımak için kullan."
+    )
+    args_model = ProjectContextArguments
+    risk = Risk.READ_ONLY
+    # Proje dosyaları dış içeriktir (web'den yapıştırılmış metin içerebilir).
+    external = True
+    content_kind = "file"
+
+    _HEAD_CHARS = 1000
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        args = cast(ProjectContextArguments, arguments)
+        # Klasörden keşfedilen projeler de bulunsun (status çağrısı beklenmez); salt yerel tarama.
+        known = {
+            **context.services.get("code_agent_project_paths", {}),
+            **available_projects(context.settings.code_agent),
+        }
+        repo = known.get(args.project)
+        if repo is None:
+            return ToolResult(
+                message="İzinli proje bulunamadı; code_agent_status ile proje adlarına bakın."
+            )
+        heads: dict[str, str] = {}
+        for name in ("CLAUDE.md", "README.md"):
+            try:
+                path = safe_join(repo, name)
+                if not path.is_file():
+                    continue
+                with path.open("r", encoding="utf-8") as stream:
+                    heads[name] = stream.read(self._HEAD_CHARS)
+            except (OSError, ValueError, UnicodeError):
+                continue
+        if not heads:
+            return ToolResult(message="Projede okunabilir CLAUDE.md veya README.md yok.")
+        return ToolResult(
+            success=True,
+            status="ok",
+            # Sabit yönlendirme dosyadan değil araçtan gelir: Haiku açıklamadaki "tek tek sor"u
+            # atlayıp üç soruyu birden soruyordu (2026-11-07 gerçek deneme); sonuç anında hatırlat.
+            message=(
+                f"{', '.join(heads)} okundu. Sıradaki adım: bu mesajda YALNIZ bir soru sor "
+                "(önce görev; kullanıcı verdiyse kapsam, o da varsa kabul ölçütü). Liste yapma, "
+                "diğer soruları sonraki mesajlara bırak."
+            ),
+            data={"project": args.project, "files": heads},
+            external=True,
+            content_kind="file",
+        )
+
+
+@register_tool
 class CodeAgentStart(BaseTool):
     name = "code_agent_start"
     label = "Onaylanan projeyi başlat"
@@ -201,6 +277,7 @@ class CodeAgentStart(BaseTool):
             return ToolResult(
                 message="Ayarlar değişti; onaylanan yollar geçersiz. Yeni taslak hazırlayın."
             )
+        entry = config.project_entries.get(alias)
         try:
             job_id = jobs.start(
                 alias,
@@ -210,6 +287,8 @@ class CodeAgentStart(BaseTool):
                 workdir=None if workdir_alias == OWN_REPO_ALIAS else workdir,
                 command=config.command,
                 max_minutes=config.max_minutes,
+                checks=entry.checks if entry else (),
+                check_timeout=config.check_timeout_seconds,
                 model=config.model,
                 manager_model=config.manager_model,
                 coder_model=config.coder_model,
@@ -318,6 +397,38 @@ class CodeAgentCancel(BaseTool):
 
 
 @register_tool
+class CodeAgentRelease(BaseTool):
+    name = "code_agent_release"
+    label = "Depo kilidini bırak"
+    done_label = "Depo kilidi bırakıldı"
+    description = (
+        "Artemis çöktükten sonra kalan belirsiz depo kilidini bırakır; ajanı durdurmaz, "
+        "dosyalara dokunmaz. Önce o repoda hiçbir ajan penceresi veya süreci çalışmadığından "
+        "emin ol."
+    )
+    args_model = ReleaseArguments
+    # Yetim bir ajan süreci kuramsal olarak hâlâ repoyu düzenliyor olabilir. Windows'ta
+    # Artemis ölünce Job Object süreç ağacını öldürür, ama bunu doğrulayamayız; bu yüzden
+    # kilidi bırakmak kullanıcının açık onayını ister.
+    risk = Risk.CONFIRM_REQUIRED
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        args = cast(ReleaseArguments, arguments)
+        jobs = _jobs(context)
+        released = None if jobs is None else jobs.release(args.job_id)
+        if released is None:
+            return ToolResult(message=f"Kilidi bırakılabilir iş bulunamadı: {args.job_id}.")
+        leftover = {True: "var", False: "yok", None: "bilinmiyor"}[released["leftover_changes"]]
+        return ToolResult(
+            success=True,
+            status="ok",
+            message=f"İş {args.job_id} için depo kilidi bırakıldı; "
+            f"commitlenmemiş değişiklik {leftover}.",
+            data={"job_id": args.job_id, "leftover_changes": released["leftover_changes"]},
+        )
+
+
+@register_tool
 class CodeAgentDiscard(BaseTool):
     name = "code_agent_discard"
     label = "Taslağı sil"
@@ -345,4 +456,33 @@ class CodeAgentDiscard(BaseTool):
             status="ok",
             message="Taslak silindi.",
             data={"spec_id": args.spec_id},
+        )
+
+
+@register_tool
+class CodeAgentClearFinished(BaseTool):
+    name = "code_agent_clear_finished"
+    label = "Biten işleri temizle"
+    done_label = "Biten işler temizlendi"
+    description = (
+        "Bitmiş (tamamlandı, hata, kesildi, iptal, zaman aşımı) ve depo kilidi serbest "
+        "iş kayıtlarını listeden siler. Aktif, bekleyen veya kilitli işlere ve repoya dokunmaz."
+    )
+    args_model = ClearFinishedArguments
+    # Yalnız yerel iş üstverisini siler; denetim günlüğündeki olaylar kalır.
+    risk = Risk.SIDE_EFFECT
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        jobs = _jobs(context)
+        try:
+            removed = [] if jobs is None else jobs.clear_finished()
+        except CodeAgentError as error:
+            return ToolResult(message=str(error))
+        if not removed:
+            return ToolResult(message="Temizlenecek bitmiş iş yok.")
+        return ToolResult(
+            success=True,
+            status="ok",
+            message=f"{len(removed)} bitmiş iş kaydı silindi.",
+            data={"job_ids": removed},
         )

@@ -11,6 +11,7 @@ import asyncio
 import json
 import logging
 import sys
+import threading
 import time
 import traceback
 from collections.abc import Callable, Iterator
@@ -85,6 +86,40 @@ class SideEffectWriteTool(ConfirmWriteTool):
     label = "Yan etki testi"
     description = "Dış içerik sonrası yan etkiyi sınayan sahte yazma aracı."
     risk: ClassVar[Risk] = Risk.SIDE_EFFECT
+
+
+class SentTool(ConfirmWriteTool):
+    """Komut gönderildi ama sonucu doğrulanamadı (kural 5): status="sent"."""
+
+    name = "telegram_sent_test"
+    label = "Gönderim testi"
+    description = "Doğrulanmamış gönderimi sınayan sahte araç."
+    risk: ClassVar[Risk] = Risk.SIDE_EFFECT
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        return ToolResult(success=False, status="sent", message="Komut gönderildi.")
+
+
+class FailTool(SentTool):
+    name = "telegram_fail_test"
+    label = "Hata testi"
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        return ToolResult(success=False, status="error", message="GIZLI-HATA-AYRINTISI")
+
+
+class SlowTool(SentTool):
+    """Bitmeyen yan etki: durdurma turu iptal etmezse sonsuza dek sürer."""
+
+    name = "telegram_slow_test"
+    label = "Yavaş test"
+    started: ClassVar[asyncio.Event | None] = None
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        assert SlowTool.started is not None
+        SlowTool.started.set()
+        await asyncio.sleep(60)
+        return ToolResult(success=True, status="ok", message="bitti")
 
 
 def registry_with(*classes: type[BaseTool]) -> ToolRegistry:
@@ -314,6 +349,73 @@ async def test_long_reply_is_split_and_every_chunk_is_audited(make_harness) -> N
     assert all(event["kind"] == "reply" and event["ok"] is True for event in outs)
 
 
+async def test_unverified_and_failed_tools_get_an_honest_footer_without_arguments(
+    make_harness,
+) -> None:
+    harness = make_harness()
+    provider = scripted(
+        call("telegram_sent_test", "s1", path="gizli-yol.txt", content="GIZLI-ARGUMAN"),
+        call("telegram_fail_test", "f1", path="b.txt"),
+        answer("Hepsi tamam, yaptım."),
+    )
+    channel, _ = harness.channel(provider, registry_with(SentTool, FailTool))
+
+    await channel.handle_update(make_message(1, "gönder", date=int(time.time())))
+
+    [reply] = [body["text"] for body in sent_bodies(harness.fake)]
+    assert reply.startswith("Hepsi tamam, yaptım.")
+    assert "Gönderildi, sonucu doğrulanmadı: Gönderim testi" in reply
+    assert "Başarısız: Hata testi" in reply
+    assert "GIZLI" not in reply  # ne argüman ne araç çıktısı
+
+
+async def test_footer_is_absent_when_every_tool_succeeded_or_is_read_only(make_harness) -> None:
+    harness = make_harness()
+    (harness.workspace / "kaynak.txt").write_text("x", encoding="utf-8")
+    provider = scripted(
+        call("telegram_side_effect_test", "w1", path="a.txt", content="x"),
+        call("read_file", "r1", path="yok.txt"),  # READ_ONLY ve başarısız: footer gerektirmez
+        answer("Yazıldı."),
+    )
+    channel, _ = harness.channel(provider, registry_with(SideEffectWriteTool, ReadFile))
+
+    await channel.handle_update(make_message(1, "yaz", date=int(time.time())))
+
+    assert [body["text"] for body in sent_bodies(harness.fake)] == ["Yazıldı."]
+
+
+async def test_footer_never_added_to_private_withheld_answer(make_harness) -> None:
+    harness = make_harness()
+    (harness.workspace / "kaynak.txt").write_text("GIZLI-ICERIK-7731", encoding="utf-8")
+    provider = scripted(
+        call("telegram_sent_test", "s1", path="a.txt"),
+        call("read_file", "r1", path="kaynak.txt"),
+        answer("Dosyada yazan: GIZLI-ICERIK-7731"),
+    )
+    channel, _ = harness.channel(provider, registry_with(SentTool, ReadFile))
+
+    await channel.handle_update(make_message(1, "gönder ve oku", date=int(time.time())))
+
+    [reply] = [body["text"] for body in sent_bodies(harness.fake)]
+    assert "gönderilmedi" in reply and "doğrulanmadı" not in reply
+    assert "GIZLI-ICERIK-7731" not in everything_sent(harness.fake)
+
+
+async def test_footer_respects_the_message_limit(make_harness) -> None:
+    harness = make_harness()
+    provider = scripted(
+        call("telegram_sent_test", "s1", path="a.txt"),
+        answer("y" * (TELEGRAM_TEXT_LIMIT - 5)),
+    )
+    channel, _ = harness.channel(provider, registry_with(SentTool))
+
+    await channel.handle_update(make_message(1, "uzun", date=int(time.time())))
+
+    chunks = [body["text"] for body in sent_bodies(harness.fake)]
+    assert len(chunks) == 2 and all(len(chunk) <= TELEGRAM_TEXT_LIMIT for chunk in chunks)
+    assert "Gönderim testi" in chunks[-1]
+
+
 async def test_private_reply_is_withheld_and_content_never_leaves(make_harness) -> None:
     harness = make_harness()
     (harness.workspace / "kaynak.txt").write_text("GIZLI-ICERIK-7731", encoding="utf-8")
@@ -496,6 +598,46 @@ async def test_polling_error_during_approval_denies(make_harness) -> None:
     events = [event["event"] for event in harness.audit_events()]
     assert "approval_error" in events
     assert "telegram_poll_error" in events
+
+
+async def test_stop_flag_denies_pending_approval_promptly(make_harness) -> None:
+    harness = make_harness(approval_timeout=30.0)
+    provider = scripted(
+        call("telegram_confirm_test", "c1", path="kapan.txt", content="x"),
+        answer("Yazmadım."),
+    )
+    channel, _ = harness.channel(provider, registry_with(ConfirmWriteTool))
+    # Onay beklemesi olay döngüsü iş parçacığını bloklar; bayrak başka iş parçacığından gelir.
+    timer = threading.Timer(0.3, channel.stop_flag.set)
+    timer.start()
+
+    started = time.monotonic()
+    await channel.handle_update(make_message(1, "kapan.txt oluştur", date=int(time.time())))
+    timer.join()
+
+    assert time.monotonic() - started < 5.0  # 30 sn'lik onay süresini beklemedi
+    assert not (harness.workspace / "kapan.txt").exists()
+    edits = method_bodies(harness.fake, "editMessageText")
+    assert len(edits) == 1 and "Kanal kapanıyor" in edits[0]["text"]
+    approvals = [e for e in harness.audit_events() if e["event"] == "approval"]
+    assert [e["approved"] for e in approvals] == [False]
+
+
+async def test_stop_during_running_tool_cancels_turn_and_writes_audit(make_harness) -> None:
+    harness = make_harness()
+    SlowTool.started = asyncio.Event()
+    provider = scripted(call("telegram_slow_test", "s1", path="a"), answer("x"))
+    channel, _ = harness.channel(provider, registry_with(SlowTool))
+    harness.fake.queue_message("yavaş araç")
+    stop = asyncio.Event()
+    serving = asyncio.create_task(channel.serve(stop))
+
+    await asyncio.wait_for(SlowTool.started.wait(), 5)
+    stop.set()
+    assert await asyncio.wait_for(serving, 8) is None  # 60 sn'lik aracı beklemedi
+
+    ends = [e for e in harness.audit_events() if e["event"] == "turn_end"]
+    assert [e["stop_reason"] for e in ends] == ["cancelled"]
 
 
 async def test_oversized_arguments_are_refused_without_buttons(make_harness) -> None:

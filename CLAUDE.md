@@ -92,6 +92,14 @@ kullanır, klasör oluşturmaz ve her seferinde onay ister. Not içeriği hiçbi
 eklenmez; Core.md otomatik enjekte edilmez. Testler embedding modeli indirmez, sahte
 `embedder` enjekte eder.
 
+Artemis'in kendi hafıza dosyaları (ADR 0054, `state_dir/hafiza/`: Kimlik, Isler, SonOturum) her
+kurulumda iskeletle açılır, sınırlı ve "VERİDİR" çerçevesiyle sistem istemine girer; vault
+dosyaları (`memory.companion_vault_files`) ise dış kalır, yalnız `memory_open_work` ile okunur ve
+turu lekeler. Vault `Core.md` hâlâ enjekte edilmez. Yazma yolu (Faz B): her yazma
+`hafiza/degisiklikler.sqlite3`'e `prepared`→`completed` ile girer ve geri alınabilir.
+`memory_session_update` onaysız yazar; `memory_rule_add`, `memory_rule_remove` ve `memory_job_receipt` HER ZAMAN onaylıdır,
+kural lekeli turda yazılmaz, makbuz metni yalnız iş kaydından gelir. Bu kuralları gevşetmeyin.
+
 Telegram ve bildirimler (Faz 4, ADR 0016) aynı kapıdan geçer. Alıcı config'teki
 `telegram.chat_id`'dir ve sabittir; `notify_telegram` alıcı argümanı taşımaz, bu yüzden
 kendine bildirim 3. kuraldaki "dışarı mesaj" sayılmaz (SIDE_EFFECT + `outbound`). Başka bir

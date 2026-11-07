@@ -114,6 +114,58 @@ async def test_cancel_current_interrupts_tool_and_audits_unknown_completion(tmp_
     assert (await runner.run("devam")).text == "Sonraki tur çalıştı."
 
 
+async def test_cancelled_thread_side_effect_blocks_next_turn_until_it_finishes(tmp_path):
+    """İptal yalnız beklemeyi keser; thread'deki PowerShell/OS işi sürer. Bitene dek yeni tur
+    başlamamalı (CLAUDE.md: temizlenmeden yeni tur yok)."""
+    import threading
+
+    from artemis.tools.base import run_blocking
+
+    started = threading.Event()
+    release = threading.Event()
+
+    class ThreadTool(BaseTool):
+        name = "thread_side_effect"
+        description = "Thread'de süren yan etkiyi taklit eder."
+        args_model = EmptyArgs
+        risk = Risk.SIDE_EFFECT
+
+        async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+            def work() -> None:
+                started.set()
+                release.wait(5)
+
+            await run_blocking(work)
+            return ToolResult(success=True, status="ok", message="Bitti.")
+
+    class ToolProvider:
+        calls = 0
+
+        async def complete(self, messages, tools, *, timeout):
+            self.calls += 1
+            if self.calls == 1:
+                return Completion(
+                    tool_calls=[ToolCall(id="t-1", name="thread_side_effect", arguments={})]
+                )
+            return Completion(content="Sonraki tur çalıştı.")
+
+    runner, _context = make_runner(tmp_path, ToolProvider(), tool=ThreadTool)
+    active = asyncio.create_task(runner.run("yap"))
+    await asyncio.to_thread(started.wait, 2)
+    assert runner.cancel_current() is True
+    assert (await active).stop_reason == "cancelled"
+
+    blocked = await runner.run("hemen yeni iş")
+    assert blocked.stop_reason == "cleanup_pending"
+
+    release.set()
+    for _ in range(100):
+        if not runner.loop.cleanup_pending:
+            break
+        await asyncio.sleep(0.02)
+    assert (await runner.run("şimdi")).text == "Sonraki tur çalıştı."
+
+
 async def test_queued_turn_is_not_cancelled_with_active_turn(tmp_path):
     provider = WaitingProvider()
     runner, _context = make_runner(tmp_path, provider)

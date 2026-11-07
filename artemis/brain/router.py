@@ -73,6 +73,11 @@ class ProviderRouter:
                 else:
                     self._providers[alias] = OllamaProvider(settings, model)
 
+    def _local(self, alias: str) -> bool:
+        """Yerel yedek: tam (maskesiz) içeriği alır, tur tek araçla sınırlanır (ADR 0055).
+        Bulut yedeğe gizli içerik zaten maskeli gider; o tur normal sınırlarla sürer."""
+        return self.settings.models[alias].provider == "ollama"
+
     def _emit_audit(self, event: str, **fields: object) -> None:
         try:
             self.audit.emit(event, **fields)
@@ -191,6 +196,7 @@ class ProviderRouter:
                 elapsed_seconds=self._clock() - started,
                 input_tokens=completion.usage.input_tokens,
                 output_tokens=completion.usage.output_tokens,
+                cached_input_tokens=completion.usage.cached_input_tokens,
                 cost_usd=str(completion.usage.cost_usd),
                 local_fallback=local_fallback,
             )
@@ -205,14 +211,34 @@ class ProviderRouter:
         *,
         timeout: float,
         stream: TextStream | None = None,
+        model: str | None = None,
     ) -> Completion:
         started = self._clock()
         guard = EmissionGuard(stream) if stream is not None else None
+        if model and model != self.settings.primary_model and model in self.settings.models:
+            # Model kademesi: zor işler modeli denenir; ücret izni/bütçe/sağlayıcı hatası
+            # kullanıcıyı durdurmaz, tur ana modelle (aşağıdaki normal yol) sürer.
+            try:
+                return await self._call(
+                    model, messages, tools,
+                    timeout=min(timeout, self.settings.provider_timeout_seconds),
+                    local_fallback=False, stream=guard,
+                )
+            except (BudgetExceeded, ProviderError) as error:
+                if guard is not None and guard.emitted:
+                    raise  # yarım akış üstüne ikinci bir yanıt üretilmez (ADR 0043)
+                self._emit_audit(
+                    "model_tier_fallback", model=model, primary=self.settings.primary_model,
+                    reason=type(error).__name__,
+                )
+                timeout -= self._clock() - started
+                started = self._clock()
         fallback = self.settings.fallback_model
         attempt_timeout = min(timeout, self.settings.provider_timeout_seconds)
         if fallback and started < self._fallback_until:
             return await self._call(
-                fallback, messages, tools, timeout=attempt_timeout, local_fallback=True,
+                fallback, messages, tools, timeout=attempt_timeout,
+                local_fallback=self._local(fallback),
                 stream=guard,
             )
         try:
@@ -252,5 +278,6 @@ class ProviderRouter:
                 timeout - (self._clock() - started), self.settings.provider_timeout_seconds
             )
             return await self._call(
-                fallback, messages, tools, timeout=remaining, local_fallback=True, stream=guard,
+                fallback, messages, tools, timeout=remaining,
+                local_fallback=self._local(fallback), stream=guard,
             )

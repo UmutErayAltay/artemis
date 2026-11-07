@@ -152,6 +152,35 @@ def test_service_handles_message_with_buttons_and_stops_cleanly(harness: Harness
     service.stop()  # idempotent
 
 
+def test_stop_during_pending_approval_ends_thread_quickly_with_audit(harness: Harness) -> None:
+    statuses: list[str] = []
+    provider = scripted(
+        call("telegram_confirm_test", "c1", path="kapan.txt", content="x"),
+        answer("Yazmadım."),
+    )
+    service = TelegramService(
+        statuses.append, runtime_factory=runtime_factory(provider, registry_with(ConfirmWriteTool))
+    )
+    try:
+        # Onay süresi uzun: durdurma bayrağı olmasa iş parçacığı JOIN süresinde de bitmezdi.
+        service.start(write_config(harness, approval_timeout_seconds=60))
+        assert wait_until(lambda: running(harness, statuses)), statuses
+        harness.fake.queue_message("kapan.txt oluştur")
+        assert wait_until(lambda: len(approval_requests(harness.fake)) == 1)
+        started = time.monotonic()
+        service.stop()
+        elapsed = time.monotonic() - started
+    finally:
+        service.stop()
+    assert elapsed < 6.0 and not service.is_running and service_threads() == []
+    assert not (harness.workspace / "kapan.txt").exists()
+    events = harness.audit_events()
+    assert [e["approved"] for e in events if e["event"] == "approval"] == [False]
+    assert any(e["event"] == "turn_end" for e in events)  # tur denetimsiz öldürülmedi
+    edits = method_bodies(harness.fake, "editMessageText")
+    assert len(edits) == 1 and "Kanal kapanıyor" in edits[0]["text"]
+
+
 def test_stop_before_thread_is_up_still_ends_the_thread(harness: Harness) -> None:
     service = TelegramService(
         lambda _text: None, runtime_factory=runtime_factory(scripted(answer("x")), registry_with())
