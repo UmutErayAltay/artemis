@@ -45,4 +45,9 @@ class Completion(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     provider: str = ""
     model: str = ""
+    # Yerel yedek rolü: tur tek araçla sınırlanır (ADR 0055). Gizlilik için KULLANILMAZ.
     local_fallback: bool = False
+    # Yanıtı üreten model girdiyi maskesiz gördü (yerel/ollama): hangi rolle çağrıldığından
+    # bağımsızdır (ana, yedek ya da zor işler modeli). Gizli geçmiş gördüyse yanıt da gizlidir
+    # (ADR 0056).
+    local_model: bool = False

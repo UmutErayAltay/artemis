@@ -557,9 +557,11 @@ class AgentLoop:
                 usage.output_tokens += completion.usage.output_tokens
                 usage.cached_input_tokens += completion.usage.cached_input_tokens
                 usage.cost_usd += completion.usage.cost_usd
-                if completion.local_fallback and history_private:
-                    # Yerel yedek gizli geçmişi görmüş olabilir ve yanıtına kopyalamış
-                    # olabilir; bu turun yeni mesajları da gizli sayılır.
+                if (completion.local_model or completion.local_fallback) and history_private:
+                    # Yerel model (yedek, ana ya da zor işler modeli) gizli geçmişi maskesiz
+                    # gördü ve yanıtına kopyalamış olabilir; bu turun yeni mesajları, araç
+                    # argümanları ve kalıcı yanıtı da gizli sayılır (ADR 0056). Rol bayrağı
+                    # (local_fallback) yalnız tek-araç sınırı içindir.
                     private_seen = True
                 audit.emit(
                     "model_response",
