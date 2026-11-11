@@ -39,6 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.providers import stored_endpoint_key
+from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
@@ -166,6 +167,27 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
     _checkbox(("routines", "enabled"), "routines_enabled"),
+    _checkbox(("calendar", "enabled"), "calendar_enabled"),
+    _checkbox(("calendar", "allow_cloud"), "calendar_cloud"),
+    _checkbox(("mail", "enabled"), "mail_enabled"),
+    _checkbox(("mail", "allow_cloud"), "mail_cloud"),
+    PanelBinding(
+        ("mail", "host"), "mail_host",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("mail", "username"), "mail_username",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("mail", "port"), "mail_port",
+        lambda edit: int(edit.text()) if edit.text().strip().isdigit() else 993,
+        lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("mail", "folder"), "mail_folder",
+        lambda edit: edit.text().strip() or "INBOX", lambda edit, value: edit.setText(str(value)),
+    ),
     _checkbox(("allow_all_applications",), "all_applications"),
     PanelBinding(
         ("computer_use", "mode"),
@@ -813,6 +835,40 @@ class SettingsPanel(QWidget):
         routines_page.addWidget(self.routines)
         routines_page.addStretch(1)
 
+        cal_page = page(
+            "Takvim ve posta",
+            "Takvimi ve okunmamış postayı salt okunur oku (sorular ve sabah brifingi için). "
+            "Kutular ve alanlar Uygula ile kaydedilir; adres ve parola hemen kasaya yazılır.",
+        )
+        self.calendar_enabled = QCheckBox("Takvim")
+        cal_page.addWidget(self.calendar_enabled)
+        self.calendar_cloud = QCheckBox("Takvim içeriği bulut modele ve Telegram'a gidebilsin")
+        cal_page.addWidget(self.calendar_cloud)
+        self.mail_enabled = QCheckBox("Posta")
+        cal_page.addWidget(self.mail_enabled)
+        self.mail_cloud = QCheckBox("Posta içeriği bulut modele ve Telegram'a gidebilsin")
+        cal_page.addWidget(self.mail_cloud)
+        cal_page.addWidget(_check_hint(
+            "Kapalıyken içerik yalnız yerel modele gider. Posta okundu işaretlenmez, hiçbir "
+            "ileti silinmez ya da taşınmaz. Eki indirilmez."
+        ))
+        self.mail_host = QLineEdit()
+        self.mail_host.setAccessibleName("IMAP sunucusu")
+        self.mail_host.setPlaceholderText("imap.gmail.com")
+        field(cal_page, "IMAP sunucusu", self.mail_host)
+        self.mail_port = QLineEdit()
+        self.mail_port.setAccessibleName("IMAP kapısı")
+        field(cal_page, "Kapı", self.mail_port)
+        self.mail_username = QLineEdit()
+        self.mail_username.setAccessibleName("Posta kullanıcı adı")
+        field(cal_page, "Kullanıcı adı", self.mail_username)
+        self.mail_folder = QLineEdit()
+        self.mail_folder.setAccessibleName("Posta klasörü")
+        field(cal_page, "Klasör", self.mail_folder)
+        self.calendar_mail = CalendarMailSection(config_path, demo=demo)
+        cal_page.addWidget(self.calendar_mail)
+        cal_page.addStretch(1)
+
         apps = page(
             "Uygulamalar",
             "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı. "
@@ -1007,7 +1063,10 @@ class SettingsPanel(QWidget):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(12)
         # Değişiklik izleme yalnız kullanıcı girdisine bakar; yenileme sonunda temiz sayılır.
-        for edit in (self.wake_name, self.dictation_hotkey, self.github_owner, self.repos_dir):
+        for edit in (
+            self.wake_name, self.dictation_hotkey, self.github_owner, self.repos_dir,
+            self.mail_host, self.mail_port, self.mail_username, self.mail_folder,
+        ):
             edit.textEdited.connect(self._mark_dirty)
         self.cloud_model.lineEdit().textEdited.connect(self._mark_dirty)  # type: ignore[union-attr]
         for box in (*(getattr(self, b.widget) for b in PANEL_BINDINGS), self.github_auto):

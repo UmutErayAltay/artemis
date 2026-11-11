@@ -650,6 +650,31 @@ class RoutinesConfig(BaseModel):
     enabled: bool = False
 
 
+class CalendarConfig(BaseModel):
+    """Takvim, salt okunur (ADR 0059). ICS adresi sırdır: ortam/kasa, YAML'a yazılmaz."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    lookahead_days: int = Field(default=7, ge=1, le=60)
+    # Takvim içeriği kişiseldir: bu açılmadıkça bulut modele ve Telegram'a gitmez.
+    allow_cloud: bool = False
+
+
+class MailConfig(BaseModel):
+    """Posta, salt okunur IMAP/TLS (ADR 0059). Parola sırdır: ortam/kasa, YAML'a yazılmaz."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    host: str = Field(default="", max_length=255, pattern=r"^[A-Za-z0-9.-]*$")
+    port: int = Field(default=993, ge=1, le=65535)
+    username: str = Field(default="", max_length=255)
+    folder: str = Field(default="INBOX", min_length=1, max_length=100)
+    max_messages: int = Field(default=10, ge=1, le=50)
+    allow_cloud: bool = False
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -693,6 +718,8 @@ class Settings(BaseModel):
     computer_use: ComputerUseConfig = Field(default_factory=ComputerUseConfig)
     dictation: DictationConfig = Field(default_factory=DictationConfig)
     routines: RoutinesConfig = Field(default_factory=RoutinesConfig)
+    calendar: CalendarConfig = Field(default_factory=CalendarConfig)
+    mail: MailConfig = Field(default_factory=MailConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

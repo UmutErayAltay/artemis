@@ -1,0 +1,163 @@
+"""Ayarlar > Takvim ve posta: iki sır (ICS adresi, IMAP parolası) ve "Kaydet ve dene" (ADR 0059).
+
+Sır alanları Telegram token alanıyla aynı desendedir (ADR 0051): parola kipinde, yalnız kimlik
+kasasına yazılır, doğrulanmadan yazılmaz, hiçbir yerde gösterilmez/loglanmaz. Sunucu, kullanıcı ve
+kutular ana panelin "Uygula" akışındadır; deneme KAYITLI ayarları okur. Ağ çağrısı QThread'dedir.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from pathlib import Path
+from zoneinfo import ZoneInfo
+
+from PySide6.QtCore import QThread
+from PySide6.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QWidget
+
+from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
+from artemis.config.settings import load_settings
+from artemis.tools import calendar_mail as core
+from artemis.tools.credentials import delete_secret, write_secret
+
+
+def check_calendar(url: str, timezone: str) -> str | None:
+    """Adres okunup ayrıştırılabiliyorsa None, yoksa kullanıcıya gösterilecek hata."""
+    local = ZoneInfo(timezone)
+    try:
+        begin, end = core.day_window(local, None, 1)
+        core.parse_events(core.fetch_ics(url), local, begin, end)
+    except (core.SourceError, ValueError) as error:
+        return str(error) if isinstance(error, core.SourceError) else "Takvim okunamadı."
+    return None
+
+
+def check_mail(host: str, port: int, username: str, password: str, folder: str) -> str | None:
+    try:
+        core.read_unread(
+            core.connect_imap, host=host, port=port, username=username,
+            password=password, folder=folder, limit=1,
+        )
+    except core.SourceError as error:
+        return str(error)
+    return None
+
+
+class _Job(QThread):
+    def __init__(self, job: Callable[[], str | None], parent: QWidget) -> None:
+        super().__init__(parent)
+        self._job = job
+        self.error: str | None = None
+
+    def run(self) -> None:
+        self.error = self._job()
+
+
+class CalendarMailSection(QWidget):
+    def __init__(self, config_path: Path, *, demo: bool = False) -> None:
+        super().__init__()
+        self.config_path = config_path
+        self._job: _Job | None = None
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(24)
+        box, body = group("Takvim adresi", divided=False)
+        layout.addWidget(box)
+        self.calendar_url = QLineEdit()
+        self.calendar_url.setEchoMode(QLineEdit.EchoMode.Password)
+        self.calendar_url.setAccessibleName("Gizli takvim adresi")
+        field(
+            body, "Gizli ICS adresi", self.calendar_url,
+            "Google Takvim: Ayarlar > takvimi entegre et > iCal biçiminde gizli adres. "
+            "https:// ile başlamalı; yalnız kimlik kasasına yazılır.",
+        )
+        self.calendar_save = QPushButton("Kaydet ve dene")
+        self.calendar_save.clicked.connect(self._save_calendar)
+        self.calendar_delete = QPushButton("Kaydı sil")
+        self.calendar_delete.clicked.connect(lambda: self._delete(core.ICS_TARGET, "Takvim adresi"))
+        body.addLayout(button_row(self.calendar_delete, self.calendar_save))
+        mail_box, mail = group("Posta parolası")
+        layout.addWidget(mail_box)
+        self.mail_password = QLineEdit()
+        self.mail_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.mail_password.setAccessibleName("Posta uygulama parolası")
+        field(
+            mail, "Uygulama parolası", self.mail_password,
+            "Gmail için hesap parolası değil, uygulama parolası. Sunucu ve kullanıcıyı yukarıya "
+            "yazıp Uygula'ya bas, sonra dene.",
+        )
+        self.mail_save = QPushButton("Kaydet ve dene")
+        self.mail_save.clicked.connect(self._save_mail)
+        self.mail_delete = QPushButton("Kaydı sil")
+        self.mail_delete.clicked.connect(lambda: self._delete(core.MAIL_TARGET, "Posta parolası"))
+        mail.addLayout(button_row(self.mail_delete, self.mail_save))
+        self.message = meta_label("")
+        self.message.setAccessibleName("Takvim ve posta işlem sonucu")
+        layout.addWidget(self.message)
+        layout.addStretch(1)
+        if demo:
+            for widget in (
+                self.calendar_url, self.calendar_save, self.calendar_delete,
+                self.mail_password, self.mail_save, self.mail_delete,
+            ):
+                widget.setEnabled(False)
+
+    def _busy(self) -> bool:
+        return self._job is not None and not self._job.isFinished()
+
+    def _start(self, job: Callable[[], str | None], secret: str, target: str, label: str) -> None:
+        if self._busy():
+            return
+        self.message.setText("Deneniyor…")
+        thread = _Job(job, self)
+
+        def done() -> None:
+            if thread.error is not None:
+                self.message.setText(f"{thread.error} Kaydedilmedi.")
+                return
+            try:
+                write_secret(secret, target)
+            except OSError:
+                self.message.setText("Saklanamadı; ilgili ortam değişkenini tanımlayın.")
+                return
+            self.message.setText(f"{label} çalışıyor ve kimlik kasasına kaydedildi.")
+
+        thread.finished.connect(done)
+        self._job = thread
+        thread.start()
+
+    def _save_calendar(self) -> None:
+        url = self.calendar_url.text().strip()
+        self.calendar_url.clear()
+        if not url:
+            self.message.setText("Önce gizli takvim adresini yaz.")
+            return
+        try:
+            timezone = load_settings(self.config_path).proactive.timezone
+        except (OSError, ValueError):
+            self.message.setText("Ayarlar okunamadı.")
+            return
+        self._start(lambda: check_calendar(url, timezone), url, core.ICS_TARGET, "Takvim")
+
+    def _save_mail(self) -> None:
+        password = self.mail_password.text().strip()
+        self.mail_password.clear()
+        if not password:
+            self.message.setText("Önce uygulama parolasını yaz.")
+            return
+        try:
+            mail = load_settings(self.config_path).mail
+        except (OSError, ValueError):
+            self.message.setText("Ayarlar okunamadı.")
+            return
+        if not (mail.host and mail.username):
+            self.message.setText("Önce sunucu ve kullanıcı adını yazıp Uygula'ya bas.")
+            return
+        self._start(
+            lambda: check_mail(mail.host, mail.port, mail.username, password, mail.folder),
+            password, core.MAIL_TARGET, "Posta",
+        )
+
+    def _delete(self, target: str, label: str) -> None:
+        delete_secret(target)
+        self.message.setText(f"{label} kaydı silindi (ortam değişkenine dokunulmadı).")
+

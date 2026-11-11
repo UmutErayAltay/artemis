@@ -204,7 +204,8 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
     assert panel.section_names() == [
-        "Ses", "Model", "Telegram", "Rutinler", "Uygulamalar", "GitHub", "Görünüm"
+        "Ses", "Model", "Telegram", "Rutinler", "Takvim ve posta", "Uygulamalar", "GitHub",
+        "Görünüm",
     ]
     assert panel.sections.objectName() == "sectionList"
     assert panel.sections.currentRow() == 0
@@ -333,7 +334,7 @@ def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit
 
     if isinstance(widget, QLineEdit):
-        widget.setText("Veli")
+        widget.setText("587" if widget.accessibleName() == "IMAP kapısı" else "Veli")  # sayı alanı
         return
     if isinstance(widget, QComboBox) and widget.isEditable():
         widget.setEditText("Veli")

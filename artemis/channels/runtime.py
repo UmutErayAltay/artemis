@@ -91,6 +91,10 @@ def create_runtime(
         tools = discover_mcp_tools(loaded, log, tools)
     if not loaded.routines.enabled:
         tools = tools.without_prefix("routine_")  # ADR 0058: kapalıyken model araçları görmez
+    if not loaded.calendar.enabled:
+        tools = tools.without_prefix("calendar_")  # ADR 0059
+    if not loaded.mail.enabled:
+        tools = tools.without_prefix("mail_")
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
     # Runtime kurulamazsa sahibi dışarıya dönmez; callback kilidi kapatır.
