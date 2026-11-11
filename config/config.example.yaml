@@ -328,6 +328,21 @@ voice:
 # routines:
 #   enabled: true            # varsayılan false
 
+# Tetikleyiciler (ADR 0061). KAPALI gelir; proactive.enabled gerekir. İzlenen klasöre yeni dosya
+# gelince (indirme bitince, bir kez) Artemis bildirim gösterir; kendiliğinden hiçbir şey çalıştırmaz.
+# Yalnız burada tanımlanır, hiçbir araç eklemez/değiştirmez (en çok 10). Açılışta var olan dosyalar
+# bildirilmez. message: {name} tetikleyici adı, {file} dosya adı. Bildirim en çok bir düğme taşır:
+# suggest (metin sohbet kutusuna yazılır, GÖNDERİLMEZ; {path} tam yol) ya da routine (ADR 0058
+# rutin adı; normal, onaylı çalışır). Dosya adları Telegram'a gönderilmez.
+# triggers:
+#   enabled: true
+#   items:
+#     - name: indirilenler
+#       folder: C:/Users/ben/Downloads     # mutlak yol
+#       pattern: "*.pdf"                   # varsayılan "*"
+#       message: "Yeni dosya geldi: {file}"
+#       suggest: "Şu dosyayı özetle: {path}"
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

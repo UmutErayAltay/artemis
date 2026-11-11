@@ -21,8 +21,9 @@ from artemis.tools.toast import ToastOutcome, show_toast
 
 # Panele (Qt kuyruğuna) başlık ve gövde ekler; eklenemezse False döner.
 PanelSink = Callable[[str, str], bool]
-# Aynısı, ek olarak panelde "Çalıştır" düğmesi gösterilecek rutin adıyla (ADR 0058).
-RoutinePanelSink = Callable[[str, str, str], bool]
+# Aynısı, ek olarak tek düğme için rutin adı (ADR 0058) ya da sohbet kutusuna yazılacak istem
+# (ADR 0061); ikisinden en çok biri doludur.
+RoutinePanelSink = Callable[[str, str, str, str], bool]
 ToastFunction = Callable[[str, str], ToastOutcome]
 
 PRIVATE_WITHHELD = (
@@ -66,17 +67,26 @@ class Deliverer:
         body: str,
         private: bool,
         routine: str = "",
+        suggest: str = "",
+        local_only: bool = False,
     ) -> DeliveryOutcome:
+        """`local_only`: dosya adı gibi kişisel metin; Telegram'a hiç gitmez (ADR 0061)."""
         targets: dict[str, str] = {}
-        if routine and self.routine_panel is not None:
-            targets["panel"] = "ok" if self.routine_panel(title, body, routine) else "error"
+        if (routine or suggest) and self.routine_panel is not None:
+            sent = self.routine_panel(title, body, routine, suggest)
+            targets["panel"] = "ok" if sent else "error"
         elif self.panel is not None:
             targets["panel"] = "ok" if self.panel(title, body) else "error"
         if self.toast is not None:
             outcome = await asyncio.to_thread(self.toast, title, body)
             targets["toast"] = outcome.status
         chat_id = self.settings.telegram.chat_id
-        if self.telegram is not None and chat_id is not None and self.settings.proactive.telegram:
+        if (
+            self.telegram is not None
+            and chat_id is not None
+            and self.settings.proactive.telegram
+            and not local_only
+        ):
             targets["telegram"] = await asyncio.to_thread(
                 self._send_telegram, chat_id, title, body, private
             )

@@ -67,3 +67,19 @@ Her bölüm gerçek Windows'ta, en sonda elle işaretlenir; sahte testler yerine
 - [ ] Bozuk dosya ekle (başlıksız bir .md, bir de Not Defteri'nde "Unicode" olarak kaydedilmiş): "Yenile"de geçersiz listede nedeniyle görünüyor, diğer beceriler çalışıyor.
 - [ ] Not Defteri'nin "BOM'lu UTF-8" kaydı kabul ediliyor.
 - [ ] Kutuyu kapatıp Uygula: sohbette `skill_read` yok, "haftalık rapor" isteği beceri kullanmıyor.
+
+## Tetikleyiciler (ADR 0061)
+
+Önkoşul: Gerçek Windows'ta elle. `config.yaml`'a `proactive.enabled: true` ve `triggers: {enabled: true, items: [{name: indirilenler, folder: C:/Users/<ad>/Downloads, pattern: "*.pdf", suggest: "Şu dosyayı özetle: {path}"}]}` yaz (ya da Ayarlar > Tetikleyiciler'de kutuyu aç, Uygula), Artemis'i yeniden başlat.
+
+- [ ] Ayarlar > Tetikleyiciler'de tetikleyici listede görünüyor ("son bildirim: henüz yok"). Açılışta İndirilenler'de var olan PDF'ler için bildirim GELMİYOR.
+- [ ] Tarayıcıdan bir PDF indir: bir dakika içinde (poll_seconds) tek bildirim: "Tetikleyici · indirilenler / Yeni dosya geldi: ...". Panelde "Yaz" düğmesi var.
+- [ ] "Yaz"a bas: istem sohbet kutusuna doldu ve GÖNDERİLMEDİ; sen Enter'a basana dek hiçbir şey çalışmıyor.
+- [ ] Büyük bir dosya indir (birkaç yüz MB): indirme sürerken bildirim yok (`.crdownload` yok sayılıyor), bittikten sonra tek bildirim.
+- [ ] Aynı anda 3-4 dosya indir/kopyala: tek birleşik bildirim ("3 yeni dosya: ...").
+- [ ] Artemis'i kapatıp aç: aynı dosyalar için tekrar bildirim gelmiyor.
+- [ ] Telegram bağlıysa: bildirim Telegram'a GİTMİYOR (dosya adı yerelde kalıyor).
+- [ ] `suggest` yerine `routine: <rutin adı>` ver (routines.enabled): düğme "Çalıştır"; basınca rutin normal, onaylı tur olarak çalışıyor.
+- [ ] Olmayan bir `folder` yaz: denetimde `trigger_unavailable` yalnız BİR kez; diğer tetikleyiciler çalışıyor.
+- [ ] `proactive.max_events_per_day: 1` ile iki bildirim: ikincisi ertesi güne kalıyor.
+- [ ] Kutuyu kapatıp Uygula: yeni dosyada bildirim yok.

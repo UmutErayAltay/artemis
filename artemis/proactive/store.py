@@ -72,6 +72,16 @@ CREATE TABLE IF NOT EXISTS occurrences (
     detail TEXT NOT NULL DEFAULT '',
     PRIMARY KEY(event_id, scheduled_for)
 );
+CREATE TABLE IF NOT EXISTS trigger_baselines (
+    trigger TEXT PRIMARY KEY
+);
+CREATE TABLE IF NOT EXISTS trigger_files (
+    trigger TEXT NOT NULL,
+    file TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    seen INTEGER NOT NULL,
+    PRIMARY KEY(trigger, file)
+);
 CREATE INDEX IF NOT EXISTS idx_occurrences_claimed_at ON occurrences(claimed_at);
 CREATE INDEX IF NOT EXISTS idx_occurrences_finished_at ON occurrences(finished_at);
 """
@@ -475,3 +485,50 @@ class ProactiveStore:
             raise ProactiveStoreError(f"count_finished_between failed: {e}") from e
         except OSError as e:
             raise ProactiveStoreError(f"count_finished_between failed: {e}") from e
+
+    # --- Tetikleyici dosya durumu (ADR 0061) ------------------------------------------
+
+    def trigger_files(self, trigger: str) -> dict[str, tuple[int, bool]] | None:
+        """Dosya -> (boyut, bildirildi mi). İlk tarama henüz kaydedilmediyse None."""
+        try:
+            with self._connect() as db:
+                if db.execute(
+                    "SELECT 1 FROM trigger_baselines WHERE trigger = ?", (trigger,)
+                ).fetchone() is None:
+                    return None
+                rows = db.execute(
+                    "SELECT file, size, seen FROM trigger_files WHERE trigger = ?", (trigger,)
+                ).fetchall()
+                return {row["file"]: (row["size"], bool(row["seen"])) for row in rows}
+        except (sqlite3.Error, OSError) as error:
+            raise ProactiveStoreError("Tetikleyici durumu okunamadı.") from error
+
+    def save_trigger_files(
+        self, trigger: str, files: dict[str, tuple[int, bool]], *, keep_missing: bool
+    ) -> None:
+        """Taramanın sonucunu yazar (taban çizgisini de kurar). `keep_missing`: tarama kesildiyse
+        görünmeyen eski kayıtlar silinmez; yoksa aynı dosya yeniden bildirilirdi."""
+        try:
+            with self._connect() as db, db:
+                db.execute("INSERT OR IGNORE INTO trigger_baselines VALUES (?)", (trigger,))
+                if not keep_missing:
+                    db.execute("DELETE FROM trigger_files WHERE trigger = ?", (trigger,))
+                db.executemany(
+                    "INSERT OR REPLACE INTO trigger_files VALUES (?,?,?,?)",
+                    [(trigger, name, size, int(seen)) for name, (size, seen) in files.items()],
+                )
+        except (sqlite3.Error, OSError) as error:
+            raise ProactiveStoreError("Tetikleyici durumu yazılamadı.") from error
+
+    def last_delivered(self, event_prefix: str) -> datetime | None:
+        """Kimliği bu önekle başlayan olayların son başarılı teslimi (UTC); hiç yoksa None."""
+        try:
+            with self._connect() as db:
+                row = db.execute(
+                    "SELECT MAX(finished_at) FROM occurrences "
+                    "WHERE substr(event_id, 1, ?) = ? AND state = 'delivered'",
+                    (len(event_prefix), event_prefix),
+                ).fetchone()
+                return _from_utc_iso(row[0]) if row and row[0] else None
+        except (sqlite3.Error, OSError) as error:
+            raise ProactiveStoreError("Son teslim okunamadı.") from error

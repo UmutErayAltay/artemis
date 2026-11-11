@@ -167,6 +167,12 @@ etmeyin ve onayı/lekeyi/gözetimsiz kuralı rutin içinde yeniden yazmayın. `r
 rutin `routine_*` adımı içeremez. Zamanı yalnız Ayarlar paneli kurar (araç EKLEMEYİN); zamanı gelen
 rutin kendiliğinden çalışmaz, yalnız "Çalıştırılsın mı?" bildirimi verilir. Bu kuralları gevşetmeyin.
 
+Tetikleyiciler (ADR 0061) varsayılan kapalıdır (`triggers.enabled`) ve yalnız config'te tanımlanır:
+onları kuran/değiştiren araç EKLEMEYİN. Bildirim LLM'siz sabit metindir, dosya adı dış metindir
+(temizlenir, talimat sayılmaz), en çok bir düğme taşır ve düğme basılmadan hiçbir şey çalışmaz
+(`suggest` sohbet kutusuna yazar, göndermez). Tetikleyici bildirimi Telegram'a gitmez. Bu kuralları
+gevşetmeyin.
+
 Açılışta başlama (Faz 7a, ADR 0030) yalnız `artemis autostart` komutu ve tepsi menüsüyle
 değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt
 yalnız HKCU `Run` değeridir, yazılınca geri okunur; komut `--ses` taşımaz. Tek örnek yerel

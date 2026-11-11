@@ -1508,3 +1508,37 @@ def test_running_visible_job_shows_honest_close_window_line(app: QApplication) -
     ))
     assert "pencereyi kapatın" in panel.start_reason.text()
     panel.close()
+
+
+def test_trigger_notice_suggest_fills_prompt_without_sending(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        sent: list[str] = []
+        window.bridge.submit = lambda text, *a, **k: sent.append(text)  # type: ignore[method-assign]
+        window._handle_event(
+            bridge_module.Proactive("Tetikleyici · t", "Geldi: r.pdf", "", "Özetle: C:/r.pdf")
+        )
+        assert not window.routine_bar.isHidden()
+        assert window.routine_run_button.text() == "Yaz"
+        window.routine_run_button.click()
+        assert window.prompt.toPlainText() == "Özetle: C:/r.pdf"
+        assert sent == [] and not window._busy and window.routine_bar.isHidden()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_trigger_notice_routine_button_uses_the_normal_tool_path(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        calls: list[tuple[str, Any]] = []
+        window.bridge.submit_tool = lambda name, arguments, **k: calls.append((name, arguments))  # type: ignore[method-assign,assignment]
+        window._handle_event(bridge_module.Proactive("Tetikleyici · t", "Geldi", "işe başla", ""))
+        assert window.routine_run_button.text() == "Çalıştır"
+        window.routine_run_button.click()
+        assert [(name, args.name) for name, args in calls] == [("routine_run", "işe başla")]
+    finally:
+        _close_cleanly(app, window)

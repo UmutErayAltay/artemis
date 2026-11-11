@@ -1120,6 +1120,7 @@ class DesktopWindow(QMainWindow):
 
         # Zamanı gelen rutin için soru satırı (ADR 0058): Çalıştır tıklaması normal, onaylı tur.
         self._routine_name = ""
+        self._routine_suggest = ""
         self.routine_bar = QFrame()
         self.routine_bar.setObjectName("composer")
         self.routine_bar.setMaximumWidth(_CHAT_MAX_WIDTH)
@@ -1752,14 +1753,21 @@ class DesktopWindow(QMainWindow):
         self.overlay.set_busy(True)
         return True
 
-    def _show_routine_notice(self, name: str, text: str) -> None:
+    def _show_routine_notice(self, name: str, text: str, suggest: str = "") -> None:
+        """Tek düğme: rutin ise "Çalıştır", tetikleyici önerisi ise "Yaz" (ADR 0061)."""
         self._routine_name = name
+        self._routine_suggest = suggest
+        self.routine_run_button.setText("Yaz" if suggest else "Çalıştır")
         self.routine_label.setText(text)
         self.routine_bar.show()
 
     def _run_routine_notice(self) -> None:
         self.routine_bar.hide()
-        if self._routine_name:
+        if self._routine_suggest:
+            # Gönderilmez: metin yalnız sohbet kutusuna yazılır, kullanıcı okuyup kendisi yollar.
+            self.prompt.setPlainText(self._routine_suggest)
+            self.prompt.setFocus()
+        elif self._routine_name:
             self._submit_routine_tool("routine_run", RoutineNameArguments(name=self._routine_name))
 
     def _submit_routine_tool(self, name: str, arguments: BaseModel) -> None:
@@ -2186,6 +2194,8 @@ class DesktopWindow(QMainWindow):
             # Kendiliğinden mesaj ayrı konuşmacıyla görünür; modelin geçmişine eklenmez.
             self._append_chat("Artemis (kendiliğinden)", f"{event.title}\n{event.body}")
             self.pet.answer(event.body)
+            if event.routine or event.suggest:
+                self._show_routine_notice(event.routine, event.body, event.suggest)
             return
         if isinstance(event, ActivityGap):
             self._ops.dropped += event.dropped_count

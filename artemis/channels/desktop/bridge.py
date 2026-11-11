@@ -152,6 +152,8 @@ class Proactive:
     body: str
     # Doluysa panel bu rutin için "Çalıştır" düğmesi gösterir (ADR 0058).
     routine: str = ""
+    # Doluysa düğme bu metni sohbet kutusuna yazar, göndermez (ADR 0061).
+    suggest: str = ""
 
 
 BridgeEvent = (
@@ -701,10 +703,10 @@ class DesktopBridge:
         self._events.put(Proactive(title, body))
         return True
 
-    def _proactive_routine_panel(self, title: str, body: str, routine: str) -> bool:
+    def _proactive_routine_panel(self, title: str, body: str, routine: str, suggest: str) -> bool:
         if self._shutdown:
             return False
-        self._events.put(Proactive(title, body, routine))
+        self._events.put(Proactive(title, body, routine, suggest))
         return True
 
     def _stop_proactive(self) -> None:

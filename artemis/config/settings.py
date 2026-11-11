@@ -3,7 +3,7 @@
 import re
 from datetime import time
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -650,6 +650,56 @@ class RoutinesConfig(BaseModel):
     enabled: bool = False
 
 
+MAX_TRIGGERS = 10
+
+
+class TriggerConfig(BaseModel):
+    """Config'te tanımlı tetikleyici (ADR 0061): yalnız kullanıcı yazar, hiçbir araç yazamaz."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(pattern=r"^[A-Za-z0-9_-]{1,32}$")
+    folder: str = Field(min_length=1, max_length=500)
+    pattern: str = Field(default="*", min_length=1, max_length=100)
+    # Yer tutucular: {name} (tetikleyici adı), {file} (yalnız dosya adı).
+    message: str = Field(default="Yeni dosya geldi: {file}", min_length=1, max_length=300)
+    # Kullanıcının yazdığı istem şablonu; {path} dosyanın tam yoludur. Sohbet kutusuna yazılır.
+    suggest: str | None = Field(default=None, min_length=1, max_length=500)
+    # ADR 0058 rutin adı; düğme normal, onaylı bir rutin çalıştırır.
+    routine: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @field_validator("folder")
+    @classmethod
+    def validate_folder(cls, value: str) -> str:
+        absolute = Path(value).is_absolute() or PureWindowsPath(value).is_absolute()
+        if chr(0) in value or not absolute:
+            raise ValueError("folder mutlak bir yol olmalı (ör. C:/Users/ben/Downloads)")
+        return value
+
+    @model_validator(mode="after")
+    def one_button(self) -> Self:
+        if self.suggest is not None and self.routine is not None:
+            raise ValueError("Bir tetikleyici en çok bir düğme taşır: suggest ya da routine")
+        return self
+
+
+class TriggersConfig(BaseModel):
+    """Tetikleyiciler (ADR 0061): klasöre yeni dosya gelince bildirim. Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    items: tuple[TriggerConfig, ...] = Field(default=(), max_length=MAX_TRIGGERS)
+
+    @field_validator("items")
+    @classmethod
+    def unique_names(cls, values: tuple[TriggerConfig, ...]) -> tuple[TriggerConfig, ...]:
+        names = [item.name.casefold() for item in values]
+        if len(names) != len(set(names)):
+            raise ValueError("Tetikleyici adları benzersiz olmalı")
+        return values
+
+
 class CalendarConfig(BaseModel):
     """Takvim, salt okunur (ADR 0059). ICS adresi sırdır: ortam/kasa, YAML'a yazılmaz."""
 
@@ -736,6 +786,7 @@ class Settings(BaseModel):
     computer_use: ComputerUseConfig = Field(default_factory=ComputerUseConfig)
     dictation: DictationConfig = Field(default_factory=DictationConfig)
     routines: RoutinesConfig = Field(default_factory=RoutinesConfig)
+    triggers: TriggersConfig = Field(default_factory=TriggersConfig)
     calendar: CalendarConfig = Field(default_factory=CalendarConfig)
     mail: MailConfig = Field(default_factory=MailConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)

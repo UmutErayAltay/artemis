@@ -58,6 +58,7 @@ from artemis.channels.desktop.routines_section import RoutinesSection
 from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
+from artemis.channels.desktop.triggers_section import TriggersSection
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import (
     BUILTIN_AGENT,
@@ -173,6 +174,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("mail", "enabled"), "mail_enabled"),
     _checkbox(("mail", "allow_cloud"), "mail_cloud"),
     _checkbox(("skills", "enabled"), "skills_enabled"),
+    _checkbox(("triggers", "enabled"), "triggers_enabled"),
     PanelBinding(
         ("mail", "host"), "mail_host",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
@@ -887,6 +889,21 @@ class SettingsPanel(QWidget):
         skills_page.addWidget(self.skills)
         skills_page.addStretch(1)
 
+        triggers_page = page(
+            "Tetikleyiciler",
+            "Bir klasöre yeni dosya gelince Artemis haber verir. Kutu Uygula ile kaydedilir; "
+            "tetikleyiciler config'te tanımlanır.",
+        )
+        self.triggers_enabled = QCheckBox("Tetikleyiciler")
+        triggers_page.addWidget(self.triggers_enabled)
+        triggers_page.addWidget(_check_hint(
+            "Klasör yoklanır; ilk bakışta var olan dosyalar bildirilmez. Dosya yazılması bitince "
+            "bir kez haber verilir. Dosya adları Telegram'a gönderilmez. proactive.enabled gerekir."
+        ))
+        self.triggers = TriggersSection(config_path, demo=demo)
+        triggers_page.addWidget(self.triggers)
+        triggers_page.addStretch(1)
+
         apps = page(
             "Uygulamalar",
             "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı. "
@@ -1417,6 +1434,7 @@ class SettingsPanel(QWidget):
             self._update_cloud_hint()
             self.routines.refresh()
             self.skills.refresh()
+            self.triggers.refresh()
             # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
             self.precision_combo.setEnabled(
                 settings.voice.stt_device != "cpu" and not self._demo

@@ -13,6 +13,7 @@ Yan etki kararı kapıdadır; bu modül onay politikası taşımaz.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 from collections.abc import Callable
 from contextlib import suppress
@@ -25,7 +26,7 @@ from artemis.brain.agent_loop import AgentLoop
 from artemis.brain.conversation import ConversationContext
 from artemis.channels.runner import CommandRunner
 from artemis.channels.runtime import Runtime
-from artemis.config.settings import BriefingConfig
+from artemis.config.settings import BriefingConfig, TriggerConfig
 from artemis.proactive.delivery import Deliverer, DeliveryOutcome
 from artemis.proactive.routines import RoutinesError, RoutineStore
 from artemis.proactive.schedule import (
@@ -39,6 +40,7 @@ from artemis.proactive.store import (
     Reminder,
     reminder_event_id,
 )
+from artemis.proactive.triggers import build_notice, scan_folder
 from artemis.safety.gate import SafetyGate
 from artemis.tools.base import ToolContext
 
@@ -77,6 +79,7 @@ class ProactiveScheduler:
         self.tz = ZoneInfo(self.config.timezone)
         self._capped_day: date | None = None
         self._routines_error_reported = False
+        self._trigger_errors: set[str] = set()
 
     async def serve(self, stop: asyncio.Event) -> None:
         """Sınırlı aralıklarla tarar; durdurma sinyali beklemeyi hemen keser."""
@@ -176,6 +179,28 @@ class ProactiveScheduler:
             self._finish(event_id, scheduled, outcome, "completed")
             left -= int(outcome.delivered)
             handled += 1
+        triggers = self.runtime.settings.triggers
+        for trigger in triggers.items if triggers.enabled else ():
+            try:
+                ready = await self._poll_trigger(trigger, now, can_fire=left > 0)
+                if not ready:
+                    continue
+                if left <= 0:
+                    capped = True
+                    continue
+                delivered = await self._fire_trigger(trigger, ready, start, now)
+            except (OSError, ValueError, RuntimeError) as error:
+                # Bozuk ya da erişilemeyen klasör yalnız o tetikleyiciyi etkiler; hata her taramada
+                # değil, bir kez denetime yazılır. Diğer tetikleyiciler çalışmaya devam eder.
+                if trigger.name not in self._trigger_errors:
+                    self._trigger_errors.add(trigger.name)
+                    self.runtime.audit.emit(
+                        "trigger_unavailable", trigger=trigger.name, error_type=type(error).__name__
+                    )
+                continue
+            self._trigger_errors.discard(trigger.name)
+            left -= delivered
+            handled += delivered
         if capped:
             today = now.astimezone(self.tz).date()
             if self._capped_day != today:
@@ -185,6 +210,60 @@ class ProactiveScheduler:
                     "proactive_capped", max_events_per_day=self.config.max_events_per_day
                 )
         return handled
+
+    async def _poll_trigger(
+        self, trigger: TriggerConfig, now: datetime, *, can_fire: bool
+    ) -> list[str]:
+        """Klasörü tarar, durumu yazar; bildirilmeye hazır (boyutu iki yoklamada aynı) dosyaları
+        döndürür. İlk tarama yalnız taban çizgisidir. Hazır dosyalar `can_fire` iken "bildirildi"
+        yazılır (önce talep edilir, en çok bir kez); sınır doluysa bekler, ertesi gün çıkar."""
+        found, truncated = await asyncio.to_thread(scan_folder, trigger.folder, trigger.pattern)
+        known = self.store.trigger_files(trigger.name)
+        if known is None:  # ilk tarama: var olanlar bildirilmez
+            baseline = {name: (size, True) for name, size in found.items()}
+            self.store.save_trigger_files(trigger.name, baseline, keep_missing=False)
+            return []
+        rows: dict[str, tuple[int, bool]] = {}
+        ready: list[str] = []
+        for name, size in found.items():
+            before = known.get(name)
+            if before is None or (not before[1] and before[0] != size):
+                rows[name] = (size, False)  # yeni ya da hâlâ büyüyor
+            elif before[1]:
+                rows[name] = before
+            else:
+                ready.append(name)
+                rows[name] = (size, can_fire)
+        self.store.save_trigger_files(trigger.name, rows, keep_missing=truncated)
+        return ready
+
+    async def _fire_trigger(
+        self, trigger: TriggerConfig, ready: list[str], day_start: datetime, now: datetime
+    ) -> int:
+        digest = hashlib.sha1("|".join(sorted(ready)).encode("utf-8")).hexdigest()[:12]
+        # Aynı dosya kümesi aynı yerel günde bir kez talep edilir: iki süreç çift bildirmez.
+        event_id = f"trigger:{trigger.name}:{digest}"
+        if not self.store.claim(event_id, day_start, "trigger", self.owner, now):
+            return 0
+        routine = trigger.routine if self.runtime.settings.routines.enabled else None
+        title, body, suggest = build_notice(
+            trigger.name, trigger.folder, trigger.message, trigger.suggest, ready
+        )
+        # Yalnız sorulur; çalıştırma/yazma kullanıcının tıklamasıyla, normal turda olur.
+        # Dosya adı kişisel olabilir: Telegram'a gitmez.
+        outcome = await self.deliverer.deliver(
+            event_id=event_id,
+            scheduled_for=day_start,
+            kind="trigger",
+            title=title,
+            body=body,
+            private=True,
+            routine=routine or "",
+            suggest=suggest,
+            local_only=True,
+        )
+        self._finish(event_id, day_start, outcome, "completed")
+        return int(outcome.delivered)
 
     def _due_routines(self, now: datetime) -> list[tuple[str, datetime]]:
         """Zamanı gelen zamanlı rutinler; bozuk dosya zamanlayıcıyı durdurmaz."""
