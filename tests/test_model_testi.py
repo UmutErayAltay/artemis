@@ -63,6 +63,14 @@ def test_suggest_layout_includes_computer_model() -> None:
     assert suggest_layout([haiku, sonnet]) == ("haiku", "sonnet", "sonnet")
     # Bilgisayarda en iyi model ana modelse ayrıca yazılmaz (boş ayar ana modeli kullanır).
     assert suggest_layout([sonnet]) == ("sonnet", None, None)
+    # Gerçek koşu (2026-11-07): abonelikte fiyatlar 0, Sonnet 1 sn hızlı, Haiku zorda şansla 8/8.
+    # Hız ana modeli değiştirmez; anadan zayıf model zor işlere önerilmez.
+    haiku = report("haiku", ["ana", "zor", "bilgisayar"], 1.0, 0.9, 41)
+    sonnet = report("sonnet", ["ana", "zor", "bilgisayar"], 0.875, 1.0, 27)
+    sonnet["median_seconds"] = 4.9
+    assert suggest_layout([sonnet, haiku], "haiku") == ("haiku", None, "sonnet")
+    haiku["zor"]["rate"] = 0.625
+    assert suggest_layout([sonnet, haiku], "haiku") == ("haiku", "sonnet", "sonnet")
 
 
 def test_recommend_adds_computer_role() -> None:

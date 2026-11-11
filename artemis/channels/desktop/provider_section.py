@@ -518,7 +518,7 @@ class ProviderSection(QWidget):
             for alias, model in settings.models.items()
         ]
         self._render_models()
-        self._suggested = suggest_layout(list(reports.values()))
+        self._suggested = suggest_layout(list(reports.values()), settings.primary_model)
         ana, zor, pc = self._suggested
         current = (
             settings.primary_model, settings.hard_model or None, settings.computer_use.model or None

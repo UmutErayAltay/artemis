@@ -63,12 +63,15 @@ def recommend(
 
 
 def suggest_layout(
-    reports: Sequence[dict[str, Any]],
+    reports: Sequence[dict[str, Any]], primary: str | None = None,
 ) -> tuple[str | None, str | None, str | None]:
     """Test edilmiş modellerden (ana, zor işler, bilgisayar kullanımı) önerisi.
 
-    Ana: "ana" rolü alanlardan en ucuz, eşitse en hızlı. Zor işler: "zor" rolü alanlardan zor
-    senaryoda en başarılı, eşitse en ucuz; ana ile aynıysa None. Bilgisayar: "bilgisayar" rolü
+    Ana: "ana" rolü alanlardan en ucuz; fiyat eşitse (abonelikte hepsi 0) şu anki ana model
+    (`primary`), sonra en hızlı. Hız tek başına ana modeli değiştirmez: abonelikte büyük model
+    kotayı daha hızlı tüketir ve fiyatı 0 görünür. Zor işler: "zor" rolü alanlardan zor
+    senaryoda en başarılı, eşitse en ucuz; yalnız anadan kesin daha başarılıysa (aksi halde
+    zor işi daha zayıf modele göndermek olur). Bilgisayar: "bilgisayar" rolü
     alanlardan en başarılı, eşitse en az adım (adım = süre ve kota); ana ile aynıysa None (boş
     computer_use.model zaten ana modeli kullanır). Tek koşu ±1 senaryo oynar.
     """
@@ -81,9 +84,15 @@ def suggest_layout(
         item for item in reports
         if "bilgisayar" in item.get("roles", []) and isinstance(item.get("bilgisayar"), dict)
     ]
-    ana = min(main, key=lambda r: (cost(r), r["median_seconds"]))["model"] if main else None
+    best_main = (
+        min(main, key=lambda r: (cost(r), r["model"] != primary, r["median_seconds"]))
+        if main else None
+    )
+    ana = best_main["model"] if best_main else None
+    ana_zor = best_main["zor"]["rate"] if best_main else 0.0
+    stronger = [item for item in hard if item["zor"]["rate"] > ana_zor]
     zor = (
-        max(hard, key=lambda r: (r["zor"]["rate"], -cost(r)))["model"] if hard else None
+        max(stronger, key=lambda r: (r["zor"]["rate"], -cost(r)))["model"] if stronger else None
     )
     pc = (
         max(computer, key=lambda r: (r["bilgisayar"]["rate"], -r["bilgisayar"]["steps"]))["model"]
