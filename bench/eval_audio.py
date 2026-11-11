@@ -136,6 +136,19 @@ def telephone_band(signal: Signal) -> Signal:
     return np.fft.irfft(spectrum, n=len(signal)).astype(np.float32)
 
 
+def babble(samples: int, pool: list[Signal], seed: int, talkers: int = 3) -> Signal:
+    """Arka plan konuşması: havuzdan rastgele birkaç gerçek kaydın toplamı (kafe/ofis)."""
+    if not pool:
+        raise ValueError("Babble havuzu boş")
+    rng = np.random.default_rng(seed)
+    mixed = np.zeros(samples, dtype=np.float32)
+    for index in rng.choice(len(pool), size=min(talkers, len(pool)), replace=False):
+        clip = pool[int(index)]
+        offset = int(rng.integers(0, max(1, len(clip))))
+        mixed += np.resize(np.roll(clip, -offset), samples)
+    return mixed
+
+
 CONDITIONS: dict[str, Callable[[Signal, int], Signal]] = {
     "clean": lambda signal, _seed: signal,
     "pink_snr15": lambda signal, seed: add_noise(signal, pink_noise(len(signal), seed), 15),

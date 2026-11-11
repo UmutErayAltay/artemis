@@ -232,6 +232,7 @@ async def measure(
     *,
     mode: str,
     model_metadata: dict[str, Any],
+    include_synthetic_text: bool = False,
 ) -> dict[str, Any]:
     rows: list[dict[str, Any]] = []
     total_word_errors = total_ref_words = total_char_errors = total_ref_chars = 0
@@ -312,6 +313,9 @@ async def measure(
             "condition": item.condition,
             "wake_detected": woke if item.wake is not None else None,
             "target_resolved": target,
+            # Sentetik metin şablondan gelir, kişisel veri değildir; gerçek kayıtta asla yazılmaz.
+            **({"hypothesis": prediction}
+               if include_synthetic_text and item.source == "synthetic" else {}),
             "latency_ms": round(elapsed * 1000, 2),
         })
     ordered = sorted(latencies)
@@ -415,6 +419,34 @@ def plan_report(
     }
 
 
+class DenoisedRecognizer:
+    """Tanımadan önce PCM'i DeepFilterNet3'ten geçirir (``noise_suppression_stt`` benzetimi).
+
+    Uygulamada mikrofon 48 kHz yakalar; burada 16 kHz yol kullanılır, bu yüzden sonuç
+    gerçek zincirin alt sınırı sayılmalıdır. Gecikme (``delay_samples``) kırpılır.
+    """
+
+    def __init__(self, inner: Recognizer, level: str) -> None:
+        from artemis.channels.voice.denoise import NOISE_LEVEL_ATTEN_DB, DeepFilterNetDenoiser
+        from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
+
+        self.inner = inner
+        self.denoiser = DeepFilterNetDenoiser(
+            DEFAULT_NOISE_MODEL_DIR, atten_lim_db=NOISE_LEVEL_ATTEN_DB[level], frame_samples=320
+        )
+
+    async def transcribe(self, pcm: bytes) -> str:
+        frame = 320 * 2
+        delay = self.denoiser.delay_samples * 2
+        padded = pcm + b"\x00" * (delay + (-(len(pcm) + delay)) % frame)
+        self.denoiser.reset()
+        cleaned = b"".join(
+            self.denoiser.process_frame(padded[start:start + frame])
+            for start in range(0, len(padded), frame)
+        )
+        return await self.inner.transcribe(cleaned[delay:delay + len(pcm)])
+
+
 class EchoRecognizer:
     """Sahte kipte WAV başına referansı döndürerek ölçüm hattını sınar."""
 
@@ -468,13 +500,18 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
         settings = with_extra_hotwords(load_settings(args.config), args.ek_hotword)
         if settings.voice.stt_model is None:
             raise ValueError("Canlı benchmark için voice.stt_model gerekli.")
-        recognizer = FasterWhisperRecognizer(settings.voice)
-        await asyncio.to_thread(recognizer.prepare)
+        whisper = FasterWhisperRecognizer(settings.voice)
+        await asyncio.to_thread(whisper.prepare)
+        recognizer = whisper
         model = metadata(settings)
+    if args.gurultu_engelle:
+        recognizer = DenoisedRecognizer(recognizer, args.gurultu_engelle)
+        model = {**model, "denoise_before_stt": args.gurultu_engelle}
     return await measure(
         corpus, root, recognizer,
         mode="sahte" if args.sahte else "canli",
         model_metadata=model,
+        include_synthetic_text=args.sentetik_metin,
     )
 
 
@@ -485,6 +522,14 @@ def main() -> None:
     modes.add_argument("--canli", action="store_true")
     parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     parser.add_argument("--corpus", type=Path, required=True)
+    parser.add_argument(
+        "--gurultu-engelle", choices=["hafif", "orta", "guclu"],
+        help="Tanımadan önce DeepFilterNet3 uygular (gürültüde uyandırma deneyi)",
+    )
+    parser.add_argument(
+        "--sentetik-metin", action="store_true",
+        help="Yalnız sentetik örneklerde tanınan metni rapora yazar (tanı için)",
+    )
     parser.add_argument(
         "--ek-hotword", action="append", default=[], metavar="AD",
         help="Yalnız bu ölçümde STT ipucuna eklenir (ör. uygulama adı); tekrarlanabilir",
