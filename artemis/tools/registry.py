@@ -39,6 +39,12 @@ class ToolRegistry:
         clone._tools = dict(self._tools)
         return clone
 
+    def without_prefix(self, prefix: str) -> ToolRegistry:
+        """Adı `prefix` ile başlayan araçlar olmadan kopya (kapalı özellik modele görünmez)."""
+        clone = ToolRegistry()
+        clone._tools = {n: t for n, t in self._tools.items() if not n.startswith(prefix)}
+        return clone
+
     def __contains__(self, name: object) -> bool:
         return name in self._tools
 

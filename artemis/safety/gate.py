@@ -15,7 +15,7 @@ from uuid import uuid4
 
 from pydantic import ValidationError
 
-from artemis.tools.base import Risk, ToolContext, ToolResult, normalize_risk
+from artemis.tools.base import GateHandle, Risk, ToolContext, ToolResult, normalize_risk
 from artemis.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -99,6 +99,10 @@ class SafetyGate:
         # okunan metinden kurulan hatırlatma da "dış içerikten" sayılır. Onay kuralı değişmez.
         context.turn_tainted = state.tainted or state.history_external
         context.turn_read_external = state.tainted
+        # Rutin gibi araçlar adımlarını bu turun kapısından geçirir (ADR 0058).
+        context.gate_handle = GateHandle(
+            self.registry, lambda step: self.dispatch(step, context, state, approve)
+        )
         self.pending_notice = ""
         self.pending_site = ""
         context.audit.emit(
@@ -138,6 +142,11 @@ class SafetyGate:
             )
         risk = normalize_risk(tool.risk_for(arguments, context))
         normalized = arguments.model_dump(mode="json")
+        refusal = tool.refuse(arguments, context)
+        if refusal is not None:
+            # Onay penceresi hiç açılmaz: kullanıcının onaylayamayacağı bir işi onaya sunmak
+            # yanıltıcıdır (ör. dış içerik okunmuş turda kalıcı rutin kaydı).
+            return self._finish(ToolResult(message=refusal), call, context, state, started)
         if state.unattended and risk is not Risk.READ_ONLY:
             # approve çağrılmaz: karşıda kimse yokken açık kalan onay, saatler sonra eski
             # bağlamla yan etki üretebilirdi. Red yine onay olayı olarak denetime yazılır.

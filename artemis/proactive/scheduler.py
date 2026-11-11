@@ -16,7 +16,7 @@ import asyncio
 import json
 from collections.abc import Callable
 from contextlib import suppress
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import uuid4
 from zoneinfo import ZoneInfo
@@ -27,6 +27,7 @@ from artemis.channels.runner import CommandRunner
 from artemis.channels.runtime import Runtime
 from artemis.config.settings import BriefingConfig
 from artemis.proactive.delivery import Deliverer, DeliveryOutcome
+from artemis.proactive.routines import RoutinesError, RoutineStore
 from artemis.proactive.schedule import (
     briefing_occurrence,
     classify_reminder,
@@ -75,6 +76,7 @@ class ProactiveScheduler:
         self.config = runtime.settings.proactive
         self.tz = ZoneInfo(self.config.timezone)
         self._capped_day: date | None = None
+        self._routines_error_reported = False
 
     async def serve(self, stop: asyncio.Event) -> None:
         """Sınırlı aralıklarla tarar; durdurma sinyali beklemeyi hemen keser."""
@@ -153,6 +155,27 @@ class ProactiveScheduler:
             self._finish(event_id, scheduled, outcome, stop_reason)
             left -= int(outcome.delivered)
             handled += 1
+        for name, scheduled in self._due_routines(now):
+            if left <= 0:
+                capped = True
+                continue
+            event_id = f"routine:{name}"
+            if not self.store.claim(event_id, scheduled, "routine", self.owner, now):
+                continue
+            # Çalıştırılmaz: yalnız sorulur. Çalıştırma kullanıcının panel tıklamasıyla, onaylı
+            # normal turda olur; gözetimsiz kural kapıda olduğu gibi kalır (ADR 0058).
+            outcome = await self.deliverer.deliver(
+                event_id=event_id,
+                scheduled_for=scheduled,
+                kind="routine",
+                title="Rutin zamanı",
+                body=f"{name} rutininin zamanı. Çalıştırılsın mı?",
+                private=False,
+                routine=name,
+            )
+            self._finish(event_id, scheduled, outcome, "completed")
+            left -= int(outcome.delivered)
+            handled += 1
         if capped:
             today = now.astimezone(self.tz).date()
             if self._capped_day != today:
@@ -162,6 +185,35 @@ class ProactiveScheduler:
                     "proactive_capped", max_events_per_day=self.config.max_events_per_day
                 )
         return handled
+
+    def _due_routines(self, now: datetime) -> list[tuple[str, datetime]]:
+        """Zamanı gelen zamanlı rutinler; bozuk dosya zamanlayıcıyı durdurmaz."""
+        settings = self.runtime.settings
+        if not settings.routines.enabled:
+            return []
+        try:
+            routines = RoutineStore(settings.state_dir / "routines.json").load()
+        except RoutinesError:
+            if not self._routines_error_reported:
+                self._routines_error_reported = True
+                self.runtime.audit.emit("routines_unavailable", reason="corrupt_or_unreadable")
+            return []
+        self._routines_error_reported = False
+        grace = timedelta(hours=self.config.briefing_grace_hours)
+        due: list[tuple[str, datetime]] = []
+        for routine in routines:
+            if routine.schedule is None:
+                continue
+            scheduled = briefing_occurrence(
+                routine.schedule.days,
+                time.fromisoformat(routine.schedule.at),
+                now,
+                self.tz,
+                grace,
+            )
+            if scheduled is not None:
+                due.append((routine.name, scheduled))
+        return due
 
     def _finish(
         self, event_id: str, scheduled: datetime, outcome: DeliveryOutcome, stop_reason: str

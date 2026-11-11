@@ -53,6 +53,7 @@ from artemis.channels.desktop.provider_section import (
     meta_label,
     store_endpoint_key,
 )
+from artemis.channels.desktop.routines_section import RoutinesSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
 from artemis.channels.voice import stt_catalog
@@ -164,6 +165,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         ("dictation", "hotkey"), "dictation_hotkey",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
+    _checkbox(("routines", "enabled"), "routines_enabled"),
     _checkbox(("allow_all_applications",), "all_applications"),
     PanelBinding(
         ("computer_use", "mode"),
@@ -796,6 +798,21 @@ class SettingsPanel(QWidget):
         telegram_page.addWidget(self.telegram)
         telegram_page.addStretch(1)
 
+        routines_page = page(
+            "Rutinler",
+            "Adlandırılmış, sabit adımlı işler (örn. “işe başla”). Kutu Uygula ile kaydedilir.",
+        )
+        self.routines_enabled = QCheckBox("Rutinler")
+        routines_page.addWidget(self.routines_enabled)
+        routines_page.addWidget(_check_hint(
+            "Sesle, yazıyla veya buradan çalıştırılır. Her adım kendi onay kurallarıyla yürür; "
+            "onaylanmayan ya da başarısız ilk adımda durur. Zamanlı bildirim için "
+            "proactive.enabled gerekir."
+        ))
+        self.routines = RoutinesSection(config_path, demo=demo)
+        routines_page.addWidget(self.routines)
+        routines_page.addStretch(1)
+
         apps = page(
             "Uygulamalar",
             "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı. "
@@ -1321,6 +1338,7 @@ class SettingsPanel(QWidget):
                 if binding.quiet:
                     widget.blockSignals(False)
             self._update_cloud_hint()
+            self.routines.refresh()
             # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
             self.precision_combo.setEnabled(
                 settings.voice.stt_device != "cpu" and not self._demo

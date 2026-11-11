@@ -642,6 +642,14 @@ class DictationConfig(BaseModel):
     max_seconds: float = Field(default=120.0, ge=1, le=600)
 
 
+class RoutinesConfig(BaseModel):
+    """Rutinler (ADR 0058): adlandırılmış sabit araç adımları. Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -684,6 +692,7 @@ class Settings(BaseModel):
     system_control: SystemControlConfig = Field(default_factory=SystemControlConfig)
     computer_use: ComputerUseConfig = Field(default_factory=ComputerUseConfig)
     dictation: DictationConfig = Field(default_factory=DictationConfig)
+    routines: RoutinesConfig = Field(default_factory=RoutinesConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

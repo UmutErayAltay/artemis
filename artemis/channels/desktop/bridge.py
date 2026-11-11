@@ -150,6 +150,8 @@ class Proactive:
 
     title: str
     body: str
+    # Doluysa panel bu rutin için "Çalıştır" düğmesi gösterir (ADR 0058).
+    routine: str = ""
 
 
 BridgeEvent = (
@@ -684,6 +686,7 @@ class DesktopBridge:
             runtime.settings,
             runtime.audit,
             panel=self._proactive_panel,
+            routine_panel=self._proactive_routine_panel,
             telegram=self._proactive_telegram,
         )
         scheduler = ProactiveScheduler(runtime, store, deliverer)
@@ -696,6 +699,12 @@ class DesktopBridge:
         if self._shutdown:
             return False
         self._events.put(Proactive(title, body))
+        return True
+
+    def _proactive_routine_panel(self, title: str, body: str, routine: str) -> bool:
+        if self._shutdown:
+            return False
+        self._events.put(Proactive(title, body, routine))
         return True
 
     def _stop_proactive(self) -> None:

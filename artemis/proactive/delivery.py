@@ -21,6 +21,8 @@ from artemis.tools.toast import ToastOutcome, show_toast
 
 # Panele (Qt kuyruğuna) başlık ve gövde ekler; eklenemezse False döner.
 PanelSink = Callable[[str, str], bool]
+# Aynısı, ek olarak panelde "Çalıştır" düğmesi gösterilecek rutin adıyla (ADR 0058).
+RoutinePanelSink = Callable[[str, str, str], bool]
 ToastFunction = Callable[[str, str], ToastOutcome]
 
 PRIVATE_WITHHELD = (
@@ -43,12 +45,14 @@ class Deliverer:
         audit: AuditLog,
         *,
         panel: PanelSink | None = None,
+        routine_panel: RoutinePanelSink | None = None,
         toast: ToastFunction | None = show_toast,
         telegram: TelegramClient | None = None,
     ) -> None:
         self.settings = settings
         self.audit = audit
         self.panel = panel
+        self.routine_panel = routine_panel
         self.toast = toast
         self.telegram = telegram
 
@@ -61,9 +65,12 @@ class Deliverer:
         title: str,
         body: str,
         private: bool,
+        routine: str = "",
     ) -> DeliveryOutcome:
         targets: dict[str, str] = {}
-        if self.panel is not None:
+        if routine and self.routine_panel is not None:
+            targets["panel"] = "ok" if self.routine_panel(title, body, routine) else "error"
+        elif self.panel is not None:
             targets["panel"] = "ok" if self.panel(title, body) else "error"
         if self.toast is not None:
             outcome = await asyncio.to_thread(self.toast, title, body)

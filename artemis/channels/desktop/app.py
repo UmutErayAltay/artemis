@@ -92,6 +92,7 @@ from artemis.channels.desktop.widgets import PetFace
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings, same_hotkey
 from artemis.safety.audit import AuditLog
+from artemis.tools.plugins.routines import RoutineNameArguments
 from artemis.tools.toast import ToastOutcome, show_toast
 
 _STYLE = themes.stylesheet(themes.DEFAULT_THEME)
@@ -1117,6 +1118,28 @@ class DesktopWindow(QMainWindow):
         self.chat.setAccessibleName("Seçilebilir sohbet geçmişi")
         left.addWidget(self.chat, 1)
 
+        # Zamanı gelen rutin için soru satırı (ADR 0058): Çalıştır tıklaması normal, onaylı tur.
+        self._routine_name = ""
+        self.routine_bar = QFrame()
+        self.routine_bar.setObjectName("composer")
+        self.routine_bar.setMaximumWidth(_CHAT_MAX_WIDTH)
+        routine_row = QHBoxLayout(self.routine_bar)
+        routine_row.setContentsMargins(12, 8, 8, 8)
+        routine_row.setSpacing(8)
+        self.routine_label = QLabel("")
+        self.routine_label.setWordWrap(True)
+        self.routine_label.setTextFormat(Qt.TextFormat.PlainText)
+        self.routine_run_button = QPushButton("Çalıştır")
+        self.routine_run_button.setObjectName("primary")
+        self.routine_dismiss_button = QPushButton("Kapat")
+        self.routine_run_button.clicked.connect(self._run_routine_notice)
+        self.routine_dismiss_button.clicked.connect(self.routine_bar.hide)
+        routine_row.addWidget(self.routine_label, 1)
+        routine_row.addWidget(self.routine_dismiss_button)
+        routine_row.addWidget(self.routine_run_button)
+        self.routine_bar.hide()
+        left.addWidget(self.routine_bar)
+
         composer = QFrame()
         composer.setObjectName("composer")
         composer.setMaximumWidth(_CHAT_MAX_WIDTH)
@@ -1311,6 +1334,7 @@ class DesktopWindow(QMainWindow):
         self._projects_timer.start()
         self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
         self.settings_panel.apply_requested.connect(self._apply_settings)
+        self.settings_panel.routines.tool_requested.connect(self._submit_routine_tool)
         # Üst çubuktaki düğme açılışta config'teki kipi gösterir; sinyal kapalı ki açılış
         # kendiliğinden config yazmasın.
         on = self.settings_panel.computer_auto.isChecked()
@@ -1728,6 +1752,27 @@ class DesktopWindow(QMainWindow):
         self.overlay.set_busy(True)
         return True
 
+    def _show_routine_notice(self, name: str, text: str) -> None:
+        self._routine_name = name
+        self.routine_label.setText(text)
+        self.routine_bar.show()
+
+    def _run_routine_notice(self) -> None:
+        self.routine_bar.hide()
+        if self._routine_name:
+            self._submit_routine_tool("routine_run", RoutineNameArguments(name=self._routine_name))
+
+    def _submit_routine_tool(self, name: str, arguments: BaseModel) -> None:
+        request_id = self.bridge.submit_tool(name, arguments)
+        if request_id is None:
+            self.settings_panel.routines.notice.setText("Başka işlem sürüyor; çalıştırılmadı.")
+            self._set_status("Başka işlem sürüyor; rutin çalıştırılmadı.", "running")
+            return
+        self._active_request = request_id
+        self._busy = True
+        self._begin_card(request_id, f"Rutin işlemi: {name}")
+        self._set_controls()
+
     def _submit_project_tool(self, name: str, arguments: BaseModel) -> None:
         # Durum yoklaması salt okunur ve 2 sn'de bir gelir: kart, meşgul durumu ve pet
         # tepkisi üretmez (aksi halde "Taslak hazırla"ya basılmış gibi titrer).
@@ -2097,6 +2142,10 @@ class DesktopWindow(QMainWindow):
         if isinstance(event, ToolFinished):
             if event.request_id == self._active_request:
                 self._dismiss_approval_for(event.request_id)
+                if event.tool_name.startswith("routine_"):
+                    self.settings_panel.routines.accept_result(event.tool_name, event.result)
+                    self._append_chat("Artemis", event.result.message)
+                    return
                 panel = (self.projects_panel if event.tool_name.startswith("code_agent_")
                          else self.data_panel)
                 panel.accept_result(event.tool_name, event.result)

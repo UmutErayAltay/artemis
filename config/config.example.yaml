@@ -286,6 +286,14 @@ voice:
 #   hotkey: ctrl+alt+d
 #   max_seconds: 120         # 1-600; kayıt kendiliğinden biter
 
+# Rutinler (ADR 0058): adlandırılmış, sabit adımlı işler ("işe başla": VS Code aç, Spotify aç,
+# sesi 30 yap). Adımlar `state_dir/routines.json` dosyasındadır; sohbetle (onaylı routine_save)
+# ya da dosyayı elle düzenleyerek oluşur. Çalışırken model yoktur, her adım kendi onay kurallarıyla
+# SafetyGate'ten geçer. Zaman yalnız Ayarlar > Rutinler'den kurulur; zamanı gelince Artemis
+# çalıştırmaz, panelde "Çalıştırılsın mı?" diye sorar (proactive.enabled gerekir).
+# routines:
+#   enabled: true            # varsayılan false
+
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1
 ollama_base_url: http://127.0.0.1:11434

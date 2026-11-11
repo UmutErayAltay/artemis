@@ -89,6 +89,8 @@ def create_runtime(
         from artemis.mcp.bridge import discover_mcp_tools
 
         tools = discover_mcp_tools(loaded, log, tools)
+    if not loaded.routines.enabled:
+        tools = tools.without_prefix("routine_")  # ADR 0058: kapalıyken model araçları görmez
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
     # Runtime kurulamazsa sahibi dışarıya dönmez; callback kilidi kapatır.

@@ -160,6 +160,13 @@ metni `external=True` ve `content_kind="screen"`'dir; `allow_cloud_screen` kapal
 sayılır. Betik sabittir, kapsam yalnız ortam değişkeniyle gider; testler PowerShell
 çalıştırmaz (sahte runner/okuyucu).
 
+Rutinler (ADR 0058) varsayılan kapalıdır (`routines.enabled`). `routine_run` her adımı
+`context.gate_handle.dispatch` ile aynı turun kapısından geçirir; adımı doğrudan `execute`
+etmeyin ve onayı/lekeyi/gözetimsiz kuralı rutin içinde yeniden yazmayın. `routine_save` ve
+`routine_delete` HER ZAMAN onaylıdır, `routine_save` dış içerik okunmuş turda onaysız reddedilir,
+rutin `routine_*` adımı içeremez. Zamanı yalnız Ayarlar paneli kurar (araç EKLEMEYİN); zamanı gelen
+rutin kendiliğinden çalışmaz, yalnız "Çalıştırılsın mı?" bildirimi verilir. Bu kuralları gevşetmeyin.
+
 Açılışta başlama (Faz 7a, ADR 0030) yalnız `artemis autostart` komutu ve tepsi menüsüyle
 değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt
 yalnız HKCU `Run` değeridir, yazılınca geri okunur; komut `--ses` taşımaz. Tek örnek yerel
