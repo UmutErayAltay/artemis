@@ -17,7 +17,7 @@ eski kodda kırılan (mutasyonla da denetlenen) regresyon testi eklendi
 | Yerel (Ollama) zor işler/ana modelin gizli geçmişten yanıtı `answer_private=False` kaydediliyordu (doğrulanmış hata) | `01ad823` | geçti (akışlı + akışsız, iki yön) | canlı Ollama bekliyor (WINDOWS_CHECKLIST F) |
 | `memory_changes` arşivdeki dış içeriği lekesiz döndürüyordu; sonraki yan etki onaysızdı (doğrulanmış hata) | `4fe7f2f` | geçti | — |
 | Hassas adım onayı pencereye bağlı değildi: tarayıcı için onaylanan Enter posta uygulamasına gidebiliyordu (doğrulanmış hata) | `89b6099` | geçti (sahte arka uç) | bekliyor (WINDOWS_CHECKLIST F) |
-| Uzun yazım Esc/süre sonrası sürüyordu: 10 karakterin 9'u durdurmadan sonra gönderildi (doğrulanmış hata) | `89b6099` | geçti (session → `windows.type_text`, sahte `_send`) | bekliyor (WINDOWS_CHECKLIST F) |
+| Uzun yazım Esc/süre sonrası sürüyordu: 10 karakterin 9'u durdurmadan sonra gönderildi (doğrulanmış hata) | `89b6099` | geçti (session → `windows.type_text`, sahte `_send`) | arka uç geçti 2026-11-11 (betik, gerçek `SendInput`, Not Defteri: durdurma, süre, odak değişimi, emoji); arayüz Esc + audit bekliyor (WINDOWS_CHECKLIST F) |
 
 Bilinen sınırlar: eski öz notların gizlilik kökeni bilinmez (gizli sayılmaz); odak kontrolü ile
 `SendInput` arasında bir karakterlik yarış kalır.

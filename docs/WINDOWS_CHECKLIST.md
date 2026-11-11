@@ -197,9 +197,15 @@ Yalnız zararsız hedef (boş Not Defteri, taslak) kullanın; gönderilen girdi 
 - [ ] **Uzun yazımda Esc:** ~300 karakterlik bir metni Not Defteri'ne yazdırırken 1-2 sn
   sonra Esc → yazım hemen duruyor; sonuç "Yazım yarıda kesildi … geri alınmadı"; audit'te
   `computer_input_partial` (sent < total).
+  *2026-11-11 arka uç geçti (betik, gerçek `SendInput`): durdurma bayrağı 1,5 sn'de → 302'nin 49'u
+  gönderildi, durdurmadan sonra karakter yok, 31 ms'de döndü; dosyadaki metin gönderilenle aynı.
+  Süre sınırı 1,0 sn → 32 karakter, aşım 0 ms. Kalan: arayüzde gerçek Esc tuşu ve audit satırı.*
 - [ ] **Yazım sırasında odak değişimi:** uzun yazım sürerken başka bir pencereye tıklayın →
   kalan metin o pencereye gitmiyor, oturum `blocked`.
-- [ ] **Emoji:** "deneme 😀 bitti" yazdırın → emoji tek karakter olarak doğru çıkıyor.
+  *2026-11-11 arka uç geçti (betik): yazım sürerken Karakter Eşlem öne alındı → 302'nin 48'inde
+  `target` ile durdu, araya giren pencereye hiç metin gitmedi. Kalan: oturumun `blocked` sonucu.*
+- [x] **Emoji:** "deneme 😀 bitti" yazdırın → emoji tek karakter olarak doğru çıkıyor.
+  *2026-11-11 geçti (betik, gerçek `SendInput`, Not Defteri; kaydedilen dosyada birebir).*
 - [ ] **Yerel model gizliliği (canlı model, Ollama):** bulut ana + Ollama `hard_model` ile
   izinsiz bir dosyayı okutup "derin düşün" isteyin, sonra sıradan bir istek → audit
   `cloud_transfer.masked_messages` > 0 ve bulut yanıtı dosya içeriğini bilmiyor.
