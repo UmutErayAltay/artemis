@@ -22,6 +22,7 @@ from artemis.channels.voice.core import Microphone, SpeechRecognizer
 
 _ESC_UNAVAILABLE = "Esc kısayolu kullanılamıyor; yazımı durdurmak için başka pencereye geçin."
 _VOICE_ON = "Ses açıkken dikte kullanılamaz; önce sesi kapatın."
+_SELECTION_ON = "Seçili metin eylemi sürerken dikte kullanılamaz."
 _BUSY = "Dikte metni işleniyor; bitmesini bekleyin."
 
 
@@ -71,6 +72,56 @@ def clean_transcript(text: str) -> str:
     return " ".join(printable.split())
 
 
+def foreground_target(backend: DictationBackend, own_pid: int) -> int | None:
+    """Odaktaki pencerenin kimliği; Artemis'in kendisi ya da okunamayan pencere hedef değil."""
+    try:
+        if backend.foreground_pid() == own_pid:
+            return None
+        return backend.foreground_window()
+    except OSError:
+        return None
+
+
+async def type_into_target(
+    backend: DictationBackend,
+    text: str,
+    target: int | None,
+    own_pid: int,
+    *,
+    closing: Callable[[], bool],
+    esc_unavailable: Callable[[], None],
+) -> tuple[str, int]:
+    """(sonuç, yazılan karakter): typed|partial|cancelled|no_target|error. Dikte ve seçili metin
+    eylemi (ADR 0062) aynı yazım motorunu paylaşır: hedef pencere yazım başlarken ve her
+    karakterde denetlenir, geçici Esc kısayolu yazımı durdurur."""
+    if target is None or foreground_target(backend, own_pid) != target:
+        return "no_target", 0
+    escaped = threading.Event()
+    hotkey = backend.escape_hotkey(escaped.set)
+    if not hotkey.start():
+        esc_unavailable()
+    reasons: list[str] = []
+
+    def should_continue() -> bool:
+        if escaped.is_set() or closing():
+            reasons.append("esc")
+        elif foreground_target(backend, own_pid) != target:
+            reasons.append("target")
+        return not reasons
+
+    try:
+        typed = await asyncio.to_thread(backend.type_text, text, should_continue)
+    except OSError:
+        return "error", 0  # kaç karakterin gittiği bilinmez
+    finally:
+        await asyncio.to_thread(hotkey.stop)
+    if typed >= len(text):
+        return "typed", typed
+    if typed > 0:
+        return "partial", typed
+    return ("cancelled" if reasons == ["esc"] else "no_target"), 0
+
+
 class Dictation:
     """Tek oturumluk durum makinesi: idle → recording → working → idle."""
 
@@ -86,6 +137,7 @@ class Dictation:
         voice_active: Callable[[], bool],
         own_pid: int | None = None,
         clock: Callable[[], float] = monotonic,
+        other_busy: Callable[[], bool] = lambda: False,
     ) -> None:
         self._max_seconds = max_seconds
         self._audit = audit
@@ -94,6 +146,7 @@ class Dictation:
         self._backend = backend
         self._emit = emit  # (tür, metin): listening | working | idle | message | text
         self._voice_active = voice_active
+        self._other_busy = other_busy  # seçili metin eylemi sürerken dikte başlamaz (ADR 0062)
         self._own_pid = os.getpid() if own_pid is None else own_pid
         self._clock = clock
         self._recognizer: SpeechRecognizer | None = None
@@ -121,6 +174,10 @@ class Dictation:
             self._phase = "idle"
             self._emit("message", _VOICE_ON)
             return
+        if self._other_busy():
+            self._phase = "idle"
+            self._emit("message", _SELECTION_ON)
+            return
         self._stop = asyncio.Event()
         self._task = asyncio.create_task(self._session())
 
@@ -134,13 +191,7 @@ class Dictation:
             self._task.cancel()
 
     def _target(self) -> int | None:
-        """Odaktaki pencerenin kimliği; Artemis'in kendisi ya da okunamayan pencere hedef değil."""
-        try:
-            if self._backend.foreground_pid() == self._own_pid:
-                return None
-            return self._backend.foreground_window()
-        except OSError:
-            return None
+        return foreground_target(self._backend, self._own_pid)
 
     async def _session(self) -> None:
         started = self._clock()
@@ -213,43 +264,32 @@ class Dictation:
         return b"".join(chunks)
 
     async def _type(self, text: str, target: int | None) -> tuple[str, int, str]:
-        """(sonuç, yazılan karakter, ileti). Hedef yazım başlarken ve her karakterde denetlenir."""
+        """(sonuç, yazılan karakter, ileti)."""
+        outcome, typed = await type_into_target(
+            self._backend, text, target, self._own_pid,
+            closing=lambda: self._closing,
+            esc_unavailable=lambda: self._emit("message", _ESC_UNAVAILABLE),
+        )
+        if outcome == "typed":
+            return outcome, typed, f"Dikte: {typed} karakter gönderildi."
+        if outcome == "partial":
+            return (
+                outcome, typed,
+                f"Dikte yarım kaldı: {typed}/{len(text)} karakter yazıldı, geri alınmadı. "
+                "Tam metin panelde.",
+            )
+        if outcome == "error":
+            # Kaç karakterin gittiği bilinmez; başarı denmez, gidenin geri alınmadığı söylenir.
+            return (
+                outcome, 0,
+                "Dikte yazımı hata verdi; bir kısmı yazılmış olabilir, geri alınmadı.",
+            )
+        if outcome == "cancelled":
+            return outcome, 0, "Dikte durduruldu (Esc); hiçbir şey yazılmadı. Metin panelde."
         if target is None or self._target() != target:
+            # Yazım hiç başlamadan hedef yok ya da değişmişti.
             return (
                 "no_target", 0,
                 "Dikte yazılmadı: hedef pencere yok ya da değişti. Metin panelde.",
             )
-        escaped = threading.Event()
-        hotkey = self._backend.escape_hotkey(escaped.set)
-        if not hotkey.start():
-            self._emit("message", _ESC_UNAVAILABLE)
-        reasons: list[str] = []
-
-        def should_continue() -> bool:
-            if escaped.is_set() or self._closing:
-                reasons.append("esc")
-            elif self._target() != target:
-                reasons.append("target")
-            return not reasons
-
-        try:
-            typed = await asyncio.to_thread(self._backend.type_text, text, should_continue)
-        except OSError:
-            # Kaç karakterin gittiği bilinmez; başarı denmez, gidenin geri alınmadığı söylenir.
-            return (
-                "error", 0,
-                "Dikte yazımı hata verdi; bir kısmı yazılmış olabilir, geri alınmadı.",
-            )
-        finally:
-            await asyncio.to_thread(hotkey.stop)
-        if typed >= len(text):
-            return "typed", typed, f"Dikte: {typed} karakter gönderildi."
-        if typed > 0:
-            return (
-                "partial", typed,
-                f"Dikte yarım kaldı: {typed}/{len(text)} karakter yazıldı, geri alınmadı. "
-                "Tam metin panelde.",
-            )
-        if reasons == ["esc"]:
-            return "cancelled", 0, "Dikte durduruldu (Esc); hiçbir şey yazılmadı. Metin panelde."
         return "no_target", 0, "Dikte yazılmadı: hedef pencere değişti. Metin panelde."

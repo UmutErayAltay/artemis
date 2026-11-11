@@ -642,6 +642,18 @@ class DictationConfig(BaseModel):
     max_seconds: float = Field(default=120.0, ge=1, le=600)
 
 
+class SelectionActionsConfig(BaseModel):
+    """Seçili metin eylemleri (ADR 0062): kısayolla Çevir/Düzelt/Özetle/Açıkla. Varsayılan kapalı.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    hotkey: str = Field(default="ctrl+alt+s", min_length=1, max_length=40)
+    # "Çevir" eyleminin hedef dili (ör. en, tr, de); modele düz metin olarak söylenir.
+    translate_to: str = Field(default="en", min_length=1, max_length=40)
+
+
 class RoutinesConfig(BaseModel):
     """Rutinler (ADR 0058): adlandırılmış sabit araç adımları. Varsayılan kapalı."""
 
@@ -785,6 +797,7 @@ class Settings(BaseModel):
     system_control: SystemControlConfig = Field(default_factory=SystemControlConfig)
     computer_use: ComputerUseConfig = Field(default_factory=ComputerUseConfig)
     dictation: DictationConfig = Field(default_factory=DictationConfig)
+    selection_actions: SelectionActionsConfig = Field(default_factory=SelectionActionsConfig)
     routines: RoutinesConfig = Field(default_factory=RoutinesConfig)
     triggers: TriggersConfig = Field(default_factory=TriggersConfig)
     calendar: CalendarConfig = Field(default_factory=CalendarConfig)
@@ -816,6 +829,11 @@ class Settings(BaseModel):
         voice = self.voice
         if same_hotkey(self.dictation.hotkey, voice.listening_hotkey):
             raise ValueError("Dikte kısayolu ses kısayoluyla aynı olamaz")
+        selection = self.selection_actions.hotkey
+        if same_hotkey(selection, voice.listening_hotkey) or same_hotkey(
+            selection, self.dictation.hotkey
+        ):
+            raise ValueError("Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı")
         if voice.stt_mode == "hybrid" and (
             voice.stt_cloud_endpoint not in self.endpoints
             or (voice.stt_cloud_protocol == "openai" and not voice.stt_cloud_model.strip())

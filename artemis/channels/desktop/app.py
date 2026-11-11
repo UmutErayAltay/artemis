@@ -80,6 +80,7 @@ from artemis.channels.desktop.projects_panel import (
     make_page_header,
     status_label,
 )
+from artemis.channels.desktop.selection_popup import SelectionPopup
 from artemis.channels.desktop.settings_panel import (
     SettingsPanel,
     save_choices,
@@ -727,6 +728,7 @@ class DesktopWindow(QMainWindow):
     # Kısayol kendi iş parçacığından yayar; Qt bunu ana iş parçacığına sıraya alır.
     _hotkey_pressed = Signal()
     _dictation_pressed = Signal()
+    _selection_pressed = Signal()
     _toast_failed = Signal(str)
 
     def __init__(
@@ -803,11 +805,21 @@ class DesktopWindow(QMainWindow):
         self._build_tray()
         self._hotkey: GlobalHotkey | None = None
         self._dictation_hotkey: GlobalHotkey | None = None
+        self._selection_hotkey: GlobalHotkey | None = None
+        # Seçili metin eylemleri (ADR 0062): pencere yalnız düğme basışlarını köprüye iletir.
+        self.selection_popup = SelectionPopup(
+            self,
+            lambda action: self.bridge.selection_run(action),
+            lambda: self.bridge.selection_write_back(),
+        )
+        self.selection_popup.apply_theme(themes.THEMES[self._theme])
+        self._selection_pressed.connect(lambda: self.bridge.selection_hotkey())
         # Köprü ayar uygulanınca yenilenir; sinyal her seferinde güncel olanı çağırır.
         self._dictation_pressed.connect(lambda: self.bridge.toggle_dictation())
         if not demo:
             self._start_hotkey()
             self._start_dictation_hotkey()
+            self._start_selection_hotkey()
         self.pet.start()
         self._refresh_brand_pet()
         self.settings_panel.pet.set_current(self.pet.skin)
@@ -872,6 +884,8 @@ class DesktopWindow(QMainWindow):
         # Masaüstü pet ve yanındaki hızlı kutu ayrı pencereler; aynı jetonlarla boyanır
         # (pet.apply_theme hızlı kutuyu da günceller; sabit lacivert yok).
         self.pet.apply_theme(self._theme)
+        if hasattr(self, "selection_popup"):
+            self.selection_popup.apply_theme(palette)
         self._theme_placeholders(self)
         self._refresh_tones()
         self._refresh_icons()
@@ -951,6 +965,40 @@ class DesktopWindow(QMainWindow):
             self._dictation_hotkey = hotkey
         elif sys.platform == "win32":
             self._hotkey_problem(f"Dikte kısayolu ({text}) başka bir programda kayıtlı.")
+
+    def _start_selection_hotkey(self) -> None:
+        """Seçili metin kısayolu (ADR 0062): kapalıyken kaydedilmez; ayar uygulanınca yenilenir."""
+        if self._selection_hotkey is not None:
+            self._selection_hotkey.stop()
+            self._selection_hotkey = None
+        try:
+            config = load_settings(self._config_path).selection_actions
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
+            return
+        if not config.enabled:
+            return
+        text = config.hotkey.strip()
+        try:
+            hotkey = GlobalHotkey(text, self._selection_pressed.emit)
+        except ValueError:
+            self._hotkey_problem(f"Seçili metin kısayolu tanınmadı: {text}")
+            return
+        if hotkey.start():
+            self._selection_hotkey = hotkey
+        elif sys.platform == "win32":
+            self._hotkey_problem(f"Seçili metin kısayolu ({text}) başka bir programda kayıtlı.")
+
+    def _show_selection(self, kind: str, message: str) -> None:
+        """Seçili metin eylemi durumu: pencere imleç yanında açılır, sonuç orada görünür."""
+        if kind == "ready":
+            self.selection_popup.show_ready(message)
+        elif kind == "working":
+            self.selection_popup.show_working()
+        elif kind == "result":
+            self.selection_popup.show_result(message)
+        elif kind == "message" and message:
+            self.selection_popup.show_message(message)
+            self._set_status(message, "ready")
 
     def _show_dictation(self, kind: str, message: str) -> None:
         """Dikte durumu (ADR 0057): kayıt sürerken görünür gösterge, bitince normal duruma dönüş."""
@@ -1550,15 +1598,23 @@ class DesktopWindow(QMainWindow):
             return
         values = self.settings_panel.values()
         try:
-            clash = same_hotkey(
-                str(values[("dictation", "hotkey")]),
-                load_settings(self._config_path).voice.listening_hotkey,
+            voice_key = load_settings(self._config_path).voice.listening_hotkey
+            dictation_key = str(values[("dictation", "hotkey")])
+            selection_key = str(values[("selection_actions", "hotkey")])
+            clash = same_hotkey(dictation_key, voice_key)
+            selection_clash = same_hotkey(selection_key, voice_key) or same_hotkey(
+                selection_key, dictation_key
             )
         except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            clash = False  # okunamayan config aşağıdaki kayıtta zaten yakalanır
+            clash = selection_clash = False  # okunamayan config aşağıdaki kayıtta yakalanır
         if clash:
             self.settings_panel.notice.setText(
                 "Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seçin."
+            )
+            return
+        if selection_clash:
+            self.settings_panel.notice.setText(
+                "Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı."
             )
             return
         try:
@@ -2003,6 +2059,7 @@ class DesktopWindow(QMainWindow):
                 self.bridge = DesktopBridge(self._config_path)
                 if not self._demo:
                     self._start_dictation_hotkey()
+                    self._start_selection_hotkey()
                 self.settings_panel.refresh()
                 self.settings_panel.notice.setText(
                     "Ayarlar uygulandı; seçilen model ve mikrofon kullanılıyor."
@@ -2050,6 +2107,8 @@ class DesktopWindow(QMainWindow):
                     self.overlay.set_busy(True)
                 else:
                     self._set_status("Hazır", "ready")
+            elif event.state.startswith("selection_"):
+                self._show_selection(event.state.removeprefix("selection_"), event.message)
             elif event.state.startswith("dictation_"):
                 self._show_dictation(event.state.removeprefix("dictation_"), event.message)
             elif event.state == "cleanup_pending":
@@ -2402,6 +2461,10 @@ class DesktopWindow(QMainWindow):
         if self._dictation_hotkey is not None:
             self._dictation_hotkey.stop()
             self._dictation_hotkey = None
+        if self._selection_hotkey is not None:
+            self._selection_hotkey.stop()
+            self._selection_hotkey = None
+        self.selection_popup.close()
         self.settings_panel.finish_inventory()
         if self._tray is not None:
             self._tray.hide()

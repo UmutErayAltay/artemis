@@ -336,7 +336,9 @@ def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit
 
     if isinstance(widget, QLineEdit):
-        widget.setText("587" if widget.accessibleName() == "IMAP kapısı" else "Veli")  # sayı alanı
+        name = widget.accessibleName()
+        # Kısayol alanları birbirinden farklı olmalı (config çakışmayı reddeder).
+        widget.setText("587" if name == "IMAP kapısı" else "Veli2" if "Seçili" in name else "Veli")
         return
     if isinstance(widget, QComboBox) and widget.isEditable():
         widget.setEditText("Veli")

@@ -18,9 +18,16 @@ from uuid import uuid4
 from pydantic import BaseModel
 
 from artemis.brain.agent_loop import RunResult
+from artemis.brain.models import Completion, Message
+from artemis.brain.router import ProviderRouter
 from artemis.brain.streaming import ResponseStream
 from artemis.channels.desktop.computer_host import ComputerHost
 from artemis.channels.desktop.dictation import Dictation, windows_backend
+from artemis.channels.desktop.selection import (
+    SelectionActions,
+    local_chat_alias,
+    windows_selection_backend,
+)
 from artemis.channels.runtime import (
     Approval as ApprovalCallback,
 )
@@ -314,6 +321,8 @@ class DesktopBridge:
         self._voice_task: asyncio.Task[None] | None = None
         # Dikte (ADR 0057) ilk kısayol basışında işçi döngüsünde kurulur.
         self._dictation: Dictation | None = None
+        # Seçili metin eylemleri (ADR 0062) de ilk kısayol basışında işçi döngüsünde kurulur.
+        self._selection: SelectionActions | None = None
         # Proaktif zamanlayıcı (ADR 0027) yalnız işçi döngüsünde yaşar.
         self._proactive_stop: asyncio.Event | None = None
         self._proactive_task: asyncio.Task[None] | None = None
@@ -425,8 +434,58 @@ class DesktopBridge:
                 backend=windows_backend(),
                 emit=lambda kind, text: self._events.put(State(f"dictation_{kind}", text)),
                 voice_active=lambda: self.voice_active,
+                other_busy=lambda: self._selection is not None and self._selection.busy,
             )
         self._dictation.toggle()
+
+    def selection_hotkey(self) -> bool:
+        """Seçili metin kısayolu (GUI thread'i): seçimi yakalar (ADR 0062)."""
+        return self._selection_call(lambda actions: actions.start_capture())
+
+    def selection_run(self, action: str) -> bool:
+        return self._selection_call(lambda actions: actions.start_run(action))
+
+    def selection_write_back(self) -> bool:
+        return self._selection_call(lambda actions: actions.start_write_back())
+
+    def _selection_call(self, call: Callable[[SelectionActions], None]) -> bool:
+        loop = self._loop
+        if loop is None or not self._ready.is_set() or self._shutdown:
+            return False
+        try:
+            loop.call_soon_threadsafe(self._selection_on_worker, call)
+        except RuntimeError:
+            return False
+        return True
+
+    def _selection_on_worker(self, call: Callable[[SelectionActions], None]) -> None:
+        runtime = self._runtime
+        if runtime is None or self._shutdown or not runtime.settings.selection_actions.enabled:
+            return
+        if self._selection is None:
+            settings = runtime.settings
+
+            async def complete(
+                messages: list[Message], model: str | None, timeout: float
+            ) -> Completion:
+                # ARAÇSIZ: seçili metin dış veridir, hiçbir araç çağrısı açılmaz (ADR 0062).
+                provider = runtime.provider
+                if model is not None and isinstance(provider, ProviderRouter):
+                    return await provider.complete(messages, [], timeout=timeout, model=model)
+                return await provider.complete(messages, [], timeout=timeout)
+
+            self._selection = SelectionActions(
+                audit=runtime.audit,
+                backend=windows_selection_backend(windows_backend()),
+                complete=complete,
+                emit=lambda kind, text: self._events.put(State(f"selection_{kind}", text)),
+                translate_to=settings.selection_actions.translate_to,
+                cloud_allowed=settings.allow_cloud_clipboard,
+                local_alias=local_chat_alias(settings),
+                other_busy=lambda: self._dictation is not None and self._dictation.busy,
+                timeout=min(settings.provider_timeout_seconds * 2, settings.max_seconds),
+            )
+        call(self._selection)
 
     def submit(self, text: str) -> str | None:
         request_id = str(uuid4())
@@ -1012,6 +1071,8 @@ class DesktopBridge:
         self._stop_voice_on_worker()
         if self._dictation is not None:
             self._dictation.shutdown()
+        if self._selection is not None:
+            self._selection.shutdown()
         self._stop_proactive()
         # Çalışan kod ajanı süreçleri panelle birlikte durur; yetim kalıp commit atmasın.
         if self._runtime is not None:
@@ -1033,6 +1094,7 @@ class DesktopBridge:
             "active_request": active_request is not None,
             "voice": voice_busy,
             "dictation": self._dictation is not None and self._dictation.busy,
+            "selection": self._selection is not None and self._selection.busy,
             "proactive": proactive_busy,
         }
         if runtime is not None and any(busy.values()):

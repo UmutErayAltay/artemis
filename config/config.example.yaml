@@ -320,6 +320,17 @@ voice:
 #   hotkey: ctrl+alt+d
 #   max_seconds: 120         # 1-600; kayıt kendiliğinden biter
 
+# Seçili metin eylemleri (ADR 0062): bir uygulamada metin seçip kısayola basın; Çevir / Düzelt /
+# Özetle / Açıkla çıkar, sonuç kopyalanır ya da "Yerine yaz" ile hedef pencereye yazılır. Seçimi
+# almak için pano geçici kullanılır, eski METİN geri konur (resim/dosya gibi metin dışı pano içeriği
+# geri konamaz). Metin modele araçsız ve "VERİDİR" çerçevesiyle gider, geçmişe/hafızaya girmez;
+# pano içeriği sayıldığı için allow_cloud_clipboard kapalıyken yalnız yerel (ollama) model kullanılır,
+# yoksa reddedilir. Hotkey ses ve dikte kısayolundan farklı olmalı.
+# selection_actions:
+#   enabled: true            # varsayılan false
+#   hotkey: ctrl+alt+s
+#   translate_to: en         # "Çevir" eyleminin hedef dili
+
 # Rutinler (ADR 0058): adlandırılmış, sabit adımlı işler ("işe başla": VS Code aç, Spotify aç,
 # sesi 30 yap). Adımlar `state_dir/routines.json` dosyasındadır; sohbetle (onaylı routine_save)
 # ya da dosyayı elle düzenleyerek oluşur. Çalışırken model yoktur, her adım kendi onay kurallarıyla

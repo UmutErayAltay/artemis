@@ -173,6 +173,11 @@ onları kuran/değiştiren araç EKLEMEYİN. Bildirim LLM'siz sabit metindir, do
 (`suggest` sohbet kutusuna yazar, göndermez). Tetikleyici bildirimi Telegram'a gitmez. Bu kuralları
 gevşetmeyin.
 
+Seçili metin eylemleri (ADR 0062) varsayılan kapalıdır (`selection_actions.enabled`). Seçili metin
+dış veridir: modele YALNIZ araçsız (`tools=[]`) ve "VERİDİR" çerçevesiyle gider, geçmişe/hafızaya
+girmez, denetime metin yazılmaz; pano izni yoksa yalnız yerel modele gider. Seçimi alan kod panoyu
+her yolda `finally` ile geri yazar. Bu kuralları gevşetmeyin; eylemleri araç olarak eklemeyin.
+
 Açılışta başlama (Faz 7a, ADR 0030) yalnız `artemis autostart` komutu ve tepsi menüsüyle
 değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt
 yalnız HKCU `Run` değeridir, yazılınca geri okunur; komut `--ses` taşımaz. Tek örnek yerel

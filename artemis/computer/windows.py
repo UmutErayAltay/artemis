@@ -503,6 +503,16 @@ def type_text(text: str, should_continue: Callable[[], bool] | None = None) -> i
     return sent
 
 
+def modifiers_down() -> bool:
+    """Ctrl/Alt/Shift/Win'den biri hâlâ basılı mı. Kısayolun kendi tuşları bırakılmadan gönderilen
+    Ctrl+C hedefte Ctrl+Alt+C gibi okunur; çağıran bırakılmasını sınırlı süre bekler."""
+    _require_windows()
+    user32 = _libs()[0]
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+    return any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in (0x10, 0x11, 0x12, 0x5B, 0x5C))
+
+
 def press_keys(keys: tuple[str, ...]) -> None:
     """Tuş birleşimi; hata olsa bile basılı kalan tuşlar finally'de bırakılır, aksi hâlde
     Ctrl/Shift takılı kalıp kullanıcının klavyesini bozar."""
@@ -524,3 +534,13 @@ def press_keys(keys: tuple[str, ...]) -> None:
             flags = _KEYEVENTF_KEYUP | (_KEYEVENTF_EXTENDEDKEY if vk in _EXTENDED else 0)
             with contextlib.suppress(OSError):  # asıl hatayı gölgelemesin
                 _send([_key(vk, 0, flags)])
+
+
+def focus_window(hwnd: int) -> bool:
+    """Pencereyi ön plana getirmeyi dener; gerçekten ön planda olduğu çağıranca ayrıca doğrulanır
+    (SetForegroundWindow'un True dönmesi odağın geçtiğini garanti etmez)."""
+    _require_windows()
+    user32 = _libs()[0]
+    user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    return bool(user32.SetForegroundWindow(hwnd))

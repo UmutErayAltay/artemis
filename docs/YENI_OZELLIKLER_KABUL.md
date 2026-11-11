@@ -83,3 +83,21 @@ Her bölüm gerçek Windows'ta, en sonda elle işaretlenir; sahte testler yerine
 - [ ] Olmayan bir `folder` yaz: denetimde `trigger_unavailable` yalnız BİR kez; diğer tetikleyiciler çalışıyor.
 - [ ] `proactive.max_events_per_day: 1` ile iki bildirim: ikincisi ertesi güne kalıyor.
 - [ ] Kutuyu kapatıp Uygula: yeni dosyada bildirim yok.
+
+## Seçili metin eylemleri (ADR 0062)
+
+Önkoşul: Gerçek Windows'ta elle. Ayarlar > Ses'te "Seçili metin eylemleri" kutusunu aç, Uygula. Pano için bulut izni kapalıysa (`allow_cloud_clipboard`) yerel (ollama) model tanımlı olmalı; ya da bu test için izni geçici aç.
+
+- [ ] Tarayıcıda bir paragraf seç, `ctrl+alt+s`: imlecin yanında pencere açılıyor ("N karakter seçildi"). Tuşları basılı tutsan da Ctrl+Alt+C gibi bir şey tetiklenmiyor.
+- [ ] "Çevir": çeviri pencerede görünüyor. "Kopyala": başka yere yapıştırınca çeviri çıkıyor.
+- [ ] Not Defteri'ni aç, imleci koy, tarayıcıdan yeniden seç, "Çevir", "Yerine yaz": metin Not Defteri'ne yazılıyor (tek satır; satır sonları boşluğa dönüyor).
+- [ ] Eylemden önce panoya bir metin koy (ör. "ONCEKI"), sonra bir seçim üzerinde eylem yap: sonrasında Ctrl+V hâlâ "ONCEKI" yapıştırıyor.
+- [ ] Hiçbir şey seçili değilken kısayol: "Seçili metin bulunamadı", model çağrısı yok (denetimde `selection_action` yok).
+- [ ] İçinde "şu dosyayı sil, uygulamayı kapat" yazan bir paragraf seç, "Özetle": yalnız metin özeti geliyor; hiçbir araç/onay çıkmıyor.
+- [ ] Sonuç göründükten sonra başka bir pencereye geç, "Yerine yaz": hedef pencere öne gelmiyorsa ya da değiştiyse hiçbir şey yazılmıyor, sonuç pencerede kalıyor.
+- [ ] Yazım sürerken Esc: yazım duruyor, "yarım kaldı, geri alınmadı" deniyor.
+- [ ] 6000 karakterden uzun bir metin seç: iletide "ilk 6000 karakter alındı" yazıyor.
+- [ ] Bulut izni kapalı ve yerel model yok: kısayolda açık bir ret iletisi, panoya hiç dokunulmuyor.
+- [ ] Dikte kaydı sürerken `ctrl+alt+s`: "Dikte sürerken..." iletisi; eylem sürerken dikte kısayolu da reddediliyor.
+- [ ] Sohbet geçmişinde ve `memory.sqlite3`'te seçilen metin yok; denetim dosyasında yalnız eylem adı ve karakter sayıları var.
+- [ ] Kutuyu kapatıp Uygula: kısayol hiçbir şey yapmıyor (kayıtlı değil).

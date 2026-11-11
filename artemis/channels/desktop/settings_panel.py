@@ -168,6 +168,15 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         ("dictation", "hotkey"), "dictation_hotkey",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
+    _checkbox(("selection_actions", "enabled"), "selection_enabled"),
+    PanelBinding(
+        ("selection_actions", "hotkey"), "selection_hotkey",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("selection_actions", "translate_to"), "selection_translate_to",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
     _checkbox(("routines", "enabled"), "routines_enabled"),
     _checkbox(("calendar", "enabled"), "calendar_enabled"),
     _checkbox(("calendar", "allow_cloud"), "calendar_cloud"),
@@ -725,6 +734,25 @@ class SettingsPanel(QWidget):
         self.dictation_hotkey.setAccessibleName("Dikte kısayolu")
         self.dictation_hotkey.setPlaceholderText("Örneğin: ctrl+alt+d")
         field(speech, "Dikte tuşu", self.dictation_hotkey)
+        self.selection_enabled = QCheckBox("Seçili metin eylemleri")
+        speech.addWidget(self.selection_enabled)
+        speech.addWidget(_check_hint(
+            "Bir uygulamada metin seçip kısayola basın: Çevir, Düzelt, Özetle ya da Açıkla. "
+            "Seçimi almak için pano geçici kullanılır ve eski metin geri konur; metin dışı pano "
+            "içeriği (resim, dosya) geri konamaz. Metin modele araçsız gider, geçmişe girmez. "
+            "Pano için bulut izni yoksa yalnız yerel model kullanılır. Değişiklik Uygula'dan "
+            "sonra geçerli olur."
+        ))
+        self.selection_hotkey = QLineEdit()
+        self.selection_hotkey.setMaxLength(40)
+        self.selection_hotkey.setAccessibleName("Seçili metin kısayolu")
+        self.selection_hotkey.setPlaceholderText("Örneğin: ctrl+alt+s")
+        field(speech, "Seçili metin tuşu", self.selection_hotkey)
+        self.selection_translate_to = QLineEdit()
+        self.selection_translate_to.setMaxLength(40)
+        self.selection_translate_to.setAccessibleName("Çeviri dili")
+        self.selection_translate_to.setPlaceholderText("Örneğin: en")
+        field(speech, "Çeviri dili", self.selection_translate_to)
         self.barge_in_box = QCheckBox("Konuşurken sesimle sustur")
         speech.addWidget(self.barge_in_box)
         self.followup_box = QCheckBox("Yanıttan sonra adsız dinle")
@@ -1099,7 +1127,8 @@ class SettingsPanel(QWidget):
             combo.setMinimumContentsLength(12)
         # Değişiklik izleme yalnız kullanıcı girdisine bakar; yenileme sonunda temiz sayılır.
         for edit in (
-            self.wake_name, self.dictation_hotkey, self.github_owner, self.repos_dir,
+            self.wake_name, self.dictation_hotkey, self.selection_hotkey,
+            self.selection_translate_to, self.github_owner, self.repos_dir,
             self.mail_host, self.mail_port, self.mail_username, self.mail_folder,
         ):
             edit.textEdited.connect(self._mark_dirty)
