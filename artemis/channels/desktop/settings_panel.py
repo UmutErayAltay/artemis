@@ -55,6 +55,7 @@ from artemis.channels.desktop.provider_section import (
     store_endpoint_key,
 )
 from artemis.channels.desktop.routines_section import RoutinesSection
+from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
 from artemis.channels.voice import stt_catalog
@@ -171,6 +172,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("calendar", "allow_cloud"), "calendar_cloud"),
     _checkbox(("mail", "enabled"), "mail_enabled"),
     _checkbox(("mail", "allow_cloud"), "mail_cloud"),
+    _checkbox(("skills", "enabled"), "skills_enabled"),
     PanelBinding(
         ("mail", "host"), "mail_host",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
@@ -869,6 +871,22 @@ class SettingsPanel(QWidget):
         cal_page.addWidget(self.calendar_mail)
         cal_page.addStretch(1)
 
+        skills_page = page(
+            "Beceriler",
+            "Elle yazdığın .md dosyalarıyla Artemis'e yeni çalışma yöntemleri öğret. "
+            "Kutu Uygula ile kaydedilir; dosyalar açılışta ve Yenile'de okunur.",
+        )
+        self.skills_enabled = QCheckBox("Beceriler")
+        skills_page.addWidget(self.skills_enabled)
+        skills_page.addWidget(_check_hint(
+            "Dosyalar state_dir/beceriler klasöründe durur. Uygulama içinde düzenlenmez ve "
+            "Artemis kendi başına beceri yazamaz. Mesajı /beceri-adı ile başlatarak da "
+            "çağırabilirsin."
+        ))
+        self.skills = SkillsSection(config_path, demo=demo)
+        skills_page.addWidget(self.skills)
+        skills_page.addStretch(1)
+
         apps = page(
             "Uygulamalar",
             "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı. "
@@ -1398,6 +1416,7 @@ class SettingsPanel(QWidget):
                     widget.blockSignals(False)
             self._update_cloud_hint()
             self.routines.refresh()
+            self.skills.refresh()
             # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
             self.precision_combo.setEnabled(
                 settings.voice.stt_device != "cpu" and not self._demo

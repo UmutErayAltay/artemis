@@ -237,6 +237,17 @@ voice:
 #     Bugünkü takvimimi (calendar_events) ve önemli okunmamış postalarımı (mail_unread)
 #     kısaca özetle; sonra bekleyen hatırlatmalarımı say.
 
+# Kullanıcı becerileri (ADR 0060). KAPALI gelir. Açıkken state_dir/beceriler/ klasörüne elle
+# yazdığınız <ad>.md dosyaları (başlıkta name ve description, altında Markdown tarif) Artemis'e
+# yeni bir çalışma yöntemi öğretir; mesajı /<ad> ile başlatınca o beceri istenir. Klasör yoksa bir
+# örnekle açılır. Beceri izin vermez: araç çağrıları normal onaydan geçer. Metin yerel kullanıcı
+# metnidir; bulut modele giden istemin parçası olur. Klasör (varsayılan state_dir/beceriler) çalışma
+# alanı, vault ve proje depolarının DIŞINDA olmalı, yoksa beceriler yüklenmez; state_dir bunlardan
+# birinin içindeyse folder ile ayrı bir mutlak klasör verin.
+# skills:
+#   enabled: true
+#   folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler
+
 # MCP sunucuları (ADR 0028). KAPALI gelir: servers boşken hiçbir süreç başlatılmaz.
 # Yalnız stdio (yerel süreç) desteklenir; her çağrıda sunucu yeniden başlatılır ve iş
 # bitince kapatılır. Sunucu üçüncü taraf koddur: kendi yaptıkları (ağ, dosya) SafetyGate'in

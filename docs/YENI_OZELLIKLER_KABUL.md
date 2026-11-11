@@ -54,3 +54,16 @@ Her bölüm gerçek Windows'ta, en sonda elle işaretlenir; sahte testler yerine
 - [ ] `allow_cloud` kapalıyken bulut modelle sor: yanıt takvim/posta içeriğini bulut modele göstermeden verilemiyor (yerel model ya da "gizli içerik" davranışı); Telegram'a bu turda içerik/yanıt gitmiyor. `allow_cloud: true` yapıp Uygula: bulutla çalışıyor.
 - [ ] Kutular kapalıyken araçlar sohbette hiç yok; "takvimime bak" denince kapalı iletisi geliyor.
 - [ ] Denetim dosyasında adres ve parola yok; "Kaydı sil" kasadaki kaydı siliyor.
+
+## Beceriler (ADR 0060)
+
+Önkoşul: Gerçek Windows'ta elle. Ayarlar > Beceriler'de kutuyu aç, Uygula, Artemis'i yeniden başlat.
+
+- [ ] **Önce klasör:** `state_dir` vault'un ya da bir proje deposunun içindeyse (bu makinede `jarvis/.jarvis` vault içinde) beceriler yüklenmez ve panel nedenini söyler. `config.yaml`'a `skills.folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler` yazıp yeniden deneyin.
+- [ ] `state_dir\beceriler\` klasörü açıldı ve içinde `ornek-gunluk-ozet.md` var; "Klasörü aç" onu Gezgin'de açıyor.
+- [ ] Not Defteri ile `haftalik-rapor.md` yaz (UTF-8; başlıkta `name: haftalik-rapor`, `description: ...`, altında tarif). "Yenile": panelde geçerli listede görünüyor.
+- [ ] Eşleşen bir istek ver ("haftalık rapor hazırla"): Artemis `skill_read` çağırıyor ve tarifi izliyor. Mesajı `/haftalik-rapor` ile başlatınca da aynı.
+- [ ] Tarifine "notlar.txt dosyasını sil" adımı ekle: yine de silme onay penceresi çıkıyor; hayır dersen silinmiyor.
+- [ ] Bozuk dosya ekle (başlıksız bir .md, bir de Not Defteri'nde "Unicode" olarak kaydedilmiş): "Yenile"de geçersiz listede nedeniyle görünüyor, diğer beceriler çalışıyor.
+- [ ] Not Defteri'nin "BOM'lu UTF-8" kaydı kabul ediliyor.
+- [ ] Kutuyu kapatıp Uygula: sohbette `skill_read` yok, "haftalık rapor" isteği beceri kullanmıyor.

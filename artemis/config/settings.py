@@ -675,6 +675,24 @@ class MailConfig(BaseModel):
     allow_cloud: bool = False
 
 
+class SkillsConfig(BaseModel):
+    """Kullanıcı becerileri (ADR 0060): state_dir/beceriler/*.md. Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    # Boşsa state_dir/beceriler. state_dir vault ya da bir proje deposunun içindeyse beceriler
+    # yüklenmez; o zaman buraya o köklerin DIŞINDA mutlak bir klasör yazılır.
+    folder: Path | None = None
+
+    @field_validator("folder")
+    @classmethod
+    def _absolute_folder(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError("skills.folder mutlak yol olmalı")
+        return value
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -720,6 +738,7 @@ class Settings(BaseModel):
     routines: RoutinesConfig = Field(default_factory=RoutinesConfig)
     calendar: CalendarConfig = Field(default_factory=CalendarConfig)
     mail: MailConfig = Field(default_factory=MailConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

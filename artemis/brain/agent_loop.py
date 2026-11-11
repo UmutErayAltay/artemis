@@ -28,6 +28,7 @@ from artemis.brain.streaming import ResponseStream
 from artemis.brain.tiering import choose_model
 from artemis.memory.companion import content_private, content_tainted, read_companion
 from artemis.safety.gate import SafetyGate, TurnState
+from artemis.skills import explicit_hint, load_skills, prompt_section
 from artemis.tools.base import Risk, ToolContext, ToolResult
 
 SYSTEM_PROMPT = """Sen Artemis, Türkçe konuşan kişisel masaüstü asistanısın.
@@ -457,6 +458,7 @@ class AgentLoop:
         past = history.messages if history is not None else []
         public_notes, private_notes = notes_blocks(self.context)
         public_companion, private_companion = companion_blocks(self.context)
+        skills = load_skills(settings)  # ADR 0060: kullanıcının kendi metni, genel blok
         # Gizli hafıza ayrı, private=True sistem mesajıdır: bulut sağlayıcısı onu HTTP
         # sınırında maskeler, yerel model tam görür (ADR 0056). Gizli hafıza da "gizli geçmiş"
         # sayılır: yerel model onu yanıtına kopyalayabilir.
@@ -478,7 +480,8 @@ class AgentLoop:
                 + json.dumps(list(settings.applications), ensure_ascii=False)
                 + ". Yalnız bu adları kullan; listede bulunan bir uygulamayı izinsiz sanma."
                 + public_notes
-                + public_companion,
+                + public_companion
+                + prompt_section(skills),
             ),
             *(
                 [Message(role="system", content=private_memory.lstrip("\n"), private=True)]
@@ -488,7 +491,9 @@ class AgentLoop:
             *past,
             Message(
                 role="user",
-                content=f"[{local_stamp(started_at)}] {text}" + memory_hint(text),
+                content=f"[{local_stamp(started_at)}] {text}"
+                + memory_hint(text)
+                + explicit_hint(skills, text),
             ),
         ]
         audit = self.context.audit

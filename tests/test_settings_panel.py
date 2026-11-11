@@ -204,7 +204,8 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
     assert panel.section_names() == [
-        "Ses", "Model", "Telegram", "Rutinler", "Takvim ve posta", "Uygulamalar", "GitHub",
+        "Ses", "Model", "Telegram", "Rutinler", "Takvim ve posta", "Beceriler", "Uygulamalar",
+        "GitHub",
         "Görünüm",
     ]
     assert panel.sections.objectName() == "sectionList"

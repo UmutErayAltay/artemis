@@ -19,6 +19,7 @@ from artemis.memory.store import MemoryStore
 from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate
+from artemis.skills import ensure_example
 from artemis.tools.base import ToolContext
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
 from artemis.tools.registry import ToolRegistry, discover_tools
@@ -95,6 +96,8 @@ def create_runtime(
         tools = tools.without_prefix("calendar_")  # ADR 0059
     if not loaded.mail.enabled:
         tools = tools.without_prefix("mail_")
+    if not loaded.skills.enabled:
+        tools = tools.without_prefix("skill_")  # ADR 0060
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
     # Runtime kurulamazsa sahibi dışarıya dönmez; callback kilidi kapatır.
@@ -130,6 +133,10 @@ def create_runtime(
             ensure_skeleton(loaded.state_dir)
         except OSError as error:
             log.emit("companion_error", error=str(error))
+        try:
+            ensure_example(loaded)  # ADR 0060: açıkken klasör yoksa örnek beceriyle açılır
+        except OSError as error:
+            log.emit("skills_error", error=str(error))
         store: MemoryStore | None = None
         if loaded.persist_memory:
             try:
