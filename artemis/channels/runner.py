@@ -43,28 +43,34 @@ class CommandRunner:
 
     async def _run_locked(
         self, text: str, unattended: bool, stream: ResponseStream | None = None,
+        attachment: ToolResult | None = None,
     ) -> RunResult:
         window = self.conversation.render()
-        if stream is None:
+        if stream is None and attachment is None:
             result = await self.loop.run(text, window, unattended=unattended)
-        else:
+        elif attachment is None:
             result = await self.loop.run(text, window, unattended=unattended, stream=stream)
+        else:
+            result = await self.loop.run(
+                text, window, unattended=unattended, stream=stream, attachment=attachment
+            )
         if result.record is not None:
             self.conversation.record(result.record)
         return result
 
     async def run(
         self, text: str, *, unattended: bool = False, stream: ResponseStream | None = None,
+        attachment: ToolResult | None = None,
     ) -> RunResult:
         async with self._lock:
             if not self.loop.cleanup_pending:
                 self.loop.context.cancelled.clear()
             task = asyncio.current_task()
             if task is None:
-                return await self._run_locked(text, unattended, stream)
+                return await self._run_locked(text, unattended, stream, attachment)
             self._active_task = task
             try:
-                return await self._run_locked(text, unattended, stream)
+                return await self._run_locked(text, unattended, stream, attachment)
             finally:
                 if self._active_task is task:
                     self._active_task = None

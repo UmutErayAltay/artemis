@@ -117,3 +117,20 @@ Her bölüm gerçek Windows'ta, en sonda elle işaretlenir; sahte testler yerine
 - [ ] Denetimde `research_search` kayıtları var, sayısı onaydaki sınırı aşmıyor.
 - [ ] Çalışırken Artemis'i kapatıp aç: iş `uncertain`, yeniden başlamıyor.
 - [ ] Kutuyu kapatıp Uygula + yeniden başlat: "araştır" isteğinde araç yok.
+
+## Telegram'dan ses, fotoğraf, dosya (ADR 0064)
+
+Önkoşul: Gerçek Windows'ta elle. Ayarlar > Telegram'da üç kutuyu aç, Uygula; Telegram kanalını yeniden başlat. Ses için yerel Whisper modeli ya da bulut STT hazır olsun.
+
+- [ ] Üç kutu kapalıyken telefondan ses, fotoğraf ve dosya yolla: her biri için "... kapalı" yanıtı geliyor, hiçbir şey çalışmıyor.
+- [ ] Sesli mesaj "saat kaç" de: önce "Şunu duydum: saat kaç", sonra cevap geliyor. Denetimde `telegram_download` (voice, ok) var, ses dosyası hiçbir yerde kalmıyor.
+- [ ] Sessizlik ya da gürültü yolla: "Ses anlaşılamadı", komut çalışmıyor.
+- [ ] 60 saniyeden uzun ses yolla: reddediliyor.
+- [ ] Onay beklerken sesli "evet" yolla: onay verilmiyor, "Önce bekleyen onayı yanıtlayın" geliyor. Düğmeye basınca normal çalışıyor.
+- [ ] Basılı bir sayfanın fotoğrafını başlıksız yolla: tanınan metin geri geliyor. `%TEMP%` altında `artemis-tg-*.jpg` kalmıyor.
+- [ ] Aynı fotoğrafı "bunu özetle" başlığıyla yolla: `perception.allow_cloud_screen` kapalıyken "Yanıt fotoğraftaki gizli içeriği ... gönderilmedi" geliyor (sessizlik yok); açıkken özet geliyor.
+- [ ] PDF yolla: çalışma alanında `Telegram\` altına kaydediliyor, yanıt göreli yolu söylüyor. Aynı dosyayı tekrar yolla: `ad-2.pdf` oluşuyor, ilki bozulmuyor.
+- [ ] `.exe` ya da `x.pdf.exe` adlı dosya yolla: reddediliyor, hiçbir şey kaydedilmiyor.
+- [ ] Dosyaya başlık olarak bir komut yaz: komut çalışmıyor, yalnız kaydedildi yanıtı geliyor.
+- [ ] Başka sohbetten ilettiğin (forward) bir sesli mesajı yolla: "İletilen mesajlar komut olarak çalıştırılmaz", indirme yok.
+- [ ] Denetim dosyasında dosya içeriği, ses metni ve fotoğraf metni yok; yalnız tür/boyut/sonuç var.

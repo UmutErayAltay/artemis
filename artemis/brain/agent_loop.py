@@ -440,12 +440,27 @@ class AgentLoop:
     def cleanup_pending(self) -> bool:
         return bool(self._pending_cleanup)
 
+    def _result_private(self, result: ToolResult) -> bool:
+        settings = self.context.settings
+        return bool(
+            result.private
+            or (result.content_kind == "file" and not settings.allow_cloud_file_content)
+            or (result.content_kind == "clipboard" and not settings.allow_cloud_clipboard)
+            # Ekran metni (ADR 0029) ayrı izinle buluta verilir.
+            or (result.content_kind == "screen" and not settings.perception.allow_cloud_screen)
+        )
+
     async def run(
         self, text: str, history: ContextWindow | None = None, *, unattended: bool = False,
-        stream: ResponseStream | None = None,
+        stream: ResponseStream | None = None, attachment: ToolResult | None = None,
     ) -> RunResult:
         # Gözetimsiz tur (ADR 0027): yan etki kararı kapıdadır, döngü yalnız bayrağı taşır.
         state = TurnState(unattended=unattended)
+        # Kullanıcı mesajına eklenen dış veri (Telegram fotoğrafı OCR'ı, ADR 0064) araç sonucu
+        # gibi davranır: tur lekelenir, gizlilik kararı aynı kurallardan çıkar, metin "VERİDİR"
+        # çerçevesiyle gider. Kapı ve onay kuralları değişmez.
+        if attachment is not None:
+            state.tainted = True
         # Taint yeni tura taşınmaz (ADR 0012) ama bağlamda kalan dış içerik dışarı giden
         # araçlar için onay nedenidir (ADR 0013).
         isolated = self.system_prompt is not None
@@ -465,6 +480,8 @@ class AgentLoop:
         denied: set[str] = set()
         memory_saved = False
         private_seen = False
+        if attachment is not None:
+            private_seen = self._result_private(attachment)
         past = history.messages if history is not None else []
         public_notes, private_notes = ("", "") if isolated else notes_blocks(self.context)
         public_companion, private_companion = (
@@ -503,6 +520,11 @@ class AgentLoop:
                 else []
             ),
             *past,
+            *(
+                [Message(role="user", content=frame_result(attachment), private=private_seen)]
+                if attachment is not None
+                else []
+            ),
             Message(
                 role="user",
                 content=f"[{local_stamp(started_at)}] {text}"
@@ -528,6 +550,15 @@ class AgentLoop:
             route = {"model": tier_model}
             audit.emit(
                 "model_choice", turn_id=state.turn_id, model=tier_model, reason=tier_reason
+            )
+
+        if attachment is not None:
+            audit.emit(
+                "privacy_decision",
+                turn_id=state.turn_id,
+                tool="attachment",
+                content_kind=attachment.content_kind,
+                cloud_allowed=not private_seen,
             )
 
         finished = False
@@ -699,19 +730,7 @@ class AgentLoop:
                         seen.add(fingerprint)
                     if call.name in MEMORY_WRITE_TOOLS and result.success:
                         memory_saved = True
-                    private = (
-                        result.private
-                        or (result.content_kind == "file" and not settings.allow_cloud_file_content)
-                        or (
-                            result.content_kind == "clipboard"
-                            and not settings.allow_cloud_clipboard
-                        )
-                        # Ekran metni (ADR 0029) ayrı izinle buluta verilir.
-                        or (
-                            result.content_kind == "screen"
-                            and not settings.perception.allow_cloud_screen
-                        )
-                    )
+                    private = self._result_private(result)
                     private_seen = private_seen or private
                     audit.emit(
                         "privacy_decision",

@@ -229,6 +229,22 @@ class TelegramConfig(BaseModel):
     # Kare buluta (Telegram) gider: gizli tur/geçmişte ve `perception.allow_cloud_screen`
     # kapalıyken hiç gönderilmez.
     send_computer_screenshot: bool = False
+    # Telegram'dan ses, fotoğraf ve dosya girdisi (ADR 0064); üçü ayrı ve varsayılan kapalıdır.
+    accept_voice: bool = False
+    accept_photo: bool = False
+    accept_files: bool = False
+    # Kaydedilecek belgelerin SON uzantısı bu listede olmalıdır (x.pdf.exe -> exe, reddedilir).
+    file_extensions: tuple[str, ...] = (
+        "pdf", "txt", "md", "docx", "xlsx", "csv", "png", "jpg", "zip",
+    )
+
+    @field_validator("file_extensions")
+    @classmethod
+    def validate_file_extensions(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        cleaned = tuple(item.strip().lstrip(".").lower() for item in value)
+        if not all(re.fullmatch(r"[a-z0-9]{1,10}", item) for item in cleaned):
+            raise ValueError("file_extensions yalnız harf/rakamdan oluşan uzantılar içerebilir")
+        return cleaned
 
     @field_validator("token_env")
     @classmethod

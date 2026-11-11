@@ -185,6 +185,9 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("skills", "enabled"), "skills_enabled"),
     _checkbox(("triggers", "enabled"), "triggers_enabled"),
     _checkbox(("research", "enabled"), "research_enabled"),
+    _checkbox(("telegram", "accept_voice"), "telegram_voice"),
+    _checkbox(("telegram", "accept_photo"), "telegram_photo"),
+    _checkbox(("telegram", "accept_files"), "telegram_files"),
     PanelBinding(
         ("mail", "host"), "mail_host",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
@@ -851,6 +854,17 @@ class SettingsPanel(QWidget):
         )
         self.telegram = TelegramSection(config_path, demo=demo)
         telegram_page.addWidget(self.telegram)
+        self.telegram_voice = QCheckBox("Ses mesajlarını kabul et")
+        self.telegram_photo = QCheckBox("Fotoğrafları kabul et")
+        self.telegram_files = QCheckBox("Dosyaları kabul et")
+        for box in (self.telegram_voice, self.telegram_photo, self.telegram_files):
+            telegram_page.addWidget(box)
+        telegram_page.addWidget(_check_hint(
+            "Kutular Uygula ile kaydedilir. Ses yazıya çevrilir ve komut olarak çalışır "
+            "(en çok 1 MB, 60 sn); fotoğraftaki metin yerel OCR ile okunur ve gizli sayılır; "
+            "dosyalar çalışma alanındaki Telegram klasörüne kaydedilir, açılmaz. İletilmiş "
+            "mesajlar yine çalışmaz."
+        ))
         telegram_page.addStretch(1)
 
         routines_page = page(

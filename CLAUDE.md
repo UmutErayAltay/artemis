@@ -184,6 +184,13 @@ hafıza, companion, beceri ve kimlik bu döngüye ASLA eklenmez, araç listesi g
 değiştirilmez. `research_start` HER ZAMAN onaylıdır (onay = `max_searches` kadar arama ön onayı),
 rapor dosya adı yalnız iş kimliğinden gelir, `research_result` dış veridir. Bu kuralları gevşetmeyin.
 
+Telegram ses/fotoğraf/dosya girdisi (ADR 0064) üç ayrı bayrakla varsayılan kapalıdır ve her
+mesaj türünde özel/iletilmemiş/taze koşulu aynen sürer. Ses onay değildir (onay yalnız düğme);
+fotoğraf OCR metni `content_kind="screen"` dış veridir (`attachment`, tur lekelenir, gizlilik
+`allow_cloud_screen`'e bağlı); belge adı saldırgan girdisidir (son uzantı, `safe_join`,
+`allow_symlinks=False`, asla üzerine yazma) ve belge başlığı komut sayılmaz. Boyut indirmeden önce
+ve okurken sınanır; geçici dosya her yolda silinir. Bu kuralları gevşetmeyin.
+
 Açılışta başlama (Faz 7a, ADR 0030) yalnız `artemis autostart` komutu ve tepsi menüsüyle
 değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt
 yalnız HKCU `Run` değeridir, yazılınca geri okunur; komut `--ses` taşımaz. Tek örnek yerel

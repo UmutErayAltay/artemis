@@ -254,17 +254,20 @@ async def build_voice_controller(
         return controller
 
 
-async def build_dictation_recognizer(runtime: Runtime) -> SpeechRecognizer:
+async def build_dictation_recognizer(
+    runtime: Runtime, content_kind: str = "dictation_audio"
+) -> SpeechRecognizer:
     """Dikte (ADR 0057) ses yoluyla AYNI gizlilik ayarını izler: `stt_mode: hybrid` seçilmişse
     ses bulut ucuna gider (`cloud_stt_transfer` denetimiyle), değilse yerel Whisper kullanılır.
-    Yeni bir izin ya da atlama yolu yoktur. Hazırlık engelleyicidir, `to_thread` ile yapılır."""
+    Yeni bir izin ya da atlama yolu yoktur. `content_kind` yalnız denetim etiketidir (Telegram
+    sesi `telegram_audio`, ADR 0064). Hazırlık engelleyicidir, `to_thread` ile yapılır."""
     settings = runtime.settings
     voice = alias_hotword_config(settings)
     if settings.voice.stt_mode == "hybrid":
         endpoint_id = settings.voice.stt_cloud_endpoint
         return OpenAICompatibleTranscriber(
             voice, endpoint_id, settings.endpoints[endpoint_id], runtime.audit,
-            content_kind="dictation_audio",
+            content_kind=content_kind,
         )
     recognizer = FasterWhisperRecognizer(voice)
     await _prepare(recognizer)

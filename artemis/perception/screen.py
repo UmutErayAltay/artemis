@@ -184,6 +184,68 @@ SCREEN_SCRIPT = "\n".join(
 )
 
 
+# Telegram fotoğrafı (ADR 0064): ekran yakalama yok, tek dosya okunur. Yol argv'de değil ortamda
+# gider; çıkış kodları ekran betiğiyle aynıdır (2 geçersiz girdi, 3 dil paketi yok, 4 boyut).
+IMAGE_SCRIPT = "\n".join(
+    [
+        "$ErrorActionPreference = 'Stop'",
+        "$path = $env:ARTEMIS_OCR_IMAGE",
+        "if (-not $path -or -not (Test-Path -LiteralPath $path -PathType Leaf)) { exit 2 }",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "Add-Type -AssemblyName System.Runtime.WindowsRuntime",
+        "$null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]",
+        "$null = [Windows.Globalization.Language, Windows.Globalization, "
+        "ContentType = WindowsRuntime]",
+        "$null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, "
+        "ContentType = WindowsRuntime]",
+        "$null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics, "
+        "ContentType = WindowsRuntime]",
+        "$null = [Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType = WindowsRuntime]",
+        "$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | "
+        "Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and "
+        "$_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | "
+        "Select-Object -First 1",
+        "function Wait-WinRT($operation, [Type]$resultType) {",
+        "  $task = $asTask.MakeGenericMethod($resultType).Invoke($null, @($operation))",
+        "  $task.Wait(-1) | Out-Null",
+        "  return $task.Result",
+        "}",
+        "$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage("
+        "(New-Object Windows.Globalization.Language 'tr-TR'))",
+        "if ($null -eq $engine) { $engine = "
+        "[Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }",
+        "if ($null -eq $engine) { exit 3 }",
+        "$stream = $null; $ras = $null",
+        "try {",
+        "  $stream = [System.IO.File]::OpenRead($path)",
+        "  $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($stream)",
+        "  $decoder = Wait-WinRT ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) "
+        "([Windows.Graphics.Imaging.BitmapDecoder])",
+        "  $software = Wait-WinRT ($decoder.GetSoftwareBitmapAsync()) "
+        "([Windows.Graphics.Imaging.SoftwareBitmap])",
+        "  try {",
+        "    $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
+        "    if ($software.PixelWidth -gt $maxDim -or $software.PixelHeight -gt $maxDim) "
+        "{ exit 4 }",
+        "    $result = Wait-WinRT ($engine.RecognizeAsync($software)) "
+        "([Windows.Media.Ocr.OcrResult])",
+        "  } finally { $software.Dispose() }",
+        "  $lines = @($result.Lines | ForEach-Object { $_.Text })",
+        "  $payload = [ordered]@{",
+        "    text = [string]::Join(\"`n\", $lines)",
+        "    language = $engine.RecognizerLanguage.LanguageTag",
+        "  }",
+        "  Write-Output ($payload | ConvertTo-Json -Compress)",
+        "} finally {",
+        "  if ($null -ne $ras) { $ras.Dispose() }",
+        "  if ($null -ne $stream) { $stream.Dispose() }",
+        "}",
+        "exit 0",
+        "",
+    ]
+)
+
+
 @dataclass(frozen=True)
 class ScreenOutcome:
     status: Literal["ok", "empty", "unavailable", "error"]
@@ -296,5 +358,63 @@ def read_screen(
         text=text,
         language=language,
         window_title=title,
+        truncated=truncated,
+    )
+
+
+def read_image(
+    path: str,
+    *,
+    runner: Callable[..., subprocess.CompletedProcess[str]] = subprocess.run,
+    platform: str | None = None,
+    timeout: float = 20.0,
+) -> ScreenOutcome:
+    """Diskteki tek bir görüntüyü yerel OCR ile okur (ADR 0064). Görüntü modele/buluta gitmez;
+    dosyayı silmek çağıranın işidir. Hata metinleri yol ve içerik taşımaz."""
+    current = sys.platform if platform is None else platform
+    if current != "win32":
+        return ScreenOutcome("unavailable", "Fotoğraf okuma yalnız Windows'ta çalışır.")
+    encoded = base64.b64encode(IMAGE_SCRIPT.encode("utf-16-le")).decode("ascii")
+    command = [
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-EncodedCommand", encoded,
+    ]
+    env = {**child_environment(), "ARTEMIS_OCR_IMAGE": path}
+    try:
+        completed = runner(
+            command,
+            env=env,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return ScreenOutcome("error", "Fotoğraf okuma zaman aşımına uğradı.")
+    except (OSError, ValueError) as error:
+        return ScreenOutcome("error", f"Fotoğraf okuma başlatılamadı ({type(error).__name__}).")
+    code = completed.returncode
+    if code == 3:
+        return ScreenOutcome(
+            "unavailable",
+            "Windows OCR dil paketi bulunamadı; Ayarlar'dan bir OCR dil paketi kurun.",
+        )
+    if code == 4:
+        return ScreenOutcome("error", "Fotoğraf OCR için fazla büyük.")
+    if code != 0:
+        return ScreenOutcome("error", f"Fotoğraf okunamadı (çıkış kodu {code}).")
+    payload = _parse_payload(completed.stdout or "")
+    if payload is None or not isinstance(payload.get("text"), str):
+        return ScreenOutcome("error", "Fotoğraf okuma çıktısı anlaşılamadı.")
+    text = _clean(str(payload["text"])).strip()
+    language = _clean(str(payload.get("language") or ""))
+    if not text:
+        return ScreenOutcome("empty", "Fotoğrafta okunabilir metin bulunamadı.", language=language)
+    truncated = len(text) > SCREEN_TEXT_LIMIT
+    return ScreenOutcome(
+        "ok", "Fotoğraf metni okundu.", text=text[:SCREEN_TEXT_LIMIT], language=language,
         truncated=truncated,
     )

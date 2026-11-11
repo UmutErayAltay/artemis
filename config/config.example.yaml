@@ -174,6 +174,15 @@ voice:
 #   # karesini sohbete yollar. Kare buluta (Telegram) gider: gizli turda ve
 #   # perception.allow_cloud_screen kapalıyken ASLA gönderilmez. /dur oturumu durdurur.
 #   send_computer_screenshot: false
+#   # Telegram'dan ses/fotoğraf/dosya (ADR 0064). Üçü ayrı ve KAPALI. Ses: <=1 MB/60 sn, ayarlı
+#   # STT ile yazıya çevrilir ("Şunu duydum: ..." sonra komut olarak çalışır; sesli "evet" onay
+#   # değildir); bulut STT voice.stt_mode ayarını izler. Fotoğraf: <=5 MB, yerel Windows OCR;
+#   # metin dış veridir ve perception.allow_cloud_screen kapalıyken gizlidir. Dosya: <=20 MB,
+#   # çalışma alanındaki Telegram/ klasörüne kaydedilir, üzerine yazılmaz, hiç açılmaz.
+#   accept_voice: false
+#   accept_photo: false
+#   accept_files: false
+#   file_extensions: [pdf, txt, md, docx, xlsx, csv, png, jpg, zip]   # SON uzantı denetlenir
 
 # Kod ajanı (ADR 0023/0026). KAPALI gelir: projects boşsa araçlar çalışmaz. Her iş
 # tam taslak için onay ister; ajan headless `claude -p` olarak çalışır, yerel commit
