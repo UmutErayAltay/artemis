@@ -619,6 +619,29 @@ class ComputerUseConfig(BaseModel):
     fallback_models: tuple[str, ...] = ()
 
 
+def same_hotkey(first: str, second: str) -> bool:
+    """"Ctrl+Alt+D" ile "alt + ctrl + d" aynı kısayoldur; iki özellik aynı tuşu kaydedemez."""
+    def normal(text: str) -> tuple[frozenset[str], str]:
+        *modifiers, key = [part.strip().lower() for part in text.split("+")]
+        return frozenset(modifiers), key
+
+    return bool(first.strip() and second.strip()) and normal(first) == normal(second)
+
+
+class DictationConfig(BaseModel):
+    """Dikte kipi (ADR 0057): kısayola bas, konuş, tekrar bas; metin odaktaki uygulamaya yazılır.
+
+    Komut yolu DEĞİLDİR: metin modele, geçmişe ya da hafızaya gitmez. Varsayılan kapalı.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    hotkey: str = Field(default="ctrl+alt+d", min_length=1, max_length=40)
+    # Kayıt bu süreyi aşarsa kendiliğinden biter ve o ana kadarki ses yazılır.
+    max_seconds: float = Field(default=120.0, ge=1, le=600)
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -660,6 +683,7 @@ class Settings(BaseModel):
     perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
     system_control: SystemControlConfig = Field(default_factory=SystemControlConfig)
     computer_use: ComputerUseConfig = Field(default_factory=ComputerUseConfig)
+    dictation: DictationConfig = Field(default_factory=DictationConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -684,6 +708,8 @@ class Settings(BaseModel):
         ):
             raise ValueError("Modelin endpoint değeri endpoints içinde tanımlanmalı")
         voice = self.voice
+        if same_hotkey(self.dictation.hotkey, voice.listening_hotkey):
+            raise ValueError("Dikte kısayolu ses kısayoluyla aynı olamaz")
         if voice.stt_mode == "hybrid" and (
             voice.stt_cloud_endpoint not in self.endpoints
             or (voice.stt_cloud_protocol == "openai" and not voice.stt_cloud_model.strip())

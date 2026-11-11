@@ -159,6 +159,11 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
     _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
     _checkbox(("voice", "echo_cancellation"), "echo_cancellation"),
+    _checkbox(("dictation", "enabled"), "dictation_enabled"),
+    PanelBinding(
+        ("dictation", "hotkey"), "dictation_hotkey",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
     _checkbox(("allow_all_applications",), "all_applications"),
     PanelBinding(
         ("computer_use", "mode"),
@@ -680,6 +685,18 @@ class SettingsPanel(QWidget):
         self.continuous_mode = QCheckBox("Kesintisiz sohbet")
         speech.addWidget(self.continuous_mode)
         speech.addWidget(_check_hint("Uyandırma adı söylemeden sürekli dinler."))
+        self.dictation_enabled = QCheckBox("Dikte kısayolu")
+        speech.addWidget(self.dictation_enabled)
+        speech.addWidget(_check_hint(
+            "Kısayola basıp konuşun, tekrar basın: metin odaktaki uygulamaya yazılır. "
+            "Komut değildir, Artemis'e gitmez. Ses açıkken çalışmaz. Esc yazımı durdurur. "
+            "Değişiklik Uygula'dan sonra geçerli olur."
+        ))
+        self.dictation_hotkey = QLineEdit()
+        self.dictation_hotkey.setMaxLength(40)
+        self.dictation_hotkey.setAccessibleName("Dikte kısayolu")
+        self.dictation_hotkey.setPlaceholderText("Örneğin: ctrl+alt+d")
+        field(speech, "Dikte tuşu", self.dictation_hotkey)
         self.barge_in_box = QCheckBox("Konuşurken sesimle sustur")
         speech.addWidget(self.barge_in_box)
         self.followup_box = QCheckBox("Yanıttan sonra adsız dinle")
@@ -973,7 +990,7 @@ class SettingsPanel(QWidget):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(12)
         # Değişiklik izleme yalnız kullanıcı girdisine bakar; yenileme sonunda temiz sayılır.
-        for edit in (self.wake_name, self.github_owner, self.repos_dir):
+        for edit in (self.wake_name, self.dictation_hotkey, self.github_owner, self.repos_dir):
             edit.textEdited.connect(self._mark_dirty)
         self.cloud_model.lineEdit().textEdited.connect(self._mark_dirty)  # type: ignore[union-attr]
         for box in (*(getattr(self, b.widget) for b in PANEL_BINDINGS), self.github_auto):

@@ -90,7 +90,7 @@ from artemis.channels.desktop.steps import StepLine, step_line
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
 from artemis.channels.desktop.widgets import PetFace
 from artemis.channels.runtime import Runtime, create_runtime
-from artemis.config.settings import load_settings
+from artemis.config.settings import load_settings, same_hotkey
 from artemis.safety.audit import AuditLog
 from artemis.tools.toast import ToastOutcome, show_toast
 
@@ -725,6 +725,7 @@ class _ChatPage(QWidget):
 class DesktopWindow(QMainWindow):
     # Kısayol kendi iş parçacığından yayar; Qt bunu ana iş parçacığına sıraya alır.
     _hotkey_pressed = Signal()
+    _dictation_pressed = Signal()
     _toast_failed = Signal(str)
 
     def __init__(
@@ -800,8 +801,12 @@ class DesktopWindow(QMainWindow):
         self._build_overlay()
         self._build_tray()
         self._hotkey: GlobalHotkey | None = None
+        self._dictation_hotkey: GlobalHotkey | None = None
+        # Köprü ayar uygulanınca yenilenir; sinyal her seferinde güncel olanı çağırır.
+        self._dictation_pressed.connect(lambda: self.bridge.toggle_dictation())
         if not demo:
             self._start_hotkey()
+            self._start_dictation_hotkey()
         self.pet.start()
         self._refresh_brand_pet()
         self.settings_panel.pet.set_current(self.pet.skin)
@@ -923,6 +928,48 @@ class DesktopWindow(QMainWindow):
             self._hotkey = hotkey
         elif sys.platform == "win32":
             self._hotkey_problem(f"Ses kısayolu ({text}) başka bir programda kayıtlı.")
+
+    def _start_dictation_hotkey(self) -> None:
+        """Dikte kısayolu (ADR 0057): kapalıyken hiç kaydedilmez; ayar uygulanınca yenilenir."""
+        if self._dictation_hotkey is not None:
+            self._dictation_hotkey.stop()
+            self._dictation_hotkey = None
+        try:
+            config = load_settings(self._config_path).dictation
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
+            return
+        if not config.enabled:
+            return
+        text = config.hotkey.strip()
+        try:
+            hotkey = GlobalHotkey(text, self._dictation_pressed.emit)
+        except ValueError:
+            self._hotkey_problem(f"Dikte kısayolu tanınmadı: {text}")
+            return
+        if hotkey.start():
+            self._dictation_hotkey = hotkey
+        elif sys.platform == "win32":
+            self._hotkey_problem(f"Dikte kısayolu ({text}) başka bir programda kayıtlı.")
+
+    def _show_dictation(self, kind: str, message: str) -> None:
+        """Dikte durumu (ADR 0057): kayıt sürerken görünür gösterge, bitince normal duruma dönüş."""
+        if kind in {"listening", "working"}:
+            line = "Dikte dinliyor…" if kind == "listening" else "Dikte yazıya çevriliyor…"
+            self._set_status(line, "running")
+            self.overlay.set_busy(True, line)
+            self.pet.set_voice("listening" if kind == "listening" else "thinking")
+        elif kind == "idle":
+            if self._busy:
+                self._set_status("Çalışıyor…", "running")
+            else:
+                self._set_status("Hazır", "ready")
+            self.overlay.set_busy(self._busy)
+            self.pet.set_voice(self._voice_state)
+        elif kind == "message" and message:
+            self._set_status(message, "ready")
+        elif kind == "text":
+            # Yazılamayan metin kaybolmasın; pano değil panel (konuşma geçmişine girmez).
+            self._append_chat("Artemis", f"Dikte metni (yazılmadı ya da yarım kaldı): {message}")
 
     def _hotkey_problem(self, message: str) -> None:
         if self._tray is not None:
@@ -1476,11 +1523,24 @@ class DesktopWindow(QMainWindow):
                 "Ayarları değiştirmek için işlemin bitmesini bekleyin."
             )
             return
+        values = self.settings_panel.values()
+        try:
+            clash = same_hotkey(
+                str(values[("dictation", "hotkey")]),
+                load_settings(self._config_path).voice.listening_hotkey,
+            )
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
+            clash = False  # okunamayan config aşağıdaki kayıtta zaten yakalanır
+        if clash:
+            self.settings_panel.notice.setText(
+                "Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seçin."
+            )
+            return
         try:
             save_choices(
                 self._config_path,
                 device,
-                values=self.settings_panel.values(),
+                values=values,
                 applications=self.settings_panel.applications,
                 code_agent=self.settings_panel.code_agent_values(),
                 stt_model=self.settings_panel.stt_model_path(),
@@ -1888,6 +1948,8 @@ class DesktopWindow(QMainWindow):
                 self._show_voice_state("off")
                 self.pet.set_busy(False)
                 self.bridge = DesktopBridge(self._config_path)
+                if not self._demo:
+                    self._start_dictation_hotkey()
                 self.settings_panel.refresh()
                 self.settings_panel.notice.setText(
                     "Ayarlar uygulandı; seçilen model ve mikrofon kullanılıyor."
@@ -1935,6 +1997,8 @@ class DesktopWindow(QMainWindow):
                     self.overlay.set_busy(True)
                 else:
                     self._set_status("Hazır", "ready")
+            elif event.state.startswith("dictation_"):
+                self._show_dictation(event.state.removeprefix("dictation_"), event.message)
             elif event.state == "cleanup_pending":
                 self._busy = True
                 self._set_status("Önceki işlem temizleniyor…", "running")
@@ -2276,6 +2340,9 @@ class DesktopWindow(QMainWindow):
         if self._hotkey is not None:
             self._hotkey.stop()
             self._hotkey = None
+        if self._dictation_hotkey is not None:
+            self._dictation_hotkey.stop()
+            self._dictation_hotkey = None
         self.settings_panel.finish_inventory()
         if self._tray is not None:
             self._tray.hide()

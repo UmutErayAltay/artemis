@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from artemis.brain.agent_loop import RunResult
 from artemis.brain.streaming import ResponseStream
 from artemis.channels.desktop.computer_host import ComputerHost
+from artemis.channels.desktop.dictation import Dictation, windows_backend
 from artemis.channels.runtime import (
     Approval as ApprovalCallback,
 )
@@ -29,8 +30,9 @@ from artemis.channels.runtime import (
     create_runtime,
 )
 from artemis.channels.telegram.api import TelegramClient, build_telegram_client
+from artemis.channels.voice.adapters import SoundDeviceMicrophone
 from artemis.channels.voice.core import VoiceController
-from artemis.channels.voice.factory import build_voice_controller
+from artemis.channels.voice.factory import build_dictation_recognizer, build_voice_controller
 from artemis.channels.voice.metrics import EventCollector, collector_report, write_report
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.scheduler import ProactiveScheduler
@@ -306,6 +308,8 @@ class DesktopBridge:
         self._voice_stop_requested = False
         self._voice_controller: VoiceController | None = None
         self._voice_task: asyncio.Task[None] | None = None
+        # Dikte (ADR 0057) ilk kısayol basışında işçi döngüsünde kurulur.
+        self._dictation: Dictation | None = None
         # Proaktif zamanlayıcı (ADR 0027) yalnız işçi döngüsünde yaşar.
         self._proactive_stop: asyncio.Event | None = None
         self._proactive_task: asyncio.Task[None] | None = None
@@ -356,6 +360,13 @@ class DesktopBridge:
                 return False
             self._voice_starting = True
             self._voice_stop_requested = False
+            # Önce kendi bayrağı, sonra dikteye bakış: dikte de tersini yapar (aynı anda
+            # iki mikrofon açılmaz, dikte sesi asistan komutu sayılmaz).
+            dictation = self._dictation
+            if dictation is not None and dictation.busy:
+                self._voice_starting = False
+                self._events.put(State("dictation_message", "Dikte sürerken ses açılamaz."))
+                return False
         loop = self._loop
         try:
             if loop is None:
@@ -382,6 +393,36 @@ class DesktopBridge:
         except RuntimeError:
             return False
         return True
+
+    def toggle_dictation(self) -> bool:
+        """Dikte kısayolu (GUI thread'i): kayıt başlatır ya da durdurup yazdırır (ADR 0057)."""
+        loop = self._loop
+        if loop is None or not self._ready.is_set() or self._shutdown:
+            return False
+        try:
+            loop.call_soon_threadsafe(self._toggle_dictation_on_worker)
+        except RuntimeError:
+            return False
+        return True
+
+    def _toggle_dictation_on_worker(self) -> None:
+        runtime = self._runtime
+        if runtime is None or self._shutdown or not runtime.settings.dictation.enabled:
+            return
+        if self._dictation is None:
+            settings = runtime.settings
+            self._dictation = Dictation(
+                max_seconds=settings.dictation.max_seconds,
+                audit=runtime.audit,
+                open_microphone=lambda: SoundDeviceMicrophone(
+                    settings.voice, device=settings.voice.input_device
+                ),
+                get_recognizer=lambda: build_dictation_recognizer(runtime),
+                backend=windows_backend(),
+                emit=lambda kind, text: self._events.put(State(f"dictation_{kind}", text)),
+                voice_active=lambda: self.voice_active,
+            )
+        self._dictation.toggle()
 
     def submit(self, text: str) -> str | None:
         request_id = str(uuid4())
@@ -958,6 +999,8 @@ class DesktopBridge:
 
     def _shutdown_on_worker(self, request_id: str | None) -> None:
         self._stop_voice_on_worker()
+        if self._dictation is not None:
+            self._dictation.shutdown()
         self._stop_proactive()
         # Çalışan kod ajanı süreçleri panelle birlikte durur; yetim kalıp commit atmasın.
         if self._runtime is not None:
@@ -978,6 +1021,7 @@ class DesktopBridge:
             "turn_cleanup": runtime is not None and runtime.agent.cleanup_pending,
             "active_request": active_request is not None,
             "voice": voice_busy,
+            "dictation": self._dictation is not None and self._dictation.busy,
             "proactive": proactive_busy,
         }
         if runtime is not None and any(busy.values()):
