@@ -28,7 +28,7 @@ from artemis.brain.streaming import ResponseStream
 from artemis.brain.tiering import choose_model
 from artemis.memory.companion import content_private, content_tainted, read_companion
 from artemis.safety.gate import SafetyGate, TurnState
-from artemis.skills import explicit_hint, load_skills, prompt_section
+from artemis.skills import Catalog, explicit_hint, load_skills, prompt_section
 from artemis.tools.base import Risk, ToolContext, ToolResult
 
 SYSTEM_PROMPT = """Sen Artemis, Türkçe konuşan kişisel masaüstü asistanısın.
@@ -424,7 +424,12 @@ class AgentLoop:
         gate: SafetyGate,
         context: ToolContext,
         approve: Callable[[str, dict[str, Any]], bool],
+        *,
+        system_prompt: str | None = None,
     ) -> None:
+        # `system_prompt` doluysa tur YALNIZ bu metinle kurulur: not, companion, beceri, uygulama
+        # listesi ve tarih ipucu hiç eklenmez (ADR 0063: araştırma işi özel veri görmemeli).
+        self.system_prompt = system_prompt
         self.provider = provider
         self.gate = gate
         self.context = context
@@ -443,8 +448,13 @@ class AgentLoop:
         state = TurnState(unattended=unattended)
         # Taint yeni tura taşınmaz (ADR 0012) ama bağlamda kalan dış içerik dışarı giden
         # araçlar için onay nedenidir (ADR 0013).
-        state.history_external = (history is not None and history.external) or any(
-            content_tainted(self.context.settings.state_dir, key) for key, _ in _COMPANION_SHARES
+        isolated = self.system_prompt is not None
+        state.history_external = (history is not None and history.external) or (
+            not isolated
+            and any(
+                content_tainted(self.context.settings.state_dir, key)
+                for key, _ in _COMPANION_SHARES
+            )
         )
         start = time.monotonic()
         settings = self.context.settings
@@ -456,9 +466,11 @@ class AgentLoop:
         memory_saved = False
         private_seen = False
         past = history.messages if history is not None else []
-        public_notes, private_notes = notes_blocks(self.context)
-        public_companion, private_companion = companion_blocks(self.context)
-        skills = load_skills(settings)  # ADR 0060: kullanıcının kendi metni, genel blok
+        public_notes, private_notes = ("", "") if isolated else notes_blocks(self.context)
+        public_companion, private_companion = (
+            ("", "") if isolated else companion_blocks(self.context)
+        )
+        skills = Catalog() if isolated else load_skills(settings)  # ADR 0060: kullanıcı metni
         # Gizli hafıza ayrı, private=True sistem mesajıdır: bulut sağlayıcısı onu HTTP
         # sınırında maskeler, yerel model tam görür (ADR 0056). Gizli hafıza da "gizli geçmiş"
         # sayılır: yerel model onu yanıtına kopyalayabilir.
@@ -473,7 +485,9 @@ class AgentLoop:
         messages = [
             Message(
                 role="system",
-                content=SYSTEM_PROMPT
+                content=self.system_prompt
+                if self.system_prompt is not None
+                else SYSTEM_PROMPT
                 + "\nKullanıcı mesajlarının başındaki [tarih saat] o mesajın yerel zamanıdır; "
                 "son mesajınki şu anki zamandır. Eski bir işi şimdi sürüyor sanma."
                 + "\nİzinli uygulama takma adları (name argümanı): "
@@ -492,8 +506,7 @@ class AgentLoop:
             Message(
                 role="user",
                 content=f"[{local_stamp(started_at)}] {text}"
-                + memory_hint(text)
-                + explicit_hint(skills, text),
+                + ("" if isolated else memory_hint(text) + explicit_hint(skills, text)),
             ),
         ]
         audit = self.context.audit

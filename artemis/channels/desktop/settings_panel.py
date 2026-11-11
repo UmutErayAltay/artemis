@@ -184,6 +184,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("mail", "allow_cloud"), "mail_cloud"),
     _checkbox(("skills", "enabled"), "skills_enabled"),
     _checkbox(("triggers", "enabled"), "triggers_enabled"),
+    _checkbox(("research", "enabled"), "research_enabled"),
     PanelBinding(
         ("mail", "host"), "mail_host",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
@@ -931,6 +932,20 @@ class SettingsPanel(QWidget):
         self.triggers = TriggersSection(config_path, demo=demo)
         triggers_page.addWidget(self.triggers)
         triggers_page.addStretch(1)
+
+        research_page = page(
+            "Araştırma",
+            "Bir konuyu arka planda web aramasıyla araştırıp kaynaklı rapor yazdırır. "
+            "Kutu Uygula ile kaydedilir.",
+        )
+        self.research_enabled = QCheckBox("Araştırma işi")
+        research_page.addWidget(self.research_enabled)
+        research_page.addWidget(_check_hint(
+            "Her araştırma başlamadan önce onay sorulur; onay en fazla research.max_searches "
+            "(varsayılan 12) web araması içindir. İş sohbet geçmişini, hafızayı ve notlarını "
+            "görmez. Rapor state_dir/arastirma klasörüne yazılır, kasaya kendiliğinden eklenmez."
+        ))
+        research_page.addStretch(1)
 
         apps = page(
             "Uygulamalar",

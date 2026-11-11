@@ -101,3 +101,19 @@ Her bölüm gerçek Windows'ta, en sonda elle işaretlenir; sahte testler yerine
 - [ ] Dikte kaydı sürerken `ctrl+alt+s`: "Dikte sürerken..." iletisi; eylem sürerken dikte kısayolu da reddediliyor.
 - [ ] Sohbet geçmişinde ve `memory.sqlite3`'te seçilen metin yok; denetim dosyasında yalnız eylem adı ve karakter sayıları var.
 - [ ] Kutuyu kapatıp Uygula: kısayol hiçbir şey yapmıyor (kayıtlı değil).
+
+## Araştırma işi (ADR 0063)
+
+Önkoşul: Gerçek Windows'ta elle. Ayarlar > Araştırma'da "Araştırma işi" kutusunu aç, Uygula; uygulamayı yeniden başlat.
+
+- [ ] Zararsız bir konu iste ("2025'te en çok satan elektrikli arabaları araştır"): onay penceresi konuyu ve en çok kaç arama yapılacağını gösteriyor; hayır dersen hiçbir şey başlamıyor.
+- [ ] Onayla, sonra başka şeyler sohbet et: Artemis yanıt vermeye devam ediyor, ek arama onayı çıkmıyor.
+- [ ] Bitince "Araştırma bitti: <konu>" bildirimi geliyor.
+- [ ] "Araştırma durumu" de: `done` ve arama sayısı (en fazla 12) görünüyor.
+- [ ] Raporu iste: kaynak adresleriyle özet geliyor. `state_dir/arastirma/` altında `<iş-kimliği>.md` var, adında konu yok.
+- [ ] "Bunu notlarıma ekle" de: `vault_append` normal onayını soruyor; onaylamadan kasaya bir şey yazılmıyor.
+- [ ] Çalışırken ikinci araştırma iste: "zaten çalışan araştırma var" deniyor.
+- [ ] Uzun bir konuda "araştırmayı iptal et": önce "iptal istendi", sonra durum `cancelled`; rapor dosyası yok.
+- [ ] Denetimde `research_search` kayıtları var, sayısı onaydaki sınırı aşmıyor.
+- [ ] Çalışırken Artemis'i kapatıp aç: iş `uncertain`, yeniden başlamıyor.
+- [ ] Kutuyu kapatıp Uygula + yeniden başlat: "araştır" isteğinde araç yok.

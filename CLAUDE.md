@@ -178,6 +178,12 @@ dış veridir: modele YALNIZ araçsız (`tools=[]`) ve "VERİDİR" çerçevesiyl
 girmez, denetime metin yazılmaz; pano izni yoksa yalnız yerel modele gider. Seçimi alan kod panoyu
 her yolda `finally` ile geri yazar. Bu kuralları gevşetmeyin; eylemleri araç olarak eklemeyin.
 
+Araştırma işi (ADR 0063) varsayılan kapalıdır (`research.enabled`). Güvenlik "özel veri yok" ilkesine
+dayanır: iş kendi `AgentLoop(system_prompt=...)`'unda boş geçmişle, yalnız `web_search` ile çalışır;
+hafıza, companion, beceri ve kimlik bu döngüye ASLA eklenmez, araç listesi genişletilmez, kapı
+değiştirilmez. `research_start` HER ZAMAN onaylıdır (onay = `max_searches` kadar arama ön onayı),
+rapor dosya adı yalnız iş kimliğinden gelir, `research_result` dış veridir. Bu kuralları gevşetmeyin.
+
 Açılışta başlama (Faz 7a, ADR 0030) yalnız `artemis autostart` komutu ve tepsi menüsüyle
 değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt
 yalnız HKCU `Run` değeridir, yazılınca geri okunur; komut `--ses` taşımaz. Tek örnek yerel

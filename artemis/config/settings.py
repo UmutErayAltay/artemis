@@ -755,6 +755,17 @@ class SkillsConfig(BaseModel):
         return value
 
 
+class ResearchConfig(BaseModel):
+    """Arka plan araştırma işi (ADR 0063). Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    # Başlatma onayı tam bu kadar web araması için ön onaydır; sayaç bitince arama reddedilir.
+    max_searches: int = Field(default=12, ge=1, le=50)
+    max_seconds: float = Field(default=600.0, ge=1, le=3600)
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -803,6 +814,7 @@ class Settings(BaseModel):
     calendar: CalendarConfig = Field(default_factory=CalendarConfig)
     mail: MailConfig = Field(default_factory=MailConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

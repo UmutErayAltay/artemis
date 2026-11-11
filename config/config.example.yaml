@@ -248,6 +248,17 @@ voice:
 #   enabled: true
 #   folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler
 
+# Arka plan araştırma işi (ADR 0063). KAPALI gelir. "Şunu araştır" isteği arka planda web
+# aramasıyla çalışır ve state_dir/arastirma/<iş-kimliği>.md raporunu yazar. Başlatma HER ZAMAN
+# onay sorar; onay gösterilen konu için en fazla max_searches web araması içindir. İş kendi
+# döngüsünde, boş geçmişle ve notlarınızı/hafızanızı/becerilerinizi görmeden çalışır; yalnız
+# web_search aracı vardır. Rapor webden türer; kasaya kendiliğinden yazılmaz (istersen vault_append,
+# normal onayla). Günlük bütçe ve allow_paid geçerlidir. Aynı anda tek araştırma çalışır.
+# research:
+#   enabled: true
+#   max_searches: 12
+#   max_seconds: 600
+
 # MCP sunucuları (ADR 0028). KAPALI gelir: servers boşken hiçbir süreç başlatılmaz.
 # Yalnız stdio (yerel süreç) desteklenir; her çağrıda sunucu yeniden başlatılır ve iş
 # bitince kapatılır. Sunucu üçüncü taraf koddur: kendi yaptıkları (ağ, dosya) SafetyGate'in
