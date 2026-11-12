@@ -124,3 +124,14 @@ def test_containers_inside_surfaces_are_transparent_but_inputs_are_not() -> None
     assert "QFrame#card QLineEdit" not in sheet
     assert "QRadioButton::indicator" in sheet
     assert "QFrame#previewWell" in sheet
+
+
+def test_buttons_and_fields_share_one_control_height() -> None:
+    """Geçmiş düğmeleri ve Ayarlar düğmeleri aynı yükseklik/dolgu ölçüsünü kullanır."""
+    for name in THEMES:
+        css = stylesheet(name)
+        assert "QPushButton {" in css and "min-height: 26px" in css, name
+        assert "QPushButton {" in css and "padding: 4px 12px" in css, name
+        assert "QSpinBox {" in css and "min-height: 26px" in css, name
+        primary = css.split("QPushButton#primary {", 1)[1].split("}", 1)[0]
+        assert "min-height" not in primary, name

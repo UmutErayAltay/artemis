@@ -343,7 +343,8 @@ AGENT_MISSING_TIP = "Bulunamadı. Ayarlar > GitHub > Kod ajanları bölümünden
 MODE_LABELS = (("Arka planda", "background"), ("Görünür pencerede", "visible"))
 LIST_MIN_ROWS = 1  # tek taslak tek satır yüksekliği alır; boşken EmptyState gösterilir
 LIST_MAX_ROWS = 6
-EDITOR_MIN_HEIGHT = 72
+# 68: üç düzenleyici + 36 px kontrollerle birincil düğme 1000x700 pencerede görünür kalır.
+EDITOR_MIN_HEIGHT = 68
 EDITOR_MAX_HEIGHT = 120
 
 

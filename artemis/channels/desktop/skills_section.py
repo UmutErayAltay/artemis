@@ -13,6 +13,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QListWidget, QPushButton, QVBoxLayout, QWidget
 
 from artemis.channels.desktop.provider_section import button_row, group, meta_label
+from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.config.settings import Settings, load_settings
 from artemis.skills import ensure_example, load_skills, skills_dir
 
@@ -29,15 +30,20 @@ class SkillsSection(QWidget):
         valid_box, valid = group("Geçerli beceriler", divided=False)
         layout.addWidget(valid_box)
         self.valid_list = QListWidget()
-        self.valid_list.setMaximumHeight(160)
         self.valid_list.setAccessibleName("Geçerli beceriler")
-        valid.addWidget(self.valid_list)
+        self.valid_area = ListWithEmpty(
+            self.valid_list, "Henüz beceri yok", "", "Klasörü aç",
+        )
+        if self.valid_area.empty.action_button is not None:
+            self.valid_area.empty.action_button.setEnabled(not demo)
+            self.valid_area.empty.action_button.clicked.connect(self._open_folder)
+        valid.addWidget(self.valid_area)
         invalid_box, invalid = group("Geçersiz dosyalar")
         layout.addWidget(invalid_box)
         self.invalid_list = QListWidget()
-        self.invalid_list.setMaximumHeight(120)
         self.invalid_list.setAccessibleName("Geçersiz beceri dosyaları")
-        invalid.addWidget(self.invalid_list)
+        self.invalid_area = ListWithEmpty(self.invalid_list, "Geçersiz dosya yok", height=120)
+        invalid.addWidget(self.invalid_area)
         self.open_button = QPushButton("Klasörü aç")
         self.refresh_button = QPushButton("Yenile")
         invalid.addLayout(button_row(self.open_button, self.refresh_button))
@@ -60,9 +66,12 @@ class SkillsSection(QWidget):
         except (OSError, ValueError):
             self._settings = None
             self.notice.setText("Ayar dosyası okunamadı.")
+            self.valid_area.show_empty("Beceriler okunamadı")
+            self.invalid_area.show_empty("Beceriler okunamadı")
         else:
             if not self._settings.skills.enabled:
-                self.notice.setText("Beceriler kapalı: yukarıdaki kutuyu aç ve Uygula'ya bas.")
+                self.valid_area.show_empty("Beceriler kapalı")
+                self.invalid_area.show_empty("Beceriler kapalı")
             else:
                 catalog = load_skills(self._settings)
                 for skill in catalog.skills:
@@ -71,6 +80,14 @@ class SkillsSection(QWidget):
                     self.invalid_list.addItem(f"{name}: {reason}")
                 if catalog.refused:
                     self.notice.setText(catalog.refused)
+                if self.valid_list.count():
+                    self.valid_area.show_list()
+                else:
+                    self.valid_area.show_empty("Henüz beceri yok", action=True)
+                if self.invalid_list.count():
+                    self.invalid_area.show_list()
+                else:
+                    self.invalid_area.show_empty("Geçersiz dosya yok")
         enabled = self._settings is not None and self._settings.skills.enabled
         self.open_button.setEnabled(enabled and not self._demo)
         self.refresh_button.setEnabled(not self._demo)

@@ -14,6 +14,7 @@ from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QListWidget, QPushButton, QVBoxLayout, QWidget
 
 from artemis.channels.desktop.provider_section import button_row, group, meta_label
+from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.config.settings import Settings, load_settings
 from artemis.safety.audit import AuditLog
 from artemis.tools.file_index import FileIndex, usable_roots
@@ -43,14 +44,21 @@ class FileSearchSection(QWidget):
         roots_box, roots = group("Aranacak klasörler", divided=False)
         layout.addWidget(roots_box)
         self.roots_list = QListWidget()
-        self.roots_list.setMaximumHeight(144)
         self.roots_list.setAccessibleName("Aranacak klasörler")
-        roots.addWidget(self.roots_list)
+        self.roots_area = ListWithEmpty(
+            self.roots_list, "Henüz klasör eklenmedi", "Klasör ekle ile başla.", height=144,
+        )
+        roots.addWidget(self.roots_area)
+        # Liste Uygula yenilemesinde, ekle/çıkar düğmelerinde ve testlerde değişir; boş durum
+        # modelin kendi sinyallerini izler.
+        model = self.roots_list.model()
+        for signal in (model.rowsInserted, model.rowsRemoved, model.modelReset):
+            signal.connect(self._sync_roots)
+        self._sync_roots()
         self.add_button = QPushButton("Klasör ekle")
         self.add_button.setObjectName("primary")
         self.remove_button = QPushButton("Listeden çıkar")
         roots.addLayout(button_row(self.remove_button, self.add_button))
-        roots.addWidget(meta_label("Liste Uygula ile kaydedilir."))
         index_box, index = group("İndeks")
         layout.addWidget(index_box)
         self.status_label = meta_label("")
@@ -59,7 +67,8 @@ class FileSearchSection(QWidget):
         self.clear_button = QPushButton("Dizini sil")
         index.addLayout(button_row(self.clear_button, self.reindex_button))
         index.addWidget(meta_label(
-            "İndeks dosya içeriğinden alınan kişisel metni yalnız state_dir içinde tutar. "
+            "İndeks dosya içeriğinden alınan kişisel metni yalnız Artemis'in veri klasöründe "
+            "tutar. "
             "Gizli görünen dosyalar (.env, anahtar, parola adları) ve bağlantılar dizinlenmez."
         ))
         self.notice = meta_label("")
@@ -75,6 +84,12 @@ class FileSearchSection(QWidget):
             button.setEnabled(not demo)
         if not demo:
             self.refresh()
+
+    def _sync_roots(self, *_args: object) -> None:
+        if self.roots_list.count():
+            self.roots_area.show_list()
+        else:
+            self.roots_area.show_empty("Henüz klasör eklenmedi", "Klasör ekle ile başla.")
 
     def _settings(self) -> Settings | None:
         try:
@@ -129,7 +144,7 @@ class FileSearchSection(QWidget):
         if settings is None or self._index is None:
             return
         if not settings.file_search.enabled:
-            self.notice.setText("Dosya araması kapalı: kutuyu aç ve Uygula'ya bas.")
+            self.notice.setText("Dosya araması kapalı. Önce Dosya aramasını kullan kutusunu aç.")
         elif self._index.start():
             self.notice.setText("Dizinleme başladı.")
         else:

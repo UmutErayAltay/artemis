@@ -11,7 +11,16 @@ pytest.importorskip("PySide6")
 
 from artemis.brain import providers
 from artemis.channels.desktop import provider_section as section_module
-from artemis.channels.desktop.settings_panel import microphone_choices, save_choices
+from artemis.channels.desktop.settings_panel import (
+    _CLEAN_TEXT as CLEAN,
+)
+from artemis.channels.desktop.settings_panel import (
+    _DIRTY_TEXT as DIRTY,
+)
+from artemis.channels.desktop.settings_panel import (
+    microphone_choices,
+    save_choices,
+)
 from artemis.config.settings import load_settings
 
 SECRET = "sk-test-gizli"
@@ -204,14 +213,17 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
     assert panel.section_names() == [
-        "Ses", "Model", "Telegram", "Rutinler", "Takvim ve posta", "Beceriler", "Tetikleyiciler",
-        "Araştırma",
-        "Gün özeti",
-        "Dosya araması",
-        "Uygulamalar",
-        "GitHub",
-        "Görünüm",
+        "Ses", "Model", "Görünüm",
+        "Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma",
+        "Telegram", "Takvim ve posta", "GitHub",
+        "Beceriler", "Dosya araması", "Uygulamalar",
     ]
+    assert panel.section_groups() == {
+        "Temel": ["Ses", "Model", "Görünüm"],
+        "Otomasyon": ["Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma"],
+        "Bağlantılar": ["Telegram", "Takvim ve posta", "GitHub"],
+        "Bilgi": ["Beceriler", "Dosya araması", "Uygulamalar"],
+    }
     assert panel.sections.objectName() == "sectionList"
     assert panel.sections.currentRow() == 0
     # Tek kaydırma bölgesi: sayfa başına ikinci kaydırıcı yok.
@@ -250,11 +262,11 @@ def test_dirty_notice_shows_after_edit_and_clears_on_refresh(tmp_path: Path, qt_
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
-    assert panel.dirty_label.isHidden()
+    assert panel.dirty_label.text() == CLEAN and not panel.apply_button.isEnabled()
     panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
-    assert not panel.dirty_label.isHidden()
+    assert panel.dirty_label.text() == DIRTY and panel.apply_button.isEnabled()
     panel.refresh()
-    assert panel.dirty_label.isHidden()
+    assert panel.dirty_label.text() == CLEAN and not panel.apply_button.isEnabled()
     panel.deleteLater()
     qt_app.processEvents()
 
@@ -345,7 +357,7 @@ def _flip(widget) -> None:  # type: ignore[no-untyped-def]
         name = widget.accessibleName()
         # Kısayol alanları birbirinden farklı olmalı (config çakışmayı reddeder).
         widget.setText(
-            "587" if name == "IMAP kapısı" else "07:15" if name == "Özet saati"
+            "587" if name == "IMAP portu" else "07:15" if name == "Özet saati"
             else "Veli2" if "Seçili" in name else "Veli"
         )
         return
@@ -573,7 +585,7 @@ def test_cloud_key_is_stored_in_vault_only(tmp_path: Path, _vault: dict[str, str
     assert panel.cloud_key.text() == "" and panel.cloud_key.placeholderText() == "kayıtlı"
     assert "kaydedildi" in panel.cloud_stt_hint.text()
     assert SECRET not in panel.cloud_stt_hint.text()
-    assert panel.dirty_label.isHidden()  # Uygula gerekmez
+    assert panel.dirty_label.text() == CLEAN  # Uygula gerekmez
     assert SECRET not in repr(panel.values())
     assert SECRET not in path.read_text(encoding="utf-8")
     panel.deleteLater()
@@ -654,7 +666,7 @@ def test_cloud_models_fetch_fills_combo_and_keeps_choice(
     ]
     assert panel.cloud_model.currentText() == "whisper-x"
     assert "2 model" in panel.cloud_stt_hint.text()
-    assert panel.dirty_label.isHidden()
+    assert panel.dirty_label.text() == CLEAN
     # yazılmış ama saklanmamış anahtar kayıtlıdan önce gelir
     panel.cloud_key.setText(SECRET)
     panel._fetch_cloud_models()
@@ -726,4 +738,155 @@ def test_file_search_section_uses_the_shared_index(tmp_path: Path) -> None:
     panel = _panel(path)
     settings = load_settings(path)
     assert panel.file_search._index is FileIndex.shared(settings, AuditLog(settings.audit_path))
+    panel.deleteLater()
+
+
+# ---- Gruplu bölüm listesi, kayıt durumu, boş durumlar, düz Türkçe metin ----
+
+
+def test_group_headers_are_not_selectable_rows(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    panel = _panel(config(tmp_path))
+    panel.resize(900, 700)
+    panel.show()
+    qt_app.processEvents()
+    assert panel.sections.count() == 13  # başlıklar satır değil: satır = sayfa
+    panel.show_section(1)
+    first_of_group = panel.sections.item(3)  # Rutinler, "Otomasyon" başlığının altında
+    rect = panel.sections.visualItemRect(first_of_group)
+    viewport = panel.sections.viewport()
+    click = Qt.MouseButton.LeftButton
+    QTest.mouseClick(viewport, click, pos=QPoint(20, rect.top() + 4))
+    assert panel.sections.currentRow() == 1  # başlık alanı seçim yapmaz
+    QTest.mouseClick(viewport, click, pos=QPoint(20, rect.bottom() - 4))
+    assert panel.sections.currentRow() == 3
+    panel.show_section(2)
+    panel.sections.setFocus()
+    QTest.keyClick(panel.sections, Qt.Key.Key_Down)  # Görünüm -> Rutinler, başlık atlanır
+    assert panel.section_names()[panel.sections.currentRow()] == "Rutinler"
+    panel.deleteLater()
+
+
+def test_status_bar_text_and_apply_follow_dirty_state(tmp_path: Path, qt_app) -> None:
+    panel = _panel(config(tmp_path))
+    assert panel.dirty_label.text() == CLEAN
+    assert not panel.apply_button.isEnabled()
+    panel.proactive_enabled.setChecked(True)
+    assert panel.dirty_label.text() == DIRTY
+    assert panel.apply_button.isEnabled()
+    panel.refresh()
+    assert panel.dirty_label.text() == CLEAN
+    assert not panel.apply_button.isEnabled()
+    panel.deleteLater()
+
+
+def test_scheduled_jobs_checkbox_is_bound_and_saved(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    assert panel.section_names()[3] == "Rutinler"
+    assert panel.proactive_enabled.text() == "Zamanlı işler"
+    assert panel.values()[("proactive", "enabled")] is False
+    panel.proactive_enabled.setChecked(True)
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).proactive.enabled is True
+    panel.refresh()
+    assert panel.proactive_enabled.isChecked()
+    panel.deleteLater()
+
+
+def test_feature_toggles_name_their_action_and_text_has_no_config_keys(
+    tmp_path: Path, qt_app
+) -> None:
+    from PySide6.QtWidgets import QCheckBox, QLabel
+
+    panel = _panel(config(tmp_path))
+    labels = {
+        "routines_enabled": "Rutinleri kullan", "triggers_enabled": "Tetikleyicileri kullan",
+        "file_search_enabled": "Dosya aramasını kullan", "skills_enabled": "Becerileri kullan",
+        "research_enabled": "Araştırma işlerini kullan",
+        "daily_summary_enabled": "Gün özetini kullan",
+        "calendar_enabled": "Takvimi kullan", "mail_enabled": "Postayı kullan",
+        "dictation_enabled": "Dikteyi kullan",
+        "selection_enabled": "Seçili metin eylemlerini kullan",
+    }
+    for attribute, text in labels.items():
+        assert getattr(panel, attribute).text() == text
+    banned = ("proactive.", "triggers.items", "allow_cloud", "state_dir", "config.yaml", "`",
+              "max_searches", "skills.folder", "Uygula ile kaydedilir", "hemen kaydedilir")
+    texts = [w.text() for w in panel.findChildren(QLabel)] + [
+        w.text() for w in panel.findChildren(QCheckBox)
+    ]
+    for text in texts:
+        assert not any(key in text for key in banned), text
+    panel.deleteLater()
+
+
+def test_cloud_options_follow_their_parent_and_keep_stored_value(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    path = config(tmp_path)
+    save_choices(path, None, values={
+        ("calendar", "enabled"): False, ("calendar", "allow_cloud"): True,
+        ("mail", "enabled"): True, ("mail", "allow_cloud"): False,
+    })
+    panel = _panel(path)
+    assert not panel.calendar_cloud.isEnabled() and panel.calendar_cloud.isChecked()
+    assert panel.mail_cloud.isEnabled() and not panel.mail_cloud.isChecked()
+    panel.calendar_enabled.setChecked(True)
+    assert panel.calendar_cloud.isEnabled()
+    panel.mail_enabled.setChecked(False)
+    assert not panel.mail_cloud.isEnabled() and not panel.mail_cloud.isChecked()
+    panel.calendar_enabled.setChecked(False)
+    assert not panel.calendar_cloud.isEnabled() and panel.calendar_cloud.isChecked()
+    # Kayıt pasif seçeneğin değerini korur: ana kutu kapalıyken de yazılan değer aynı kalır.
+    save_choices(path, None, values=panel.values())
+    saved = load_settings(path)
+    assert saved.calendar.allow_cloud is True and saved.calendar.enabled is False
+    assert saved.mail.allow_cloud is False and saved.mail.enabled is False
+    titles = {w.text() for w in panel.findChildren(QLabel) if w.objectName() == "sectionTitle"}
+    assert {"Takvim", "Posta"} <= titles
+    assert panel.mail_port.accessibleName() == "IMAP portu"
+    assert "Kapı" not in {w.text() for w in panel.findChildren(QLabel)}
+    panel.deleteLater()
+
+
+def test_level_label_fits_full_scale(tmp_path: Path, qt_app) -> None:
+    panel = _panel(config(tmp_path))
+    needed = panel.level_value.fontMetrics().horizontalAdvance("%100")
+    assert panel.level_value.minimumWidth() >= needed
+    panel.deleteLater()
+
+
+def test_list_empty_states_and_disabled_messages(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    assert panel.routines.routine_area.currentWidget() is panel.routines.routine_area.empty
+    assert panel.routines.routine_area.empty.title_label.text() == "Rutinler kapalı"
+    assert panel.triggers.trigger_area.empty.title_label.text() == "Tetikleyiciler kapalı"
+    assert panel.skills.valid_area.empty.title_label.text() == "Beceriler kapalı"
+    # Klasör listesi özellikten bağımsız: boşken yönlendirir, dolunca listeyi gösterir.
+    roots = panel.file_search.roots_area
+    assert roots.currentWidget() is roots.empty
+    assert roots.empty.title_label.text() == "Henüz klasör eklenmedi"
+    assert roots.empty.body_label.text() == "Klasör ekle ile başla."
+    panel.file_search_roots.addItem(str(tmp_path))
+    assert roots.currentWidget() is roots.listing
+    panel.file_search_roots.clear()
+    assert roots.currentWidget() is roots.empty
+    save_choices(path, None, values={
+        ("routines", "enabled"): True, ("triggers", "enabled"): True, ("skills", "enabled"): True,
+    })
+    panel.refresh()
+    assert panel.routines.routine_area.empty.title_label.text() == "Henüz rutin yok"
+    assert "rutin kaydet" in panel.routines.routine_area.empty.body_label.text()
+    triggers = panel.triggers.trigger_area
+    assert triggers.empty.title_label.text() == "Tanımlı tetikleyici yok"
+    assert triggers.empty.action_button is not None
+    assert triggers.empty.action_button.text() == "Ayar dosyasını aç"
+    assert not triggers.empty.action_button.isHidden()
+    assert panel.skills.valid_area.empty.title_label.text() == "Henüz beceri yok"
+    assert panel.skills.valid_area.empty.action_button.text() == "Klasörü aç"  # type: ignore[union-attr]
+    assert panel.skills.invalid_area.empty.title_label.text() == "Geçersiz dosya yok"
     panel.deleteLater()

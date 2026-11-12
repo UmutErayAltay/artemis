@@ -31,6 +31,7 @@ from artemis.channels.desktop.app import (
     OperationCard,
     PetFace,
     build_window,
+    welcome_suggestions,
 )
 from artemis.channels.desktop.bridge import Activity
 from artemis.channels.desktop.shell_assets import NAV_ICONS, greeting_for_hour
@@ -135,15 +136,81 @@ def test_capitalised_demo_chip_still_triggers_the_approval_flow(
     _wait(app, lambda: not window._busy)
 
 
-def test_real_mode_examples_map_to_existing_tools(app: QApplication) -> None:
-    chat = ChatTranscript(False, lambda _t: None)
-    assert [b.text() for b in chat.suggestion_buttons] == [
-        "Saat kaç?", "Yarın 09:00 için hatırlatma kur", "Not defterini aç",
-    ]
-    from artemis.tools.registry import discover_tools
+def test_welcome_chips_follow_enabled_features(app: QApplication) -> None:
+    from artemis.config.settings import (
+        CalendarConfig,
+        FileSearchConfig,
+        ResearchConfig,
+        RoutinesConfig,
+        Settings,
+    )
 
-    registry = discover_tools()
-    assert all(name in registry for name in ("current_time", "reminder_create", "open_application"))
+    assert welcome_suggestions(None) == ("Hatırlatma kur", "Saat kaç?")
+    everything = Settings(
+        calendar=CalendarConfig(enabled=True), routines=RoutinesConfig(enabled=True),
+        research=ResearchConfig(enabled=True), file_search=FileSearchConfig(enabled=True),
+    )
+    assert welcome_suggestions(everything) == (
+        "Bugün ne var?", "Bir rutin çalıştır", "Şunu araştır: …", "Dosyalarımda ara: …",
+    )
+    some = Settings(research=ResearchConfig(enabled=True))
+    assert welcome_suggestions(some) == ("Şunu araştır: …", "Hatırlatma kur", "Saat kaç?")
+    sent: list[str] = []
+    chat = ChatTranscript(False, sent.append)
+    chat.set_suggestions(welcome_suggestions(some), "ctrl+alt+d")
+    assert [b.text() for b in chat.suggestion_buttons] == list(welcome_suggestions(some))
+    assert "Ctrl+Alt+D" in chat.description.text()
+    chat.set_suggestions(welcome_suggestions(some))
+    assert "Ctrl" not in chat.description.text()
+    chat.suggestion_buttons[1].click()
+    assert sent == ["Hatırlatma kur"]
+
+
+def test_text_chips_fill_and_plain_chips_send(window: DesktopWindow) -> None:
+    window._demo = False
+    sent: list[str] = []
+    window._submit_main = lambda: sent.append(window.prompt.toPlainText())  # type: ignore[method-assign]
+    window._on_welcome_chip("Şunu araştır: …")
+    assert window.prompt.toPlainText() == "Şunu araştır: " and sent == []
+    window._on_welcome_chip("Hatırlatma kur")
+    assert sent == ["Hatırlatma kur"]
+    window._demo = True
+
+
+def test_notice_row_matches_composer_width_and_edge(window: DesktopWindow) -> None:
+    for width in (1280, 820):
+        window.resize(width, 800)
+        window.routine_bar.show()
+        QApplication.processEvents()
+        composer = window.prompt.parentWidget()
+        assert composer is not None
+        assert window.routine_bar.width() == composer.width()
+        assert window.routine_bar.mapToGlobal(QPoint(0, 0)).x() == (
+            composer.mapToGlobal(QPoint(0, 0)).x()
+        )
+
+
+def test_composer_placeholder_is_short_and_hint_moves_to_tooltip(window: DesktopWindow) -> None:
+    assert window.prompt.placeholderText() == "Artemis'e yaz…"
+    assert "Shift+Enter" in window.prompt.toolTip()
+    assert "Shift+Enter" in window.prompt.accessibleDescription()
+
+
+def test_operation_card_hides_raw_args_until_details(window: DesktopWindow) -> None:
+    window.resize(1280, 800)
+    _card_events(window, "m1")
+    card = window.activity.widget().findChildren(OperationCard)[0]
+    shown = [label.text() for label in card.findChildren(QLabel) if label is not card.details]
+    assert "tamam" in shown
+    assert not any("key: k" in t or "ms" in t for t in shown)
+    assert "key: k" in card.details.text() and "100 ms" in card.details.text()
+    assert card.details.isHidden()
+
+
+def test_model_chip_opens_model_settings(window: DesktopWindow) -> None:
+    assert window.model_caption.text() == "Model"
+    window.model_value.click()
+    assert window.tabs.currentWidget() is window.settings_scroll
 
 
 def test_cancel_is_visible_only_while_busy(window: DesktopWindow) -> None:
@@ -190,7 +257,10 @@ def test_icon_toggles_expose_checked_state_and_names(window: DesktopWindow) -> N
     assert not window.voice_button.isChecked()
     window.auto_button.setChecked(True)
     assert window.auto_button.accessibleDescription() == "Oto onay açık"
-    assert "Oto onay açık" in window.auto_button.toolTip()
+    assert window.auto_button.toolTip().startswith("Onay: otomatik")
+    window.auto_button.setChecked(False)
+    assert window.auto_button.toolTip().startswith("Onay: her işlemde sor")
+    window.auto_button.setChecked(True)
     window.auto_button.setChecked(False)
     assert window.auto_button.accessibleDescription() == "Oto onay kapalı"
 
@@ -204,7 +274,7 @@ def test_topbar_has_one_status_pill_and_demo_chip(window: DesktopWindow) -> None
 @pytest.mark.parametrize("theme", sorted(THEMES))
 def test_sidebar_icons_follow_nav_text_color(window: DesktopWindow, theme: str) -> None:
     window._apply_theme(theme)
-    assert len(window.nav_buttons) == len(NAV_ICONS) == 5
+    assert len(window.nav_buttons) == len(NAV_ICONS) == 6
     target = QColor(THEMES[theme]["nav_text"])
     for button in window.nav_buttons.values():
         assert not button.icon().isNull() and button.text() in NAV_ICONS
@@ -283,7 +353,7 @@ def test_empty_operations_drawer_still_opens_below_1100px(window: DesktopWindow)
 
 def test_topbar_chips_are_flat_and_all_controls_have_tooltips(window: DesktopWindow) -> None:
     assert window.demo_chip is not None and window.demo_chip.toolTip()
-    assert window.model_value.toolTip().startswith("Seçili model")
+    assert window.model_value.toolTip().startswith("Kullanılan beyin modeli")
     pill = window.status_label.parentWidget()
     assert pill is not None and pill.toolTip() and pill.accessibleName()
     for button in (window.voice_button, window.auto_button):
@@ -420,3 +490,27 @@ def test_projects_agent_row_combos_show_full_option_texts(
     button = panel.add_folder_button
     right = button.mapTo(viewport, QPoint(0, 0)).x() + button.width()
     assert right <= viewport.width()
+
+
+def test_status_pill_hugs_its_text_and_resizes_with_each_status(
+    window: DesktopWindow,
+) -> None:
+    app = QApplication.instance()
+    assert isinstance(app, QApplication)
+    pill = window.status_pill
+
+    def snug_for(text: str) -> None:
+        window._set_status(text, "ready")
+        app.processEvents()
+        text_w = window.status_label.fontMetrics().horizontalAdvance(text)
+        dot_w = window.status_dot.sizeHint().width()
+        # Yatay iç boşluk (QSS padding 12px iki yan) + nokta ile metin arası 6 px + 8 px tolerans.
+        assert text_w <= pill.width() <= text_w + dot_w + 6 + 24 + 8
+
+    snug_for("Hazır")
+    short = pill.width()
+    snug_for("Çalışıyor… uzun bir durum metni")
+    long_width = pill.width()
+    assert long_width > short
+    snug_for("Hazır")
+    assert pill.width() < long_width

@@ -10,6 +10,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 from artemis.channels.desktop import provider_section, themes
+from artemis.channels.desktop.settings_panel import _CLEAN_TEXT as CLEAN
+from artemis.channels.desktop.settings_panel import _DIRTY_TEXT as DIRTY
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from tests.test_settings_panel import config
 
@@ -27,12 +29,12 @@ def _panel(tmp_path: Path, *, demo: bool = False) -> SettingsPanel:
 
 def test_apply_is_disabled_until_dirty_and_survives_window_enable(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path)
-    assert not panel.apply_button.isEnabled() and panel.dirty_label.isHidden()
+    assert not panel.apply_button.isEnabled() and panel.dirty_label.text() == CLEAN
     panel.apply_button.setEnabled(True)  # pencere (_set_controls) hazır diyor; değişiklik yok
     assert not panel.apply_button.isEnabled()
     panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
     assert panel.apply_button.isEnabled()
-    assert panel.dirty_label.text() == "Kaydedilmemiş değişiklik"
+    assert panel.dirty_label.text() == DIRTY
     panel.apply_button.setEnabled(False)  # işlem sürerken pencere kapatır
     assert not panel.apply_button.isEnabled()
     panel.apply_button.setEnabled(True)
@@ -46,17 +48,17 @@ def test_theme_change_does_not_dirty_the_form(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path)
     panel.theme_cards["dark"].radio.click()
     panel.set_theme("light")
-    assert panel.dirty_label.isHidden() and not panel.apply_button.isEnabled()
-    panel.show_section(panel.section_names().index("Görünüm"))
-    texts = [label.text() for label in panel.findChildren(type(panel.dirty_label))]
-    assert any("Hemen uygulanır" in text for text in texts)
+    assert panel.dirty_label.text() == CLEAN and not panel.apply_button.isEnabled()
+    # anında kaydedilen sayfa açıklamayla değil kısa "Kaydedildi" ile bildirir
+    assert panel.saved_notes["Görünüm"].text() == "Kaydedildi"
+    assert not panel.saved_notes["Görünüm"].isHidden()
     panel.deleteLater()
 
 
 def test_device_toggle_rebuild_is_not_a_user_change(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path)
     panel.advanced_devices.setChecked(True)
-    assert panel.dirty_label.isHidden()
+    assert panel.dirty_label.text() == CLEAN
     panel.deleteLater()
 
 
@@ -128,8 +130,10 @@ def test_last_row_is_reachable_above_the_bar(tmp_path: Path, qt_app) -> None:
     panel.deleteLater()
 
 
-def test_section_rows_are_36px(tmp_path: Path, qt_app) -> None:
+def test_section_rows_are_tight_and_group_headers_add_height(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path)
+    firsts = {names[0] for names in panel.section_groups().values()}
     for row in range(panel.sections.count()):
-        assert panel.sections.item(row).sizeHint().height() == 36
+        item = panel.sections.item(row)
+        assert item.sizeHint().height() == (52 if item.text() in firsts else 30)
     panel.deleteLater()

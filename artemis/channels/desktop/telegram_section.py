@@ -46,7 +46,8 @@ LOCKED_TEXT = (
 TEST_TEXT = "Artemis test mesajı: bağlantı çalışıyor."
 NOTICE_TEXT = "Artemis bağlandı."
 CONFLICT_TEXT = (
-    "Botu başka bir süreç dinliyor (`artemis telegram` açık olabilir). Onu durdurup tekrar dene."
+    "Botu başka bir süreç dinliyor (terminalde Telegram botu açık olabilir). "
+    "Onu durdurup tekrar dene."
 )
 
 
@@ -194,7 +195,7 @@ class TelegramSection(QWidget):
         channel.addWidget(self.channel_label)
         self.hint = meta_label(
             "Komutlar bu sohbetin kendi geçmişinde çalışır; onaylar yalnız Telegram "
-            "düğmeleriyle sorulur. `artemis telegram` de açıksa bot tek dinleyiciye izin "
+            "düğmeleriyle sorulur. Terminalde Telegram botu da açıksa bot tek dinleyiciye izin "
             "verdiğinden çakışma olur."
         )
         channel.addWidget(self.hint)
@@ -415,7 +416,10 @@ class TelegramSection(QWidget):
         if not self._write_chat_id(chat_id):
             return
         self.changed.emit()
-        suffix = "" if confirmed else " Kod mesajı onaylanamadı; `artemis telegram` açıksa dikkat."
+        suffix = (
+            "" if confirmed
+            else " Kod mesajı onaylanamadı; terminalde Telegram botu açıksa dikkat."
+        )
         self.message.setText(f"Sohbet {chat_id} bağlandı.{suffix}")
         self._send(token, config, audit_path, chat_id, NOTICE_TEXT, "Artemis bağlandı bildirimi")
 

@@ -146,8 +146,12 @@ QPlainTextEdit[readOnly="true"], QTextEdit[readOnly="true"] {{ background: {t['s
 QFrame#sidebar QLabel {{ color: {t['nav_text']}; }}
 {ctl} {{ background: {t['soft']}; border: 1px solid {t['border']};
  border-radius: 8px; padding: 4px 8px; min-height: 22px; }}
-QLineEdit, QComboBox, QSpinBox {{ background: {t['surface']}; color: {t['text']};
- selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
+/* Tek kontrol yüksekliği: min-height içerik kutusudur, Qt üstüne 4px dolgu ve 1px çerçeve ekler.
+   26px + 2*4 + 2*1 = 36px toplam; düğme, metin alanı, kutu ve sayaç aynı hizada kalır. */
+QPushButton {{ padding: 4px 12px; min-height: 26px; }}
+QLineEdit, QComboBox, QSpinBox {{ min-height: 26px; background: {t['surface']};
+ color: {t['text']}; selection-background-color: {t['accent']};
+ selection-color: {t['accent_text']}; }}
 QPlainTextEdit, QTextEdit, QListWidget {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; border-radius: 8px; padding: 4px 8px;
  selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
@@ -158,7 +162,10 @@ QPushButton:disabled, QComboBox:disabled, QCheckBox:disabled, QLineEdit:disabled
  color: {t['muted']}; }}
 QPushButton:disabled:hover, QComboBox:disabled:hover {{ border-color: {t['border']}; }}
 QPushButton#primary {{ background: {t['accent']}; color: {t['accent_text']};
- border-color: {t['accent']}; font-weight: 650; min-height: 26px; }}
+ border-color: {t['accent']}; font-weight: 650; }}
+/* Metin bağlantısı, etiket ve kenar çubuğu düğmeleri kendi küçük ölçüsünü korur (22px içerik). */
+QPushButton#ghost, QPushButton#disclosure, QPushButton#chip, QPushButton#themeToggle {{
+ min-height: 22px; min-width: 0; padding: 4px 8px; }}
 QPushButton#voiceToggle:checked {{ border: 2px solid {t['accent']};
  color: {t['accent']}; padding: 3px 7px; }}
 QPushButton#danger {{ color: {t['error']}; border-color: {t['error']}; }}

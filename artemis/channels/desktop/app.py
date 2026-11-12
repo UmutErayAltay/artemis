@@ -8,7 +8,7 @@ import sys
 import tempfile
 import threading
 from collections import deque
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QSystemTrayIcon,
     QTabWidget,
     QVBoxLayout,
@@ -52,6 +53,7 @@ from artemis.brain.providers import provider_problem
 from artemis.channels.autostart import Autostart
 from artemis.channels.desktop import pet_sprite, shell_assets, themes
 from artemis.channels.desktop.approval_dialog import ApprovalDialog
+from artemis.channels.desktop.automation_panel import AutomationPanel
 from artemis.channels.desktop.bridge import (
     Activity,
     ActivityGap,
@@ -92,7 +94,7 @@ from artemis.channels.desktop.steps import StepLine, step_line
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
 from artemis.channels.desktop.widgets import PetFace
 from artemis.channels.runtime import Runtime, create_runtime
-from artemis.config.settings import load_settings, same_hotkey
+from artemis.config.settings import Settings, load_settings, same_hotkey
 from artemis.proactive.daily_summary import VAULT_TEXT_LIMIT, parse_day, summary_path
 from artemis.safety.audit import AuditLog
 from artemis.tools.plugins.memory import AppendArguments
@@ -175,7 +177,7 @@ class PromptEdit(QPlainTextEdit):
         super().__init__(parent)
         self._on_send = on_send
         self._min_height = min_height
-        self.setPlaceholderText("Artemis'e ne yapmak istediğinizi yazın…")
+        self.setPlaceholderText("Artemis'e yaz…")
         # Sakin tek satır başlar (44px), en çok ~4 satıra kadar büyür.
         self.setFixedHeight(min_height)
         self.document().documentLayout().documentSizeChanged.connect(self._fit_height)
@@ -330,10 +332,8 @@ class OperationCard(QFrame):
             row = QVBoxLayout()
             row.setSpacing(0)
             row.addWidget(self._label(op.label, palette["text"], 13))
-            if op.summary:
-                row.addWidget(self._label(op.summary, palette["muted"], 12))
-            state = op.state_text + (f" · {op.duration}" if op.duration else "")
-            row.addWidget(self._label(state, tone, 12))
+            # Ham argümanlar ve süre varsayılan olarak "Ayrıntılar" altındadır.
+            row.addWidget(self._label(op.state_text, tone, 12))
             if op.message:
                 row.addWidget(self._label(op.message, palette["muted"], 12))
             if op.approval:
@@ -349,7 +349,12 @@ class OperationCard(QFrame):
         toggle.setChecked(card.expanded)
         toggle.setAccessibleName("Mesaj işlem ayrıntılarını göster")
         layout.addWidget(toggle, 0, Qt.AlignmentFlag.AlignLeft)
-        self.details = self._label("\n".join(card.details), palette["muted"], 12)
+        lines = [
+            f"{op.label}: " + " · ".join(part for part in (op.summary, op.duration) if part)
+            for op in card.ops
+            if op.summary or op.duration
+        ]
+        self.details = self._label("\n".join(lines + card.details), palette["muted"], 12)
         self.details.setObjectName("opDetails")
         self.details.setVisible(card.expanded)
         layout.addWidget(self.details)
@@ -400,10 +405,30 @@ def _hour_now() -> int:
 _AVATAR = 28
 _AVATAR_GAP = 8
 _AVATAR_INDENT = _AVATAR + _AVATAR_GAP
-# Karşılamadaki örnek komutlar gerçek araçlara karşılık gelir: current_time,
-# reminder_create, open_application. Demo çalışma zamanı yalnız kendi örneklerini bilir.
-_EXAMPLE_COMMANDS = ("Saat kaç?", "Yarın 09:00 için hatırlatma kur", "Not defterini aç")
+# Demo çalışma zamanı yalnız kendi örneklerini bilir.
 _DEMO_EXAMPLES = ("Merhaba", "Örnek akış")
+_MAX_CHIPS = 4
+_WELCOME_BODY = (
+    "Uygulama açabilir, hatırlatma kurabilir, dosyalarınla çalışabilirim; "
+    "onay gereken işlerde ayrıntıları önce gösteririm."
+)
+
+
+def welcome_suggestions(settings: Settings | None) -> tuple[str, ...]:
+    """Açık özelliklere göre karşılama önerileri (en çok 4); "…" ile bitenler yazma alanında
+    tamamlanır. İki genel öneri (current_time, reminder_create) satırı hiç boş bırakmaz."""
+    chips: list[str] = []
+    if settings is not None:
+        if settings.calendar.enabled:
+            chips.append("Bugün ne var?")
+        if settings.routines.enabled:
+            chips.append("Bir rutin çalıştır")
+        if settings.research.enabled:
+            chips.append("Şunu araştır: …")
+        if settings.file_search.enabled:
+            chips.append("Dosyalarımda ara: …")
+    chips += ["Hatırlatma kur", "Saat kaç?"]
+    return tuple(chips[:_MAX_CHIPS])
 
 
 class ChatTranscript(QWidget):
@@ -440,10 +465,9 @@ class ChatTranscript(QWidget):
         self.greeting.setObjectName("greeting")
         self.greeting.setTextFormat(Qt.TextFormat.PlainText)
         self.greeting.setAlignment(Qt.AlignmentFlag.AlignHCenter)
-        description = QLabel(
-            "Uygulama açabilir, hatırlatma kurabilir, dosyalarınla çalışabilirim; "
-            "onay gereken işlerde ayrıntıları önce gösteririm."
-        )
+        self._demo = demo
+        description = QLabel(_WELCOME_BODY)
+        self.description = description
         description.setObjectName("emptyBody")
         description.setWordWrap(True)
         description.setAlignment(Qt.AlignmentFlag.AlignHCenter)
@@ -451,20 +475,11 @@ class ChatTranscript(QWidget):
         description.setTextFormat(Qt.TextFormat.PlainText)
         welcome_layout.addWidget(self.greeting)
         welcome_layout.addWidget(description, 0, Qt.AlignmentFlag.AlignHCenter)
-        suggestions = QHBoxLayout()
-        suggestions.setSpacing(8)
-        suggestions.addStretch(1)
+        self._suggestions = QHBoxLayout()
+        self._suggestions.setSpacing(8)
         self.suggestion_buttons: list[QPushButton] = []
-        for text in _DEMO_EXAMPLES if demo else _EXAMPLE_COMMANDS:
-            button = QPushButton(text)
-            button.setObjectName("chip")
-            button.setAccessibleName(f"Örnek komut: {text}")
-            button.setToolTip("Komut kutusuna yazar, göndermez")
-            button.clicked.connect(lambda _checked=False, value=text: on_suggestion(value))
-            suggestions.addWidget(button)
-            self.suggestion_buttons.append(button)
-        suggestions.addStretch(1)
-        welcome_layout.addLayout(suggestions)
+        welcome_layout.addLayout(self._suggestions)
+        self.set_suggestions(_DEMO_EXAMPLES if demo else welcome_suggestions(None))
         self.refresh_greeting()
         # Karşılama kutusu esner ve ortalanır; mesaj gelince gizlenir, kaydırıcı alanı alır.
         outer.addWidget(self.welcome, 1, Qt.AlignmentFlag.AlignCenter)
@@ -487,6 +502,37 @@ class ChatTranscript(QWidget):
         self._scroll_area.setWidget(self.content)
         self._scroll_area.hide()
         outer.addWidget(self._scroll_area, 1)
+
+    def set_suggestions(self, chips: Sequence[str], dictation_hotkey: str = "") -> None:
+        """Öneri satırını ve (dikte açıksa) kısayol cümlesini yeniden kurar. Demo sabit kalır."""
+        if self._demo:
+            chips, dictation_hotkey = _DEMO_EXAMPLES, ""
+        body = _WELCOME_BODY
+        if dictation_hotkey:
+            body += f" Dikte için {dictation_hotkey.strip().title()} tuşlarına bas."
+        self.description.setText(body)
+        while self._suggestions.count():
+            item = self._suggestions.takeAt(0)
+            widget = item.widget() if item is not None else None
+            if widget is not None:
+                widget.deleteLater()
+        self.suggestion_buttons = []
+        self._suggestions.addStretch(1)
+        for text in chips:
+            button = QPushButton(text)
+            button.setObjectName("chip")
+            button.setAccessibleName(f"Örnek komut: {text}")
+            fills = self._demo or text.endswith("…")
+            button.setToolTip("Komut kutusuna yazar, göndermez" if fills else "Hemen gönderir")
+            button.setProperty("chip", text)
+            button.clicked.connect(self._chip_clicked)
+            self._suggestions.addWidget(button)
+            self.suggestion_buttons.append(button)
+        self._suggestions.addStretch(1)
+
+    def _chip_clicked(self) -> None:
+        if (button := self.sender()) is not None:
+            self._on_suggestion(str(button.property("chip")))
 
     def refresh_greeting(self) -> None:
         self.greeting.setText(greeting_for_hour(self._hour()))
@@ -820,6 +866,7 @@ class DesktopWindow(QMainWindow):
         # Köprü ayar uygulanınca yenilenir; sinyal her seferinde güncel olanı çağırır.
         self._dictation_pressed.connect(lambda: self.bridge.toggle_dictation())
         if not demo:
+            self._refresh_welcome()
             self._start_hotkey()
             self._start_dictation_hotkey()
             self._start_selection_hotkey()
@@ -874,6 +921,7 @@ class DesktopWindow(QMainWindow):
         # Her yoldan gelen tema değişimi Görünüm kartlarını da eşitler; set_theme sinyal yaymaz.
         self.settings_panel.set_theme(self._theme)
         self.settings_panel.providers.set_theme(themes.THEMES[self._theme])
+        self.automation_panel.set_theme(themes.THEMES[self._theme])
         palette = themes.THEMES[self._theme]
         for block in self.findChildren(StepBlock):
             block.apply_theme(palette)
@@ -1076,15 +1124,20 @@ class DesktopWindow(QMainWindow):
         row.addStretch(1)
 
         # Model: ortada tek çip; dar pencerede kısalır (bkz. _fit_shell).
-        self.model_value = QLabel("Yükleniyor…")
+        # Çip düğmedir: Ayarlar > Model'i açar, klavyeyle de erişilir.
+        self.model_caption = QLabel("Model")
+        self.model_caption.setObjectName("meta")
+        self.model_value = QPushButton("Yükleniyor…")
         self.model_value.setObjectName("chip")
-        self.model_value.setTextFormat(Qt.TextFormat.PlainText)
-        self.model_value.setAccessibleName("Seçili model")
-        self.model_value.setToolTip("Seçili model")
+        self.model_value.setAccessibleName("Kullanılan beyin modeli")
+        self.model_value.setToolTip("Kullanılan beyin modeli")
+        self.model_value.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.model_value.clicked.connect(self._show_model_settings)
         value_font = self.model_value.font()
         value_font.setPixelSize(13)
         self.model_value.setFont(value_font)
         self.model_box = self.model_value
+        row.addWidget(self.model_caption, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self.model_value, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addStretch(1)
 
@@ -1105,18 +1158,23 @@ class DesktopWindow(QMainWindow):
         self.auto_button.toggled.connect(self._toggle_auto_mode)
         row.addWidget(self.auto_button)
         status_pill = QFrame()
+        self.status_pill = status_pill
         status_pill.setObjectName("statusPill")
         # Düz durum çipi tıklanmaz (simge anahtarları tıklanır); ikisi de ipucu taşır.
         status_pill.setToolTip("Çalışma durumu")
         status_pill.setAccessibleName("Çalışma durumu")
+        # Çip içeriğine sığar: genişlemez, metin değişince yeniden ölçülür.
+        status_pill.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         status_row = QHBoxLayout(status_pill)
         status_row.setContentsMargins(0, 0, 0, 0)
-        status_row.setSpacing(8)
+        status_row.setSpacing(6)
         self.status_dot = QLabel("●")
         self.status_dot.setObjectName("statusDot")
+        self.status_dot.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self.status_label = QLabel("")
         self.status_label.setObjectName("status")
-        self.status_label.setMinimumWidth(64)
+        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
         self._set_status("Başlatılıyor…", "running")
         status_row.addWidget(self.status_dot)
         status_row.addWidget(self.status_label)
@@ -1162,7 +1220,7 @@ class DesktopWindow(QMainWindow):
 
         # Konuşma düz zemindedir (kart yok); okunur sütun ortalanır.
         self.chat = ChatTranscript(
-            self._demo, self._set_suggestion, themes.THEMES[self._theme],
+            self._demo, self._on_welcome_chip, themes.THEMES[self._theme],
             pet_source=self._pet_pixmap,
         )
         self.chat.setObjectName("chatTranscript")
@@ -1196,7 +1254,12 @@ class DesktopWindow(QMainWindow):
         routine_row.addWidget(self.summary_vault_button)
         routine_row.addWidget(self.routine_run_button)
         self.routine_bar.hide()
-        left.addWidget(self.routine_bar)
+        # Yazma alanıyla aynı ortalanmış sütun: genişlik ve sol kenar her pencerede aynı kalır.
+        notice_wrap = QHBoxLayout()
+        notice_wrap.addStretch(1)
+        notice_wrap.addWidget(self.routine_bar, 1000)
+        notice_wrap.addStretch(1)
+        left.addLayout(notice_wrap)
 
         composer = QFrame()
         composer.setObjectName("composer")
@@ -1206,9 +1269,10 @@ class DesktopWindow(QMainWindow):
         composer_row.setSpacing(8)
         self.prompt = PromptEdit(self._submit_main)
         self.prompt.setObjectName("mainPrompt")
-        self.prompt.setPlaceholderText(
-            "Artemis'e yazın…  Enter gönderir, Shift+Enter yeni satır"
-        )
+        self.prompt.setPlaceholderText("Artemis'e yaz…")
+        hint = "Enter gönderir, Shift+Enter yeni satır"
+        self.prompt.setToolTip(hint)
+        self.prompt.setAccessibleDescription(hint)
         composer_row.addWidget(self.prompt, 1)
         # Üst çubuktaki ses anahtarıyla aynı yol; yalnız tıklama ona iletilir.
         self.composer_voice = self._icon_toggle("Sesi aç veya kapat (yazma alanı)")
@@ -1419,6 +1483,11 @@ class DesktopWindow(QMainWindow):
         self.data_panel.tool_requested.connect(self._submit_project_tool)
         self.data_page = self._page(self.data_panel)
         self.tabs.addTab(self.data_page, "Geçmiş ve hatırlatmalar")
+        self.automation_panel = AutomationPanel(demo=self._demo, config_path=self._config_path)
+        self.automation_panel.tool_requested.connect(self._submit_automation_tool)
+        self.automation_panel.settings_requested.connect(self._open_settings_section)
+        self.automation_page = self._page(self.automation_panel)
+        self.tabs.addTab(self.automation_page, "Otomasyon")
         # Pet atölyesi günlük ayarlardan ayrı sayfadır; PetSection kendi başlığını taşır
         # ama kaydırıcısı yoktur.
         self.pet_scroll = QScrollArea()
@@ -1430,7 +1499,8 @@ class DesktopWindow(QMainWindow):
         self.tabs.tabBar().hide()
         sidebar = self._build_sidebar([
             ("Sohbet", self.chat_page), ("Projeler", self.projects_page),
-            ("Petler", self.pet_page), ("Geçmiş", self.data_page),
+            ("Otomasyon", self.automation_page), ("Petler", self.pet_page),
+            ("Geçmiş", self.data_page),
             ("Ayarlar", self.settings_scroll),
         ])
         self.tabs.currentChanged.connect(self._sync_navigation)
@@ -1478,6 +1548,12 @@ class DesktopWindow(QMainWindow):
                     self.settings_panel.providers
                 ),
             )
+
+    def _open_settings_section(self, name: str) -> None:
+        names = self.settings_panel.section_names()
+        if name in names:
+            self.settings_panel.show_section(names.index(name))
+        self.tabs.setCurrentWidget(self.settings_scroll)
 
     def _sync_navigation(self, *_args: object) -> None:
         for page, button in self.nav_buttons.items():
@@ -1602,7 +1678,7 @@ class DesktopWindow(QMainWindow):
     def _apply_settings(self, device: int | str | None) -> None:
         if self._demo or self._exiting:
             self.settings_panel.notice.setText(
-                "Ayarları değiştirmek için işlemin bitmesini bekleyin."
+                "Ayarları değiştirmek için işlemin bitmesini bekle."
             )
             return
         values = self.settings_panel.values()
@@ -1618,7 +1694,7 @@ class DesktopWindow(QMainWindow):
             clash = selection_clash = False  # okunamayan config aşağıdaki kayıtta yakalanır
         if clash:
             self.settings_panel.notice.setText(
-                "Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seçin."
+                "Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seç."
             )
             return
         if selection_clash:
@@ -1773,6 +1849,7 @@ class DesktopWindow(QMainWindow):
         width = self.width()
         wide = width >= _STEP_PANEL_MIN_WINDOW
         self.model_box.setVisible(width >= 800)
+        self.model_caption.setVisible(width >= 800)
         self._show_model(self._model_full)
         self.operations_button.setVisible(not wide)
         self._dock_operations(not wide)
@@ -1786,7 +1863,10 @@ class DesktopWindow(QMainWindow):
         metrics = QFontMetrics(self.model_value.font())
         shown = metrics.elidedText(text, Qt.TextElideMode.ElideRight, limit)
         self.model_value.setText(shown)
-        self.model_value.setToolTip(f"Seçili model: {text}" if text else "Seçili model")
+        self.model_value.setToolTip(
+            f"Kullanılan beyin modeli: {text}. Değiştirmek için Ayarlar'ı aç."
+            if text else "Kullanılan beyin modeli"
+        )
         # Çipin 8px yan dolgusu iki yanda 16px ekler; 8px pay ölçü sapmasına karşıdır.
         self.model_value.setFixedWidth(max(60, metrics.horizontalAdvance(shown) + 24))
 
@@ -1798,6 +1878,31 @@ class DesktopWindow(QMainWindow):
     def _set_suggestion(self, text: str) -> None:
         self.prompt.setPlainText(text)
         self.prompt.setFocus()
+        cursor = self.prompt.textCursor()
+        cursor.movePosition(cursor.MoveOperation.End)
+        self.prompt.setTextCursor(cursor)
+
+    def _on_welcome_chip(self, text: str) -> None:
+        """Demo ve "…" ile biten öneri yalnız yazma alanına yazılır; diğerleri gönderilir."""
+        if self._demo or text.endswith("…"):
+            self._set_suggestion(text.removesuffix("…"))
+        else:
+            self._set_suggestion(text)
+            self._submit_main()
+
+    def _refresh_welcome(self) -> None:
+        """Karşılama önerileri açık özelliklerden kurulur; config okunamazsa varsayılanlar."""
+        try:
+            settings = load_settings(self._config_path)
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
+            settings = None
+        self.chat.set_suggestions(
+            welcome_suggestions(settings),
+            settings.dictation.hotkey if settings and settings.dictation.enabled else "",
+        )
+
+    def _show_model_settings(self, _event: object = None) -> None:
+        self._open_settings_section("Model")
 
     def _submit_overlay(self) -> None:
         text = self.overlay.input.toPlainText().strip()
@@ -1879,16 +1984,37 @@ class DesktopWindow(QMainWindow):
         elif self._routine_name:
             self._submit_routine_tool("routine_run", RoutineNameArguments(name=self._routine_name))
 
-    def _submit_routine_tool(self, name: str, arguments: BaseModel) -> None:
+    def _submit_automation_tool(self, name: str, arguments: BaseModel) -> None:
+        self._submit_routine_tool(name, arguments, from_automation=True)
+
+    def _submit_routine_tool(
+        self, name: str, arguments: BaseModel, *, from_automation: bool = False
+    ) -> None:
         request_id = self.bridge.submit_tool(name, arguments)
         if request_id is None:
-            self.settings_panel.routines.notice.setText("Başka işlem sürüyor; çalıştırılmadı.")
+            # Otomasyon sayfasından gelen uyarı kendi satırında kalır; ayar satırı değişmez.
+            notice = (
+                self.automation_panel.notice if from_automation
+                else self.settings_panel.routines.notice
+            )
+            notice.setText("Başka işlem sürüyor; çalıştırılmadı.")
             self._set_status("Başka işlem sürüyor; rutin çalıştırılmadı.", "running")
             return
         self._active_request = request_id
         self._busy = True
-        self._begin_card(request_id, f"Rutin işlemi: {name}")
+        self._begin_card(request_id, self._routine_tool_title(name, arguments))
         self._set_controls()
+
+    def _routine_tool_title(self, name: str, arguments: BaseModel) -> str:
+        """İşlem kartı başlığı: ham araç adı yerine insan okur ad (kapı yolu değişmez)."""
+        if name == "vault_append":
+            return "Gün özetini vault'a ekle"
+        if name == "research_cancel":
+            return "Araştırmayı durdur"
+        if name == "routine_run":
+            label = self.bridge.labels().get(name, ("Rutin çalıştır", ""))[0]
+            return f"{label}: {getattr(arguments, 'name', '')}".rstrip(": ")
+        return f"Rutin işlemi: {name}"
 
     def _submit_project_tool(self, name: str, arguments: BaseModel) -> None:
         # Durum yoklaması salt okunur ve 2 sn'de bir gelir: kart, meşgul durumu ve pet
@@ -2014,11 +2140,11 @@ class DesktopWindow(QMainWindow):
 
     def _show_auto_state(self, on: bool) -> None:
         """Simge anahtarı metin taşımaz; durum erişilebilir açıklamada ve ipucunda okunur."""
-        text = f"Oto onay {'açık' if on else 'kapalı'}"
-        self.auto_button.setAccessibleDescription(text)
+        self.auto_button.setAccessibleDescription(f"Oto onay {'açık' if on else 'kapalı'}")
+        mode = "otomatik" if on else "her işlemde sor"
         self.auto_button.setToolTip(
-            f"{text}. Açıkken bilgisayar kullanımı adımları sormadan çalışır; Esc yine "
-            "durdurur. Değişiklik hemen geçerli, Uygula gerekmez."
+            f"Onay: {mode}. Oto onay açıkken bilgisayar kullanımı adımları sormadan çalışır; "
+            "Esc yine durdurur. Değişiklik hemen geçerli, Uygula gerekmez."
         )
 
     def _live_continuous(self, checked: bool) -> None:
@@ -2038,6 +2164,7 @@ class DesktopWindow(QMainWindow):
         self.status_label.setText(text)
         self._status_tone = tone
         self.status_dot.setStyleSheet(_dot_style(self._token(_STATUS_TONES[tone])))
+        self.status_pill.adjustSize()
 
     def _show_voice_state(self, state: str) -> None:
         self._voice_state = state
@@ -2060,9 +2187,9 @@ class DesktopWindow(QMainWindow):
         if self._demo:
             tip = "Demo modunda ses yok"
         elif on:
-            tip = f"{text} · kapatmak için tıklayın"
+            tip = f"{text} · kapatmak için tıkla"
         else:
-            tip = f"{text} · açmak için tıklayın; mikrofonu yalnız siz açarsınız"
+            tip = f"{text} · açmak için tıkla; mikrofonu yalnız sen açarsın"
         for button in (self.voice_button, self.composer_voice):
             button.setChecked(on)
             button.setAccessibleDescription(text)
@@ -2083,6 +2210,7 @@ class DesktopWindow(QMainWindow):
         self.auto_button.setEnabled(not self._exiting and not self._demo)
         self.projects_panel.set_busy(not enabled)
         self.data_panel.set_busy(not enabled)
+        self.automation_panel.set_busy(not enabled)
         self.prompt.setEnabled(enabled)
         self.send_button.setEnabled(enabled)
         self.new_chat_button.setEnabled(enabled)
@@ -2111,6 +2239,7 @@ class DesktopWindow(QMainWindow):
                 self.pet.set_busy(False)
                 self.bridge = DesktopBridge(self._config_path)
                 if not self._demo:
+                    self._refresh_welcome()
                     self._start_dictation_hotkey()
                     self._start_selection_hotkey()
                 self.settings_panel.refresh()
@@ -2196,26 +2325,26 @@ class DesktopWindow(QMainWindow):
                     )
                 else:
                     fix = (
-                        'Paketleri `pip install -e ".[stream]"` ile kurun'
+                        'Paketleri pip install -e ".[stream]" ile kurun.'
                         if kind == "deps"
-                        else "config'te `voice.live_transcript_model` ve "
-                        "`voice.live_transcript_revision` ayarlarına bakın"
+                        else "Ayarlar > Ses bölümündeki canlı yazı modelini kontrol et."
                     )
                     self._append_chat(
                         "Artemis",
-                        f"Canlı yazı açılamadı: {reason}. {fix}; ses canlı yazısız sürüyor.",
+                        f"Canlı yazı açılamadı: {reason}. {fix} Ses canlı yazısız sürüyor.",
                     )
             elif event.state == "voice_denoise":
                 if event.message.startswith("unavailable:"):
                     kind, _, reason = event.message.removeprefix("unavailable:").partition(":")
                     fix = (
-                        'Paketleri `pip install -e ".[voice]"` ile kurun'
+                        'Paketleri pip install -e ".[voice]" ile kurun.'
                         if kind == "deps"
-                        else "Artemis'i yeniden kurun veya `voice.noise_model_dir` ayarına bakın"
+                        else "Artemis'i yeniden kurun ya da Ayarlar > Ses bölümündeki "
+                        "ses temizleme ayarlarını kontrol et."
                     )
                     self._append_chat(
                         "Artemis",
-                        f"Gürültü engelleme açılamadı: {reason}. {fix}; ses işlenmeden sürüyor.",
+                        f"Gürültü engelleme açılamadı: {reason}. {fix} Ses işlenmeden sürüyor.",
                     )
                 elif event.message == "off":
                     self._append_chat(
@@ -2264,6 +2393,10 @@ class DesktopWindow(QMainWindow):
                 self._dismiss_approval_for(event.request_id)
                 if event.tool_name.startswith("routine_"):
                     self.settings_panel.routines.accept_result(event.tool_name, event.result)
+                    self._append_chat("Artemis", event.result.message)
+                    return
+                if event.tool_name == "research_cancel":
+                    self.automation_panel.accept_result(event.tool_name, event.result)
                     self._append_chat("Artemis", event.result.message)
                     return
                 panel = (self.projects_panel if event.tool_name.startswith("code_agent_")

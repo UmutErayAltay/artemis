@@ -1,6 +1,6 @@
-"""Ayarlar > Rutinler: liste, çalıştır, sil, zaman ve dosyayı aç (ADR 0058).
+"""Ayarlar > Rutinler: liste, sil, zaman ve dosyayı aç (ADR 0058). Çalıştırma Otomasyon'dadır.
 
-Çalıştırma ve silme araç çağrısıdır: bu bölüm yalnız `tool_requested` yayar, pencere onu aynı
+Silme araç çağrısıdır: bu bölüm yalnız `tool_requested` yayar, pencere onu aynı
 köprü ve SafetyGate üzerinden gönderir (ikinci onay yolu yok). Adım yazma arayüzü bilerek yoktur;
 rutin sohbetle (onaylı `routine_save`) ya da JSON'u elle düzenleyerek oluşur. Zaman yalnız buradan
 kurulur; hiçbir araç zaman ayarlayamaz.
@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
+from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.config.settings import load_settings
 from artemis.proactive.routines import (
     Routine,
@@ -62,18 +63,19 @@ class RoutinesSection(QWidget):
         list_box, listing = group("Kayıtlı rutinler", divided=False)
         layout.addWidget(list_box)
         self.routine_list = QListWidget()
-        self.routine_list.setMaximumHeight(160)
         self.routine_list.setAccessibleName("Kayıtlı rutinler")
-        listing.addWidget(self.routine_list)
-        self.run_button = QPushButton("Çalıştır")
-        self.run_button.setObjectName("primary")
+        self.routine_area = ListWithEmpty(self.routine_list, "Henüz rutin yok")
+        listing.addWidget(self.routine_area)
+        self.run_hint = meta_label("Rutinleri Otomasyon sayfasından çalıştırırsın.")
+        listing.addWidget(self.run_hint)
         self.delete_button = QPushButton("Sil")
         self.open_button = QPushButton("Dosyayı aç")
-        listing.addLayout(button_row(self.open_button, self.delete_button, self.run_button))
+        self.action_row = QWidget()
+        self.action_row.setLayout(button_row(self.open_button, self.delete_button))
+        listing.addWidget(self.action_row)
         listing.addWidget(meta_label(
-            "Rutin sohbetle oluşur: örneğin “işe başla adında bir rutin kaydet: …” de, "
-            "onay penceresindeki adımları kontrol et. Dosyayı elle de düzenleyebilirsin. "
-            "Çalıştırma ve silme onay ister; adımların kendi onayları da geçerlidir."
+            "Silme onay ister; adımların kendi onayları da geçerlidir. "
+            "Dosyayı elle de düzenleyebilirsin."
         ))
         when_box, when = group("Zaman", "Zamanı gelince Artemis çalıştırmaz, yalnız sorar.")
         layout.addWidget(when_box)
@@ -95,7 +97,6 @@ class RoutinesSection(QWidget):
         when.addLayout(button_row(self.clear_time_button, self.save_time_button))
         self.notice = meta_label("")
         layout.addWidget(self.notice)
-        self.run_button.clicked.connect(self._run)
         self.delete_button.clicked.connect(self._delete)
         self.open_button.clicked.connect(self._open_file)
         self.save_time_button.clicked.connect(self._save_time)
@@ -112,12 +113,13 @@ class RoutinesSection(QWidget):
             self._enabled = False
             self._store = None
             self.notice.setText("Ayar dosyası okunamadı.")
+            self.routine_area.show_empty("Rutinler okunamadı")
             self._set_controls()
             return
         self._enabled = settings.routines.enabled
         self._store = RoutineStore(settings.state_dir / "routines.json")
         if not self._enabled:
-            self.notice.setText("Rutinler kapalı: yukarıdaki kutuyu aç ve Uygula'ya bas.")
+            self.routine_area.show_empty("Rutinler kapalı")
         else:
             try:
                 for routine in self._store.load():
@@ -125,10 +127,16 @@ class RoutinesSection(QWidget):
             except RoutinesError as error:
                 # Bozuk dosya sessizce sıfırlanmaz; kullanıcı dosyayı açıp düzeltir.
                 self.notice.setText(str(error))
+                self.routine_area.show_empty("Rutinler okunamadı")
             else:
                 if not settings.proactive.enabled:
-                    self.notice.setText(
-                        "Zamanlı bildirim için config'te proactive.enabled: true gerekir."
+                    self.notice.setText("Zamanlı bildirim için Zamanlı işler açık olmalı.")
+                if self.routine_list.count():
+                    self.routine_area.show_list()
+                else:
+                    self.routine_area.show_empty(
+                        "Henüz rutin yok",
+                        "Sohbette “işe başla adında bir rutin kaydet: …” de.",
                     )
         self._set_controls()
 
@@ -151,7 +159,8 @@ class RoutinesSection(QWidget):
     def _set_controls(self) -> None:
         usable = self._enabled and not self._demo
         has_selection = self.routine_list.currentRow() >= 0
-        self.run_button.setEnabled(usable and has_selection)
+        self.action_row.setVisible(self._enabled)
+        self.run_hint.setVisible(self._enabled)
         self.delete_button.setEnabled(usable and has_selection)
         self.save_time_button.setEnabled(usable and has_selection)
         self.clear_time_button.setEnabled(usable and has_selection)
@@ -170,9 +179,6 @@ class RoutinesSection(QWidget):
         if routine is not None:
             args: BaseModel = RoutineNameArguments(name=routine.name)
             self.tool_requested.emit(tool, args)
-
-    def _run(self) -> None:
-        self._request("routine_run")
 
     def _delete(self) -> None:
         self._request("routine_delete")

@@ -494,7 +494,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 def test_routines_section_lists_runs_schedules_and_deletes_via_tools(tmp_path: Path) -> None:
     pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QPushButton
 
     from artemis.channels.desktop.routines_section import RoutinesSection
 
@@ -513,11 +513,13 @@ def test_routines_section_lists_runs_schedules_and_deletes_via_tools(tmp_path: P
     requested: list[tuple[str, Any]] = []
     section.tool_requested.connect(lambda name, args: requested.append((name, args)))
     assert section.routine_list.count() == 1
-    assert not section.run_button.isEnabled()  # seçim yok
+    assert "Çalıştır" not in [button.text() for button in section.findChildren(QPushButton)]
+    assert section.run_hint.text() == "Rutinleri Otomasyon sayfasından çalıştırırsın."
+    assert section.action_row.isVisibleTo(section)
+    assert not section.delete_button.isEnabled()  # seçim yok
     section.routine_list.setCurrentRow(0)
-    section.run_button.click()
     section.delete_button.click()
-    assert [name for name, _ in requested] == ["routine_run", "routine_delete"]
+    assert [name for name, _ in requested] == ["routine_delete"]
     assert requested[0][1].name == "işe başla"
     assert store.load()[0].schedule is None  # silme yalnız araçla, panel doğrudan silmez
     section.time_edit.setText("25:99")
@@ -543,7 +545,9 @@ def test_routines_section_is_inert_when_disabled_or_corrupt(tmp_path: Path) -> N
     state = tmp_path / "state"
     config.write_text(yaml.safe_dump({"workspace": str(tmp_path), "state_dir": str(state)}))
     section = RoutinesSection(config)
-    assert "kapalı" in section.notice.text() and not section.run_button.isEnabled()
+    assert section.routine_area.empty.title_label.text() == "Rutinler kapalı"
+    assert not section.action_row.isVisibleTo(section)  # kapalıyken eylem satırı yok
+    assert not section.run_hint.isVisibleTo(section)
     config.write_text(yaml.safe_dump({
         "workspace": str(tmp_path), "state_dir": str(state), "routines": {"enabled": True}
     }))
@@ -552,3 +556,4 @@ def test_routines_section_is_inert_when_disabled_or_corrupt(tmp_path: Path) -> N
     section.refresh()
     assert "bozuk" in section.notice.text() and section.routine_list.count() == 0
     assert (state / "routines.json").read_text(encoding="utf-8") == "{"
+    assert section.action_row.isVisibleTo(section)

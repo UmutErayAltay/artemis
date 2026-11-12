@@ -726,7 +726,7 @@ class ProviderSection(QWidget):
             self.status.setText(
                 f"Claude Code CLI bulundu: {found}"
                 if found
-                else "Claude Code CLI bulunamadı. Kurun ve `claude` ile giriş yapın."
+                else "Claude Code CLI bulunamadı. Kur ve Claude Code ile giriş yap."
             )
 
     def _sync_cli_button(self) -> None:
@@ -898,7 +898,8 @@ class ProviderSection(QWidget):
         self.status.setText(
             "Model eklendi."
             + (
-                " Ücretli model bütçe korumasınca engellenir; izin için allow_paid gerekir."
+                " Ücretli model bütçe korumasınca engellenir; "
+                "ücretli kullanım izni ayar dosyasından verilir."
                 if paid
                 else ""
             )

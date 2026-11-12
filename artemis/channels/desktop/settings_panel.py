@@ -8,14 +8,13 @@ import os
 import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import yaml
-from PySide6.QtCore import QRectF, QSize, Qt, QThread, Signal
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPixmap
+from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPixmap
 from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
@@ -33,6 +32,8 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSizePolicy,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -74,6 +75,8 @@ from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_comm
 SettingPath = tuple[str, ...]
 
 _BAR_HEIGHT = 60  # alt çubuk: 12 + 36 (Uygula) + 12
+_DIRTY_TEXT = "Kaydedilmemiş değişiklik var"
+_CLEAN_TEXT = "Tüm değişiklikler kayıtlı"
 
 
 @dataclass(frozen=True)
@@ -178,6 +181,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         ("selection_actions", "translate_to"), "selection_translate_to",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
+    _checkbox(("proactive", "enabled"), "proactive_enabled"),
     _checkbox(("routines", "enabled"), "routines_enabled"),
     _checkbox(("calendar", "enabled"), "calendar_enabled"),
     _checkbox(("calendar", "allow_cloud"), "calendar_cloud"),
@@ -408,10 +412,58 @@ def default_repos_dir() -> str:
     return str(Path(os.environ.get("USERPROFILE") or Path.home()) / "Desktop" / "Projeler")
 
 
+_ITEM_HEIGHT = 30  # bölüm satırı; dar pencerede liste kendi kaydırıcısına ihtiyaç duymasın
+_HEADER_HEIGHT = 22  # grup başlığı, grubun ilk satırının üstünde
+_GROUP_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
+class _SectionDelegate(QStyledItemDelegate):
+    """Grup başlığını grubun ilk satırının üstüne çizer. Başlık ayrı bir öğe olmadığı için
+    seçilemez ve klavye gezintisinde atlanır; satır sırası sayfa sırasıyla aynı kalır."""
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.muted = QColor(THEMES[DEFAULT_THEME]["muted"])
+
+    def sizeHint(self, option: QStyleOptionViewItem, index: Any) -> QSize:  # noqa: N802
+        hint = index.data(Qt.ItemDataRole.SizeHintRole)
+        return hint if isinstance(hint, QSize) else super().sizeHint(option, index)
+
+    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: Any) -> None:
+        title = index.data(_GROUP_ROLE)
+        if title:
+            painter.save()
+            font = QFont(option.font)
+            font.setPixelSize(11)
+            font.setBold(True)
+            font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 104)
+            painter.setFont(font)
+            painter.setPen(self.muted)
+            rect = QRect(option.rect.left() + 12, option.rect.top(), option.rect.width() - 12,
+                         _HEADER_HEIGHT - 3)
+            painter.drawText(rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom),
+                             str(title))
+            painter.restore()
+            option = QStyleOptionViewItem(option)
+            option.rect = option.rect.adjusted(0, _HEADER_HEIGHT, 0, 0)
+        super().paint(painter, option, index)
+
+
 class _SectionList(QListWidget):
     """Bölüm listesi; sağdaki tek kaydırma bölgesini (`scroll_area`) de taşır."""
 
     scroll_area: QScrollArea
+
+    def _on_header(self, position: QPoint) -> bool:
+        item = self.itemAt(position)
+        return (
+            item is not None and bool(item.data(_GROUP_ROLE))
+            and position.y() - self.visualItemRect(item).top() < _HEADER_HEIGHT
+        )
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+        if not self._on_header(event.position().toPoint()):  # başlık alanı seçim yapmaz
+            super().mousePressEvent(event)
 
 
 # Tema adının yanındaki açıklama; anahtarlar themes.THEME_LABELS ile aynı.
@@ -497,12 +549,38 @@ class _ThemeCard(QFrame):
         super().mousePressEvent(event)
 
 
+def _indent(box: QCheckBox) -> QHBoxLayout:
+    """Bağlı seçenek: ana kutunun altında, gösterge genişliği kadar girintili."""
+    row = QHBoxLayout()
+    row.setContentsMargins(24, 0, 0, 0)
+    row.addWidget(box)
+    return row
+
+
 def _check_hint(text: str) -> QLabel:
     """Onay kutusunun altındaki 12px soluk açıklama; kutu metni uzayıp satırı taşırmasın diye
     ayrıntı buraya (sarılabilir) konur. Girinti = gösterge 16px + boşluk 8px."""
     label = meta_label(text)
     label.setContentsMargins(24, 0, 0, 0)
     return label
+
+
+class _SavedNote(QLabel):
+    """Anında kaydedilen bir denetim çalışınca kısa süre "Kaydedildi" der (renge bağlı değil)."""
+
+    def __init__(self) -> None:
+        super().__init__("Kaydedildi")
+        self.setObjectName("meta")
+        self.setAccessibleName("Kayıt durumu")
+        self.setVisible(False)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(2500)
+        self._timer.timeout.connect(self.hide)
+
+    def flash(self) -> None:
+        self.show()
+        self._timer.start()
 
 
 class _ApplyButton(QPushButton):
@@ -560,25 +638,37 @@ class SettingsPanel(QWidget):
         title.setObjectName("pageTitle")
         title.setFixedHeight(48)
         layout.addWidget(title)
-        body = QHBoxLayout()
-        body.setSpacing(16)
-        layout.addLayout(body, 1)
-        # Sol bölüm listesi + tek kaydırma bölgesi (iç içe kaydırıcı yok).
+        # Bölüm listesi ve sayfa tek kaydırma bölgesinde yan yana durur: dar pencerede listenin
+        # kendi kaydırıcısı olmaz, ikisi birlikte kayar (iç içe ya da yan yana iki kaydırıcı yok).
         self.sections = _SectionList()
         self.sections.setObjectName("sectionList")
         self.sections.setFixedWidth(200)
         self.sections.setAccessibleName("Ayar bölümleri")
-        body.addWidget(self.sections)
+        self.sections.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._section_delegate = _SectionDelegate(self.sections)
+        self.sections.setItemDelegate(self._section_delegate)
         self.stack = CurrentPageStack()
+        body = QWidget()
+        body_row = QHBoxLayout(body)
+        body_row.setContentsMargins(0, 0, 0, 0)
+        body_row.setSpacing(16)
+        # Alt dolgu sayfalarla aynı: son bölüm de alt çubuğun altında kırpılı kalmaz.
+        body_row.addWidget(self.sections, 0, Qt.AlignmentFlag.AlignTop)
+        body_row.addWidget(self.stack, 1)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(self.stack)
+        scroll.setWidget(body)
         self.sections.scroll_area = scroll
-        body.addWidget(scroll, 1)
+        layout.addWidget(scroll, 1)
 
-        def page(name: str, description: str) -> QVBoxLayout:
-            """Bölüm sayfası: 720px'i aşmayan sütun, solda; başlık + tek satır açıklama."""
+        current_group = ""
+        self.saved_notes: dict[str, _SavedNote] = {}
+
+        def page(name: str, description: str, group_title: str = "") -> QVBoxLayout:
+            """Bölüm sayfası: 720px'i aşmayan sütun, solda; başlık + tek satır açıklama.
+            `group_title` grubun ilk sayfasında grup başlığını açar."""
+            nonlocal current_group
             outer = QWidget()
             row = QHBoxLayout(outer)
             # Alt dolgu = yapışkan alt çubuğun yüksekliği: kaydırınca son satır çubuğun hemen
@@ -593,17 +683,29 @@ class SettingsPanel(QWidget):
             row.addStretch(0)
             head = QLabel(name)
             head.setObjectName("sectionTitle")
+            # Anında kaydedilen sayfalar başlığın sağında kısa "Kaydedildi" gösterir; gizliyken
+            # satır yüksekliği başlıkla belirlendiği için yerleşim oynamaz.
+            saved = _SavedNote()
+            self.saved_notes[name] = saved
+            title_row = QHBoxLayout()
+            title_row.addWidget(head, 1)
+            title_row.addWidget(saved, 0, Qt.AlignmentFlag.AlignVCenter)
             heading = QVBoxLayout()
             heading.setSpacing(4)
-            heading.addWidget(head)
+            heading.addLayout(title_row)
             heading.addWidget(meta_label(description))
             content.addLayout(heading)
             self.sections.addItem(name)
-            self.sections.item(self.sections.count() - 1).setSizeHint(QSize(0, 36))
+            item = self.sections.item(self.sections.count() - 1)
+            if group_title:
+                current_group = group_title
+                item.setData(_GROUP_ROLE, group_title)
+            item.setData(Qt.ItemDataRole.AccessibleTextRole, f"{name}, {current_group}")
+            item.setSizeHint(QSize(0, _ITEM_HEIGHT + (_HEADER_HEIGHT if group_title else 0)))
             self.stack.addWidget(outer)
             return content
 
-        voice = page("Ses", "Uyandırma, tanıma ve konuşma. Değişiklikler Uygula ile kaydedilir.")
+        voice = page("Ses", "Uyandırma, tanıma ve konuşma.", "Temel")
         # Uyandırma ve mikrofon
         wake_box, wake = group("Uyandırma ve mikrofon", divided=False)
         voice.addWidget(wake_box)
@@ -635,7 +737,8 @@ class SettingsPanel(QWidget):
         self.input_level.setAccessibleName("Ses girişi seviyesi")
         self.level_value = QLabel("%0")
         self.level_value.setObjectName("meta")
-        self.level_value.setMinimumWidth(32)
+        # "%100" sığmalı: sabit genişlik satırın içinde kalır, dar pencerede kırpılmaz.
+        self.level_value.setFixedWidth(self.level_value.fontMetrics().horizontalAdvance("%100") + 8)
         self.level_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         self.input_level.valueChanged.connect(lambda value: self.level_value.setText(f"%{value}"))
         level_row = QHBoxLayout()
@@ -738,26 +841,24 @@ class SettingsPanel(QWidget):
         self.continuous_mode = QCheckBox("Kesintisiz sohbet")
         speech.addWidget(self.continuous_mode)
         speech.addWidget(_check_hint("Uyandırma adı söylemeden sürekli dinler."))
-        self.dictation_enabled = QCheckBox("Dikte kısayolu")
+        self.dictation_enabled = QCheckBox("Dikteyi kullan")
         speech.addWidget(self.dictation_enabled)
         speech.addWidget(_check_hint(
             "Kısayola basıp konuşun, tekrar basın: metin odaktaki uygulamaya yazılır. "
-            "Komut değildir, Artemis'e gitmez. Ses açıkken çalışmaz. Esc yazımı durdurur. "
-            "Değişiklik Uygula'dan sonra geçerli olur."
+            "Komut değildir, Artemis'e gitmez. Ses açıkken çalışmaz. Esc yazımı durdurur."
         ))
         self.dictation_hotkey = QLineEdit()
         self.dictation_hotkey.setMaxLength(40)
         self.dictation_hotkey.setAccessibleName("Dikte kısayolu")
         self.dictation_hotkey.setPlaceholderText("Örneğin: ctrl+alt+d")
         field(speech, "Dikte tuşu", self.dictation_hotkey)
-        self.selection_enabled = QCheckBox("Seçili metin eylemleri")
+        self.selection_enabled = QCheckBox("Seçili metin eylemlerini kullan")
         speech.addWidget(self.selection_enabled)
         speech.addWidget(_check_hint(
             "Bir uygulamada metin seçip kısayola basın: Çevir, Düzelt, Özetle ya da Açıkla. "
             "Seçimi almak için pano geçici kullanılır ve eski metin geri konur; metin dışı pano "
             "içeriği (resim, dosya) geri konamaz. Metin modele araçsız gider, geçmişe girmez. "
-            "Pano için bulut izni yoksa yalnız yerel model kullanılır. Değişiklik Uygula'dan "
-            "sonra geçerli olur."
+            "Pano için bulut izni yoksa yalnız yerel model kullanılır."
         ))
         self.selection_hotkey = QLineEdit()
         self.selection_hotkey.setMaxLength(40)
@@ -782,8 +883,7 @@ class SettingsPanel(QWidget):
         self.live_transcript = QCheckBox("Canlı yazı (konuşurken)")
         self.live_transcript.setToolTip(
             "Konuşurken metin pet balonunda akar; yalnız gösterimdir, komutu etkilemez. "
-            "Kurulum: pip install .[stream] ve ayar dosyasında model/revision. "
-            "Değişiklik ses yeniden başlayınca uygulanır."
+            "Ek bir bileşen kurulumu ister. Değişiklik ses yeniden başlayınca uygulanır."
         )
         clean.addWidget(self.live_transcript)
         # Lisans atfı (mihu Community License): "Powered by mihu" arayüzde görünür kalmalı.
@@ -851,138 +951,94 @@ class SettingsPanel(QWidget):
         self.advanced_toggle.toggled.connect(self._toggle_advanced)
 
         # Model: bağlantılar ve modeller ProviderSection'dadır.
-        model_page = page(
-            "Model", "Beyin modelini seç. Model ve bağlantı değişiklikleri hemen kaydedilir; "
-            "Uygula gerekmez."
-        )
+        model_page = page("Model", "Beyin modelini seç ve bağlantıları yönet.")
         self.providers = ProviderSection(config_path, demo=demo)
         self.providers.changed.connect(self._load_cloud_servers)
+        self.providers.changed.connect(self.saved_notes["Model"].flash)
         model_page.addWidget(self.providers)
         model_page.addStretch(1)
 
-        telegram_page = page(
-            "Telegram",
-            "Bot token'ı ve sohbet eşleştirme. Değişiklikler hemen kaydedilir; Uygula gerekmez.",
+        # Pet bölümü ayarlarda gösterilmez; app.py kendi sayfasında barındırır.
+        self.pet = PetSection(
+            pets_dir if pets_dir is not None else pets_dir_for(config_path),
+            codex_pets_dir,
+            demo=demo,
+            config_path=config_path,
         )
-        self.telegram = TelegramSection(config_path, demo=demo)
-        telegram_page.addWidget(self.telegram)
-        self.telegram_voice = QCheckBox("Ses mesajlarını kabul et")
-        self.telegram_photo = QCheckBox("Fotoğrafları kabul et")
-        self.telegram_files = QCheckBox("Dosyaları kabul et")
-        for box in (self.telegram_voice, self.telegram_photo, self.telegram_files):
-            telegram_page.addWidget(box)
-        telegram_page.addWidget(_check_hint(
-            "Kutular Uygula ile kaydedilir. Ses yazıya çevrilir ve komut olarak çalışır "
-            "(en çok 1 MB, 60 sn); fotoğraftaki metin yerel OCR ile okunur ve gizli sayılır; "
-            "dosyalar çalışma alanındaki Telegram klasörüne kaydedilir, açılmaz. İletilmiş "
-            "mesajlar yine çalışmaz."
-        ))
-        telegram_page.addStretch(1)
+
+        look = page("Görünüm", "Arayüz renkleri.")
+        theme_box, theme = group("Tema", divided=False)
+        look.addWidget(theme_box)
+        # app.py ve testler bu seçiciyi okur/yazar; kartlar ona bağlı, kendisi görünmez.
+        self.theme_combo = QComboBox(self)
+        self.theme_combo.setAccessibleName("Arayüz teması")
+        self.theme_combo.setVisible(False)
+        for key, label in THEME_LABELS.items():
+            self.theme_combo.addItem(label, key)
+        self.theme_combo.setCurrentIndex(self.theme_combo.findData(DEFAULT_THEME))
+        self.theme_cards: dict[str, _ThemeCard] = {}
+        theme_group = QButtonGroup(self)
+        self._theme_grid = QGridLayout()
+        self._theme_grid.setSpacing(12)
+        for key, label in THEME_LABELS.items():
+            theme_card = _ThemeCard(key, label)
+            theme_card.radio.setProperty("theme", key)
+            theme_card.radio.toggled.connect(self._theme_picked)
+            theme_group.addButton(theme_card.radio)
+            self.theme_cards[key] = theme_card
+        theme.addLayout(self._theme_grid)
+        self._theme_columns = 0
+        self._layout_theme_cards(2)
+        self.theme_combo.currentIndexChanged.connect(self._emit_theme)
+        self.theme_combo.currentIndexChanged.connect(self._sync_theme_cards)
+        self.theme_combo.currentIndexChanged.connect(self.saved_notes["Görünüm"].flash)
+        self._sync_theme_cards()
+        look.addStretch(1)
 
         routines_page = page(
             "Rutinler",
-            "Adlandırılmış, sabit adımlı işler (örn. “işe başla”). Kutu Uygula ile kaydedilir.",
+            "Adlandırılmış, sabit adımlı işler (örn. “işe başla”).",
+            "Otomasyon",
         )
-        self.routines_enabled = QCheckBox("Rutinler")
+        self.proactive_enabled = QCheckBox("Zamanlı işler")
+        routines_page.addWidget(self.proactive_enabled)
+        routines_page.addWidget(_check_hint(
+            "Hatırlatmalar, rutin saatleri, tetikleyiciler ve gün özeti bunun açık olmasını ister."
+        ))
+        self.routines_enabled = QCheckBox("Rutinleri kullan")
         routines_page.addWidget(self.routines_enabled)
         routines_page.addWidget(_check_hint(
-            "Sesle, yazıyla veya buradan çalıştırılır. Her adım kendi onay kurallarıyla yürür; "
-            "onaylanmayan ya da başarısız ilk adımda durur. Zamanlı bildirim için "
-            "proactive.enabled gerekir."
+            "Sesle, yazıyla veya Otomasyon sayfasından çalıştırılır. Her adım kendi onay "
+            "kurallarıyla yürür; onaylanmayan ya da başarısız ilk adımda durur."
         ))
         self.routines = RoutinesSection(config_path, demo=demo)
         routines_page.addWidget(self.routines)
         routines_page.addStretch(1)
 
-        cal_page = page(
-            "Takvim ve posta",
-            "Takvimi ve okunmamış postayı salt okunur oku (sorular ve sabah brifingi için). "
-            "Kutular ve alanlar Uygula ile kaydedilir; adres ve parola hemen kasaya yazılır.",
-        )
-        self.calendar_enabled = QCheckBox("Takvim")
-        cal_page.addWidget(self.calendar_enabled)
-        self.calendar_cloud = QCheckBox("Takvim içeriği bulut modele ve Telegram'a gidebilsin")
-        cal_page.addWidget(self.calendar_cloud)
-        self.mail_enabled = QCheckBox("Posta")
-        cal_page.addWidget(self.mail_enabled)
-        self.mail_cloud = QCheckBox("Posta içeriği bulut modele ve Telegram'a gidebilsin")
-        cal_page.addWidget(self.mail_cloud)
-        cal_page.addWidget(_check_hint(
-            "Kapalıyken içerik yalnız yerel modele gider. Posta okundu işaretlenmez, hiçbir "
-            "ileti silinmez ya da taşınmaz. Eki indirilmez."
-        ))
-        self.mail_host = QLineEdit()
-        self.mail_host.setAccessibleName("IMAP sunucusu")
-        self.mail_host.setPlaceholderText("imap.gmail.com")
-        field(cal_page, "IMAP sunucusu", self.mail_host)
-        self.mail_port = QLineEdit()
-        self.mail_port.setAccessibleName("IMAP kapısı")
-        field(cal_page, "Kapı", self.mail_port)
-        self.mail_username = QLineEdit()
-        self.mail_username.setAccessibleName("Posta kullanıcı adı")
-        field(cal_page, "Kullanıcı adı", self.mail_username)
-        self.mail_folder = QLineEdit()
-        self.mail_folder.setAccessibleName("Posta klasörü")
-        field(cal_page, "Klasör", self.mail_folder)
-        self.calendar_mail = CalendarMailSection(config_path, demo=demo)
-        cal_page.addWidget(self.calendar_mail)
-        cal_page.addStretch(1)
-
-        skills_page = page(
-            "Beceriler",
-            "Elle yazdığın .md dosyalarıyla Artemis'e yeni çalışma yöntemleri öğret. "
-            "Kutu Uygula ile kaydedilir; dosyalar açılışta ve Yenile'de okunur.",
-        )
-        self.skills_enabled = QCheckBox("Beceriler")
-        skills_page.addWidget(self.skills_enabled)
-        skills_page.addWidget(_check_hint(
-            "Dosyalar state_dir/beceriler klasöründe durur. Uygulama içinde düzenlenmez ve "
-            "Artemis kendi başına beceri yazamaz. Mesajı /beceri-adı ile başlatarak da "
-            "çağırabilirsin."
-        ))
-        self.skills = SkillsSection(config_path, demo=demo)
-        skills_page.addWidget(self.skills)
-        skills_page.addStretch(1)
-
         triggers_page = page(
             "Tetikleyiciler",
-            "Bir klasöre yeni dosya gelince Artemis haber verir. Kutu Uygula ile kaydedilir; "
-            "tetikleyiciler config'te tanımlanır.",
+            "Bir klasöre yeni dosya gelince Artemis haber verir.",
         )
-        self.triggers_enabled = QCheckBox("Tetikleyiciler")
+        self.triggers_enabled = QCheckBox("Tetikleyicileri kullan")
         triggers_page.addWidget(self.triggers_enabled)
         triggers_page.addWidget(_check_hint(
             "Klasör yoklanır; ilk bakışta var olan dosyalar bildirilmez. Dosya yazılması bitince "
-            "bir kez haber verilir. Dosya adları Telegram'a gönderilmez. proactive.enabled gerekir."
+            "bir kez haber verilir. Dosya adları Telegram'a gönderilmez. Zamanlı işler açık olmalı."
         ))
         self.triggers = TriggersSection(config_path, demo=demo)
         triggers_page.addWidget(self.triggers)
         triggers_page.addStretch(1)
 
-        research_page = page(
-            "Araştırma",
-            "Bir konuyu arka planda web aramasıyla araştırıp kaynaklı rapor yazdırır. "
-            "Kutu Uygula ile kaydedilir.",
-        )
-        self.research_enabled = QCheckBox("Araştırma işi")
-        research_page.addWidget(self.research_enabled)
-        research_page.addWidget(_check_hint(
-            "Her araştırma başlamadan önce onay sorulur; onay en fazla research.max_searches "
-            "(varsayılan 12) web araması içindir. İş sohbet geçmişini, hafızayı ve notlarını "
-            "görmez. Rapor state_dir/arastirma klasörüne yazılır, kasaya kendiliğinden eklenmez."
-        ))
-        research_page.addStretch(1)
-
         summary_page = page(
             "Gün özeti",
-            "Belirlenen saatte günün kısa bir kaydını yazar. Kutu ve saat Uygula ile kaydedilir.",
+            "Belirlenen saatte günün kısa bir kaydını yazar.",
         )
-        self.daily_summary_enabled = QCheckBox("Gün sonu özeti")
+        self.daily_summary_enabled = QCheckBox("Gün özetini kullan")
         summary_page.addWidget(self.daily_summary_enabled)
         summary_page.addWidget(_check_hint(
             "Konuşma metni okunmaz; yalnız bugünün araç, dosya, iş ve hatırlatma sayıları "
-            "state_dir/gunluk klasörüne yazılır. Telegram'a gitmez. Vault'a ekleme yalnız "
-            "bildirimdeki düğmeyle ve onayla olur. proactive.enabled gerekir."
+            "Artemis'in veri klasöründeki günlük klasörüne yazılır. Telegram'a gitmez. Vault'a "
+            "ekleme yalnız bildirimdeki düğmeyle ve onayla olur. Zamanlı işler açık olmalı."
         ))
         self.daily_summary_at = QLineEdit()
         self.daily_summary_at.setMaxLength(5)
@@ -991,65 +1047,88 @@ class SettingsPanel(QWidget):
         field(summary_page, "Özet saati (SS:DD)", self.daily_summary_at)
         summary_page.addStretch(1)
 
-        files_page = page(
-            "Dosya araması",
-            "Seçtiğin klasörlerde dosya adı ve içeriğiyle arama. Kutu ve liste Uygula ile "
-            "kaydedilir.",
+        research_page = page(
+            "Araştırma",
+            "Bir konuyu arka planda web aramasıyla araştırıp kaynaklı rapor yazdırır.",
         )
-        self.file_search_enabled = QCheckBox("Dosya araması")
-        files_page.addWidget(self.file_search_enabled)
-        files_page.addWidget(_check_hint(
-            "Metin, kod ve docx dosyalarının içeriği; PDF'lerin yalnız adı aranır. Sonuçta yol "
-            "ve kısa alıntı gelir, dosyanın tamamı gelmez. Dosya içeriği sayıldığı için "
-            "allow_cloud_file_content kapalıyken buluta gitmez."
+        self.research_enabled = QCheckBox("Araştırma işlerini kullan")
+        research_page.addWidget(self.research_enabled)
+        research_page.addWidget(_check_hint(
+            "Her araştırma başlamadan önce onay sorulur; onay en fazla 12 web araması içindir. "
+            "İş sohbet geçmişini, hafızayı ve notlarını görmez. Rapor Artemis'in veri "
+            "klasöründeki araştırma klasörüne yazılır, kasaya kendiliğinden eklenmez."
         ))
-        self.file_search = FileSearchSection(config_path, demo=demo)
-        self.file_search_roots = self.file_search.roots_list
-        files_page.addWidget(self.file_search)
-        files_page.addStretch(1)
+        research_page.addStretch(1)
 
-        apps = page(
-            "Uygulamalar",
-            "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı. "
-            "Değişiklikler Uygula ile kaydedilir.",
+        telegram_page = page(
+            "Telegram",
+            "Bot token'ı ve sohbet eşleştirme.",
+            "Bağlantılar",
         )
-        access_box, access = group("Erişim", divided=False)
-        apps.addWidget(access_box)
-        self.all_applications = QCheckBox("Bütün kurulu uygulamalara erişim")
-        self.all_applications.toggled.connect(self._sync_application_access)
-        access.addWidget(self.all_applications)
-        self.computer_auto = QCheckBox("Otomatik bilgisayar kullanımı")
-        self.computer_auto.setToolTip(
-            "Hassas adımlar ve temiz turda başlangıç sorulmaz; Esc her an durdurur. Terminal, "
-            "Artemis ve parola yöneticisi engeli ile dış içerikten sonraki onay yine geçerlidir."
-        )
-        access.addWidget(self.computer_auto)
-        access.addWidget(_check_hint(
-            "Adımları sormadan yapar; Esc her an durdurur. Üst çubuktaki otomatik onay düğmesi "
-            "hemen uygulanır, bu kutu Uygula ile kaydedilir."
+        self.telegram = TelegramSection(config_path, demo=demo)
+        self.telegram.changed.connect(self.saved_notes["Telegram"].flash)
+        self.telegram.channel_changed.connect(self.saved_notes["Telegram"].flash)
+        telegram_page.addWidget(self.telegram)
+        self.telegram_voice = QCheckBox("Ses mesajlarını kabul et")
+        self.telegram_photo = QCheckBox("Fotoğrafları kabul et")
+        self.telegram_files = QCheckBox("Dosyaları kabul et")
+        for box in (self.telegram_voice, self.telegram_photo, self.telegram_files):
+            telegram_page.addWidget(box)
+        telegram_page.addWidget(_check_hint(
+            "Ses yazıya çevrilir ve komut olarak çalışır "
+            "(en çok 1 MB, 60 sn); fotoğraftaki metin yerel OCR ile okunur ve gizli sayılır; "
+            "dosyalar çalışma alanındaki Telegram klasörüne kaydedilir, açılmaz. İletilmiş "
+            "mesajlar yine çalışmaz."
         ))
-        list_box, listing = group("İzinli uygulamalar")
-        apps.addWidget(list_box)
-        self.application_list = QListWidget()
-        self.application_list.setMaximumHeight(144)
-        self.application_list.setAccessibleName("İzinli uygulamalar")
-        listing.addWidget(self.application_list)
-        self.add_application_button = QPushButton("Uygulama ekle")
-        self.add_application_button.setObjectName("primary")
-        self.add_application_button.clicked.connect(self._add_application)
-        self.remove_application_button = QPushButton("Listeden çıkar")
-        self.remove_application_button.clicked.connect(self._remove_application)
-        listing.addLayout(button_row(self.remove_application_button, self.add_application_button))
-        self.application_hint = meta_label(
-            "Artemis listedeki uygulamaları açabilir. Yeni uygulama ekleyip Uygula'ya bas."
+        telegram_page.addStretch(1)
+
+        cal_page = page(
+            "Takvim ve posta",
+            "Takvimi ve okunmamış postayı salt okunur oku (sorular ve sabah brifingi için).",
         )
-        listing.addWidget(self.application_hint)
-        apps.addStretch(1)
+        takvim_box, takvim = group("Takvim", divided=False)
+        cal_page.addWidget(takvim_box)
+        self.calendar_enabled = QCheckBox("Takvimi kullan")
+        takvim.addWidget(self.calendar_enabled)
+        self.calendar_cloud = QCheckBox("Takvim içeriği bulut modele ve Telegram'a gidebilsin")
+        takvim.addLayout(_indent(self.calendar_cloud))
+        self.calendar_enabled.toggled.connect(self.calendar_cloud.setEnabled)
+        self.calendar_cloud.setEnabled(self.calendar_enabled.isChecked())
+        posta_box, posta = group("Posta")
+        cal_page.addWidget(posta_box)
+        self.mail_enabled = QCheckBox("Postayı kullan")
+        posta.addWidget(self.mail_enabled)
+        self.mail_cloud = QCheckBox("Posta içeriği bulut modele ve Telegram'a gidebilsin")
+        posta.addLayout(_indent(self.mail_cloud))
+        self.mail_enabled.toggled.connect(self.mail_cloud.setEnabled)
+        self.mail_cloud.setEnabled(self.mail_enabled.isChecked())
+        posta.addWidget(_check_hint(
+            "Kapalıyken içerik yalnız yerel modele gider. Posta okundu işaretlenmez, hiçbir "
+            "ileti silinmez ya da taşınmaz. Eki indirilmez."
+        ))
+        self.mail_host = QLineEdit()
+        self.mail_host.setAccessibleName("IMAP sunucusu")
+        self.mail_host.setPlaceholderText("imap.gmail.com")
+        field(posta, "IMAP sunucusu", self.mail_host)
+        self.mail_port = QLineEdit()
+        self.mail_port.setAccessibleName("IMAP portu")
+        field(posta, "Port", self.mail_port)
+        self.mail_username = QLineEdit()
+        self.mail_username.setAccessibleName("Posta kullanıcı adı")
+        field(posta, "Kullanıcı adı", self.mail_username)
+        self.mail_folder = QLineEdit()
+        self.mail_folder.setAccessibleName("Posta klasörü")
+        field(posta, "Klasör", self.mail_folder)
+        # Takvim adresi ve posta parolası kendi kutularına (yukarıdaki iki grup) eklenir.
+        self.calendar_mail = CalendarMailSection(
+            config_path, demo=demo, calendar=takvim, mail=posta
+        )
+        cal_page.addWidget(self.calendar_mail)
+        cal_page.addStretch(1)
 
         github = page(
             "GitHub",
-            "Kendi repolarını kod ajanının erişimine bağla ve hangi ajanın çalışacağını seç. "
-            "“Bağla” düğmesi hemen kaydeder; diğer alanlar Uygula ile.",
+            "Kendi repolarını kod ajanının erişimine bağla ve hangi ajanın çalışacağını seç.",
         )
         account_box, account = group("Hesap", divided=False)
         github.addWidget(account_box)
@@ -1090,7 +1169,7 @@ class SettingsPanel(QWidget):
         # Uygulamalar listesiyle aynı kirli-durum/Uygula akışı (ikinci kaydetme yolu yok).
         agents_box, agents = group(
             "Kod ajanları",
-            "Arka plan proje işinde çalışacak ajanlar. Değişiklikler Uygula ile kaydedilir.",
+            "Arka plan proje işinde çalışacak ajanlar.",
         )
         github.addWidget(agents_box)
         self.agent_list = QListWidget()
@@ -1113,46 +1192,79 @@ class SettingsPanel(QWidget):
         self.default_agent_combo.activated.connect(self._default_agent_picked)
         github.addStretch(1)
 
-        # Pet bölümü ayarlarda gösterilmez; app.py kendi sayfasında barındırır.
-        self.pet = PetSection(
-            pets_dir if pets_dir is not None else pets_dir_for(config_path),
-            codex_pets_dir,
-            demo=demo,
-            config_path=config_path,
+        skills_page = page(
+            "Beceriler",
+            "Elle yazdığın .md dosyalarıyla Artemis'e yeni çalışma yöntemleri öğret.",
+            "Bilgi",
         )
+        self.skills_enabled = QCheckBox("Becerileri kullan")
+        skills_page.addWidget(self.skills_enabled)
+        skills_page.addWidget(_check_hint(
+            "Dosyalar Artemis'in veri klasöründeki beceriler klasöründe durur ve açılışta ile "
+            "Yenile'de okunur. Uygulama içinde düzenlenmez ve Artemis kendi başına beceri "
+            "yazamaz. Mesajı /beceri-adı ile başlatarak da çağırabilirsin."
+        ))
+        self.skills = SkillsSection(config_path, demo=demo)
+        skills_page.addWidget(self.skills)
+        skills_page.addStretch(1)
 
-        look = page(
-            "Görünüm",
-            "Arayüz renkleri. Hemen uygulanır; Uygula gerekmez, sohbet yeniden başlamaz.",
+        files_page = page(
+            "Dosya araması",
+            "Seçtiğin klasörlerde dosya adı ve içeriğiyle arama.",
         )
-        theme_box, theme = group("Tema", divided=False)
-        look.addWidget(theme_box)
-        # app.py ve testler bu seçiciyi okur/yazar; kartlar ona bağlı, kendisi görünmez.
-        self.theme_combo = QComboBox(self)
-        self.theme_combo.setAccessibleName("Arayüz teması")
-        self.theme_combo.setVisible(False)
-        for key, label in THEME_LABELS.items():
-            self.theme_combo.addItem(label, key)
-        self.theme_combo.setCurrentIndex(self.theme_combo.findData(DEFAULT_THEME))
-        self.theme_cards: dict[str, _ThemeCard] = {}
-        theme_group = QButtonGroup(self)
-        self._theme_grid = QGridLayout()
-        self._theme_grid.setSpacing(12)
-        for key, label in THEME_LABELS.items():
-            theme_card = _ThemeCard(key, label)
-            theme_card.radio.toggled.connect(partial(self._theme_picked, key))
-            theme_group.addButton(theme_card.radio)
-            self.theme_cards[key] = theme_card
-        theme.addLayout(self._theme_grid)
-        self._theme_columns = 0
-        self._layout_theme_cards(2)
-        self.theme_combo.currentIndexChanged.connect(
-            lambda: self.theme_changed.emit(str(self.theme_combo.currentData()))
-        )
-        self.theme_combo.currentIndexChanged.connect(self._sync_theme_cards)
-        self._sync_theme_cards()
-        look.addStretch(1)
+        self.file_search_enabled = QCheckBox("Dosya aramasını kullan")
+        files_page.addWidget(self.file_search_enabled)
+        files_page.addWidget(_check_hint(
+            "Metin, kod ve docx dosyalarının içeriği; PDF'lerin yalnız adı aranır. Sonuçta yol "
+            "ve kısa alıntı gelir, dosyanın tamamı gelmez. Bulut izni verilmediği sürece dosya "
+            "içeriği yalnız yerel modele gider; bu izin henüz panelde yok, ayar dosyasından "
+            "verilir."
+        ))
+        self.file_search = FileSearchSection(config_path, demo=demo)
+        self.file_search_roots = self.file_search.roots_list
+        files_page.addWidget(self.file_search)
+        files_page.addStretch(1)
 
+        apps = page(
+            "Uygulamalar",
+            "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı.",
+        )
+        access_box, access = group("Erişim", divided=False)
+        apps.addWidget(access_box)
+        self.all_applications = QCheckBox("Bütün kurulu uygulamalara erişim")
+        self.all_applications.toggled.connect(self._sync_application_access)
+        access.addWidget(self.all_applications)
+        self.computer_auto = QCheckBox("Otomatik bilgisayar kullanımı")
+        self.computer_auto.setToolTip(
+            "Hassas adımlar ve temiz turda başlangıç sorulmaz; Esc her an durdurur. Terminal, "
+            "Artemis ve parola yöneticisi engeli ile dış içerikten sonraki onay yine geçerlidir."
+        )
+        access.addWidget(self.computer_auto)
+        access.addWidget(_check_hint(
+            "Adımları sormadan yapar; Esc her an durdurur. Üst çubuktaki otomatik onay "
+            "düğmesiyle aynı ayardır."
+        ))
+        list_box, listing = group("İzinli uygulamalar")
+        apps.addWidget(list_box)
+        self.application_list = QListWidget()
+        self.application_list.setMaximumHeight(144)
+        self.application_list.setAccessibleName("İzinli uygulamalar")
+        listing.addWidget(self.application_list)
+        self.add_application_button = QPushButton("Uygulama ekle")
+        self.add_application_button.setObjectName("primary")
+        self.add_application_button.clicked.connect(self._add_application)
+        self.remove_application_button = QPushButton("Listeden çıkar")
+        self.remove_application_button.clicked.connect(self._remove_application)
+        listing.addLayout(button_row(self.remove_application_button, self.add_application_button))
+        self.application_hint = meta_label("Artemis listedeki uygulamaları açabilir.")
+        listing.addWidget(self.application_hint)
+        apps.addStretch(1)
+
+        # Liste kaydırıcısız: yüksekliği satırların toplamıdır (alt dolgu çubuğa ayrılır).
+        self.sections.setFixedHeight(
+            sum(self.sections.item(row).sizeHint().height() for row in range(self.sections.count()))
+            + _BAR_HEIGHT
+        )
         self.sections.currentRowChanged.connect(self._on_section)
         self.sections.setCurrentRow(0)
         self._on_section(0)
@@ -1164,14 +1276,15 @@ class SettingsPanel(QWidget):
         bar_row = QHBoxLayout(bar)
         bar_row.setContentsMargins(16, 12, 16, 12)
         bar_row.setSpacing(12)
-        self.notice = meta_label(
-            "Uygula; ses, uygulama ve GitHub ayarlarını kaydeder ve yeni sohbet başlatır."
-        )
+        self.notice = meta_label("")
         self.current_device.setTextFormat(Qt.TextFormat.PlainText)
-        self.dirty_label = QLabel("Kaydedilmemiş değişiklik")
+        # Kayıt durumu açıklanmaz, gösterilir: değişiklik varken Uygula açık, yoksa kapalı.
+        self.dirty_label = QLabel(_CLEAN_TEXT)
         self.dirty_label.setObjectName("meta")
-        self.dirty_label.setVisible(False)
+        self.dirty_label.setAccessibleName("Kayıt durumu")
+        self._dirty = False
         self.apply_button = _ApplyButton("Uygula")
+        self.apply_button.setToolTip("Değişiklikleri kaydeder ve yeni sohbet başlatır.")
         self.apply_button.setObjectName("primary")
         self.apply_button.setFixedHeight(36)
         self.apply_button.setMinimumWidth(88)
@@ -1182,6 +1295,7 @@ class SettingsPanel(QWidget):
         layout.addWidget(bar)
         if demo:
             self.notice.setText("Demo modunda ayarlar değiştirilmez.")
+            self.dirty_label.setVisible(False)
             self.refresh_button.setEnabled(False)
             self.apply_button.setEnabled(False)
             self.add_application_button.setEnabled(False)
@@ -1224,6 +1338,16 @@ class SettingsPanel(QWidget):
     def section_names(self) -> list[str]:
         return [self.sections.item(row).text() for row in range(self.sections.count())]
 
+    def section_groups(self) -> dict[str, list[str]]:
+        """Grup başlığı -> sayfa adları (listede sırayla). Başlıklar satır değildir."""
+        groups: dict[str, list[str]] = {}
+        title = ""
+        for row in range(self.sections.count()):
+            item = self.sections.item(row)
+            title = str(item.data(_GROUP_ROLE) or title)
+            groups.setdefault(title, []).append(item.text())
+        return groups
+
     def show_section(self, index: int) -> None:
         self.sections.setCurrentRow(index)
 
@@ -1243,11 +1367,19 @@ class SettingsPanel(QWidget):
         self.theme_combo.blockSignals(blocked)
         self._sync_theme_cards()
 
-    def _theme_picked(self, key: str, on: bool) -> None:
-        if on:
-            self.theme_combo.setCurrentIndex(self.theme_combo.findData(key))
+    def _theme_picked(self, on: bool) -> None:
+        radio = self.sender()
+        if on and radio is not None:
+            self.theme_combo.setCurrentIndex(self.theme_combo.findData(radio.property("theme")))
+
+    def _emit_theme(self, *_args: object) -> None:
+        self.theme_changed.emit(str(self.theme_combo.currentData()))
 
     def _sync_theme_cards(self, *_args: object) -> None:
+        self._section_delegate.muted = QColor(
+            THEMES.get(str(self.theme_combo.currentData()), THEMES[DEFAULT_THEME])["muted"]
+        )
+        self.sections.viewport().update()
         card_for = self.theme_cards.get(str(self.theme_combo.currentData()))
         if card_for is not None and not card_for.radio.isChecked():
             card_for.radio.setChecked(True)
@@ -1258,7 +1390,8 @@ class SettingsPanel(QWidget):
 
     def _set_dirty(self, dirty: bool) -> None:
         """Uygula yalnız değişiklik varken açılır; tema gibi anında uygulananlar buraya uğramaz."""
-        self.dirty_label.setVisible(dirty)
+        self._dirty = dirty
+        self.dirty_label.setText(_DIRTY_TEXT if dirty else _CLEAN_TEXT)
         self.apply_button.set_dirty(dirty)
 
     def _layout_theme_cards(self, columns: int) -> None:
@@ -1616,7 +1749,7 @@ class SettingsPanel(QWidget):
     def _toggle_device_detail(self) -> None:
         if self._demo:
             return
-        was_dirty = not self.dirty_label.isHidden()
+        was_dirty = self._dirty
         try:
             self._refresh_devices(load_settings(self.config_path))
         except (OSError, ValueError):
@@ -1645,7 +1778,7 @@ class SettingsPanel(QWidget):
         self.application_hint.setText(
             "Kurulu uygulamalar otomatik bulunur. Silme, kaldırma ve hassas işlemler onay ister."
             if self.all_applications.isChecked()
-            else "Yeni uygulama ekleyip Uygula'ya bas."
+            else "Artemis listedeki uygulamaları açabilir."
         )
 
     def _add_application(self) -> None:
@@ -1761,6 +1894,7 @@ class SettingsPanel(QWidget):
         except (OSError, ValueError, KeyError, TypeError):
             self.github_status.setText("GitHub ayarları kaydedilemedi.")
             return
+        self.saved_notes["GitHub"].flash()
         self.run_github_sync(auto=False)
 
     def start_auto_sync(self) -> None:

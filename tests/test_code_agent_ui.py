@@ -437,7 +437,8 @@ def test_settings_codex_is_builtin_default_applies_without_profile(
     assert panel.default_agent_combo.findData("codex") >= 0
     panel.default_agent_combo.setCurrentIndex(panel.default_agent_combo.findData("codex"))
     panel.default_agent_combo.activated.emit(panel.default_agent_combo.currentIndex())
-    assert panel.apply_button.isEnabled() and not panel.dirty_label.isHidden()
+    assert panel.apply_button.isEnabled()
+    assert panel.dirty_label.text() == "Kaydedilmemiş değişiklik var"
     assert load_settings(path).code_agent.default_agent == "claude"  # Uygula'ya kadar yazılmadı
     save_choices(path, None, code_agent=panel.code_agent_values())
     agent = load_settings(path).code_agent

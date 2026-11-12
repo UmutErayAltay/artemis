@@ -449,7 +449,7 @@ def test_paid_image_model_shows_image_price_field_and_budget_warning(
     assert model.image_cost_usd == Decimal("0.04")
     assert (model.input_per_million, model.output_per_million) == (0, 0)
     text = section.status.text()
-    assert "allow_paid" in text and "rezervasyon" in text
+    assert "ücretli kullanım izni" in text and "rezervasyon" in text
     section.kind.setCurrentIndex(0)  # Sohbet'e dönünce eski fiyat alanları
     assert section.image_box.isHidden() and not section.price_box.isHidden()
 

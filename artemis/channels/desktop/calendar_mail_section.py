@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QWidget
 
-from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
+from artemis.channels.desktop.provider_section import button_row, field, meta_label
 from artemis.config.settings import load_settings
 from artemis.tools import calendar_mail as core
 from artemis.tools.credentials import delete_secret, write_secret
@@ -53,30 +53,31 @@ class _Job(QThread):
 
 
 class CalendarMailSection(QWidget):
-    def __init__(self, config_path: Path, *, demo: bool = False) -> None:
+    """Gizli alanlar; kutuları (Takvim, Posta) ayar sayfası kurar ve bu bölüme verir."""
+
+    def __init__(
+        self, config_path: Path, *, demo: bool = False,
+        calendar: QVBoxLayout, mail: QVBoxLayout,
+    ) -> None:
         super().__init__()
         self.config_path = config_path
         self._job: _Job | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        box, body = group("Takvim adresi", divided=False)
-        layout.addWidget(box)
         self.calendar_url = QLineEdit()
         self.calendar_url.setEchoMode(QLineEdit.EchoMode.Password)
         self.calendar_url.setAccessibleName("Gizli takvim adresi")
         field(
-            body, "Gizli ICS adresi", self.calendar_url,
+            calendar, "Gizli ICS adresi", self.calendar_url,
             "Google Takvim: Ayarlar > takvimi entegre et > iCal biçiminde gizli adres. "
             "https:// ile başlamalı; yalnız kimlik kasasına yazılır.",
         )
         self.calendar_save = QPushButton("Kaydet ve dene")
         self.calendar_save.clicked.connect(self._save_calendar)
         self.calendar_delete = QPushButton("Kaydı sil")
-        self.calendar_delete.clicked.connect(lambda: self._delete(core.ICS_TARGET, "Takvim adresi"))
-        body.addLayout(button_row(self.calendar_delete, self.calendar_save))
-        mail_box, mail = group("Posta parolası")
-        layout.addWidget(mail_box)
+        self.calendar_delete.clicked.connect(self._delete_calendar)
+        calendar.addLayout(button_row(self.calendar_delete, self.calendar_save))
         self.mail_password = QLineEdit()
         self.mail_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.mail_password.setAccessibleName("Posta uygulama parolası")
@@ -88,7 +89,7 @@ class CalendarMailSection(QWidget):
         self.mail_save = QPushButton("Kaydet ve dene")
         self.mail_save.clicked.connect(self._save_mail)
         self.mail_delete = QPushButton("Kaydı sil")
-        self.mail_delete.clicked.connect(lambda: self._delete(core.MAIL_TARGET, "Posta parolası"))
+        self.mail_delete.clicked.connect(self._delete_mail)
         mail.addLayout(button_row(self.mail_delete, self.mail_save))
         self.message = meta_label("")
         self.message.setAccessibleName("Takvim ve posta işlem sonucu")
@@ -156,6 +157,14 @@ class CalendarMailSection(QWidget):
             lambda: check_mail(mail.host, mail.port, mail.username, password, mail.folder),
             password, core.MAIL_TARGET, "Posta",
         )
+
+    # Bağlı yöntem: self'i yakalayan lambda Qt bağlantısında referans döngüsü kurar ve gc başka
+    # iş parçacığında toplarsa uygulama çöker (bkz. tests/test_no_signal_cycles.py).
+    def _delete_calendar(self) -> None:
+        self._delete(core.ICS_TARGET, "Takvim adresi")
+
+    def _delete_mail(self) -> None:
+        self._delete(core.MAIL_TARGET, "Posta parolası")
 
     def _delete(self, target: str, label: str) -> None:
         delete_secret(target)

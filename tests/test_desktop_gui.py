@@ -34,6 +34,7 @@ from artemis.channels.desktop.bridge import Activity, Finished, State, VoiceComm
 from artemis.channels.desktop.demo import DemoReadTool, DemoWriteTool
 from artemis.channels.desktop.themes import THEMES
 from artemis.channels.runtime import Runtime
+from artemis.tools.plugins.routines import RoutineNameArguments
 
 
 @pytest.fixture
@@ -1579,5 +1580,29 @@ def test_summary_notice_open_and_vault_button_follow_vault_setting(
         window._handle_event(bridge_module.Proactive("t", "b", "", "", "../x"))
         window.summary_vault_button.click()
         assert len(calls) == 1
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_busy_refusal_lands_in_the_panel_that_started_the_action(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        window.bridge.submit_tool = lambda name, arguments, **k: None  # type: ignore[method-assign,assignment]
+        window.settings_panel.routines.notice.setText("ayar-önce")
+        window.automation_panel.notice.setText("otomasyon-önce")
+        window.automation_panel.tool_requested.emit(
+            "routine_run", RoutineNameArguments(name="işe başla")
+        )
+        assert window.automation_panel.notice.text() == "Başka işlem sürüyor; çalıştırılmadı."
+        assert window.settings_panel.routines.notice.text() == "ayar-önce"
+
+        window.automation_panel.notice.setText("otomasyon-sonra")
+        window.settings_panel.routines.notice.setText("ayar-sonra")
+        window._submit_routine_tool("routine_run", RoutineNameArguments(name="işe başla"))
+        refusal = "Başka işlem sürüyor; çalıştırılmadı."
+        assert window.settings_panel.routines.notice.text() == refusal
+        assert window.automation_panel.notice.text() == "otomasyon-sonra"
     finally:
         _close_cleanly(app, window)
