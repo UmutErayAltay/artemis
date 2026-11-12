@@ -153,3 +153,17 @@ Her bölüm gerçek Windows'ta, en sonda elle işaretlenir; sahte testler yerine
 - [ ] Belgeler altında `.ssh` adlı bir klasöre ve `Cookies` adlı bir dosyaya bilinen bir ifade yaz: yeniden dizinleyince bulunmuyor.
 - [ ] Dizinleme sürerken "Dizini sil": arayüz donmuyor, indeks siliniyor ve kendiliğinden geri gelmiyor; "Yeniden dizinle" ile yeniden oluşuyor.
 - [ ] Dizinleme sürerken "Yeniden dizinle"ye tekrar bas: ikinci koşu başlamıyor.
+
+## Gün sonu özeti (ADR 0066)
+
+Önkoşul: Gerçek Windows'ta elle. config'te `proactive.enabled: true` ve `daily_summary.enabled: true` (ya da Ayarlar > Gün özeti, Uygula, yeniden başlat); `daily_summary.at` birkaç dakika sonrasına ayarlı; `memory.vault_path` tanımlı.
+
+- [ ] Gün içinde Artemis'i kullan: birkaç sohbet, bir dosya oluştur/sil, bir hatırlatma kur.
+- [ ] Ayarlanan saatte "Günün özeti hazır" bildirimi (panel + toast) geliyor; Telegram'a hiçbir şey gitmiyor.
+- [ ] "Aç" düğmesi `state_dir\gunluk\YYYY-MM-DD.md` dosyasını açıyor: sayılar doğru, dosya yolları görünüyor, konuşma metni ve araç sonuçları yok.
+- [ ] "Vault'a ekle" onay penceresi açıyor ve eklenecek metni gösteriyor; "Hayır" dersen vault'a hiçbir şey yazılmıyor; "Evet" dersen not vault'ta `vault_note` dosyasının sonuna ekleniyor.
+- [ ] `memory.vault_path` boşken bildirimde "Vault'a ekle" düğmesi görünmüyor.
+- [ ] Hiç etkinlik olmayan bir günde bildirim ve dosya yok.
+- [ ] Artemis'i özet saatinde kapalı tut, `briefing_grace_hours` içinde aç: özet "gecikmeli" diye üretiliyor.
+- [ ] "Dün ne yaptık" de: `daily_summary_read` ile dünkü özet okunuyor; kayıt olmayan günde "kayıtlı özet yok" deniyor.
+- [ ] `daily_summary.enabled: false` iken araç modele görünmüyor ve bildirim gelmiyor.

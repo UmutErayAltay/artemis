@@ -488,6 +488,25 @@ class ProactiveStore:
 
     # --- Tetikleyici dosya durumu (ADR 0061) ------------------------------------------
 
+    def finished_counts_between(
+        self, start: datetime, end: datetime, kind: str
+    ) -> dict[str, int]:
+        """`kind` türünde, `[start, end)` içinde biten oluşumların durum -> sayı dökümü."""
+        _require_aware(start, "start")
+        _require_aware(end, "end")
+        try:
+            with self._connect() as db:
+                rows = db.execute(
+                    """
+                    SELECT state, COUNT(*) FROM occurrences
+                    WHERE kind = ? AND finished_at >= ? AND finished_at < ? GROUP BY state
+                    """,
+                    (kind, _to_utc_iso(start), _to_utc_iso(end)),
+                ).fetchall()
+        except sqlite3.Error as error:
+            raise ProactiveStoreError(f"Depo okunamadı: {type(error).__name__}") from None
+        return {state: count for state, count in rows}
+
     def trigger_files(self, trigger: str) -> dict[str, tuple[int, bool]] | None:
         """Dosya -> (boyut, bildirildi mi). İlk tarama henüz kaydedilmediyse None."""
         try:

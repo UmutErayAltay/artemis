@@ -110,6 +110,8 @@ def create_runtime(
         tools = tools.without_prefix("research_")  # ADR 0063
     if not loaded.file_search.enabled:
         tools = tools.without_prefix("file_search")  # ADR 0065
+    if not loaded.daily_summary.enabled:
+        tools = tools.without_prefix("daily_summary_")  # ADR 0066
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
     # Runtime kurulamazsa sahibi dışarıya dönmez; callback kilidi kapatır.

@@ -1542,3 +1542,42 @@ def test_trigger_notice_routine_button_uses_the_normal_tool_path(
         assert [(name, args.name) for name, args in calls] == [("routine_run", "işe başla")]
     finally:
         _close_cleanly(app, window)
+
+
+def test_summary_notice_open_and_vault_button_follow_vault_setting(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        calls: list[tuple[str, Any]] = []
+        window.bridge.submit_tool = lambda name, arguments, **k: calls.append((name, arguments))  # type: ignore[method-assign,assignment]
+        event = bridge_module.Proactive("Günün özeti hazır", "özet", "", "", "2026-10-15")
+        # Vault kapalı (config yok/okunamaz): yalnız "Aç".
+        window._handle_event(event)
+        assert window.routine_run_button.text() == "Aç"
+        assert window.summary_vault_button.isHidden()
+        # Vault açık: "Vault'a ekle" görünür ve onaylı vault_append yolunu (submit_tool) kullanır.
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        state = tmp_path / "state"
+        (state / "gunluk").mkdir(parents=True)
+        (state / "gunluk" / "2026-10-15.md").write_text("# Gün özeti\n- x\n", encoding="utf-8")
+        config = tmp_path / "config.yaml"
+        config.write_text(
+            f"state_dir: {state.as_posix()}\nmemory:\n  vault_path: {vault.as_posix()}\n",
+            encoding="utf-8",
+        )
+        window._config_path = config
+        window._handle_event(event)
+        assert not window.summary_vault_button.isHidden()
+        window.summary_vault_button.click()
+        assert [(n, a.path, a.text) for n, a in calls] == [
+            ("vault_append", "Artemis-Gunluk.md", "# Gün özeti\n- x")
+        ]
+        assert not list(vault.iterdir())  # düğme doğrudan dosya yazmaz
+        # Geçersiz gün: hiçbir şey açılmaz/eklenmez.
+        window._handle_event(bridge_module.Proactive("t", "b", "", "", "../x"))
+        window.summary_vault_button.click()
+        assert len(calls) == 1
+    finally:
+        _close_cleanly(app, window)

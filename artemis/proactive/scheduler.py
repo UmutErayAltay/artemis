@@ -27,6 +27,7 @@ from artemis.brain.conversation import ConversationContext
 from artemis.channels.runner import CommandRunner
 from artemis.channels.runtime import Runtime
 from artemis.config.settings import BriefingConfig, TriggerConfig
+from artemis.proactive.daily_summary import build_summary, summary_path, write_summary
 from artemis.proactive.delivery import Deliverer, DeliveryOutcome
 from artemis.proactive.routines import RoutinesError, RoutineStore
 from artemis.proactive.schedule import (
@@ -47,6 +48,8 @@ from artemis.tools.base import ToolContext
 # Talep eden süreç bu süreden uzun sessiz kalırsa öldüğü varsayılır. Brifing turu en çok
 # `max_seconds` sürer; teslim için pay bırakılır.
 STALE_MARGIN = timedelta(minutes=5)
+# Özet saatinden bu kadar sonra üretilirse "gecikmeli" diye işaretlenir (uygulama kapalıydı).
+SUMMARY_LATE_AFTER = timedelta(minutes=5)
 MISSED_LIST_LIMIT = 20
 BRIEFING_PREFIX = (
     "[Gözetimsiz proaktif tur: kullanıcı şu an ekranda olmayabilir ve onay veremez. "
@@ -179,6 +182,13 @@ class ProactiveScheduler:
             self._finish(event_id, scheduled, outcome, "completed")
             left -= int(outcome.delivered)
             handled += 1
+        if self.runtime.settings.daily_summary.enabled:
+            if left <= 0:
+                capped = True
+            else:
+                delivered = await self._daily_summary(now)
+                left -= delivered
+                handled += delivered
         triggers = self.runtime.settings.triggers
         for trigger in triggers.items if triggers.enabled else ():
             try:
@@ -210,6 +220,67 @@ class ProactiveScheduler:
                     "proactive_capped", max_events_per_day=self.config.max_events_per_day
                 )
         return handled
+
+    async def _daily_summary(self, now: datetime) -> int:
+        """Gün sonu özeti (ADR 0066): LLM'siz, yerel dosya + "hazır" bildirimi. Boş gün yazmaz.
+
+        Özet deterministik olduğundan kapalıyken kaçan gün, süre payı içinde sonraki açılışta
+        yine üretilir ("gecikmeli" etiketiyle). Hiçbir hata taramayı düşürmez.
+        """
+        settings = self.runtime.settings
+        grace = timedelta(hours=self.config.briefing_grace_hours)
+        scheduled = briefing_occurrence(
+            (0, 1, 2, 3, 4, 5, 6),
+            time.fromisoformat(settings.daily_summary.at),
+            now,
+            self.tz,
+            grace,
+        )
+        if scheduled is None:
+            return 0
+        event_id = "daily_summary"
+        if not self.store.claim(event_id, scheduled, "daily_summary", self.owner, now):
+            return 0
+        day = scheduled.astimezone(self.tz).date()
+        start, end = local_day_bounds(scheduled, self.tz)
+        try:
+            counts = self.store.finished_counts_between(start, end, "reminder")
+            text = await asyncio.to_thread(
+                build_summary,
+                settings.audit_path,
+                day,
+                start,
+                end,
+                reminders=counts,
+                late_at=format_local(now, self.tz) if now - scheduled > SUMMARY_LATE_AFTER else "",
+            )
+            if text is not None:
+                await asyncio.to_thread(
+                    write_summary, summary_path(settings.state_dir, day), text
+                )
+        except (OSError, ValueError, RuntimeError, ArithmeticError) as error:
+            self.runtime.audit.emit("daily_summary_error", error_type=type(error).__name__)
+            self._finish(event_id, scheduled, DeliveryOutcome(False, {}), "completed")
+            return 0
+        if text is None:
+            # Boş gün: dosya da bildirim de yok. "missed" yalnız yeniden talep edilmesin diye
+            # kapanış durumudur; günlük sınıra sayılmaz.
+            self.store.finish(
+                event_id, scheduled, "missed", "Boş gün; özet yazılmadı.", self.clock()
+            )
+            return 0
+        outcome = await self.deliverer.deliver(
+            event_id=event_id,
+            scheduled_for=scheduled,
+            kind="daily_summary",
+            title="Günün özeti hazır",
+            body=f"{day.isoformat()} özeti state_dir/gunluk klasörüne yazıldı.",
+            private=True,
+            summary_day=day.isoformat(),
+            local_only=True,  # kullanıcının etkinliği: Telegram'a hiç gitmez
+        )
+        self._finish(event_id, scheduled, outcome, "completed")
+        return int(outcome.delivered)
 
     async def _poll_trigger(
         self, trigger: TriggerConfig, now: datetime, *, can_fire: bool

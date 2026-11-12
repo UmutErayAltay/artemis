@@ -206,6 +206,7 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
     assert panel.section_names() == [
         "Ses", "Model", "Telegram", "Rutinler", "Takvim ve posta", "Beceriler", "Tetikleyiciler",
         "Araştırma",
+        "Gün özeti",
         "Dosya araması",
         "Uygulamalar",
         "GitHub",
@@ -343,7 +344,10 @@ def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     if isinstance(widget, QLineEdit):
         name = widget.accessibleName()
         # Kısayol alanları birbirinden farklı olmalı (config çakışmayı reddeder).
-        widget.setText("587" if name == "IMAP kapısı" else "Veli2" if "Seçili" in name else "Veli")
+        widget.setText(
+            "587" if name == "IMAP kapısı" else "07:15" if name == "Özet saati"
+            else "Veli2" if "Seçili" in name else "Veli"
+        )
         return
     if isinstance(widget, QComboBox) and widget.isEditable():
         widget.setEditText("Veli")

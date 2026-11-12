@@ -16,11 +16,12 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ValidationError
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QColor,
+    QDesktopServices,
     QFont,
     QFontMetrics,
     QIcon,
@@ -92,7 +93,9 @@ from artemis.channels.desktop.telegram_service import TelegramService, should_ru
 from artemis.channels.desktop.widgets import PetFace
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings, same_hotkey
+from artemis.proactive.daily_summary import VAULT_TEXT_LIMIT, parse_day, summary_path
 from artemis.safety.audit import AuditLog
+from artemis.tools.plugins.memory import AppendArguments
 from artemis.tools.plugins.routines import RoutineNameArguments
 from artemis.tools.toast import ToastOutcome, show_toast
 
@@ -1169,6 +1172,7 @@ class DesktopWindow(QMainWindow):
         # Zamanı gelen rutin için soru satırı (ADR 0058): Çalıştır tıklaması normal, onaylı tur.
         self._routine_name = ""
         self._routine_suggest = ""
+        self._summary_day = ""
         self.routine_bar = QFrame()
         self.routine_bar.setObjectName("composer")
         self.routine_bar.setMaximumWidth(_CHAT_MAX_WIDTH)
@@ -1181,10 +1185,15 @@ class DesktopWindow(QMainWindow):
         self.routine_run_button = QPushButton("Çalıştır")
         self.routine_run_button.setObjectName("primary")
         self.routine_dismiss_button = QPushButton("Kapat")
+        # Yalnız gün özeti bildiriminde (ADR 0066) ve vault açıkken görünür.
+        self.summary_vault_button = QPushButton("Vault'a ekle")
+        self.summary_vault_button.hide()
+        self.summary_vault_button.clicked.connect(self._append_summary_to_vault)
         self.routine_run_button.clicked.connect(self._run_routine_notice)
         self.routine_dismiss_button.clicked.connect(self.routine_bar.hide)
         routine_row.addWidget(self.routine_label, 1)
         routine_row.addWidget(self.routine_dismiss_button)
+        routine_row.addWidget(self.summary_vault_button)
         routine_row.addWidget(self.routine_run_button)
         self.routine_bar.hide()
         left.addWidget(self.routine_bar)
@@ -1809,17 +1818,61 @@ class DesktopWindow(QMainWindow):
         self.overlay.set_busy(True)
         return True
 
-    def _show_routine_notice(self, name: str, text: str, suggest: str = "") -> None:
-        """Tek düğme: rutin ise "Çalıştır", tetikleyici önerisi ise "Yaz" (ADR 0061)."""
+    def _show_routine_notice(
+        self, name: str, text: str, suggest: str = "", summary_day: str = ""
+    ) -> None:
+        """Ana düğme: rutin "Çalıştır", tetikleyici önerisi "Yaz" (ADR 0061), gün özeti "Aç";
+        özet için vault açıksa ikinci düğme "Vault'a ekle" (ADR 0066)."""
         self._routine_name = name
         self._routine_suggest = suggest
-        self.routine_run_button.setText("Yaz" if suggest else "Çalıştır")
+        self._summary_day = summary_day
+        self.routine_run_button.setText(
+            "Aç" if summary_day else "Yaz" if suggest else "Çalıştır"
+        )
+        self.summary_vault_button.setVisible(bool(summary_day) and self._vault_note() is not None)
         self.routine_label.setText(text)
         self.routine_bar.show()
 
+    def _vault_note(self) -> str | None:
+        """Vault kapalıysa ya da config okunamazsa None, değilse eklenecek not adı."""
+        try:
+            settings = load_settings(self._config_path)
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
+            return None
+        if settings.memory.vault_path is None:
+            return None
+        return settings.daily_summary.vault_note
+
+    def _summary_file(self) -> Path | None:
+        day = parse_day(self._summary_day)
+        if day is None:
+            return None
+        try:
+            return summary_path(load_settings(self._config_path).state_dir, day)
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
+            return None
+
+    def _append_summary_to_vault(self) -> None:
+        """Normal, onaylı `vault_append` turu: onay penceresi eklenecek metni gösterir."""
+        path, note = self._summary_file(), self._vault_note()
+        self.routine_bar.hide()
+        if path is None or note is None:
+            return
+        try:
+            text = path.read_text(encoding="utf-8")[:VAULT_TEXT_LIMIT].strip()
+        except (OSError, UnicodeError):
+            self._set_status("Özet dosyası okunamadı.", "running")
+            return
+        if text:
+            self._submit_routine_tool("vault_append", AppendArguments(path=note, text=text))
+
     def _run_routine_notice(self) -> None:
         self.routine_bar.hide()
-        if self._routine_suggest:
+        if self._summary_day:
+            path = self._summary_file()
+            if path is not None and path.is_file():
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        elif self._routine_suggest:
             # Gönderilmez: metin yalnız sohbet kutusuna yazılır, kullanıcı okuyup kendisi yollar.
             self.prompt.setPlainText(self._routine_suggest)
             self.prompt.setFocus()
@@ -2253,8 +2306,10 @@ class DesktopWindow(QMainWindow):
             # Kendiliğinden mesaj ayrı konuşmacıyla görünür; modelin geçmişine eklenmez.
             self._append_chat("Artemis (kendiliğinden)", f"{event.title}\n{event.body}")
             self.pet.answer(event.body)
-            if event.routine or event.suggest:
-                self._show_routine_notice(event.routine, event.body, event.suggest)
+            if event.routine or event.suggest or event.summary_day:
+                self._show_routine_notice(
+                    event.routine, event.body, event.suggest, event.summary_day
+                )
             return
         if isinstance(event, ActivityGap):
             self._ops.dropped += event.dropped_count

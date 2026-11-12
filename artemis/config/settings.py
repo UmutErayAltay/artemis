@@ -783,6 +783,19 @@ class ResearchConfig(BaseModel):
     max_seconds: float = Field(default=600.0, ge=1, le=3600)
 
 
+class DailySummaryConfig(BaseModel):
+    """Gün sonu özeti (ADR 0066): audit'ten LLM'siz, yerel Markdown. Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    # Yerel saat (proactive.timezone), "SS:DD".
+    at: str = Field(default="22:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    # "Vault'a ekle" düğmesinin ekleyeceği not (vault köküne göreli); yalnız memory.vault_path
+    # tanımlıysa düğme görünür ve ekleme her zaman onaylıdır.
+    vault_note: str = Field(default="Artemis-Gunluk.md", min_length=1, max_length=200)
+
+
 class FileSearchConfig(BaseModel):
     """Yerel dosya araması (ADR 0065). Varsayılan kapalı; kökleri yalnız kullanıcı yazar."""
 
@@ -853,6 +866,7 @@ class Settings(BaseModel):
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
     file_search: FileSearchConfig = Field(default_factory=FileSearchConfig)
+    daily_summary: DailySummaryConfig = Field(default_factory=DailySummaryConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

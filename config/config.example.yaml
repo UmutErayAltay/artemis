@@ -257,6 +257,18 @@ voice:
 #   enabled: true
 #   folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler
 
+# Gün sonu özeti (ADR 0066). KAPALI gelir; proactive.enabled gerekir. `at` saatinde (yerel,
+# proactive.timezone) günün denetim kayıtlarından LLM'siz kısa bir Markdown yazılır:
+# state_dir/gunluk/YYYY-MM-DD.md (tur sayıları, araçlar ve başarısızlar, dosya işlemleri, biten işler,
+# hatırlatmalar, reddedilen onaylar, günün model harcaması). Konuşma metni ve araç sonuçları girmez.
+# Boş gün dosya yazmaz. Uygulama kapalıyken kaçan gün, briefing_grace_hours içinde açılışta "gecikmeli"
+# diye üretilir. Bildirimde "Aç" ve (memory.vault_path varsa) "Vault'a ekle" düğmesi çıkar; ekleme
+# normal vault_append onayıyla vault_note'a yapılır, kendiliğinden hiçbir şey yazılmaz. Özet Telegram'a gitmez.
+# daily_summary:
+#   enabled: true
+#   at: "22:30"
+#   vault_note: Artemis-Gunluk.md
+
 # Arka plan araştırma işi (ADR 0063). KAPALI gelir. "Şunu araştır" isteği arka planda web
 # aramasıyla çalışır ve state_dir/arastirma/<iş-kimliği>.md raporunu yazar. Başlatma HER ZAMAN
 # onay sorar; onay gösterilen konu için en fazla max_searches web araması içindir. İş kendi

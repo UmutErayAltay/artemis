@@ -21,9 +21,9 @@ from artemis.tools.toast import ToastOutcome, show_toast
 
 # Panele (Qt kuyruğuna) başlık ve gövde ekler; eklenemezse False döner.
 PanelSink = Callable[[str, str], bool]
-# Aynısı, ek olarak tek düğme için rutin adı (ADR 0058) ya da sohbet kutusuna yazılacak istem
-# (ADR 0061); ikisinden en çok biri doludur.
-RoutinePanelSink = Callable[[str, str, str, str], bool]
+# Aynısı, ek olarak düğme için rutin adı (ADR 0058), sohbet kutusuna yazılacak istem (ADR 0061)
+# ya da gün özeti tarihi (ADR 0066); üçünden en çok biri doludur.
+RoutinePanelSink = Callable[[str, str, str, str, str], bool]
 ToastFunction = Callable[[str, str], ToastOutcome]
 
 PRIVATE_WITHHELD = (
@@ -68,12 +68,13 @@ class Deliverer:
         private: bool,
         routine: str = "",
         suggest: str = "",
+        summary_day: str = "",
         local_only: bool = False,
     ) -> DeliveryOutcome:
         """`local_only`: dosya adı gibi kişisel metin; Telegram'a hiç gitmez (ADR 0061)."""
         targets: dict[str, str] = {}
-        if (routine or suggest) and self.routine_panel is not None:
-            sent = self.routine_panel(title, body, routine, suggest)
+        if (routine or suggest or summary_day) and self.routine_panel is not None:
+            sent = self.routine_panel(title, body, routine, suggest, summary_day)
             targets["panel"] = "ok" if sent else "error"
         elif self.panel is not None:
             targets["panel"] = "ok" if self.panel(title, body) else "error"

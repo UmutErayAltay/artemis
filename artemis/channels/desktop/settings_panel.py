@@ -186,6 +186,11 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("skills", "enabled"), "skills_enabled"),
     _checkbox(("triggers", "enabled"), "triggers_enabled"),
     _checkbox(("research", "enabled"), "research_enabled"),
+    _checkbox(("daily_summary", "enabled"), "daily_summary_enabled"),
+    PanelBinding(
+        ("daily_summary", "at"), "daily_summary_at",
+        lambda edit: edit.text().strip() or "22:30", lambda edit, value: edit.setText(str(value)),
+    ),
     _checkbox(("file_search", "enabled"), "file_search_enabled"),
     PanelBinding(
         ("file_search", "roots"), "file_search_roots",
@@ -968,6 +973,24 @@ class SettingsPanel(QWidget):
         ))
         research_page.addStretch(1)
 
+        summary_page = page(
+            "Gün özeti",
+            "Belirlenen saatte günün kısa bir kaydını yazar. Kutu ve saat Uygula ile kaydedilir.",
+        )
+        self.daily_summary_enabled = QCheckBox("Gün sonu özeti")
+        summary_page.addWidget(self.daily_summary_enabled)
+        summary_page.addWidget(_check_hint(
+            "Konuşma metni okunmaz; yalnız bugünün araç, dosya, iş ve hatırlatma sayıları "
+            "state_dir/gunluk klasörüne yazılır. Telegram'a gitmez. Vault'a ekleme yalnız "
+            "bildirimdeki düğmeyle ve onayla olur. proactive.enabled gerekir."
+        ))
+        self.daily_summary_at = QLineEdit()
+        self.daily_summary_at.setMaxLength(5)
+        self.daily_summary_at.setAccessibleName("Özet saati")
+        self.daily_summary_at.setPlaceholderText("22:30")
+        field(summary_page, "Özet saati (SS:DD)", self.daily_summary_at)
+        summary_page.addStretch(1)
+
         files_page = page(
             "Dosya araması",
             "Seçtiğin klasörlerde dosya adı ve içeriğiyle arama. Kutu ve liste Uygula ile "
@@ -1183,6 +1206,7 @@ class SettingsPanel(QWidget):
             self.wake_name, self.dictation_hotkey, self.selection_hotkey,
             self.selection_translate_to, self.github_owner, self.repos_dir,
             self.mail_host, self.mail_port, self.mail_username, self.mail_folder,
+            self.daily_summary_at,
         ):
             edit.textEdited.connect(self._mark_dirty)
         self.cloud_model.lineEdit().textEdited.connect(self._mark_dirty)  # type: ignore[union-attr]

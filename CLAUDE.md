@@ -197,6 +197,13 @@ fotoğraf OCR metni `content_kind="screen"` dış veridir (`attachment`, tur lek
 `allow_symlinks=False`, asla üzerine yazma) ve belge başlığı komut sayılmaz. Boyut indirmeden önce
 ve okurken sınanır; geçici dosya her yolda silinir. Bu kuralları gevşetmeyin.
 
+Gün sonu özeti (ADR 0066) varsayılan kapalıdır (`daily_summary.enabled`). Özet LLM'sizdir, denetimden
+yalnız sayılabilir alanlarla (konuşma metni, yanıt ve araç sonuç gövdesi asla) üretilir, kullanıcının
+etkinliği olduğu için `private`+`local_only`'dir (Telegram'a gitmez). Vault'a yalnız bildirimdeki
+düğmeyle ve normal onaylı `vault_append` ile eklenir; kendiliğinden vault yazımı eklemeyin. Denetim
+okuması sınırlı ve bozuk satıra dayanıklı kalmalı, zamanlayıcıdan hata çıkmamalıdır. Bu kuralları
+gevşetmeyin.
+
 Açılışta başlama (Faz 7a, ADR 0030) yalnız `artemis autostart` komutu ve tepsi menüsüyle
 değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt
 yalnız HKCU `Run` değeridir, yazılınca geri okunur; komut `--ses` taşımaz. Tek örnek yerel

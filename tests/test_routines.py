@@ -415,7 +415,9 @@ class Panel:
     def __init__(self) -> None:
         self.routine_items: list[tuple[str, str, str]] = []
 
-    def __call__(self, title: str, body: str, routine: str, suggest: str = "") -> bool:
+    def __call__(
+        self, title: str, body: str, routine: str, suggest: str = "", day: str = ""
+    ) -> bool:
         self.routine_items.append((title, body, routine))
         return True
 

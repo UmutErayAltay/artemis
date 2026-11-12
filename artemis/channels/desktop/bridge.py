@@ -161,6 +161,8 @@ class Proactive:
     routine: str = ""
     # Doluysa düğme bu metni sohbet kutusuna yazar, göndermez (ADR 0061).
     suggest: str = ""
+    # Doluysa düğmeler "Aç" ve (vault açıksa) "Vault'a ekle" olur (ADR 0066); değer `YYYY-MM-DD`.
+    summary_day: str = ""
 
 
 BridgeEvent = (
@@ -762,10 +764,12 @@ class DesktopBridge:
         self._events.put(Proactive(title, body))
         return True
 
-    def _proactive_routine_panel(self, title: str, body: str, routine: str, suggest: str) -> bool:
+    def _proactive_routine_panel(
+        self, title: str, body: str, routine: str, suggest: str, summary_day: str
+    ) -> bool:
         if self._shutdown:
             return False
-        self._events.put(Proactive(title, body, routine, suggest))
+        self._events.put(Proactive(title, body, routine, suggest, summary_day))
         return True
 
     def _stop_proactive(self) -> None:
