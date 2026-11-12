@@ -1,5 +1,6 @@
 """Sırların YAML veya repr içine girmemesi için ayarlarda sır alanı bulunmaz."""
 
+import os
 import re
 from datetime import time
 from decimal import Decimal
@@ -782,6 +783,26 @@ class ResearchConfig(BaseModel):
     max_seconds: float = Field(default=600.0, ge=1, le=3600)
 
 
+class FileSearchConfig(BaseModel):
+    """Yerel dosya araması (ADR 0065). Varsayılan kapalı; kökleri yalnız kullanıcı yazar."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    roots: list[str] = Field(default_factory=list)  # mutlak klasörler; hiçbir araç değiştirmez
+    max_file_mb: int = Field(default=5, ge=1, le=100)
+    exclude_dirs: list[str] = Field(
+        default_factory=lambda: [".git", "node_modules", ".venv", "__pycache__", "AppData"]
+    )
+
+    @field_validator("roots")
+    @classmethod
+    def _absolute_roots(cls, values: list[str]) -> list[str]:
+        if any(not os.path.isabs(value) for value in values):
+            raise ValueError("file_search.roots mutlak klasör yolları olmalı")
+        return values
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -831,6 +852,7 @@ class Settings(BaseModel):
     mail: MailConfig = Field(default_factory=MailConfig)
     skills: SkillsConfig = Field(default_factory=SkillsConfig)
     research: ResearchConfig = Field(default_factory=ResearchConfig)
+    file_search: FileSearchConfig = Field(default_factory=FileSearchConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"

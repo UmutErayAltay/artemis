@@ -268,6 +268,20 @@ voice:
 #   max_searches: 12
 #   max_seconds: 600
 
+# Yerel dosya araması (ADR 0065). KAPALI gelir. Seçtiğin klasörlerde dosya adı ve içeriğiyle tam
+# metin arama ("kira sözleşmesi geçen belge"). İndeks state_dir/dosya_arama.sqlite3'te durur
+# (kişisel metin içerir; Ayarlar'dan "Dizini sil"). Açılışta ve "Yeniden dizinle" ile arka planda
+# dizinlenir. Metin/kod/docx içeriği, PDF'in yalnız adı aranır. Bağlantılar, boyut sınırını aşan
+# ve gizli görünen dosyalar (.env, *.pem, *.key, adında secret/token/password/credentials)
+# dizinlenmez. roots mutlak klasör yollarıdır, yalnız sen yazarsın; state_dir ve beceri klasörü
+# kök olamaz. Sonuç dosya içeriği sayılır: allow_cloud_file_content kapalıyken buluta gitmez.
+# file_search:
+#   enabled: true
+#   roots:
+#     - C:/Users/<ad>/Documents/Belgeler
+#   max_file_mb: 5
+#   exclude_dirs: [.git, node_modules, .venv, __pycache__, AppData]
+
 # MCP sunucuları (ADR 0028). KAPALI gelir: servers boşken hiçbir süreç başlatılmaz.
 # Yalnız stdio (yerel süreç) desteklenir; her çağrıda sunucu yeniden başlatılır ve iş
 # bitince kapatılır. Sunucu üçüncü taraf koddur: kendi yaptıkları (ağ, dosya) SafetyGate'in

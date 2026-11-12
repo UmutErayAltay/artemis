@@ -184,6 +184,12 @@ hafıza, companion, beceri ve kimlik bu döngüye ASLA eklenmez, araç listesi g
 değiştirilmez. `research_start` HER ZAMAN onaylıdır (onay = `max_searches` kadar arama ön onayı),
 rapor dosya adı yalnız iş kimliğinden gelir, `research_result` dış veridir. Bu kuralları gevşetmeyin.
 
+Yerel dosya araması (ADR 0065) varsayılan kapalıdır (`file_search.enabled`). Kökleri yalnız kullanıcı
+yazar (araç EKLEMEYİN); `state_dir` ve beceri klasörü kök olamaz/dizinlenmez, bağlantılar izlenmez,
+gizli görünen dosyalar (`.env*`, anahtar, `secret`/`token`/`password`/`credentials` adları) asla
+dizinlenmez, sonuç `external=True` + `content_kind="file"`'dır ve dosyanın tamamını döndüren araç
+eklenmez (yalnız en çok 200 karakterlik alıntı). Bu kuralları gevşetmeyin.
+
 Telegram ses/fotoğraf/dosya girdisi (ADR 0064) üç ayrı bayrakla varsayılan kapalıdır ve her
 mesaj türünde özel/iletilmemiş/taze koşulu aynen sürer. Ses onay değildir (onay yalnız düğme);
 fotoğraf OCR metni `content_kind="screen"` dış veridir (`attachment`, tur lekelenir, gizlilik

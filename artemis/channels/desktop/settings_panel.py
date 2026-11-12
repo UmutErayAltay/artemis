@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
 from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
+from artemis.channels.desktop.file_search_section import FileSearchSection
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.projects_panel import CurrentPageStack
@@ -185,6 +186,12 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("skills", "enabled"), "skills_enabled"),
     _checkbox(("triggers", "enabled"), "triggers_enabled"),
     _checkbox(("research", "enabled"), "research_enabled"),
+    _checkbox(("file_search", "enabled"), "file_search_enabled"),
+    PanelBinding(
+        ("file_search", "roots"), "file_search_roots",
+        lambda box: [box.item(row).text() for row in range(box.count())],
+        lambda box, value: (box.clear(), box.addItems([str(v) for v in value]))[0],
+    ),
     _checkbox(("telegram", "accept_voice"), "telegram_voice"),
     _checkbox(("telegram", "accept_photo"), "telegram_photo"),
     _checkbox(("telegram", "accept_files"), "telegram_files"),
@@ -961,6 +968,23 @@ class SettingsPanel(QWidget):
         ))
         research_page.addStretch(1)
 
+        files_page = page(
+            "Dosya araması",
+            "Seçtiğin klasörlerde dosya adı ve içeriğiyle arama. Kutu ve liste Uygula ile "
+            "kaydedilir.",
+        )
+        self.file_search_enabled = QCheckBox("Dosya araması")
+        files_page.addWidget(self.file_search_enabled)
+        files_page.addWidget(_check_hint(
+            "Metin, kod ve docx dosyalarının içeriği; PDF'lerin yalnız adı aranır. Sonuçta yol "
+            "ve kısa alıntı gelir, dosyanın tamamı gelmez. Dosya içeriği sayıldığı için "
+            "allow_cloud_file_content kapalıyken buluta gitmez."
+        ))
+        self.file_search = FileSearchSection(config_path, demo=demo)
+        self.file_search_roots = self.file_search.roots_list
+        files_page.addWidget(self.file_search)
+        files_page.addStretch(1)
+
         apps = page(
             "Uygulamalar",
             "Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı. "
@@ -1169,6 +1193,9 @@ class SettingsPanel(QWidget):
                 box.currentIndexChanged.connect(self._mark_dirty)
         for combo in (self.device_combo, self.stt_combo):
             combo.currentIndexChanged.connect(self._mark_dirty)
+        roots_model = self.file_search_roots.model()
+        roots_model.rowsInserted.connect(self._mark_dirty)
+        roots_model.rowsRemoved.connect(self._mark_dirty)
 
     def section_names(self) -> list[str]:
         return [self.sections.item(row).text() for row in range(self.sections.count())]
@@ -1493,6 +1520,7 @@ class SettingsPanel(QWidget):
             self.routines.refresh()
             self.skills.refresh()
             self.triggers.refresh()
+            self.file_search.refresh()
             # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
             self.precision_combo.setEnabled(
                 settings.voice.stt_device != "cpu" and not self._demo

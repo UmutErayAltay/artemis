@@ -206,6 +206,7 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
     assert panel.section_names() == [
         "Ses", "Model", "Telegram", "Rutinler", "Takvim ve posta", "Beceriler", "Tetikleyiciler",
         "Araştırma",
+        "Dosya araması",
         "Uygulamalar",
         "GitHub",
         "Görünüm",
@@ -334,8 +335,11 @@ def _panel(path: Path):  # type: ignore[no-untyped-def]
 
 def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     """Widget'ı varsayılandan farklı, seçilebilir bir değere getirir."""
-    from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit
+    from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit, QListWidget
 
+    if isinstance(widget, QListWidget):  # file_search.roots: mutlak yol yeter, varlığı aranmaz
+        widget.addItem(str(Path(widget.accessibleName() or "x").resolve() / "belgeler"))
+        return
     if isinstance(widget, QLineEdit):
         name = widget.accessibleName()
         # Kısayol alanları birbirinden farklı olmalı (config çakışmayı reddeder).
@@ -706,4 +710,16 @@ def test_cloud_models_fetch_disabled_for_xai_and_ignored_without_server(
     panel.cloud_server.setCurrentIndex(0)
     panel._fetch_cloud_models()
     assert panel._cloud_fetch is None and calls == []
+    panel.deleteLater()
+
+
+def test_file_search_section_uses_the_shared_index(tmp_path: Path) -> None:
+    """Panel ve runtime aynı FileIndex'i kullanır: "Dizini sil" çalışanı durdurabilir."""
+    from artemis.safety.audit import AuditLog
+    from artemis.tools.file_index import FileIndex
+
+    path = config(tmp_path)
+    panel = _panel(path)
+    settings = load_settings(path)
+    assert panel.file_search._index is FileIndex.shared(settings, AuditLog(settings.audit_path))
     panel.deleteLater()

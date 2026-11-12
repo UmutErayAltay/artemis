@@ -134,3 +134,22 @@ Her bölüm gerçek Windows'ta, en sonda elle işaretlenir; sahte testler yerine
 - [ ] Dosyaya başlık olarak bir komut yaz: komut çalışmıyor, yalnız kaydedildi yanıtı geliyor.
 - [ ] Başka sohbetten ilettiğin (forward) bir sesli mesajı yolla: "İletilen mesajlar komut olarak çalıştırılmaz", indirme yok.
 - [ ] Denetim dosyasında dosya içeriği, ses metni ve fotoğraf metni yok; yalnız tür/boyut/sonuç var.
+
+## Yerel dosya araması (ADR 0065)
+
+Önkoşul: Gerçek Windows'ta elle. Ayarlar > Dosya araması'nda "Dosya araması" kutusunu aç; "Klasör ekle" ile Belgeler klasörünü seç; Uygula; uygulamayı yeniden başlat. İçinde bilinen bir ifade geçen bir .txt/.docx hazır olsun, ayrıca Belgeler altında içinde herhangi bir metin olan bir `.env` dosyası.
+
+- [ ] Ayarlar > Dosya araması: durum satırında "dizinleniyor", bitince dosya sayısı ve son dizinleme saati görünüyor; Artemis o sırada sohbete yanıt vermeye devam ediyor.
+- [ ] "Belgelerimde 'bilinen ifade' geçen dosya hangisi" de: yol, tarih ve en çok 200 karakterlik alıntı geliyor; dosyanın tamamı gelmiyor.
+- [ ] Aynı ifadeyi BÜYÜK harflerle ve ş/ğ/ı/ö yerine s/g/i/o yazarak sor: yine buluyor.
+- [ ] Bir dosya adından ara ("fatura" gibi): ad eşleşmesi geliyor.
+- [ ] `.env` dosyasındaki bir sözcüğü ara: bulunamadı.
+- [ ] Yeni bir dosya ekle, "Yeniden dizinle"ye bas: yeni dosya bulunuyor; bir dosyayı silip yeniden dizinle: artık bulunmuyor.
+- [ ] Sonuç geldikten sonra Artemis'ten yan etkili bir iş iste (örneğin uygulama kapat): dış içerik uyarısıyla onay soruyor.
+- [ ] `allow_cloud_file_content` kapalıyken bulut modelle sorulunca sonucun yerel modele gittiğini ya da gizli sayıldığını denetim dosyasında doğrula.
+- [ ] "Dizini sil": durum "0 dosya", `state_dir/dosya_arama.sqlite3` yok; aramada "bulunamadı".
+- [ ] Listeden klasörü çıkarıp Uygula, yeniden dizinle: o klasördeki dosyalar bulunmuyor.
+- [ ] Kutuyu kapatıp Uygula + yeniden başlat: "dosya ara" isteğinde araç yok.
+- [ ] Belgeler altında `.ssh` adlı bir klasöre ve `Cookies` adlı bir dosyaya bilinen bir ifade yaz: yeniden dizinleyince bulunmuyor.
+- [ ] Dizinleme sürerken "Dizini sil": arayüz donmuyor, indeks siliniyor ve kendiliğinden geri gelmiyor; "Yeniden dizinle" ile yeniden oluşuyor.
+- [ ] Dizinleme sürerken "Yeniden dizinle"ye tekrar bas: ikinci koşu başlamıyor.

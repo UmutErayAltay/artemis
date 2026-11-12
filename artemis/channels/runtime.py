@@ -22,6 +22,7 @@ from artemis.safety.gate import SafetyGate
 from artemis.skills import ensure_example
 from artemis.tools.base import ToolContext
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
+from artemis.tools.file_index import FileIndex
 from artemis.tools.registry import ToolRegistry, discover_tools
 from artemis.tools.research_jobs import ResearchJobs
 
@@ -52,6 +53,9 @@ class Runtime:
         research = self.context.services.get("research_jobs")
         if isinstance(research, ResearchJobs):
             research.shutdown()
+        index = self.context.services.get("file_index")
+        if isinstance(index, FileIndex):
+            index.shutdown()
 
 
 def create_runtime(
@@ -104,6 +108,8 @@ def create_runtime(
         tools = tools.without_prefix("skill_")  # ADR 0060
     if not loaded.research.enabled:
         tools = tools.without_prefix("research_")  # ADR 0063
+    if not loaded.file_search.enabled:
+        tools = tools.without_prefix("file_search")  # ADR 0065
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
     # Runtime kurulamazsa sahibi dışarıya dönmez; callback kilidi kapatır.
@@ -137,6 +143,13 @@ def create_runtime(
                 )
             except (OSError, sqlite3.Error) as error:
                 log.emit("research_unavailable", error_type=type(error).__name__)
+        if loaded.file_search.enabled:
+            # Her kanal sorgulayabilir; dizinlemeyi yalnız sahip runtime başlatır (ikili koşu yok).
+            file_index = FileIndex.shared(loaded, log)
+            cleanup.callback(file_index.shutdown)
+            context.services["file_index"] = file_index
+            if with_code_agent and not file_index.start() and not file_index.available:
+                log.emit("file_search_unavailable", reason="fts5")
         budget = loaded.context_token_budget
         primary = loaded.models.get(loaded.primary_model)
         if primary is not None:
