@@ -2,6 +2,37 @@
 
 Her bölüm gerçek Windows'ta, en sonda elle işaretlenir; sahte testler yerine geçmez.
 
+## Başlamadan önce
+
+On özelliğin hepsi kapalı gelir. Denemek için `config/config.yaml`'a aşağıdakileri ekleyin
+(anahtarların açıklaması `config/config.example.yaml`'da), sonra Artemis'i yeniden başlatın.
+Çoğu Ayarlar panelinden de açılır.
+
+```yaml
+proactive: {enabled: true, timezone: Europe/Istanbul}   # rutin saati, tetikleyici, gün özeti için
+dictation: {enabled: true}
+routines: {enabled: true}
+calendar: {enabled: true}
+mail: {enabled: true, host: imap.gmail.com, username: <adres>}
+skills:
+  enabled: true
+  folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler   # state_dir vault içindeyse ŞART
+triggers:
+  enabled: true
+  items:
+    - {name: indirilenler, folder: C:/Users/<ad>/Downloads, suggest: "{path} dosyasını özetle"}
+selection_actions: {enabled: true}
+research: {enabled: true}
+telegram: {accept_voice: true, accept_photo: true, accept_files: true}   # mevcut telegram bölümüne
+file_search: {enabled: true, roots: [C:/Users/<ad>/Documents/<bir klasör>]}
+daily_summary: {enabled: true, at: "22:30"}
+```
+
+Sırlar YAML'a yazılmaz: takvim ICS adresi ve posta parolası Ayarlar > Takvim ve posta'dan girilir.
+
+Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sahte bench
+`dangerous_errors: 0`. Bu listedeki hiçbir madde henüz gerçek Windows'ta işaretlenmedi.
+
 ## Dikte kipi (ADR 0057)
 
 Önkoşul: config'te `dictation: {enabled: true}`, ses modeli kurulu, ses kapalı. Gerçek Windows'ta elle.
