@@ -677,7 +677,7 @@ def test_provider_section_has_no_reference_cycle(app: QApplication, tmp_path: Pa
             gc.enable()
 
 
-def test_parallel_checkbox_flag_and_local_disable(
+def test_parallel_checkbox_flag_also_for_local(
     app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from PySide6.QtCore import QSettings
@@ -708,10 +708,11 @@ def test_parallel_checkbox_flag_and_local_disable(
     assert started[-1][started[-1].index("--paralel") + 1] == "4"
     section._model_test = None
     section.select_model("yerel")
-    assert not section.parallel_test.isEnabled() and not section.parallel_test.isChecked()
-    assert section.parallel_test.toolTip() == "Yerel modelde sırayla çalışır"
+    # Yerel (ör. proxy) modelde de seçilebilir; ipucu yavaşlayabileceğini söyler.
+    assert section.parallel_test.isEnabled() and section.parallel_test.isChecked()
+    assert "bu bilgisayarda" in section.parallel_test.toolTip()
     section._test_model()
-    assert "--paralel" not in started[-1]
+    assert started[-1][started[-1].index("--paralel") + 1] == "4"
 
 
 class _FakeProcess:
@@ -816,6 +817,7 @@ def test_detail_stacks_when_narrow_and_sits_beside_when_wide(
     section.resize(700, 900)
     app.processEvents()
     assert section.model_split.direction() == QBoxLayout.Direction.TopToBottom
+    section.layout().activate()  # yük altında ertelenen yerleşimi beklemeden uygula
     assert section.detail.mapTo(section, section.detail.rect().topLeft()).y() > (
         section.model_list.mapTo(section, section.model_list.rect().bottomLeft()).y()
     )
@@ -899,22 +901,61 @@ def test_paid_estimate_is_in_confirmation(
     assert "USD" in seen[0] and "yaklaşık" in seen[0]
 
 
-def test_compare_table_newest_first(app: QApplication, tmp_path: Path) -> None:
-    section = ProviderSection(_three_models(tmp_path))
+def test_model_sort_by_score_connection_and_remembered(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from PySide6.QtCore import QSettings
+
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "qs"))
+    path = _three_models(tmp_path)
     _report(tmp_path, "haiku 5-5", 6, 5, ["ana"])
     _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
-    folder = tmp_path / "state" / "model_testleri"
-    os.utime(folder / "haiku-5-5.json", (1_700_000_000, 1_700_000_000))
-    settings = load_settings(section.config_path)
-    rows = sorted(
-        (
-            ((folder / f"{section_module._slug(a)}.json").stat().st_mtime, a, r)
-            for a, r in section._reports(settings).items()
-        ),
-        reverse=True,
+    section = ProviderSection(path)
+    added = [alias for alias, _ in section.model_rows()]
+    section.model_sort.setCurrentIndex(section.model_sort.findData("score"))
+    scored = [alias for alias, _ in section.model_rows()]
+    assert scored[:2] == ["sonnet 5-5", "haiku 5-5"]  # test edilmemiş en sonda
+    assert set(scored) == set(added)
+    section.model_sort.setCurrentIndex(section.model_sort.findData("name"))
+    names = [alias for alias, _ in section.model_rows()]
+    assert names == sorted(names, key=str.casefold)
+    # Seçim hatırlanır; config'teki sıra değişmez.
+    again = ProviderSection(path)
+    assert again.model_sort.currentData() == "name"
+    assert list(load_settings(path).models) == added
+
+
+def test_endpoint_list_shows_four_rows(app: QApplication, tmp_path: Path) -> None:
+    section = ProviderSection(_three_models(tmp_path))
+    row = section.endpoint_list.sizeHintForRow(0)
+    assert row > 0
+    assert section.endpoint_list.height() >= 4 * row
+
+
+def test_wheel_over_combo_scrolls_page_not_value(app: QApplication) -> None:
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QComboBox, QScrollArea, QVBoxLayout, QWidget
+
+    from artemis.channels.desktop.settings_panel import _install_wheel_guard
+
+    _install_wheel_guard()
+    area = QScrollArea()
+    page = QWidget()
+    page.setMinimumHeight(2000)
+    combo = QComboBox(page)
+    combo.addItems(["a", "b", "c"])
+    QVBoxLayout(page).addWidget(combo)
+    area.setWidget(page)
+    area.resize(300, 200)
+    area.show()
+    app.processEvents()
+    event = QWheelEvent(
+        QPointF(5, 5), QPointF(combo.mapToGlobal(QPoint(5, 5))), QPoint(0, 0), QPoint(0, -120),
+        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
+        False,
     )
-    table = section_module._comparison_table(rows)
-    assert table.horizontalHeaderItem(0).text() == "Model"
-    assert [table.item(r, 0).text() for r in range(2)] == ["sonnet 5-5", "haiku 5-5"]
-    assert table.item(0, 1).text() == "7/7" and table.item(0, 6).text() == "ücretsiz"
-    assert table.item(0, 4).text() == "yok"
+    QApplication.sendEvent(combo, event)
+    assert combo.currentIndex() == 0
+    assert area.verticalScrollBar().value() > 0
+    area.close()

@@ -13,7 +13,19 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
-from PySide6.QtCore import QPoint, QRect, QRectF, QSettings, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import (
+    QEvent,
+    QObject,
+    QPoint,
+    QRect,
+    QRectF,
+    QSettings,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -25,6 +37,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
+    QAbstractScrollArea,
+    QAbstractSpinBox,
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -42,6 +57,7 @@ from PySide6.QtWidgets import (
     QRadioButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QToolButton,
@@ -657,6 +673,33 @@ class _ApplyButton(QPushButton):
         super().setEnabled(self._allowed and self._dirty)
 
 
+class _WheelGuard(QObject):
+    """Kaydırılan sayfadaki açılır liste/sayı kutusu tekerlekle değişmez; tekerlek sayfayı kaydırır.
+
+    Kullanıcı sayfada aşağı inerken imlecin altına gelen seçim sessizce değişiyordu
+    (2026-11-13). Değer yalnız tıklayıp seçerek ya da klavyeyle değişir.
+    """
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        if event.type() != QEvent.Type.Wheel or not isinstance(
+            watched, QComboBox | QAbstractSpinBox | QSlider
+        ):
+            return False
+        parent = watched.parentWidget()
+        while parent is not None and not isinstance(parent, QAbstractScrollArea):
+            parent = parent.parentWidget()
+        if parent is None:
+            return False  # kaydırılan sayfada değil: normal davranış
+        QApplication.sendEvent(parent.viewport(), event)
+        return True
+
+
+def _install_wheel_guard() -> None:
+    app = QApplication.instance()
+    if app is not None and app.findChild(_WheelGuard) is None:
+        app.installEventFilter(_WheelGuard(app))
+
+
 class SettingsPanel(QWidget):
     theme_changed = Signal(str)
     apply_requested = Signal(object)  # mikrofon aygıtı; model seçimi ProviderSection'da
@@ -675,6 +718,7 @@ class SettingsPanel(QWidget):
     ) -> None:
         super().__init__()
         self.setObjectName("settingsPanel")
+        _install_wheel_guard()
         self._state = None if demo else state  # son bölüm yalnız burada hatırlanır
         self._navigating = False
         self._row_groups: list[tuple[str, bool]] = []  # (grup, grubun ilk sayfası mı)

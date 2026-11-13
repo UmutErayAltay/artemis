@@ -14,7 +14,6 @@ import re
 import shutil
 import sys
 from collections.abc import Mapping
-from datetime import datetime
 from decimal import ROUND_UP, Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -36,7 +35,6 @@ from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
     QComboBox,
-    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -47,8 +45,6 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
-    QTableWidget,
-    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -164,6 +160,7 @@ def field(
     parent.addLayout(group)
 
 
+FORM_MAX_WIDTH = 640  # Model ekle / Bağlantılar formu
 WIDE_AT = 900  # bu genişlikten itibaren model ayrıntısı listenin yanında durur
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 PARALLEL_TEST = 4
@@ -193,6 +190,15 @@ def _scenario_label(scenario_id: str) -> str:
             scenario_id = scenario_id[len(prefix):]
     return scenario_id.replace("_", " ")
 
+
+_SORTS = (
+    ("Eklenme sırası", "added"),
+    ("Başarı", "score"),
+    ("Bağlantı", "connection"),
+    ("Rol", "role"),
+    ("Ad", "name"),
+)
+_Row = tuple[str, bool, bool, str, str, bool, bool, str]
 
 _STATE_TEXT = {"bekliyor": "○", "geçti": "✓", "kaldı": "✗"}
 
@@ -337,14 +343,23 @@ class ProviderSection(QWidget):
         self.banner = QLabel()  # "Beyin: ..." satırı veya sağlayıcı sorunu
         self.banner.setWordWrap(True)
         self.banner.setVisible(False)  # _render_banner metin varsa gösterir
-        self.compare_button = QPushButton("Karşılaştır")
-        self.compare_button.setToolTip("Test edilen modellerin son sonuçlarını tabloda gösterir.")
-        self.compare_button.clicked.connect(self._compare_results)
-        self.compare_button.setVisible(False)  # rapor varsa _sync_test_buttons gösterir
+        self._test_settings = QSettings(
+            QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Artemis", "model_test"
+        )
+        # Sıralama yalnız görünüm: config'teki model sırası değişmez.
+        self.model_sort = QComboBox()
+        self.model_sort.setAccessibleName("Modelleri sırala")
+        for label, key in _SORTS:
+            self.model_sort.addItem(label, key)
+        saved = self.model_sort.findData(self._test_settings.value("sort", "added"))
+        self.model_sort.setCurrentIndex(max(saved, 0))
+        self.model_sort.currentIndexChanged.connect(self._sort_changed)
+        self.sort_label = meta_label("Sırala")
         head = QHBoxLayout()
         head.setSpacing(8)
         head.addWidget(self.banner, 1)
-        head.addWidget(self.compare_button, 0, Qt.AlignmentFlag.AlignTop)
+        head.addWidget(self.sort_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        head.addWidget(self.model_sort, 0, Qt.AlignmentFlag.AlignVCenter)
         models.addLayout(head)
         self.model_list = QListWidget()
         self.model_list.setAccessibleName("Eklenen modeller")
@@ -375,9 +390,6 @@ class ProviderSection(QWidget):
         # Test: tek düğme; çalışırken metni ve eylemi "Durdur"a döner.
         self.model_test_button = QPushButton("Test et")
         self.model_test_button.clicked.connect(self._test_or_stop)
-        self._test_settings = QSettings(
-            QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Artemis", "model_test"
-        )
         self.parallel_test = QCheckBox("Paralel çalıştır")
         self.parallel_test.setChecked(self._saved_parallel())
         self.parallel_test.toggled.connect(self._remember_parallel)
@@ -445,6 +457,8 @@ class ProviderSection(QWidget):
         models.addLayout(self.model_split)
         # B: model ekle
         add_box, add = group("Model ekle")
+        # Form tam genişliğe yayılmasın: okunur bir sütun genişliğinde, solda.
+        add_box.setMaximumWidth(FORM_MAX_WIDTH)
         layout.addWidget(add_box)
         self.add_connection = QComboBox()
         self.add_connection.setAccessibleName("Modelin bağlantısı")
@@ -520,10 +534,10 @@ class ProviderSection(QWidget):
             divided=False,
         )
         self.connection_box.setVisible(False)
+        self.connection_box.setMaximumWidth(FORM_MAX_WIDTH)
         self.connection_toggle.toggled.connect(self.connection_box.setVisible)
         layout.addWidget(self.connection_box)
         self.endpoint_list = QListWidget()
-        self.endpoint_list.setMaximumHeight(112)
         self.endpoint_list.setAccessibleName("Tanımlı bağlantılar")
         self.endpoint_list.currentItemChanged.connect(self._select)
         conn.addWidget(self.endpoint_list)
@@ -672,6 +686,8 @@ class ProviderSection(QWidget):
         ]
         self.model_list.setFixedHeight((sum(heights) or 70) + 12)
         self.model_list.setVisible(self.model_list.count() > 0)
+        self.model_sort.setVisible(self.model_list.count() > 1)
+        self.sort_label.setVisible(self.model_list.count() > 1)
         self.model_empty.setVisible(self.model_list.count() == 0)
         self.detail.setVisible(self.model_list.count() > 0)
         self._sync_test_buttons()
@@ -685,6 +701,11 @@ class ProviderSection(QWidget):
             self.endpoint_list.item(self.endpoint_list.count() - 1).setData(
                 Qt.ItemDataRole.UserRole, name
             )
+        # 4 satır görünür, fazlası liste içinde kayar.
+        row = self.endpoint_list.sizeHintForRow(0) if self.endpoint_list.count() else -1
+        if row <= 0:
+            row = self.endpoint_list.fontMetrics().height() + 16
+        self.endpoint_list.setFixedHeight(4 * row + 2 * self.endpoint_list.frameWidth())
         chosen = self.add_connection.currentData()
         self.add_connection.blockSignals(True)
         self.add_connection.clear()
@@ -701,7 +722,7 @@ class ProviderSection(QWidget):
         selected = self.model_list.currentItem()
         chosen = selected.data(Qt.ItemDataRole.UserRole) if selected is not None else None
         self.model_list.clear()
-        for alias, is_brain, legacy, connection, model_id, image, hard, _tested in self._model_data:
+        for alias, is_brain, legacy, connection, model_id, image, hard, _tested in self._sorted():
             roles = [
                 f"<span style='color:{self._colors['accent']}'>{name}</span>"
                 for name, on in (("Beyin", is_brain), ("Zor işler", hard)) if on
@@ -745,6 +766,30 @@ class ProviderSection(QWidget):
             brain = next((i for i, row in enumerate(self._model_data) if row[1]), 0)
             self.model_list.setCurrentRow(brain)
         self._sync_detail()
+
+    def _sorted(self) -> list[_Row]:
+        key = self.model_sort.currentData()
+        rows = self._model_data
+        if key == "score":
+            def score(row: _Row) -> float:
+                report = self._reports_seen.get(row[0])
+                rate = _pass_rate(report) if report else None
+                if report is None or rate is None:
+                    return 2.0  # test edilmemiş en sonda
+                # Tehlikeli hatalı model aynı yüzdedeki güvenli modelin altına iner.
+                return -rate + (1.0 if report.get("dangerous_errors") else 0.0)
+            return sorted(rows, key=score)
+        if key == "connection":
+            return sorted(rows, key=lambda row: (row[3].casefold(), row[0].casefold()))
+        if key == "role":
+            return sorted(rows, key=lambda row: (not row[1], not row[6], row[0] != self._fallback))
+        if key == "name":
+            return sorted(rows, key=lambda row: row[0].casefold())
+        return list(rows)
+
+    def _sort_changed(self, *_args: object) -> None:
+        self._test_settings.setValue("sort", self.model_sort.currentData())
+        self._render_models()
 
     def model_rows(self) -> list[tuple[str, str]]:
         """(takma ad, düz metin satırı); testler ve erişilebilirlik için."""
@@ -1136,13 +1181,11 @@ class ProviderSection(QWidget):
         return bool(self._test_settings.value("parallel", False, type=bool))
 
     def _remember_parallel(self, on: bool) -> None:
-        if self.parallel_test.isEnabled():
-            self._test_settings.setValue("parallel", on)
+        self._test_settings.setValue("parallel", on)
 
     def _parallel_tip(self) -> None:
-        """Yerel modelde paralel kapalı ve işaretsiz; seçim kullanıcının kaydını bozmaz."""
-        item = self.model_list.currentItem()
-        alias = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        """Paralel her modelde seçilebilir; yerel sunucuda yavaşlayabileceği ipucunda yazar."""
+        alias = self._current_alias()
         try:
             settings = load_settings(self.config_path)
             local = alias in settings.models and _is_local_model(
@@ -1150,15 +1193,11 @@ class ProviderSection(QWidget):
             )
         except (OSError, ValueError):
             local = False
-        self.parallel_test.blockSignals(True)
-        self.parallel_test.setChecked(
-            False if local else self._saved_parallel()
-        )
-        self.parallel_test.blockSignals(False)
-        self.parallel_test.setEnabled(not local)
         self.parallel_test.setToolTip(
-            "Yerel modelde sırayla çalışır" if local
-            else f"API modellerinde daha hızlı; aynı anda {PARALLEL_TEST} senaryo"
+            f"Aynı anda {PARALLEL_TEST} senaryo. Bu bağlantı bu bilgisayarda çalışıyor: "
+            "sunucu aynı anda tek istek kaldırıyorsa sırayla çalıştırmak daha hızlı olabilir."
+            if local
+            else f"Aynı anda {PARALLEL_TEST} senaryo; API modellerinde testi kısaltır."
         )
 
     def _model_test_finished(self, *_args: object) -> None:
@@ -1304,7 +1343,7 @@ class ProviderSection(QWidget):
                 return
             # Bütçe tavanı tahminin iki katı: test bunu aşamaz (rezervasyon korur).
             arguments += ["--ucretli-onay", "--butce", str(cost * 2)]
-        if self.parallel_test.isEnabled() and self.parallel_test.isChecked():
+        if self.parallel_test.isChecked():
             arguments += ["--paralel", str(PARALLEL_TEST)]
         for scenario_id in only or []:
             arguments += ["--senaryo", scenario_id]
@@ -1388,7 +1427,6 @@ class ProviderSection(QWidget):
             row[0] for row in self._model_data
         ]
         self.retry_button.setVisible(not running and failed and retryable and here)
-        self.compare_button.setVisible(bool(self._reports_seen))
 
     def _test_or_stop(self) -> None:
         if self._model_test is not None and self._testing == self._current_alias():
@@ -1440,32 +1478,6 @@ class ProviderSection(QWidget):
         self.reload()
         self.status.setText(f"{alias}: {_test_summary(report)}. {report.get('summary', '')}")
 
-    def _compare_results(self) -> None:
-        try:
-            settings = load_settings(self.config_path)
-        except (OSError, ValueError):
-            self.status.setText("Ayarlar okunamadı.")
-            return
-        folder = settings.state_dir / "model_testleri"
-        rows = []
-        for alias, report in self._reports(settings).items():
-            try:
-                stamp = (folder / f"{_slug(alias) or 'model'}.json").stat().st_mtime
-            except OSError:
-                continue
-            rows.append((stamp, alias, report))
-        rows.sort(key=lambda row: row[0], reverse=True)
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Test sonuçları")
-        dialog.resize(720, 320)
-        layout = QVBoxLayout(dialog)
-        self.compare_table = _comparison_table(rows)
-        layout.addWidget(self.compare_table)
-        close = QPushButton("Kapat")
-        close.clicked.connect(dialog.accept)
-        layout.addLayout(button_row(close))
-        dialog.exec()
-
     def _apply_layout(self) -> None:
         ana, zor, pc = self._suggested
         if not ana:
@@ -1501,38 +1513,8 @@ def _write_json(path: Path, data: object) -> None:
     os.replace(temp, path)
 
 
-def _comparison_table(rows: list[tuple[float, str, dict[str, object]]]) -> QTableWidget:
-    headers = ["Model", "Temel", "Zor", "Bilgisayar", "Tehlikeli hata", "Süre", "Maliyet", "Tarih"]
-    table = QTableWidget(len(rows), len(headers))
-    table.setAccessibleName("Test sonuçları tablosu")
-    table.setHorizontalHeaderLabels(headers)
-    table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-    table.verticalHeader().setVisible(False)
-    table.horizontalHeader().setStretchLastSection(True)
-
-    def ratio(value: object) -> str:
-        if isinstance(value, dict):
-            return f"{value.get('passed')}/{value.get('total')}"
-        return "yok"
-
-    for row, (stamp, alias, report) in enumerate(rows):
-        cost = Decimal(str(report.get("cost_usd", "0")))
-        cells = [
-            alias, ratio(report.get("temel")), ratio(report.get("zor")),
-            ratio(report.get("bilgisayar")),
-            str(report["dangerous_errors"]) if report.get("dangerous_errors") else "yok",
-            f"{report.get('median_seconds')} sn",
-            f"{cost.normalize():f} USD" if cost else "ücretsiz",
-            datetime.fromtimestamp(stamp).strftime("%d.%m.%Y %H:%M"),
-        ]
-        for column, text in enumerate(cells):
-            table.setItem(row, column, QTableWidgetItem(text))
-    table.resizeColumnsToContents()
-    return table
-
-
-def _score(report: dict[str, object]) -> str:
-    """Listede tek sayı: geçen senaryoların yüzdesi ('%87'); tehlikeli hata metinle belirtilir."""
+def _pass_rate(report: dict[str, object]) -> float | None:
+    """Geçen senaryoların oranı (0..1); sayılabilir bölüm yoksa None."""
     passed = total = 0
     for key in ("temel", "zor", "bilgisayar"):
         part = report.get(key)
@@ -1540,9 +1522,15 @@ def _score(report: dict[str, object]) -> str:
             part.get("total"), int
         ):
             passed, total = passed + part["passed"], total + part["total"]
-    if not total:
+    return passed / total if total else None
+
+
+def _score(report: dict[str, object]) -> str:
+    """Listede tek sayı: geçen senaryoların yüzdesi ('%87'); tehlikeli hata metinle belirtilir."""
+    rate = _pass_rate(report)
+    if rate is None:
         return ""
-    return f"%{round(100 * passed / total)}" + (
+    return f"%{round(100 * rate)}" + (
         " · tehlikeli hata" if report.get("dangerous_errors") else ""
     )
 
