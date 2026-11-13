@@ -515,20 +515,15 @@ class ProviderSection(QWidget):
         test_box.addWidget(self.test_list)
         test_box.addWidget(self.test_result)
         retry_row = QHBoxLayout()
-        retry_row.addLayout(self._tip_after(self.retry_button, (
-            "Testte kalan senaryoları aynı modelle bir kez daha çalıştırır. Ücretli modelde "
-            "yalnız kalanların payı kadar tahmini tutar önce sorulur."
-        )))
+        retry_row.addWidget(self.retry_button)
         retry_row.addStretch(1)
         test_box.addLayout(retry_row)
         field(detail, "Test", test_box, help=(
             "Seçili modeli senaryolarla dener. Ücretli modelde önce tahmini tutarı sorar; test "
-            "bütçesi bu tahminin iki katıyla sınırlanır. Resim modelleri bu testle denenmez."
+            "bütçesi bu tahminin iki katıyla sınırlanır; yeniden denemede yalnız kalanların payı "
+            "sorulur. Resim modelleri denenmez."
         ))
-        detail.addLayout(button_row(self.remove_button, help=(
-            "Seçili modeli listeden ve ayar dosyasından kaldırır. Beyin, Zor işler ya da Yedek "
-            "olan model kaldırılamaz; önce o rolü başka bir modele ver."
-        )))
+        detail.addLayout(button_row(self.remove_button))
         self.detail.setVisible(False)  # reload() model varsa gösterir
         self.model_list.currentItemChanged.connect(self._selection_changed)
         # Test edilmiş modellerden çıkan önerilen düzen (ana + zor işler) ve tek tık uygulama.
@@ -549,13 +544,11 @@ class ProviderSection(QWidget):
         sort_row.setSpacing(8)
         sort_row.addStretch(1)
         sort_row.addWidget(self.sort_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        self.sort_tip = HelpTip(
-            "Listeyi yalnız görünümde sıralar (başarı, bağlantı, rol, ad ya da eklenme sırası). "
-            "Ayar dosyasındaki model sırası ve seçimin hiçbiri değişmez."
-        )
-        sort_row.addWidget(self.sort_tip, 0, Qt.AlignmentFlag.AlignVCenter)
         sort_row.addWidget(self.model_sort, 0, Qt.AlignmentFlag.AlignVCenter)
         left.addLayout(sort_row)
+        # Gizli başlar: reload() iki ve daha çok modelde açar; demo/boş listede sıralanacak şey yok.
+        self.model_sort.setVisible(False)
+        self.sort_label.setVisible(False)
         left.addWidget(self.model_list)
         left.addWidget(self.model_empty)
         left.addWidget(self.layout_label)
@@ -599,14 +592,8 @@ class ProviderSection(QWidget):
         prices = QVBoxLayout(self.price_box)
         prices.setContentsMargins(0, 0, 0, 0)
         prices.setSpacing(12)
-        field(prices, "Girdi fiyatı (USD / milyon jeton)", self.input_price, help=(
-            "Modelin 1 milyon girdi jetonu için fiyatı. Test et'teki tahmini tutar ve bütçe "
-            "koruması bununla hesaplanır; ücretsiz modelde 0 kalır."
-        ))
-        field(prices, "Çıktı fiyatı (USD / milyon jeton)", self.output_price, help=(
-            "Modelin 1 milyon çıktı jetonu için fiyatı; girdi fiyatıyla birlikte tahmini maliyeti "
-            "ve test onayındaki tutarı belirler."
-        ))
+        field(prices, "Girdi fiyatı (USD / milyon jeton)", self.input_price)
+        field(prices, "Çıktı fiyatı (USD / milyon jeton)", self.output_price)
         self.price_box.setVisible(False)
         self.kind = QComboBox()
         self.kind.setAccessibleName("Model türü")
@@ -621,29 +608,15 @@ class ProviderSection(QWidget):
         field(
             image_layout, "Resim başına fiyat (USD)", self.image_price,
             "Her çağrıda bütçeden bu tutar ayrılır (rezervasyon).",
-            help="Resim üretimi çağrı başına ücretlenir. Bütçe koruması her çağrıdan önce bu "
-            "tutarı ayırır.",
         )
         self.image_box.setVisible(False)
         self.make_primary = QCheckBox("Beyin modeli yap")
         self.kind.currentIndexChanged.connect(self._sync_kind)
         self.paid.toggled.connect(self._sync_kind)
-        field(add, "Bağlantı", self.add_connection, help=(
-            "Modelin çalışacağı sunucu. Önce aşağıdaki Bağlantılar'dan eklemen gerekir; Claude "
-            "aboneliği seçilirse model Claude Code CLI ile çalışır."
-        ))
-        field(add, "Tür", self.kind, help=(
-            "Sohbet: konuşmalara cevap veren model. Resim: yalnız resim üretir; Beyin, Zor işler "
-            "ya da Yedek olamaz ve Claude aboneliğiyle kullanılamaz."
-        ))
-        field(add, "Model", model_row, help=(
-            "Sunucudaki model adı. Listeyi getir seçili bağlantının model listesini ister "
-            "(küçük bir ağ isteği); adı elle de yazabilirsin."
-        ))
-        field(add, "Takma ad", self.alias, help=(
-            "Modelin Artemis içindeki kısa adı; listede ve rollerde bu görünür. Boş bırakırsan "
-            "model adından türetilir; aynı ad iki kez kullanılamaz."
-        ))
+        field(add, "Bağlantı", self.add_connection)
+        field(add, "Tür", self.kind)
+        field(add, "Model", model_row)
+        field(add, "Takma ad", self.alias)
         add.addLayout(with_help(self.paid, (
             "Modelin kullanım başına ücret aldığını işaretler ve fiyat alanlarını açar. "
             "Ücretli model bütçe korumasına takılır; ücretli kullanım izni ayar dosyasından "
@@ -651,20 +624,14 @@ class ProviderSection(QWidget):
         )))
         add.addWidget(self.price_box)
         add.addWidget(self.image_box)
-        add.addLayout(with_help(self.make_primary, (
-            "Eklenince bu model Beyin olur: sohbetlere o cevap verir. Ayarlardan çıkınca "
-            "geçerli olur ve yeni sohbet başlar. Resim modeli Beyin olamaz."
-        )))
+        add.addWidget(self.make_primary)
         self.add_button = QPushButton("Ekle")
         self.add_button.setObjectName("primary")
         self.add_button.clicked.connect(self._add_model)
         self.cli_test_button = QPushButton("Aboneliği test et")
         self.cli_test_button.setToolTip("Küçük bir gerçek istek atar; kotadan az harcar.")
         self.cli_test_button.clicked.connect(self._test_cli)
-        add.addLayout(button_row(self.cli_test_button, self.add_button, help=(
-            "Ekle: modeli ayar dosyasına yazar. Aboneliği test et (yalnız Claude aboneliğinde): "
-            "küçük bir gerçek istek atar; kotandan az da olsa harcar."
-        )))
+        add.addLayout(button_row(self.cli_test_button, self.add_button))
         # C: bağlantı ekle/düzenle; modeller önde kalsın diye varsayılan kapalı
         self.connection_toggle = QPushButton("Bağlantı ekle veya düzenle")
         self.connection_toggle.setObjectName("ghost")
@@ -699,22 +666,10 @@ class ProviderSection(QWidget):
         self.key = QLineEdit()
         self.key.setAccessibleName("API anahtarı")
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
-        field(conn, "Şablon", self.preset, help=(
-            "Bilinen bir sağlayıcının adresini ve anahtar gerekip gerekmediğini forma doldurur. "
-            "Hiçbir şey kaydetmez; Kaydet'e basana kadar yalnız form değişir."
-        ))
-        field(conn, "Kimlik (kısa ad)", self.endpoint_id, help=(
-            "Bağlantının kısa adı (harf, rakam, _ ve -). Modeller bağlantıya bu adla bağlanır; "
-            "anahtar da bu adla saklanır."
-        ))
-        field(conn, "Adres", self.base_url, help=(
-            "Sunucunun temel adresi (örn. .../v1). Bu bağlantıyı kullanan modelin istekleri bu "
-            "adrese gider; localhost adresi bilgisayarından çıkmaz."
-        ))
-        conn.addLayout(with_help(self.needs_key, (
-            "Sunucu istek başına anahtar istiyorsa işaretli bırak. Kapalıysa anahtar "
-            "gönderilmez; yerel sunucular genelde anahtar istemez."
-        )))
+        field(conn, "Şablon", self.preset)
+        field(conn, "Kimlik (kısa ad)", self.endpoint_id)
+        field(conn, "Adres", self.base_url)
+        conn.addWidget(self.needs_key)
         field(conn, "API anahtarı", self.key, help=(
             "Anahtar Windows kimlik kasasına yazılır, ayar dosyasına (YAML) asla girmez. "
             "Kaydedince alan temizlenir; boş bırakırsan kayıtlı anahtar korunur."
@@ -728,11 +683,7 @@ class ProviderSection(QWidget):
         self.delete_button.setObjectName("danger")
         self.delete_button.clicked.connect(self._delete)
         conn.addLayout(button_row(
-            self.delete_button, self.test_button, self.save_button, help=(
-                "Sil: bağlantıyı ve kasadaki anahtarını kaldırır (kullanan model varsa önce "
-                "onları kaldır). Bağlantıyı test et: adrese küçük bir istek atar. "
-                "Kaydet: bağlantıyı yazar."
-            ),
+            self.delete_button, self.test_button, self.save_button,
         ))
         self.status = QLabel()
         self.status.setWordWrap(True)
@@ -868,7 +819,6 @@ class ProviderSection(QWidget):
         self.model_list.setVisible(self.model_list.count() > 0)
         self.model_sort.setVisible(self.model_list.count() > 1)
         self.sort_label.setVisible(self.model_list.count() > 1)
-        self.sort_tip.setVisible(self.model_list.count() > 1)
         self.model_empty.setVisible(self.model_list.count() == 0)
         self.detail.setVisible(self.model_list.count() > 0)
         self._sync_test_buttons()

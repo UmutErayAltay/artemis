@@ -67,10 +67,7 @@ class RoutinesSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        list_box, listing = group("Kayıtlı rutinler", divided=False, help=(
-            "Burada kayıtlı rutinler. Rutini bu sayfada yazar ve düzenlersin; çalıştırmak "
-            "Otomasyon sayfasından olur ve her adım normal onay kurallarına tabidir."
-        ))
+        list_box, listing = group("Kayıtlı rutinler", divided=False)
         layout.addWidget(list_box)
         self.routine_list = QListWidget()
         self.routine_list.setAccessibleName("Kayıtlı rutinler")
@@ -87,11 +84,6 @@ class RoutinesSection(QWidget):
         self.action_row.setLayout(
             button_row(
                 self.fix_button, self.delete_button, self.edit_button, self.add_button,
-                help=(
-                    "Rutin ekle/Düzenle: adımları sırayla yazdığın formu açar. Sil: seçili "
-                    "rutini kaldırır (onay sorar). Dosyayı düzelt: bozuk routines.json'u "
-                    "yalnız geçerliyse kaydederek onarır."
-                ),
             )
         )
         listing.addWidget(self.action_row)
@@ -105,10 +97,7 @@ class RoutinesSection(QWidget):
         self.time_edit.setMaxLength(5)
         self.time_edit.setPlaceholderText("08:30")
         self.time_edit.setAccessibleName("Rutin saati")
-        field(when, "Saat (SS:DD)", self.time_edit, help=(
-            "Rutinin hatırlatılacağı saat, 24 saatlik SS:DD (örn. 08:30). Seçili rutine uygulanır; "
-            "kaydedene kadar bir şey değişmez."
-        ))
+        field(when, "Saat (SS:DD)", self.time_edit)
         days_row = QHBoxLayout()
         days_row.setSpacing(8)
         self.day_boxes = [QCheckBox(name) for name in _DAYS]
@@ -116,18 +105,11 @@ class RoutinesSection(QWidget):
             box.setChecked(True)
             days_row.addWidget(box)
         days_row.addStretch(1)
-        field(when, "Günler", days_row, help=(
-            "Rutinin hangi günler hatırlatılacağı; en az bir gün seçili olmalı."
-        ))
+        field(when, "Günler", days_row)
         self.save_time_button = QPushButton("Zamanı kaydet")
         self.clear_time_button = QPushButton("Zamanı kaldır")
         when.addLayout(button_row(
             self.clear_time_button, self.save_time_button,
-            help=(
-                "Zamanı kaydet: seçili saat ve günleri bu rutine yazar. Zamanı kaldır: zamanı "
-                "siler. Zamanı gelince rutin kendiliğinden çalışmaz, yalnız \"çalıştırılsın mı\" "
-                "bildirimi gelir."
-            ),
         ))
         self.notice = meta_label("")
         layout.addWidget(self.notice)

@@ -237,7 +237,11 @@ QMenu, QToolTip {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; padding: 8px; }}
 QToolButton#helpTip {{ border: 1px solid {t['border']}; border-radius: 9px; padding: 0;
  background: {t['soft']}; color: {t['muted']}; font-size: 12px; font-weight: 600; }}
-QToolButton#helpTip:hover, QToolButton#helpTip:focus {{ color: {t['accent']};
+QFrame#helpPopup {{ background: {t['surface']}; border: 1px solid {t['control_border']};
+ border-radius: 8px; }}
+QFrame#helpPopup QLabel {{ color: {t['text']}; background: transparent; }}
+QToolButton#helpTip:hover, QToolButton#helpTip:focus, QToolButton#helpTip:checked {{
+ color: {t['accent']};
  border-color: {t['accent']}; }}
 QMenu::item:selected {{ background: {t['soft']}; }}
 QSplitter::handle {{ background: {t['bg']}; width: 8px; }}

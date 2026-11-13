@@ -44,23 +44,10 @@ from artemis.skills import (
 
 _TR = str.maketrans("çÇğĞıİöÖşŞüÜ", "ccggiioossuu")
 _BLANK = "Boş"
-_NAME_HELP = (
-    "Becerinin adı ve dosya adı (ad.md). Sohbette /ad yazarak çağırırsın. "
-    "Yalnız küçük harf, rakam ve tire; en çok 40 karakter. Kaydedildikten sonra değişmez."
-)
-_DESCRIPTION_HELP = (
-    "Modelin sistem istemindeki tek satırı: hangi isteklerde bu becerinin seçileceğini buradan "
-    "anlar. Gövdeyi ancak seçtikten sonra okur; bu yüzden açıklama 'ne zaman' sorusunu "
-    f"cevaplamalı. En çok {MAX_DESCRIPTION} karakter."
-)
 _BODY_HELP = (
     "Model bu beceriyi seçince bu talimatı okur; araç çağrıları yine onay kurallarına tabidir. "
     "Kişisel veri yazma: bulut modele gidebilir. "
     f"En çok {MAX_BODY} karakter; uzun tarifler kesilmesin diye kısa tut."
-)
-_RAW_HELP = (
-    "Bu dosya beceri olarak okunamadı. Başlık (--- arası ad/açıklama) ve talimatı düzeltip "
-    "kaydet; yalnız geçerliyse yazılır, aksi halde dosya olduğu gibi kalır."
 )
 _BODY_PLACEHOLDER = (
     "Kullanıcı ... isterse:\n\n"
@@ -76,7 +63,8 @@ def _row(widget: QWidget, help_text: str, *, fill: bool = True) -> QHBoxLayout:
     row = QHBoxLayout()
     row.setSpacing(6)
     row.addWidget(widget, 1 if fill else 0)
-    row.addWidget(HelpTip(help_text), 0, Qt.AlignmentFlag.AlignVCenter)
+    if help_text:
+        row.addWidget(HelpTip(help_text), 0, Qt.AlignmentFlag.AlignVCenter)
     if not fill:
         row.addStretch(1)
     return row
@@ -122,9 +110,7 @@ class SkillDialog(FormDialog):
         self.template.currentIndexChanged.connect(self._template_changed)
         if not self._edit:
             self._caption(layout, "Başlangıç", _row(
-                self.template,
-                "Hazır bir şablondan başla ya da boş bırak. Şablon açıklamayı ve talimatı "
-                "doldurur; sonra istediğin gibi değiştirirsin.",
+                self.template, "",
             ))
 
         self.name = QLineEdit(name or "")
@@ -132,7 +118,7 @@ class SkillDialog(FormDialog):
         self.name.setReadOnly(self._edit)
         self.name.setPlaceholderText("örn. haftalik-rapor")
         self.name.textChanged.connect(self._validate)
-        self._caption(layout, "Ad", _row(self.name, _NAME_HELP))
+        self._caption(layout, "Ad", _row(self.name, ""))
         self.name_hint = QLabel("")
         self.name_hint.setObjectName("warnNote")
         self.name_hint.setWordWrap(True)
@@ -152,7 +138,7 @@ class SkillDialog(FormDialog):
         box = QVBoxLayout(self.description_box)
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(8)
-        self._caption(box, "Açıklama", _row(self.description, _DESCRIPTION_HELP))
+        self._caption(box, "Açıklama", _row(self.description, ""))
         self.description_count = self._counter(box)
         layout.addWidget(self.description_box)
 
@@ -194,7 +180,7 @@ class SkillDialog(FormDialog):
         raw_label.setObjectName("fieldLabel")
         self.raw_caption = QWidget()  # ham kipte topluca görünür
         self.raw_caption.setObjectName("flat")
-        self.raw_caption.setLayout(_row(raw_label, _RAW_HELP, fill=False))
+        self.raw_caption.setLayout(_row(raw_label, "", fill=False))
         layout.addWidget(self.raw_caption)
         layout.addWidget(self.raw)
 

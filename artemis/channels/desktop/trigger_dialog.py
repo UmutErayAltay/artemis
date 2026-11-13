@@ -132,10 +132,7 @@ class TriggerDialog(FormDialog):
         self.name.setMaxLength(32)
         self.name.setAccessibleName("Ad")
         self.name.textEdited.connect(self._name_edited)
-        self._add(layout, "Ad", self.name, "name", "Harf, rakam, _ ya da -", help=(
-            "Tetikleyicinin listede ve bildirimde görünen kısa adı. Klasörü seçince kendiliğinden "
-            "önerilir; her tetikleyicinin adı benzersiz olmalı."
-        ))
+        self._add(layout, "Ad", self.name, "name", "Harf, rakam, _ ya da -")
 
         self.folder = QLineEdit(existing.folder if existing else "")
         self.folder.setReadOnly(True)
@@ -190,10 +187,6 @@ class TriggerDialog(FormDialog):
         self._add(
             layout, "Dosya türü", box, "pattern",
             "Özelde tek desen yazılır: * her şeyi, ? tek harfi tutar.",
-            help=(
-                "Hangi dosyalar için haber verileceğini belirler. Yalnız adı bu desene uyan "
-                "dosyalar bildirilir; başka tür için ayrı tetikleyici ekle."
-            ),
         )
         self._kind_changed()
 
@@ -201,10 +194,6 @@ class TriggerDialog(FormDialog):
         self.message.setAccessibleName("Bildirim metni")
         self._add(
             layout, "Bildirim metni", self.message, "message", "{file} dosyanın adıdır.",
-            help=(
-                "Yeni dosya gelince gösterilen bildirimin metni. Dosya adları Telegram'a "
-                "gönderilmez."
-            ),
         )
 
         label = QLabel("Düğme")

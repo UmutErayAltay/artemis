@@ -4,9 +4,18 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLayout, QToolButton, QToolTip, QWidget
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, Qt
+from PySide6.QtGui import QColor, QEnterEvent, QHideEvent, QKeyEvent, QPainter, QPen, QPixmap
+from PySide6.QtWidgets import (
+    QApplication,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLayout,
+    QToolButton,
+    QVBoxLayout,
+    QWidget,
+)
 
 from artemis.channels.desktop import themes
 
@@ -83,28 +92,126 @@ class PetFace(QWidget):
         p.end()
 
 
-class HelpTip(QToolButton):
-    """Bir ayarın/işlemin yanındaki küçük "?" baloncuğu: neyi etkilediğini, neyi değiştirdiğini
-    ve bedelini (bellek, hız, gizlilik) söyler.
+class _HelpPopup(QFrame):
+    """Baloncuğun kendisi: odak almayan, çerçevesiz küçük pencere (tema `#helpPopup`)."""
 
-    Üzerine gelince ipucu, tıklayınca (ya da klavyeyle Boşluk/Enter) aynı metin baloncukta açılır:
-    fareyle gezmeyen kullanıcı da okuyabilsin diye. Metin ekran okuyucuya açıklama olarak gider.
+    def __init__(self, parent: QWidget) -> None:
+        # Ebeveyn = düğmenin penceresi: tema pencereye uygulanır, ayrı pencere de onu miras alır.
+        super().__init__(parent, Qt.WindowType.ToolTip | Qt.WindowType.FramelessWindowHint)
+        self.setObjectName("helpPopup")
+        self.setAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 8, 10, 8)
+        self.label = QLabel()
+        self.label.setWordWrap(True)
+        self.label.setTextFormat(Qt.TextFormat.PlainText)
+        self.label.setMaximumWidth(320)
+        layout.addWidget(self.label)
+
+
+class HelpTip(QToolButton):
+    """Bir ayarın/işlemin yanındaki küçük "?": neyi etkilediğini ve bedelini (bellek, hız, gizlilik)
+    söyler.
+
+    Fare üstüne gelince baloncuk açılır, ayrılınca kapanır; tıklayınca (ya da Boşluk/Enter) açık
+    kalır ve yeniden tıklama, başka yere tıklama ya da Esc ile kapanır. Aynı anda tek baloncuk
+    sabitlenir. Metin ekran okuyucuya açıklama olarak gider; Qt'nin kendi ipucu bastırılır ki
+    baloncukla üst üste iki kutu çıkmasın.
     """
+
+    _pinned: HelpTip | None = None
 
     def __init__(self, text: str, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("helpTip")
         self.setText("?")
-        self.setToolTip(text)
+        self.setToolTip(text)  # metnin tek kaynağı; yerel ipucu event() içinde bastırılır
         self.setAccessibleName("Yardım")
         self.setAccessibleDescription(text)
         self.setCursor(Qt.CursorShape.WhatsThisCursor)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setCheckable(True)  # sabitliyken işaretli görünür
         self.setFixedSize(18, 18)
-        self.clicked.connect(self._show)
+        self._popup: _HelpPopup | None = None
+        self.toggled.connect(self._pin_changed)
 
-    def _show(self) -> None:
-        QToolTip.showText(self.mapToGlobal(QPoint(self.width() + 4, 0)), self.toolTip(), self)
+    def is_open(self) -> bool:
+        return self._popup is not None and self._popup.isVisible()
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.ToolTip:
+            return True
+        return super().event(event)
+
+    def enterEvent(self, event: QEnterEvent) -> None:  # noqa: N802
+        super().enterEvent(event)
+        self._open()
+
+    def leaveEvent(self, event: QEvent) -> None:  # noqa: N802
+        super().leaveEvent(event)
+        if not self.isChecked():
+            self._close()
+
+    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
+        # Sayfa değişince ya da pencere gizlenince baloncuk ekranda asılı kalmasın.
+        self.setChecked(False)
+        self._close()
+        super().hideEvent(event)
+
+    def _pin_changed(self, pinned: bool) -> None:
+        app = QApplication.instance()
+        if pinned:
+            previous = HelpTip._pinned
+            if previous is not None and previous is not self:
+                previous.setChecked(False)
+            HelpTip._pinned = self
+            if app is not None:
+                app.installEventFilter(self)
+            self._open()
+        else:
+            if HelpTip._pinned is self:
+                HelpTip._pinned = None
+            if app is not None:
+                app.removeEventFilter(self)
+            # İkinci tıklama imleç hâlâ üstündeyken de kapatır; yeniden üstüne gelince açılır.
+            self._close()
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+        """Sabit baloncuk: dışarı tıklama, Esc ya da uygulamadan çıkış kapatır."""
+        kind = event.type()
+        if kind == QEvent.Type.MouseButtonPress and watched is not self and not (
+            isinstance(watched, QWidget) and self._popup is not None
+            and (watched is self._popup or self._popup.isAncestorOf(watched))
+        ):
+            if isinstance(watched, QWidget) and watched.window() is not None:
+                self.setChecked(False)
+        elif kind == QEvent.Type.KeyPress and isinstance(event, QKeyEvent) and (
+            event.key() == Qt.Key.Key_Escape
+        ):
+            self.setChecked(False)
+            return True
+        elif kind == QEvent.Type.ApplicationDeactivate:
+            self.setChecked(False)
+        return False
+
+    def _open(self) -> None:
+        if self._popup is None:
+            self._popup = _HelpPopup(self.window())
+        self._popup.label.setText(self.toolTip())
+        self._popup.adjustSize()
+        point = self.mapToGlobal(QPoint(self.width() + 6, -4))
+        screen = self.screen().availableGeometry() if self.screen() else None
+        if screen is not None:
+            size = self._popup.size()
+            if point.x() + size.width() > screen.right():
+                point.setX(self.mapToGlobal(QPoint(0, 0)).x() - size.width() - 6)
+            point.setY(max(screen.top(), min(point.y(), screen.bottom() - size.height())))
+        self._popup.move(point)
+        self._popup.show()
+
+    def _close(self) -> None:
+        if self._popup is not None:
+            self._popup.hide()
 
 
 def with_help(widget: QWidget | QLayout, text: str) -> QHBoxLayout:

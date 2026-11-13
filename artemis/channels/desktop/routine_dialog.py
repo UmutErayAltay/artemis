@@ -129,9 +129,7 @@ class _ArgField(QWidget):
         layout.setSpacing(4)
         caption = QLabel(f"{label} *" if required else label)
         caption.setObjectName("fieldLabel")
-        about = f"Aracın «{name}» alanı. "
-        about += "Zorunlu: boş bırakılamaz." if required else "İsteğe bağlı: boşsa gönderilmez."
-        layout.addLayout(with_help(caption, about))  # "?" etiketin yanında
+        layout.addWidget(caption)
         layout.addWidget(self._widget)
 
     def _spin(self, schema: dict[str, Any], start: Any) -> QWidget:
@@ -225,11 +223,7 @@ class _StepEditor(QFrame):
             self.tool.addItem(tool_display(tool_name), tool_name)
         if step is not None:
             self.tool.setCurrentIndex(max(0, self.tool.findData(step.tool)))
-        layout.addLayout(with_help(
-            self.tool,
-            "Adımda çalışacak araç. Adımlar sırayla, her biri normal onay kurallarıyla çalışır; "
-            "onay isteyen adım yine sorar. Rutin araçları rutinin içinde kullanılamaz.",
-        ))
+        layout.addWidget(self.tool)
         self.about = QLabel("")
         self.about.setObjectName("meta")
         self.about.setWordWrap(True)
@@ -348,12 +342,7 @@ class RoutineDialog(FormDialog):
         self.name.setMaxLength(40)
         self.name.setAccessibleName("Ad")
         self.name.setMinimumWidth(280)
-        self.body_layout.addLayout(with_help(
-            label,
-            "Rutini sohbette ve Otomasyon'da bu adla çağırırsın. 1-40 karakter; büyük/küçük "
-            "harf fark etmez, iki rutin aynı adı taşıyamaz. Adı değiştirirsen tetikleyicilerdeki "
-            "rutin adını da güncelle.",
-        ))
+        self.body_layout.addWidget(label)
         self.body_layout.addWidget(self.name)
         steps_label = QLabel("Adımlar")
         steps_label.setObjectName("fieldLabel")

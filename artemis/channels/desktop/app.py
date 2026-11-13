@@ -111,18 +111,10 @@ PROJECTS_POLL_IDLE_MS = 15000
 
 
 # Köprü ses durumunu makine okunur taşır; Türkçe metne ekran çevirir.
-_HELP_VOICE = (
-    "Mikrofonu açar: sesle komut verirsin. Yalnız sen açınca dinler, ham ses saklanmaz. Sesli "
-    "\"evet\" onay sayılmaz; onayı ekrandaki pencereden verirsin."
-)
 _HELP_AUTO = (
     "Onaylı: bilgisayar kullanımı, pencere kontrolü ve ekran okuma her seferinde sorar. Otomatik: "
     "bu üçü onay sormadan çalışır (dış içerik okunmuş turda da); Esc durdurur. Diğer araçlar "
     "etkilenmez. Anında geçerli."
-)
-_HELP_MODEL = (
-    "Sohbetin kullandığı beyin modeli. Tıklayınca Ayarlar > Model açılır; orada yaptığın "
-    "değişiklik Ayarlardan çıkınca yeni bir sohbetle devreye girer."
 )
 _HELP_NEW_CHAT = (
     "Modelin bağlamını sıfırlar; sonraki mesaj boş geçmişle başlar. Kalıcı konuşma arşivini "
@@ -130,15 +122,6 @@ _HELP_NEW_CHAT = (
 )
 _HELP_QUICK = (
     "Küçük, hep üstte duran hızlı komut penceresini açar; yazdığın komut aynı sohbete gider."
-)
-_HELP_SEND = (
-    "Gönder: yazdığını modele yollar; yan etkili adımlar yine onay ister. İptal (iş sürerken "
-    "görünür): çalışan turu ve açık onay penceresini durdurur."
-)
-_HELP_NOTICE = (
-    "Bildirimin işlemini yapar: rutin ise onaylı bir turda çalıştırır, gün özeti ise özeti "
-    "uygulama içinde açar, öneri ise metni sohbet kutusuna yazar (göndermez). "
-    "\"Vault'a ekle\" özeti onayla vault'a ekler."
 )
 _VOICE_LABELS = {
     "off": "Ses kapalı",
@@ -1175,10 +1158,8 @@ class DesktopWindow(QMainWindow):
         value_font.setPixelSize(13)
         self.model_value.setFont(value_font)
         self.model_box = self.model_value
-        self.model_tip = HelpTip(_HELP_MODEL)  # çip gizlenince birlikte gizlenir (_fit_shell)
         row.addWidget(self.model_caption, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self.model_value, 0, Qt.AlignmentFlag.AlignVCenter)
-        row.addWidget(self.model_tip, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addStretch(1)
 
         # voice_dot/voice_state köprü ve testler için canlı kalan, görünmeyen aynalardır;
@@ -1192,7 +1173,6 @@ class DesktopWindow(QMainWindow):
         self.voice_button = self._icon_toggle("Sesi aç veya kapat")
         self.voice_button.clicked.connect(self._toggle_voice)
         row.addWidget(self.voice_button)
-        row.addWidget(HelpTip(_HELP_VOICE), 0, Qt.AlignmentFlag.AlignVCenter)
         self.auto_button = self._icon_toggle(
             "Bilgisayar kullanımında otomatik onayı aç veya kapat"
         )
@@ -1299,7 +1279,6 @@ class DesktopWindow(QMainWindow):
         routine_row.addWidget(self.routine_dismiss_button)
         routine_row.addWidget(self.summary_vault_button)
         routine_row.addWidget(self.routine_run_button)
-        routine_row.addWidget(HelpTip(_HELP_NOTICE), 0, Qt.AlignmentFlag.AlignVCenter)
         self.routine_bar.hide()
         # Yazma alanıyla aynı ortalanmış sütun: genişlik ve sol kenar her pencerede aynı kalır.
         notice_wrap = QHBoxLayout()
@@ -1336,11 +1315,8 @@ class DesktopWindow(QMainWindow):
         self.send_button.clicked.connect(self._submit_main)
         bottom = Qt.AlignmentFlag.AlignBottom
         composer_row.addWidget(self.composer_voice, 0, bottom)
-        composer_row.addWidget(HelpTip(_HELP_VOICE), 0, bottom)
         composer_row.addWidget(self.cancel_button, 0, bottom)
         composer_row.addWidget(self.send_button, 0, bottom)
-        # İptal yalnız iş sürerken görünür; tek "?" Gönder'in yanında ikisini de anlatır.
-        composer_row.addWidget(HelpTip(_HELP_SEND), 0, bottom)
         # Sütun ortalanır: kenar boşlukları esner, yazma alanı 680px'e kadar genişler.
         composer_wrap = QHBoxLayout()
         composer_wrap.addStretch(1)
@@ -1939,7 +1915,6 @@ class DesktopWindow(QMainWindow):
         self._compact_nav(width < _COMPACT_NAV_WINDOW)
         wide = width >= _STEP_PANEL_MIN_WINDOW
         self.model_box.setVisible(width >= 800)
-        self.model_tip.setVisible(width >= 800)
         self.model_caption.setVisible(width >= 800)
         self._show_model(self._model_full)
         self.operations_button.setVisible(not wide)

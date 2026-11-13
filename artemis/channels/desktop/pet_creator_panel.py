@@ -162,10 +162,6 @@ def price_warning(model: ModelConfig) -> str:
 
 
 _STAGES = ("Tarif", "Görsel", "Animasyon", "Kaydet")
-_HELP_RESET = (
-    "Sohbeti ve kaydedilmemiş çizimi temizleyip yeni pet başlatır. Kurulu petler ile seçili "
-    "model/yöntem kalır."
-)
 _HELP_METHOD = (
     "SVG: metin modeli çizimi SVG olarak yazar, animasyonlar yerelde üretilir; hızlı ve ucuz. "
     "Resim modeli: temel görsel ve her animasyon satırı için ayrı çağrı yapar; ~4-6 dk sürer, "
@@ -175,22 +171,9 @@ _HELP_MODEL = (
     "Çizimi yapacak model. Bulut modeliyse yazdığın tarif ona gider; ücretliyse bütçeden düşer "
     "ve allow_paid kapalıysa reddedilir (tutar altındaki uyarıda yazar)."
 )
-_HELP_NAME = (
-    "Kaydedince petin adı ve klasör kimliği bu olur; boşsa \"Yeni pet\". Aynı adlı pet varsa "
-    "üzerine yazmadan önce sorar."
-)
 _HELP_SEND = (
     "Tarifini seçili modele gönderir. Sonraki düzeltmeler ('daha mavi yap') mevcut çizimi "
     "(SVG ya da temel görsel) de gönderir. Başka dosya ya da sohbet geçmişin gitmez."
-)
-_HELP_STATE = (
-    "Üretilen animasyonu seçtiğin durumda (bekleme, koşma, el sallama…) yerelde oynatır; model "
-    "çağrısı yapmaz."
-)
-_HELP_JOBS = (
-    "Animasyonları üret (resim yöntemi): temel görselden satır satır model çağrısı yapar, kota "
-    "harcar. İptal: beklemeyi bırakır; SVG çağrısında uzaktaki istek durmaz. Kaydet ve seç: peti "
-    "kurar, masaüstü arkadaşı yapar."
 )
 # Bunun altında sütunlar alt alta dizilir; 900px pencerede sağ sütun 240'ın altına inmesin.
 _WIDE_MIN = 760
@@ -296,8 +279,6 @@ class CreatorPanel(QFrame):
         )
         self.reset_button.clicked.connect(self.reset_conversation)
         header.addWidget(self.reset_button)
-        self.reset_tip = HelpTip(_HELP_RESET)  # düğmeyle birlikte görünür/gizlenir
-        header.addWidget(self.reset_tip, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header)
         # Başlık ve aşama çubuğu kaydırılan gövdenin DIŞINDA: sayfa kayarken hep görünür.
         # Aşama çubuğu yalnız mevcut durumdan türetilir (_update_stage).
@@ -345,7 +326,7 @@ class CreatorPanel(QFrame):
         self.name_edit.setMaxLength(80)
         self.name_edit.setAccessibleName("Pet adı")
         self.name_edit.setMinimumHeight(32)
-        left_lay.addWidget(_field("Pet adı", self.name_edit, _HELP_NAME))
+        left_lay.addWidget(_field("Pet adı", self.name_edit))
         self.chat_log = QPlainTextEdit()
         self.chat_log.setReadOnly(True)
         self.chat_log.setMinimumHeight(140)
@@ -412,7 +393,7 @@ class CreatorPanel(QFrame):
                 QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
             )
             combo.setMinimumContentsLength(8)
-        right_lay.addWidget(_field("Önizleme durumu", self.state_combo, _HELP_STATE))
+        right_lay.addWidget(_field("Önizleme durumu", self.state_combo))
         job_row = QHBoxLayout()
         job_row.setSpacing(8)
         job_row.addStretch(1)
@@ -426,8 +407,6 @@ class CreatorPanel(QFrame):
         for button in (self.animate_button, self.cancel_button, self.save_button):
             button.setMinimumWidth(88)
             job_row.addWidget(button)
-        # Animasyonları üret yalnız resim yönteminde görünür; tek "?" üçünü de anlatır.
-        job_row.addWidget(HelpTip(_HELP_JOBS), 0, Qt.AlignmentFlag.AlignVCenter)
         right_lay.addLayout(job_row)
         self.busy = _label("", "meta")
         self.busy.setWordWrap(True)
@@ -561,7 +540,6 @@ class CreatorPanel(QFrame):
         self.workshop.setVisible(has_models)
         self.stage_bar.setVisible(has_models)
         self.reset_button.setVisible(has_models)
-        self.reset_tip.setVisible(has_models)
         self.fields.setVisible(has_models)
         self.empty_state.set_text(
             "Pet üretmek için bir model gerekli",

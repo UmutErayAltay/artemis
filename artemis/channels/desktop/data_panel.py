@@ -51,30 +51,9 @@ def _fold(text: str) -> str:
     return text.translate(str.maketrans("İIı", "iii")).casefold()
 
 
-_HELP_HISTORY = (
-    "Yerel arşivdeki konuşma geçmişini okuyup gösterir. Hiçbir şeyi silmez, değiştirmez ya da "
-    "bir yere göndermez."
-)
-_HELP_SEARCH = "Yalnız yüklenmiş satırları süzer; arşive yeni sorgu atmaz, hiçbir şey değişmez."
-_HELP_DAYS = (
-    "Konuşmalar bu kadar gün saklanır, eskileri silinir. 0 = otomatik silme kapalı. Öz notlar ve "
-    "denetim günlüğü bu ayardan etkilenmez."
-)
 _HELP_RETENTION = (
     "Süreyi kaydeder ve bundan eski konuşmaları hemen siler; geri gelmez, yedek değildir. 0 "
     "seçiliyse bir şey silinmez. Onay sorar."
-)
-_HELP_FILTER = (
-    "Hatırlatma teslimlerini duruma göre süzer. Yenile, listeyi bu süzgeçle yeniden okur; "
-    "hiçbir şeyi değiştirmez."
-)
-_HELP_RETRY = (
-    "Seçili teslimi yeni bir hatırlatma olarak yeniden kurar. Önceki teslim gerçekleşmiş "
-    "olabilir, bu yüzden çift bildirim gelebilir. Onay sorar; Artemis açık olmalı."
-)
-_HELP_RULES = (
-    "Yenile: Artemis'in uyduğu kalıcı kuralları yeniden okur. Her kuralın Kaldır düğmesi onay "
-    "sorar ve o kuralı siler."
 )
 _HELP_DELETE = (
     "Tüm konuşma arşivini siler ve dosyayı yeniden yazar; geri alınamaz. Öz notlar, denetim "
@@ -119,7 +98,6 @@ class DataPanel(QWidget):
         self.history.setAccessibleName("Konuşma geçmişini göster veya yenile")
         self.history.clicked.connect(self._request_history)
         header.addWidget(self.history)
-        header.addWidget(HelpTip(_HELP_HISTORY), 0, Qt.AlignmentFlag.AlignVCenter)
         hist.addLayout(header)
         hist.addWidget(make_label("Yeni sohbet açmak geçmişi silmez.", "fieldLabel"))
         # Arama yalnız yüklenmiş satırları süzer; yeni veri kaynağı ya da araç çağrısı yok.
@@ -128,7 +106,7 @@ class DataPanel(QWidget):
         self.search.setPlaceholderText("Konuşmalarda ara: bir kelime ya da tarih yaz")
         self.search.setAccessibleName("Geçmişte ara")
         self.search.textChanged.connect(lambda _: self._render_history())
-        hist.addWidget(make_field("Geçmişte ara", self.search, _HELP_SEARCH))
+        hist.addWidget(make_field("Geçmişte ara", self.search))
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
         self.preview.setAccessibleName("Konuşma geçmişi")
@@ -165,7 +143,7 @@ class DataPanel(QWidget):
         )
         retention_row = QHBoxLayout()
         retention_row.setSpacing(8)
-        retention_row.addWidget(make_field("Saklama süresi", self.days, _HELP_DAYS))
+        retention_row.addWidget(make_field("Saklama süresi", self.days))
         # Düğme alt kenara hizalı: alan etiketi üstte olsa da düğme kutuyla aynı çizgide durur.
         retention_row.addWidget(self.retention, 0, Qt.AlignmentFlag.AlignBottom)
         retention_row.addWidget(HelpTip(_HELP_RETENTION), 0, Qt.AlignmentFlag.AlignBottom)
@@ -210,12 +188,11 @@ class DataPanel(QWidget):
         retry_row = QHBoxLayout()
         retry_row.setSpacing(6)
         retry_row.addWidget(self.retry)
-        retry_row.addWidget(HelpTip(_HELP_RETRY), 0, Qt.AlignmentFlag.AlignVCenter)
         retry_col.addLayout(retry_row)
         retry_col.addWidget(self.retry_warning, 0, Qt.AlignmentFlag.AlignRight)
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
-        filter_row.addWidget(make_field("Teslim durumu", self.filter, _HELP_FILTER))
+        filter_row.addWidget(make_field("Teslim durumu", self.filter))
         filter_row.addWidget(self.refresh, 0, Qt.AlignmentFlag.AlignBottom)
         filter_row.addStretch()
         filter_row.addLayout(retry_col)
@@ -242,7 +219,6 @@ class DataPanel(QWidget):
         self.memory_refresh.setAccessibleName("Kuralları yenile")
         self.memory_refresh.clicked.connect(self._request_memory)
         mem_header.addWidget(self.memory_refresh)
-        mem_header.addWidget(HelpTip(_HELP_RULES), 0, Qt.AlignmentFlag.AlignVCenter)
         mem.addLayout(mem_header)
         mem.addWidget(
             make_label(

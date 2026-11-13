@@ -45,10 +45,7 @@ class TriggersSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        box, listing = group("Tanımlı tetikleyiciler", divided=False, help=(
-            "Her tetikleyici bir klasörü izler; yeni dosya gelince bildirim gönderir. Bildirimdeki "
-            "düğmeye basmadan hiçbir şey çalışmaz. Düzenle ve Sil yalnız o tetikleyiciyi etkiler."
-        ))
+        box, listing = group("Tanımlı tetikleyiciler", divided=False)
         layout.addWidget(box)
         self.trigger_list = QListWidget()
         self.trigger_list.setAccessibleName("Tanımlı tetikleyiciler")
@@ -69,10 +66,7 @@ class TriggersSection(QWidget):
         # Liste boşken tek birincil eylem boş durumdaki düğmedir; alttaki yalnız liste doluyken
         # görünür (UX-09). Ayar dosyasını dış editörde açan düğme yok: form her alanı kapsar.
         self.add_button.setVisible(False)
-        listing.addLayout(button_row(self.refresh_button, self.add_button, help=(
-            "Yenile: listeyi ve son bildirim zamanlarını yeniden okur. Tetikleyici ekle: yeni "
-            "klasör izleyicisi kurar; Zamanlı işler açık olmalı."
-        )))
+        listing.addLayout(button_row(self.refresh_button, self.add_button))
         listing.addWidget(meta_label(
             "Bildirim yalnız sorar: düğmeye basmadan hiçbir şey çalışmaz. "
             "Tetikleyiciyi yalnız sen eklersin; Artemis kendi başına ekleyemez."

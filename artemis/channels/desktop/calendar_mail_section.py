@@ -72,20 +72,12 @@ class CalendarMailSection(QWidget):
             calendar, "Gizli ICS adresi", self.calendar_url,
             "Google Takvim: Ayarlar > takvimi entegre et > iCal biçiminde gizli adres. "
             "https:// ile başlamalı; yalnız kimlik kasasına yazılır.",
-            help=(
-                "Takvimini salt okunur okumak için gizli adres. Adres Windows kimlik kasasına "
-                "yazılır, ayar dosyasına girmez; kaydetmeden önce okunup denenir. Adresi bilen "
-                "takvimini görebilir, paylaşma."
-            ),
         )
         self.calendar_save = QPushButton("Kaydet ve dene")
         self.calendar_save.clicked.connect(self._save_calendar)
         self.calendar_delete = QPushButton("Kaydı sil")
         self.calendar_delete.clicked.connect(self._delete_calendar)
-        calendar.addLayout(button_row(self.calendar_delete, self.calendar_save, help=(
-            "Kaydet ve dene: adresi okuyup denemeyi başarırsa kasaya yazar. Kaydı sil: kasadaki "
-            "adresi siler (ortam değişkenine dokunmaz)."
-        )))
+        calendar.addLayout(button_row(self.calendar_delete, self.calendar_save))
         self.mail_password = QLineEdit()
         self.mail_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.mail_password.setAccessibleName("Posta uygulama parolası")
@@ -93,19 +85,12 @@ class CalendarMailSection(QWidget):
             mail, "Uygulama parolası", self.mail_password,
             "Gmail için hesap parolası değil, uygulama parolası. Sunucu ve kullanıcıyı yukarıya "
             "yazıp “Kaydedildi” yazısını bekle, sonra dene.",
-            help=(
-                "Posta hesabının uygulama parolası. Windows kimlik kasasına yazılır, ayar "
-                "dosyasına girmez; kaydetmeden önce sunucuya bağlanıp denenir."
-            ),
         )
         self.mail_save = QPushButton("Kaydet ve dene")
         self.mail_save.clicked.connect(self._save_mail)
         self.mail_delete = QPushButton("Kaydı sil")
         self.mail_delete.clicked.connect(self._delete_mail)
-        mail.addLayout(button_row(self.mail_delete, self.mail_save, help=(
-            "Kaydet ve dene: sunucuya bağlanıp denemeyi başarırsa parolayı kasaya yazar. "
-            "Kaydı sil: kasadaki parolayı siler (ortam değişkenine dokunmaz)."
-        )))
+        mail.addLayout(button_row(self.mail_delete, self.mail_save))
         self.message = meta_label("")
         self.message.setAccessibleName("Takvim ve posta işlem sonucu")
         layout.addWidget(self.message)

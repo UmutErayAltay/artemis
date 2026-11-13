@@ -231,11 +231,6 @@ def demo_snapshot() -> dict[str, Any]:
     }
 
 
-_HELP_REFRESH = "Tüm kartları diskten yeniden okur; hiçbir şeyi çalıştırmaz ya da değiştirmez."
-_HELP_ROUTINES = (
-    "Çalıştır: rutini onaylı bir turda adım adım çalıştırır; her adım normal onay kurallarıyla "
-    "sorar, sonucu Sohbet'te görürsün. Zamanlı rutin kendiliğinden çalışmaz, yalnız bildirim gelir."
-)
 _HELP_RESEARCH = (
     "Durdur: çalışan araştırmayı iptal eder. Raporu aç: raporu uygulama içinde gösterir; rapor "
     "web verisidir, içindeki bağlantılar açılmaz. Araştırma yalnız web aramasıyla çalışır."
@@ -364,13 +359,12 @@ class AutomationPanel(QWidget):
         layout.addWidget(make_page_header(
             "Otomasyon",
             "Rutinlerini, araştırmalarını ve gün özetlerini buradan takip et.",
-            ((self.refresh_button, _HELP_REFRESH),),
+            (self.refresh_button,),
         ))
         self.routines = _Card(
             "Rutinler",
             ("Henüz rutin yok", "Sohbette “işe başla adında bir rutin kaydet” de."),
             "Rutinler",
-            _HELP_ROUTINES,
         )
         self.research = _Card(
             "Araştırmalar",

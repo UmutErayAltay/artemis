@@ -39,25 +39,9 @@ from artemis.channels.desktop.projects_panel import (
 from artemis.channels.desktop.widgets import HelpTip
 
 _SOURCE_LABEL = {"artemis": "Artemis", "codex": "Codex"}
-_HELP_SELECT = (
-    "Seçili peti masaüstündeki arkadaşın ve uygulama başlığındaki yüz yapar (karta çift tıklamak "
-    "da aynı). Yalnız görünümü değiştirir; izinleri etkilemez."
-)
 _HELP_NEW = (
     "Pet üretici atölyesini açar. Çizimi bir model yapar; model buluttaysa yazdığın tarif ona "
     "gider, ücretliyse bütçeden düşer."
-)
-_HELP_LIST = (
-    "Küre ve yüklü petler. Bir kart seç, sonra Masaüstüne al; Sil ve Pet yükle bu listeyi "
-    "değiştirir."
-)
-_HELP_DELETE = (
-    "Seçili peti diskten siler (onay sorar). Yalnız Artemis'e yüklenen ya da ürettiğin petler "
-    "silinir; seçiliyse Küre'ye dönülür."
-)
-_HELP_IMPORT = (
-    "Codex biçimli bir peti zip ya da klasörden Artemis'e kopyalar. İçeriği ve lisansı senin "
-    "sorumluluğundadır; aynı adlı pet varsa üzerine yazmadan önce sorar."
 )
 _ORB_LABEL = "Küre · Artemis"
 _ORB_NAME = "Küre"
@@ -259,17 +243,19 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
 
     def _with_tip(self, button: QPushButton, text: str) -> QHBoxLayout:
         """Düğme + "?"; düğme `_show_button` ile gizlenip gösterilince baloncuk da eşlenir."""
-        tip = HelpTip(text)
-        self._tips[button] = tip
         row = QHBoxLayout()
         row.setSpacing(6)
         row.addWidget(button)
-        row.addWidget(tip, 0, Qt.AlignmentFlag.AlignVCenter)
+        if text:
+            tip = HelpTip(text)
+            self._tips[button] = tip
+            row.addWidget(tip, 0, Qt.AlignmentFlag.AlignVCenter)
         return row
 
     def _show_button(self, button: QPushButton, visible: bool) -> None:
         button.setVisible(visible)
-        self._tips[button].setVisible(visible)
+        if button in self._tips:
+            self._tips[button].setVisible(visible)
 
     def _build_gallery_page(self) -> QWidget:
         # Kaydırıcı yok: Petler sayfasının tek kaydırma bölgesi app.py'deki pet_scroll'dur.
@@ -314,7 +300,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         self.new_button.clicked.connect(self.show_workshop)
         self._tips: dict[QPushButton, HelpTip] = {}  # düğme gizlenince "?" de gizlenir
         for button, tip in (
-            (self.hero_select_button, _HELP_SELECT), (self.new_button, _HELP_NEW),
+            (self.hero_select_button, ""), (self.new_button, _HELP_NEW),
         ):
             button.setMinimumWidth(128)
             actions.addLayout(self._with_tip(button, tip))
@@ -332,7 +318,6 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         heading = QLabel("Yüklü petler")
         heading.setObjectName("sectionTitle")
         head.addWidget(heading)
-        head.addWidget(HelpTip(_HELP_LIST), 0, Qt.AlignmentFlag.AlignVCenter)
         head.addStretch(1)
         self.delete_button = QPushButton("Sil")
         self.delete_button.setObjectName("danger")
@@ -350,7 +335,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
             "hiçbirini kendisi dağıtmaz."
         )
         for button, tip in (
-            (self.delete_button, _HELP_DELETE), (self.import_button, _HELP_IMPORT),
+            (self.delete_button, ""), (self.import_button, ""),
         ):
             button.setMinimumWidth(88)
             head.addLayout(self._with_tip(button, tip))

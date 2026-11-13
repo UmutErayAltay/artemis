@@ -222,7 +222,7 @@ class AgentDialog(FormDialog):
         for caption, widget, hint, help_text in (
             (
                 "Ad", self.name, "Küçük harf, rakam, _ veya -",
-                "Ajanın listede ve proje ayarında görünen kısa adı; benzersiz olmalı.",
+                "",
             ),
             (
                 "Komut", self.command, None,
@@ -231,20 +231,17 @@ class AgentDialog(FormDialog):
             ),
             (
                 "Argümanlar", self.args, None,
-                "Komuta eklenen argümanlar, satır başına bir tane. {prompt_file}, {workdir} ve "
-                "{repo} çalışma anında gerçek değerle değişir.",
+"",
             ),
             (
                 "İstem biçimi", self.prompt_via, None,
-                "Ajana verilecek iş metninin nasıl iletileceği: standart girdiden (stdin) ya da "
-                "geçici bir dosya olarak ({prompt_file}).",
+"",
             ),
             (
                 "Görünür pencere argümanları (isteğe bağlı)",
                 self.visible_args,
                 "Satır başına bir argüman. {prompt} kısa yönerge, {prompt_file} tam istemdir.",
-                "Boş bırakırsan görünür pencere kipi kapalı kalır; doldurursan ajan görünür bir "
-                "konsol penceresinde de çalıştırılabilir.",
+"",
             ),
             (
                 "Ortam değişkeni adları (isteğe bağlı)",
@@ -257,7 +254,7 @@ class AgentDialog(FormDialog):
             widget.setAccessibleName(caption)
             label = QLabel(caption)
             label.setObjectName("fieldLabel")
-            layout.addLayout(with_help(label, help_text))
+            layout.addLayout(with_help(label, help_text)) if help_text else layout.addWidget(label)
             layout.addWidget(widget)
             if hint:
                 note = QLabel(hint)

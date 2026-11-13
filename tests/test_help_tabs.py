@@ -39,23 +39,27 @@ def check_texts(found: list[HelpTip]) -> None:
         assert tip.accessibleDescription() == text
 
 
-def test_every_tab_has_bubbles(qt_app: QApplication, tmp_path: Path) -> None:
+def test_every_tab_stays_within_caps_and_keeps_key_bubbles(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
     window = build_window(tmp_path / "ignored.yaml", demo=True, app=qt_app)
     try:
         settings = window.settings_panel
+        chat = tips(window.model_box.parentWidget())  # type: ignore[arg-type]  # üst çubuk
         pages = {
-            "chat": (window, 8),  # üst çubuk 3 + başlık 2 + yazma alanı 2 + bildirim 1
-            "projects": (window.projects_panel, 12),
-            "data": (window.data_panel, 6),
-            "automation": (window.automation_panel, 4),
-            "pet": (settings.pet, 8),
-            "routines": (settings.routines, 4),
-            "skills": (settings.skills, 3),
+            "chat": (chat, 4, ["Otomatik"]),
+            "projects": (tips(window.projects_panel), 4, ["push yapmaz", "kesilir"]),
+            "data": (tips(window.data_panel), 4, ["geri gelmez", "geri alınamaz"]),
+            "automation": (tips(window.automation_panel), 4, ["Telegram'a gitmez", "web"]),
+            "pet": (tips(settings.pet), 4, []),
+            "routines": (tips(settings.routines), 5, []),
+            "skills": (tips(settings.skills), 5, []),
         }
-        for name, (page, minimum) in pages.items():
-            found = tips(page)
-            assert len(found) >= minimum, (name, len(found))
+        for name, (found, cap, words) in pages.items():
+            assert 1 <= len(found) <= cap or (not words and len(found) <= cap), (name, len(found))
             check_texts(found)
+            for word in words:
+                assert any(word in tip.toolTip() for tip in found), (name, word)
     finally:
         window.close()
 
@@ -76,8 +80,9 @@ def test_pet_creator_bubbles(qt_app: QApplication, tmp_path: Path) -> None:
         creator = window.settings_panel.pet.creator
         assert creator is not None
         found = tips(creator)
-        assert len(found) >= 7
+        assert 1 <= len(found) <= 3
         check_texts(found)
+        assert any("gönderir" in tip.toolTip() for tip in found)  # ne, hangi modele gider
     finally:
         window.close()
 

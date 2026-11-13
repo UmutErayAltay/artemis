@@ -79,10 +79,6 @@ class SkillsSection(QWidget):
             button.setEnabled(False)
         valid.addLayout(button_row(
             self.delete_button, self.edit_button, self.try_button, self.new_button,
-            help=(
-                "Yeni beceri/Düzenle: ad, açıklama ve talimat formunu açar. Dene: sohbet kutusuna "
-                "/beceri-adı yazar, göndermez. Sil: dosyayı kalıcı siler (onay sorar)."
-            ),
         ))
         self.fix_button = QPushButton("Düzelt")
         self.fix_button.setToolTip("Bozuk dosyayı uygulama içinde aç ve onar")
@@ -91,10 +87,6 @@ class SkillsSection(QWidget):
         self.delete_invalid_button.setEnabled(False)
         invalid.addLayout(button_row(
             self.delete_invalid_button, self.fix_button,
-            help=(
-                "Düzelt: bozuk dosyayı uygulama içinde açar; yalnız geçerliyse kaydedilir. Sil: "
-                "dosyayı kalıcı siler (onay sorar)."
-            ),
         ))
         # Klasörü göster yalnız dosya gezginini açar (düzenleyici değil); ikincil, düşük vurgu.
         self.open_button = QPushButton("Klasörü göster")
@@ -106,10 +98,6 @@ class SkillsSection(QWidget):
         invalid.addWidget(self.folder_label)
         invalid.addLayout(button_row(
             self.choose_button, self.open_button, self.refresh_button,
-            help=(
-                "Klasör seç: beceri klasörünü değiştirir ve ayar dosyasına yazar. Klasörü göster: "
-                "Dosya Gezgini'nde açar. Yenile: klasörü yeniden okur."
-            ),
         ))
         invalid.addWidget(meta_label(
             "Beceri metni yerel bir dosyadır; bulut modele giden istemin parçası olur, "

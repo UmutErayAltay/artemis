@@ -378,39 +378,9 @@ _HELP_PROJECT = (
     "İşin yapılacağı, Ayarlar'da tanımlı yerel depo. Ajan dosyaları bu depoda düzenler ve "
     "yerel commit atabilir; push yapmaz."
 )
-_HELP_AGENT = (
-    "İşi yapacak komut satırı ajanı (Ayarlar > GitHub > Kod ajanları). Ajan makinende ayrı bir "
-    "program olarak çalışır."
-)
 _HELP_MODE = (
     "Arka planda: pencere açılmaz, durumu buradan izlersin. Görünür pencerede: ajan kendi "
     "penceresinde çalışır; pencereyi kapatırsan iş kesilir ve Artemis soru-cevap yapamaz."
-)
-_HELP_WORKDIR = (
-    "Ajanın başladığı klasör; oradaki kuralları yükler. Depo dışı bir klasör seçersen ajan o "
-    "klasördeki dosyaları da değiştirebilir."
-)
-_HELP_ADD_FOLDER = (
-    "Seçtiğin klasörü takma adla başlangıç klasörleri listesine ekler ve ayar dosyasına yazar. "
-    "Klasörü yalnız sen seçersin; model yol veremez."
-)
-_HELP_DEFAULT = (
-    "Seçili ajan ve klasörü bu projenin varsayılanı olarak ayar dosyasına yazar; sonraki "
-    "işlerde bu seçim hazır gelir."
-)
-_HELP_TASK = "Ajanın yapacağı işi anlat. Taslakta ve onay ekranında aynen görünür."
-_HELP_SCOPE = (
-    "Ajanın dokunabileceği dosya, klasör ya da alan; her satır bir madde. Onay ekranında "
-    "tam olarak görürsün."
-)
-_HELP_ACCEPTANCE = "İşin bittiğini nasıl anlayacağın (ör. testler geçiyor); her satır bir madde."
-_HELP_PREPARE = (
-    "Yazdıklarından değişmez bir yerel taslak oluşturur; ajanı BAŞLATMAZ. Sağda inceleyip "
-    "onaylayınca çalışır."
-)
-_HELP_ANSWER = (
-    "Ajanın sorusuna yazdığın cevabı gönderir ve aynı oturumda devam ettirir (yalnız Claude). "
-    "Her seferinde onay ister."
 )
 _HELP_START = (
     "Durumu yenile: listeyi şimdi yeniden okur. Taslağı onayla ve başlat: seçili taslağı ajanda "
@@ -599,13 +569,13 @@ class ProjectsPanel(QWidget):
         self._set_projects([])
         left_lay.addWidget(make_field("Proje", self.project, _HELP_PROJECT))
         left_lay.addWidget(self._build_agent_row())
-        for caption, widget, tip in (
-            ("Görev", self.task, _HELP_TASK),
-            ("Kapsam", self.scope, _HELP_SCOPE),
-            ("Kabul ölçütleri", self.acceptance, _HELP_ACCEPTANCE),
+        for caption, widget in (
+            ("Görev", self.task),
+            ("Kapsam", self.scope),
+            ("Kabul ölçütleri", self.acceptance),
         ):
             widget.setAccessibleName(caption)
-            left_lay.addWidget(make_field(caption, widget, tip))
+            left_lay.addWidget(make_field(caption, widget))
         self.prepare_button = QPushButton("Taslak hazırla")
         # Pasif düğmenin nedeni düğmenin hemen yanında muted metindir: ayrı satır olsaydı
         # 1280x850'de yeni seçiciler yüzünden kıvrımın altına düşerdi.
@@ -613,7 +583,6 @@ class ProjectsPanel(QWidget):
         prepare_row = QHBoxLayout()
         prepare_row.setSpacing(12)
         prepare_row.addWidget(self.prepare_button)
-        prepare_row.addWidget(HelpTip(_HELP_PREPARE), 0, Qt.AlignmentFlag.AlignVCenter)
         prepare_row.addWidget(self.prepare_reason, 1)
         left_lay.addLayout(prepare_row)
         left_lay.addStretch()  # boşluk eylem satırlarının altında kalır; düğme son editöre yapışık
@@ -662,7 +631,6 @@ class ProjectsPanel(QWidget):
         answer_row = QHBoxLayout()
         answer_row.addStretch()
         answer_row.addWidget(self.answer_button)
-        answer_row.addWidget(HelpTip(_HELP_ANSWER), 0, Qt.AlignmentFlag.AlignVCenter)
         q_lay.addLayout(answer_row)
         right_lay.addWidget(self.question_box)
         self.refresh_button = QPushButton("Durumu yenile")
@@ -777,13 +745,12 @@ class ProjectsPanel(QWidget):
         folder_row.setSpacing(8)
         folder_row.addWidget(self.workdir_combo, 1)
         folder_row.addWidget(self.add_folder_button)
-        folder_row.addWidget(HelpTip(_HELP_ADD_FOLDER), 0, Qt.AlignmentFlag.AlignVCenter)
         self._agent_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._agent_row.setSpacing(12)
-        self._agent_row.addWidget(make_field("Kod ajanı", self.agent_combo, _HELP_AGENT), 3)
+        self._agent_row.addWidget(make_field("Kod ajanı", self.agent_combo), 3)
         self._agent_row.addWidget(make_field("Çalışma kipi", self.mode_combo, _HELP_MODE), 3)
         self._agent_row.addWidget(
-            make_field("Başlangıç klasörü", folder_box, _HELP_WORKDIR), 4
+            make_field("Başlangıç klasörü", folder_box), 4
         )
         column.addLayout(self._agent_row)
         # Çözülmüş yol 12px soluk ipucudur; uyarı yalnız proje dışı klasörde görünür.
@@ -802,7 +769,6 @@ class ProjectsPanel(QWidget):
         hint_row.setSpacing(8)
         hint_row.addWidget(self.workdir_hint, 1)
         hint_row.addWidget(self.default_button)
-        hint_row.addWidget(HelpTip(_HELP_DEFAULT), 0, Qt.AlignmentFlag.AlignVCenter)
         column.addLayout(hint_row)
         for widget in (self.workdir_warning, self.agent_reason):
             column.addWidget(widget)

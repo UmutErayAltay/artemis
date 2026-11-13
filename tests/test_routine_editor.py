@@ -206,7 +206,7 @@ def test_reorder_steps_and_help_tips(qt_app: QApplication) -> None:
     dialog.submit()
     assert dialog.result_routine is not None
     assert [s.tool for s in dialog.result_routine.steps] == ["mixed_tool", "plain_tool"]
-    assert len(dialog.findChildren(HelpTip)) >= 6  # ad, adımlar, araç, her argüman
+    assert len(dialog.findChildren(HelpTip)) <= 3  # yalnız "Adımlar"; argüman başına baloncuk yok
     assert all(tip.toolTip() for tip in dialog.findChildren(HelpTip))
     dialog.deleteLater()
 
