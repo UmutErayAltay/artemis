@@ -32,7 +32,7 @@ from artemis.proactive.routines import RoutinesError, RoutineStore
 from artemis.proactive.schedule import format_local
 from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 
-_APPLY_NOTE = "Çalışan uygulama yeni listeyi Uygula'ya basınca (ya da yeniden açılınca) alır."
+_APPLY_NOTE = "Çalışan uygulama yeni listeyi Ayarlar'dan çıkınca (ya da yeniden açılınca) alır."
 
 
 class TriggersSection(QWidget):
@@ -108,7 +108,9 @@ class TriggersSection(QWidget):
         items = settings.triggers.items
         self.add_button.setEnabled(not self._demo and len(items) < MAX_TRIGGERS)
         if items and not settings.triggers.enabled:
-            self.notice.setText("Tetikleyiciler kapalı: yukarıdaki kutuyu açıp Uygula'ya bas.")
+            self.notice.setText(
+                "Tetikleyiciler kapalı: yukarıdaki kutuyu açınca kendiliğinden kaydedilir."
+            )
         if (settings.triggers.enabled or items) and not settings.proactive.enabled:
             self.warning_row.show()
             self.proactive_button.show()
@@ -263,7 +265,7 @@ class TriggersSection(QWidget):
     def _tick_proactive(self) -> None:
         self.proactive_requested.emit()
         self.proactive_button.hide()
-        self.proactive_warning.setText("Zamanlı işler işaretlendi; kaydetmek için Uygula'ya bas.")
+        self.proactive_warning.setText("Zamanlı işler işaretlendi; kendiliğinden kaydedilir.")
 
     def _open_config(self) -> None:
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._config_path)))

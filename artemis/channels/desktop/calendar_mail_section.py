@@ -2,7 +2,7 @@
 
 Sır alanları Telegram token alanıyla aynı desendedir (ADR 0051): parola kipinde, yalnız kimlik
 kasasına yazılır, doğrulanmadan yazılmaz, hiçbir yerde gösterilmez/loglanmaz. Sunucu, kullanıcı ve
-kutular ana panelin "Uygula" akışındadır; deneme KAYITLI ayarları okur. Ağ çağrısı QThread'dedir.
+kutular ana panelin otomatik kaydındadır; deneme KAYITLI ayarları okur. Ağ çağrısı QThread'dedir.
 """
 
 from __future__ import annotations
@@ -84,7 +84,7 @@ class CalendarMailSection(QWidget):
         field(
             mail, "Uygulama parolası", self.mail_password,
             "Gmail için hesap parolası değil, uygulama parolası. Sunucu ve kullanıcıyı yukarıya "
-            "yazıp Uygula'ya bas, sonra dene.",
+            "yazıp “Kaydedildi” yazısını bekle, sonra dene.",
         )
         self.mail_save = QPushButton("Kaydet ve dene")
         self.mail_save.clicked.connect(self._save_mail)
@@ -151,7 +151,9 @@ class CalendarMailSection(QWidget):
             self.message.setText("Ayarlar okunamadı.")
             return
         if not (mail.host and mail.username):
-            self.message.setText("Önce sunucu ve kullanıcı adını yazıp Uygula'ya bas.")
+            self.message.setText(
+                "Önce sunucu ve kullanıcı adını yazıp “Kaydedildi” yazısını bekle."
+            )
             return
         self._start(
             lambda: check_mail(mail.host, mail.port, mail.username, password, mail.folder),

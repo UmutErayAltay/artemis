@@ -10,8 +10,6 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 from artemis.channels.desktop import provider_section, themes
-from artemis.channels.desktop.settings_panel import _CLEAN_TEXT as CLEAN
-from artemis.channels.desktop.settings_panel import _DIRTY_TEXT as DIRTY
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from tests.test_settings_panel import config
 
@@ -27,20 +25,11 @@ def _panel(tmp_path: Path, *, demo: bool = False) -> SettingsPanel:
     return SettingsPanel(config(tmp_path), demo=demo)
 
 
-def test_apply_is_disabled_until_dirty_and_survives_window_enable(tmp_path: Path, qt_app) -> None:
-    panel = _panel(tmp_path)
-    assert not panel.apply_button.isEnabled() and panel.dirty_label.text() == CLEAN
-    panel.apply_button.setEnabled(True)  # pencere (_set_controls) hazır diyor; değişiklik yok
-    assert not panel.apply_button.isEnabled()
+def test_demo_never_autosaves_and_has_no_revert(tmp_path: Path, qt_app) -> None:
+    panel = _panel(tmp_path, demo=True)
     panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
-    assert panel.apply_button.isEnabled()
-    assert panel.dirty_label.text() == DIRTY
-    panel.apply_button.setEnabled(False)  # işlem sürerken pencere kapatır
-    assert not panel.apply_button.isEnabled()
-    panel.apply_button.setEnabled(True)
-    assert panel.apply_button.isEnabled()
-    panel.refresh()
-    assert not panel.apply_button.isEnabled()
+    assert not panel._dirty and not panel._save_timer.isActive()
+    assert panel.revert_button.isHidden()
     panel.deleteLater()
 
 
@@ -48,7 +37,7 @@ def test_theme_change_does_not_dirty_the_form(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path)
     panel.theme_cards["dark"].radio.click()
     panel.set_theme("light")
-    assert panel.dirty_label.text() == CLEAN and not panel.apply_button.isEnabled()
+    assert not panel._dirty
     # anında kaydedilen sayfa açıklamayla değil kısa "Kaydedildi" ile bildirir
     assert panel.saved_notes["Görünüm"].text() == "Kaydedildi"
     assert not panel.saved_notes["Görünüm"].isHidden()
@@ -58,7 +47,7 @@ def test_theme_change_does_not_dirty_the_form(tmp_path: Path, qt_app) -> None:
 def test_device_toggle_rebuild_is_not_a_user_change(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path)
     panel.advanced_devices.setChecked(True)
-    assert panel.dirty_label.text() == CLEAN
+    assert not panel._dirty
     panel.deleteLater()
 
 
@@ -119,14 +108,14 @@ def test_theme_change_restyles_provider_section(tmp_path: Path, qt_app) -> None:
     panel.deleteLater()
 
 
-def test_last_row_is_reachable_above_the_bar(tmp_path: Path, qt_app) -> None:
+def test_no_sticky_bar_and_notice_lives_in_title_row(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path)
-    bar = panel.apply_button.parentWidget()
-    assert bar is not None
+    assert not hasattr(panel, "apply_button") and not hasattr(panel, "dirty_label")
+    assert panel.title_row.indexOf(panel.notice) >= 0
+    assert panel.title_row.indexOf(panel.revert_button) >= 0
     for index in range(panel.stack.count()):
         layout = panel.stack.widget(index).layout()
-        assert layout is not None
-        assert layout.contentsMargins().bottom() >= bar.height()
+        assert layout is not None and layout.contentsMargins().bottom() == 0
     panel.deleteLater()
 
 

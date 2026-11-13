@@ -429,17 +429,16 @@ def test_settings_codex_is_builtin_default_applies_without_profile(
     path = config(tmp_path)
     panel = SettingsPanel(path)
     assert panel.agent_list.count() == 2 and panel.agent_list.item(0).text().startswith("claude")
-    assert not panel.apply_button.isEnabled()
+    assert not panel._dirty
     assert panel.agent_list.item(1).text().startswith("codex") and "yerleşik" in (
         panel.agent_list.item(1).text()
     )
-    # Codex yerleşik: profil eklemeden varsayılan seçilebilir; Uygula yalnız default_agent yazar.
+    # Codex yerleşik: profil eklemeden varsayılan seçilebilir; kayıt yalnız default_agent yazar.
     assert panel.default_agent_combo.findData("codex") >= 0
     panel.default_agent_combo.setCurrentIndex(panel.default_agent_combo.findData("codex"))
     panel.default_agent_combo.activated.emit(panel.default_agent_combo.currentIndex())
-    assert panel.apply_button.isEnabled()
-    assert panel.dirty_label.text() == "Kaydedilmemiş değişiklik var"
-    assert load_settings(path).code_agent.default_agent == "claude"  # Uygula'ya kadar yazılmadı
+    assert panel._dirty
+    assert load_settings(path).code_agent.default_agent == "claude"  # kayda kadar yazılmadı
     save_choices(path, None, code_agent=panel.code_agent_values())
     agent = load_settings(path).code_agent
     assert agent.default_agent == "codex" and agent.agents == {}
@@ -507,7 +506,7 @@ def test_settings_custom_agent_is_staged_not_written(
 
     monkeypatch.setattr(AgentDialog, "exec", fake_exec)
     panel.add_custom_agent_button.click()
-    assert "aider" in panel.code_agents and panel.apply_button.isEnabled()
+    assert "aider" in panel.code_agents and panel._dirty
     assert panel.code_agent_values()["agents"] == {
         "aider": {"kind": "generic", "command": "aider", "prompt_via": "stdin"}
     }

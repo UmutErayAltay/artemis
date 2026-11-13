@@ -88,6 +88,7 @@ from artemis.channels.desktop.projects_panel import (
 from artemis.channels.desktop.selection_popup import SelectionPopup
 from artemis.channels.desktop.settings_panel import (
     SettingsPanel,
+    _same,
     save_choices,
     save_computer_mode,
 )
@@ -1463,6 +1464,12 @@ class DesktopWindow(QMainWindow):
                             "Artemis", "appearance"),
         )
         self.settings_panel.apply_requested.connect(self._apply_settings)
+        # Otomatik kayıt config'i yazar ama çalışma zamanı (= yeni sohbet) yalnız Ayarlar
+        # sekmesinden çıkılınca bir kez yeniden kurulur; her düzenlemede sohbet sıfırlanmaz.
+        # Karar bayrakla değil içerikle verilir: çalışma zamanının kurulduğu config'in dökümü
+        # saklanır. Böylece kendi başına yazan bölümler (tetikleyici formu, beceri klasörü) da
+        # kapsanır, geri alma eski hâle dönünce boşuna yeniden kurulmaz.
+        self._runtime_dump = self.settings_panel.config_dump()
         self.settings_panel.routines.tool_requested.connect(self._submit_routine_tool)
         self.settings_panel.skills.try_requested.connect(self._try_skill)
         # Üst çubuktaki düğme açılışta config'teki kipi gösterir; sinyal kapalı ki açılış
@@ -1515,6 +1522,8 @@ class DesktopWindow(QMainWindow):
             ("Ayarlar", self.settings_scroll),
         ])
         self.tabs.currentChanged.connect(self._sync_navigation)
+        self._settings_open = self.tabs.currentWidget() is self.settings_scroll
+        self.tabs.currentChanged.connect(self._settings_tab_changed)
         self._sync_navigation()
         body = QHBoxLayout()
         body.setSpacing(16)
@@ -1573,6 +1582,25 @@ class DesktopWindow(QMainWindow):
         for page, button in self.nav_buttons.items():
             button.setChecked(page is self.tabs.currentWidget())
 
+    def _settings_tab_changed(self, *_args: object) -> None:
+        """Ayarlar'dan çıkış: bekleyen düzenleme yazılır, sonra tek yeniden kurulum. Girişte
+        "geri al" taban çizgisi o anki kayıtlı dosyadan yenilenir."""
+        is_open = self.tabs.currentWidget() is self.settings_scroll
+        if is_open == self._settings_open:
+            return
+        self._settings_open = is_open
+        if is_open:
+            self.settings_panel.begin_session()
+            return
+        self.settings_panel.flush()
+        if self._settings_restart_pending:
+            self._request_restart(self.settings_panel.notice)
+
+    @property
+    def _settings_restart_pending(self) -> bool:
+        """Kayıtlı config, çalışma zamanının son kurulduğu config'ten (tür-katı) farklı mı."""
+        return not _same(self.settings_panel.config_dump(), self._runtime_dump)
+
     def _toggle_theme(self) -> None:
         """Açık/koyu arasında geçer; karma (mixed) türev korunur."""
         name = self._theme
@@ -1589,7 +1617,7 @@ class DesktopWindow(QMainWindow):
         self._check_provider(open_settings=False)
         if self._exiting or self._demo:
             self.settings_panel.providers.status.setText(
-                "Kaydedildi; işlem bitince Uygula ile yeni ayarlar devreye girer."
+                "Kaydedildi; işlem bitince yeni ayarlar devreye girer."
             )
             return
         self._request_restart(self.settings_panel.providers.status)
@@ -1643,6 +1671,8 @@ class DesktopWindow(QMainWindow):
         geçersiz kılar; bu yüzden hepsi boşta olana dek ertelenir (bayrak tek seferliktir).
         Config zaten yazılmıştır: ertelenen yalnız canlı kuruluştur, ayar kaybolmaz.
         """
+        # Bu istek o anki config'le kurar; sekmeden çıkış aynı içerik için ikinci kez kurmaz.
+        self._runtime_dump = self.settings_panel.config_dump()
         if self._restart_settings:
             # Sürmekte olan kuruluş config'i durma bittikten sonra okur; ikincisi gereksiz.
             return
@@ -1678,7 +1708,7 @@ class DesktopWindow(QMainWindow):
             return
         text = (
             f"{len(report.cloned)} yeni GitHub reposu çekildi; "
-            "Ayarlar'da Uygula ile kullanıma girer."
+            "Ayarlar'dan çıkınca kullanıma girer."
         )
         self.pet.say(text, "job")
         if self._tray is not None:
@@ -1690,12 +1720,12 @@ class DesktopWindow(QMainWindow):
         self._theme_placeholders(self.overlay)
 
     def _apply_settings(self, device: int | str | None) -> None:
+        """Otomatik kayıt: doğrular ve yazar, yeniden kurmaz (sekmeden çıkınca kurulur)."""
+        panel = self.settings_panel
         if self._demo or self._exiting:
-            self.settings_panel.notice.setText(
-                "Ayarları değiştirmek için işlemin bitmesini bekle."
-            )
+            panel.save_failed("Ayarları değiştirmek için işlemin bitmesini bekle.")
             return
-        values = self.settings_panel.values()
+        values = panel.values()
         try:
             voice_key = load_settings(self._config_path).voice.listening_hotkey
             dictation_key = str(values[("dictation", "hotkey")])
@@ -1707,29 +1737,24 @@ class DesktopWindow(QMainWindow):
         except (OSError, ValueError, ValidationError, yaml.YAMLError):
             clash = selection_clash = False  # okunamayan config aşağıdaki kayıtta yakalanır
         if clash:
-            self.settings_panel.notice.setText(
-                "Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seç."
-            )
+            panel.save_failed("Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seç.")
             return
         if selection_clash:
-            self.settings_panel.notice.setText(
-                "Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı."
-            )
+            panel.save_failed("Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı.")
             return
         try:
-            save_choices(
+            written = save_choices(
                 self._config_path,
                 device,
                 values=values,
-                applications=self.settings_panel.applications,
-                code_agent=self.settings_panel.code_agent_values(),
-                stt_model=self.settings_panel.stt_model_path(),
+                applications=panel.applications,
+                code_agent=panel.code_agent_values(),
+                stt_model=panel.stt_model_path(),
             )
         except (OSError, ValueError, KeyError, TypeError):
-            self.settings_panel.notice.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
+            panel.save_failed("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
             return
-        # Meşgulken de kaydedilir; canlı kuruluş işlem bitince kendiliğinden yapılır.
-        self._request_restart(self.settings_panel.notice)
+        panel.mark_saved(written)
 
     def _restart_runtime(self) -> None:
         """Config değişince çalışma zamanını yeniden kurar (Uygula ve sağlayıcı kaydı)."""
@@ -2221,7 +2246,6 @@ class DesktopWindow(QMainWindow):
 
     def _set_controls(self) -> None:
         enabled = self._worker_ready and not self._busy and not self._exiting
-        self.settings_panel.apply_button.setEnabled(enabled and not self._demo)
         voice_ok = self._worker_ready and not self._exiting and not self._demo
         self.voice_button.setEnabled(voice_ok)
         self.composer_voice.setEnabled(voice_ok)
@@ -2648,6 +2672,8 @@ class DesktopWindow(QMainWindow):
             block.add_line(activity, line)
 
     def _request_exit(self) -> None:
+        # Bekleyen düzenleme kaybolmasın; _exiting kayıtları reddeder, o yüzden önce.
+        self.settings_panel.flush()
         self._exiting = True
         if self._approval_dialog is not None:
             self._approval_dialog.reject()

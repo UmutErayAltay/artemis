@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib
 import importlib.util
 import os
@@ -15,6 +16,7 @@ from urllib.parse import urlparse
 import yaml
 from PySide6.QtCore import (
     QEvent,
+    QFileSystemWatcher,
     QObject,
     QPoint,
     QRect,
@@ -101,9 +103,25 @@ from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_comm
 SettingPath = tuple[str, ...]
 
 _BLOCK_MAX_WIDTH = 1240  # liste + sayfa bloğu; geniş pencerede ortalanır
-_BAR_HEIGHT = 60 # alt çubuk: 12 + 36 (Uygula) + 12
-_DIRTY_TEXT = "Kaydedilmemiş değişiklik var"
-_CLEAN_TEXT = "Tüm değişiklikler kayıtlı"
+_AUTOSAVE_MS = 800  # son düzenlemeden sonra bu kadar durulunca kaydedilir
+_REVERT_TOOLTIP = (
+    "Ayarlar açıldığındaki kayıtlı hâline döner. "
+    "API anahtarları ve kasadaki parolalar geri alınmaz."
+)
+
+
+def _same(a: Any, b: Any) -> bool:
+    """Tür-katı eşitlik: True != 1, 1 != 1.0; sözlükte anahtar sırası önemsiz, listede önemli.
+
+    Python'un `==`i bool/int/float'ı eşit sayar; "geri al" ve "yazma gereksiz" kararı bu yüzden
+    sessizce yanlış çıkardı (örn. 1 yerine True kaydedilmiş sayılırdı)."""
+    if type(a) is not type(b):
+        return False
+    if isinstance(a, dict):
+        return a.keys() == b.keys() and all(_same(a[key], b[key]) for key in a)
+    if isinstance(a, list | tuple):
+        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
+    return bool(a == b)
 
 
 @dataclass(frozen=True)
@@ -272,8 +290,11 @@ def save_choices(
     applications: dict[str, str] | None = None,
     code_agent: dict[str, Any] | None = None,
     stt_model: Path | None = None,
-) -> None:
+) -> bool:
     """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir.
+
+    Dosya içeriği değişmeyecekse yazmaz ve False döner (otomatik kayıt her duraksamada dosyayı
+    yeniden yazıp izleyicileri ve yeniden başlatmayı boşuna tetiklemesin); yazdıysa True.
 
     `values` yalnız PANEL_BINDINGS yollarını kabul eder (yazım hatası sessizce yeni alan
     açmasın diye KeyError); verilmeyen yolun kayıtlı değeri korunur.
@@ -283,6 +304,7 @@ def save_choices(
         raise KeyError(f"Panel bağı olmayan ayar yolu: {sorted(unknown)}")
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    before = copy.deepcopy(raw)
     raw.setdefault("voice", {})["input_device"] = device
     for setting_path, value in (values or {}).items():
         section = raw
@@ -298,7 +320,10 @@ def save_choices(
         ]
     if code_agent is not None:
         _merge_code_agent(raw, code_agent)
+    if _same(before, raw):
+        return False
     _write_validated(path, raw)
+    return True
 
 
 def save_computer_mode(path: Path, mode: str) -> None:
@@ -651,26 +676,36 @@ class _SavedNote(QLabel):
         self._timer.start()
 
 
-class _ApplyButton(QPushButton):
-    """Uygula: yalnız değişiklik varken açık. Pencere (`_set_controls`) meşgulken `setEnabled`
-    çağırır; o izni saklarız ve kirli durumla birleştiririz, böylece ikisi birbirini ezmez."""
+class _Notice(QLabel):
+    """Üst satırdaki durum yazısı: `setText` geçicidir (~6 sn), `show_error` kalıcıdır.
 
-    def __init__(self, text: str) -> None:
-        super().__init__(text)
-        self._allowed = True
-        self._dirty = False
-        self._sync()
+    Alt çubuk kalktığı için mesajlar sayfayı itmeden köşede belirir; hata ise kullanıcı bir
+    şey yapana (yeni kayıt/geri alma/yeni metin) kadar görünür kalmalı."""
 
-    def setEnabled(self, arg__1: bool) -> None:  # noqa: N802
-        self._allowed = arg__1
-        self._sync()
+    def __init__(self) -> None:
+        super().__init__("")
+        self.setObjectName("meta")
+        self.setAccessibleName("Durum")
+        self.setWordWrap(True)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        # Uzun mesaj satırın asgari genişliğini şişirip dar pencerede yatay kaydırma açmasın.
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(6000)
+        self._timer.timeout.connect(self.clear)
 
-    def set_dirty(self, dirty: bool) -> None:
-        self._dirty = dirty
-        self._sync()
+    def setText(self, arg__1: str) -> None:  # noqa: N802
+        super().setText(arg__1)
+        if arg__1:
+            self._timer.start()
+        else:
+            self._timer.stop()
 
-    def _sync(self) -> None:
-        super().setEnabled(self._allowed and self._dirty)
+    def show_error(self, text: str) -> None:
+        super().setText(text)
+        self._timer.stop()
 
 
 class _WheelGuard(QObject):
@@ -702,7 +737,10 @@ def _install_wheel_guard() -> None:
 
 class SettingsPanel(QWidget):
     theme_changed = Signal(str)
-    apply_requested = Signal(object)  # mikrofon aygıtı; model seçimi ProviderSection'da
+    # Otomatik kayıt isteği (düzenleme durulunca ya da flush): mikrofon aygıtı; model seçimi
+    # ProviderSection'da. Pencere yazar, sonra mark_saved()/save_failed() ile geri bildirir.
+    apply_requested = Signal(object)
+    reverted = Signal()  # config dosyası oturum başındaki hâline döndü; canlı kuruluş gerekir
     # (SyncReport, otomatik_mi): otomatik eşitleme sonucu pencere tarafından baloncukla duyurulur.
     github_synced = Signal(object, bool)
 
@@ -732,13 +770,46 @@ class SettingsPanel(QWidget):
         self._github_sync = github_sync
         self._github_auto = False
         self.applications: dict[str, str] = {}
+        self._dirty = False
+        self._failed = False
+        self._baseline_bytes: bytes | None = None
+        self._baseline_dump: dict[str, Any] | None = None
+        # Tek vuruşlu zamanlayıcılar bağlı yöntemle çalışır (lambda kendini yakalarsa GC çöker).
+        self._save_timer = QTimer(self)
+        self._save_timer.setSingleShot(True)
+        self._save_timer.setInterval(_AUTOSAVE_MS)
+        self._save_timer.timeout.connect(self._apply)
+        self._disk_timer = QTimer(self)
+        self._disk_timer.setSingleShot(True)
+        self._disk_timer.setInterval(200)
+        self._disk_timer.timeout.connect(self._disk_changed)
+        self._watcher = QFileSystemWatcher(self)
+        self._watcher.fileChanged.connect(self._disk_timer.start)
+        self._watcher.directoryChanged.connect(self._disk_timer.start)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 0, 24, 24)
         layout.setSpacing(12)
         title = QLabel("Ayarlar")
         title.setObjectName("pageTitle")
         title.setFixedHeight(40)
-        layout.addWidget(title)
+        # Durum yazısı ve geri alma düğmesi başlıkla aynı satırda, sağda: alt çubuk yok.
+        self.notice = _Notice()
+        self.retry_button = QPushButton("Tekrar dene")
+        self.retry_button.setToolTip("Kaydedilemeyen değişiklikleri yeniden yazmayı dener.")
+        self.retry_button.setVisible(False)
+        self.retry_button.clicked.connect(self.flush)
+        self.revert_button = QPushButton("Değişiklikleri geri al")
+        self.revert_button.setToolTip(_REVERT_TOOLTIP)
+        self.revert_button.setVisible(False)
+        self.revert_button.clicked.connect(self._revert)
+        title_row = QHBoxLayout()
+        title_row.setSpacing(12)
+        title_row.addWidget(title)
+        title_row.addWidget(self.notice, 1)
+        title_row.addWidget(self.retry_button)
+        title_row.addWidget(self.revert_button)
+        self.title_row = title_row
+        layout.addLayout(title_row)
         # Bölüm listesi kaydırma alanının dışında: uzun sayfayı kaydırınca liste yerinde kalır.
         # Yalnız sayfa kaydırılır; liste kendi kaydırıcısını yalnız pencere kısaysa gösterir.
         self.sections = _SectionList()
@@ -752,7 +823,6 @@ class SettingsPanel(QWidget):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        # Alt dolgu sayfalarla aynı: son bölüm de alt çubuğun altında kırpılı kalmaz.
         scroll.setWidget(self.stack)
         self.sections.scroll_area = scroll
         body = QWidget()
@@ -762,8 +832,7 @@ class SettingsPanel(QWidget):
         nav = QWidget()
         nav.setFixedWidth(200)
         nav_col = QVBoxLayout(nav)
-        # Alt çubuk gövdenin üstüne biner: liste de sayfalar gibi onun kadar boşluk bırakır.
-        nav_col.setContentsMargins(0, 0, 0, _BAR_HEIGHT + 12)
+        nav_col.setContentsMargins(0, 0, 0, 12)
         nav_col.setSpacing(8)
         self.search = _SearchBox()
         self.search.setPlaceholderText("Ayarlarda ara")
@@ -786,14 +855,13 @@ class SettingsPanel(QWidget):
         def page(
             name: str, description: str, group_title: str = "", *, wide: bool = False,
         ) -> QVBoxLayout:
-            """Bölüm sayfası: 880px'i aşmayan sütun, solda; başlık + tek satır açıklama.
-            `group_title` grubun ilk sayfasında grup başlığını açar."""
+            """Bölüm sayfası: 880px'i aşmayan sütun, solda; tek satır açıklama. Sayfa adı
+            bölüm listesinde zaten seçili görünür, sayfada tekrarlanmaz. `group_title`
+            grubun ilk sayfasında grup başlığını açar."""
             nonlocal current_group
             outer = QWidget()
             row = QHBoxLayout(outer)
-            # Alt dolgu = yapışkan alt çubuğun yüksekliği: kaydırınca son satır çubuğun hemen
-            # altında kırpılı kalmaz, rahatça erişilir.
-            row.setContentsMargins(0, 0, 0, _BAR_HEIGHT)
+            row.setContentsMargins(0, 0, 0, 0)
             column = QWidget()
             # Model sayfası liste + ayrıntıyı yan yana koyar; bloğun bütün sayfa alanını kullanır.
             column.setMaximumWidth(16777215 if wide else 880)
@@ -802,19 +870,12 @@ class SettingsPanel(QWidget):
             content.setSpacing(24)
             row.addWidget(column, 1)
             row.addStretch(0)
-            head = QLabel(name)
-            head.setObjectName("sectionTitle")
-            # Anında kaydedilen sayfalar başlığın sağında kısa "Kaydedildi" gösterir; gizliyken
-            # satır yüksekliği başlıkla belirlendiği için yerleşim oynamaz.
+            # Anında kaydedilen sayfalar açıklamanın sağında kısa "Kaydedildi" gösterir.
             saved = _SavedNote()
             self.saved_notes[name] = saved
-            title_row = QHBoxLayout()
-            title_row.addWidget(head, 1)
-            title_row.addWidget(saved, 0, Qt.AlignmentFlag.AlignVCenter)
-            heading = QVBoxLayout()
-            heading.setSpacing(4)
-            heading.addLayout(title_row)
-            heading.addWidget(meta_label(description))
+            heading = QHBoxLayout()
+            heading.addWidget(meta_label(description), 1)
+            heading.addWidget(saved, 0, Qt.AlignmentFlag.AlignVCenter)
             content.addLayout(heading)
             self.sections.addItem(name)
             item = self.sections.item(self.sections.count() - 1)
@@ -839,7 +900,7 @@ class SettingsPanel(QWidget):
         self.wake_name.setPlaceholderText("Örneğin: Artemis, Ali veya Veli")
         self.wake_name.setToolTip(
             "Sesle çağırmak için kullanacağın ad. Uygulamanın adı Artemis olarak kalır. "
-            "Uygula ile ses yeniden başlatılınca geçerli olur."
+            "Ayarlar'dan çıkınca ses yeniden başlatılır ve ad geçerli olur."
         )
         field(wake, "Uyandırma adı", self.wake_name,
               "Sesle çağırma adı; uygulamanın adı Artemis kalır.")
@@ -1400,35 +1461,10 @@ class SettingsPanel(QWidget):
         self.search.textChanged.connect(self._filter_sections)
         self.search.returnPressed.connect(self._pick_first_match)
 
-        # Yapışkan alt çubuk kaydırma bölgesinin dışındadır: uzun sayfada da görünür kalır.
-        bar = QFrame()
-        bar.setObjectName("card")
-        bar.setFixedHeight(_BAR_HEIGHT)
-        bar_row = QHBoxLayout(bar)
-        bar_row.setContentsMargins(16, 12, 16, 12)
-        bar_row.setSpacing(12)
-        self.notice = meta_label("")
         self.current_device.setTextFormat(Qt.TextFormat.PlainText)
-        # Kayıt durumu açıklanmaz, gösterilir: değişiklik varken Uygula açık, yoksa kapalı.
-        self.dirty_label = QLabel(_CLEAN_TEXT)
-        self.dirty_label.setObjectName("meta")
-        self.dirty_label.setAccessibleName("Kayıt durumu")
-        self._dirty = False
-        self.apply_button = _ApplyButton("Uygula")
-        self.apply_button.setToolTip("Değişiklikleri kaydeder ve yeni sohbet başlatır.")
-        self.apply_button.setObjectName("primary")
-        self.apply_button.setFixedHeight(36)
-        self.apply_button.setMinimumWidth(88)
-        self.apply_button.clicked.connect(self._apply)
-        bar_row.addWidget(self.notice, 1)
-        bar_row.addWidget(self.dirty_label)
-        bar_row.addWidget(self.apply_button)
-        layout.addWidget(bar)
         if demo:
             self.notice.setText("Demo modunda ayarlar değiştirilmez.")
-            self.dirty_label.setVisible(False)
             self.refresh_button.setEnabled(False)
-            self.apply_button.setEnabled(False)
             self.add_application_button.setEnabled(False)
             self.remove_application_button.setEnabled(False)
             self.advanced_devices.setEnabled(False)
@@ -1465,6 +1501,8 @@ class SettingsPanel(QWidget):
         roots_model = self.file_search_roots.model()
         roots_model.rowsInserted.connect(self._mark_dirty)
         roots_model.rowsRemoved.connect(self._mark_dirty)
+        if not demo:
+            self.begin_session()
 
     def section_names(self) -> list[str]:
         return [self.sections.item(row).text() for row in range(self.sections.count())]
@@ -1570,7 +1608,7 @@ class SettingsPanel(QWidget):
             card_for.radio.setChecked(True)
 
     def _triggers_saved(self) -> None:
-        """Form `triggers.enabled`ı açmış olabilir; kutu eski kalırsa Uygula geri kapatırdı."""
+        """Form `triggers.enabled`ı açmış olabilir; kutu eski kalırsa kayıt geri kapatırdı."""
         try:
             enabled = load_settings(self.config_path).triggers.enabled
         except (OSError, ValueError):
@@ -1580,7 +1618,7 @@ class SettingsPanel(QWidget):
         self.triggers_enabled.blockSignals(blocked)
 
     def _tick_proactive(self) -> None:
-        """Dosyaya yazmaz: kutuyu işaretler (toggled -> kirli), kaydı Uygula yapar."""
+        """Dosyaya yazmaz: kutuyu işaretler (toggled -> kirli), kaydı otomatik kayıt yapar."""
         self.proactive_enabled.setChecked(True)
 
     def _mark_dirty(self, *_args: object) -> None:
@@ -1588,15 +1626,120 @@ class SettingsPanel(QWidget):
             # ponytail: kirli bölüm = o an açık olan; değişiklik yalnız görünen sayfada olur.
             self._dirty_rows.add(self.stack.currentIndex())
             self._set_dirty(True)
+            # Her düzenleme sayacı yeniden başlatır: yazma duraksayınca tek kez olur.
+            self._save_timer.start()
 
     def _set_dirty(self, dirty: bool) -> None:
-        """Uygula yalnız değişiklik varken açılır; tema gibi anında uygulananlar buraya uğramaz."""
+        """Tema gibi anında uygulananlar buraya uğramaz. Temizlenince bekleyen otomatik kayıt da
+        düşer: kodla yenileme/geri alma sonradan eski değeri dosyaya yazmasın."""
         self._dirty = dirty
-        self.dirty_label.setText(_DIRTY_TEXT if dirty else _CLEAN_TEXT)
-        self.apply_button.set_dirty(dirty)
         if not dirty:
+            self._save_timer.stop()
+            self._failed = False
+            self.retry_button.setVisible(False)
             self._dirty_rows.clear()
         self._refresh_dirty_dots()
+        self._update_revert()
+
+    def _apply(self) -> None:
+        self.apply_requested.emit(self.device_combo.currentData())
+
+    def flush(self) -> None:
+        """Bekleyen değişiklik varsa debounce'u beklemeden kaydettirir (sekme/pencere çıkışı)."""
+        if self._dirty and not self._demo:
+            self._save_timer.stop()
+            self._apply()
+
+    def mark_saved(self, written: bool = True) -> None:
+        """Pencere kaydı yazdı: temiz say. Yeniden kurulum sekmeden çıkınca yapılır."""
+        self._set_dirty(False)
+        if written:
+            self.notice.setText("Kaydedildi · Ayarlar'dan çıkınca uygulanır")
+
+    def save_failed(self, text: str) -> None:
+        """Kayıt reddedildi: değişiklik kirli kalır (bölüm noktaları durur), hata kalıcıdır."""
+        self._failed = True
+        self.notice.show_error(text)
+        self.retry_button.setVisible(not self._demo)
+        self._update_revert()
+
+    # Oturum başlangıcına dönüş ---------------------------------------------------------------
+
+    def config_dump(self) -> dict[str, Any] | None:
+        """Kayıtlı config'in doğrulanmış dökümü; okunamazsa None."""
+        return self._dump()
+
+    def _dump(self) -> dict[str, Any] | None:
+        try:
+            return load_settings(self.config_path).model_dump(mode="json")
+        except (OSError, ValueError, yaml.YAMLError):
+            return None
+
+    def begin_session(self) -> None:
+        """Ayarlar açıldığındaki kayıtlı hâli "geri al" için saklar (sekmeye her girişte).
+
+        Yalnız config dosyası alınır; kasadaki parolalar bilerek bellekte tutulmaz."""
+        if self._demo:
+            return
+        self.flush()  # bekleyen düzenleme yeni taban çizgisine karışmasın
+        try:
+            self._baseline_bytes = self.config_path.read_bytes()
+            self._baseline_dump = load_settings(self.config_path).model_dump(mode="json")
+        except (OSError, ValueError, yaml.YAMLError):
+            self._baseline_bytes = self._baseline_dump = None
+        self._watch()
+        self._update_revert()
+
+    def _watch(self) -> None:
+        """Dosya + klasör izlenir: atomik değiştirme (os.replace) dosya izini düşürür."""
+        wanted = [str(self.config_path), str(self.config_path.parent)]
+        have = set(self._watcher.files()) | set(self._watcher.directories())
+        missing = [path for path in wanted if path not in have and Path(path).exists()]
+        if missing:
+            self._watcher.addPaths(missing)
+
+    def _disk_changed(self) -> None:
+        self._watch()
+        self._update_revert()
+
+    def _update_revert(self) -> None:
+        """Düğme: kirli ya da kayıtlı hâl taban çizgisinden (tür-katı) farklıysa görünür."""
+        if self._demo or self._baseline_dump is None or self._baseline_bytes is None:
+            self.revert_button.setVisible(False)
+            return
+        # Okunamayan/geçersiz config "değişti" sayılır: kullanıcı geri alabilsin.
+        changed = self._dirty or not _same(self._dump(), self._baseline_dump)
+        self.revert_button.setVisible(changed)
+
+    def _revert(self) -> None:
+        baseline = self._baseline_bytes
+        if baseline is None or self._demo:
+            return
+        self._save_timer.stop()  # bekleyen otomatik kayıt geri almanın üstüne yazmasın
+        temporary = ""
+        try:
+            descriptor, temporary = tempfile.mkstemp(
+                prefix=".settings-", suffix=".yaml", dir=self.config_path.parent
+            )
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(baseline)
+            load_settings(Path(temporary))
+            os.replace(temporary, self.config_path)
+        except (OSError, ValueError, yaml.YAMLError):
+            # Kirli kalır (düğme görünür, yeniden denenebilir); yarım yazılmış dosya yok.
+            self.notice.show_error("Değişiklikler geri alınamadı; mevcut ayarlar korunuyor.")
+            self._update_revert()
+            return
+        finally:
+            if temporary:
+                Path(temporary).unlink(missing_ok=True)
+        self._set_dirty(False)
+        self.refresh()
+        self.telegram.refresh()
+        self._watch()
+        self._update_revert()
+        self.notice.setText("Değişiklikler geri alındı")
+        self.reverted.emit()
 
     def _layout_theme_cards(self, columns: int) -> None:
         """İki sütunlu kart ızgarası ~510px ister; dar pencerede tek sütun, yoksa bütün sayfaların
@@ -1852,7 +1995,7 @@ class SettingsPanel(QWidget):
     def _stt_download_done(self, _path: Path) -> None:
         choice = self._selected_stt_choice()
         self._populate_stt_choices(choice.name if choice is not None else None)
-        self.stt_status.setText("İndirildi; Uygula'ya bas.")
+        self.stt_status.setText("İndirildi; kendiliğinden kaydedilir.")
 
     def _stt_download_failed(self, error_type: str) -> None:
         self.stt_status.setText(f"İndirilemedi: {error_type}")
@@ -2004,7 +2147,7 @@ class SettingsPanel(QWidget):
         self.applications[alias] = str(path)
         self._refresh_applications()
         self._mark_dirty()
-        self.notice.setText("Uygulama eklendi; kaydetmek için Uygula'ya bas.")
+        self.notice.setText("Uygulama eklendi; kendiliğinden kaydedilir.")
 
     def _remove_application(self) -> None:
         item = self.application_list.currentItem()
@@ -2012,10 +2155,7 @@ class SettingsPanel(QWidget):
             del self.applications[item.data(Qt.ItemDataRole.UserRole)]
             self._refresh_applications()
             self._mark_dirty()
-            self.notice.setText("Uygulama listeden çıkarıldı; kaydetmek için Uygula'ya bas.")
-
-    def _apply(self) -> None:
-        self.apply_requested.emit(self.device_combo.currentData())
+            self.notice.setText("Uygulama listeden çıkarıldı; kendiliğinden kaydedilir.")
 
     def values(self) -> dict[SettingPath, Any]:
         """PANEL_BINDINGS alanlarının panelde görünen değeri; save_choices(values=...) için."""
@@ -2077,7 +2217,7 @@ class SettingsPanel(QWidget):
         self.code_agents[name] = profile
         self._refresh_code_agents()
         self._mark_dirty()
-        self.agent_hint.setText(f"'{name}' eklendi; kaydetmek için Uygula'ya bas.")
+        self.agent_hint.setText(f"'{name}' eklendi; kendiliğinden kaydedilir.")
 
     def _add_custom_agent(self) -> None:
         dialog = AgentDialog((*BUILTIN_AGENTS, *self.code_agents), self)

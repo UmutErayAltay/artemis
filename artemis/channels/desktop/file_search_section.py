@@ -1,6 +1,6 @@
 """Ayarlar > Dosya araması: kök listesi, indeks durumu, yeniden dizinle, dizini sil (ADR 0065).
 
-Klasör listesi PANEL_BINDINGS ile Uygula'dan kaydedilir; kökleri hiçbir araç değiştirmez.
+Klasör listesi PANEL_BINDINGS ile otomatik kayıtla yazılır; kökleri hiçbir araç değiştirmez.
 Düğmeler kayıtlı ayarı kullanır. `FileIndex.shared` runtime'la aynı örneği verir: tek kilit,
 tek iptal bayrağı, tek iş parçacığı. "Dizini sil" bekleyip dosyayı sildiği için ayrı bir
 QThread'de çalışır (arayüz donmaz).

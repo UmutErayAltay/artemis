@@ -559,7 +559,7 @@ def test_settings_apply_restarts_runtime_with_selected_device_and_keeps_model(
         window.settings_panel.device_combo.addItem("Test mikrofonu", 9)
         combo = window.settings_panel.device_combo  # başta "Mikrofon bulunamadı" satırı var
         combo.setCurrentIndex(combo.findData(9))
-        window.settings_panel._apply()
+        window.tabs.setCurrentWidget(window.chat_page)  # çıkış bekleyen düzenlemeyi yazar, kurar
         _wait(app, lambda: len(settings_seen) == 2 and window._worker_ready)
         assert settings_seen[-1].models[settings_seen[-1].primary_model].model == "first-model"
         assert settings_seen[-1].voice.input_device == 9
@@ -618,6 +618,13 @@ def _deferred_settings_window(
     return window, path, seen, blocker
 
 
+def _apply_and_leave(window: DesktopWindow) -> None:
+    """Otomatik kaydı tetikler, sonra Ayarlar'dan çıkar: yeniden kurulum yalnız çıkışta olur."""
+    window.tabs.setCurrentWidget(window.settings_scroll)
+    window.settings_panel._apply()
+    window.tabs.setCurrentWidget(window.chat_page)
+
+
 def _pick_device(window: DesktopWindow, device: int) -> None:
     combo = window.settings_panel.device_combo
     combo.addItem("Test mikrofonu", device)
@@ -643,7 +650,7 @@ def test_settings_apply_during_active_turn_defers_rebuild_and_keeps_turn(
         _wait(app, lambda: blocker.entered.is_set())
         _pick_device(window, 9)
         # Düğme tur sürerken normalde pasif; sinyal yine de gelebilir.
-        window.settings_panel._apply()
+        _apply_and_leave(window)
         app.processEvents()
         # Ayar diske yazıldı ama canlı kuruluş yapılmadı: tur iptal edilmedi, köprü aynı.
         assert load_settings(path).voice.input_device == 9
@@ -692,8 +699,9 @@ def test_settings_apply_when_idle_rebuilds_immediately_and_pending_approval_defe
         assert len(seen) == 1 and window._config_restart_pending
         window._approval_dialog = None
         window._config_restart_pending = False
-        # Boştayken eskisi gibi hemen kurulur.
-        window.settings_panel._apply()
+        # Boştayken Ayarlar'dan çıkınca kurulur (yeni bir değişiklik yazılmış olmalı).
+        _pick_device(window, 10)
+        _apply_and_leave(window)
         _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
         assert not window._config_restart_pending
     finally:
@@ -726,7 +734,8 @@ def test_settings_apply_resyncs_embedded_telegram_once(
     monkeypatch.setattr(app_module, "should_run", lambda _config: True)
     try:
         # Uygula: gömülü kanal runtime'ı eski ayarla kalmasın, durup config'ten yeniden başlar.
-        window.settings_panel._apply()
+        _pick_device(window, 5)
+        _apply_and_leave(window)
         _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
         assert fake.calls == ["stop", "start"]
         # Telegram ayarı değişince hemen yeniden kurulum da olsa çift yeniden başlatma olmaz.
@@ -1616,3 +1625,98 @@ def test_ctrl_comma_opens_settings_from_anywhere(app: QApplication, tmp_path: Pa
     assert window.tabs.currentWidget() is window.settings_scroll
     assert window._settings_shortcut.key().toString() == "Ctrl+,"
     _close_cleanly(app, window)
+
+
+def test_settings_hotkey_clash_blocks_autosave_until_fixed_then_retry_saves(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.config.settings import load_settings
+
+    window, path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    panel = window.settings_panel
+    try:
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        panel.dictation_hotkey.setText("ctrl+space")  # ses kısayoluyla çakışır
+        panel._mark_dirty()
+        panel.flush()
+        assert panel._dirty and not panel.retry_button.isHidden()
+        assert "aynı olamaz" in panel.notice.text()
+        assert load_settings(path).dictation.hotkey != "ctrl+space"
+        assert not window._settings_restart_pending
+        panel.dictation_hotkey.setText("ctrl+alt+k")
+        panel.retry_button.click()
+        assert not panel._dirty and panel.retry_button.isHidden()
+        assert load_settings(path).dictation.hotkey == "ctrl+alt+k"
+        assert window._settings_restart_pending
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
+def test_leaving_settings_flushes_pending_edit_and_restarts_exactly_once(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.config.settings import load_settings
+
+    window, path, _seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    panel = window.settings_panel
+    requests: list[object] = []
+
+    def fake_restart(notice: object = None) -> None:
+        window._runtime_dump = panel.config_dump()  # gerçek _request_restart da böyle yapar
+        requests.append(notice)
+
+    monkeypatch.setattr(window, "_request_restart", fake_restart)
+    try:
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        _pick_device(window, 7)  # düzenleme bekliyor, debounce dolmadı
+        assert panel._dirty and requests == []
+        window.tabs.setCurrentWidget(window.chat_page)
+        assert load_settings(path).voice.input_device == 7  # çıkış bekleyeni yazdı
+        assert len(requests) == 1
+        # Yeniden girince taban çizgisi kayıtlı dosyadan yenilenir: geri al gizli.
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        assert panel.revert_button.isHidden()
+        assert panel._baseline_bytes == path.read_bytes()
+        # Değişiklik yoksa çıkış yeniden kurulum istemez.
+        window.tabs.setCurrentWidget(window.chat_page)
+        assert len(requests) == 1
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
+def test_leaving_settings_restarts_for_direct_section_write_but_not_after_revert(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tetikleyici formu/beceri klasörü config'i kendisi yazar; çıkışta yine kurulmalı.
+    Geri alma eski hâle döndürünce çalışma zamanı zaten o config'le kurulu: kurulum yok."""
+    import yaml
+
+    from artemis.channels.desktop.settings_panel import _write_validated
+
+    window, path, _seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    panel = window.settings_panel
+    requests: list[object] = []
+
+    def fake_restart(notice: object = None) -> None:
+        window._runtime_dump = panel.config_dump()
+        requests.append(notice)
+
+    monkeypatch.setattr(window, "_request_restart", fake_restart)
+    try:
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw.setdefault("skills", {})["folder"] = str(tmp_path / "beceri")
+        _write_validated(path, raw)  # bölümün doğrudan yazımı (panel kirli değil)
+        window.tabs.setCurrentWidget(window.chat_page)
+        assert len(requests) == 1
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        raw["skills"]["folder"] = str(tmp_path / "baska")
+        _write_validated(path, raw)
+        panel._revert()  # oturum başındaki (çalışma zamanının kurulu olduğu) hâle döner
+        window.tabs.setCurrentWidget(window.chat_page)
+        assert len(requests) == 1
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)

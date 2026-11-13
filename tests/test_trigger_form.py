@@ -125,7 +125,7 @@ def test_add_edit_delete_writes_yaml(
     assert raw["triggers"]["items"][0]["name"] == "gelen"
     assert raw["applications"] == {"brave": "brave.exe"}  # ilgisiz anahtar korunur
     assert "açıldı" in section.notice.text()
-    assert "Uygula" in section.notice.text() and seen == [True]
+    assert "çıkınca" in section.notice.text() and seen == [True]
     assert section.trigger_list.count() == 1
     # Düzenle: satırdaki düğme (sender + property) üzerinden.
     accept_with(monkeypatch, folder, message="Merhaba {file}")

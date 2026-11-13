@@ -12,12 +12,8 @@ pytest.importorskip("PySide6")
 from artemis.brain import providers
 from artemis.channels.desktop import provider_section as section_module
 from artemis.channels.desktop.settings_panel import (
-    _CLEAN_TEXT as CLEAN,
-)
-from artemis.channels.desktop.settings_panel import (
-    _DIRTY_TEXT as DIRTY,
-)
-from artemis.channels.desktop.settings_panel import (
+    _same,
+    _write_validated,
     microphone_choices,
     save_choices,
 )
@@ -242,7 +238,6 @@ def test_settings_block_is_centred_on_wide_windows_and_full_on_narrow(
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
-    bar = panel.apply_button.parentWidget()
     body = panel.sections.parentWidget().parentWidget()
     panel.resize(1920, 1040)
     panel.show()
@@ -250,8 +245,6 @@ def test_settings_block_is_centred_on_wide_windows_and_full_on_narrow(
     left, right = body.geometry().left(), 1920 - body.geometry().right() - 1
     assert abs(left - right) <= 2
     assert body.width() <= 1240
-    assert (bar.geometry().left(), bar.geometry().right()) == (
-        body.geometry().left(), body.geometry().right())
     panel.resize(900, 700)
     qt_app.processEvents()
     assert body.geometry().left() == 24 and body.width() == panel.width() - 48
@@ -285,11 +278,11 @@ def test_dirty_notice_shows_after_edit_and_clears_on_refresh(tmp_path: Path, qt_
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
-    assert panel.dirty_label.text() == CLEAN and not panel.apply_button.isEnabled()
+    assert not panel._dirty
     panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
-    assert panel.dirty_label.text() == DIRTY and panel.apply_button.isEnabled()
+    assert panel._dirty and panel._save_timer.isActive()
     panel.refresh()
-    assert panel.dirty_label.text() == CLEAN and not panel.apply_button.isEnabled()
+    assert not panel._dirty and not panel._save_timer.isActive()
     panel.deleteLater()
     qt_app.processEvents()
 
@@ -608,7 +601,7 @@ def test_cloud_key_is_stored_in_vault_only(tmp_path: Path, _vault: dict[str, str
     assert panel.cloud_key.text() == "" and panel.cloud_key.placeholderText() == "kayıtlı"
     assert "kaydedildi" in panel.cloud_stt_hint.text()
     assert SECRET not in panel.cloud_stt_hint.text()
-    assert panel.dirty_label.text() == CLEAN  # Uygula gerekmez
+    assert not panel._dirty  # kayıt gerekmez
     assert SECRET not in repr(panel.values())
     assert SECRET not in path.read_text(encoding="utf-8")
     panel.deleteLater()
@@ -689,7 +682,7 @@ def test_cloud_models_fetch_fills_combo_and_keeps_choice(
     ]
     assert panel.cloud_model.currentText() == "whisper-x"
     assert "2 model" in panel.cloud_stt_hint.text()
-    assert panel.dirty_label.text() == CLEAN
+    assert not panel._dirty
     # yazılmış ama saklanmamış anahtar kayıtlıdan önce gelir
     panel.cloud_key.setText(SECRET)
     panel._fetch_cloud_models()
@@ -818,16 +811,13 @@ def test_section_list_stays_put_while_the_page_scrolls(tmp_path: Path, qt_app) -
     panel.deleteLater()
 
 
-def test_status_bar_text_and_apply_follow_dirty_state(tmp_path: Path, qt_app) -> None:
+def test_dirty_state_follows_edits_and_refresh(tmp_path: Path, qt_app) -> None:
     panel = _panel(config(tmp_path))
-    assert panel.dirty_label.text() == CLEAN
-    assert not panel.apply_button.isEnabled()
+    assert not panel._dirty
     panel.proactive_enabled.setChecked(True)
-    assert panel.dirty_label.text() == DIRTY
-    assert panel.apply_button.isEnabled()
+    assert panel._dirty
     panel.refresh()
-    assert panel.dirty_label.text() == CLEAN
-    assert not panel.apply_button.isEnabled()
+    assert not panel._dirty
     panel.deleteLater()
 
 
@@ -1038,3 +1028,228 @@ def test_last_section_is_remembered_and_falls_back(tmp_path: Path, qt_app) -> No
     assert third.sections.currentRow() == 0
     for panel in (first, second, third):
         panel.deleteLater()
+
+
+# --- Otomatik kayıt, başlık tekrarı, "Değişiklikleri geri al" -------------------------------
+
+
+def _wait(predicate, timeout_ms: int = 3000) -> bool:  # type: ignore[no-untyped-def]
+    from PySide6.QtTest import QTest
+
+    waited = 0
+    while not predicate() and waited < timeout_ms:
+        QTest.qWait(20)
+        waited += 20
+    return bool(predicate())
+
+
+def _wire(panel, path: Path, writes: list[bool]) -> None:  # type: ignore[no-untyped-def]
+    """Pencerenin kayıt işleyicisinin sadeleşmiş hâli (kısayol denetimi app testindedir)."""
+    from artemis.channels.desktop import settings_panel as module
+
+    def handler(device) -> None:  # type: ignore[no-untyped-def]
+        try:
+            written = module.save_choices(
+                path, device, values=panel.values(), applications=panel.applications,
+                code_agent=panel.code_agent_values(), stt_model=panel.stt_model_path(),
+            )
+        except (OSError, ValueError, KeyError, TypeError):
+            panel.save_failed("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
+            return
+        writes.append(written)
+        panel.mark_saved(written)
+
+    panel.apply_requested.connect(handler)
+
+
+def test_same_is_type_strict_and_order_independent() -> None:
+    assert not _same(True, 1) and not _same(1, True)
+    assert not _same(1, 1.0) and _same(1.5, 1.5)
+    assert _same({"a": 1, "b": {"c": [1, 2]}}, {"b": {"c": [1, 2]}, "a": 1})
+    assert not _same({"a": 1}, {"a": 1, "b": 2})
+    assert not _same([1, 2], [2, 1])
+    assert not _same({"a": [True]}, {"a": [1]})
+    assert not _same(None, {})
+
+
+def test_pages_have_no_title_duplicating_their_name_and_search_still_works(
+    tmp_path: Path, qt_app
+) -> None:
+    from PySide6.QtWidgets import QLabel
+
+    panel = _panel(config(tmp_path))
+    for row, name in enumerate(panel.section_names()):
+        page = panel.stack.widget(row)
+        titles = {
+            w.text().casefold()
+            for w in page.findChildren(QLabel) if w.objectName() == "sectionTitle"
+        }
+        assert name.casefold() not in titles, name
+    panel.search.setText("telegram")
+    shown = [
+        n for r, n in enumerate(panel.section_names()) if not panel.sections.item(r).isHidden()
+    ]
+    assert "Telegram" in shown and "Ses" not in shown
+    panel.search.setText("")
+    assert all(not panel.sections.item(r).isHidden() for r in range(panel.sections.count()))
+    panel.deleteLater()
+
+
+def test_autosave_debounces_rapid_edits_into_one_write(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    writes: list[bool] = []
+    _wire(panel, path, writes)
+    for value in ("Ali", "Veli", "Zeynep"):
+        panel.wake_name.setText(value)
+        panel._mark_dirty()
+    assert writes == [] and panel._save_timer.isActive()
+    assert _wait(lambda: bool(writes))
+    assert writes == [True] and not panel._dirty
+    assert load_settings(path).voice.wake_word.casefold() == "zeynep"
+    panel.deleteLater()
+
+
+def test_revert_button_hidden_then_visible_and_a_b_a_hides_it(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    writes: list[bool] = []
+    _wire(panel, path, writes)
+    assert panel.revert_button.isHidden()
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    assert not panel.revert_button.isHidden()
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())  # A -> B -> A
+    panel.flush()
+    assert not panel._dirty and panel.revert_button.isHidden()
+    panel.deleteLater()
+
+
+def test_revert_restores_every_kind_of_value_byte_for_byte(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path, cloud=True)
+    panel = _panel(path)
+    writes: list[bool] = []
+    _wire(panel, path, writes)
+    baseline = path.read_bytes()
+
+    def snapshot() -> tuple[object, ...]:
+        return (
+            panel.wake_name.text(), panel.mail_port.text(), panel.barge_in_box.isChecked(),
+            panel.file_search_roots.count(), dict(panel.applications),
+        )
+
+    old = snapshot()
+    panel.wake_name.setText("Veli")  # string
+    panel.mail_port.setText("587")  # int
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())  # bool
+    panel.file_search_roots.addItem(str((tmp_path / "belgeler").resolve()))  # list
+    panel.applications["notepad"] = "notepad.exe"  # iç içe sözlük
+    panel._refresh_applications()
+    panel._mark_dirty()
+    panel.flush()
+    assert writes == [True] and path.read_bytes() != baseline
+    # Bölümün doğrudan yazdığı değişiklik de geri alınır.
+    providers = panel.providers
+    providers.add_connection.setCurrentIndex(providers.add_connection.findData("bulut"))
+    providers.model_name.setEditText("m-2")
+    providers.make_primary.setChecked(False)
+    providers._add_model()
+    assert "m-2" in load_settings(path).models
+    assert _wait(lambda: not panel.revert_button.isHidden())
+    panel.revert_button.click()
+    assert path.read_bytes() == baseline
+    assert snapshot() == old
+    assert "m-2" not in load_settings(path).models
+    assert panel.revert_button.isHidden() and not panel._dirty
+    assert panel.notice.text() == "Değişiklikler geri alındı"
+    panel.deleteLater()
+
+
+def test_pending_autosave_never_fires_after_revert(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtTest import QTest
+
+    path = config(tmp_path)
+    panel = _panel(path)
+    writes: list[bool] = []
+    _wire(panel, path, writes)
+    baseline = path.read_bytes()
+    panel.wake_name.setText("Veli")
+    panel._mark_dirty()
+    assert panel._save_timer.isActive() and not panel.revert_button.isHidden()
+    panel.revert_button.click()
+    QTest.qWait(1200)  # debounce'u aşar
+    assert writes == [] and path.read_bytes() == baseline
+    assert panel.revert_button.isHidden()
+    panel.deleteLater()
+
+
+def test_save_failure_keeps_dirty_shows_persistent_error_and_retry_works(
+    tmp_path: Path, qt_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.channels.desktop import settings_panel as module
+
+    path = config(tmp_path)
+    panel = _panel(path)
+    writes: list[bool] = []
+    _wire(panel, path, writes)
+    real = module.save_choices
+
+    def broken(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise OSError("disk dolu")
+
+    monkeypatch.setattr(module, "save_choices", broken)
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    panel.flush()
+    assert panel._dirty and not panel.retry_button.isHidden()
+    assert "kaydedilemedi" in panel.notice.text()
+    assert not panel.notice._timer.isActive()  # hata kalıcıdır
+    monkeypatch.setattr(module, "save_choices", real)
+    panel.retry_button.click()
+    assert writes == [True] and not panel._dirty and panel.retry_button.isHidden()
+    assert panel.notice._timer.isActive()  # başarı bildirimi geçicidir
+    panel.deleteLater()
+
+
+def test_revert_write_failure_shows_error_and_keeps_button(
+    tmp_path: Path, qt_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    writes: list[bool] = []
+    _wire(panel, path, writes)
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    panel.flush()
+    changed = path.read_bytes()
+
+    def boom(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise OSError("kilitli")
+
+    monkeypatch.setattr(os, "replace", boom)
+    panel.revert_button.click()
+    assert "geri alınamadı" in panel.notice.text()
+    assert not panel.notice._timer.isActive()
+    assert not panel.revert_button.isHidden() and path.read_bytes() == changed
+    assert not [p for p in tmp_path.iterdir() if p.name.startswith(".settings-")]
+    panel.deleteLater()
+
+
+def test_notice_is_transient_but_errors_persist(tmp_path: Path, qt_app) -> None:
+    panel = _panel(config(tmp_path))
+    panel.notice._timer.setInterval(30)  # 6 sn yerine: davranış aynı, test hızlı
+    panel.notice.setText("Kaydedildi")
+    assert _wait(lambda: panel.notice.text() == "")
+    panel.notice.show_error("Kaydedilemedi")
+    assert not panel.notice._timer.isActive() and panel.notice.text() == "Kaydedilemedi"
+    panel.deleteLater()
+
+
+def test_direct_atomic_write_by_another_section_shows_revert(tmp_path: Path, qt_app) -> None:
+    """Başka bölüm config'i os.replace ile yazar: izleyici bunu görür ve dosya izini yeniler."""
+    path = config(tmp_path)
+    panel = _panel(path)
+    assert panel.revert_button.isHidden()
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw.setdefault("skills", {})["folder"] = str(tmp_path / "beceri")
+    _write_validated(path, raw)
+    assert _wait(lambda: not panel.revert_button.isHidden())
+    assert str(path) in panel._watcher.files()  # atomik değiştirmeden sonra yeniden eklendi
+    panel.deleteLater()
