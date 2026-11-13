@@ -321,8 +321,7 @@ def test_remove_model_ok_and_refused_for_primary(app: QApplication, tmp_path: Pa
         section.model_name.setEditText(name)
         section.make_primary.setChecked(primary)
         section._add_model()
-    section._remove_model()  # seçim yok
-    assert "seçin" in section.status.text()
+    assert section._current_alias() == "first"  # ayrıntı paneli hep bir modeli gösterir
     section.select_model("m-1")
     section._remove_model()
     assert "kaldırılamaz" in section.status.text()
@@ -586,7 +585,7 @@ def test_hard_role_toggles_and_shows_in_rows_and_banner(app: QApplication, tmp_p
     assert load_settings(path).hard_model == "sonnet 5-5"
     assert "Zor işler" in dict(section.model_rows())["sonnet 5-5"]
     assert "Zor işler: sonnet 5-5" in section.banner.text()
-    assert section.hard_button.text() == "Zor işlerden çıkar"
+    assert section.hard_button.isChecked() and section.hard_button.text() == "✓ Zor işler"
     section._remove_model()  # zor işler modeli kaldırılamaz
     assert "sonnet 5-5" in load_settings(path).models
     section._toggle_role("hard_model")
@@ -599,8 +598,10 @@ def test_test_results_and_suggested_layout_apply(app: QApplication, tmp_path: Pa
     _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
     section = ProviderSection(path)
     rows = dict(section.model_rows())
-    assert "temel 7/7 · zor 5/8" in rows["haiku 5-5"] and "ana model" in rows["haiku 5-5"]
-    assert "zor işler" in rows["sonnet 5-5"]
+    assert rows["haiku 5-5"].endswith("Beyin %80")  # (7+5)/15
+    assert rows["sonnet 5-5"].endswith("Rol yok %100")
+    assert "test yok" in rows["first"]
+    assert "temel 7/7 · zor 5/8" in section.test_result.text()
     assert "Ana: haiku 5-5 · Zor işler: sonnet 5-5" in section.layout_label.text()
     assert not section.apply_layout_button.isHidden()
     section._apply_layout()
@@ -610,7 +611,8 @@ def test_test_results_and_suggested_layout_apply(app: QApplication, tmp_path: Pa
     # Bozuk rapor ekranı çökertmez, yalnız yok sayılır.
     (tmp_path / "state" / "model_testleri" / "haiku-5-5.json").write_text("{", encoding="utf-8")
     section.reload()
-    assert "Test:" not in dict(section.model_rows())["haiku 5-5"]
+    assert "%" not in dict(section.model_rows())["haiku 5-5"]
+    assert "test yok" in dict(section.model_rows())["haiku 5-5"]
 
 
 def test_paid_model_test_needs_confirmation(
@@ -646,7 +648,7 @@ def test_fallback_role_from_ui(app: QApplication, tmp_path: Path) -> None:
     assert load_settings(path).fallback_model == "sonnet 5-5"
     assert "Yedek" in dict(section.model_rows())["sonnet 5-5"]
     assert "Yedek: sonnet 5-5" in section.banner.text()
-    assert section.fallback_button.text() == "Yedekten çıkar"
+    assert section.fallback_button.isChecked() and section.fallback_button.text() == "✓ Yedek"
     section._remove_model()
     assert "sonnet 5-5" in load_settings(path).models  # yedek kaldırılamaz
     section._make_primary()  # beyin olunca yedek rolü düşer
@@ -758,10 +760,66 @@ def test_live_list_updates_from_progress_lines(app: QApplication, tmp_path: Path
 
 def test_test_widgets_hidden_until_a_test_runs(app: QApplication, tmp_path: Path) -> None:
     section = ProviderSection(_three_models(tmp_path))
-    assert section.test_list.isHidden() and section.stop_button.isHidden()
+    assert section.test_list.isHidden() and section.model_test_button.text() == "Test et"
     assert section.retry_button.isHidden()
     section, _ = _running(tmp_path)
-    assert not section.test_list.isHidden() and not section.stop_button.isHidden()
+    assert not section.test_list.isHidden() and section.model_test_button.text() == "Durdur"
+
+
+def test_test_button_slot_switches_to_stop_and_acts(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section, fake = _running(tmp_path)  # beyin modeli (haiku) seçili ve test ediliyor
+    monkeypatch.setattr(section_module.QTimer, "singleShot", lambda ms, _cb: None)
+    assert section._current_alias() == "haiku 5-5" and section.model_test_button.isEnabled()
+    section.model_test_button.click()  # aynı düğme artık durdurur
+    assert fake.calls == ["terminate"]
+    section.select_model("sonnet 5-5")  # başka modelde: test kapalı, satırlar gizli
+    assert section.model_test_button.text() == "Test et"
+    assert not section.model_test_button.isEnabled() and section.test_list.isHidden()
+    section.select_model("haiku 5-5")
+    assert section.model_test_button.text() == "Durdur" and not section.test_list.isHidden()
+
+
+def test_role_buttons_use_existing_actions_and_reflect_state(
+    app: QApplication, tmp_path: Path
+) -> None:
+    path = _three_models(tmp_path)
+    section = ProviderSection(path)
+    assert section.primary_button.isChecked() and section.primary_button.text() == "✓ Beyin"
+    assert not section.hard_button.isEnabled() and not section.fallback_button.isEnabled()
+    section.select_model("sonnet 5-5")
+    section.hard_button.click()
+    assert load_settings(path).hard_model == "sonnet 5-5" and section.hard_button.isChecked()
+    section.fallback_button.click()
+    assert load_settings(path).fallback_model == "sonnet 5-5"
+    section.hard_button.click()  # ikinci tık rolü kapatır
+    assert load_settings(path).hard_model is None and not section.hard_button.isChecked()
+    section.primary_button.click()
+    settings = load_settings(path)
+    assert (settings.primary_model, settings.fallback_model) == ("sonnet 5-5", None)
+    section.primary_button.click()  # beyin kendi kendine kapatılamaz
+    assert load_settings(path).primary_model == "sonnet 5-5" and section.primary_button.isChecked()
+
+
+def test_detail_stacks_when_narrow_and_sits_beside_when_wide(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from PySide6.QtWidgets import QBoxLayout
+
+    section = ProviderSection(_three_models(tmp_path))
+    section.resize(1200, 700)
+    section.show()
+    app.processEvents()
+    assert section.model_split.direction() == QBoxLayout.Direction.LeftToRight
+    assert section.detail.geometry().left() > section.model_list.geometry().right()
+    section.resize(700, 900)
+    app.processEvents()
+    assert section.model_split.direction() == QBoxLayout.Direction.TopToBottom
+    assert section.detail.mapTo(section, section.detail.rect().topLeft()).y() > (
+        section.model_list.mapTo(section, section.model_list.rect().bottomLeft()).y()
+    )
+    section.close()
 
 
 def test_stop_terminates_then_kills_and_saves_nothing(
@@ -803,6 +861,10 @@ def test_retry_failed_runs_only_failed_and_merges(
     section._test_rows = {"temel_a": "geçti", "temel_b": "kaldı", "zor_c": "geçti"}
     section._last = (path, base)
     section._sync_test_buttons()
+    assert not section.retry_button.isHidden()  # beyin (haiku) seçili, rapor onun
+    section.select_model("sonnet 5-5")
+    assert section.retry_button.isHidden()  # satırlar başka modelin
+    section.select_model("haiku 5-5")
     assert not section.retry_button.isHidden()
     section._retry_failed()
     args = started[-1]

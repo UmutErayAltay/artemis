@@ -31,7 +31,9 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
+    QBoxLayout,
     QCheckBox,
     QComboBox,
     QDialog,
@@ -162,6 +164,7 @@ def field(
     parent.addLayout(group)
 
 
+WIDE_AT = 900  # bu genişlikten itibaren model ayrıntısı listenin yanında durur
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
 PARALLEL_TEST = 4
 
@@ -310,6 +313,7 @@ class ProviderSection(QWidget):
         # (takma ad, beyin mi, eski ayar mı, bağlantı, model kimliği, resim mi, zor işler mi,
         # son test özeti)
         self._model_data: list[tuple[str, bool, bool, str, str, bool, bool, str]] = []
+        self._reports_seen: dict[str, dict[str, object]] = {}  # takma ad -> son rapor
         self._model_test: QProcess | None = None
         self._testing = ""
         self._fallback = ""
@@ -333,77 +337,112 @@ class ProviderSection(QWidget):
         self.banner = QLabel()  # "Beyin: ..." satırı veya sağlayıcı sorunu
         self.banner.setWordWrap(True)
         self.banner.setVisible(False)  # _render_banner metin varsa gösterir
-        models.addWidget(self.banner)
+        self.compare_button = QPushButton("Karşılaştır")
+        self.compare_button.setToolTip("Test edilen modellerin son sonuçlarını tabloda gösterir.")
+        self.compare_button.clicked.connect(self._compare_results)
+        self.compare_button.setVisible(False)  # rapor varsa _sync_test_buttons gösterir
+        head = QHBoxLayout()
+        head.setSpacing(8)
+        head.addWidget(self.banner, 1)
+        head.addWidget(self.compare_button, 0, Qt.AlignmentFlag.AlignTop)
+        models.addLayout(head)
         self.model_list = QListWidget()
         self.model_list.setAccessibleName("Eklenen modeller")
-        models.addWidget(self.model_list)
         self.model_list.setVisible(False)  # reload() dolu olunca gösterir
         self.model_empty = meta_label("Henüz model eklenmedi. Aşağıdan bir model ekle.")
-        models.addWidget(self.model_empty)
-        self.primary_button = QPushButton("Beyin yap")
-        self.primary_button.setObjectName("primary")
+        # Roller: seçili modelin rolleri; işlemler mevcut _make_primary/_toggle_role yollarıdır.
+        self.primary_button = QPushButton("Beyin")
         self.primary_button.clicked.connect(self._make_primary)
-        self.remove_button = QPushButton("Kaldır")
-        self.remove_button.setObjectName("danger")
-        self.remove_button.clicked.connect(self._remove_model)
-        self.remove_button.setVisible(False)  # reload() model varsa gösterir
-        self.primary_button.setVisible(False)
         # Model kademesi: seçili model zor işler (çok adımlı, planlama) turlarını üstlenir.
-        self.hard_button = QPushButton("Zor işler yap")
-        self.hard_button.setToolTip("Çok adımlı ve planlama isteyen turlar bu modelle çalışır.")
+        self.hard_button = QPushButton("Zor işler")
         self.hard_button.clicked.connect(self._toggle_hard_role)
         # Arıza yedeği: beyin modeli kota/bağlantı/sunucu hatası verince tur bununla sürer.
-        self.fallback_button = QPushButton("Arıza yedeği yap")
-        self.fallback_button.setToolTip(
-            "Beyin modeli kotaya takılır ya da yanıt vermezse Artemis bu modelle devam eder."
-        )
+        self.fallback_button = QPushButton("Yedek")
         self.fallback_button.clicked.connect(self._toggle_fallback_role)
+        for button in (self.primary_button, self.hard_button, self.fallback_button):
+            button.setCheckable(True)
+            # Eylem reddedilirse (yazılamadı, resim modeli) işaret gerçek duruma döner.
+            button.clicked.connect(self._sync_detail)
+        self.primary_button.setToolTip("Sohbetlere bu model cevap verir.")
+        self.primary_button.setAccessibleName("Beyin modeli yap")
+        self.hard_button.setAccessibleName("Zor işler modeli yap")
+        self.fallback_button.setAccessibleName("Arıza yedeği yap")
+        self._style_roles()
+        self.remove_button = QPushButton("Modeli kaldır")
+        self.remove_button.setObjectName("danger")
+        self.remove_button.setStyleSheet("border: none; background: transparent;")
+        self.remove_button.clicked.connect(self._remove_model)
+        # Test: tek düğme; çalışırken metni ve eylemi "Durdur"a döner.
         self.model_test_button = QPushButton("Test et")
-        self.model_test_button.setToolTip(
-            f"{_scenario_count()} senaryoluk testi arka planda çalıştırır; bilgisayarına dokunmaz."
-        )
-        self.model_test_button.clicked.connect(self._test_model)
+        self.model_test_button.clicked.connect(self._test_or_stop)
         self._test_settings = QSettings(
             QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Artemis", "model_test"
         )
-        self.parallel_test = QCheckBox("Senaryoları paralel çalıştır")
+        self.parallel_test = QCheckBox("Paralel çalıştır")
         self.parallel_test.setChecked(self._saved_parallel())
         self.parallel_test.toggled.connect(self._remember_parallel)
         self._parallel_tip()
-        self.stop_button = QPushButton("Durdur")
-        self.stop_button.setToolTip("Çalışan testi durdurur; rapor kaydedilmez.")
-        self.stop_button.clicked.connect(self._stop_test)
         self.retry_button = QPushButton("Kalanları yeniden dene")
         self.retry_button.setToolTip("Kalan senaryoları aynı modelle bir kez daha çalıştırır.")
         self.retry_button.clicked.connect(self._retry_failed)
-        self.compare_button = QPushButton("Sonuçları karşılaştır")
-        self.compare_button.setToolTip("Test edilen modellerin son sonuçlarını tabloda gösterir.")
-        self.compare_button.clicked.connect(self._compare_results)
+        self.retry_button.setVisible(False)
         self.test_list = QListWidget()
         self.test_list.setAccessibleName("Test senaryoları")
         self.test_list.setMaximumHeight(160)
-        for button in (
-            self.hard_button, self.fallback_button, self.model_test_button, self.parallel_test,
-            self.stop_button, self.retry_button, self.compare_button, self.test_list,
-        ):
-            button.setVisible(False)
-        # İki satır: beş düğme dar pencerede yatay taşmasın.
-        models.addWidget(self.parallel_test)
-        models.addWidget(self.test_list)
-        models.addLayout(button_row(self.stop_button, self.retry_button, self.compare_button))
-        models.addLayout(
-            button_row(self.remove_button, self.model_test_button, self.primary_button)
-        )
-        models.addLayout(button_row(self.fallback_button, self.hard_button))
+        self.test_list.setVisible(False)
+        self.test_result = meta_label("")
+        # Seçili model ayrıntısı: Rol, Test, kaldırma.
+        self.detail = QFrame()
+        self.detail.setObjectName("card")
+        detail = QVBoxLayout(self.detail)
+        detail.setContentsMargins(16, 16, 16, 16)
+        detail.setSpacing(12)
+        self.detail_title = QLabel()
+        self.detail_title.setObjectName("sectionTitle")
+        detail.addWidget(self.detail_title)
+        role_row = QHBoxLayout()
+        role_row.setSpacing(8)
+        for button in (self.primary_button, self.hard_button, self.fallback_button):
+            role_row.addWidget(button)
+        role_row.addStretch(1)
+        field(detail, "Rol", role_row)
+        test_row = QHBoxLayout()
+        test_row.setSpacing(12)
+        test_row.addWidget(self.model_test_button)
+        test_row.addWidget(self.parallel_test)
+        test_row.addStretch(1)
+        test_box = QVBoxLayout()
+        test_box.setSpacing(8)
+        test_box.addLayout(test_row)
+        test_box.addWidget(self.test_list)
+        test_box.addWidget(self.test_result)
+        retry_row = QHBoxLayout()
+        retry_row.addWidget(self.retry_button)
+        retry_row.addStretch(1)
+        test_box.addLayout(retry_row)
+        field(detail, "Test", test_box)
+        detail.addLayout(button_row(self.remove_button))
+        self.detail.setVisible(False)  # reload() model varsa gösterir
         self.model_list.currentItemChanged.connect(self._selection_changed)
         # Test edilmiş modellerden çıkan önerilen düzen (ana + zor işler) ve tek tık uygulama.
         self.layout_label = meta_label("")
         self.layout_label.setVisible(False)
-        models.addWidget(self.layout_label)
         self.apply_layout_button = QPushButton("Bu düzeni uygula")
         self.apply_layout_button.clicked.connect(self._apply_layout)
         self.apply_layout_button.setVisible(False)
-        models.addLayout(button_row(self.apply_layout_button))
+        # Geniş alanda liste solda, ayrıntı sağda; dar alanda ayrıntı listenin altına iner.
+        self.model_split = QBoxLayout(QBoxLayout.Direction.TopToBottom)
+        self.model_split.setSpacing(16)
+        left = QVBoxLayout()
+        left.setSpacing(12)
+        left.addWidget(self.model_list)
+        left.addWidget(self.model_empty)
+        left.addWidget(self.layout_label)
+        left.addLayout(button_row(self.apply_layout_button))
+        left.addStretch(1)
+        self.model_split.addLayout(left, 1)
+        self.model_split.addWidget(self.detail, 1, Qt.AlignmentFlag.AlignTop)
+        models.addLayout(self.model_split)
         # B: model ekle
         add_box, add = group("Model ekle")
         layout.addWidget(add_box)
@@ -533,6 +572,19 @@ class ProviderSection(QWidget):
         else:
             self.reload()
 
+    def _style_roles(self) -> None:
+        # İşaretli rol vurgu çerçevesi alır; "✓" metni durumu renksiz de belli eder.
+        sheet = f"QPushButton:checked {{ border: 1px solid {self._colors['accent']}; }}"
+        for button in (self.primary_button, self.hard_button, self.fallback_button):
+            button.setStyleSheet(sheet)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+        super().resizeEvent(event)
+        wide = event.size().width() >= WIDE_AT
+        self.model_split.setDirection(
+            QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
+        )
+
     def show_problem(self, reason: str | None) -> None:
         self._problem = reason
         self._render_banner()
@@ -547,6 +599,7 @@ class ProviderSection(QWidget):
         """Satır içi renkleri yeniden çizer; bağlantı taslağına (reload) dokunmaz."""
         self._colors = {key: palette[key] for key in _COLOR_KEYS}
         self._render_banner()
+        self._style_roles()
         self._render_models()
 
     def _render_banner(self) -> None:
@@ -581,7 +634,7 @@ class ProviderSection(QWidget):
         self.make_primary.setChecked(self._problem is not None)
         if self._problem and not settings.endpoints:
             self.connection_toggle.setChecked(True)  # ilk kurulumda form gizli kalmasın
-        reports = self._reports(settings)
+        reports = self._reports_seen = self._reports(settings)
         self._fallback = settings.fallback_model or ""
         self._model_data = [
             (
@@ -612,7 +665,6 @@ class ProviderSection(QWidget):
         )
         self.layout_label.setVisible(bool(ana))
         self.apply_layout_button.setVisible(bool(ana) and (ana, zor, pc) != current)
-        self._sync_hard_button()
         # Liste kendi içinde kaydırılmasın: en çok 6 satır kadar uzar.
         heights = [
             self.model_list.item(index).sizeHint().height()
@@ -621,13 +673,7 @@ class ProviderSection(QWidget):
         self.model_list.setFixedHeight((sum(heights) or 70) + 12)
         self.model_list.setVisible(self.model_list.count() > 0)
         self.model_empty.setVisible(self.model_list.count() == 0)
-        # Boş listede "Kaldır"/"Beyin yap" işlenecek bir şey bulamaz; gizlenir.
-        self.remove_button.setVisible(self.model_list.count() > 0)
-        self.primary_button.setVisible(self.model_list.count() > 0)
-        self.hard_button.setVisible(self.model_list.count() > 0)
-        self.fallback_button.setVisible(self.model_list.count() > 0)
-        self.model_test_button.setVisible(self.model_list.count() > 0)
-        self.parallel_test.setVisible(self.model_list.count() > 0)
+        self.detail.setVisible(self.model_list.count() > 0)
         self._sync_test_buttons()
         self.endpoint_list.clear()
         for name, endpoint in settings.endpoints.items():
@@ -655,37 +701,33 @@ class ProviderSection(QWidget):
         selected = self.model_list.currentItem()
         chosen = selected.data(Qt.ItemDataRole.UserRole) if selected is not None else None
         self.model_list.clear()
-        for alias, is_brain, legacy, connection, model_id, image, hard, tested in self._model_data:
-            brain = (
-                f"&nbsp;&nbsp;<span style='color:{self._colors['accent']}'>&#9679; Beyin</span>"
-                if is_brain
-                else ""
-            )
-            if hard:
-                brain += (
-                    f"&nbsp;&nbsp;<span style='color:{self._colors['accent']}'>"
-                    "&#9679; Zor işler</span>"
-                )
+        for alias, is_brain, legacy, connection, model_id, image, hard, _tested in self._model_data:
+            roles = [
+                f"<span style='color:{self._colors['accent']}'>{name}</span>"
+                for name, on in (("Beyin", is_brain), ("Zor işler", hard)) if on
+            ]
             if alias == self._fallback and not is_brain:
-                brain += (
-                    f"&nbsp;&nbsp;<span style='color:{self._colors['muted']}'>"
-                    "&#9679; Yedek</span>"
-                )
-            if alias == self._testing:
-                tested = "Test sürüyor…"
+                roles.append(f"<span style='color:{self._colors['muted']}'>Yedek</span>")
+            muted = self._colors["muted"]
+            role_text = " · ".join(roles) or f"<span style='color:{muted}'>Rol yok</span>"
+            score = (
+                "Test sürüyor…" if alias == self._testing
+                else _score(self._reports_seen[alias]) if alias in self._reports_seen
+                else "test yok"
+            )
             tag = (
                 f"&nbsp;&nbsp;<span style='color:{self._colors['warning']}'>eski ayar</span>"
                 if legacy else ""
             )
             kind = " · resim" if image else ""
-            test_line = (
-                f"<br><span style='color:{self._colors['muted']}'>{html.escape(tested)}</span>"
-                if tested else ""
-            )
             label = QLabel(
-                f"<b>{html.escape(alias)}</b>{brain}{tag}<br>"
-                f"<span style='color:{self._colors['muted']}'>"
-                f"{html.escape(connection)} · {html.escape(model_id)}{kind}</span>{test_line}"
+                "<table width='100%' cellspacing='0'><tr>"
+                f"<td><b>{html.escape(alias)}</b>{tag}<br>"
+                f"<span style='color:{muted}'>"
+                f"{html.escape(connection)} · {html.escape(model_id)}{kind}</span></td>"
+                f"<td align='right'>{role_text}<br>"
+                f"<span style='color:{muted}'>{html.escape(score)}</span></td>"
+                "</tr></table>"
             )
             label.setTextFormat(Qt.TextFormat.RichText)
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -698,6 +740,11 @@ class ProviderSection(QWidget):
             self.model_list.setItemWidget(item, label)
             if alias == chosen:
                 self.model_list.setCurrentItem(item)
+        if self.model_list.currentItem() is None and self._model_data:
+            # Ayrıntı paneli her zaman bir modeli gösterir: önce beyin modeli.
+            brain = next((i for i, row in enumerate(self._model_data) if row[1]), 0)
+            self.model_list.setCurrentRow(brain)
+        self._sync_detail()
 
     def model_rows(self) -> list[tuple[str, str]]:
         """(takma ad, düz metin satırı); testler ve erişilebilirlik için."""
@@ -1037,10 +1084,10 @@ class ProviderSection(QWidget):
             self.status.setText("Beyin modeli kaldırılamaz; önce başka bir modeli beyin yapın.")
             return
         if alias == settings.fallback_model:
-            self.status.setText("Arıza yedeği kaldırılamaz; önce 'Yedekten çıkar'.")
+            self.status.setText("Arıza yedeği kaldırılamaz; önce Rol'den Yedek'i kapat.")
             return
         if alias == settings.hard_model:
-            self.status.setText("Zor işler modeli kaldırılamaz; önce 'Zor işlerden çıkar'.")
+            self.status.setText("Zor işler modeli kaldırılamaz; önce Rol'den Zor işler'i kapat.")
             return
         raw = self._raw()
         raw["models"].pop(alias, None)  # type: ignore[attr-defined]
@@ -1083,8 +1130,7 @@ class ProviderSection(QWidget):
         self._toggle_role("fallback_model")
 
     def _selection_changed(self, *_args: object) -> None:
-        self._sync_hard_button()
-        self._parallel_tip()
+        self._sync_detail()  # paralel kutusunu da günceller
 
     def _saved_parallel(self) -> bool:
         return bool(self._test_settings.value("parallel", False, type=bool))
@@ -1126,13 +1172,42 @@ class ProviderSection(QWidget):
             return
         self._model_test_done(self._testing, self._test_report)
 
-    def _sync_hard_button(self) -> None:
+    def _current_alias(self) -> str | None:
         item = self.model_list.currentItem()
-        selected = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
-        is_hard = any(row[0] == selected and row[6] for row in self._model_data)
-        self.hard_button.setText("Zor işlerden çıkar" if is_hard else "Zor işler yap")
-        is_fallback = bool(selected) and selected == self._fallback
-        self.fallback_button.setText("Yedekten çıkar" if is_fallback else "Arıza yedeği yap")
+        return str(item.data(Qt.ItemDataRole.UserRole)) if item is not None else None
+
+    def _sync_detail(self, *_args: object) -> None:
+        """Ayrıntı paneli seçili modelin durumunu gösterir."""
+        selected = self._current_alias()
+        row = next((r for r in self._model_data if r[0] == selected), None)
+        brain, image, hard = (row[1], row[5], row[6]) if row else (False, False, False)
+        fallback = bool(selected) and selected == self._fallback
+        self.detail_title.setText(selected or "")
+        reason = "Resim modeli bu rolü üstlenemez." if image else (
+            "Bu model zaten beyin; bu rol için başka bir model seç." if brain else ""
+        )
+        hard_tip = "Çok adımlı ve planlama isteyen turlar bu modelle çalışır."
+        fallback_tip = (
+            "Beyin modeli kotaya takılır ya da yanıt vermezse Artemis bu modelle devam eder."
+        )
+        for button, name, on, tip, free in (
+            (self.primary_button, "Beyin", brain, None, not image),
+            (self.hard_button, "Zor işler", hard, hard_tip, not image and not brain),
+            (self.fallback_button, "Yedek", fallback, fallback_tip, not image and not brain),
+        ):
+            button.setChecked(on)
+            button.setText(("✓ " if on else "") + name)
+            button.setEnabled(free)
+            if tip:
+                button.setToolTip(tip if free else reason)
+        summary = (
+            _test_summary(self._reports_seen[selected]) if selected in self._reports_seen else ""
+        )
+        self.test_result.setText(
+            summary.replace("Test:", "Son test:", 1) if summary else "Bu model henüz test edilmedi."
+        )
+        self._sync_test_buttons()
+        self._parallel_tip()
 
     def _toggle_role(self, key: str) -> None:
         """Seçili modeli zor işler (hard_model) ya da arıza yedeği (fallback_model) yapar."""
@@ -1292,15 +1367,34 @@ class ProviderSection(QWidget):
 
     def _sync_test_buttons(self) -> None:
         running = self._model_test is not None
+        selected = self._current_alias()
+        mine = running and self._testing == selected
         failed = any(state == "kaldı" for state in self._test_rows.values())
-        self.test_list.setVisible(bool(self._test_rows))
-        self.stop_button.setVisible(running)
+        # Satırlar son/çalışan testin modeline aittir; başka model seçiliyken gösterilmez.
+        shown = self._testing or (str(self._last[1].get("model", "")) if self._last else "")
+        here = shown == selected
+        self.test_list.setVisible(bool(self._test_rows) and here)
+        # Tek düğme: test sürerken aynı yerde "Durdur" olur; başka modelin testi sürüyorsa kapalı.
+        self.model_test_button.setText("Durdur" if mine else "Test et")
+        self.model_test_button.setEnabled(not running or mine)
+        self.model_test_button.setToolTip(
+            "Çalışan testi durdurur; rapor kaydedilmez." if mine
+            else f"{self._testing} testi sürüyor; bitmesini bekle." if running
+            else f"{_scenario_count()} senaryoluk testi arka planda çalıştırır; "
+            "bilgisayarına dokunmaz."
+        )
         # Kademeli testin ("ana + zor") adı tek model değil: yeniden deneme yalnız tek modelde.
         retryable = self._last is not None and str(self._last[1].get("model", "")) in [
             row[0] for row in self._model_data
         ]
-        self.retry_button.setVisible(not running and failed and retryable)
-        self.compare_button.setVisible(self.model_list.count() > 0)
+        self.retry_button.setVisible(not running and failed and retryable and here)
+        self.compare_button.setVisible(bool(self._reports_seen))
+
+    def _test_or_stop(self) -> None:
+        if self._model_test is not None and self._testing == self._current_alias():
+            self._stop_test()
+        else:
+            self._test_model()
 
     def _model_test_output(self) -> None:
         if self._model_test is None:
@@ -1435,6 +1529,22 @@ def _comparison_table(rows: list[tuple[float, str, dict[str, object]]]) -> QTabl
             table.setItem(row, column, QTableWidgetItem(text))
     table.resizeColumnsToContents()
     return table
+
+
+def _score(report: dict[str, object]) -> str:
+    """Listede tek sayı: geçen senaryoların yüzdesi ('%87'); tehlikeli hata metinle belirtilir."""
+    passed = total = 0
+    for key in ("temel", "zor", "bilgisayar"):
+        part = report.get(key)
+        if isinstance(part, dict) and isinstance(part.get("passed"), int) and isinstance(
+            part.get("total"), int
+        ):
+            passed, total = passed + part["passed"], total + part["total"]
+    if not total:
+        return ""
+    return f"%{round(100 * passed / total)}" + (
+        " · tehlikeli hata" if report.get("dangerous_errors") else ""
+    )
 
 
 def _test_summary(report: dict[str, object]) -> str:

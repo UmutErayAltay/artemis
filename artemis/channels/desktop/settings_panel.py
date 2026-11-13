@@ -84,7 +84,8 @@ from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_comm
 
 SettingPath = tuple[str, ...]
 
-_BAR_HEIGHT = 60  # alt çubuk: 12 + 36 (Uygula) + 12
+_BLOCK_MAX_WIDTH = 1240  # liste + sayfa bloğu; geniş pencerede ortalanır
+_BAR_HEIGHT = 60 # alt çubuk: 12 + 36 (Uygula) + 12
 _DIRTY_TEXT = "Kaydedilmemiş değişiklik var"
 _CLEAN_TEXT = "Tüm değişiklikler kayıtlı"
 
@@ -689,10 +690,10 @@ class SettingsPanel(QWidget):
         self.applications: dict[str, str] = {}
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 0, 24, 24)
-        layout.setSpacing(16)
+        layout.setSpacing(12)
         title = QLabel("Ayarlar")
         title.setObjectName("pageTitle")
-        title.setFixedHeight(48)
+        title.setFixedHeight(40)
         layout.addWidget(title)
         # Bölüm listesi kaydırma alanının dışında: uzun sayfayı kaydırınca liste yerinde kalır.
         # Yalnız sayfa kaydırılır; liste kendi kaydırıcısını yalnız pencere kısaysa gösterir.
@@ -738,8 +739,10 @@ class SettingsPanel(QWidget):
         current_group = ""
         self.saved_notes: dict[str, _SavedNote] = {}
 
-        def page(name: str, description: str, group_title: str = "") -> QVBoxLayout:
-            """Bölüm sayfası: 720px'i aşmayan sütun, solda; başlık + tek satır açıklama.
+        def page(
+            name: str, description: str, group_title: str = "", *, wide: bool = False,
+        ) -> QVBoxLayout:
+            """Bölüm sayfası: 880px'i aşmayan sütun, solda; başlık + tek satır açıklama.
             `group_title` grubun ilk sayfasında grup başlığını açar."""
             nonlocal current_group
             outer = QWidget()
@@ -748,7 +751,8 @@ class SettingsPanel(QWidget):
             # altında kırpılı kalmaz, rahatça erişilir.
             row.setContentsMargins(0, 0, 0, _BAR_HEIGHT)
             column = QWidget()
-            column.setMaximumWidth(720)
+            # Model sayfası liste + ayrıntıyı yan yana koyar; bloğun bütün sayfa alanını kullanır.
+            column.setMaximumWidth(16777215 if wide else 880)
             content = QVBoxLayout(column)
             content.setContentsMargins(0, 0, 0, 0)
             content.setSpacing(24)
@@ -1026,7 +1030,7 @@ class SettingsPanel(QWidget):
         self.advanced_toggle.toggled.connect(self._toggle_advanced)
 
         # Model: bağlantılar ve modeller ProviderSection'dadır.
-        model_page = page("Model", "Beyin modelini seç ve bağlantıları yönet.")
+        model_page = page("Model", "Beyin modelini seç ve bağlantıları yönet.", wide=True)
         self.providers = ProviderSection(config_path, demo=demo)
         self.providers.changed.connect(self._load_cloud_servers)
         self.providers.changed.connect(self.saved_notes["Model"].flash)
@@ -1576,6 +1580,10 @@ class SettingsPanel(QWidget):
         super().resizeEvent(event)
         self.sections.setFixedWidth(160 if self.width() < 760 else 200)
         self._layout_theme_cards(1 if self.width() < 840 else 2)
+        # Geniş pencerede başlık, gövde ve alt çubuk tek bloktur: en çok _BLOCK_MAX_WIDTH, ortada.
+        # Dar pencerede yan boşluk 0 kalır, yerleşim eskisi gibidir.
+        side = max(0, (self.width() - 48 - _BLOCK_MAX_WIDTH) // 2)
+        self.layout().setContentsMargins(24 + side, 0, 24 + side, 24)  # type: ignore[union-attr]
 
     def _update_cloud_hint(self, *_args: object) -> None:
         """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0046)."""

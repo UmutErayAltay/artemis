@@ -236,6 +236,29 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
     qt_app.processEvents()
 
 
+def test_settings_block_is_centred_on_wide_windows_and_full_on_narrow(
+    tmp_path: Path, qt_app
+) -> None:
+    from artemis.channels.desktop import settings_panel
+
+    panel = settings_panel.SettingsPanel(config(tmp_path))
+    bar = panel.apply_button.parentWidget()
+    body = panel.sections.parentWidget().parentWidget()
+    panel.resize(1920, 1040)
+    panel.show()
+    qt_app.processEvents()
+    left, right = body.geometry().left(), 1920 - body.geometry().right() - 1
+    assert abs(left - right) <= 2
+    assert body.width() <= 1240
+    assert (bar.geometry().left(), bar.geometry().right()) == (
+        body.geometry().left(), body.geometry().right())
+    panel.resize(900, 700)
+    qt_app.processEvents()
+    assert body.geometry().left() == 24 and body.width() == panel.width() - 48
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
 def test_theme_cards_follow_combo_and_emit_once(tmp_path: Path, qt_app) -> None:
     from artemis.channels.desktop import settings_panel
     from artemis.channels.desktop.themes import THEME_LABELS
