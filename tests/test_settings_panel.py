@@ -769,6 +769,32 @@ def test_group_headers_are_not_selectable_rows(tmp_path: Path, qt_app) -> None:
     panel.deleteLater()
 
 
+def test_section_list_stays_put_while_the_page_scrolls(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    panel = _panel(config(tmp_path))
+    panel.resize(900, 520)
+    panel.show()
+    qt_app.processEvents()
+    scroll = panel.sections.scroll_area
+    assert not scroll.isAncestorOf(panel.sections)  # liste kaydırma alanının dışında
+    before = panel.sections.mapToGlobal(QPoint(0, 0)).y()
+    scroll.verticalScrollBar().setValue(scroll.verticalScrollBar().maximum())
+    qt_app.processEvents()
+    assert scroll.verticalScrollBar().maximum() > 0  # uzun sayfa: kaydırma gerçekten oldu
+    assert scroll.verticalScrollBar().value() > 0
+    assert panel.sections.mapToGlobal(QPoint(0, 0)).y() == before
+    # Seçim hâlâ çalışır ve yeni sayfa en üstten açılır.
+    rect = panel.sections.visualItemRect(panel.sections.item(2))
+    QTest.mouseClick(panel.sections.viewport(), Qt.MouseButton.LeftButton,
+                     pos=QPoint(20, rect.center().y()))
+    assert panel.sections.currentRow() == 2
+    assert panel.stack.currentIndex() == 2
+    assert scroll.verticalScrollBar().value() == 0
+    panel.deleteLater()
+
+
 def test_status_bar_text_and_apply_follow_dirty_state(tmp_path: Path, qt_app) -> None:
     panel = _panel(config(tmp_path))
     assert panel.dirty_label.text() == CLEAN
@@ -891,3 +917,101 @@ def test_list_empty_states_and_disabled_messages(tmp_path: Path, qt_app) -> None
     assert panel.skills.valid_area.empty.action_button.text() == "Klasörü aç"  # type: ignore[union-attr]
     assert panel.skills.invalid_area.empty.title_label.text() == "Geçersiz dosya yok"
     panel.deleteLater()
+
+
+# ---- Arama, kirli nokta, son bölüm ----
+
+
+def _visible(panel) -> list[str]:  # type: ignore[no-untyped-def]
+    return [panel.sections.item(r).text() for r in range(panel.sections.count())
+            if not panel.sections.item(r).isHidden()]
+
+
+def test_search_filters_by_title_and_page_text_turkish_insensitive(tmp_path: Path, qt_app) -> None:
+    panel = _panel(config(tmp_path))
+    panel.search.setText("RUTİN")  # başlık; İ/i farkı yok
+    assert _visible(panel) == ["Rutinler"]
+    assert panel.sections.currentRow() == panel.section_names().index("Rutinler")  # tek eşleşme
+    panel.search.setText("bütün kurulu uygulamalara")  # sayfadaki onay kutusu metni
+    assert _visible(panel) == ["Uygulamalar"]
+    panel.search.setText("UYANDIRMA ADI")
+    assert "Ses" in _visible(panel)
+    panel.search.setText("zzzyok")
+    assert _visible(panel) == [] and not panel.no_results.isHidden()
+    panel.search.clear()
+    assert len(_visible(panel)) == panel.sections.count() and panel.no_results.isHidden()
+    assert panel.section_groups() == panel.section_groups()  # bozulmadı
+    panel.deleteLater()
+
+
+def test_search_hides_empty_group_headers_and_enter_selects(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    from artemis.channels.desktop.settings_panel import _GROUP_ROLE
+
+    panel = _panel(config(tmp_path))
+    names = panel.section_names()
+    panel.search.setText("ra")  # birden çok eşleşme
+    shown = _visible(panel)
+    headers = [r for r in range(panel.sections.count())
+               if panel.sections.item(r).data(_GROUP_ROLE)]
+    # her görünür grubun tam bir başlığı var, gizli grubun yok
+    assert all(not panel.sections.item(r).isHidden() for r in headers)
+    assert len(headers) == len({g for g, _ in (panel._row_groups[names.index(n)] for n in shown)})
+    panel.search.setText("Rutinler")
+    panel.show_section(0)
+    QTest.keyClick(panel.search, Qt.Key.Key_Return)
+    assert panel.sections.currentRow() == names.index("Rutinler")
+    panel.deleteLater()
+
+
+def test_search_escape_clears(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+
+    panel = _panel(config(tmp_path))
+    panel.show()
+    panel.search.setFocus()
+    panel.search.setText("zzz")
+    QTest.keyClick(panel.search, Qt.Key.Key_Escape)
+    assert panel.search.text() == "" and len(_visible(panel)) == panel.sections.count()
+    panel.deleteLater()
+
+
+def test_dirty_dot_marks_edited_section_and_clears(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtCore import Qt
+
+    from artemis.channels.desktop.settings_panel import _DIRTY_ROLE
+
+    panel = _panel(config(tmp_path))
+    panel.show_section(0)
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    item = panel.sections.item(0)
+    assert item.data(_DIRTY_ROLE)
+    assert "kaydedilmemiş değişiklik var" in item.data(Qt.ItemDataRole.AccessibleTextRole)
+    assert not panel.sections.item(1).data(_DIRTY_ROLE)
+    panel.refresh()
+    assert not item.data(_DIRTY_ROLE)
+    assert "kaydedilmemiş" not in item.data(Qt.ItemDataRole.AccessibleTextRole)
+    panel.deleteLater()
+
+
+def test_last_section_is_remembered_and_falls_back(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtCore import QSettings
+
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+
+    state = QSettings(str(tmp_path / "s.ini"), QSettings.Format.IniFormat)
+    first = SettingsPanel(config(tmp_path), state=state)
+    first.sections.setCurrentRow(2)  # kullanıcı seçimi
+    name = first.section_names()[2]
+    first.show_section(1)  # kodla gezinme kaydı değiştirmez
+    assert state.value("settings/section") == name
+    second = SettingsPanel(config(tmp_path), state=state)
+    assert second.sections.currentRow() == 2 and second.stack.currentIndex() == 2
+    state.setValue("settings/section", "Artık yok")
+    third = SettingsPanel(config(tmp_path), state=state)
+    assert third.sections.currentRow() == 0
+    for panel in (first, second, third):
+        panel.deleteLater()

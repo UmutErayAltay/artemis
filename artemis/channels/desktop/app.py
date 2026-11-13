@@ -26,9 +26,11 @@ from PySide6.QtGui import (
     QFontMetrics,
     QIcon,
     QKeyEvent,
+    QKeySequence,
     QPainter,
     QPalette,
     QPixmap,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QApplication,
@@ -1454,9 +1456,15 @@ class DesktopWindow(QMainWindow):
         self._projects_timer.setInterval(PROJECTS_POLL_ACTIVE_MS)
         self._projects_timer.timeout.connect(self._refresh_projects)
         self._projects_timer.start()
-        self.settings_panel = SettingsPanel(self._config_path, demo=self._demo)
+        self.settings_panel = SettingsPanel(
+            self._config_path,
+            demo=self._demo,
+            state=QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope,
+                            "Artemis", "appearance"),
+        )
         self.settings_panel.apply_requested.connect(self._apply_settings)
         self.settings_panel.routines.tool_requested.connect(self._submit_routine_tool)
+        self.settings_panel.skills.try_requested.connect(self._try_skill)
         # Üst çubuktaki düğme açılışta config'teki kipi gösterir; sinyal kapalı ki açılış
         # kendiliğinden config yazmasın.
         on = self.settings_panel.computer_auto.isChecked()
@@ -1476,6 +1484,9 @@ class DesktopWindow(QMainWindow):
         self.settings_panel.pet.skin_selected.connect(self._select_skin)
         self.settings_panel.pet.model_settings_requested.connect(self._open_model_settings)
         self.settings_scroll = self.settings_panel
+        # Ctrl+, her yerden Ayarlar'ı açar (pencere kapsamlı).
+        self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
+        self._settings_shortcut.activated.connect(self._show_settings)
         self.tabs.addTab(self.settings_scroll, "Ayarlar")
         self.projects_page = self._page(self.projects_panel)
         self.tabs.addTab(self.projects_page, "Projeler")
@@ -1548,6 +1559,9 @@ class DesktopWindow(QMainWindow):
                     self.settings_panel.providers
                 ),
             )
+
+    def _show_settings(self) -> None:
+        self.tabs.setCurrentWidget(self.settings_scroll)
 
     def _open_settings_section(self, name: str) -> None:
         names = self.settings_panel.section_names()
@@ -1881,6 +1895,11 @@ class DesktopWindow(QMainWindow):
         cursor = self.prompt.textCursor()
         cursor.movePosition(cursor.MoveOperation.End)
         self.prompt.setTextCursor(cursor)
+
+    def _try_skill(self, name: str) -> None:
+        """Ayarlar > Beceriler "Dene": sohbete geçer, /beceri-adı yazar, göndermez."""
+        self.tabs.setCurrentWidget(self.chat_page)
+        self._set_suggestion(f"/{name} ")
 
     def _on_welcome_chip(self, text: str) -> None:
         """Demo ve "…" ile biten öneri yalnız yazma alanına yazılır; diğerleri gönderilir."""

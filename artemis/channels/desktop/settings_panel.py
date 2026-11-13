@@ -13,9 +13,18 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
-from PySide6.QtCore import QPoint, QRect, QRectF, QSize, Qt, QThread, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPainterPath, QPixmap
+from PySide6.QtCore import QPoint, QRect, QRectF, QSettings, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QKeyEvent,
+    QMouseEvent,
+    QPainter,
+    QPainterPath,
+    QPixmap,
+)
 from PySide6.QtWidgets import (
+    QAbstractButton,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -23,6 +32,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFrame,
     QGridLayout,
+    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -429,6 +439,14 @@ def default_repos_dir() -> str:
 _ITEM_HEIGHT = 30  # bölüm satırı; dar pencerede liste kendi kaydırıcısına ihtiyaç duymasın
 _HEADER_HEIGHT = 22  # grup başlığı, grubun ilk satırının üstünde
 _GROUP_ROLE = Qt.ItemDataRole.UserRole + 1
+_DIRTY_ROLE = Qt.ItemDataRole.UserRole + 2
+_DIRTY_A11Y = "kaydedilmemiş değişiklik var"
+_LAST_SECTION_KEY = "settings/section"
+
+
+def _fold(text: str) -> str:
+    """Arama için: büyük/küçük harf ve Türkçe İ/ı farkı yok sayılır."""
+    return text.replace("İ", "i").replace("I", "i").replace("ı", "i").lower()
 
 
 class _SectionDelegate(QStyledItemDelegate):
@@ -438,6 +456,7 @@ class _SectionDelegate(QStyledItemDelegate):
     def __init__(self, parent: QWidget) -> None:
         super().__init__(parent)
         self.muted = QColor(THEMES[DEFAULT_THEME]["muted"])
+        self.accent = QColor(THEMES[DEFAULT_THEME]["accent"])
 
     def sizeHint(self, option: QStyleOptionViewItem, index: Any) -> QSize:  # noqa: N802
         hint = index.data(Qt.ItemDataRole.SizeHintRole)
@@ -461,10 +480,28 @@ class _SectionDelegate(QStyledItemDelegate):
             option = QStyleOptionViewItem(option)
             option.rect = option.rect.adjusted(0, _HEADER_HEIGHT, 0, 0)
         super().paint(painter, option, index)
+        if index.data(_DIRTY_ROLE):  # renk tek başına değil: erişilebilir metin de var
+            painter.save()
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(self.accent)
+            painter.drawEllipse(QPoint(option.rect.right() - 14, option.rect.center().y()), 4, 4)
+            painter.restore()
+
+
+class _SearchBox(QLineEdit):
+    """Esc aramayı temizler."""
+
+    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+        if event.key() == Qt.Key.Key_Escape and self.text():
+            self.clear()
+        else:
+            super().keyPressEvent(event)
 
 
 class _SectionList(QListWidget):
-    """Bölüm listesi; sağdaki tek kaydırma bölgesini (`scroll_area`) de taşır."""
+    """Bölüm listesi. Kaydırma dışında, sabit durur; `scroll_area` sağdaki sayfa kaydırma
+    alanına işaret eder (başa dönme ve görünür kılma için)."""
 
     scroll_area: QScrollArea
 
@@ -633,9 +670,14 @@ class SettingsPanel(QWidget):
         github_sync: GitHubSyncFunction = sync_repos,
         pets_dir: Path | None = None,
         codex_pets_dir: Path | None = None,
+        state: QSettings | None = None,
     ) -> None:
         super().__init__()
         self.setObjectName("settingsPanel")
+        self._state = None if demo else state  # son bölüm yalnız burada hatırlanır
+        self._navigating = False
+        self._row_groups: list[tuple[str, bool]] = []  # (grup, grubun ilk sayfası mı)
+        self._dirty_rows: set[int] = set()
         self.config_path = config_path
         self._demo = demo
         self._gpu_mb = stt_catalog.gpu_memory_mb()
@@ -652,29 +694,46 @@ class SettingsPanel(QWidget):
         title.setObjectName("pageTitle")
         title.setFixedHeight(48)
         layout.addWidget(title)
-        # Bölüm listesi ve sayfa tek kaydırma bölgesinde yan yana durur: dar pencerede listenin
-        # kendi kaydırıcısı olmaz, ikisi birlikte kayar (iç içe ya da yan yana iki kaydırıcı yok).
+        # Bölüm listesi kaydırma alanının dışında: uzun sayfayı kaydırınca liste yerinde kalır.
+        # Yalnız sayfa kaydırılır; liste kendi kaydırıcısını yalnız pencere kısaysa gösterir.
         self.sections = _SectionList()
         self.sections.setObjectName("sectionList")
         self.sections.setFixedWidth(200)
         self.sections.setAccessibleName("Ayar bölümleri")
-        self.sections.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.sections.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._section_delegate = _SectionDelegate(self.sections)
         self.sections.setItemDelegate(self._section_delegate)
         self.stack = CurrentPageStack()
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # Alt dolgu sayfalarla aynı: son bölüm de alt çubuğun altında kırpılı kalmaz.
+        scroll.setWidget(self.stack)
+        self.sections.scroll_area = scroll
         body = QWidget()
         body_row = QHBoxLayout(body)
         body_row.setContentsMargins(0, 0, 0, 0)
         body_row.setSpacing(16)
-        # Alt dolgu sayfalarla aynı: son bölüm de alt çubuğun altında kırpılı kalmaz.
-        body_row.addWidget(self.sections, 0, Qt.AlignmentFlag.AlignTop)
-        body_row.addWidget(self.stack, 1)
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(body)
-        self.sections.scroll_area = scroll
-        layout.addWidget(scroll, 1)
+        nav = QWidget()
+        nav.setFixedWidth(200)
+        nav_col = QVBoxLayout(nav)
+        # Alt çubuk gövdenin üstüne biner: liste de sayfalar gibi onun kadar boşluk bırakır.
+        nav_col.setContentsMargins(0, 0, 0, _BAR_HEIGHT + 12)
+        nav_col.setSpacing(8)
+        self.search = _SearchBox()
+        self.search.setPlaceholderText("Ayarlarda ara")
+        self.search.setAccessibleName("Ayarlarda ara")
+        self.search.setFixedHeight(36)
+        self.search.setClearButtonEnabled(True)
+        self.no_results = QLabel("Sonuç yok")
+        self.no_results.setObjectName("meta")
+        self.no_results.setVisible(False)
+        nav_col.addWidget(self.search)
+        nav_col.addWidget(self.sections, 1)
+        nav_col.addWidget(self.no_results)
+        body_row.addWidget(nav)
+        body_row.addWidget(scroll, 1)
+        layout.addWidget(body, 1)
 
         current_group = ""
         self.saved_notes: dict[str, _SavedNote] = {}
@@ -713,6 +772,8 @@ class SettingsPanel(QWidget):
             item = self.sections.item(self.sections.count() - 1)
             if group_title:
                 current_group = group_title
+            self._row_groups.append((current_group, bool(group_title)))
+            if group_title:
                 item.setData(_GROUP_ROLE, group_title)
             item.setData(Qt.ItemDataRole.AccessibleTextRole, f"{name}, {current_group}")
             item.setSizeHint(QSize(0, _ITEM_HEIGHT + (_HEADER_HEIGHT if group_title else 0)))
@@ -1216,8 +1277,10 @@ class SettingsPanel(QWidget):
         self.skills_enabled = QCheckBox("Becerileri kullan")
         skills_page.addWidget(self.skills_enabled)
         skills_page.addWidget(_check_hint(
-            "Dosyalar Artemis'in veri klasöründeki beceriler klasöründe durur ve açılışta ile "
-            "Yenile'de okunur. Uygulama içinde düzenlenmez ve Artemis kendi başına beceri "
+            "Dosyalar varsayılan olarak Artemis'in kullanıcı verisi klasöründeki beceriler "
+            "klasöründe durur; Klasör seç ile başka bir klasör seçebilirsin. Açılışta ve "
+            "Yenile'de okunur. Uygulama içinde düzenlenmez; Yeni beceri yalnız senin "
+            "tıklamanla hazır bir şablondan yeni dosya açar. Artemis kendi başına beceri "
             "yazamaz. Mesajı /beceri-adı ile başlatarak da çağırabilirsin."
         ))
         self.skills = SkillsSection(config_path, demo=demo)
@@ -1276,14 +1339,18 @@ class SettingsPanel(QWidget):
         listing.addWidget(self.application_hint)
         apps.addStretch(1)
 
-        # Liste kaydırıcısız: yüksekliği satırların toplamıdır (alt dolgu çubuğa ayrılır).
-        self.sections.setFixedHeight(
-            sum(self.sections.item(row).sizeHint().height() for row in range(self.sections.count()))
-            + _BAR_HEIGHT
-        )
         self.sections.currentRowChanged.connect(self._on_section)
-        self.sections.setCurrentRow(0)
-        self._on_section(0)
+        start = 0
+        if self._state is not None:
+            saved = str(self._state.value(_LAST_SECTION_KEY, ""))
+            if saved in self.section_names():  # anahtar artık yoksa ilk bölüm
+                start = self.section_names().index(saved)
+        self._navigating = True  # açılış seçimi yeniden yazılmaz
+        self.sections.setCurrentRow(start)
+        self._navigating = False
+        self._on_section(start)
+        self.search.textChanged.connect(self._filter_sections)
+        self.search.returnPressed.connect(self._pick_first_match)
 
         # Yapışkan alt çubuk kaydırma bölgesinin dışındadır: uzun sayfada da görünür kalır.
         bar = QFrame()
@@ -1357,19 +1424,73 @@ class SettingsPanel(QWidget):
     def section_groups(self) -> dict[str, list[str]]:
         """Grup başlığı -> sayfa adları (listede sırayla). Başlıklar satır değildir."""
         groups: dict[str, list[str]] = {}
-        title = ""
-        for row in range(self.sections.count()):
-            item = self.sections.item(row)
-            title = str(item.data(_GROUP_ROLE) or title)
-            groups.setdefault(title, []).append(item.text())
+        for row, (title, _first) in enumerate(self._row_groups):
+            groups.setdefault(title, []).append(self.sections.item(row).text())
         return groups
 
     def show_section(self, index: int) -> None:
-        self.sections.setCurrentRow(index)
+        self._navigating = True  # kodla gezinme (ör. model uyarısı) son seçimi değiştirmez
+        try:
+            self.sections.setCurrentRow(index)
+        finally:
+            self._navigating = False
+
+    def _page_text(self, row: int) -> str:
+        """Sayfada görünen metinler: başlık, etiketler, kutu ve grup adları."""
+        page = self.stack.widget(row)
+        assert page is not None
+        parts = [self.sections.item(row).text()]
+        parts += [label.text() for label in page.findChildren(QLabel)]
+        parts += [button.text() for button in page.findChildren(QAbstractButton)]
+        parts += [box.title() for box in page.findChildren(QGroupBox)]
+        return _fold("\n".join(parts))
+
+    def _filter_sections(self, text: str) -> None:
+        needle = _fold(text.strip())
+        shown = [
+            row for row in range(self.sections.count())
+            if not needle or needle in self._page_text(row)
+        ]
+        seen: set[str] = set()
+        for row in range(self.sections.count()):
+            item = self.sections.item(row)
+            item.setHidden(row not in shown)
+            group = self._row_groups[row][0]
+            header = row in shown and group not in seen  # boş grubun başlığı da gizlenir
+            if row in shown:
+                seen.add(group)
+            item.setData(_GROUP_ROLE, group if header else None)
+            item.setSizeHint(QSize(0, _ITEM_HEIGHT + (_HEADER_HEIGHT if header else 0)))
+        self.no_results.setVisible(bool(needle) and not shown)
+        if shown and self.sections.currentRow() not in shown:
+            self.sections.setCurrentRow(shown[0])
+        if needle and len(shown) == 1:
+            self.sections.setCurrentRow(shown[0])
+
+    def _pick_first_match(self) -> None:
+        for row in range(self.sections.count()):
+            if not self.sections.item(row).isHidden():
+                self.sections.setCurrentRow(row)
+                return
+
+    def _refresh_dirty_dots(self) -> None:
+        for row in range(self.sections.count()):
+            item = self.sections.item(row)
+            dirty = row in self._dirty_rows
+            item.setData(_DIRTY_ROLE, dirty)
+            spoken = f"{item.text()}, {self._row_groups[row][0]}"
+            item.setData(
+                Qt.ItemDataRole.AccessibleTextRole,
+                spoken + (f", {_DIRTY_A11Y}" if dirty else ""),
+            )
+            item.setToolTip(_DIRTY_A11Y if dirty else "")
+        self.sections.viewport().update()
 
     def _on_section(self, row: int) -> None:
         if row < 0:
             return
+        if self._state is not None and not self._navigating:
+            self._state.setValue(_LAST_SECTION_KEY, self.sections.item(row).text())
         self.stack.setCurrentIndex(row)
         # Önceki sayfanın kaydırma konumu yeni (kısa) sayfada alta düşmesin; programatik
         # show_section() de buradan geçer.
@@ -1392,9 +1513,9 @@ class SettingsPanel(QWidget):
         self.theme_changed.emit(str(self.theme_combo.currentData()))
 
     def _sync_theme_cards(self, *_args: object) -> None:
-        self._section_delegate.muted = QColor(
-            THEMES.get(str(self.theme_combo.currentData()), THEMES[DEFAULT_THEME])["muted"]
-        )
+        tokens = THEMES.get(str(self.theme_combo.currentData()), THEMES[DEFAULT_THEME])
+        self._section_delegate.muted = QColor(tokens["muted"])
+        self._section_delegate.accent = QColor(tokens["accent"])
         self.sections.viewport().update()
         card_for = self.theme_cards.get(str(self.theme_combo.currentData()))
         if card_for is not None and not card_for.radio.isChecked():
@@ -1416,6 +1537,8 @@ class SettingsPanel(QWidget):
 
     def _mark_dirty(self, *_args: object) -> None:
         if not self._demo:
+            # ponytail: kirli bölüm = o an açık olan; değişiklik yalnız görünen sayfada olur.
+            self._dirty_rows.add(self.stack.currentIndex())
             self._set_dirty(True)
 
     def _set_dirty(self, dirty: bool) -> None:
@@ -1423,6 +1546,9 @@ class SettingsPanel(QWidget):
         self._dirty = dirty
         self.dirty_label.setText(_DIRTY_TEXT if dirty else _CLEAN_TEXT)
         self.apply_button.set_dirty(dirty)
+        if not dirty:
+            self._dirty_rows.clear()
+        self._refresh_dirty_dots()
 
     def _layout_theme_cards(self, columns: int) -> None:
         """İki sütunlu kart ızgarası ~510px ister; dar pencerede tek sütun, yoksa bütün sayfaların

@@ -1606,3 +1606,13 @@ def test_busy_refusal_lands_in_the_panel_that_started_the_action(
         assert window.automation_panel.notice.text() == "otomasyon-sonra"
     finally:
         _close_cleanly(app, window)
+
+
+def test_ctrl_comma_opens_settings_from_anywhere(app: QApplication, tmp_path: Path) -> None:
+    window = _window(app, tmp_path)
+    window.tabs.setCurrentIndex(0)
+    assert window.tabs.currentWidget() is not window.settings_scroll
+    window._settings_shortcut.activated.emit()
+    assert window.tabs.currentWidget() is window.settings_scroll
+    assert window._settings_shortcut.key().toString() == "Ctrl+,"
+    _close_cleanly(app, window)
