@@ -19,6 +19,7 @@ from __future__ import annotations
 import os
 import re
 import sys
+import tempfile
 from dataclasses import dataclass, field
 from importlib import resources
 from pathlib import Path
@@ -26,6 +27,7 @@ from pathlib import Path
 import yaml
 
 from artemis.config.settings import Settings
+from artemis.safety.paths import safe_join
 
 NAME_PATTERN = re.compile(r"^[a-z0-9-]{1,40}$")
 MAX_SKILLS = 40
@@ -126,13 +128,15 @@ def ensure_example(settings: Settings) -> None:
             stream.write(text)
 
 
-def _parse(path: Path) -> Skill:
-    """Geçersizse ValueError (kullanıcıya gösterilecek neden)."""
-    if path.stat().st_size > _MAX_FILE_BYTES:
+def parse_bytes(data: bytes, stem: str) -> Skill:
+    """Dosya baytlarını `<stem>.md` becerisi olarak doğrular; geçersizse ValueError (kullanıcıya
+    gösterilecek neden). Yükleyici ve uygulama içi düzenleyici AYNI doğrulayıcıyı kullanır: panel
+    yazmadan önce tam yazılacak baytları buradan geçirir, böylece kaydedilen dosya yüklenir."""
+    if len(data) > _MAX_FILE_BYTES:
         raise ValueError("Dosya çok büyük.")
     try:
         # utf-8-sig: Not Defteri'nin eklediği BOM kabul; UTF-16/ANSI dosya çözülemez.
-        text = path.read_bytes().decode("utf-8-sig")
+        text = data.decode("utf-8-sig")
     except UnicodeDecodeError:
         raise ValueError("UTF-8 değil; Not Defteri'nde 'UTF-8' olarak kaydedin.") from None
     text = text.replace("\r\n", "\n")
@@ -149,8 +153,8 @@ def _parse(path: Path) -> Skill:
     name, description = meta.get("name"), meta.get("description")
     if not isinstance(name, str) or not NAME_PATTERN.fullmatch(name):
         raise ValueError("name 1-40 karakter; küçük harf, rakam ve tire olmalı.")
-    if name != path.stem:
-        raise ValueError(f"name ({name}) dosya adıyla ({path.stem}) aynı olmalı.")
+    if name != stem:
+        raise ValueError(f"name ({name}) dosya adıyla ({stem}) aynı olmalı.")
     if not isinstance(description, str) or not description.strip():
         raise ValueError("description boş olamaz.")
     description = " ".join(description.split())
@@ -161,6 +165,116 @@ def _parse(path: Path) -> Skill:
     if len(body) > MAX_BODY:
         raise ValueError(f"Gövde {MAX_BODY} karakteri aşıyor.")
     return Skill(name, description, body)
+
+
+def _parse(path: Path) -> Skill:
+    if path.stat().st_size > _MAX_FILE_BYTES:
+        raise ValueError("Dosya çok büyük.")  # okumadan reddet
+    return parse_bytes(path.read_bytes(), path.stem)
+
+
+def compose(name: str, description: str, body: str) -> str:
+    """Form alanlarından dosya metni. Açıklama yaml ile yazılır: `:` ya da `#` içeren cümle
+    başlığı bozmaz; geçerliliği yine `parse_bytes` söyler."""
+    head = yaml.safe_dump(
+        {"name": name, "description": " ".join(description.split())},
+        allow_unicode=True, default_flow_style=False, sort_keys=False, width=10_000,
+    )
+    return "---\n" + head + "---\n" + body.strip() + "\n"
+
+
+class SkillWriteError(Exception):
+    """Panelin yazma/silme işlemi reddedildi; mesaj kullanıcıya gösterilir."""
+
+
+def _skill_path(settings: Settings, name: str) -> tuple[Path, Path]:
+    """(klasör, dosya). Konum güvensizse ya da ad geçersizse reddeder; yol `safe_join`'dan geçer."""
+    problem = location_problem(settings)
+    if problem:
+        raise SkillWriteError(problem)
+    if not NAME_PATTERN.fullmatch(name):
+        raise SkillWriteError("Ad 1-40 karakter; küçük harf, rakam ve tire olmalı.")
+    folder = skills_dir(settings)
+    try:
+        return folder, safe_join(folder, f"{name}.md", allow_symlinks=False)
+    except ValueError as error:
+        raise SkillWriteError(str(error)) from None
+
+
+def create_skill(settings: Settings, name: str, text: str) -> None:
+    """YENİ beceri dosyası; `open("x")` olduğundan var olanın üzerine asla yazmaz."""
+    data = text.encode("utf-8")
+    try:
+        parse_bytes(data, name)
+    except ValueError as error:
+        raise SkillWriteError(str(error)) from None
+    folder, path = _skill_path(settings, name)
+    try:
+        folder.mkdir(parents=True, exist_ok=True)
+        if sum(1 for _ in folder.glob("*.md")) >= MAX_SKILLS:
+            raise SkillWriteError(f"En çok {MAX_SKILLS} beceri yüklenir.")
+        with path.open("xb") as stream:
+            stream.write(data)
+    except FileExistsError:
+        raise SkillWriteError(f"{name}.md zaten var; üzerine yazılmaz.") from None
+    except OSError:
+        raise SkillWriteError("Beceri dosyası oluşturulamadı.") from None
+
+
+def replace_skill(settings: Settings, name: str, text: str, original: bytes) -> None:
+    """Var olan beceriyi atomik değiştirir. Dosya `original` baytlarından farklıysa (başka biri
+    değiştirmiş) hiçbir şey yazmaz: kullanıcının dış düzenlemesi sessizce ezilmez."""
+    data = text.encode("utf-8")
+    try:
+        parse_bytes(data, name)
+    except ValueError as error:
+        raise SkillWriteError(str(error)) from None
+    folder, path = _skill_path(settings, name)
+    tmp: str | None = None
+    try:
+        if path.is_symlink() or path.resolve().parent != folder.resolve():
+            raise SkillWriteError("Dosya sembolik bağlantı; değiştirilmez.")
+        if path.read_bytes() != original:
+            raise SkillWriteError(
+                "Dosya sen düzenlerken diskte değişti; yazılmadı. Pencereyi kapatıp yeniden aç."
+            )
+        # Geçici dosya aynı klasörde (os.replace aynı sürücüde atomik); *.md olmadığı için
+        # yarım kalırsa bile yükleyici onu beceri saymaz.
+        handle, tmp = tempfile.mkstemp(dir=folder, suffix=".tmp")
+        with os.fdopen(handle, "wb") as stream:
+            stream.write(data)
+        os.replace(tmp, path)
+        tmp = None
+    except OSError:
+        raise SkillWriteError("Beceri dosyası yazılamadı.") from None
+    finally:
+        if tmp is not None:
+            Path(tmp).unlink(missing_ok=True)
+
+
+def delete_skill(settings: Settings, file_name: str) -> None:
+    """Tek dosyayı siler (yalnız `.md`; bağlantıysa yalnız bağlantı kalkar, hedefe dokunulmaz)."""
+    problem = location_problem(settings)
+    if problem:
+        raise SkillWriteError(problem)
+    try:
+        folder = skills_dir(settings)
+        # Yalnız tek parça ad: ayraç, `..`, sürücü yok. safe_join burada kullanılmaz çünkü
+        # bağlantının HEDEFİNİ denetler; klasör dışına işaret eden ya da kırık bağlantı silinemezdi.
+        # unlink bağlantının kendisini siler, hedefe dokunmaz.
+        if (
+            not file_name or Path(file_name).name != file_name or file_name in {".", ".."}
+            or "/" in file_name or "\\" in file_name or ":" in file_name
+        ):
+            raise SkillWriteError("Geçersiz dosya adı.")
+        path = folder.resolve() / file_name
+        if path.suffix != ".md" or not (path.is_file() or path.is_symlink()):
+            raise SkillWriteError("Silinecek beceri dosyası bulunamadı.")
+        path.unlink()
+    except ValueError as error:
+        raise SkillWriteError(str(error)) from None
+    except OSError:
+        raise SkillWriteError("Dosya silinemedi.") from None
 
 
 def load_skills(settings: Settings) -> Catalog:

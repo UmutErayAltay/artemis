@@ -1,10 +1,9 @@
-"""Ayarlar > Beceriler: geçerli ve geçersiz beceri dosyaları, klasörü aç, yenile (ADR 0060).
+"""Ayarlar > Beceriler: geçerli ve geçersiz beceri dosyaları; ekle, düzenle, düzelt, sil (ADR 0060).
 
-Uygulama içi düzenleyici bilerek yoktur: beceri yalnız kullanıcının yazdığı dosyadır (güven sınırı).
-Tek istisna "Yeni beceri": kullanıcı açıkça tıklarsa panel, paketle gelen sabit bir şablondan YENİ
-bir dosya oluşturur ve kullanıcının düzenleyicisinde açar. Var olan dosyayı değiştirmez, üzerine
-yazmaz, silmez; hiçbir araç ya da model bunu tetikleyemez. Klasör yalnız etkin ve güvenli
-konumdaysa açılır ya da yazılır.
+Beceri yalnız kullanıcının yazdığı talimattır (güven sınırı), bu yüzden dosyayı yalnız kullanıcının
+açık tıklaması değiştirir: "Yeni beceri…"/"Düzenle"/"Düzelt" uygulama içi `SkillDialog`'u açar,
+"Sil" onay sorar (varsayılan Hayır). Hiçbir araç ya da model bunu tetikleyemez; dış düzenleyici
+açılmaz. Klasör yalnız etkin ve güvenli konumdaysa yazılır.
 """
 
 from __future__ import annotations
@@ -15,10 +14,7 @@ import yaml
 from PySide6.QtCore import Qt, QUrl, Signal
 from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import (
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
-    QInputDialog,
     QListWidget,
     QListWidgetItem,
     QMessageBox,
@@ -29,23 +25,18 @@ from PySide6.QtWidgets import (
 
 from artemis.channels.desktop.provider_section import button_row, group, meta_label
 from artemis.channels.desktop.settings_lists import ListWithEmpty
+from artemis.channels.desktop.skill_dialog import SkillDialog, read_for_edit
 from artemis.config.settings import Settings, load_settings
 from artemis.skills import (
     NAME_PATTERN,
+    SkillWriteError,
+    delete_skill,
     ensure_example,
     load_skills,
     location_problem,
     skills_dir,
-    templates,
 )
 
-_BLANK = "Boş beceri"
-_BLANK_TEXT = """---
-name: {name}
-description: Bu becerinin ne zaman kullanılacağını tek cümleyle yaz.
----
-Tarifi buraya yaz: Artemis'in hangi adımları sırayla izleyeceğini kısa ve düz anlat.
-"""
 _NAME_ROLE = Qt.ItemDataRole.UserRole
 
 
@@ -66,11 +57,11 @@ class SkillsSection(QWidget):
         self.valid_list = QListWidget()
         self.valid_list.setAccessibleName("Geçerli beceriler")
         self.valid_area = ListWithEmpty(
-            self.valid_list, "Henüz beceri yok", "", "Klasörü aç",
+            self.valid_list, "Henüz beceri yok", "", "Yeni beceri…",
         )
         if self.valid_area.empty.action_button is not None:
             self.valid_area.empty.action_button.setEnabled(not demo)
-            self.valid_area.empty.action_button.clicked.connect(self._open_folder)
+            self.valid_area.empty.action_button.clicked.connect(self._new_skill)
         valid.addWidget(self.valid_area)
         invalid_box, invalid = group("Geçersiz dosyalar")
         layout.addWidget(invalid_box)
@@ -79,18 +70,47 @@ class SkillsSection(QWidget):
         self.invalid_area = ListWithEmpty(self.invalid_list, "Geçersiz dosya yok", height=120)
         invalid.addWidget(self.invalid_area)
         self.new_button = QPushButton("Yeni beceri…")
+        self.new_button.setObjectName("primary")
         self.try_button = QPushButton("Dene")
         self.try_button.setToolTip("Sohbet kutusuna /beceri-adı yazar, göndermez")
-        self.try_button.setEnabled(False)
-        valid.addLayout(button_row(self.try_button, self.new_button))
-        self.open_button = QPushButton("Klasörü aç")
+        self.edit_button = QPushButton("Düzenle")
+        self.delete_button = QPushButton("Sil")
+        for button in (self.try_button, self.edit_button, self.delete_button):
+            button.setEnabled(False)
+        valid.addLayout(button_row(
+            self.delete_button, self.edit_button, self.try_button, self.new_button,
+            help=(
+                "Yeni beceri/Düzenle: ad, açıklama ve talimat formunu açar. Dene: sohbet kutusuna "
+                "/beceri-adı yazar, göndermez. Sil: dosyayı kalıcı siler (onay sorar)."
+            ),
+        ))
+        self.fix_button = QPushButton("Düzelt")
+        self.fix_button.setToolTip("Bozuk dosyayı uygulama içinde aç ve onar")
+        self.delete_invalid_button = QPushButton("Sil")
+        self.fix_button.setEnabled(False)
+        self.delete_invalid_button.setEnabled(False)
+        invalid.addLayout(button_row(
+            self.delete_invalid_button, self.fix_button,
+            help=(
+                "Düzelt: bozuk dosyayı uygulama içinde açar; yalnız geçerliyse kaydedilir. Sil: "
+                "dosyayı kalıcı siler (onay sorar)."
+            ),
+        ))
+        # Klasörü göster yalnız dosya gezginini açar (düzenleyici değil); ikincil, düşük vurgu.
+        self.open_button = QPushButton("Klasörü göster")
         self.choose_button = QPushButton("Klasör seç…")
         self.refresh_button = QPushButton("Yenile")
         invalid.addWidget(meta_label("Beceri dosyalarını bu klasöre .md olarak koy:"))
         self.folder_label = meta_label("")
         self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         invalid.addWidget(self.folder_label)
-        invalid.addLayout(button_row(self.choose_button, self.open_button, self.refresh_button))
+        invalid.addLayout(button_row(
+            self.choose_button, self.open_button, self.refresh_button,
+            help=(
+                "Klasör seç: beceri klasörünü değiştirir ve ayar dosyasına yazar. Klasörü göster: "
+                "Dosya Gezgini'nde açar. Yenile: klasörü yeniden okur."
+            ),
+        ))
         invalid.addWidget(meta_label(
             "Beceri metni yerel bir dosyadır; bulut modele giden istemin parçası olur, "
             "başka bir kullanıcı metni gibi. Beceri izin vermez: her adım normal onaydan geçer."
@@ -100,6 +120,11 @@ class SkillsSection(QWidget):
         self.open_button.clicked.connect(self._open_folder)
         self.new_button.clicked.connect(self._new_skill)
         self.try_button.clicked.connect(self._try_selected)
+        self.edit_button.clicked.connect(self._edit_selected)
+        self.delete_button.clicked.connect(self._delete_selected)
+        self.fix_button.clicked.connect(self._fix_selected)
+        self.delete_invalid_button.clicked.connect(self._delete_invalid)
+        self.invalid_list.currentItemChanged.connect(self._selection_changed)
         self.valid_list.itemDoubleClicked.connect(self._try_selected)
         self.valid_list.currentItemChanged.connect(self._selection_changed)
         self.choose_button.clicked.connect(self._choose_folder)
@@ -130,7 +155,9 @@ class SkillsSection(QWidget):
                     item.setData(_NAME_ROLE, skill.name)
                     self.valid_list.addItem(item)
                 for name, reason in catalog.invalid:
-                    self.invalid_list.addItem(f"{name}: {reason}")
+                    invalid_item = QListWidgetItem(f"{name}: {reason}")
+                    invalid_item.setData(_NAME_ROLE, name)
+                    self.invalid_list.addItem(invalid_item)
                 self.notice.setText(" ".join(
                     n for n in (catalog.refused, self._legacy_notice(self._settings)) if n
                 ))
@@ -145,7 +172,7 @@ class SkillsSection(QWidget):
         enabled = self._settings is not None and self._settings.skills.enabled
         self.open_button.setEnabled(enabled and not self._demo)
         self.new_button.setEnabled(enabled and not self._demo)
-        self.try_button.setEnabled(False)
+        self._selection_changed()
         self.choose_button.setEnabled(self._settings is not None and not self._demo)
         self.refresh_button.setEnabled(not self._demo)
 
@@ -167,87 +194,91 @@ class SkillsSection(QWidget):
         return ""
 
     def _selection_changed(self) -> None:
-        self.try_button.setEnabled(self.valid_list.currentItem() is not None)
+        live = not self._demo and self._settings is not None and self._settings.skills.enabled
+        valid = self.valid_list.currentItem() is not None
+        self.try_button.setEnabled(valid)
+        self.edit_button.setEnabled(valid and live)
+        self.delete_button.setEnabled(valid and live)
+        broken = self.invalid_list.currentItem()
+        self.delete_invalid_button.setEnabled(broken is not None and live)
+        # Dosya adı geçersizse (örn. büyük harf) name==dosya adı kuralı yüzünden yerinde onarılamaz.
+        self.fix_button.setEnabled(
+            broken is not None and live
+            and NAME_PATTERN.fullmatch(Path(str(broken.data(_NAME_ROLE))).stem) is not None
+        )
 
     def _try_selected(self) -> None:
         item = self.valid_list.currentItem()
         if item is not None:
             self.try_requested.emit(str(item.data(_NAME_ROLE)))
 
-    def _pick_template(self) -> str | None:
-        """Şablon seçtirir: boş beceri için '', şablon için adı; vazgeçilirse None."""
-        dialog = QDialog(self)
-        dialog.setWindowTitle("Yeni beceri")
-        layout = QVBoxLayout(dialog)
-        choices = QListWidget()
-        choices.setAccessibleName("Beceri şablonları")
-        choices.addItem(f"{_BLANK}: sıfırdan kendin yaz")
-        for name, text in templates():
-            description = yaml.safe_load(text.split("---")[1]).get("description", "")
-            choices.addItem(f"{name}: {description}")
-        choices.setCurrentRow(0)
-        layout.addWidget(choices)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
-        )
-        buttons.accepted.connect(dialog.accept)
-        buttons.rejected.connect(dialog.reject)
-        choices.itemDoubleClicked.connect(dialog.accept)
-        layout.addWidget(buttons)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
-            return None
-        row = choices.currentRow()
-        return "" if row <= 0 else templates()[row - 1][0]
-
-    def _ask_name(self) -> str | None:
-        name, ok = QInputDialog.getText(
-            self, "Yeni beceri", "Dosya adı (küçük harf, rakam, tire):"
-        )
-        return name.strip() if ok else None
-
-    def _new_skill(self) -> None:
-        """Seçilen şablondan YENİ dosya yazar (asla üzerine yazmaz) ve düzenleyicide açar."""
+    def _writable_settings(self) -> Settings | None:
+        """Yazmaya hazır ayar; kapalıysa, demoda ya da konum güvensizse None (neden gösterilir)."""
         settings = self._settings
         if settings is None or not settings.skills.enabled or self._demo:
-            return
+            return None
         problem = location_problem(settings)
         if problem:
             self.notice.setText(problem)
-            return
-        picked = self._pick_template()
-        if picked is None:
-            return
-        if picked:
-            name, text = picked, dict(templates())[picked]
-        else:
-            asked = self._ask_name()
-            if asked is None:
+            return None
+        return settings
+
+    def _run_dialog(self, settings: Settings, name: str | None) -> None:
+        original: bytes | None = None
+        if name is not None:
+            try:
+                original = read_for_edit(settings, name)
+            except SkillWriteError as error:
+                self.notice.setText(str(error))
                 return
-            if not NAME_PATTERN.fullmatch(asked):
-                self.notice.setText(
-                    "Dosya adı 1-40 karakter olmalı; yalnız küçük harf, rakam ve tire kullan."
-                )
-                return
-            name, text = asked, _BLANK_TEXT.format(name=asked)
-        folder = skills_dir(settings)
-        path = folder / f"{name}.md"
-        try:
-            folder.mkdir(parents=True, exist_ok=True)
-            with path.open("x", encoding="utf-8", newline="") as stream:
-                stream.write(text)
-        except FileExistsError:
-            answer = QMessageBox.question(
-                self, "Yeni beceri",
-                f"{name}.md zaten var; üzerine yazılmaz. Mevcut dosyayı açayım mı?",
-            )
-            if answer == QMessageBox.StandardButton.Yes:
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        SkillDialog(settings, name, original, self).exec()
+        self.refresh()  # iptal edilse de dış değişiklikler listede güncel görünsün
+
+    def _new_skill(self) -> None:
+        settings = self._writable_settings()
+        if settings is not None:
+            self._run_dialog(settings, None)
+
+    def _edit_selected(self) -> None:
+        item = self.valid_list.currentItem()
+        settings = self._writable_settings()
+        if item is not None and settings is not None:
+            self._run_dialog(settings, str(item.data(_NAME_ROLE)))
+
+    def _fix_selected(self) -> None:
+        item = self.invalid_list.currentItem()
+        settings = self._writable_settings()
+        if item is not None and settings is not None:
+            self._run_dialog(settings, Path(str(item.data(_NAME_ROLE))).stem)
+
+    def _confirm_delete(self, file_name: str) -> None:
+        settings = self._writable_settings()
+        if settings is None:
             return
-        except OSError:
-            self.notice.setText("Beceri dosyası oluşturulamadı.")
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+        answer = QMessageBox.question(
+            self, "Beceriyi sil", f"{file_name} silinsin mi? Bu geri alınamaz.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        problem = ""
+        if answer == QMessageBox.StandardButton.Yes:
+            try:
+                delete_skill(settings, file_name)
+            except SkillWriteError as error:
+                problem = str(error)
         self.refresh()
+        if problem:  # refresh bildirimi sildiği için hata ondan sonra yazılır
+            self.notice.setText(problem)
+
+    def _delete_selected(self) -> None:
+        item = self.valid_list.currentItem()
+        if item is not None:
+            self._confirm_delete(f"{item.data(_NAME_ROLE)}.md")
+
+    def _delete_invalid(self) -> None:
+        item = self.invalid_list.currentItem()
+        if item is not None:
+            self._confirm_delete(str(item.data(_NAME_ROLE)))
 
     def _open_folder(self) -> None:
         settings = self._settings

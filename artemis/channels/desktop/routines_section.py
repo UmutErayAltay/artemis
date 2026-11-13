@@ -1,32 +1,34 @@
-"""Ayarlar > Rutinler: liste, sil, zaman ve dosyayı aç (ADR 0058). Çalıştırma Otomasyon'dadır.
+"""Ayarlar > Rutinler: ekle, düzenle, sil, zaman ve bozuk dosyayı düzelt (ADR 0058 + Ek karar).
 
-Silme araç çağrısıdır: bu bölüm yalnız `tool_requested` yayar, pencere onu aynı
-köprü ve SafetyGate üzerinden gönderir (ikinci onay yolu yok). Adım yazma arayüzü bilerek yoktur;
-rutin sohbetle (onaylı `routine_save`) ya da JSON'u elle düzenleyerek oluşur. Zaman yalnız buradan
-kurulur; hiçbir araç zaman ayarlayamaz.
+Çalıştırma Otomasyon'dadır. Ekle/düzenle/sil panelde kullanıcının tıklamasıyla yapılır ve
+`validate_steps` + atomik `RoutineStore.save` ile yazılır: panel kullanıcının kendisidir, bu yüzden
+SafetyGate onayı gerekmez (zaman ayarı da böyle). Araçlar (`routine_save`/`routine_delete`) aynen
+onaylı kalır. Dış editör açılmaz. Zaman yalnız buradan kurulur; hiçbir araç zaman ayarlayamaz.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from pydantic import BaseModel, ValidationError
-from PySide6.QtCore import QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from pydantic import ValidationError
+from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QHBoxLayout,
     QLineEdit,
     QListWidget,
+    QMessageBox,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
 from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
+from artemis.channels.desktop.routine_dialog import RoutineDialog, RoutineFileDialog
 from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.config.settings import load_settings
 from artemis.proactive.routines import (
+    MAX_ROUTINES,
     Routine,
     RoutineSchedule,
     RoutinesError,
@@ -34,7 +36,7 @@ from artemis.proactive.routines import (
     name_key,
 )
 from artemis.tools.base import ToolResult
-from artemis.tools.plugins.routines import RoutineNameArguments
+from artemis.tools.registry import ToolRegistry, discover_tools
 
 _DAYS = ("Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz")
 
@@ -49,10 +51,15 @@ def _describe(routine: Routine) -> str:
 
 
 class RoutinesSection(QWidget):
-    tool_requested = Signal(str, object)  # (araç adı, pydantic argümanları)
+    # Artık yayılmaz (silme panelde doğrudan); pencere bağlantıları bozulmasın diye durur.
+    tool_requested = Signal(str, object)
 
-    def __init__(self, config_path: Path, *, demo: bool = False) -> None:
+    def __init__(
+        self, config_path: Path, *, demo: bool = False, registry: ToolRegistry | None = None
+    ) -> None:
         super().__init__()
+        self._registry = registry
+        self._corrupt = False
         self._config_path = config_path
         self._demo = demo
         self._enabled = False
@@ -60,7 +67,10 @@ class RoutinesSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        list_box, listing = group("Kayıtlı rutinler", divided=False)
+        list_box, listing = group("Kayıtlı rutinler", divided=False, help=(
+            "Burada kayıtlı rutinler. Rutini bu sayfada yazar ve düzenlersin; çalıştırmak "
+            "Otomasyon sayfasından olur ve her adım normal onay kurallarına tabidir."
+        ))
         layout.addWidget(list_box)
         self.routine_list = QListWidget()
         self.routine_list.setAccessibleName("Kayıtlı rutinler")
@@ -69,13 +79,25 @@ class RoutinesSection(QWidget):
         self.run_hint = meta_label("Rutinleri Otomasyon sayfasından çalıştırırsın.")
         listing.addWidget(self.run_hint)
         self.delete_button = QPushButton("Sil")
-        self.open_button = QPushButton("Dosyayı aç")
+        self.edit_button = QPushButton("Düzenle")
+        self.fix_button = QPushButton("Dosyayı düzelt")
+        self.add_button = QPushButton("Rutin ekle")
+        self.add_button.setObjectName("primary")
         self.action_row = QWidget()
-        self.action_row.setLayout(button_row(self.open_button, self.delete_button))
+        self.action_row.setLayout(
+            button_row(
+                self.fix_button, self.delete_button, self.edit_button, self.add_button,
+                help=(
+                    "Rutin ekle/Düzenle: adımları sırayla yazdığın formu açar. Sil: seçili "
+                    "rutini kaldırır (onay sorar). Dosyayı düzelt: bozuk routines.json'u "
+                    "yalnız geçerliyse kaydederek onarır."
+                ),
+            )
+        )
         listing.addWidget(self.action_row)
         listing.addWidget(meta_label(
-            "Silme onay ister; adımların kendi onayları da geçerlidir. "
-            "Dosyayı elle de düzenleyebilirsin."
+            "Rutini burada yazarsın; adımların kendi onayları çalışırken yine geçerlidir. "
+            "Silme onay ister."
         ))
         when_box, when = group("Zaman", "Zamanı gelince Artemis çalıştırmaz, yalnız sorar.")
         layout.addWidget(when_box)
@@ -83,7 +105,10 @@ class RoutinesSection(QWidget):
         self.time_edit.setMaxLength(5)
         self.time_edit.setPlaceholderText("08:30")
         self.time_edit.setAccessibleName("Rutin saati")
-        field(when, "Saat (SS:DD)", self.time_edit)
+        field(when, "Saat (SS:DD)", self.time_edit, help=(
+            "Rutinin hatırlatılacağı saat, 24 saatlik SS:DD (örn. 08:30). Seçili rutine uygulanır; "
+            "kaydedene kadar bir şey değişmez."
+        ))
         days_row = QHBoxLayout()
         days_row.setSpacing(8)
         self.day_boxes = [QCheckBox(name) for name in _DAYS]
@@ -91,14 +116,25 @@ class RoutinesSection(QWidget):
             box.setChecked(True)
             days_row.addWidget(box)
         days_row.addStretch(1)
-        field(when, "Günler", days_row)
+        field(when, "Günler", days_row, help=(
+            "Rutinin hangi günler hatırlatılacağı; en az bir gün seçili olmalı."
+        ))
         self.save_time_button = QPushButton("Zamanı kaydet")
         self.clear_time_button = QPushButton("Zamanı kaldır")
-        when.addLayout(button_row(self.clear_time_button, self.save_time_button))
+        when.addLayout(button_row(
+            self.clear_time_button, self.save_time_button,
+            help=(
+                "Zamanı kaydet: seçili saat ve günleri bu rutine yazar. Zamanı kaldır: zamanı "
+                "siler. Zamanı gelince rutin kendiliğinden çalışmaz, yalnız \"çalıştırılsın mı\" "
+                "bildirimi gelir."
+            ),
+        ))
         self.notice = meta_label("")
         layout.addWidget(self.notice)
         self.delete_button.clicked.connect(self._delete)
-        self.open_button.clicked.connect(self._open_file)
+        self.add_button.clicked.connect(self._add)
+        self.edit_button.clicked.connect(self._edit)
+        self.fix_button.clicked.connect(self._fix_file)
         self.save_time_button.clicked.connect(self._save_time)
         self.clear_time_button.clicked.connect(self._clear_time)
         self.routine_list.currentRowChanged.connect(self._selected)
@@ -107,6 +143,7 @@ class RoutinesSection(QWidget):
     def refresh(self) -> None:
         self.routine_list.clear()
         self.notice.setText("")
+        self._corrupt = False
         try:
             settings = load_settings(self._config_path)
         except (OSError, ValueError):
@@ -125,7 +162,8 @@ class RoutinesSection(QWidget):
                 for routine in self._store.load():
                     self.routine_list.addItem(_describe(routine))
             except RoutinesError as error:
-                # Bozuk dosya sessizce sıfırlanmaz; kullanıcı dosyayı açıp düzeltir.
+                # Bozuk dosya sessizce sıfırlanmaz; kullanıcı "Dosyayı düzelt" ile düzeltir.
+                self._corrupt = True
                 self.notice.setText(str(error))
                 self.routine_area.show_empty("Rutinler okunamadı")
             else:
@@ -136,7 +174,8 @@ class RoutinesSection(QWidget):
                 else:
                     self.routine_area.show_empty(
                         "Henüz rutin yok",
-                        "Sohbette “işe başla adında bir rutin kaydet: …” de.",
+                        "“Rutin ekle” ile başla ya da sohbette "
+                        "“işe başla adında bir rutin kaydet: …” de.",
                     )
         self._set_controls()
 
@@ -158,13 +197,17 @@ class RoutinesSection(QWidget):
 
     def _set_controls(self) -> None:
         usable = self._enabled and not self._demo
+        editable = usable and not self._corrupt  # bozukken yazmak dosyayı ezerdi
         has_selection = self.routine_list.currentRow() >= 0
         self.action_row.setVisible(self._enabled)
         self.run_hint.setVisible(self._enabled)
-        self.delete_button.setEnabled(usable and has_selection)
+        self.add_button.setEnabled(editable)
+        self.edit_button.setEnabled(editable and has_selection)
+        self.delete_button.setEnabled(editable and has_selection)
+        self.fix_button.setVisible(self._corrupt)
+        self.fix_button.setEnabled(usable)
         self.save_time_button.setEnabled(usable and has_selection)
         self.clear_time_button.setEnabled(usable and has_selection)
-        self.open_button.setEnabled(not self._demo and self._store is not None)
 
     def _selected(self, _row: int) -> None:
         routine = self._current()
@@ -174,14 +217,101 @@ class RoutinesSection(QWidget):
             box.setChecked(schedule is None or index in schedule.days)
         self._set_controls()
 
-    def _request(self, tool: str) -> None:
-        routine = self._current()
-        if routine is not None:
-            args: BaseModel = RoutineNameArguments(name=routine.name)
-            self.tool_requested.emit(tool, args)
+    def _tools(self) -> ToolRegistry:
+        if self._registry is None:
+            self._registry = discover_tools()  # çalıştırıcıyla aynı kayıt; ikinci kayıt yok
+        return self._registry
+
+    def _load_strict(self) -> list[Routine] | None:
+        """Yazma öncesi okuma: hata varsa None (boş listeye düşüp dosyayı ezmesin)."""
+        if self._store is None or self._demo:
+            return None
+        try:
+            return self._store.load()
+        except RoutinesError as error:
+            self.notice.setText(str(error))
+            return None
+
+    def _commit(self, routines: list[Routine], note: str, select: int = -1) -> None:
+        if self._store is None:
+            return
+        try:
+            self._store.save(routines)
+        except RoutinesError as error:
+            self.notice.setText(str(error))
+            return
+        self.refresh()
+        if select >= 0:
+            self.routine_list.setCurrentRow(select)
+        self.notice.setText(note)
+
+    def confirm_box(self, text: str) -> tuple[QMessageBox, QPushButton]:
+        """Silme onayı: varsayılan "Vazgeç" (Enter yanlışlıkla silmesin)."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Question)
+        box.setWindowTitle("Rutin")
+        box.setText(text)
+        yes = box.addButton("Sil", QMessageBox.ButtonRole.DestructiveRole)
+        no = box.addButton("Vazgeç", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(no)
+        box.setEscapeButton(no)
+        return box, yes
+
+    def _confirm(self, text: str) -> bool:
+        box, yes = self.confirm_box(text)
+        box.exec()
+        return box.clickedButton() is yes
+
+    def _add(self) -> None:
+        self._edit_routine(None)
+
+    def _edit(self) -> None:
+        self._edit_routine(self.routine_list.currentRow())
+
+    def _edit_routine(self, row: int | None) -> None:
+        routines = self._load_strict()
+        if routines is None:
+            return
+        current = routines[row] if row is not None and 0 <= row < len(routines) else None
+        if row is not None and current is None:
+            return
+        if current is None and len(routines) >= MAX_ROUTINES:
+            self.notice.setText(f"En çok {MAX_ROUTINES} rutin olabilir.")
+            return
+        others = [item for item in routines if item is not current]
+        dialog = RoutineDialog(current, others, self._tools(), self)
+        if dialog.exec() != RoutineDialog.DialogCode.Accepted or dialog.result_routine is None:
+            return
+        result = dialog.result_routine
+        updated = [result if item is current else item for item in routines]
+        if current is None:
+            updated.append(result)
+        note = "Rutin kaydedildi."
+        if current is not None and name_key(current.name) != name_key(result.name):
+            note += " Adı değiştirdiysen tetikleyicilerdeki rutin adını da güncelle."
+        self._commit(updated, note, updated.index(result))
 
     def _delete(self) -> None:
-        self._request("routine_delete")
+        routine = self._current()
+        routines = self._load_strict()
+        if routine is None or routines is None:
+            return
+        if not self._confirm(f"«{routine.name}» rutini silinsin mi?"):
+            return
+        key = name_key(routine.name)
+        self._commit([item for item in routines if name_key(item.name) != key], "Rutin silindi.")
+
+    def _fix_file(self) -> None:
+        if self._store is None or self._demo:
+            return
+        try:
+            dialog = RoutineFileDialog(self._store, self._tools(), self)
+        except OSError as error:
+            self.notice.setText(f"Rutin dosyası okunamadı ({type(error).__name__}).")
+            return
+        if dialog.exec() == RoutineFileDialog.DialogCode.Accepted and dialog.saved:
+            self.refresh()
+            self.notice.setText("Rutin dosyası düzeltildi.")
 
     def accept_result(self, tool_name: str, result: ToolResult) -> None:
         self.notice.setText(result.message)
@@ -222,15 +352,3 @@ class RoutinesSection(QWidget):
 
     def _clear_time(self) -> None:
         self._write_schedule(None)
-
-    def _open_file(self) -> None:
-        store = self._store
-        if store is None:
-            return
-        try:
-            if not store.path.exists():
-                store.save([])  # boş ama geçerli dosya: elle düzenleyen şemayı görür
-        except RoutinesError as error:
-            self.notice.setText(str(error))
-            return
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(store.path)))

@@ -9,6 +9,8 @@ DEFAULT_THEME = "light-mixed"
 
 # Sıcak yoldaş paleti (DESIGN.md "Warm companion direction"): krem/kemik ve sıcak mürekkep;
 # kurumsal slate-mavi bırakıldı. Düz tonlar, gradyan/parıltı yok.
+# accent #0f7f7a -> #0b7570: bağlantı/ghost düğme metni küçük yazıda accent_soft üstünde 4.04:1 idi
+# (AA için 4.5); artık bg, surface, soft ve accent_soft üstünde >= 4.5:1 (testte kilitli).
 # nav_muted #6b5f55 -> #5f544a: krem menüde nav_selected üstünde 4.23:1 idi (AA için 4.5 gerekir).
 # Menü/çalışma alanı ayrımı: nav önce bg ile ~1.07:1 (açık), ~1.06:1 (koyu) idi, görünmüyordu;
 # artık her temada >= 1.15:1 (testte kilitli). Koyu menü artık bg'den biraz AÇIK sıcak ton.
@@ -19,7 +21,9 @@ _LIGHT = {
     "text": "#2a2420",
     "muted": "#6b5f55",
     "border": "#e2d8c8",
-    "accent": "#0f7f7a",
+    # Giriş denetimi kenarı: kart/ayraç kenarı sade kalır, alan sınırı >= 3:1 olmalı (WCAG 1.4.11).
+    "control_border": "#8a7b69",
+    "accent": "#0b7570",
     "accent_text": "#ffffff",
     "accent_soft": "#d9efec",
     "nav": "#e8dfcf",
@@ -37,6 +41,7 @@ _DARK = {
     "text": "#f0e9df",
     "muted": "#b3a698",
     "border": "#3b332c",
+    "control_border": "#7d7064",
     "accent": "#5fd0c5",
     "accent_text": "#0d2926",
     "accent_soft": "#1f3a37",
@@ -100,6 +105,7 @@ def stylesheet(name: str) -> str:
 QWidget {{ background: {t['bg']}; color: {t['text']};
  font-family: 'Segoe UI Variable Text', 'Segoe UI'; font-size: 14px; }}
 QDialog {{ background: {t['surface']}; }}
+QDialog QRadioButton, QDialog QCheckBox {{ background: transparent; }}
 QLabel {{ background: transparent; }}
 QLabel#status {{ border: none; background: transparent; font-weight: 600; }}
 QLabel#greeting {{ font-size: 28px; font-weight: 650; }}
@@ -155,6 +161,8 @@ QLineEdit, QComboBox, QSpinBox {{ min-height: 26px; background: {t['surface']};
 QPlainTextEdit, QTextEdit, QListWidget {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; border-radius: 8px; padding: 4px 8px;
  selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
+QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QTextEdit {{
+ border: 1px solid {t['control_border']}; }}
 QPushButton:hover, QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
  border-color: {t['accent']}; }}
 {foc} {{ border: 2px solid {t['accent']}; padding: 3px 7px; }}
@@ -202,11 +210,11 @@ QListWidget#sectionList {{ background: transparent; border: none; padding: 0; }}
 QListWidget#sectionList::item {{ min-height: 20px; padding: 8px 12px; }}
 QCheckBox {{ color: {t['text']}; spacing: 8px; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px;
- border: 1px solid {t['border']}; background: {t['surface']}; }}
+ border: 1px solid {t['control_border']}; background: {t['surface']}; }}
 QCheckBox::indicator:checked {{ background: {t['accent']}; border-color: {t['accent']}; }}
 QRadioButton {{ color: {t['text']}; spacing: 8px; }}
 QRadioButton::indicator {{ width: 16px; height: 16px; border-radius: 8px;
- border: 1px solid {t['muted']}; background: {t['surface']}; }}
+ border: 1px solid {t['control_border']}; background: {t['surface']}; }}
 QRadioButton::indicator:checked {{ image: url({radio}); border: none; }}
 QCheckBox:focus, QRadioButton:focus {{ color: {t['accent']}; }}
 QTabWidget::pane {{ border: none; }}
@@ -227,6 +235,10 @@ QProgressBar::chunk {{ background: {t['accent']}; border-radius: 4px; }}
 QToolButton {{ border: 1px solid {t['border']}; padding: 4px 8px; border-radius: 8px; }}
 QMenu, QToolTip {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; padding: 8px; }}
+QToolButton#helpTip {{ border: 1px solid {t['border']}; border-radius: 9px; padding: 0;
+ background: {t['soft']}; color: {t['muted']}; font-size: 12px; font-weight: 600; }}
+QToolButton#helpTip:hover, QToolButton#helpTip:focus {{ color: {t['accent']};
+ border-color: {t['accent']}; }}
 QMenu::item:selected {{ background: {t['soft']}; }}
 QSplitter::handle {{ background: {t['bg']}; width: 8px; }}
 /* wave2-shell */
@@ -265,7 +277,7 @@ QFrame#themeCard QLabel, QFrame#themeCard QRadioButton {{ background: transparen
 QFrame#themeCard QRadioButton {{ spacing: 0; font-weight: 600; }}
 QFrame#themeCard QRadioButton::indicator {{ width: 0; height: 0; border: none; }}
 QWidget#settingsPanel QPushButton#primary:disabled {{ background: {t['soft']};
- color: {t['muted']}; border-color: {t['border']}; font-weight: 600; }}
+ color: {t['muted']}; border-color: {t['accent']}; font-weight: 650; }}
 /* wave2-pets */
 QFrame#petHero {{ background: {t['accent_soft']}; border: none; border-radius: 14px; }}
 QLabel#petStage {{ background: {t['surface']}; border-radius: 14px; }}
@@ -309,8 +321,9 @@ QLabel#warnNote {{ color: {t['warning']}; font-size: 12px; }}
 QFrame#dangerZone {{ background: transparent; border: 1px solid {t['error']};
  border-radius: 12px; }}
 QFrame#dangerZone QLabel#sectionTitle {{ color: {t['error']}; }}
+/* Devre dışı birincil düğme birincil kalır: accent çerçeve + kalın yazı, ama dolgu/metin sönük. */
 QPushButton#primary:disabled {{ background: {t['soft']}; color: {t['muted']};
- border-color: {t['border']}; }}
+ border-color: {t['accent']}; font-weight: 650; }}
 QSpinBox:disabled {{ background: {t['soft']}; color: {t['muted']}; }}
 /* /wave2-lists */
 """

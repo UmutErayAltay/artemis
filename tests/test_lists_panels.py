@@ -108,7 +108,9 @@ def test_disabled_reasons_are_shown_and_cleared(app: QApplication) -> None:
 def test_demo_reasons(app: QApplication) -> None:
     panel = ProjectsPanel(demo=True)
     panel.set_busy(False)
-    assert "Demo" in panel.prepare_reason.text() and "Demo" in panel.start_reason.text()
+    # UX-11: demo nedeni her düğmede tekrarlanmaz; sayfanın üstünde bir kez söylenir.
+    assert not panel.demo_note.isHidden() and "Demo" in panel.demo_note.text()
+    assert not panel.prepare_button.isEnabled() and not panel.start_button.isEnabled()
 
 
 def test_preview_escapes_user_text(app: QApplication) -> None:
@@ -314,7 +316,7 @@ def test_retry_label_short_with_separate_warning(app: QApplication) -> None:
 def test_history_search_is_first_class_and_content_capped(app: QApplication) -> None:
     panel = DataPanel()
     assert panel.search.placeholderText().startswith("Konuşmalarda ara")
-    assert panel.MAX_CONTENT_WIDTH == 960
+    # UX-02: genişlik tavanı artık bütün sekmelerin ortak sayfa kabuğunda (PAGE_MAX_WIDTH).
     assert panel.search.accessibleName() == "Geçmişte ara"
 
 

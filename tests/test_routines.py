@@ -518,10 +518,10 @@ def test_routines_section_lists_runs_schedules_and_deletes_via_tools(tmp_path: P
     assert section.action_row.isVisibleTo(section)
     assert not section.delete_button.isEnabled()  # seçim yok
     section.routine_list.setCurrentRow(0)
-    section.delete_button.click()
-    assert [name for name, _ in requested] == ["routine_delete"]
-    assert requested[0][1].name == "işe başla"
-    assert store.load()[0].schedule is None  # silme yalnız araçla, panel doğrudan silmez
+    section._confirm = lambda text: False  # type: ignore[method-assign]
+    section.delete_button.click()  # panel silmesi onay ister; Vazgeç hiçbir şeyi silmez
+    assert requested == [] and len(store.load()) == 1
+    assert store.load()[0].schedule is None
     section.time_edit.setText("25:99")
     section.save_time_button.click()
     assert store.load()[0].schedule is None and "SS:DD" in section.notice.text()

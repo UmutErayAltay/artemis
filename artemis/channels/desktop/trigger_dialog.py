@@ -16,8 +16,6 @@ from PySide6.QtCore import QStandardPaths
 from PySide6.QtWidgets import (
     QButtonGroup,
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -28,6 +26,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.channels.desktop.dialog_shell import FormDialog
+from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import MAX_TRIGGERS, TriggerConfig
 
 DEFAULT_MESSAGE = "Yeni dosya geldi: {file}"
@@ -109,7 +109,7 @@ def validate_trigger(
     return item, {}
 
 
-class TriggerDialog(QDialog):
+class TriggerDialog(FormDialog):
     def __init__(
         self,
         existing: TriggerConfig | None,
@@ -118,25 +118,24 @@ class TriggerDialog(QDialog):
         routines_hint: str,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(parent)
+        super().__init__(
+            "Tetikleyiciyi düzenle" if existing else "Tetikleyici ekle", 500, parent
+        )
         self._others = others
         self.result_trigger: TriggerConfig | None = None
         self._name_touched = existing is not None
         self.setWindowTitle("Tetikleyiciyi düzenle" if existing else "Tetikleyici ekle")
-        self.setMinimumWidth(500)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
-        title = QLabel(self.windowTitle())
-        title.setObjectName("title")
-        layout.addWidget(title)
+        layout = self.form
         self._errors: dict[str, QLabel] = {}
 
         self.name = QLineEdit(existing.name if existing else "")
         self.name.setMaxLength(32)
         self.name.setAccessibleName("Ad")
         self.name.textEdited.connect(self._name_edited)
-        self._add(layout, "Ad", self.name, "name", "Harf, rakam, _ ya da -")
+        self._add(layout, "Ad", self.name, "name", "Harf, rakam, _ ya da -", help=(
+            "Tetikleyicinin listede ve bildirimde görünen kısa adı. Klasörü seçince kendiliğinden "
+            "önerilir; her tetikleyicinin adı benzersiz olmalı."
+        ))
 
         self.folder = QLineEdit(existing.folder if existing else "")
         self.folder.setReadOnly(True)
@@ -148,7 +147,10 @@ class TriggerDialog(QDialog):
         row.setSpacing(8)
         row.addWidget(self.folder, 1)
         row.addWidget(self.browse)
-        self._add(layout, "Klasör", row, "folder")
+        self._add(layout, "Klasör", row, "folder", help=(
+            "İzlenecek klasör. Klasör yoklanır; ilk bakışta var olan dosyalar bildirilmez, yalnız "
+            "sonradan gelenler bildirilir. Hızlı düğmeler sık klasörleri seçer."
+        ))
         quick = QHBoxLayout()
         quick.setSpacing(8)
         self.quick_buttons: list[QPushButton] = []
@@ -188,16 +190,29 @@ class TriggerDialog(QDialog):
         self._add(
             layout, "Dosya türü", box, "pattern",
             "Özelde tek desen yazılır: * her şeyi, ? tek harfi tutar.",
+            help=(
+                "Hangi dosyalar için haber verileceğini belirler. Yalnız adı bu desene uyan "
+                "dosyalar bildirilir; başka tür için ayrı tetikleyici ekle."
+            ),
         )
         self._kind_changed()
 
         self.message = QLineEdit(existing.message if existing else DEFAULT_MESSAGE)
         self.message.setAccessibleName("Bildirim metni")
-        self._add(layout, "Bildirim metni", self.message, "message", "{file} dosyanın adıdır.")
+        self._add(
+            layout, "Bildirim metni", self.message, "message", "{file} dosyanın adıdır.",
+            help=(
+                "Yeni dosya gelince gösterilen bildirimin metni. Dosya adları Telegram'a "
+                "gönderilmez."
+            ),
+        )
 
         label = QLabel("Düğme")
         label.setObjectName("fieldLabel")
-        layout.addWidget(label)
+        layout.addLayout(with_help(label, (
+            "Bildirime eklenecek düğme. Yok: yalnız haber verir. Öneri yaz: metni sohbet kutusuna "
+            "yazar, göndermez. Rutin çalıştır: düğmeye basınca seçilen rutini çalıştırır."
+        )))
         self.none_radio = QRadioButton("Yok")
         self.suggest_radio = QRadioButton("Öneri yaz")
         self.routine_radio = QRadioButton("Rutin çalıştır")
@@ -228,21 +243,14 @@ class TriggerDialog(QDialog):
          self.routine_radio if existing and existing.routine else self.none_radio).setChecked(True)
         self._button_changed()
 
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Kaydet" if existing else "Ekle")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Vazgeç")
-        buttons.accepted.connect(self.submit)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.add_buttons("Kaydet" if existing else "Ekle")
 
     def _add(self, layout: QVBoxLayout, caption: str, control: QWidget | QHBoxLayout | QVBoxLayout,
-             key: str, hint: str | None = None) -> None:
+             key: str, hint: str | None = None, help: str = "") -> None:  # noqa: A002
         if caption:
             label = QLabel(caption)
             label.setObjectName("fieldLabel")
-            layout.addWidget(label)
+            layout.addLayout(with_help(label, help)) if help else layout.addWidget(label)
         if isinstance(control, QWidget):
             layout.addWidget(control)
         else:

@@ -130,7 +130,12 @@ def test_research_cancel_uses_gated_tool_and_report_opens(
     (state / "arastirma").mkdir()
     (state / "arastirma" / f"{'b' * 12}.md").write_text("# Rapor", encoding="utf-8")
     opened: list[str] = []
-    monkeypatch.setattr(module.QDesktopServices, "openUrl", lambda url: opened.append(url.path()))
+
+    def fake_exec(self: Any) -> int:  # rapor uygulama içi görüntüleyicide açılır (dış uygulama yok)
+        opened.append(self.browser.toPlainText())
+        return 0
+
+    monkeypatch.setattr("artemis.channels.desktop.text_viewer.TextViewerDialog.exec", fake_exec)
     panel = AutomationPanel(config_path=config)
     calls: list[tuple[str, Any]] = []
     panel.tool_requested.connect(lambda name, args: calls.append((name, args)))
@@ -140,7 +145,7 @@ def test_research_cancel_uses_gated_tool_and_report_opens(
     panel.cancel_buttons["a" * 12].click()
     assert [(n, a.job_id) for n, a in calls] == [("research_cancel", "a" * 12)]
     panel.report_buttons["b" * 12].click()
-    assert opened and opened[0].endswith(f"{'b' * 12}.md")
+    assert opened and "Rapor" in opened[0]
     # Salt okunur: kayıtlar değişmedi (kurucu 'uncertain' yazmaz).
     snap = load_snapshot(config)
     assert {j["status"] for j in snap["research"]["items"]} == {"running", "done"}

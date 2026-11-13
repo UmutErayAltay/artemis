@@ -11,8 +11,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 import yaml
-from PySide6.QtCore import QSize, Qt, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import QSize, Qt, Signal
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -46,7 +45,10 @@ class TriggersSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        box, listing = group("Tanımlı tetikleyiciler", divided=False)
+        box, listing = group("Tanımlı tetikleyiciler", divided=False, help=(
+            "Her tetikleyici bir klasörü izler; yeni dosya gelince bildirim gönderir. Bildirimdeki "
+            "düğmeye basmadan hiçbir şey çalışmaz. Düzenle ve Sil yalnız o tetikleyiciyi etkiler."
+        ))
         layout.addWidget(box)
         self.trigger_list = QListWidget()
         self.trigger_list.setAccessibleName("Tanımlı tetikleyiciler")
@@ -62,10 +64,15 @@ class TriggersSection(QWidget):
             empty_add.clicked.connect(self._add)
         listing.addWidget(self.trigger_area)
         self.refresh_button = QPushButton("Yenile")
-        self.open_button = QPushButton("Ayar dosyasını aç")
         self.add_button = QPushButton("Tetikleyici ekle")
         self.add_button.setObjectName("primary")
-        listing.addLayout(button_row(self.refresh_button, self.open_button, self.add_button))
+        # Liste boşken tek birincil eylem boş durumdaki düğmedir; alttaki yalnız liste doluyken
+        # görünür (UX-09). Ayar dosyasını dış editörde açan düğme yok: form her alanı kapsar.
+        self.add_button.setVisible(False)
+        listing.addLayout(button_row(self.refresh_button, self.add_button, help=(
+            "Yenile: listeyi ve son bildirim zamanlarını yeniden okur. Tetikleyici ekle: yeni "
+            "klasör izleyicisi kurar; Zamanlı işler açık olmalı."
+        )))
         listing.addWidget(meta_label(
             "Bildirim yalnız sorar: düğmeye basmadan hiçbir şey çalışmaz. "
             "Tetikleyiciyi yalnız sen eklersin; Artemis kendi başına ekleyemez."
@@ -85,12 +92,10 @@ class TriggersSection(QWidget):
         self.notice = meta_label("")
         layout.addWidget(self.notice)
         self.refresh_button.clicked.connect(self.refresh)
-        self.open_button.clicked.connect(self._open_config)
         self.add_button.clicked.connect(self._add)
         self.proactive_button.clicked.connect(self._tick_proactive)
         for button in (self.refresh_button, self.add_button, self.proactive_button):
             button.setEnabled(not demo)
-        self.open_button.setEnabled(not demo)
         self.refresh()
 
     def refresh(self) -> None:
@@ -106,6 +111,7 @@ class TriggersSection(QWidget):
             self.add_button.setEnabled(False)
             return
         items = settings.triggers.items
+        self.add_button.setVisible(bool(items))
         self.add_button.setEnabled(not self._demo and len(items) < MAX_TRIGGERS)
         if items and not settings.triggers.enabled:
             self.notice.setText(
@@ -266,6 +272,3 @@ class TriggersSection(QWidget):
         self.proactive_requested.emit()
         self.proactive_button.hide()
         self.proactive_warning.setText("Zamanlı işler işaretlendi; kendiliğinden kaydedilir.")
-
-    def _open_config(self) -> None:
-        QDesktopServices.openUrl(QUrl.fromLocalFile(str(self._config_path)))

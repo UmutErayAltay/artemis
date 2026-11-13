@@ -36,6 +36,16 @@ def test_palettes_are_readable_and_mixed_navigation_is_distinct() -> None:
     assert stylesheet("invalid") == stylesheet(DEFAULT_THEME)
 
 
+def test_accent_text_and_control_borders_meet_wcag() -> None:
+    """UX-04: accent küçük metin olarak AA (4.5), giriş denetimi kenarı 3:1 geçmeli."""
+    for name, palette in THEMES.items():
+        for background in ("bg", "surface", "soft", "accent_soft"):
+            assert contrast(palette["accent"], palette[background]) >= 4.5, (name, background)
+        for background in ("bg", "surface", "soft"):
+            assert contrast(palette["control_border"], palette[background]) >= 3, (
+                name, background)
+
+
 def test_themes_share_token_keys_and_warm_type_rules() -> None:
     keys = set(THEMES["light"])
     assert "accent_soft" in keys

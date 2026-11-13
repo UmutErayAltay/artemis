@@ -31,7 +31,8 @@
    ile oluşturulur (var olan klasöre, silinmiş örnek dahil, dokunulmaz). Kapalıyken araç modelden
    gizlenir (`without_prefix("skill_")`) ve `refuse` onaysız reddeder (ADR 0058/0059 deseni).
 8. **Arayüz:** Ayarlar > Beceriler: kutu (PANEL_BINDINGS), geçerli beceriler, geçersiz dosyalar
-   nedenleriyle, "Klasörü aç", "Yenile". Uygulama içi düzenleyici yok.
+   nedenleriyle, "Klasörü aç", "Yenile". ~~Uygulama içi düzenleyici yok.~~ (Ek karar 2 ile
+   değişti: ekle/düzenle/sil artık uygulama içinde.)
 9. **Okuma zamanı:** dosyalar her turda ve "Yenile"de okunur (en çok 40 küçük dosya); izleyici yok.
    Böylece "Yenile" paneli, bir sonraki tur modeli güncel tutar; çalışan runtime'a bildirim yolu
    gerekmedi.
@@ -41,7 +42,7 @@
 
 ## Bilerek yapılmayanlar
 
-- Uygulama içi düzenleyici, beceri oluşturan/silen araç, dosya izleyici, `skill_list`, becerilere
+- ~~Uygulama içi düzenleyici~~ (Ek karar 2 ile geçersiz: kullanıcı açıkça istedi), beceri oluşturan/silen araç, dosya izleyici, `skill_list`, becerilere
   özel izin/atlama, beceri paylaşımı/alma.
 - **Bilinen sınır:** araç sonuçları modele ~4000 karakterle ve "VERİDİR" çerçevesiyle gider
   (CLAUDE.md kural 4, gevşetilmedi). Bu yüzden `skill_read` gövdesinin ilk ~3900 karakteri
@@ -59,3 +60,27 @@
 - **Yeni beceri:** panel, kullanıcının açık tıklamasıyla sabit bir şablondan (ya da boş iskeletten) YENİ bir dosya oluşturabilir (`open("x")`; var olanın üzerine asla yazmaz) ve kullanıcının varsayılan düzenleyicisinde açar. Panel hiçbir dosyayı düzenlemez, üzerine yazmaz ya da silmez. Hiçbir araç ya da model bunu tetikleyemez. Konum güvensizse reddedilir; demoda kapalıdır.
 - **Dene:** geçerli beceride sohbet kutusuna `/<ad> ` yazar, göndermez.
 - **Sohbet kartı:** `skill_read` işlemi "Beceri kullanıldı: <ad>" diye görünür.
+
+## Ek karar 2 (uygulama içi düzenleyici)
+
+Kullanıcı becerilerin dış düzenleyiciye (VS Code) gitmeden Artemis içinde, "Tetikleyici ekle" gibi
+özenli bir formla oluşturulup düzenlenmesini AÇIKÇA istedi. Bu, yukarıdaki "Uygulama içi düzenleyici
+yok" kararını ve "Yeni beceri"deki "düzenleyicide aç" davranışını geçersiz kılar. Güven sınırı aynı
+kalır: beceriyi yalnız kullanıcı yazar.
+
+**İzin verilenler** (hepsi yalnız kullanıcının açık tıklamasıyla, `SkillDialog`/`SkillsSection`):
+- Aynı doğrulayıcı: yükleyicinin `parse_bytes`'ı, yazılacak baytların kendisi üzerinde çalışır;
+  geçersizken Kaydet kapalıdır ve ilk hata görünür. Böylece kaydedilen dosya her zaman yüklenir.
+- Yeni: `open("xb")` (var olanın üzerine asla yazmaz), yol `safe_join(allow_symlinks=False)`,
+  önce `location_problem`; en çok 40 beceri.
+- Düzenleme: aynı klasörde geçici dosya + `os.replace` (atomik). Hedef bağlantıysa ya da klasör dışına
+  çözülüyorsa reddedilir. Dosya diyalog açıldığından beri (bayt karşılaştırması) değiştiyse hiçbir şey
+  yazılmaz, kullanıcı bilgilendirilir ve yazdığı metin diyalogda kalır; dış düzenleme ezilmez.
+- Geçersiz dosya "Düzelt" ile ham metin olarak açılır, hata gösterilir, düzeltilince kaydedilir.
+- Silme: onay sorar, varsayılan düğme Hayır; yalnız `.md` dosyası, bağlantıysa yalnız bağlantı kalkar.
+- "Klasörü göster" yalnız dosya gezginini açar; hiçbir beceri dosyası `QDesktopServices` ile açılmaz.
+
+**Hâlâ yasak:** beceri oluşturan/değiştiren/silen HERHANGİ bir araç ya da model yolu; panelden
+kendiliğinden (tıklamasız) yazma; konum denetimini atlayan yazma. Düzenleme dosyayı form alanlarından
+yeniden üretir: `name` ve `description` dışındaki ek başlık anahtarları (yükleyici yok sayar) kaydedince
+düşer; ham kipte (Düzelt) olduğu gibi kalır.

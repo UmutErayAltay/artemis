@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QHBoxLayout, QLayout, QToolButton, QToolTip, QWidget
 
 from artemis.channels.desktop import themes
 
@@ -81,3 +81,41 @@ class PetFace(QWidget):
         p.setPen(QPen(QColor(t["text"]), 2.2, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         p.drawArc(QRectF(21, 34, 12, 8), 200 * 16, 140 * 16)
         p.end()
+
+
+class HelpTip(QToolButton):
+    """Bir ayarın/işlemin yanındaki küçük "?" baloncuğu: neyi etkilediğini, neyi değiştirdiğini
+    ve bedelini (bellek, hız, gizlilik) söyler.
+
+    Üzerine gelince ipucu, tıklayınca (ya da klavyeyle Boşluk/Enter) aynı metin baloncukta açılır:
+    fareyle gezmeyen kullanıcı da okuyabilsin diye. Metin ekran okuyucuya açıklama olarak gider.
+    """
+
+    def __init__(self, text: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("helpTip")
+        self.setText("?")
+        self.setToolTip(text)
+        self.setAccessibleName("Yardım")
+        self.setAccessibleDescription(text)
+        self.setCursor(Qt.CursorShape.WhatsThisCursor)
+        self.setFocusPolicy(Qt.FocusPolicy.TabFocus)
+        self.setFixedSize(18, 18)
+        self.clicked.connect(self._show)
+
+    def _show(self) -> None:
+        QToolTip.showText(self.mapToGlobal(QPoint(self.width() + 4, 0)), self.toolTip(), self)
+
+
+def with_help(widget: QWidget | QLayout, text: str) -> QHBoxLayout:
+    """`widget`/düzen + sağında "?" baloncuğu; satır sola yaslanır, baloncuk metne yapışır."""
+    row = QHBoxLayout()
+    row.setContentsMargins(0, 0, 0, 0)
+    row.setSpacing(6)
+    if isinstance(widget, QLayout):
+        row.addLayout(widget)
+    else:
+        row.addWidget(widget)
+    row.addWidget(HelpTip(text), 0, Qt.AlignmentFlag.AlignVCenter)
+    row.addStretch(1)
+    return row

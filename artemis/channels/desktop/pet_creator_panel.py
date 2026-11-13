@@ -47,6 +47,7 @@ from artemis.channels.desktop import pet_animator, pet_creator, pet_sprite
 from artemis.channels.desktop import pet_image_pipeline as pipe
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError
 from artemis.channels.desktop.projects_panel import EmptyState
+from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import ModelConfig, load_settings
 from artemis.safety.audit import AuditLog
 
@@ -161,6 +162,36 @@ def price_warning(model: ModelConfig) -> str:
 
 
 _STAGES = ("Tarif", "Görsel", "Animasyon", "Kaydet")
+_HELP_RESET = (
+    "Sohbeti ve kaydedilmemiş çizimi temizleyip yeni pet başlatır. Kurulu petler ile seçili "
+    "model/yöntem kalır."
+)
+_HELP_METHOD = (
+    "SVG: metin modeli çizimi SVG olarak yazar, animasyonlar yerelde üretilir; hızlı ve ucuz. "
+    "Resim modeli: temel görsel ve her animasyon satırı için ayrı çağrı yapar; ~4-6 dk sürer, "
+    "daha çok kota/maliyet harcar."
+)
+_HELP_MODEL = (
+    "Çizimi yapacak model. Bulut modeliyse yazdığın tarif ona gider; ücretliyse bütçeden düşer "
+    "ve allow_paid kapalıysa reddedilir (tutar altındaki uyarıda yazar)."
+)
+_HELP_NAME = (
+    "Kaydedince petin adı ve klasör kimliği bu olur; boşsa \"Yeni pet\". Aynı adlı pet varsa "
+    "üzerine yazmadan önce sorar."
+)
+_HELP_SEND = (
+    "Tarifini seçili modele gönderir. Sonraki düzeltmeler ('daha mavi yap') mevcut çizimi "
+    "(SVG ya da temel görsel) de gönderir. Başka dosya ya da sohbet geçmişin gitmez."
+)
+_HELP_STATE = (
+    "Üretilen animasyonu seçtiğin durumda (bekleme, koşma, el sallama…) yerelde oynatır; model "
+    "çağrısı yapmaz."
+)
+_HELP_JOBS = (
+    "Animasyonları üret (resim yöntemi): temel görselden satır satır model çağrısı yapar, kota "
+    "harcar. İptal: beklemeyi bırakır; SVG çağrısında uzaktaki istek durmaz. Kaydet ve seç: peti "
+    "kurar, masaüstü arkadaşı yapar."
+)
 # Bunun altında sütunlar alt alta dizilir; 900px pencerede sağ sütun 240'ın altına inmesin.
 _WIDE_MIN = 760
 _COMPACT_MAX = 480  # modelsiz boş durum kartının azami genişliği
@@ -208,13 +239,16 @@ def _flat(widget: QWidget) -> QWidget:
     return widget
 
 
-def _field(caption: str, widget: QWidget) -> QWidget:
-    """Etiket alanın üstünde (DESIGN.md: 13px muted, 4px aralık)."""
+def _field(caption: str, widget: QWidget, help: str = "") -> QWidget:  # noqa: A002
+    """Etiket alanın üstünde (DESIGN.md: 13px muted, 4px aralık); `help` "?" etiketin yanına."""
     box = _flat(QWidget())
     lay = QVBoxLayout(box)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(4)
-    lay.addWidget(_label(caption, "fieldLabel"))
+    if help:
+        lay.addLayout(with_help(_label(caption, "fieldLabel"), help))
+    else:
+        lay.addWidget(_label(caption, "fieldLabel"))
     lay.addWidget(widget)
     return box
 
@@ -262,6 +296,8 @@ class CreatorPanel(QFrame):
         )
         self.reset_button.clicked.connect(self.reset_conversation)
         header.addWidget(self.reset_button)
+        self.reset_tip = HelpTip(_HELP_RESET)  # düğmeyle birlikte görünür/gizlenir
+        header.addWidget(self.reset_tip, 0, Qt.AlignmentFlag.AlignVCenter)
         layout.addLayout(header)
         # Başlık ve aşama çubuğu kaydırılan gövdenin DIŞINDA: sayfa kayarken hep görünür.
         # Aşama çubuğu yalnız mevcut durumdan türetilir (_update_stage).
@@ -296,8 +332,8 @@ class CreatorPanel(QFrame):
         fields_lay.setSpacing(12)
         pair = QHBoxLayout()
         pair.setSpacing(12)
-        pair.addWidget(_field("Yöntem", self.method), 1)
-        pair.addWidget(_field("Model", self.model_combo), 2)
+        pair.addWidget(_field("Yöntem", self.method, _HELP_METHOD), 1)
+        pair.addWidget(_field("Model", self.model_combo, _HELP_MODEL), 2)
         fields_lay.addLayout(pair)
         self.warning = _label("", "meta")
         self.warning.setWordWrap(True)
@@ -309,7 +345,7 @@ class CreatorPanel(QFrame):
         self.name_edit.setMaxLength(80)
         self.name_edit.setAccessibleName("Pet adı")
         self.name_edit.setMinimumHeight(32)
-        left_lay.addWidget(_field("Pet adı", self.name_edit))
+        left_lay.addWidget(_field("Pet adı", self.name_edit, _HELP_NAME))
         self.chat_log = QPlainTextEdit()
         self.chat_log.setReadOnly(True)
         self.chat_log.setMinimumHeight(140)
@@ -338,6 +374,7 @@ class CreatorPanel(QFrame):
         self.send_button.clicked.connect(self.send)
         send_row.addWidget(self.input, 1)
         send_row.addWidget(self.send_button)
+        send_row.addWidget(HelpTip(_HELP_SEND), 0, Qt.AlignmentFlag.AlignVCenter)
         left_lay.addLayout(send_row)
 
         right, right_lay = _column()
@@ -375,7 +412,7 @@ class CreatorPanel(QFrame):
                 QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
             )
             combo.setMinimumContentsLength(8)
-        right_lay.addWidget(_field("Önizleme durumu", self.state_combo))
+        right_lay.addWidget(_field("Önizleme durumu", self.state_combo, _HELP_STATE))
         job_row = QHBoxLayout()
         job_row.setSpacing(8)
         job_row.addStretch(1)
@@ -389,6 +426,8 @@ class CreatorPanel(QFrame):
         for button in (self.animate_button, self.cancel_button, self.save_button):
             button.setMinimumWidth(88)
             job_row.addWidget(button)
+        # Animasyonları üret yalnız resim yönteminde görünür; tek "?" üçünü de anlatır.
+        job_row.addWidget(HelpTip(_HELP_JOBS), 0, Qt.AlignmentFlag.AlignVCenter)
         right_lay.addLayout(job_row)
         self.busy = _label("", "meta")
         self.busy.setWordWrap(True)
@@ -522,6 +561,7 @@ class CreatorPanel(QFrame):
         self.workshop.setVisible(has_models)
         self.stage_bar.setVisible(has_models)
         self.reset_button.setVisible(has_models)
+        self.reset_tip.setVisible(has_models)
         self.fields.setVisible(has_models)
         self.empty_state.set_text(
             "Pet üretmek için bir model gerekli",

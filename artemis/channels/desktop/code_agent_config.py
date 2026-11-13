@@ -17,14 +17,13 @@ import yaml
 from pydantic import ValidationError
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
-    QVBoxLayout,
 )
 
+from artemis.channels.desktop.dialog_shell import FormDialog
+from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import (
     ALIAS_RE,
     BUILTIN_AGENTS,
@@ -192,21 +191,15 @@ def parse_agent_form(
     return name, profile.model_dump(mode="json", exclude_defaults=True)
 
 
-class AgentDialog(QDialog):
+class AgentDialog(FormDialog):
     """Özel ajan ekleme penceresi; doğrulama `parse_agent_form`da, hata satır içi gösterilir."""
 
     def __init__(self, taken: Iterable[str], parent: Any = None) -> None:
-        super().__init__(parent)
+        super().__init__("Özel kod ajanı", 480, parent)
         self._taken = tuple(taken)
         self.result_profile: tuple[str, dict[str, Any]] | None = None
         self.setWindowTitle("Özel kod ajanı ekle")
-        self.setMinimumWidth(480)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
-        title = QLabel("Özel kod ajanı")
-        title.setObjectName("title")
-        layout.addWidget(title)
+        layout = self.form
         self.name = QLineEdit()
         self.name.setPlaceholderText("Örn. aider")
         self.command = QLineEdit()
@@ -226,26 +219,45 @@ class AgentDialog(QDialog):
         self.prompt_via.addItem("Geçici dosya ({prompt_file})", "file")
         self.env = QLineEdit()
         self.env.setPlaceholderText("Örn. OPENAI_API_KEY, AIDER_MODEL")
-        for caption, widget, hint in (
-            ("Ad", self.name, "Küçük harf, rakam, _ veya -"),
-            ("Komut", self.command, None),
-            ("Argümanlar", self.args, None),
-            ("İstem biçimi", self.prompt_via, None),
+        for caption, widget, hint, help_text in (
+            (
+                "Ad", self.name, "Küçük harf, rakam, _ veya -",
+                "Ajanın listede ve proje ayarında görünen kısa adı; benzersiz olmalı.",
+            ),
+            (
+                "Komut", self.command, None,
+                "Ajanı başlatan program. Bu bilgisayarda bulunabilir olmalı; Artemis bu komutu "
+                "kod işi sırasında çalıştırır.",
+            ),
+            (
+                "Argümanlar", self.args, None,
+                "Komuta eklenen argümanlar, satır başına bir tane. {prompt_file}, {workdir} ve "
+                "{repo} çalışma anında gerçek değerle değişir.",
+            ),
+            (
+                "İstem biçimi", self.prompt_via, None,
+                "Ajana verilecek iş metninin nasıl iletileceği: standart girdiden (stdin) ya da "
+                "geçici bir dosya olarak ({prompt_file}).",
+            ),
             (
                 "Görünür pencere argümanları (isteğe bağlı)",
                 self.visible_args,
                 "Satır başına bir argüman. {prompt} kısa yönerge, {prompt_file} tam istemdir.",
+                "Boş bırakırsan görünür pencere kipi kapalı kalır; doldurursan ajan görünür bir "
+                "konsol penceresinde de çalıştırılabilir.",
             ),
             (
                 "Ortam değişkeni adları (isteğe bağlı)",
                 self.env,
                 "Yalnız adlar saklanır; değerler asla yazılmaz. Değeri kendi ortamında tanımla.",
+                "Ajana aktarılacak ortam değişkenlerinin adları. Değerler ayar dosyasına "
+                "yazılmaz; senin ortamından okunur.",
             ),
         ):
             widget.setAccessibleName(caption)
             label = QLabel(caption)
             label.setObjectName("fieldLabel")
-            layout.addWidget(label)
+            layout.addLayout(with_help(label, help_text))
             layout.addWidget(widget)
             if hint:
                 note = QLabel(hint)
@@ -258,14 +270,7 @@ class AgentDialog(QDialog):
         self.error.setWordWrap(True)
         self.error.hide()
         layout.addWidget(self.error)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Ekle")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Vazgeç")
-        buttons.accepted.connect(self.submit)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.add_buttons("Ekle")
 
     def submit(self) -> None:
         try:

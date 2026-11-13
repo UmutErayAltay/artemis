@@ -16,12 +16,11 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ValidationError
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
     QColor,
-    QDesktopServices,
     QFont,
     QFontMetrics,
     QIcon,
@@ -82,6 +81,7 @@ from artemis.channels.desktop.pet import PetWidget, level_from_message
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.projects_panel import (
     ProjectsPanel,
+    center_page,
     make_page_header,
     status_label,
 )
@@ -95,7 +95,8 @@ from artemis.channels.desktop.settings_panel import (
 from artemis.channels.desktop.shell_assets import greeting_for_hour
 from artemis.channels.desktop.steps import StepLine, step_line
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
-from artemis.channels.desktop.widgets import PetFace
+from artemis.channels.desktop.text_viewer import open_text_file
+from artemis.channels.desktop.widgets import HelpTip, PetFace
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import Settings, load_settings, same_hotkey
 from artemis.proactive.daily_summary import VAULT_TEXT_LIMIT, parse_day, summary_path
@@ -110,6 +111,35 @@ PROJECTS_POLL_IDLE_MS = 15000
 
 
 # Köprü ses durumunu makine okunur taşır; Türkçe metne ekran çevirir.
+_HELP_VOICE = (
+    "Mikrofonu açar: sesle komut verirsin. Yalnız sen açınca dinler, ham ses saklanmaz. Sesli "
+    "\"evet\" onay sayılmaz; onayı ekrandaki pencereden verirsin."
+)
+_HELP_AUTO = (
+    "Onaylı: bilgisayar kullanımı, pencere kontrolü ve ekran okuma her seferinde sorar. Otomatik: "
+    "bu üçü onay sormadan çalışır (dış içerik okunmuş turda da); Esc durdurur. Diğer araçlar "
+    "etkilenmez. Anında geçerli."
+)
+_HELP_MODEL = (
+    "Sohbetin kullandığı beyin modeli. Tıklayınca Ayarlar > Model açılır; orada yaptığın "
+    "değişiklik Ayarlardan çıkınca yeni bir sohbetle devreye girer."
+)
+_HELP_NEW_CHAT = (
+    "Modelin bağlamını sıfırlar; sonraki mesaj boş geçmişle başlar. Kalıcı konuşma arşivini "
+    "silmez. Çalışan tur varken sıfırlanmaz."
+)
+_HELP_QUICK = (
+    "Küçük, hep üstte duran hızlı komut penceresini açar; yazdığın komut aynı sohbete gider."
+)
+_HELP_SEND = (
+    "Gönder: yazdığını modele yollar; yan etkili adımlar yine onay ister. İptal (iş sürerken "
+    "görünür): çalışan turu ve açık onay penceresini durdurur."
+)
+_HELP_NOTICE = (
+    "Bildirimin işlemini yapar: rutin ise onaylı bir turda çalıştırır, gün özeti ise özeti "
+    "uygulama içinde açar, öneri ise metni sohbet kutusuna yazar (göndermez). "
+    "\"Vault'a ekle\" özeti onayla vault'a ekler."
+)
 _VOICE_LABELS = {
     "off": "Ses kapalı",
     "preparing": "Ses hazırlanıyor…",
@@ -140,6 +170,9 @@ _BUBBLE_GUTTER = 8
 # Bu pencere genişliğinin altında adım paneli gizlenir, üst çubuk daralır.
 _STEP_PANEL_MIN_WINDOW = 1100
 _COMPACT_HEADER_WINDOW = 1000
+_COMPACT_NAV_WINDOW = 900  # bunun altında yan gezinme yalnız ikon (UX-01)
+_NAV_WIDTH = 176
+_NAV_COMPACT_WIDTH = 72
 # Ayrıntı ipucu büyük denetim kayıtlarında da ekranı ve belleği şişirmez.
 _DETAIL_LIMIT = 4000
 # Adım blokları yalnız son birkaç isteğin canlı bağlantısını tutar.
@@ -944,7 +977,9 @@ class DesktopWindow(QMainWindow):
         self._refresh_tones()
         self._refresh_icons()
         dark = self._theme.startswith("dark")
-        self.theme_toggle.setText("Açık tema" if dark else "Koyu tema")
+        self._theme_toggle_text = "Açık tema" if dark else "Koyu tema"
+        compact = self.sidebar.width() == _NAV_COMPACT_WIDTH
+        self.theme_toggle.setText("" if compact else self._theme_toggle_text)
         self.theme_toggle.setAccessibleName("Açık temaya geç" if dark else "Koyu temaya geç")
         if not self._demo:
             self._appearance.setValue("theme", self._theme)
@@ -1140,8 +1175,10 @@ class DesktopWindow(QMainWindow):
         value_font.setPixelSize(13)
         self.model_value.setFont(value_font)
         self.model_box = self.model_value
+        self.model_tip = HelpTip(_HELP_MODEL)  # çip gizlenince birlikte gizlenir (_fit_shell)
         row.addWidget(self.model_caption, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addWidget(self.model_value, 0, Qt.AlignmentFlag.AlignVCenter)
+        row.addWidget(self.model_tip, 0, Qt.AlignmentFlag.AlignVCenter)
         row.addStretch(1)
 
         # voice_dot/voice_state köprü ve testler için canlı kalan, görünmeyen aynalardır;
@@ -1155,11 +1192,13 @@ class DesktopWindow(QMainWindow):
         self.voice_button = self._icon_toggle("Sesi aç veya kapat")
         self.voice_button.clicked.connect(self._toggle_voice)
         row.addWidget(self.voice_button)
+        row.addWidget(HelpTip(_HELP_VOICE), 0, Qt.AlignmentFlag.AlignVCenter)
         self.auto_button = self._icon_toggle(
             "Bilgisayar kullanımında otomatik onayı aç veya kapat"
         )
         self.auto_button.toggled.connect(self._toggle_auto_mode)
         row.addWidget(self.auto_button)
+        row.addWidget(HelpTip(_HELP_AUTO), 0, Qt.AlignmentFlag.AlignVCenter)
         status_pill = QFrame()
         self.status_pill = status_pill
         status_pill.setObjectName("statusPill")
@@ -1210,7 +1249,11 @@ class DesktopWindow(QMainWindow):
             make_page_header(
                 # Marka üst çubukta, sayfa adı kenar çubuğunda zaten var; üçüncü kez yazılmaz.
                 "",
-                actions=(self.operations_button, self.new_chat_button, self.quick_action),
+                actions=(
+                    self.operations_button,
+                    (self.new_chat_button, _HELP_NEW_CHAT),
+                    (self.quick_action, _HELP_QUICK),
+                ),
             )
         )
         # Başlıktan sonra iki sütun: sohbet+yazma alanı ve (geniş pencerede) son işlem kartı.
@@ -1256,6 +1299,7 @@ class DesktopWindow(QMainWindow):
         routine_row.addWidget(self.routine_dismiss_button)
         routine_row.addWidget(self.summary_vault_button)
         routine_row.addWidget(self.routine_run_button)
+        routine_row.addWidget(HelpTip(_HELP_NOTICE), 0, Qt.AlignmentFlag.AlignVCenter)
         self.routine_bar.hide()
         # Yazma alanıyla aynı ortalanmış sütun: genişlik ve sol kenar her pencerede aynı kalır.
         notice_wrap = QHBoxLayout()
@@ -1292,8 +1336,11 @@ class DesktopWindow(QMainWindow):
         self.send_button.clicked.connect(self._submit_main)
         bottom = Qt.AlignmentFlag.AlignBottom
         composer_row.addWidget(self.composer_voice, 0, bottom)
+        composer_row.addWidget(HelpTip(_HELP_VOICE), 0, bottom)
         composer_row.addWidget(self.cancel_button, 0, bottom)
         composer_row.addWidget(self.send_button, 0, bottom)
+        # İptal yalnız iş sürerken görünür; tek "?" Gönder'in yanında ikisini de anlatır.
+        composer_row.addWidget(HelpTip(_HELP_SEND), 0, bottom)
         # Sütun ortalanır: kenar boşlukları esner, yazma alanı 680px'e kadar genişler.
         composer_wrap = QHBoxLayout()
         composer_wrap.addStretch(1)
@@ -1394,7 +1441,8 @@ class DesktopWindow(QMainWindow):
     def _build_sidebar(self, pages: list[tuple[str, QWidget]]) -> QFrame:
         sidebar = QFrame()
         sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(176)
+        sidebar.setFixedWidth(_NAV_WIDTH)
+        self.sidebar = sidebar
         navigation = QVBoxLayout(sidebar)
         navigation.setContentsMargins(12, 12, 12, 12)
         navigation.setSpacing(4)
@@ -1408,6 +1456,7 @@ class DesktopWindow(QMainWindow):
             button.setCheckable(True)
             button.setAutoExclusive(True)
             button.setAccessibleName(label)
+            button.setToolTip(label)  # dar pencerede yalnız ikon kalır; ad ipucunda
             button.setIconSize(QSize(20, 20))
             button.clicked.connect(
                 lambda _checked=False, target=page: self.tabs.setCurrentWidget(target)
@@ -1500,7 +1549,7 @@ class DesktopWindow(QMainWindow):
         self.data_panel = DataPanel(demo=self._demo)
         self.data_panel.tool_requested.connect(self._submit_project_tool)
         self.data_page = self._page(self.data_panel)
-        self.tabs.addTab(self.data_page, "Geçmiş ve hatırlatmalar")
+        self.tabs.addTab(self.data_page, "Geçmiş")
         self.automation_panel = AutomationPanel(demo=self._demo, config_path=self._config_path)
         self.automation_panel.tool_requested.connect(self._submit_automation_tool)
         self.automation_panel.settings_requested.connect(self._open_settings_section)
@@ -1511,6 +1560,7 @@ class DesktopWindow(QMainWindow):
         self.pet_scroll = QScrollArea()
         self.pet_scroll.setWidgetResizable(True)
         self.pet_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        center_page(self.pet_scroll)
         self.pet_scroll.setWidget(self.settings_panel.pet)
         self.pet_page = self._page(self.pet_scroll)
         self.tabs.addTab(self.pet_page, "Petler")
@@ -1886,8 +1936,10 @@ class DesktopWindow(QMainWindow):
         "İşlemler" düğmesiyle açılan yan sayfaya taşınır, böylece her genişlikte erişilir.
         """
         width = self.width()
+        self._compact_nav(width < _COMPACT_NAV_WINDOW)
         wide = width >= _STEP_PANEL_MIN_WINDOW
         self.model_box.setVisible(width >= 800)
+        self.model_tip.setVisible(width >= 800)
         self.model_caption.setVisible(width >= 800)
         self._show_model(self._model_full)
         self.operations_button.setVisible(not wide)
@@ -1895,6 +1947,18 @@ class DesktopWindow(QMainWindow):
         self._sync_activity_panel()
         if self.drawer.isVisible():
             self.drawer.setGeometry(self.chat_page.rect())
+
+    def _compact_nav(self, compact: bool) -> None:
+        """Dar pencerede yan gezinme yalnız ikon olur (UX-01): içerik ~110px kazanır.
+
+        Ad erişilebilir ad ve ipucu olarak kalır; böylece ekran okuyucu ve fare etiketi yitirmez."""
+        if compact == (self.sidebar.width() == _NAV_COMPACT_WIDTH):
+            return
+        self.sidebar.setFixedWidth(_NAV_COMPACT_WIDTH if compact else _NAV_WIDTH)
+        for button in self.nav_buttons.values():
+            button.setText("" if compact else button.accessibleName())
+        self.theme_toggle.setText("" if compact else self._theme_toggle_text)
+        self.theme_toggle.setToolTip(self.theme_toggle.accessibleName())
 
     def _show_model(self, text: str) -> None:
         self._model_full = text
@@ -2020,7 +2084,7 @@ class DesktopWindow(QMainWindow):
         if self._summary_day:
             path = self._summary_file()
             if path is not None and path.is_file():
-                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+                open_text_file(path, "Gün özeti", self)
         elif self._routine_suggest:
             # Gönderilmez: metin yalnız sohbet kutusuna yazılır, kullanıcı okuyup kendisi yollar.
             self.prompt.setPlainText(self._routine_suggest)

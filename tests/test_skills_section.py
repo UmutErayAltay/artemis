@@ -14,7 +14,7 @@ from PySide6.QtWidgets import QApplication, QFileDialog
 from artemis.channels.desktop import skills_section as module
 from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.config.settings import load_settings
-from artemis.skills import load_skills, skills_dir
+from artemis.skills import skills_dir
 
 
 def make_config(tmp_path: Path, vault: Path) -> Path:
@@ -99,40 +99,11 @@ def test_demo_disables_choose(tmp_path: Path) -> None:
     widget.deleteLater()
 
 
-def test_new_skill_from_template_never_overwrites(
-    section: SkillsSection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    opened: list[object] = []
-    monkeypatch.setattr(module.QDesktopServices, "openUrl", lambda url: opened.append(url))
-    monkeypatch.setattr(section, "_pick_template", lambda: "sabah-plani")
-    section._new_skill()
-    path = skills_dir(section._settings) / "sabah-plani.md"  # type: ignore[arg-type]
-    assert path.is_file() and len(opened) == 1
-    path.write_text("kullanici", encoding="utf-8")
-    yes = module.QMessageBox.StandardButton.Yes
-    monkeypatch.setattr(module.QMessageBox, "question", lambda *a, **k: yes)
-    section._new_skill()
-    assert path.read_text(encoding="utf-8") == "kullanici" and len(opened) == 2
-
-
-def test_new_blank_skill_validates_name(
-    section: SkillsSection, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    monkeypatch.setattr(module.QDesktopServices, "openUrl", lambda url: None)
-    monkeypatch.setattr(section, "_pick_template", lambda: "")
-    monkeypatch.setattr(section, "_ask_name", lambda: "Kötü Ad")
-    section._new_skill()
-    assert "küçük harf" in section.notice.text()
-    monkeypatch.setattr(section, "_ask_name", lambda: "benim-beceri")
-    section._new_skill()
-    assert [s.name for s in load_skills(section._settings).skills] == ["benim-beceri"]  # type: ignore[arg-type]
-
-
 def test_new_skill_refused_in_unsafe_location_and_demo(
     section: SkillsSection, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     called: list[int] = []
-    monkeypatch.setattr(section, "_pick_template", lambda: called.append(1) or "")
+    monkeypatch.setattr(module.SkillDialog, "exec", lambda self: called.append(1) or 0)
     raw = yaml.safe_load(section._config_path.read_text(encoding="utf-8"))
     raw["skills"]["folder"] = str(tmp_path / "vault" / "b")
     section._config_path.write_text(yaml.safe_dump(raw), encoding="utf-8")

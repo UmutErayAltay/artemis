@@ -19,8 +19,8 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from PySide6.QtCore import QObject, QUrl, Signal
-from PySide6.QtGui import QDesktopServices, QShowEvent
+from PySide6.QtCore import QObject, Signal
+from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -39,6 +39,8 @@ from artemis.channels.desktop.projects_panel import (
     make_page_header,
     make_scroll_page,
 )
+from artemis.channels.desktop.text_viewer import open_text_file
+from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import load_settings
 from artemis.proactive.daily_summary import parse_day, summary_path
 from artemis.proactive.routines import RoutinesError, RoutineStore
@@ -229,14 +231,30 @@ def demo_snapshot() -> dict[str, Any]:
     }
 
 
+_HELP_REFRESH = "Tüm kartları diskten yeniden okur; hiçbir şeyi çalıştırmaz ya da değiştirmez."
+_HELP_ROUTINES = (
+    "Çalıştır: rutini onaylı bir turda adım adım çalıştırır; her adım normal onay kurallarıyla "
+    "sorar, sonucu Sohbet'te görürsün. Zamanlı rutin kendiliğinden çalışmaz, yalnız bildirim gelir."
+)
+_HELP_RESEARCH = (
+    "Durdur: çalışan araştırmayı iptal eder. Raporu aç: raporu uygulama içinde gösterir; rapor "
+    "web verisidir, içindeki bağlantılar açılmaz. Araştırma yalnız web aramasıyla çalışır."
+)
+_HELP_SUMMARIES = (
+    "Aç: o günün özetini uygulama içinde gösterir. Özet, denetim kaydındaki sayılardan yerelde "
+    "üretilir; konuşma metni içermez ve Telegram'a gitmez."
+)
+
+
 class _Card:
     """Kart gövdesi: tek anda ya satırlar, ya boş durum, ya da kapalı satırı görünür."""
 
     def __init__(
-        self, title: str, empty: tuple[str, str], settings_section: str,
+        self, title: str, empty: tuple[str, str], settings_section: str, help: str = "",  # noqa: A002
     ) -> None:
         self.frame, lay = make_card()
-        lay.addWidget(make_label(title, "sectionTitle"))
+        heading = make_label(title, "sectionTitle")
+        lay.addLayout(with_help(heading, help)) if help else lay.addWidget(heading)
         self.rows_box = QWidget()
         self.rows = QVBoxLayout(self.rows_box)
         self.rows.setContentsMargins(0, 0, 0, 0)
@@ -323,7 +341,6 @@ class _Relay(QObject):
 class AutomationPanel(QWidget):
     tool_requested = Signal(str, object)
     settings_requested = Signal(str)  # Ayarlar bölüm adı
-    MAX_CONTENT_WIDTH = 960
 
     def __init__(self, *, demo: bool = False, config_path: Path | None = None) -> None:
         super().__init__()
@@ -339,38 +356,33 @@ class AutomationPanel(QWidget):
         self.report_buttons: dict[str, QPushButton] = {}
         self.summary_buttons: dict[str, QPushButton] = {}
         outer = make_scroll_page(self)
-        body = QWidget()
-        body.setMaximumWidth(self.MAX_CONTENT_WIDTH)
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout = outer  # genişlik sınırı ve ortalama ortak kabuktan (make_scroll_page) gelir
         layout.setSpacing(16)
-        holder = QHBoxLayout()
-        holder.setContentsMargins(0, 0, 0, 0)
-        holder.addWidget(body, 1)
-        outer.addLayout(holder)
-        outer.addStretch(1)
         self.refresh_button = QPushButton("Yenile")
         self.refresh_button.setAccessibleName("Otomasyon sayfasını yenile")
         self.refresh_button.clicked.connect(self.refresh)
         layout.addWidget(make_page_header(
             "Otomasyon",
             "Rutinlerini, araştırmalarını ve gün özetlerini buradan takip et.",
-            (self.refresh_button,),
+            ((self.refresh_button, _HELP_REFRESH),),
         ))
         self.routines = _Card(
             "Rutinler",
             ("Henüz rutin yok", "Sohbette “işe başla adında bir rutin kaydet” de."),
             "Rutinler",
+            _HELP_ROUTINES,
         )
         self.research = _Card(
             "Araştırmalar",
             ("Henüz araştırma yok", "Sohbette bir konu söyle ve araştırmasını iste."),
             "Araştırma",
+            _HELP_RESEARCH,
         )
         self.summaries = _Card(
             "Gün özetleri",
             ("Henüz özet yok", "Gün sonu özeti her akşam bir kez yazılır."),
             "Gün özeti",
+            _HELP_SUMMARIES,
         )
         self.notices = _Card(
             "Son bildirimler",
@@ -378,9 +390,27 @@ class AutomationPanel(QWidget):
             "Tetikleyiciler",
         )
         self.notice = make_label("", "meta")
+        # Aynı konu iki yerde bölünmesin: izleme burada, kurulum Ayarlar'da (UX-06). Küçük
+        # bağlantılar ilgili Ayarlar bölümüne geçirir; kartlardaki "Ayarlarda aç" yalnız
+        # kapalıyken çıkar.
+        links = QHBoxLayout()
+        links.setSpacing(4)
+        links.addWidget(make_label("Ayarlar:", "meta"))
+        self.settings_links: dict[str, QPushButton] = {}
+        for section in ("Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma"):
+            link = QPushButton(section)
+            link.setObjectName("ghost")
+            link.setAccessibleName(f"{section} ayarlarını aç")
+            link.setProperty("section", section)
+            link.clicked.connect(self._open_settings)
+            self.settings_links[section] = link
+            links.addWidget(link)
+        links.addStretch(1)
+        layout.addLayout(links)
         for card in (self.routines, self.research, self.summaries, self.notices):
             layout.addWidget(card.frame)
         layout.addWidget(self.notice)
+        layout.addStretch(1)
         self._relay.loaded.connect(self._apply)
         for card in (self.routines, self.research, self.summaries, self.notices):
             card.link.clicked.connect(self._open_settings)
@@ -562,7 +592,8 @@ class AutomationPanel(QWidget):
 
     def _open(self, path: str) -> None:
         if path and not self._demo:
-            QDesktopServices.openUrl(QUrl.fromLocalFile(path))
+            file = Path(path)
+            open_text_file(file, file.name, self)  # rapor web verisi: uygulama içinde, bağlantısız
 
     def set_busy(self, busy: bool) -> None:
         """Köprü meşgulken ya da demoda eylem düğmeleri kapanır; salt okuma sürer."""

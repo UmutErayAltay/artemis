@@ -41,7 +41,11 @@ class FileSearchSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        roots_box, roots = group("Aranacak klasörler", divided=False)
+        roots_box, roots = group("Aranacak klasörler", divided=False, help=(
+            "Yalnız burada eklediğin klasörler dizinlenir ve aranır; kökleri sen seçersin, "
+            "Artemis ekleyemez. Klasör ekle ve Listeden çıkar bu listeyi değiştirir; "
+            "kendiliğinden kaydedilir."
+        ))
         layout.addWidget(roots_box)
         self.roots_list = QListWidget()
         self.roots_list.setAccessibleName("Aranacak klasörler")
@@ -65,7 +69,10 @@ class FileSearchSection(QWidget):
         index.addWidget(self.status_label)
         self.reindex_button = QPushButton("Yeniden dizinle")
         self.clear_button = QPushButton("Dizini sil")
-        index.addLayout(button_row(self.clear_button, self.reindex_button))
+        index.addLayout(button_row(self.clear_button, self.reindex_button, help=(
+            "Yeniden dizinle: klasörleri tarayıp indeksi günceller (Dosya araması açık olmalı). "
+            "Dizini sil: indeksi tamamen siler; dosyalarına dokunmaz."
+        )))
         index.addWidget(meta_label(
             "İndeks dosya içeriğinden alınan kişisel metni yalnız Artemis'in veri klasöründe "
             "tutar. "

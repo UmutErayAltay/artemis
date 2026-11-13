@@ -209,7 +209,7 @@ def test_demo_disables_buttons(qt_app: QApplication, tmp_path: Path) -> None:
         {"name": "bir", "folder": str(folder)}]})
     section = TriggersSection(path, demo=True)
     assert not section.add_button.isEnabled()
-    assert not section.open_button.isEnabled()
+    assert not section.add_button.isVisible()
     row = section.trigger_list.itemWidget(section.trigger_list.item(0))
     assert all(not b.isEnabled() for b in row.findChildren(type(section.add_button)))
     section._edit(None)  # doğrudan çağrı bile yazmaz

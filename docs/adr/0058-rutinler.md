@@ -59,3 +59,30 @@ zamanı gelince kendiliğinden çalıştırma, Telegram'dan çalıştırma, adı
 - Windows kabulü yapılmadı (`docs/YENI_OZELLIKLER_KABUL.md`).
 
 **Ek (doğrulama sonrası):** `sent` dönen adım (ör. `open_application`: komut gitti, açıldığı doğrulanmadı) rutini durdurmaz; durdursaydı uygulama açan her rutin ilk adımda biterdi. Böyle bir adım varsa rutinin kendi sonucu da `sent` olur, başarı denmez (kural 5). UTF-8 olmayan dosya bozuk sayılır.
+
+## Ek karar: uygulama içi rutin düzenleyici (R7)
+
+Ayarlar > Rutinler artık "Dosyayı aç" ile işletim sisteminin varsayılan uygulamasını (kullanıcıda VS
+Code) açmaz; her şey Artemis içinde yapılır. Bu, yukarıdaki "Bilerek yapılmayanlar"daki "adım
+düzenleyici arayüz" maddesini ve 9. maddedeki "Dosyayı aç"ı geçersiz kılar. Diğer her kural aynen sürer.
+
+- **Rutin ekle / Düzenle / Sil:** yalnız kullanıcının panelde tıklamasıyla çalışır. Form (`RoutineDialog`)
+  her adımı `validate_steps` ile doğrular (araç ve çalıştırıcıyla aynı fonksiyon); geçersizken Kaydet
+  kapalıdır ve ilk hata görünür. Araç listesi `routine_*` araçlarını içermez, adım olarak da
+  kaydedilemez. Yazım `RoutineStore.save` (atomik, geçici dosya + `os.replace`) ile yapılır. Argüman
+  formu aracın `args_model` JSON şemasından üretilir; basit alanlar tür-doğru değer verir, karmaşık
+  alanlar JSON kutusunda kalır. Zaman düzenlemesi yine yalnız panelin "Zaman" grubundadır; düzenleme
+  mevcut zamanı korur.
+- **Onay neden gerekmez:** `routine_save`/`routine_delete` onayı, modelin (dış içerikle
+  yönlendirilebilen) kullanıcı adına rutin yazmasına karşıdır. Panel kullanıcının kendisidir; zamanı
+  da zaten "yalnız Ayarlar paneli" kurar. Panel hiçbir aracı çağırmaz ve SafetyGate'i atlatmaz: araçlar
+  her zaman onaylı kalır, panel yalnız kendi dosyasına, aynı doğrulamayla yazar. Silme panelde yine
+  onaylıdır (varsayılan "Vazgeç").
+- **Dış editör yok:** `QDesktopServices` kullanılmaz.
+- **Bozuk dosya:** "bozuk dosya sessizce sıfırlanmaz" kuralı aynen sürer. Bozukken ekle/düzenle/sil
+  kapalıdır (boş listeye düşüp dosyayı ezmesin); "Dosyayı düzelt" ham JSON'u monospace bir
+  editörde açar. Kaydet `RoutineFile` + `validate_steps` geçmeden hiçbir şey yazmaz; geçersizse hata
+  gösterilir ve dosya olduğu gibi kalır. Dosyayı kendiliğinden silen/sıfırlayan bir yol yoktur.
+- **Metin görüntüleyici:** `TextViewerDialog` salt okunur, bağlantı açmayan, görsel yüklemeyen bir
+  görünümdür (web araştırması metni yalnız veri olarak gösterilir); rapor ve gün özeti ileride bunu
+  kullanır.

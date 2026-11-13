@@ -16,6 +16,7 @@ import sys
 from collections.abc import Mapping
 from decimal import ROUND_UP, Decimal, InvalidOperation
 from pathlib import Path
+from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
@@ -23,6 +24,7 @@ import yaml
 from PySide6.QtCore import (
     QProcess,
     QProcessEnvironment,
+    QRect,
     QSettings,
     QSize,
     Qt,
@@ -58,6 +60,7 @@ from artemis.brain.providers import (
     stored_endpoint_key,
 )
 from artemis.channels.desktop import themes
+from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import (
     ENDPOINT_ID_RE,
     EndpointConfig,
@@ -110,10 +113,10 @@ def divider() -> QFrame:
 
 
 def group(
-    title: str, hint: str | None = None, *, divided: bool = True
+    title: str, hint: str | None = None, *, divided: bool = True, help: str = "",  # noqa: A002
 ) -> tuple[QWidget, QVBoxLayout]:
     """Düz ayar grubu: ince çizgi + başlık + kısa ipucu. Kart içinde kart olmaması için çerçeve yok;
-    çizgi grubun içinde olduğundan grup gizlenince çizgi de gider."""
+    çizgi grubun içinde olduğundan grup gizlenince çizgi de gider. `help` başlığa "?" ekler."""
     box = QWidget()
     box.setObjectName("group")
     outer = QVBoxLayout(box)
@@ -126,7 +129,7 @@ def group(
     heading.setSpacing(4)
     head = QLabel(title)
     head.setObjectName("sectionTitle")
-    heading.addWidget(head)
+    heading.addLayout(with_help(head, help)) if help else heading.addWidget(head)
     if hint:
         heading.addWidget(meta_label(hint))
     outer.addLayout(heading)
@@ -142,14 +145,21 @@ def meta_label(text: str) -> QLabel:
 
 
 def field(
-    parent: QVBoxLayout, label: str, control: QWidget | QLayout, hint: str | None = None
+    parent: QVBoxLayout, label: str, control: QWidget | QLayout, hint: str | None = None,
+    *, help: str = "",  # noqa: A002 - çağrı yerlerinde en okunur ad
 ) -> None:
-    """Etiket alanın üstünde (13px, 4px boşluk); ipucu altta 12px soluk."""
+    """Etiket alanın üstünde (13px, 4px boşluk); ipucu altta 12px soluk.
+
+    `help` verilirse etiketin hemen sağında "?" baloncuğu durur: her formda aynı yerde, böylece
+    kullanıcı ayarın neyi etkilediğini hep aynı noktada bulur."""
     group = QVBoxLayout()
     group.setSpacing(4)
     caption = QLabel(label)
     caption.setObjectName("fieldLabel")
-    group.addWidget(caption)
+    if help:
+        group.addLayout(with_help(caption, help))
+    else:
+        group.addWidget(caption)
     if isinstance(control, QWidget):
         caption.setBuddy(control)
         group.addWidget(control)
@@ -203,14 +213,87 @@ _Row = tuple[str, bool, bool, str, str, bool, bool, str]
 _STATE_TEXT = {"bekliyor": "○", "geçti": "✓", "kaldı": "✗"}
 
 
-def button_row(*buttons: QPushButton) -> QHBoxLayout:
-    """Sağa yaslı düğme satırı; birincil düğme en sonda verilir, içeriğe göre genişler."""
-    row = QHBoxLayout()
-    row.setSpacing(8)
-    row.addStretch(1)
+class _FlowRow(QLayout):
+    """Sağa yaslı düğme satırı; sığmayınca düğmeler alt satıra sarılır.
+
+    Dar pencerede (720px) uzun etiketli düğmeler tek satıra sığmıyor, kırpılıyordu ya da
+    sayfayı yatay kaydırıyordu (UX-01). Asgari genişlik en geniş tek düğmedir; ihtiyaç
+    olursa yükseklik genişliğe göre büyür (heightForWidth).
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._items: list[Any] = []
+        self._gap = 8
+
+    def addItem(self, arg__1: Any) -> None:  # noqa: N802 (Qt adı)
+        self._items.append(arg__1)
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index: int) -> Any:  # noqa: N802 (Qt adı)
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index: int) -> Any:  # noqa: N802 (Qt adı)
+        return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802 (Qt adı)
+        return True
+
+    def heightForWidth(self, arg__1: int) -> int:  # noqa: N802 (Qt adı)
+        return self._arrange(QRect(0, 0, arg__1, 0), apply=False)
+
+    def setGeometry(self, arg__1: QRect) -> None:  # noqa: N802 (Qt adı)
+        super().setGeometry(arg__1)
+        self._arrange(arg__1, apply=True)
+
+    def sizeHint(self) -> QSize:  # noqa: N802 (Qt adı)
+        hints = [item.sizeHint() for item in self._items]
+        width = sum(h.width() for h in hints) + self._gap * max(0, len(hints) - 1)
+        return QSize(width, max((h.height() for h in hints), default=0))
+
+    def minimumSize(self) -> QSize:  # noqa: N802 (Qt adı)
+        sizes = [item.minimumSize() for item in self._items]
+        return QSize(max((s.width() for s in sizes), default=0),
+                     max((s.height() for s in sizes), default=0))
+
+    def _arrange(self, rect: QRect, *, apply: bool) -> int:
+        lines: list[list[Any]] = [[]]
+        used = 0
+        for item in self._items:
+            width = item.sizeHint().width()
+            if lines[-1] and used + self._gap + width > rect.width():
+                lines.append([])
+                used = 0
+            used += (self._gap if lines[-1] else 0) + width
+            lines[-1].append(item)
+        y = rect.y()
+        for line in lines:
+            height = max((item.sizeHint().height() for item in line), default=0)
+            x = rect.right() + 1 - sum(i.sizeHint().width() for i in line) - self._gap * (
+                len(line) - 1
+            )
+            for item in line:
+                size = item.sizeHint()
+                if apply:
+                    top = y + (height - size.height()) // 2  # düğme yanındaki küçük "?" ortalanır
+                    item.setGeometry(QRect(max(x, rect.x()), top, size.width(), size.height()))
+                x += size.width() + self._gap
+            y += height + self._gap
+        return max(0, y - self._gap - rect.y())
+
+
+def button_row(*buttons: QPushButton, help: str = "") -> QLayout:  # noqa: A002
+    """Sağa yaslı düğme satırı; birincil düğme en sonda verilir, sığmazsa alt satıra sarılır.
+
+    `help` verilirse son düğmenin sağında "?" baloncuğu durur (satırdaki düğmeleri anlatır)."""
+    row = _FlowRow()
     for button in buttons:
         button.setMinimumWidth(88)
         row.addWidget(button)
+    if help:
+        row.addWidget(HelpTip(help))
     return row
 
 
@@ -310,6 +393,7 @@ class ProviderSection(QWidget):
     def __init__(self, config_path: Path, *, demo: bool = False) -> None:
         super().__init__()
         self.config_path = config_path
+        self._button_tips: dict[QPushButton, QWidget] = {}
         self._test: ConnectionTest | None = None
         self._fetch: ConnectionTest | None = None
         self._cli_test: CliTest | None = None
@@ -355,12 +439,7 @@ class ProviderSection(QWidget):
         self.model_sort.setCurrentIndex(max(saved, 0))
         self.model_sort.currentIndexChanged.connect(self._sort_changed)
         self.sort_label = meta_label("Sırala")
-        head = QHBoxLayout()
-        head.setSpacing(8)
-        head.addWidget(self.banner, 1)
-        head.addWidget(self.sort_label, 0, Qt.AlignmentFlag.AlignVCenter)
-        head.addWidget(self.model_sort, 0, Qt.AlignmentFlag.AlignVCenter)
-        models.addLayout(head)
+        models.addWidget(self.banner)
         self.model_list = QListWidget()
         self.model_list.setAccessibleName("Eklenen modeller")
         self.model_list.setVisible(False)  # reload() dolu olunca gösterir
@@ -417,11 +496,18 @@ class ProviderSection(QWidget):
         for button in (self.primary_button, self.hard_button, self.fallback_button):
             role_row.addWidget(button)
         role_row.addStretch(1)
-        field(detail, "Rol", role_row)
+        field(detail, "Rol", role_row, help=(
+            "Beyin: sohbetlere bu model cevap verir. Zor işler: çok adımlı ve planlama isteyen "
+            "turları bu model alır. Yedek: beyin kota, bağlantı ya da sunucu hatası verince tur "
+            "bununla sürer. Ayarlardan çıkınca geçerli olur."
+        ))
         test_row = QHBoxLayout()
         test_row.setSpacing(12)
         test_row.addWidget(self.model_test_button)
-        test_row.addWidget(self.parallel_test)
+        test_row.addLayout(with_help(self.parallel_test, (
+            f"Senaryolardan {PARALLEL_TEST}'ü aynı anda çalışır; API modellerinde testi kısaltır. "
+            "Yerel sunucu aynı anda tek istek kaldırıyorsa yavaşlatabilir."
+        )))
         test_row.addStretch(1)
         test_box = QVBoxLayout()
         test_box.setSpacing(8)
@@ -429,11 +515,20 @@ class ProviderSection(QWidget):
         test_box.addWidget(self.test_list)
         test_box.addWidget(self.test_result)
         retry_row = QHBoxLayout()
-        retry_row.addWidget(self.retry_button)
+        retry_row.addLayout(self._tip_after(self.retry_button, (
+            "Testte kalan senaryoları aynı modelle bir kez daha çalıştırır. Ücretli modelde "
+            "yalnız kalanların payı kadar tahmini tutar önce sorulur."
+        )))
         retry_row.addStretch(1)
         test_box.addLayout(retry_row)
-        field(detail, "Test", test_box)
-        detail.addLayout(button_row(self.remove_button))
+        field(detail, "Test", test_box, help=(
+            "Seçili modeli senaryolarla dener. Ücretli modelde önce tahmini tutarı sorar; test "
+            "bütçesi bu tahminin iki katıyla sınırlanır. Resim modelleri bu testle denenmez."
+        ))
+        detail.addLayout(button_row(self.remove_button, help=(
+            "Seçili modeli listeden ve ayar dosyasından kaldırır. Beyin, Zor işler ya da Yedek "
+            "olan model kaldırılamaz; önce o rolü başka bir modele ver."
+        )))
         self.detail.setVisible(False)  # reload() model varsa gösterir
         self.model_list.currentItemChanged.connect(self._selection_changed)
         # Test edilmiş modellerden çıkan önerilen düzen (ana + zor işler) ve tek tık uygulama.
@@ -447,10 +542,28 @@ class ProviderSection(QWidget):
         self.model_split.setSpacing(16)
         left = QVBoxLayout()
         left.setSpacing(12)
+        # "Sırala" liste sütununun başlığında, listenin sağ kenarıyla hizalı: eskiden bütün sayfa
+        # genişliğine yaslanıp kaydırma çubuğuna biniyordu (UX-03).
+        sort_row = QHBoxLayout()
+        sort_row.setContentsMargins(0, 0, 0, 0)
+        sort_row.setSpacing(8)
+        sort_row.addStretch(1)
+        sort_row.addWidget(self.sort_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        self.sort_tip = HelpTip(
+            "Listeyi yalnız görünümde sıralar (başarı, bağlantı, rol, ad ya da eklenme sırası). "
+            "Ayar dosyasındaki model sırası ve seçimin hiçbiri değişmez."
+        )
+        sort_row.addWidget(self.sort_tip, 0, Qt.AlignmentFlag.AlignVCenter)
+        sort_row.addWidget(self.model_sort, 0, Qt.AlignmentFlag.AlignVCenter)
+        left.addLayout(sort_row)
         left.addWidget(self.model_list)
         left.addWidget(self.model_empty)
         left.addWidget(self.layout_label)
-        left.addLayout(button_row(self.apply_layout_button))
+        self.apply_layout_button.setMinimumWidth(88)
+        left.addLayout(self._tip_after(self.apply_layout_button, (
+            "Test sonuçlarına göre önerilen Beyin, Zor işler ve bilgisayar kullanımı "
+            "modellerini tek tıkla ayara yazar. Ayarlardan çıkınca geçerli olur."
+        )))
         left.addStretch(1)
         self.model_split.addLayout(left, 1)
         self.model_split.addWidget(self.detail, 1, Qt.AlignmentFlag.AlignTop)
@@ -486,8 +599,14 @@ class ProviderSection(QWidget):
         prices = QVBoxLayout(self.price_box)
         prices.setContentsMargins(0, 0, 0, 0)
         prices.setSpacing(12)
-        field(prices, "Girdi fiyatı (USD / milyon jeton)", self.input_price)
-        field(prices, "Çıktı fiyatı (USD / milyon jeton)", self.output_price)
+        field(prices, "Girdi fiyatı (USD / milyon jeton)", self.input_price, help=(
+            "Modelin 1 milyon girdi jetonu için fiyatı. Test et'teki tahmini tutar ve bütçe "
+            "koruması bununla hesaplanır; ücretsiz modelde 0 kalır."
+        ))
+        field(prices, "Çıktı fiyatı (USD / milyon jeton)", self.output_price, help=(
+            "Modelin 1 milyon çıktı jetonu için fiyatı; girdi fiyatıyla birlikte tahmini maliyeti "
+            "ve test onayındaki tutarı belirler."
+        ))
         self.price_box.setVisible(False)
         self.kind = QComboBox()
         self.kind.setAccessibleName("Model türü")
@@ -502,26 +621,50 @@ class ProviderSection(QWidget):
         field(
             image_layout, "Resim başına fiyat (USD)", self.image_price,
             "Her çağrıda bütçeden bu tutar ayrılır (rezervasyon).",
+            help="Resim üretimi çağrı başına ücretlenir. Bütçe koruması her çağrıdan önce bu "
+            "tutarı ayırır.",
         )
         self.image_box.setVisible(False)
         self.make_primary = QCheckBox("Beyin modeli yap")
         self.kind.currentIndexChanged.connect(self._sync_kind)
         self.paid.toggled.connect(self._sync_kind)
-        field(add, "Bağlantı", self.add_connection)
-        field(add, "Tür", self.kind)
-        field(add, "Model", model_row)
-        field(add, "Takma ad", self.alias)
-        add.addWidget(self.paid)
+        field(add, "Bağlantı", self.add_connection, help=(
+            "Modelin çalışacağı sunucu. Önce aşağıdaki Bağlantılar'dan eklemen gerekir; Claude "
+            "aboneliği seçilirse model Claude Code CLI ile çalışır."
+        ))
+        field(add, "Tür", self.kind, help=(
+            "Sohbet: konuşmalara cevap veren model. Resim: yalnız resim üretir; Beyin, Zor işler "
+            "ya da Yedek olamaz ve Claude aboneliğiyle kullanılamaz."
+        ))
+        field(add, "Model", model_row, help=(
+            "Sunucudaki model adı. Listeyi getir seçili bağlantının model listesini ister "
+            "(küçük bir ağ isteği); adı elle de yazabilirsin."
+        ))
+        field(add, "Takma ad", self.alias, help=(
+            "Modelin Artemis içindeki kısa adı; listede ve rollerde bu görünür. Boş bırakırsan "
+            "model adından türetilir; aynı ad iki kez kullanılamaz."
+        ))
+        add.addLayout(with_help(self.paid, (
+            "Modelin kullanım başına ücret aldığını işaretler ve fiyat alanlarını açar. "
+            "Ücretli model bütçe korumasına takılır; ücretli kullanım izni ayar dosyasından "
+            "verilir."
+        )))
         add.addWidget(self.price_box)
         add.addWidget(self.image_box)
-        add.addWidget(self.make_primary)
+        add.addLayout(with_help(self.make_primary, (
+            "Eklenince bu model Beyin olur: sohbetlere o cevap verir. Ayarlardan çıkınca "
+            "geçerli olur ve yeni sohbet başlar. Resim modeli Beyin olamaz."
+        )))
         self.add_button = QPushButton("Ekle")
         self.add_button.setObjectName("primary")
         self.add_button.clicked.connect(self._add_model)
         self.cli_test_button = QPushButton("Aboneliği test et")
         self.cli_test_button.setToolTip("Küçük bir gerçek istek atar; kotadan az harcar.")
         self.cli_test_button.clicked.connect(self._test_cli)
-        add.addLayout(button_row(self.cli_test_button, self.add_button))
+        add.addLayout(button_row(self.cli_test_button, self.add_button, help=(
+            "Ekle: modeli ayar dosyasına yazar. Aboneliği test et (yalnız Claude aboneliğinde): "
+            "küçük bir gerçek istek atar; kotandan az da olsa harcar."
+        )))
         # C: bağlantı ekle/düzenle; modeller önde kalsın diye varsayılan kapalı
         self.connection_toggle = QPushButton("Bağlantı ekle veya düzenle")
         self.connection_toggle.setObjectName("ghost")
@@ -556,11 +699,26 @@ class ProviderSection(QWidget):
         self.key = QLineEdit()
         self.key.setAccessibleName("API anahtarı")
         self.key.setEchoMode(QLineEdit.EchoMode.Password)
-        field(conn, "Şablon", self.preset)
-        field(conn, "Kimlik (kısa ad)", self.endpoint_id)
-        field(conn, "Adres", self.base_url)
-        conn.addWidget(self.needs_key)
-        field(conn, "API anahtarı", self.key)
+        field(conn, "Şablon", self.preset, help=(
+            "Bilinen bir sağlayıcının adresini ve anahtar gerekip gerekmediğini forma doldurur. "
+            "Hiçbir şey kaydetmez; Kaydet'e basana kadar yalnız form değişir."
+        ))
+        field(conn, "Kimlik (kısa ad)", self.endpoint_id, help=(
+            "Bağlantının kısa adı (harf, rakam, _ ve -). Modeller bağlantıya bu adla bağlanır; "
+            "anahtar da bu adla saklanır."
+        ))
+        field(conn, "Adres", self.base_url, help=(
+            "Sunucunun temel adresi (örn. .../v1). Bu bağlantıyı kullanan modelin istekleri bu "
+            "adrese gider; localhost adresi bilgisayarından çıkmaz."
+        ))
+        conn.addLayout(with_help(self.needs_key, (
+            "Sunucu istek başına anahtar istiyorsa işaretli bırak. Kapalıysa anahtar "
+            "gönderilmez; yerel sunucular genelde anahtar istemez."
+        )))
+        field(conn, "API anahtarı", self.key, help=(
+            "Anahtar Windows kimlik kasasına yazılır, ayar dosyasına (YAML) asla girmez. "
+            "Kaydedince alan temizlenir; boş bırakırsan kayıtlı anahtar korunur."
+        ))
         self.test_button = QPushButton("Bağlantıyı test et")
         self.test_button.clicked.connect(self._test_connection)
         self.save_button = QPushButton("Kaydet")
@@ -569,7 +727,13 @@ class ProviderSection(QWidget):
         self.delete_button = QPushButton("Sil")
         self.delete_button.setObjectName("danger")
         self.delete_button.clicked.connect(self._delete)
-        conn.addLayout(button_row(self.delete_button, self.test_button, self.save_button))
+        conn.addLayout(button_row(
+            self.delete_button, self.test_button, self.save_button, help=(
+                "Sil: bağlantıyı ve kasadaki anahtarını kaldırır (kullanan model varsa önce "
+                "onları kaldır). Bağlantıyı test et: adrese küçük bir istek atar. "
+                "Kaydet: bağlantıyı yazar."
+            ),
+        ))
         self.status = QLabel()
         self.status.setWordWrap(True)
         # Uzun yol/adres tek "sözcük" sayılıp sütunu genişletmesin (yatay kaydırma çıkmasın).
@@ -585,6 +749,22 @@ class ProviderSection(QWidget):
             self.status.setText("Demo modunda bağlantılar ve modeller değiştirilmez.")
         else:
             self.reload()
+
+    def _tip_after(self, button: QPushButton, text: str) -> QHBoxLayout:
+        """Düğme + "?" satırı; düğme gizlenince baloncuk da gizlenir (`_show_button`)."""
+        row = with_help(button, text)
+        item = row.itemAt(1)
+        tip = item.widget() if item is not None else None
+        assert tip is not None
+        tip.setVisible(not button.isHidden())
+        self._button_tips[button] = tip
+        return row
+
+    def _show_button(self, button: QPushButton, visible: bool) -> None:
+        button.setVisible(visible)
+        tip = self._button_tips.get(button)
+        if tip is not None:
+            tip.setVisible(visible)
 
     def _style_roles(self) -> None:
         # İşaretli rol vurgu çerçevesi alır; "✓" metni durumu renksiz de belli eder.
@@ -678,7 +858,7 @@ class ProviderSection(QWidget):
             if ana else ""
         )
         self.layout_label.setVisible(bool(ana))
-        self.apply_layout_button.setVisible(bool(ana) and (ana, zor, pc) != current)
+        self._show_button(self.apply_layout_button, bool(ana) and (ana, zor, pc) != current)
         # Liste kendi içinde kaydırılmasın: en çok 6 satır kadar uzar.
         heights = [
             self.model_list.item(index).sizeHint().height()
@@ -688,6 +868,7 @@ class ProviderSection(QWidget):
         self.model_list.setVisible(self.model_list.count() > 0)
         self.model_sort.setVisible(self.model_list.count() > 1)
         self.sort_label.setVisible(self.model_list.count() > 1)
+        self.sort_tip.setVisible(self.model_list.count() > 1)
         self.model_empty.setVisible(self.model_list.count() == 0)
         self.detail.setVisible(self.model_list.count() > 0)
         self._sync_test_buttons()
@@ -1426,7 +1607,7 @@ class ProviderSection(QWidget):
         retryable = self._last is not None and str(self._last[1].get("model", "")) in [
             row[0] for row in self._model_data
         ]
-        self.retry_button.setVisible(not running and failed and retryable and here)
+        self._show_button(self.retry_button, not running and failed and retryable and here)
 
     def _test_or_stop(self) -> None:
         if self._model_test is not None and self._testing == self._current_alias():

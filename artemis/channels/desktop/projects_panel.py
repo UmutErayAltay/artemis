@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from pydantic import ValidationError
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtGui import QResizeEvent, QShowEvent, QStandardItemModel
 from PySide6.QtWidgets import (
     QBoxLayout,
@@ -37,6 +37,7 @@ from artemis.channels.desktop.code_agent_config import (
     slug_alias,
     workdir_alias_error,
 )
+from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import (
     OWN_REPO_ALIAS,
     CodeAgentConfig,
@@ -147,19 +148,26 @@ class PathHint(QLabel):
         self._elide()
 
 
-def make_field(caption: str, widget: QWidget) -> QWidget:
-    """Etiket alanın üstünde kalıcıdır; placeholder yalnız örnek verir."""
+def make_field(caption: str, widget: QWidget, help: str = "") -> QWidget:  # noqa: A002
+    """Etiket alanın üstünde kalıcıdır; placeholder yalnız örnek verir. `help` varsa "?" etiketin
+    hemen yanında durur."""
     box = QWidget()
     lay = QVBoxLayout(box)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(4)
-    lay.addWidget(make_label(caption, "fieldLabel"))
+    label = make_label(caption, "fieldLabel")
+    if help:
+        lay.addLayout(with_help(label, help))
+    else:
+        lay.addWidget(label)
     lay.addWidget(widget)
     return box
 
 
 def make_page_header(
-    title: str, subtitle: str | None = None, actions: tuple[QWidget, ...] = ()
+    title: str,
+    subtitle: str | None = None,
+    actions: tuple[QWidget | tuple[QWidget, str], ...] = (),
 ) -> QWidget:
     """Her sayfanın aynı başlık satırı: 48px sabit, sağda eylemler, 4px altında alt başlık.
 
@@ -179,7 +187,12 @@ def make_page_header(
     row.addWidget(heading)
     row.addStretch(1)
     for action in actions:
-        row.addWidget(action)
+        if isinstance(action, tuple):  # (düğme, yardım): "?" düğmenin hemen sağında
+            row.addWidget(action[0])
+            row.addWidget(HelpTip(action[1]), 0, Qt.AlignmentFlag.AlignVCenter)
+            row.setSpacing(8)
+        else:
+            row.addWidget(action)
     column.addLayout(row)
     if subtitle:
         column.addWidget(make_label(subtitle, "meta"))
@@ -236,6 +249,33 @@ class CurrentPageStack(QWidget):
         self.currentChanged.emit(index)
 
 
+# Tüm ana sekmelerin (Projeler, Otomasyon, Geçmiş, Petler, Ayarlar) ortak sayfa kabuğu: içerik en
+# çok bu genişlikte, ortada; başlık bloğun sol kenarında. Sekme değişince başlık zıplamasın (UX-02).
+PAGE_MAX_WIDTH = 1240
+
+
+class PageBody(QWidget):
+    """Sayfa gövdesi: en çok PAGE_MAX_WIDTH, kendi asgari genişliğinin altına asla sıkıştırılmaz.
+
+    Sabit üst sınır, asgarisi 1240px'i aşan bir sayfada (Projeler'de iki sütun + uzun durum metni)
+    çocukları üst üste bindirirdi; sınır asgariye göre yükselir, taşma eskisi gibi kaydırılır.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setMaximumWidth(PAGE_MAX_WIDTH)
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.LayoutRequest:
+            self.setMaximumWidth(max(PAGE_MAX_WIDTH, self.minimumSizeHint().width()))
+        return super().event(event)
+
+
+def center_page(scroll: QScrollArea) -> None:
+    """Kaydırma alanındaki sayfa PAGE_MAX_WIDTH'i aşmaz ve yatayda ortalanır (üstten hizalı)."""
+    scroll.setAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop)
+
+
 def make_scroll_page(panel: QWidget) -> QVBoxLayout:
     """Sayfada tek kaydırma bölgesi: dar pencerede kartlar sıkışmak yerine kayar."""
     outer = QVBoxLayout(panel)
@@ -243,7 +283,8 @@ def make_scroll_page(panel: QWidget) -> QVBoxLayout:
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
-    content = QWidget()
+    center_page(scroll)
+    content = PageBody()
     scroll.setWidget(content)
     outer.addWidget(scroll)
     layout = QVBoxLayout(content)
@@ -333,6 +374,53 @@ def status_chip(record: dict[str, Any]) -> tuple[str, str]:
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "waiting", "cancelling", "cleanup_pending"})
 WORKDIR_WARNING = "Ajan bu klasörde başlar ve oradaki kuralları yükler; dosyaları değiştirebilir."
 FLOW_STEPS = ("Hazırla", "İncele", "Başlat")
+_HELP_PROJECT = (
+    "İşin yapılacağı, Ayarlar'da tanımlı yerel depo. Ajan dosyaları bu depoda düzenler ve "
+    "yerel commit atabilir; push yapmaz."
+)
+_HELP_AGENT = (
+    "İşi yapacak komut satırı ajanı (Ayarlar > GitHub > Kod ajanları). Ajan makinende ayrı bir "
+    "program olarak çalışır."
+)
+_HELP_MODE = (
+    "Arka planda: pencere açılmaz, durumu buradan izlersin. Görünür pencerede: ajan kendi "
+    "penceresinde çalışır; pencereyi kapatırsan iş kesilir ve Artemis soru-cevap yapamaz."
+)
+_HELP_WORKDIR = (
+    "Ajanın başladığı klasör; oradaki kuralları yükler. Depo dışı bir klasör seçersen ajan o "
+    "klasördeki dosyaları da değiştirebilir."
+)
+_HELP_ADD_FOLDER = (
+    "Seçtiğin klasörü takma adla başlangıç klasörleri listesine ekler ve ayar dosyasına yazar. "
+    "Klasörü yalnız sen seçersin; model yol veremez."
+)
+_HELP_DEFAULT = (
+    "Seçili ajan ve klasörü bu projenin varsayılanı olarak ayar dosyasına yazar; sonraki "
+    "işlerde bu seçim hazır gelir."
+)
+_HELP_TASK = "Ajanın yapacağı işi anlat. Taslakta ve onay ekranında aynen görünür."
+_HELP_SCOPE = (
+    "Ajanın dokunabileceği dosya, klasör ya da alan; her satır bir madde. Onay ekranında "
+    "tam olarak görürsün."
+)
+_HELP_ACCEPTANCE = "İşin bittiğini nasıl anlayacağın (ör. testler geçiyor); her satır bir madde."
+_HELP_PREPARE = (
+    "Yazdıklarından değişmez bir yerel taslak oluşturur; ajanı BAŞLATMAZ. Sağda inceleyip "
+    "onaylayınca çalışır."
+)
+_HELP_ANSWER = (
+    "Ajanın sorusuna yazdığın cevabı gönderir ve aynı oturumda devam ettirir (yalnız Claude). "
+    "Her seferinde onay ister."
+)
+_HELP_START = (
+    "Durumu yenile: listeyi şimdi yeniden okur. Taslağı onayla ve başlat: seçili taslağı ajanda "
+    "çalıştırır; onay penceresi tam kapsamı gösterir. Ajan Artemis kapısı dışında da çalışabilir."
+)
+_HELP_ROW_ACTIONS = (
+    "İşi durdur: yarım dosya değişiklikleri kalır, geri alınmaz. Taslağı sil: başlamamış taslağı "
+    "siler. Kilidi bırak: Artemis çöktüyse kalan depo kilidini açar. Biten işleri temizle: biten "
+    "kayıtları listeden siler; repoya dokunmaz."
+)
 # Seçicide gösterilen ad; saklanan takma ad değişmez (claude).
 AGENT_LABELS = {"claude": "Claude Code"}
 # Proje listesi boşken combo boş ve etiketsiz görünürdü; devre dışı satır nedenini söyler
@@ -343,8 +431,9 @@ AGENT_MISSING_TIP = "Bulunamadı. Ayarlar > GitHub > Kod ajanları bölümünden
 MODE_LABELS = (("Arka planda", "background"), ("Görünür pencerede", "visible"))
 LIST_MIN_ROWS = 1  # tek taslak tek satır yüksekliği alır; boşken EmptyState gösterilir
 LIST_MAX_ROWS = 6
-# 68: üç düzenleyici + 36 px kontrollerle birincil düğme 1000x700 pencerede görünür kalır.
-EDITOR_MIN_HEIGHT = 68
+# 60: üç düzenleyici, "?" baloncuklu etiket satırları (18px) ve 36 px kontrollerle birincil düğme
+# 1000x700 pencerede görünür kalır.
+EDITOR_MIN_HEIGHT = 60
 EDITOR_MAX_HEIGHT = 120
 
 
@@ -457,6 +546,13 @@ class ProjectsPanel(QWidget):
                 "Yerel bir depoda iş taslağı hazırla, kapsamını incele, onaylayıp başlat.",
             )
         )
+        # Demo notu sayfa başında bir kez verilir; her eylemin altında tekrarlanmaz (UX-11).
+        self.demo_note = make_label(
+            "Demo modunda proje süreçleri kapalı: taslak hazırlama ve başlatma etkin sürümde "
+            "çalışır.", "meta",
+        )
+        self.demo_note.setVisible(demo)
+        layout.addWidget(self.demo_note)
         # Üç adımlı akış yalnız seçili taslak/iş durumundan türer (_update_flow); durum tutmaz.
         self.flow_bar = QFrame()
         self.flow_bar.setObjectName("stageBar")
@@ -501,15 +597,15 @@ class ProjectsPanel(QWidget):
             editor.textChanged.connect(self._editor_text_changed)
         self.project.setAccessibleName("Proje")
         self._set_projects([])
-        left_lay.addWidget(make_field("Proje", self.project))
+        left_lay.addWidget(make_field("Proje", self.project, _HELP_PROJECT))
         left_lay.addWidget(self._build_agent_row())
-        for caption, widget in (
-            ("Görev", self.task),
-            ("Kapsam", self.scope),
-            ("Kabul ölçütleri", self.acceptance),
+        for caption, widget, tip in (
+            ("Görev", self.task, _HELP_TASK),
+            ("Kapsam", self.scope, _HELP_SCOPE),
+            ("Kabul ölçütleri", self.acceptance, _HELP_ACCEPTANCE),
         ):
             widget.setAccessibleName(caption)
-            left_lay.addWidget(make_field(caption, widget))
+            left_lay.addWidget(make_field(caption, widget, tip))
         self.prepare_button = QPushButton("Taslak hazırla")
         # Pasif düğmenin nedeni düğmenin hemen yanında muted metindir: ayrı satır olsaydı
         # 1280x850'de yeni seçiciler yüzünden kıvrımın altına düşerdi.
@@ -517,6 +613,7 @@ class ProjectsPanel(QWidget):
         prepare_row = QHBoxLayout()
         prepare_row.setSpacing(12)
         prepare_row.addWidget(self.prepare_button)
+        prepare_row.addWidget(HelpTip(_HELP_PREPARE), 0, Qt.AlignmentFlag.AlignVCenter)
         prepare_row.addWidget(self.prepare_reason, 1)
         left_lay.addLayout(prepare_row)
         left_lay.addStretch()  # boşluk eylem satırlarının altında kalır; düğme son editöre yapışık
@@ -565,6 +662,7 @@ class ProjectsPanel(QWidget):
         answer_row = QHBoxLayout()
         answer_row.addStretch()
         answer_row.addWidget(self.answer_button)
+        answer_row.addWidget(HelpTip(_HELP_ANSWER), 0, Qt.AlignmentFlag.AlignVCenter)
         q_lay.addLayout(answer_row)
         right_lay.addWidget(self.question_box)
         self.refresh_button = QPushButton("Durumu yenile")
@@ -575,6 +673,7 @@ class ProjectsPanel(QWidget):
         actions.addStretch()
         actions.addWidget(self.refresh_button)
         actions.addWidget(self.start_button)
+        actions.addWidget(HelpTip(_HELP_START), 0, Qt.AlignmentFlag.AlignVCenter)
         right_lay.addLayout(actions)
         self.start_reason = AutoHideLabel()
         self.start_reason.setAlignment(Qt.AlignmentFlag.AlignRight)
@@ -596,11 +695,13 @@ class ProjectsPanel(QWidget):
         cancel_row.addWidget(self.release_button)
         cancel_row.addWidget(self.discard_button)
         cancel_row.addWidget(self.clear_button)
+        # Düğmeler seçime göre görünür/gizlenir; tek "?" satırın sonunda kalır ve hepsini anlatır.
+        cancel_row.addWidget(HelpTip(_HELP_ROW_ACTIONS), 0, Qt.AlignmentFlag.AlignVCenter)
         cancel_row.addStretch()
         right_lay.addSpacing(8)
         right_lay.addLayout(cancel_row)
         self.notice = make_label(
-            "Demo modunda proje süreçleri kapalı." if demo else "Durum bekleniyor.", "meta"
+            "" if demo else "Durum bekleniyor.", "meta"
         )
         right_lay.addWidget(self.notice)
 
@@ -676,11 +777,14 @@ class ProjectsPanel(QWidget):
         folder_row.setSpacing(8)
         folder_row.addWidget(self.workdir_combo, 1)
         folder_row.addWidget(self.add_folder_button)
+        folder_row.addWidget(HelpTip(_HELP_ADD_FOLDER), 0, Qt.AlignmentFlag.AlignVCenter)
         self._agent_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._agent_row.setSpacing(12)
-        self._agent_row.addWidget(make_field("Kod ajanı", self.agent_combo), 3)
-        self._agent_row.addWidget(make_field("Çalışma kipi", self.mode_combo), 3)
-        self._agent_row.addWidget(make_field("Başlangıç klasörü", folder_box), 4)
+        self._agent_row.addWidget(make_field("Kod ajanı", self.agent_combo, _HELP_AGENT), 3)
+        self._agent_row.addWidget(make_field("Çalışma kipi", self.mode_combo, _HELP_MODE), 3)
+        self._agent_row.addWidget(
+            make_field("Başlangıç klasörü", folder_box, _HELP_WORKDIR), 4
+        )
         column.addLayout(self._agent_row)
         # Çözülmüş yol 12px soluk ipucudur; uyarı yalnız proje dışı klasörde görünür.
         self.workdir_hint = PathHint()
@@ -698,6 +802,7 @@ class ProjectsPanel(QWidget):
         hint_row.setSpacing(8)
         hint_row.addWidget(self.workdir_hint, 1)
         hint_row.addWidget(self.default_button)
+        hint_row.addWidget(HelpTip(_HELP_DEFAULT), 0, Qt.AlignmentFlag.AlignVCenter)
         column.addLayout(hint_row)
         for widget in (self.workdir_warning, self.agent_reason):
             column.addWidget(widget)
@@ -1038,14 +1143,14 @@ class ProjectsPanel(QWidget):
         enabled = not busy and not self._demo
         prepare_reason = self._prepare_block()
         self.prepare_button.setEnabled(not prepare_reason)
-        self.prepare_reason.setText(prepare_reason)
+        self.prepare_reason.setText("" if self._demo else prepare_reason)
         self.refresh_button.setEnabled(enabled)
         selected = self._selected()
         kind, record = selected if selected else ("", {})
         lock_reason = self._lock_block(record) if kind == "draft" else ""
         self.start_button.setEnabled(enabled and kind == "draft" and not lock_reason)
         if self._demo:
-            start_reason = "Demo modunda proje süreçleri kapalı."
+            start_reason = ""  # neden sayfa başındaki demo notunda
         elif busy:
             start_reason = "Artemis meşgul; hazır olunca açılır."
         elif lock_reason:

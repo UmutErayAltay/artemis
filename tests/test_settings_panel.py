@@ -349,6 +349,7 @@ _UNBOUND_WIDGETS = {
     "stt_combo": "stt_model: katalog seçimi yola çevrilir, indirme durumu taşır",
     "github_auto": "code_agent.auto_sync: github_values ile birlikte, save_code_agent de yazar",
     "advanced_devices": "yalnız görünüm; config'e yazılmaz",
+    "section_combo": "dar pencerede bölüm listesinin yerine geçen gezinme; config'e yazılmaz",
     "default_agent_combo": "code_agent.default_agent: code_agent_values ile ajanlarla yazılır",
 }
 
@@ -924,10 +925,11 @@ def test_list_empty_states_and_disabled_messages(tmp_path: Path, qt_app) -> None
     assert triggers.empty.title_label.text() == "Tanımlı tetikleyici yok"
     assert triggers.empty.action_button is not None
     assert triggers.empty.action_button.text() == "Tetikleyici ekle"
-    assert panel.triggers.open_button.text() == "Ayar dosyasını aç"
+    assert not hasattr(panel.triggers, "open_button")  # dış editör düğmesi yok (UX-09)
+    assert panel.triggers.add_button.isHidden()  # boşken tek birincil eylem: boş durumdaki düğme
     assert not triggers.empty.action_button.isHidden()
     assert panel.skills.valid_area.empty.title_label.text() == "Henüz beceri yok"
-    assert panel.skills.valid_area.empty.action_button.text() == "Klasörü aç"  # type: ignore[union-attr]
+    assert panel.skills.valid_area.empty.action_button.text() == "Yeni beceri…"  # type: ignore[union-attr]
     assert panel.skills.invalid_area.empty.title_label.text() == "Geçersiz dosya yok"
     panel.deleteLater()
 

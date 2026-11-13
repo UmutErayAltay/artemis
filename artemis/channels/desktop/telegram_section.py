@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QPushButton, QVBoxLa
 
 from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
 from artemis.channels.desktop.telegram_service import channel_blocker
+from artemis.channels.desktop.widgets import with_help
 from artemis.channels.telegram.api import (
     TOKEN_TARGET,
     TelegramClient,
@@ -166,6 +167,10 @@ class TelegramSection(QWidget):
         field(
             body, "Bot token'ı", self.token,
             "@BotFather'dan alınan token yalnız kimlik kasasına yazılır.",
+            help=(
+                "Botun kimliği. Windows kimlik kasasına yazılır, ayar dosyasına ve loga girmez. "
+                "Kaydet ve doğrula önce Telegram'a sorup doğrular, geçerliyse kaydeder."
+            ),
         )
         body.addLayout(button_row(self.save_button))
         pair_box, pair = group("Sohbet")
@@ -182,14 +187,22 @@ class TelegramSection(QWidget):
         self.disconnect_button = QPushButton("Bağlantıyı kes")
         self.disconnect_button.clicked.connect(self._disconnect)
         pair.addLayout(button_row(
-            self.disconnect_button, self.test_button, self.cancel_button, self.pair_button
+            self.disconnect_button, self.test_button, self.cancel_button, self.pair_button,
+            help=(
+                "Eşleştir: botu bu sohbete bağlar; botuna özelden bir kod yazarsın. Test mesajı: "
+                "sohbete bir deneme iletisi yollar. Bağlantıyı kes: kayıtlı sohbeti ve kasadaki "
+                "token'ı siler."
+            ),
         ))
         channel_box, channel = group("Telegram'dan komut")
         layout.addWidget(channel_box)
         self.channel_check = QCheckBox("Artemis açıkken Telegram'dan komut al")
         self.channel_check.setAccessibleName("Telegram kanalı masaüstünde çalışsın")
         self.channel_check.toggled.connect(self._toggle_channel)
-        channel.addWidget(self.channel_check)
+        channel.addLayout(with_help(self.channel_check, (
+            "Açıkken Artemis çalıştığı sürece Telegram'dan yazdığın komutları alır. Komutlar bu "
+            "sohbetin kendi geçmişinde çalışır; onaylar yalnız Telegram düğmeleriyle sorulur."
+        )))
         self.channel_label = meta_label("")
         self.channel_label.setAccessibleName("Telegram kanalı durumu")
         channel.addWidget(self.channel_label)
