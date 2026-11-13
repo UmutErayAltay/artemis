@@ -1,4 +1,11 @@
-"""Kullanıcı becerileri (ADR 0060): `state_dir/beceriler/<ad>.md` dosyaları.
+"""Kullanıcı becerileri (ADR 0060): `<beceri klasörü>/<ad>.md` dosyaları.
+
+Klasör: `skills.folder`; yoksa güvenliyse mevcut `state_dir/beceriler`; yoksa kullanıcı veri
+klasörü (Windows: APPDATA/Artemis/beceriler; diğerlerinde XDG_CONFIG_HOME/artemis/beceriler).
+
+Hazır şablonlar `artemis/skill_templates/` içinde paketle gelir; klasör ilk kez açılırken ve
+panelde kullanıcı açıkça "Yeni beceri" dediğinde YENİ bir dosya olarak yazılır (asla üzerine
+yazılmaz, silinmez; araç ya da model bunu tetikleyemez).
 
 Beceri KULLANICININ yazdığı talimattır ve gövdesi kullanıcının kendi isteği kadar güvenilir
 sayılır. Bu yalnız klasöre kullanıcıdan başkası yazamıyorsa güvenlidir: hiçbir araç beceri
@@ -9,8 +16,11 @@ kapıdan geçer. Dosyalar her turda ve "Yenile"de okunur (en çok 40 küçük do
 
 from __future__ import annotations
 
+import os
 import re
+import sys
 from dataclasses import dataclass, field
+from importlib import resources
 from pathlib import Path
 
 import yaml
@@ -27,20 +37,12 @@ PROMPT_CHARS = 2000
 # Bundan büyük dosya okunmadan reddedilir (gövde sınırının rahat üstü, UTF-8 çok baytlı olabilir).
 _MAX_FILE_BYTES = MAX_BODY * 4 + 2000
 
-EXAMPLE_NAME = "ornek-gunluk-ozet"
-EXAMPLE = f"""---
-name: {EXAMPLE_NAME}
-description: Günün notlarını ve açık işleri kısa bir akşam özetine çevirir.
----
-Kullanıcı günlük özet isterse:
-
-1. memory_open_work ile açık işlere bak.
-2. Üç başlıkta yaz: Bugün yapılanlar, Açık kalanlar, Yarın ilk iş.
-3. Her başlıkta en çok üç madde kullan; kısa ve düz Türkçe yaz.
-
-Bu dosya bir örnektir; kendi becerilerini aynı biçimde, bu klasöre .md olarak ekle.
-Dosya adı ile name alanı aynı olmalı (küçük harf, rakam, tire).
-"""
+def templates() -> list[tuple[str, str]]:
+    """Pakete gömülü hazır beceri şablonları: (ad, metin), ada göre sıralı."""
+    folder = resources.files("artemis") / "skill_templates"
+    found = [(f.name.removesuffix(".md"), f.read_text(encoding="utf-8"))
+             for f in folder.iterdir() if f.name.endswith(".md")]
+    return sorted(found)
 
 
 @dataclass(frozen=True)
@@ -61,8 +63,22 @@ class Catalog:
         return next((s for s in self.skills if s.name == name), None)
 
 
+def _user_dir() -> Path:
+    if sys.platform == "win32":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base) / "Artemis" / "beceriler"
+    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
+    return Path(base) / "artemis" / "beceriler"
+
+
 def skills_dir(settings: Settings) -> Path:
-    return settings.skills.folder or settings.state_dir / "beceriler"
+    if settings.skills.folder:
+        return settings.skills.folder
+    # Eski varsayılan yalnız varsa ve güvenliyse sürer; vault içindeyse yenisine geçilir.
+    legacy = settings.state_dir / "beceriler"
+    if legacy.is_dir() and location_problem(settings, legacy) is None:
+        return legacy
+    return _user_dir()
 
 
 def _write_roots(settings: Settings) -> list[tuple[str, Path]]:
@@ -78,34 +94,36 @@ def _write_roots(settings: Settings) -> list[tuple[str, Path]]:
     return [(label, path.resolve()) for label, path in roots if path is not None]
 
 
-def location_problem(settings: Settings) -> str | None:
+def location_problem(settings: Settings, folder: Path | None = None) -> str | None:
     """Klasör bir aracın/kod ajanının yazabileceği yerdeyse neden; güvenliyse None.
 
     Beceri gövdesi kullanıcının kendi talimatı sayılır; bu yalnız oraya kullanıcıdan başka
     kimse yazamıyorsa doğrudur. Yalnız çalışma alanına bakmak yetmez: vault_append vault'a,
-    kod ajanı kendi çalışma klasörüne yazar.
+    kod ajanı kendi çalışma klasörüne yazar. `folder` verilmezse geçerli klasör denetlenir.
+    Metin kullanıcıya gösterilir: yapılandırma anahtarı içermez.
     """
-    folder = skills_dir(settings)
+    folder = folder or skills_dir(settings)
     if folder.is_symlink():
-        return "Beceriler klasörü sembolik bağlantı olamaz."
+        return "Beceriler klasörü sembolik bağlantı olamaz. Klasör seç ile başka bir klasör seç."
     real = folder.resolve()
     for label, root in _write_roots(settings):
         if real.is_relative_to(root) or root.is_relative_to(real):
             return (
-                f"Beceriler klasörü {label} ile iç içe ({root}); araçlar oraya yazabilirdi. "
-                "config'te skills.folder ile bu köklerin dışında bir klasör verin."
+                f"Bu klasör {label} ile iç içe ({root}); araçlar oraya yazabilirdi. "
+                "Klasör seç ile bu konumların dışında bir klasör seç."
             )
     return None
 
 
 def ensure_example(settings: Settings) -> None:
-    """Klasör yoksa örnekle açar; var olana (kullanıcının sildiği örnek dahil) dokunmaz."""
+    """Klasör yoksa hazır şablonlarla açar; var olana (silinen örnek dahil) dokunmaz."""
     folder = skills_dir(settings)
     if not settings.skills.enabled or location_problem(settings) or folder.exists():
         return
     folder.mkdir(parents=True)
-    with (folder / f"{EXAMPLE_NAME}.md").open("x", encoding="utf-8", newline="") as stream:
-        stream.write(EXAMPLE)
+    for name, text in templates():
+        with (folder / f"{name}.md").open("x", encoding="utf-8", newline="") as stream:
+            stream.write(text)
 
 
 def _parse(path: Path) -> Skill:

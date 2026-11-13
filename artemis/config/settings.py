@@ -755,13 +755,13 @@ class MailConfig(BaseModel):
 
 
 class SkillsConfig(BaseModel):
-    """Kullanıcı becerileri (ADR 0060): state_dir/beceriler/*.md. Varsayılan kapalı."""
+    """Kullanıcı becerileri (ADR 0060): <klasör>/*.md. Varsayılan kapalı."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = False
-    # Boşsa state_dir/beceriler. state_dir vault ya da bir proje deposunun içindeyse beceriler
-    # yüklenmez; o zaman buraya o köklerin DIŞINDA mutlak bir klasör yazılır.
+    # Boşsa güvenliyse mevcut state_dir/beceriler, yoksa kullanıcı veri klasörü (skills.skills_dir).
+    # Seçilen klasör vault/proje deposu/çalışma alanı içindeyse beceriler yüklenmez.
     folder: Path | None = None
 
     @field_validator("folder")

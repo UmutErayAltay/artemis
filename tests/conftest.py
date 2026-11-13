@@ -34,6 +34,14 @@ def isolated_credentials(monkeypatch):
     monkeypatch.setattr("artemis.channels.telegram.api.read_secret", lambda target: None)
 
 
+@pytest.fixture(autouse=True)
+def isolated_user_data_dir(monkeypatch, tmp_path_factory):
+    # Beceri klasörü varsayılanı gerçek APPDATA/XDG yoluna düşmesin (kural 8).
+    base = tmp_path_factory.mktemp("userdata")
+    monkeypatch.setenv("APPDATA", str(base))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(base))
+
+
 @pytest.fixture(autouse=True, scope="session")
 def isolated_qsettings(tmp_path_factory):
     # Pet konumu/görünürlüğü gerçek kullanıcı ayarlarına yazılmasın (kural 8).

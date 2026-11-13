@@ -50,3 +50,12 @@
 - Windows kabulü yapılmadı (`docs/YENI_OZELLIKLER_KABUL.md`).
 
 **Ek (doğrulama sonrası):** konum denetimi yalnız çalışma alanına değil bütün yazma köklerine bakar: `memory.vault_path` (`vault_append` ve vault'ta başlayan kod ajanı), `code_agent.repos_dir`, `workdirs` ve proje depoları. Klasör bunlardan biriyle iç içeyse beceriler yüklenmez. `state_dir` böyle bir kökün içindeyse `skills.folder` ile dışarıda mutlak bir klasör verilir. Kalan, kaçınılmaz yollar: bilgisayar kullanımının bir düzenleyiciye yazması ve kullanıcının kendi eliyle kurduğu sert bağ.
+
+## Ek karar (konum, Klasör seç, şablonlar)
+
+- **Varsayılan konum** kullanıcı veri klasörüdür (Windows: `APPDATA/Artemis/beceriler`; diğerlerinde `XDG_CONFIG_HOME/artemis/beceriler`). Eski `state_dir/beceriler` yalnız varsa ve konum denetiminden geçiyorsa kullanılır. Güvensizse ve `.md` içeriyorsa panel bunu iki yolu da yazarak bildirir; dosyaları kullanıcı kendisi taşır, otomatik taşıma yoktur.
+- **Klasör seç** Ayarlar > Beceriler'de klasörü seçtirir; konum denetiminden geçerse `skills.folder` olarak doğrulamalı ve atomik yazılır.
+- **Şablonlar:** paketle gelen sabit şablonlar (`artemis/skill_templates/`) klasör ilk kez açılırken yazılır; var olan klasöre dokunulmaz.
+- **Yeni beceri:** panel, kullanıcının açık tıklamasıyla sabit bir şablondan (ya da boş iskeletten) YENİ bir dosya oluşturabilir (`open("x")`; var olanın üzerine asla yazmaz) ve kullanıcının varsayılan düzenleyicisinde açar. Panel hiçbir dosyayı düzenlemez, üzerine yazmaz ya da silmez. Hiçbir araç ya da model bunu tetikleyemez. Konum güvensizse reddedilir; demoda kapalıdır.
+- **Dene:** geçerli beceride sohbet kutusuna `/<ad> ` yazar, göndermez.
+- **Sohbet kartı:** `skill_read` işlemi "Beceri kullanıldı: <ad>" diye görünür.

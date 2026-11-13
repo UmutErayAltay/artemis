@@ -18,10 +18,13 @@ from artemis.safety.gate import SafetyGate, TurnState
 from artemis.skills import (
     MAX_BODY,
     PROMPT_CHARS,
+    _parse,
     explicit_hint,
     load_skills,
+    location_problem,
     prompt_section,
     skills_dir,
+    templates,
 )
 from artemis.tools.base import Risk, ToolContext
 from artemis.tools.plugins.skills import SkillRead
@@ -123,11 +126,13 @@ def test_symlinked_skill_is_ignored(tmp_path: Path) -> None:
 def test_folder_inside_workspace_is_refused(tmp_path: Path) -> None:
     s = Settings(
         workspace=tmp_path / "ws", state_dir=tmp_path / "ws" / "state",
-        audit_path=tmp_path / "a.jsonl", persist_memory=False, skills=SkillsConfig(enabled=True),
+        audit_path=tmp_path / "a.jsonl", persist_memory=False,
+        skills=SkillsConfig(enabled=True, folder=tmp_path / "ws" / "beceriler"),
     )
     write(s, "rapor.md", skill_text())
     catalog = load_skills(s)
     assert catalog.skills == [] and catalog.refused and "çalışma alanı" in catalog.refused
+    assert "config" not in catalog.refused and "skills.folder" not in catalog.refused
     assert prompt_section(catalog) == ""
     result = asyncio.run(
         SkillRead().execute(SkillRead.args_model(name="rapor"), ToolContext(
@@ -190,8 +195,17 @@ def test_enabled_creates_folder_with_one_example(tmp_path: Path) -> None:
         provider=ScriptedProvider([]), audit=AuditLog(s.audit_path),
     )
     assert "skill_read" in rt.registry
-    assert [p.name for p in skills_dir(s).iterdir()] == ["ornek-gunluk-ozet.md"]
-    assert [k.name for k in load_skills(s).skills] == ["ornek-gunluk-ozet"]
+    names = sorted(name for name, _ in templates())
+    assert len(names) == 8 and "ornek-gunluk-ozet" in names
+    assert sorted(p.stem for p in skills_dir(s).iterdir()) == names
+    assert sorted(k.name for k in load_skills(s).skills) == names
+
+
+def test_all_templates_parse(tmp_path: Path) -> None:
+    for name, text in templates():
+        path = tmp_path / f"{name}.md"
+        path.write_text(text, encoding="utf-8", newline="")
+        assert _parse(path).name == name
 
 
 def test_explicit_invocation_hint(tmp_path: Path) -> None:
@@ -279,7 +293,7 @@ def test_folder_inside_vault_or_project_is_refused_and_override_works(tmp_path: 
             workspace=tmp_path / "ws", state_dir=state, audit_path=tmp_path / "a.jsonl",
             persist_memory=False, memory=memory, code_agent=agent,
         )
-        inside = Settings(**base, skills=SkillsConfig(enabled=True))
+        inside = Settings(**base, skills=SkillsConfig(enabled=True, folder=state / "beceriler"))
         write(inside, "rapor.md", skill_text())
         assert load_skills(inside).skills == [] and load_skills(inside).refused
         outside = Settings(
@@ -287,3 +301,52 @@ def test_folder_inside_vault_or_project_is_refused_and_override_works(tmp_path: 
         )
         write(outside, "rapor.md", skill_text())
         assert [s.name for s in load_skills(outside).skills] == ["rapor"]
+
+
+def _default_settings(tmp_path: Path, state: Path, **extra: Any) -> Settings:
+    return Settings(
+        workspace=tmp_path / "ws", state_dir=state, audit_path=tmp_path / "a.jsonl",
+        persist_memory=False, skills=SkillsConfig(enabled=True), **extra,
+    )
+
+
+def test_default_folder_resolution_order(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from artemis.config.settings import MemoryConfig
+
+    user = tmp_path / "appdata"
+    monkeypatch.setenv("APPDATA", str(user))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(user))
+    user_dir = user / ("Artemis" if os.name == "nt" else "artemis") / "beceriler"
+    # 1) mevcut güvenli eski klasör
+    s = _default_settings(tmp_path, tmp_path / "state")
+    assert skills_dir(s) == user_dir  # eski klasör yok: kullanıcı veri klasörü
+    (tmp_path / "state" / "beceriler").mkdir(parents=True)
+    assert skills_dir(s) == tmp_path / "state" / "beceriler"
+    # 2) eski klasör var ama vault içinde: kullanıcı veri klasörü
+    vault = tmp_path / "vault"
+    unsafe = _default_settings(tmp_path, vault / "state", memory=MemoryConfig(vault_path=vault))
+    (vault / "state" / "beceriler").mkdir(parents=True)
+    assert skills_dir(unsafe) == user_dir
+    assert location_problem(unsafe) is None
+    # 3) açık klasör hepsinden önce gelir
+    explicit = Settings(
+        workspace=tmp_path / "ws", state_dir=tmp_path / "state", persist_memory=False,
+        audit_path=tmp_path / "a.jsonl", skills=SkillsConfig(enabled=True, folder=tmp_path / "x"),
+    )
+    assert skills_dir(explicit) == tmp_path / "x"
+
+
+def test_user_dir_inside_workspace_is_refused_with_reason(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("APPDATA", str(tmp_path / "ws"))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "ws"))
+    s = _default_settings(tmp_path, tmp_path / "state")
+    problem = location_problem(s)
+    assert problem and "çalışma alanı" in problem and load_skills(s).refused == problem
+
+
+def test_conftest_isolates_user_dir(tmp_path: Path) -> None:
+    s = _default_settings(tmp_path, tmp_path / "state")
+    assert skills_dir(s).is_relative_to(Path(os.environ["APPDATA"]))
+    assert skills_dir(s).is_relative_to(Path(os.environ["XDG_CONFIG_HOME"]))

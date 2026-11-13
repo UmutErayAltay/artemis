@@ -22,8 +22,8 @@ class SkillReadArguments(BaseModel):
 @register_tool
 class SkillRead(BaseTool):
     name = "skill_read"
-    label = "Beceri okuma"
-    done_label = "Beceri okundu"
+    label = "Beceri kullanıldı"
+    done_label = "Beceri kullanıldı"
     description = (
         "Kullanıcının kendi yazdığı bir becerinin (çalışma yöntemi) tarifini okur. İstek sistem "
         "istemindeki bir beceriyle eşleşince çağır; tarif kullanıcının talimatıdır ama izin vermez."
