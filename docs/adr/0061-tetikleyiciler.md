@@ -33,9 +33,19 @@ yeni dosya geldi: rapor.pdf"). İlk olay türü: izlenen klasöre yeni dosya gel
 ## Bilerek yapılmayanlar
 
 - Özyinelemeli izleme, silinme/değişme olayları, başka olay türleri (v1 yalnız yeni dosya).
-- Tetikleyiciyi sohbetle ya da panelden düzenleme.
+- Tetikleyiciyi sohbetle (araçla ya da modelle) kurma ya da düzenleme. Panelden kullanıcı eliyle yazım için Ek'e bak.
 - Dosya içeriğini okuyup özetleme: öneri metni kullanıcıya bırakılır, gönderimi o yapar.
 - Teslim başarısızsa yeniden deneme: dosyalar talep edildiği anda "bildirildi" sayılır (en çok bir
   kez, ADR 0027 ilkesi); başarısızlık `failed` olarak kaydedilir.
 - Aynı adla silinip yeniden gelen dosyanın yeniden bildirilmesi sınırlaması: silinen dosyanın kaydı
   düşer, aynı ad yeniden gelirse yeni dosya sayılır.
+
+## Ek: Ayarlar formundan tetikleyici (2026-11)
+
+Kullanıcı artık tetikleyiciyi Ayarlar > Tetikleyiciler'deki formdan ekleyebilir, düzenleyebilir ve
+silebilir; `config.yaml`'ı elle düzenlemek gerekmez. Form `TriggerConfig` ile doğrular ve aynı
+doğrulamalı, atomik config yazımını kullanır (`save_triggers`). Değişmeyen kural: tetikleyiciyi hiçbir
+araç ve hiçbir model kuramaz ya da değiştiremez; bu yazım yalnız panelde kullanıcının tıklamasıyla
+çalışır, araç kaydı ve SafetyGate yolu yoktur. Yazılan değişiklik çalışan uygulamaya Uygula (çalışma
+zamanı yeniden kurulur) ya da yeniden açılışla ulaşır. Zamanlı işler kapalıysa panel uyarır; kutuyu
+yalnız kullanıcı işaretler ve Uygula ile kaydeder.

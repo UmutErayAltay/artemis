@@ -291,6 +291,20 @@ def save_code_agent(path: Path, code_agent: dict[str, Any]) -> None:
     _write_validated(path, raw)
 
 
+def save_triggers(path: Path, items: list[dict[str, Any]], *, enable: bool = False) -> None:
+    """Tetikleyici listesini yazar (ADR 0061). Yalnız Ayarlar formundan, kullanıcı eylemiyle
+    çağrılır; hiçbir araç ya da model ulaşamaz. Diğer anahtarlar ve atomik yazım
+    `_write_validated`ta."""
+    load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
+    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    section = raw.get("triggers") or {}
+    section["items"] = items
+    if enable:
+        section["enabled"] = True
+    raw["triggers"] = section
+    _write_validated(path, raw)
+
+
 def _merge_code_agent(raw: dict[str, Any], code_agent: dict[str, Any]) -> None:
     # None değer alanı siler (örn. GitHub bağını kaldırmak); diğer code_agent alanları korunur.
     section = raw.get("code_agent") or {}
@@ -1028,6 +1042,8 @@ class SettingsPanel(QWidget):
         self.triggers = TriggersSection(config_path, demo=demo)
         triggers_page.addWidget(self.triggers)
         triggers_page.addStretch(1)
+        self.triggers.saved.connect(self._triggers_saved)
+        self.triggers.proactive_requested.connect(self._tick_proactive)
 
         summary_page = page(
             "Gün özeti",
@@ -1383,6 +1399,20 @@ class SettingsPanel(QWidget):
         card_for = self.theme_cards.get(str(self.theme_combo.currentData()))
         if card_for is not None and not card_for.radio.isChecked():
             card_for.radio.setChecked(True)
+
+    def _triggers_saved(self) -> None:
+        """Form `triggers.enabled`ı açmış olabilir; kutu eski kalırsa Uygula geri kapatırdı."""
+        try:
+            enabled = load_settings(self.config_path).triggers.enabled
+        except (OSError, ValueError):
+            return
+        blocked = self.triggers_enabled.blockSignals(True)
+        self.triggers_enabled.setChecked(enabled)
+        self.triggers_enabled.blockSignals(blocked)
+
+    def _tick_proactive(self) -> None:
+        """Dosyaya yazmaz: kutuyu işaretler (toggled -> kirli), kaydı Uygula yapar."""
+        self.proactive_enabled.setChecked(True)
 
     def _mark_dirty(self, *_args: object) -> None:
         if not self._demo:

@@ -912,9 +912,13 @@ def test_projects_panel_has_no_lambda_reference_cycle(app: QApplication) -> None
     ref = weakref.ref(panel)
     panel.task.setPlainText("satır\n" * 5)  # bağlı yöntem sinyalden çalışır, çökmez
     assert panel.task.height() >= 1
+    # Önceki durum geri yüklenir: gui_gc otomatik GC'yi kapalı tutar, burada açılırsa
+    # kalan testlerde döngüler köprü iş parçacığında toplanıp Qt'yi çökertir.
+    was_enabled = gc.isenabled()
     gc.disable()
     try:
         del panel
         assert ref() is None  # döngü olsaydı gc.collect olmadan yaşamaya devam ederdi
     finally:
-        gc.enable()
+        if was_enabled:
+            gc.enable()

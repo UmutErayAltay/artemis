@@ -663,9 +663,13 @@ def test_provider_section_has_no_reference_cycle(app: QApplication, tmp_path: Pa
     section = ProviderSection(_three_models(tmp_path))
     section.select_model("sonnet 5-5")  # seçim sinyali bağlı yöntemden çalışır
     ref = weakref.ref(section)
+    # Önceki durum geri yüklenir: gui_gc otomatik GC'yi kapalı tutar, burada açılırsa
+    # kalan testlerde döngüler köprü iş parçacığında toplanıp Qt'yi çökertir.
+    was_enabled = gc.isenabled()
     gc.disable()
     try:
         del section
         assert ref() is None
     finally:
-        gc.enable()
+        if was_enabled:
+            gc.enable()

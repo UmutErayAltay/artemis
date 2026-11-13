@@ -884,7 +884,8 @@ def test_list_empty_states_and_disabled_messages(tmp_path: Path, qt_app) -> None
     triggers = panel.triggers.trigger_area
     assert triggers.empty.title_label.text() == "Tanımlı tetikleyici yok"
     assert triggers.empty.action_button is not None
-    assert triggers.empty.action_button.text() == "Ayar dosyasını aç"
+    assert triggers.empty.action_button.text() == "Tetikleyici ekle"
+    assert panel.triggers.open_button.text() == "Ayar dosyasını aç"
     assert not triggers.empty.action_button.isHidden()
     assert panel.skills.valid_area.empty.title_label.text() == "Henüz beceri yok"
     assert panel.skills.valid_area.empty.action_button.text() == "Klasörü aç"  # type: ignore[union-attr]

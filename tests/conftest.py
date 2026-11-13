@@ -70,21 +70,38 @@ def qt_widgets_deleted_by_qt():
     sonra exit 139). `deleteLater` + DeferredDelete C++ nesnelerini önce ve ebeveyn -> çocuk
     sırasıyla yok eder; sarmalayıcılar sonradan geçersiz sayılıp zararsız toplanır.
     """
-    yield
     import sys
 
-    # Qt'yi hiç yüklemeyen testlerde PySide içe aktarma maliyeti ödenmez.
-    widgets = sys.modules.get("PySide6.QtWidgets")
-    if widgets is None:
-        return
-    from PySide6.QtCore import QCoreApplication, QEvent
+    def gui_app():
+        # Qt'yi hiç yüklemeyen testlerde PySide içe aktarma maliyeti ödenmez.
+        widgets = sys.modules.get("PySide6.QtWidgets")
+        return None if widgets is None else widgets.QApplication.instance()
 
-    app = widgets.QApplication.instance()
+    # Döngüsel GC yalnız GUI iş parçacığında (gui_gc docstring'i); uygulamayı ilk Qt testi
+    # kurar, bu yüzden ilk kez teardown'da da denenir. İdempotent.
+    if gui_app() is not None:
+        from artemis.channels.desktop import gui_gc
+
+        gui_gc.install(gui_app())
+    yield
+    app = gui_app()
     if app is None:
         return
+    from artemis.channels.desktop import gui_gc
+
+    gui_gc.install(app)
+    from PySide6.QtCore import QCoreApplication, QEvent
+
     for widget in app.topLevelWidgets():
         widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    # Testler olay döngüsünü az çalıştırır; otomatik GC kapalıyken çöp birikir ve gui_gc
+    # zamanlayıcısı onu sonraki testin içinde tek seferde toplar (zamanlama testleri, ör. Qt
+    # kalp atışı, 60 ms'lik pencereyi kaçırır). Her test kendi çöpünü burada, ana iş
+    # parçacığında öder. Gerçek uygulamada olay döngüsü sürekli döndüğü için birikme olmaz.
+    # Yalnız eşiği aşan nesil toplanır (otomatik GC'nin kuralı); her testte tam toplama
+    # takımı 5,5 dakikadan 9 dakikaya çıkarıyordu.
+    gui_gc.collect_due()
 
 
 @pytest.fixture(autouse=True)

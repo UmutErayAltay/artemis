@@ -103,6 +103,8 @@ Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sa
 
 Önkoşul: Gerçek Windows'ta elle. `config.yaml`'a `proactive.enabled: true` ve `triggers: {enabled: true, items: [{name: indirilenler, folder: C:/Users/<ad>/Downloads, pattern: "*.pdf", suggest: "Şu dosyayı özetle: {path}"}]}` yaz (ya da Ayarlar > Tetikleyiciler'de kutuyu aç, Uygula), Artemis'i yeniden başlat.
 
+- [ ] Ayarlar > Tetikleyiciler > "Tetikleyici ekle": klasör seç (İndirilenler düğmesi), ad otomatik gelir, dosya türü PDF, Ekle. Liste güncellenir; kutu kapalıydıysa açıldığı yazar. Zamanlı işler kapalıysa uyarı ve "Zamanlı işleri aç" düğmesi çıkar; düğme kutuyu işaretler, Uygula'ya basana kadar dosyaya yazılmaz. Uygula'dan sonra aşağıdaki bildirim denemesi çalışır.
+- [ ] Satırdaki "Düzenle" ile bildirim metnini değiştir, "Sil" ile (onay sorar) tetikleyiciyi kaldır. Olmayan klasör, aynı ad ve 10'dan fazla tetikleyici düz Türkçe hatayla reddedilir.
 - [ ] Ayarlar > Tetikleyiciler'de tetikleyici listede görünüyor ("son bildirim: henüz yok"). Açılışta İndirilenler'de var olan PDF'ler için bildirim GELMİYOR.
 - [ ] Tarayıcıdan bir PDF indir: bir dakika içinde (poll_seconds) tek bildirim: "Tetikleyici · indirilenler / Yeni dosya geldi: ...". Panelde "Yaz" düğmesi var.
 - [ ] "Yaz"a bas: istem sohbet kutusuna doldu ve GÖNDERİLMEDİ; sen Enter'a basana dek hiçbir şey çalışmıyor.

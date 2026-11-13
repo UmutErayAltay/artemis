@@ -36,12 +36,16 @@ def _assert_dies_without_gc(holder: list[Any]) -> None:
     widget.deleteLater()
     QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
     app.processEvents()
+    # Önceki durum geri yüklenir: gui_gc otomatik GC'yi kapalı tutar, burada açılırsa
+    # kalan testlerde döngüler köprü iş parçacığında toplanıp Qt'yi çökertir.
+    was_enabled = gc.isenabled()
     gc.disable()
     try:
         del widget
         assert ref() is None  # döngü olsaydı gc.collect olmadan yaşamaya devam ederdi
     finally:
-        gc.enable()
+        if was_enabled:
+            gc.enable()
 
 
 def test_automation_panel_has_no_cycle() -> None:
@@ -68,6 +72,33 @@ def test_selection_popup_has_no_cycle() -> None:
     popup.close_button.click()
     holder = [popup]
     del popup
+    _assert_dies_without_gc(holder)
+
+
+def test_triggers_section_and_dialog_have_no_cycle(tmp_path: Path) -> None:
+    from artemis.channels.desktop.trigger_dialog import TriggerDialog
+    from artemis.channels.desktop.triggers_section import TriggersSection
+
+    _app()
+    path = tmp_path / "config.yaml"
+    path.write_text(yaml.safe_dump({
+        "workspace": "desktop", "state_dir": "state", "audit_path": "audit.jsonl",
+        "primary_model": "first",
+        "models": {"first": {"provider": "openrouter", "model": "first-model",
+                             "input_per_million": "0", "output_per_million": "0"}},
+        "triggers": {"enabled": True, "items": [{"name": "bir", "folder": str(tmp_path)}]},
+    }), encoding="utf-8")
+    section = TriggersSection(path)
+    section.proactive_button.click()
+    dialog = TriggerDialog(None, [], ["rutin"], "", section)
+    dialog.suggest_radio.setChecked(True)
+    dialog.quick_buttons[0].click()
+    dialog.submit()
+    holder = [dialog]
+    del dialog
+    _assert_dies_without_gc(holder)
+    holder = [section]
+    del section
     _assert_dies_without_gc(holder)
 
 

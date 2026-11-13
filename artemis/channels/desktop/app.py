@@ -51,7 +51,7 @@ from PySide6.QtWidgets import (
 
 from artemis.brain.providers import provider_problem
 from artemis.channels.autostart import Autostart
-from artemis.channels.desktop import pet_sprite, shell_assets, themes
+from artemis.channels.desktop import gui_gc, pet_sprite, shell_assets, themes
 from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.automation_panel import AutomationPanel
 from artemis.channels.desktop.bridge import (
@@ -2687,6 +2687,9 @@ def build_window(
     app: QApplication | None = None,
 ) -> DesktopWindow:
     """GUI factory; offscreen kabul testleri aynı gerçek pencereyi kullanır."""
+    current = app if app is not None else QApplication.instance()
+    if isinstance(current, QApplication):
+        gui_gc.install(current)  # betikler/testler run_desktop'suz de buradan geçer
     return DesktopWindow(config_path, demo=demo, voice=voice, app=app)
 
 
@@ -2725,6 +2728,7 @@ def run_desktop(
     _set_app_user_model_id()
     current = QApplication.instance()
     app = current if isinstance(current, QApplication) else QApplication([])
+    gui_gc.install(app)
     server: InstanceServer | None = None
     if not demo:
         # ADR 0030: aynı durum dizininde ikinci örnek açılmaz; var olanın paneli öne gelir.
