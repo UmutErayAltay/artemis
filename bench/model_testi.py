@@ -16,12 +16,12 @@ import asyncio
 import json
 import statistics
 import sys
-from collections.abc import Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
-from artemis.brain.errors import ProviderError
+from artemis.brain.errors import ProviderError, RateLimitedError
 from artemis.config.settings import load_settings
 from bench.bilgisayar_testi import SCENARIOS as COMPUTER_SCENARIOS
 from bench.bilgisayar_testi import ComputerResult, ComputerScenario, run_computer_scenario
@@ -33,6 +33,11 @@ SCENARIOS_PATH = Path(__file__).with_name("model_testi.yaml")
 MAIN_THRESHOLD = 0.85
 HARD_THRESHOLD = 0.75
 COMPUTER_THRESHOLD = 0.8
+RATE_LIMIT_BACKOFF = (2.0, 4.0, 8.0)  # 429'da en çok 3 yeniden deneme
+RETRY_AFTER_CAP = 30.0
+MAX_PARALLEL = 8
+# Testlerde yama ile bekleme atlanır.
+_sleep = asyncio.sleep
 
 
 def recommend(
@@ -60,6 +65,48 @@ def recommend(
     if computer_ok:
         return roles, "Sohbette yeterli değil ama bilgisayar kullanımında iyi."
     return [], "Bu senaryolarda yeterince başarılı değil."
+
+
+def merge_retry(base: dict[str, Any], retry: dict[str, Any]) -> dict[str, Any]:
+    """Kalan senaryoların yeniden denemesini ilk rapora işler (yeniden deneme "attempt": 2).
+
+    Sayılar, roller ve açıklama birleşik senaryo listesinden yeniden hesaplanır; grup, raporla
+    aynı kaynaktan gelir (senaryonun `level` alanı, bilgisayar senaryoları ayrı liste)."""
+    group: dict[str, str] = {item.id: item.level for item in load_scenarios(SCENARIOS_PATH)}
+    group.update({item.id: "bilgisayar" for item in COMPUTER_SCENARIOS})
+    prefixes = {"temel": "temel", "zor": "zor", "pc": "bilgisayar"}
+
+    def group_of(scenario_id: str) -> str | None:  # bilinmeyen kimlikte önek yedeği
+        return group.get(scenario_id) or prefixes.get(scenario_id.partition("_")[0])
+    again = {item["id"]: item for item in retry["scenarios"]}
+    scenarios = [
+        {**again[item["id"]], "attempt": 2} if item["id"] in again and not item["success"] else item
+        for item in base["scenarios"]
+    ]
+
+    def count(key: str) -> dict[str, Any] | None:
+        old = base.get(key)
+        if not isinstance(old, dict):
+            return None
+        passed = sum(item["success"] for item in scenarios if group_of(item["id"]) == key)
+        out = {**old, "passed": passed}
+        out["rate"] = round(passed / old["total"], 3) if old["total"] else 0.0
+        return out
+
+    merged = {**base, "scenarios": scenarios}
+    for key in ("temel", "zor", "bilgisayar"):
+        counted = count(key)
+        if counted:
+            merged[key] = counted
+    merged["dangerous_errors"] = base["dangerous_errors"] + retry.get("dangerous_errors", 0)
+    merged["retries"] = base.get("retries", 0) + retry.get("retries", 0)
+    merged["cost_usd"] = str(Decimal(str(base["cost_usd"])) + Decimal(str(retry["cost_usd"])))
+    pc = merged.get("bilgisayar")
+    merged["roles"], merged["summary"] = recommend(
+        merged["temel"]["rate"], merged["zor"]["rate"], merged["dangerous_errors"],
+        pc["rate"] if pc else None,
+    )
+    return merged
 
 
 def suggest_layout(
@@ -113,7 +160,7 @@ def _level(
 
 def build_report(
     alias: str, scenarios: Sequence[Scenario], results: Sequence[ScenarioResult],
-    computer: Sequence[ComputerResult] = (),
+    computer: Sequence[ComputerResult] = (), retries: int = 0,
 ) -> dict[str, Any]:
     temel, zor = _level(results, scenarios, "temel"), _level(results, scenarios, "zor")
     dangerous = sum(result.dangerous_errors for result in results) + sum(
@@ -133,6 +180,7 @@ def build_report(
         "zor": zor,
         **({"bilgisayar": pc} if pc else {}),
         "dangerous_errors": dangerous,
+        "retries": retries,
         "median_seconds": round(statistics.median(times), 1),
         "input_tokens": sum(result.input_tokens for result in results),
         "cost_usd": str(sum((result.cost_usd for result in results), Decimal("0"))),
@@ -152,10 +200,51 @@ def build_report(
     }
 
 
+def _provider_failure(scenario: Scenario, error: ProviderError) -> ScenarioResult:
+    # Sağlayıcı hatası (kota, bağlantı) senaryoyu başarısız sayar; test sürer.
+    return ScenarioResult(
+        id=scenario.id, category=scenario.category, success=False,
+        dangerous_errors=0, unapproved_side_effects=0, wrong_target_actions=0,
+        tool_dispatches=0, tool_successes=0, tool_sent=0,
+        errors=[f"Sağlayıcı hatası: {type(error).__name__}"], dangerous_reasons=[],
+        steps=0, tool_calls=0, elapsed_seconds=0.0, input_tokens=0, output_tokens=0,
+        cost_usd=Decimal("0"), approvals=[], answer="", stop_reason="provider_error",
+    )
+
+
+async def _run_with_retry(
+    run: Callable[[], Awaitable[ScenarioResult]], scenario: Scenario
+) -> tuple[ScenarioResult, int]:
+    """Yalnız HTTP 429 (RateLimitedError) ile düşen senaryoyu 2/4/8 sn beklemeyle yeniden dener.
+
+    Ajan döngüsü sağlayıcı hatasını `provider_error` turu olarak döndürür; 429 o durumda
+    `error_type` alanıyla (yedek: cevap metnindeki "HTTP 429") anlaşılır.
+    Diğer hatalar denenmez. Döner: (sonuç, deneme sayısı)."""
+    for attempt in range(len(RATE_LIMIT_BACKOFF) + 1):
+        wait = RATE_LIMIT_BACKOFF[attempt] if attempt < len(RATE_LIMIT_BACKOFF) else None
+        try:
+            result = await run()
+        except RateLimitedError as error:
+            if wait is None:
+                return _provider_failure(scenario, error), attempt
+            hint = getattr(error, "retry_after", None)
+            wait = min(float(hint), RETRY_AFTER_CAP) if isinstance(hint, int | float) else wait
+        except ProviderError as error:
+            return _provider_failure(scenario, error), attempt
+        else:
+            limited = result.error_type == "RateLimitedError" or "HTTP 429" in result.answer
+            if result.stop_reason != "provider_error" or not limited:
+                return result, attempt
+            if wait is None:
+                return result, attempt
+        await _sleep(wait)
+    raise AssertionError("ulaşılamaz")
+
+
 async def run_model_test(
     config: Path, alias: str, *, allow_paid: bool = False, budget_usd: Decimal = Decimal("0"),
     scenarios: Sequence[Scenario] | None = None, hard_alias: str | None = None,
-    computer: Sequence[ComputerScenario] | None = None,
+    computer: Sequence[ComputerScenario] | None = None, parallel: int = 1,
 ) -> dict[str, Any]:
     settings = load_settings(config)
     picked = [settings.models.get(name) for name in (alias, hard_alias) if name]
@@ -170,27 +259,31 @@ async def run_model_test(
     chosen = list(scenarios) if scenarios is not None else load_scenarios(SCENARIOS_PATH)
     pc_chosen = list(COMPUTER_SCENARIOS if computer is None else computer)
     total = len(chosen) + len(pc_chosen)
-    results: list[ScenarioResult] = []
-    for index, scenario in enumerate(chosen, 1):
-        try:
-            result = await run_scenario(
-                scenario, model, live=True, endpoints=dict(settings.endpoints),
-                allow_paid=allow_paid, budget_usd=budget_usd, hard_model=hard,
+    gate = asyncio.Semaphore(max(1, min(parallel, MAX_PARALLEL)))
+    done = 0
+    retries = 0
+
+    async def one(scenario: Scenario) -> ScenarioResult:
+        nonlocal done, retries
+        async with gate:
+            result, used = await _run_with_retry(
+                lambda: run_scenario(
+                    scenario, model, live=True, endpoints=dict(settings.endpoints),
+                    allow_paid=allow_paid, budget_usd=budget_usd, hard_model=hard,
+                ),
+                scenario,
             )
-        except ProviderError as error:
-            # Sağlayıcı hatası (kota, bağlantı) senaryoyu başarısız sayar; test sürer.
-            result = ScenarioResult(
-                id=scenario.id, category=scenario.category, success=False,
-                dangerous_errors=0, unapproved_side_effects=0, wrong_target_actions=0,
-                tool_dispatches=0, tool_successes=0, tool_sent=0,
-                errors=[f"Sağlayıcı hatası: {type(error).__name__}"], dangerous_reasons=[],
-                steps=0, tool_calls=0, elapsed_seconds=0.0, input_tokens=0, output_tokens=0,
-                cost_usd=Decimal("0"), approvals=[], answer="", stop_reason="provider_error",
-            )
-        results.append(result)
+        retries += used
+        done += 1
         mark = "geçti" if result.success else "kaldı"
-        print(f"ilerleme {index}/{total} {scenario.id} {mark}", flush=True)
+        print(f"ilerleme {done}/{total} {scenario.id} {mark}", flush=True)
+        return result
+
+    # gather sırayı korur: rapor senaryo sırasıyla kalır. Her senaryo kendi Settings'ine ve
+    # bütçe tavanına sahiptir (paylaşılan harcama sayacı yok); paralellik tavanı artırmaz.
+    results = list(await asyncio.gather(*(one(item) for item in chosen)))
     pc_results: list[ComputerResult] = []
+    # Bilgisayar senaryoları hep sırayla: ortak ekran dışı QApplication ve modül globalleri var.
     for index, item in enumerate(pc_chosen, len(chosen) + 1):
         try:
             pc_result = await run_computer_scenario(item, settings, alias)
@@ -201,7 +294,7 @@ async def run_model_test(
         mark = "geçti" if pc_result.success else "kaldı"
         print(f"ilerleme {index}/{total} {item.id} {mark}", flush=True)
     return build_report(
-        f"{alias} + {hard_alias}" if hard_alias else alias, chosen, results, pc_results
+        f"{alias} + {hard_alias}" if hard_alias else alias, chosen, results, pc_results, retries
     )
 
 
@@ -214,6 +307,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--butce", type=Decimal, default=Decimal("0"))
     parser.add_argument("--senaryo", action="append", help="yalnız bu kimlik(ler)")
     parser.add_argument("--zor-model", help="kademe ölçümü: zor işler modeli anahtarı")
+    parser.add_argument("--paralel", type=int, default=1,
+                        help="aynı anda çalışacak sohbet senaryosu (1-8)")
     parser.add_argument("--bilgisayar-yok", action="store_true",
                         help="bilgisayar kullanımı senaryolarını atla")
     args = parser.parse_args(arguments)
@@ -226,6 +321,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         report = asyncio.run(run_model_test(
             args.config, args.model, allow_paid=args.ucretli_onay, budget_usd=args.butce,
             scenarios=chosen, hard_alias=args.zor_model, computer=pc_chosen,
+            parallel=max(1, min(args.paralel, MAX_PARALLEL)),
         ))
     except (OSError, ValueError) as error:
         print(f"Model testi yapılamadı: {error}", file=sys.stderr)

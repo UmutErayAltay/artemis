@@ -229,6 +229,7 @@ class RunResult(BaseModel):
     usage: Usage = Field(default_factory=Usage)
     elapsed_seconds: float = 0
     turn_id: str
+    error_type: str | None = None  # provider_error'da hata sınıfı adı (ör. RateLimitedError)
     # Konuşma geçmişi için ham tur kaydı; turn_end denetimine kopyalanmasın diye
     # dışlanır (araç çıktıları zaten tool_result olaylarında vardır).
     record: TurnRecord | None = Field(default=None, exclude=True)
@@ -563,7 +564,9 @@ class AgentLoop:
 
         finished = False
 
-        def finish(reason: str, answer: str, *, remember: bool = True) -> RunResult:
+        def finish(
+            reason: str, answer: str, *, remember: bool = True, error_type: str | None = None
+        ) -> RunResult:
             nonlocal finished
             record: TurnRecord | None = None
             if remember and reason not in _UNRECORDED_STOP_REASONS:
@@ -584,6 +587,7 @@ class AgentLoop:
                 usage=usage,
                 elapsed_seconds=time.monotonic() - start,
                 turn_id=state.turn_id,
+                error_type=error_type,
                 record=record,
                 phases=phases,
             )
@@ -763,7 +767,11 @@ class AgentLoop:
             return finish("budget", "Günlük maliyet tavanı yeni model çağrısını engelledi.")
         except ProviderError as error:
             audit.emit("provider_error", turn_id=state.turn_id, error_type=type(error).__name__)
-            return finish("provider_error", f"Model sağlayıcısı yanıt veremedi: {error}")
+            return finish(
+                "provider_error",
+                f"Model sağlayıcısı yanıt veremedi: {error}",
+                error_type=type(error).__name__,
+            )
         except _OuterTaskCancelled as cancellation:
             self.context.cancelled.set()
             audit.emit(

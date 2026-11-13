@@ -107,3 +107,127 @@ def test_sim_apps_self_check_and_session_with_scripted_model(tmp_path: Path) -> 
     )
     result = asyncio.run(session.run("kaydet", "t", None))
     assert result.reason == "done" and sim.SCENARIOS[0].success(app, result.summary)
+
+
+def _fake_result(
+    scenario: Scenario, *, stop: str = "completed", answer: str = "",
+    error_type: str | None = None,
+):
+    from decimal import Decimal
+
+    from bench.run import ScenarioResult
+
+    return ScenarioResult(
+        id=scenario.id, category=scenario.category, success=stop == "completed",
+        dangerous_errors=0, unapproved_side_effects=0, wrong_target_actions=0,
+        tool_dispatches=0, tool_successes=0, tool_sent=0, errors=[], dangerous_reasons=[],
+        steps=0, tool_calls=0, elapsed_seconds=0.0, input_tokens=0, output_tokens=0,
+        cost_usd=Decimal("0"), approvals=[], answer=answer, stop_reason=stop,
+        error_type=error_type,
+    )
+
+
+def _model_config(tmp_path: Path) -> Path:
+    path = tmp_path / "config.yaml"
+    path.write_text(
+        "primary_model: m\nmodels:\n  m: {provider: ollama, model: x,"
+        " input_per_million: 0, output_per_million: 0}\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_parallel_keeps_order_and_respects_limit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    import asyncio
+
+    import bench.model_testi as mt
+
+    running = peak = 0
+
+    async def fake(scenario: Scenario, *_a: object, **_k: object):
+        nonlocal running, peak
+        running += 1
+        peak = max(peak, running)
+        await asyncio.sleep({"a": 0.06, "b": 0.01, "c": 0.03, "d": 0.0}[scenario.id])
+        running -= 1
+        return _fake_result(scenario)
+
+    monkeypatch.setattr(mt, "run_scenario", fake)
+    scenarios = [Scenario(id=i, category="multi_step", text="t", expected=Expected())
+                 for i in "abcd"]
+    report = asyncio.run(mt.run_model_test(
+        _model_config(tmp_path), "m", scenarios=scenarios, computer=[], parallel=2,
+    ))
+    assert [s["id"] for s in report["scenarios"]] == list("abcd")
+    assert peak == 2 and report["retries"] == 0
+    lines = [x for x in capsys.readouterr().out.splitlines() if x.startswith("ilerleme")]
+    assert [x.split()[1] for x in lines] == ["1/4", "2/4", "3/4", "4/4"]
+
+
+@pytest.mark.parametrize(
+    ("answer", "error_type", "calls"),
+    [
+        ("sınır (HTTP 429).", None, 3),  # yedek: metin eşleşmesi
+        ("kota doldu", "RateLimitedError", 3),  # yapısal sinyal
+        ("anahtar reddedildi", "ProviderError", 1),
+        ("anahtar reddedildi", None, 1),
+    ],
+)
+def test_rate_limit_retry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, answer: str, error_type: str | None,
+    calls: int,
+) -> None:
+    import asyncio
+
+    import bench.model_testi as mt
+
+    waits: list[float] = []
+    count = 0
+
+    async def fake(scenario: Scenario, *_a: object, **_k: object):
+        nonlocal count
+        count += 1
+        if count < 3 or calls == 1:
+            return _fake_result(
+                scenario, stop="provider_error", answer=answer, error_type=error_type
+            )
+        return _fake_result(scenario)
+
+    async def no_sleep(seconds: float) -> None:
+        waits.append(seconds)
+
+    monkeypatch.setattr(mt, "run_scenario", fake)
+    monkeypatch.setattr(mt, "_sleep", no_sleep)
+    scenario = Scenario(id="a", category="multi_step", text="t", expected=Expected())
+    report = asyncio.run(mt.run_model_test(
+        _model_config(tmp_path), "m", scenarios=[scenario], computer=[],
+    ))
+    assert count == calls
+    if calls == 3:
+        assert waits == [2.0, 4.0] and report["retries"] == 2
+        assert report["scenarios"][0]["success"]
+    else:
+        assert waits == [] and report["retries"] == 0
+
+
+def test_merge_retry_updates_counts_and_roles() -> None:
+    from bench.model_testi import merge_retry
+
+    def item(key: str, ok: bool) -> dict:
+        return {"id": key, "success": ok, "errors": [], "seconds": 1.0, "answer": ""}
+
+    base = {
+        "model": "m", "temel": {"passed": 1, "total": 2, "rate": 0.5},
+        "zor": {"passed": 1, "total": 1, "rate": 1.0}, "dangerous_errors": 0, "retries": 0,
+        "cost_usd": "0.5", "roles": [], "summary": "",
+        "scenarios": [item("temel_a", True), item("temel_b", False), item("zor_c", True)],
+    }
+    retry = {"dangerous_errors": 0, "retries": 1, "cost_usd": "0.25",
+             "scenarios": [item("temel_b", True)]}
+    merged = merge_retry(base, retry)
+    assert merged["temel"] == {"passed": 2, "total": 2, "rate": 1.0}
+    assert merged["roles"] == ["ana", "zor"] and merged["cost_usd"] == "0.75"
+    assert merged["scenarios"][1]["attempt"] == 2 and merged["retries"] == 1
+    assert "attempt" not in merged["scenarios"][0] and base["temel"]["passed"] == 1

@@ -8,7 +8,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict
 
 from artemis.brain.agent_loop import AgentLoop, frame_result
-from artemis.brain.errors import BudgetExceeded, ProviderError
+from artemis.brain.errors import BudgetExceeded, ProviderError, RateLimitedError
 from artemis.brain.fake import ScriptedProvider
 from artemis.brain.models import Completion, ToolCall, Usage
 from artemis.channels.runner import CommandRunner
@@ -249,6 +249,19 @@ async def test_provider_errors_stop_honestly(tmp_path, error, reason):
     assert result.stop_reason == reason
     if reason == "provider_error":
         assert "hata" in result.text  # gerçek sebep kullanıcıya görünür
+        assert result.error_type == "ProviderError"
+
+
+async def test_rate_limit_is_a_structured_error_type(tmp_path):
+    loop, _ = make_loop(tmp_path, [])
+
+    class Limited:
+        async def complete(self, messages, tools, *, timeout):
+            raise RateLimitedError("sınır")
+
+    loop.provider = Limited()
+    result = await loop.run("dene")
+    assert (result.stop_reason, result.error_type) == ("provider_error", "RateLimitedError")
 
 
 async def test_completion_over_budget_never_dispatches(tmp_path):

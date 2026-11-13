@@ -13,15 +13,28 @@ import os
 import re
 import shutil
 import sys
+from collections.abc import Mapping
+from datetime import datetime
 from decimal import ROUND_UP, Decimal, InvalidOperation
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import httpx
 import yaml
-from PySide6.QtCore import QProcess, QProcessEnvironment, QSize, Qt, QThread, Signal
+from PySide6.QtCore import (
+    QProcess,
+    QProcessEnvironment,
+    QSettings,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+)
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -32,6 +45,8 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -54,7 +69,9 @@ from artemis.config.settings import (
 )
 from artemis.tools.credentials import delete_secret, write_secret
 from artemis.tools.platform import child_environment
-from bench.model_testi import suggest_layout
+from bench.bilgisayar_testi import SCENARIOS as COMPUTER_SCENARIOS
+from bench.model_testi import SCENARIOS_PATH, merge_retry, suggest_layout
+from bench.run import load_scenarios
 
 # Model testi bir koşuda yaklaşık bu kadar token harcar (2026-11-07 ölçümü: ~340 bin giriş);
 # ücretli modelde tahmini maliyet ve bütçe tavanı bundan hesaplanır.
@@ -143,6 +160,38 @@ def field(
     if hint:
         group.addWidget(meta_label(hint))
     parent.addLayout(group)
+
+
+LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
+PARALLEL_TEST = 4
+
+
+def _is_local_model(model: ModelConfig, endpoints: Mapping[str, EndpointConfig]) -> bool:
+    if model.provider == "ollama":
+        return True
+    endpoint = endpoints.get(model.endpoint or "")
+    return endpoint is not None and urlsplit(endpoint.base_url).hostname in LOCAL_HOSTS
+
+
+def _scenario_ids() -> list[str]:
+    return [item.id for item in load_scenarios(SCENARIOS_PATH)] + [
+        item.id for item in COMPUTER_SCENARIOS
+    ]
+
+
+def _scenario_count() -> int:
+    return len(_scenario_ids())
+
+
+def _scenario_label(scenario_id: str) -> str:
+    """'temel_dosya_oku' -> 'dosya oku' (kategori öneki ve alt çizgiler görünmez)."""
+    for prefix in ("temel_", "zor_", "pc_"):
+        if scenario_id.startswith(prefix):
+            scenario_id = scenario_id[len(prefix):]
+    return scenario_id.replace("_", " ")
+
+
+_STATE_TEXT = {"bekliyor": "○", "geçti": "✓", "kaldı": "✗"}
 
 
 def button_row(*buttons: QPushButton) -> QHBoxLayout:
@@ -265,6 +314,12 @@ class ProviderSection(QWidget):
         self._testing = ""
         self._fallback = ""
         self._test_report = Path()
+        self._test_rows: dict[str, str] = {}  # senaryo kimliği -> bekliyor/geçti/kaldı
+        self._second: set[str] = set()  # 2. denemede geçenler
+        self._test_buffer = ""
+        self._stopping = False
+        self._retrying = False
+        self._last: tuple[Path, dict[str, object]] | None = None  # (rapor yolu, gösterilen rapor)
         self._suggested: tuple[str | None, str | None, str | None] = (None, None, None)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -305,12 +360,37 @@ class ProviderSection(QWidget):
         self.fallback_button.clicked.connect(self._toggle_fallback_role)
         self.model_test_button = QPushButton("Test et")
         self.model_test_button.setToolTip(
-            "15 senaryoluk testi arka planda çalıştırır; bilgisayarına dokunmaz."
+            f"{_scenario_count()} senaryoluk testi arka planda çalıştırır; bilgisayarına dokunmaz."
         )
         self.model_test_button.clicked.connect(self._test_model)
-        for button in (self.hard_button, self.fallback_button, self.model_test_button):
+        self._test_settings = QSettings(
+            QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Artemis", "model_test"
+        )
+        self.parallel_test = QCheckBox("Senaryoları paralel çalıştır")
+        self.parallel_test.setChecked(self._saved_parallel())
+        self.parallel_test.toggled.connect(self._remember_parallel)
+        self._parallel_tip()
+        self.stop_button = QPushButton("Durdur")
+        self.stop_button.setToolTip("Çalışan testi durdurur; rapor kaydedilmez.")
+        self.stop_button.clicked.connect(self._stop_test)
+        self.retry_button = QPushButton("Kalanları yeniden dene")
+        self.retry_button.setToolTip("Kalan senaryoları aynı modelle bir kez daha çalıştırır.")
+        self.retry_button.clicked.connect(self._retry_failed)
+        self.compare_button = QPushButton("Sonuçları karşılaştır")
+        self.compare_button.setToolTip("Test edilen modellerin son sonuçlarını tabloda gösterir.")
+        self.compare_button.clicked.connect(self._compare_results)
+        self.test_list = QListWidget()
+        self.test_list.setAccessibleName("Test senaryoları")
+        self.test_list.setMaximumHeight(160)
+        for button in (
+            self.hard_button, self.fallback_button, self.model_test_button, self.parallel_test,
+            self.stop_button, self.retry_button, self.compare_button, self.test_list,
+        ):
             button.setVisible(False)
         # İki satır: beş düğme dar pencerede yatay taşmasın.
+        models.addWidget(self.parallel_test)
+        models.addWidget(self.test_list)
+        models.addLayout(button_row(self.stop_button, self.retry_button, self.compare_button))
         models.addLayout(
             button_row(self.remove_button, self.model_test_button, self.primary_button)
         )
@@ -547,6 +627,8 @@ class ProviderSection(QWidget):
         self.hard_button.setVisible(self.model_list.count() > 0)
         self.fallback_button.setVisible(self.model_list.count() > 0)
         self.model_test_button.setVisible(self.model_list.count() > 0)
+        self.parallel_test.setVisible(self.model_list.count() > 0)
+        self._sync_test_buttons()
         self.endpoint_list.clear()
         for name, endpoint in settings.endpoints.items():
             if not endpoint.api_key:
@@ -1002,8 +1084,46 @@ class ProviderSection(QWidget):
 
     def _selection_changed(self, *_args: object) -> None:
         self._sync_hard_button()
+        self._parallel_tip()
+
+    def _saved_parallel(self) -> bool:
+        return bool(self._test_settings.value("parallel", False, type=bool))
+
+    def _remember_parallel(self, on: bool) -> None:
+        if self.parallel_test.isEnabled():
+            self._test_settings.setValue("parallel", on)
+
+    def _parallel_tip(self) -> None:
+        """Yerel modelde paralel kapalı ve işaretsiz; seçim kullanıcının kaydını bozmaz."""
+        item = self.model_list.currentItem()
+        alias = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        try:
+            settings = load_settings(self.config_path)
+            local = alias in settings.models and _is_local_model(
+                settings.models[alias], settings.endpoints
+            )
+        except (OSError, ValueError):
+            local = False
+        self.parallel_test.blockSignals(True)
+        self.parallel_test.setChecked(
+            False if local else self._saved_parallel()
+        )
+        self.parallel_test.blockSignals(False)
+        self.parallel_test.setEnabled(not local)
+        self.parallel_test.setToolTip(
+            "Yerel modelde sırayla çalışır" if local
+            else f"API modellerinde daha hızlı; aynı anda {PARALLEL_TEST} senaryo"
+        )
 
     def _model_test_finished(self, *_args: object) -> None:
+        if self._stopping:
+            self._stopping = self._retrying = False
+            process, self._model_test, self._testing = self._model_test, None, ""
+            if process is not None:
+                process.deleteLater()
+            self.reload()
+            self.status.setText("Test durduruldu")
+            return
         self._model_test_done(self._testing, self._test_report)
 
     def _sync_hard_button(self) -> None:
@@ -1070,7 +1190,17 @@ class ProviderSection(QWidget):
         return answer == QMessageBox.StandardButton.Yes
 
     def _test_model(self) -> None:
-        alias = self._selected_alias()
+        self._start_test(self._selected_alias(), None)
+
+    def _retry_failed(self) -> None:
+        failed = [key for key, state in self._test_rows.items() if state == "kaldı"]
+        if self._last is None or not failed:
+            return
+        alias = str(self._last[1].get("model", ""))
+        if alias in [row[0] for row in self._model_data]:
+            self._start_test(alias, failed)
+
+    def _start_test(self, alias: str | None, only: list[str] | None) -> None:
         if alias is None:
             return
         if self._model_test is not None:
@@ -1091,13 +1221,21 @@ class ProviderSection(QWidget):
                 Decimal(TEST_INPUT_TOKENS) * model.input_per_million
                 + Decimal(TEST_OUTPUT_TOKENS) * model.output_per_million
             ) / Decimal(1_000_000)
+            if only:  # yeniden deneme yalnız kalan senaryoların payını harcar
+                cost = cost * len(only) / _scenario_count()
             cost = cost.quantize(Decimal("0.01"), rounding=ROUND_UP)
             if not self._confirm_paid(alias, cost):
                 self.status.setText("Test başlatılmadı.")
                 return
             # Bütçe tavanı tahminin iki katı: test bunu aşamaz (rezervasyon korur).
             arguments += ["--ucretli-onay", "--butce", str(cost * 2)]
-        report = settings.state_dir / "model_testleri" / f"{_slug(alias) or 'model'}.json"
+        if self.parallel_test.isEnabled() and self.parallel_test.isChecked():
+            arguments += ["--paralel", str(PARALLEL_TEST)]
+        for scenario_id in only or []:
+            arguments += ["--senaryo", scenario_id]
+        # Yeniden deneme ayrı dosyaya yazar: tam rapor kısmi raporla ezilmez, sonra birleştirilir.
+        suffix = ".yeniden" if only else ""
+        report = settings.state_dir / "model_testleri" / f"{_slug(alias) or 'model'}{suffix}.json"
         arguments += ["--rapor", str(report)]
         process = QProcess(self)
         environment = QProcessEnvironment()
@@ -1115,31 +1253,124 @@ class ProviderSection(QWidget):
         self._test_report = report
         process.finished.connect(self._model_test_finished)
         self._model_test, self._testing = process, alias
+        self._retrying, self._test_buffer = bool(only), ""
+        if only:
+            self._test_rows.update(dict.fromkeys(only, "bekliyor"))
+        else:
+            self._test_rows = dict.fromkeys(_scenario_ids(), "bekliyor")
+            self._second.clear()
+            self._last = None
+        self._render_test_list()
         self._render_models()
-        self.status.setText(f"{alias} test ediliyor (15 senaryo, birkaç dakika sürer)…")
+        count = len(only) if only else _scenario_count()
+        self.status.setText(f"{alias} test ediliyor ({count} senaryo, birkaç dakika sürer)…")
         process.start(sys.executable, arguments)
+
+    def _stop_test(self) -> None:
+        process = self._model_test
+        if process is None or self._stopping:
+            return
+        self._stopping = True
+        self.status.setText("Test durduruluyor…")
+        process.terminate()
+        QTimer.singleShot(3000, self._kill_test)
+
+    def _kill_test(self) -> None:
+        process = self._model_test
+        if (
+            process is not None and self._stopping
+            and process.state() != QProcess.ProcessState.NotRunning
+        ):
+            process.kill()
+
+    def _render_test_list(self) -> None:
+        self.test_list.clear()
+        for key, state in self._test_rows.items():
+            note = " (2. deneme)" if state == "geçti" and key in self._second else ""
+            self.test_list.addItem(f"{_STATE_TEXT[state]} {_scenario_label(key)}: {state}{note}")
+        self._sync_test_buttons()
+
+    def _sync_test_buttons(self) -> None:
+        running = self._model_test is not None
+        failed = any(state == "kaldı" for state in self._test_rows.values())
+        self.test_list.setVisible(bool(self._test_rows))
+        self.stop_button.setVisible(running)
+        # Kademeli testin ("ana + zor") adı tek model değil: yeniden deneme yalnız tek modelde.
+        retryable = self._last is not None and str(self._last[1].get("model", "")) in [
+            row[0] for row in self._model_data
+        ]
+        self.retry_button.setVisible(not running and failed and retryable)
+        self.compare_button.setVisible(self.model_list.count() > 0)
 
     def _model_test_output(self) -> None:
         if self._model_test is None:
             return
         text = bytes(self._model_test.readAllStandardOutput().data()).decode("utf-8", "replace")
-        for line in text.splitlines():
-            if line.startswith("ilerleme "):
-                parts = line.split()
+        self._test_buffer += text
+        *lines, self._test_buffer = self._test_buffer.split("\n")
+        for line in lines:
+            parts = line.split()
+            if len(parts) == 4 and parts[0] == "ilerleme":
                 self.status.setText(f"{self._testing} test ediliyor: {parts[1]} senaryo bitti…")
+                if parts[2] in self._test_rows and parts[3] in _STATE_TEXT:
+                    self._test_rows[parts[2]] = parts[3]
+                    if parts[3] == "geçti" and self._retrying:
+                        self._second.add(parts[2])
+                    self._render_test_list()
 
     def _model_test_done(self, alias: str, report_path: Path) -> None:
         process, self._model_test, self._testing = self._model_test, None, ""
+        retrying, self._retrying = self._retrying, False
         if process is not None:
             process.deleteLater()
         try:
             report = json.loads(report_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
+            if retrying and self._last is not None:
+                base_path, base = self._last
+                report_path.unlink(missing_ok=True)
+                report_path = base_path
+                report = merge_retry(base, report)
+                _write_json(report_path, report)
+        except (OSError, ValueError, KeyError, TypeError):
             self.reload()
+            self._render_test_list()
             self.status.setText(f"{alias} testi tamamlanamadı (bağlantı veya ayar sorunu).")
             return
+        self._last = (report_path, report)
+        done = report.get("scenarios", [])
+        self._second = {item["id"] for item in done if item.get("attempt") == 2}
+        self._test_rows.update(
+            {item["id"]: "geçti" if item["success"] else "kaldı" for item in done}
+        )
+        self._render_test_list()
         self.reload()
         self.status.setText(f"{alias}: {_test_summary(report)}. {report.get('summary', '')}")
+
+    def _compare_results(self) -> None:
+        try:
+            settings = load_settings(self.config_path)
+        except (OSError, ValueError):
+            self.status.setText("Ayarlar okunamadı.")
+            return
+        folder = settings.state_dir / "model_testleri"
+        rows = []
+        for alias, report in self._reports(settings).items():
+            try:
+                stamp = (folder / f"{_slug(alias) or 'model'}.json").stat().st_mtime
+            except OSError:
+                continue
+            rows.append((stamp, alias, report))
+        rows.sort(key=lambda row: row[0], reverse=True)
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Test sonuçları")
+        dialog.resize(720, 320)
+        layout = QVBoxLayout(dialog)
+        self.compare_table = _comparison_table(rows)
+        layout.addWidget(self.compare_table)
+        close = QPushButton("Kapat")
+        close.clicked.connect(dialog.accept)
+        layout.addLayout(button_row(close))
+        dialog.exec()
 
     def _apply_layout(self) -> None:
         ana, zor, pc = self._suggested
@@ -1167,6 +1398,43 @@ class ProviderSection(QWidget):
             + (f", bilgisayar kullanımı: {pc}" if pc else "") + "."
         )
         self.changed.emit()
+
+
+def _write_json(path: Path, data: object) -> None:
+    """Geçici dosyaya yazıp yerine koyar: yarım rapor kalmaz."""
+    temp = path.with_suffix(".tmp")
+    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    os.replace(temp, path)
+
+
+def _comparison_table(rows: list[tuple[float, str, dict[str, object]]]) -> QTableWidget:
+    headers = ["Model", "Temel", "Zor", "Bilgisayar", "Tehlikeli hata", "Süre", "Maliyet", "Tarih"]
+    table = QTableWidget(len(rows), len(headers))
+    table.setAccessibleName("Test sonuçları tablosu")
+    table.setHorizontalHeaderLabels(headers)
+    table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+    table.verticalHeader().setVisible(False)
+    table.horizontalHeader().setStretchLastSection(True)
+
+    def ratio(value: object) -> str:
+        if isinstance(value, dict):
+            return f"{value.get('passed')}/{value.get('total')}"
+        return "yok"
+
+    for row, (stamp, alias, report) in enumerate(rows):
+        cost = Decimal(str(report.get("cost_usd", "0")))
+        cells = [
+            alias, ratio(report.get("temel")), ratio(report.get("zor")),
+            ratio(report.get("bilgisayar")),
+            str(report["dangerous_errors"]) if report.get("dangerous_errors") else "yok",
+            f"{report.get('median_seconds')} sn",
+            f"{cost.normalize():f} USD" if cost else "ücretsiz",
+            datetime.fromtimestamp(stamp).strftime("%d.%m.%Y %H:%M"),
+        ]
+        for column, text in enumerate(cells):
+            table.setItem(row, column, QTableWidgetItem(text))
+    table.resizeColumnsToContents()
+    return table
 
 
 def _test_summary(report: dict[str, object]) -> str:

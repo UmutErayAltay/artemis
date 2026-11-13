@@ -673,3 +673,186 @@ def test_provider_section_has_no_reference_cycle(app: QApplication, tmp_path: Pa
     finally:
         if was_enabled:
             gc.enable()
+
+
+def test_parallel_checkbox_flag_and_local_disable(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import QSettings
+
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "qs"))
+    path = _three_models(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"]["bulut"] = {"base_url": "https://api.example.com/v1"}
+    raw["models"]["bulut"] = {
+        "provider": "openai_compatible", "endpoint": "bulut", "model": "b",
+        "input_per_million": "0", "output_per_million": "0",
+    }
+    raw["endpoints"]["lokal"] = {"base_url": "http://localhost:8080/v1", "api_key": False}
+    raw["models"]["yerel"] = {
+        "provider": "openai_compatible", "endpoint": "lokal", "model": "q",
+        "input_per_million": "0", "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    started: list[list[str]] = []
+    monkeypatch.setattr(section_module.QProcess, "start", lambda _s, _e, args: started.append(args))
+    section = ProviderSection(path)
+    section.select_model("bulut")
+    section._test_model()
+    assert "--paralel" not in started[-1]
+    section._model_test = None
+    section.parallel_test.setChecked(True)
+    section._test_model()
+    assert started[-1][started[-1].index("--paralel") + 1] == "4"
+    section._model_test = None
+    section.select_model("yerel")
+    assert not section.parallel_test.isEnabled() and not section.parallel_test.isChecked()
+    assert section.parallel_test.toolTip() == "Yerel modelde sırayla çalışır"
+    section._test_model()
+    assert "--paralel" not in started[-1]
+
+
+class _FakeProcess:
+    """QProcess yerine: çıktı satırları elle verilir, terminate/kill sayılır."""
+
+    def __init__(self) -> None:
+        self.out = b""
+        self.calls: list[str] = []
+
+    def readAllStandardOutput(self) -> Any:  # noqa: N802
+        data, self.out = self.out, b""
+        return type("B", (), {"data": lambda _s: data})()
+
+    def terminate(self) -> None:
+        self.calls.append("terminate")
+
+    def kill(self) -> None:
+        self.calls.append("kill")
+
+    def state(self) -> Any:
+        return section_module.QProcess.ProcessState.Running
+
+    def deleteLater(self) -> None:  # noqa: N802
+        pass
+
+
+def _running(tmp_path: Path) -> tuple[ProviderSection, _FakeProcess]:
+    section = ProviderSection(_three_models(tmp_path))
+    fake = _FakeProcess()
+    section._model_test, section._testing = fake, "haiku 5-5"  # type: ignore[assignment]
+    section._test_rows = {"temel_dosya_oku": "bekliyor", "zor_toplam": "bekliyor"}
+    section._render_test_list()
+    return section, fake
+
+
+def test_live_list_updates_from_progress_lines(app: QApplication, tmp_path: Path) -> None:
+    section, fake = _running(tmp_path)
+    assert section.test_list.item(0).text() == "○ dosya oku: bekliyor"
+    fake.out = b"ilerleme 1/2 temel_dosya_oku ge\xc3\xa7ti\nilerleme 2/2 zor_to"
+    section._model_test_output()  # yarım satır tamponlanır
+    fake.out = b"plam kald\xc4\xb1\n"
+    section._model_test_output()
+    items = [section.test_list.item(i).text() for i in range(section.test_list.count())]
+    assert items == ["✓ dosya oku: geçti", "✗ toplam: kaldı"]
+
+
+def test_test_widgets_hidden_until_a_test_runs(app: QApplication, tmp_path: Path) -> None:
+    section = ProviderSection(_three_models(tmp_path))
+    assert section.test_list.isHidden() and section.stop_button.isHidden()
+    assert section.retry_button.isHidden()
+    section, _ = _running(tmp_path)
+    assert not section.test_list.isHidden() and not section.stop_button.isHidden()
+
+
+def test_stop_terminates_then_kills_and_saves_nothing(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section, fake = _running(tmp_path)
+    delays: list[int] = []
+    monkeypatch.setattr(section_module.QTimer, "singleShot", lambda ms, _cb: delays.append(ms))
+    section._test_report = tmp_path / "state" / "model_testleri" / "haiku-5-5.json"
+    section._stop_test()
+    assert fake.calls == ["terminate"] and delays == [3000]
+    section._kill_test()
+    assert fake.calls == ["terminate", "kill"]
+    section._model_test_finished()
+    assert section.status.text() == "Test durduruldu"
+    assert section._model_test is None and not section._test_report.exists()
+    assert section.test_list.count() == 2  # biten satırlar kalır
+
+
+def test_retry_failed_runs_only_failed_and_merges(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section = ProviderSection(_three_models(tmp_path))
+    started: list[list[str]] = []
+    monkeypatch.setattr(section_module.QProcess, "start", lambda _s, _e, args: started.append(args))
+    base = {
+        "model": "haiku 5-5", "temel": {"passed": 1, "total": 2, "rate": 0.5},
+        "zor": {"passed": 1, "total": 1, "rate": 1.0}, "dangerous_errors": 0,
+        "median_seconds": 5.0, "cost_usd": "0", "roles": [], "summary": "",
+        "scenarios": [
+            {"id": "temel_a", "success": True}, {"id": "temel_b", "success": False},
+            {"id": "zor_c", "success": True},
+        ],
+    }
+    folder = tmp_path / "state" / "model_testleri"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "haiku-5-5.json"
+    path.write_text(json.dumps(base), encoding="utf-8")
+    section._test_rows = {"temel_a": "geçti", "temel_b": "kaldı", "zor_c": "geçti"}
+    section._last = (path, base)
+    section._sync_test_buttons()
+    assert not section.retry_button.isHidden()
+    section._retry_failed()
+    args = started[-1]
+    assert [args[i + 1] for i, a in enumerate(args) if a == "--senaryo"] == ["temel_b"]
+    assert args[args.index("--rapor") + 1].endswith("haiku-5-5.yeniden.json")
+    assert section.retry_button.isHidden()
+    retry_path = folder / "haiku-5-5.yeniden.json"
+    retry_path.write_text(json.dumps({
+        "dangerous_errors": 0, "cost_usd": "0",
+        "scenarios": [{"id": "temel_b", "success": True}],
+    }), encoding="utf-8")
+    section._model_test_finished()
+    assert not retry_path.exists()
+    assert json.loads(path.read_text(encoding="utf-8"))["temel"]["passed"] == 2
+    assert section.test_list.item(1).text() == "✓ b: geçti (2. deneme)"
+    assert "temel 2/2" in section.status.text()
+
+
+def test_paid_estimate_is_in_confirmation(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section = ProviderSection(_three_models(tmp_path, paid="3"))
+    seen: list[str] = []
+
+    def ask(_parent: object, _title: str, text: str, *_a: object) -> Any:
+        seen.append(text)
+        return section_module.QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(section_module.QMessageBox, "question", ask)
+    section.select_model("sonnet 5-5")
+    section._test_model()
+    assert "USD" in seen[0] and "yaklaşık" in seen[0]
+
+
+def test_compare_table_newest_first(app: QApplication, tmp_path: Path) -> None:
+    section = ProviderSection(_three_models(tmp_path))
+    _report(tmp_path, "haiku 5-5", 6, 5, ["ana"])
+    _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
+    folder = tmp_path / "state" / "model_testleri"
+    os.utime(folder / "haiku-5-5.json", (1_700_000_000, 1_700_000_000))
+    settings = load_settings(section.config_path)
+    rows = sorted(
+        (
+            ((folder / f"{section_module._slug(a)}.json").stat().st_mtime, a, r)
+            for a, r in section._reports(settings).items()
+        ),
+        reverse=True,
+    )
+    table = section_module._comparison_table(rows)
+    assert table.horizontalHeaderItem(0).text() == "Model"
+    assert [table.item(r, 0).text() for r in range(2)] == ["sonnet 5-5", "haiku 5-5"]
+    assert table.item(0, 1).text() == "7/7" and table.item(0, 6).text() == "ücretsiz"
+    assert table.item(0, 4).text() == "yok"
