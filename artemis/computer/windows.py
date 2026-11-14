@@ -544,3 +544,59 @@ def focus_window(hwnd: int) -> bool:
     user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
     user32.SetForegroundWindow.restype = wintypes.BOOL
     return bool(user32.SetForegroundWindow(hwnd))
+
+
+# Odaktaki denetimin değerini UI Automation ile okur ve beklenen metinle karşılaştırır. Betik
+# sabittir; beklenen metin (özel, ekran içeriği sayılır) yalnız ortam değişkeniyle çocuğa gider,
+# argv'de ve logda yoktur. Yalnız `1`/`0`/`?` basılır: okunan değer süreçten çıkmaz.
+_FOCUS_SCRIPT = "\n".join(
+    [
+        "$ErrorActionPreference = 'Stop'",
+        "try {",
+        "  Add-Type -AssemblyName UIAutomationClient",
+        "  Add-Type -AssemblyName UIAutomationTypes",
+        "  $e = [System.Windows.Automation.AutomationElement]::FocusedElement",
+        "  $p = $null",
+        "  $vp = [System.Windows.Automation.ValuePattern]::Pattern",
+        "  $tp = [System.Windows.Automation.TextPattern]::Pattern",
+        "  if ($e.TryGetCurrentPattern($vp, [ref]$p)) {",
+        "    $v = $p.Current.Value",
+        "  } elseif ($e.TryGetCurrentPattern($tp, [ref]$p)) {",
+        "    $v = $p.DocumentRange.GetText(65536)",
+        "  } else { '?'; exit 0 }",
+        "  $x = $env:ARTEMIS_EXPECTED_TEXT",
+        "  $v = $v -replace \"`r`n\", \"`n\"; $x = $x -replace \"`r`n\", \"`n\"",
+        "  if ($v.Contains($x)) { '1' } else { '0' }",
+        "} catch { '?' }",
+    ]
+)
+_FOCUS_TEXT_LIMIT = 8000  # ortam değişkeni sınırı (32 KB) altında kalmak için
+
+
+def focused_value_contains(
+    expected: str, timeout: float, runner: Callable[..., Any] | None = None
+) -> bool | None:
+    """Odaktaki alanın değeri `expected`i içeriyor mu; her başarısızlıkta None (ADR 0070)."""
+    if sys.platform != "win32" or not expected or len(expected) > _FOCUS_TEXT_LIMIT:
+        return None
+    import base64
+    import subprocess
+
+    from artemis.tools.platform import child_environment
+
+    encoded = base64.b64encode(_FOCUS_SCRIPT.encode("utf-16-le")).decode("ascii")
+    command = [
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-EncodedCommand", encoded,
+    ]
+    env = {**child_environment(), "ARTEMIS_EXPECTED_TEXT": expected}
+    try:
+        completed = (runner or subprocess.run)(
+            command, env=env, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    answer = (completed.stdout or "").strip()
+    return {"1": True, "0": False}.get(answer) if completed.returncode == 0 else None

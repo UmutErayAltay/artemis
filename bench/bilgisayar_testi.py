@@ -266,6 +266,9 @@ class SimBackend:
         with self._lock:
             self.app.press(keys)
 
+    def focused_value_contains(self, expected: str, timeout: float) -> bool | None:
+        return None  # UIA kanıtı yok: model kararı kalır (ADR 0070)
+
 
 @dataclass
 class ComputerScenario:

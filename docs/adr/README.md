@@ -72,3 +72,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0067 — Silero VAD varsayılan konuşma algılayıcı](0067-silero-vad.md)
 - [0068 — Anlamsal konuşma sonu (Smart Turn v3.2)](0068-anlamsal-konusma-sonu.md)
 - [0069 — Cihaz içi uyandırma sözcüğü ön-kapısı (isteğe bağlı)](0069-uyandirma-on-kapisi.md)
+- [0070 — computer_use "ok" için OS düzeyi kanıt](0070-computer-use-os-kaniti.md)

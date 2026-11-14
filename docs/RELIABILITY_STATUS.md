@@ -67,7 +67,10 @@ Bilerek değiştirilmeyenler / açık sınırlar:
   (kullanıcının açık seçimi; `test_gate.py` bunu kilitler).
 - Claude kod ajanı Bash'i OS sandbox değildir; `Bash(git push:*)` reddi aşılabilir önek
   kuralıdır. Bağımsız kontroller ajanın değiştirdiği depoda çalışır.
-- `computer_use` "ok" sonucu hâlâ ikinci model yargısıdır; UIA/OS durum doğrulaması yok.
+- `computer_use` "ok" sonucu hâlâ esas olarak ikinci model yargısıdır; ADR 0070 ile OS kanıtı VE
+  kuralıyla eklendi: gönderilemeyen girdi ya da (yazma görevinde) odaktaki alanda UIA ile
+  bulunamayan metin "ok"u geri çevirir, asla "hayır"ı "evet" yapmaz. Tıklama/kaydırma/tuş
+  görevlerinde yalnız girdi-sonuç denetimi var; sonucun doğruluğu model yargısı kalır.
 - MCP ve `claude_cli` süreçleri artık spawn sonrası KILL_ON_JOB_CLOSE Job Object'ine bağlanır
   (`own_process_tree`, kod ajanındaki `WindowsProcessTree` yeniden kullanıldı) ve kapanışta job
   sonlandırılır; `kill_tree` yedektir. Kalan sınır: süreç askıda başlatılmadığı için atamadan
