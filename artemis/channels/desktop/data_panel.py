@@ -242,6 +242,10 @@ class DataPanel(QWidget):
         layout.addWidget(self.notice)
 
         # Yıkıcı eylem sayfanın en altında kendi bloğunda; onay akışı araç kapısında kalır.
+        layout.addWidget(self._build_danger_zone())
+        self.set_busy(True)
+
+    def _build_danger_zone(self) -> QFrame:
         self.danger_zone = QFrame()
         self.danger_zone.setObjectName("dangerZone")
         danger = QVBoxLayout(self.danger_zone)
@@ -269,8 +273,7 @@ class DataPanel(QWidget):
         delete_row.addWidget(HelpTip(_HELP_DELETE), 0, Qt.AlignmentFlag.AlignVCenter)
         delete_row.addWidget(self.delete_reason, 1)
         danger.addLayout(delete_row)
-        layout.addWidget(self.danger_zone)
-        self.set_busy(True)
+        return self.danger_zone
 
     def _request_history(self) -> None:
         self.tool_requested.emit("conversation_history", HistoryArguments(action="list"))

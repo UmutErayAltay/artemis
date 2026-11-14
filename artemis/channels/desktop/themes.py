@@ -76,19 +76,7 @@ def _tokens(name: str) -> dict[str, str]:
     return THEMES.get(name, THEMES[DEFAULT_THEME])
 
 
-def stylesheet(name: str) -> str:
-    """Semantic Qt style shared by the window and its dialogs.
-
-    Dynamic-property selectors ([selected="true"], [state="current"]) only update
-    after the caller runs widget.style().unpolish(widget) and polish(widget).
-    Controls: 1px border + 4px 8px padding; focus swaps to 2px border + 3px 7px
-    (the only off-scale padding) so the box never shifts.
-    """
-    t = _tokens(name)
-    tone = "dark" if t["bg"] == THEMES["dark"]["bg"] else "light"
-    down = (_ASSETS / f"arrow-down-{tone}.svg").as_posix()
-    up = (_ASSETS / f"arrow-up-{tone}.svg").as_posix()
-    radio = (_ASSETS / f"radio-on-{tone}.svg").as_posix()
+def _qss_controls(t: dict[str, str], up: str, down: str) -> str:
     # Plain containers inside a surface would otherwise paint the page bg as a stain.
     # Exact-class selectors (.QWidget) leave inputs, which subclass QWidget, untouched.
     surfaces = ", ".join(
@@ -201,7 +189,11 @@ QSpinBox::up-button {{ subcontrol-position: top right; }}
 QSpinBox::down-button {{ subcontrol-position: bottom right; }}
 QSpinBox::up-arrow {{ image: url({up}); width: 10px; height: 6px; }}
 QSpinBox::down-arrow {{ image: url({down}); width: 10px; height: 6px; }}
-QListWidget {{ outline: 0; }}
+"""
+
+
+def _qss_components(t: dict[str, str], down: str, radio: str) -> str:
+    return f"""QListWidget {{ outline: 0; }}
 QListWidget::item {{ padding: 8px 12px; border-left: 2px solid transparent; }}
 QListWidget::item:hover {{ background: {t['soft']}; }}
 QListWidget::item:selected {{ background: {t['soft']}; color: {t['text']};
@@ -331,3 +323,19 @@ QPushButton#primary:disabled {{ background: {t['soft']}; color: {t['muted']};
 QSpinBox:disabled {{ background: {t['soft']}; color: {t['muted']}; }}
 /* /wave2-lists */
 """
+
+
+def stylesheet(name: str) -> str:
+    """Semantic Qt style shared by the window and its dialogs.
+
+    Dynamic-property selectors ([selected="true"], [state="current"]) only update
+    after the caller runs widget.style().unpolish(widget) and polish(widget).
+    Controls: 1px border + 4px 8px padding; focus swaps to 2px border + 3px 7px
+    (the only off-scale padding) so the box never shifts.
+    """
+    t = _tokens(name)
+    tone = "dark" if t["bg"] == THEMES["dark"]["bg"] else "light"
+    down = (_ASSETS / f"arrow-down-{tone}.svg").as_posix()
+    up = (_ASSETS / f"arrow-up-{tone}.svg").as_posix()
+    radio = (_ASSETS / f"radio-on-{tone}.svg").as_posix()
+    return _qss_controls(t, up, down) + _qss_components(t, down, radio)
