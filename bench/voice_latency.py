@@ -11,7 +11,7 @@ import platform
 import signal
 import sys
 import tempfile
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Sequence
 from contextlib import redirect_stdout
 from dataclasses import replace
 from pathlib import Path
@@ -35,6 +35,7 @@ from artemis.safety.gate import SafetyGate
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import ToolRegistry
 from bench.voice_resources import GpuSampler, process_peak_memory_bytes
+from bench.wav_source import NullSink, WavMicrophone, read_wav_pcm
 
 
 class _NoArguments(BaseModel):
@@ -259,6 +260,11 @@ def _hardware(
             else voice.edge_voice if voice.tts_backend == "edge" else "ema"
         ),
         "pipeline_sample_rate": voice.sample_rate,
+        "vad": {
+            "requested": voice.vad_backend,
+            "actual": "webrtc" if voice.vad_backend == "webrtc" or "vad:webrtc" in states
+            else "silero",
+        },
         "noise_suppression": {
             "requested": voice.noise_suppression,
             "actual": False if (not voice.noise_suppression or "denoise:off" in states
@@ -284,7 +290,15 @@ def _hardware(
     }
 
 
-async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
+async def live_report(
+    config_path: Path, duration: float, wavs: Sequence[Path] = (), repeats: int = 1,
+    gap_seconds: float = 15.0,
+) -> dict[str, Any]:
+    """Canlı ölçüm; ``wavs`` verilirse mikrofon yerine WAV'lar gerçek zamanlı beslenir.
+
+    Dosya güdümlü kipte STT/LLM/TTS gerçektir (bu makinenin GPU'su ve config'teki model); yalnız
+    mikrofon ve hoparlör sahtedir. Gerçek mikrofon kabulünün yerini tutmaz.
+    """
     if not math.isfinite(duration) or duration <= 0:
         raise ValueError("duration sonlu ve pozitif olmalı")
     settings = load_settings(config_path)
@@ -311,7 +325,7 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
         # heard/level durumları kişisel içerik taşır; rapora yalnız sabit durumlar girer.
         if state.startswith("denoise:unavailable:"):
             states.add("denoise:unavailable")
-        elif state in {"denoise:off", "echo:off"}:
+        elif state in {"denoise:off", "echo:off", "vad:webrtc"}:
             states.add(state)
 
     def approve(name: str, arguments: dict[str, Any]) -> bool:
@@ -343,8 +357,19 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
     try:
         runtime = create_runtime(config_path, approve, settings=settings)
         phase = "voice_setup"
+        devices: dict[str, Any] = {}
+        if wavs:
+            devices["microphone"] = WavMicrophone(
+                [read_wav_pcm(path) for path in wavs],
+                frame_ms=settings.voice.frame_ms,
+                repeats=repeats,
+                # Ara yanıt + oynatmadan uzun olmalı: söz kesme açıksa sonraki WAV yanıtı keserdi.
+                # Bitişte ayrıca durdurma istenmez: WAV sonu (EOF) döngüyü kendisi kapatır.
+                gap_silence_s=gap_seconds,
+            )
+            devices["sink"] = NullSink()
         controller = await build_voice_controller(
-            runtime, runtime.runner.run, on_state, on_event=collector,
+            runtime, runtime.runner.run, on_state, on_event=collector, **devices,
         )
         previous = signal.getsignal(signal.SIGINT)
         signal.signal(signal.SIGINT, stop)
@@ -352,7 +377,10 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
         timer = loop.call_later(duration, controller.request_stop)
         sampler = asyncio.create_task(gpu.run(os.getpid(), sampling_stopped))
         phase = "capture"
-        print(f"Canlı ölçüm başladı ({duration:g} sn). 'artemis' deyin.", file=sys.stderr)
+        if wavs:
+            print(f"Dosya güdümlü ölçüm: {len(wavs)} WAV x {repeats}.", file=sys.stderr)
+        else:
+            print(f"Canlı ölçüm başladı ({duration:g} sn). 'artemis' deyin.", file=sys.stderr)
         await controller.run()
     except (OSError, RuntimeError, ValueError, ImportError) as error:
         failures.append({"phase": phase, "error_type": type(error).__name__})
@@ -381,7 +409,7 @@ async def live_report(config_path: Path, duration: float) -> dict[str, Any]:
                     failures.append({
                         "phase": "runtime_shutdown", "error_type": type(error).__name__,
                     })
-    report = _report(collector, "canli")
+    report = _report(collector, "dosya" if wavs else "canli")
     # Yalnız gerçek sounddevice çıkışı bu bilgiyi taşır; sahte/başka sink için null kalır.
     sink_output = getattr(getattr(controller, "sink", None), "output_info", None)
     resources = {"cpu_peak_memory_bytes": _peak_memory(failures), **gpu.report()}
@@ -406,6 +434,10 @@ def main() -> None:
     parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
     parser.add_argument("--iterations", type=int, default=10)
     parser.add_argument("--duration", type=float, default=60)
+    parser.add_argument("--wav", type=Path, nargs="+", default=(),
+                        help="--canli ile: mikrofon yerine bu WAV'lar (16 kHz mono 16 bit)")
+    parser.add_argument("--tekrar", type=int, default=1, help="--wav listesinin tekrar sayısı")
+    parser.add_argument("--ara", type=float, default=15.0, help="WAV'lar arası sessizlik (sn)")
     parser.add_argument("--rapor", type=Path, help="İsteğe bağlı JSON rapor dosyası")
     args = parser.parse_args()
     if args.iterations < 1 or not math.isfinite(args.duration) or args.duration <= 0:
@@ -413,7 +445,9 @@ def main() -> None:
     failed = False
     try:
         report = asyncio.run(
-            fake_report(args.iterations) if args.sahte else live_report(args.config, args.duration)
+            fake_report(args.iterations) if args.sahte
+            else live_report(
+                args.config, args.duration, args.wav, args.tekrar, args.ara)
         )
     except (OSError, RuntimeError, ValueError, ImportError) as error:
         report = _report(EventCollector(), "canli" if args.canli else "sahte")

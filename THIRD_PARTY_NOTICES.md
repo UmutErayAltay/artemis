@@ -49,6 +49,11 @@ ticari olarak dağıtacaksanız `[stream]` ekstrasını ve canlı yazı özelli�
 - Lisans: Apache-2.0 — <https://github.com/huggingface/huggingface_hub>
 - Yalnız `[stream]` ekstrasında, model dosyalarını sabit revision'dan indirmek için.
 
+## Silero VAD (konuşma algılama)
+
+Pakete dahil model (MIT) ve lisans bildirimi için
+[`artemis/channels/voice/models/silero/NOTICE`](artemis/channels/voice/models/silero/NOTICE) dosyasına bakın.
+
 ## DeepFilterNet3 (gürültü engelleme)
 
 Pakete dahil model ve lisans bildirimi için

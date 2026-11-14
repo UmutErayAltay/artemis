@@ -78,6 +78,11 @@ class VoiceConfig(BaseModel):
     sample_rate: Literal[16000] = 16000
     frame_ms: Literal[20, 30] = 20
     vad_aggressiveness: int = Field(default=2, ge=0, le=3)
+    # Konuşma algılayıcı (ADR 0067): `auto` paketle gelen Silero VAD'ı (sinir ağı, gürültüde daha az
+    # yanlış tetik) kullanır, kurulamazsa WebRTC'ye döner; `webrtc` eski davranıştır.
+    vad_backend: Literal["auto", "webrtc", "silero"] = "auto"
+    # Silero konuşma olasılığı eşiği; yalnız `vad_aggressiveness` WebRTC'ye uygulanır.
+    vad_threshold: float = Field(default=0.5, gt=0, lt=1)
     end_silence_ms: int = Field(default=600, ge=100, le=3000)
     # Eski config uyumluluğu; söz kesme artık nihai STT doğrulamasını bekler (ADR 0040).
     barge_in_ms: int = Field(default=180, ge=100, le=1000)
@@ -93,7 +98,9 @@ class VoiceConfig(BaseModel):
     streaming: bool = True
     continuous_mode: bool = False
     # Ses kapanınca içeriksiz gecikme raporu state_dir/voice-telemetry/ altına yazılır (ADR 0041).
-    telemetry_report: bool = False
+    # Varsayılan açık: rapor yalnız süre/sayı taşır (metin, ses yok); gerçek kullanımda gecikme
+    # ölçülmeden "hızlı" denemez.
+    telemetry_report: bool = True
     # Masaüstünde sesi açıp kapatan Windows genel kısayolu ("Ses" düğmesiyle aynı yol);
     # tek elle basılabilsin diye ctrl+space. Boş dize kısayolu kapatır.
     listening_hotkey: str = Field(default="ctrl+space", max_length=40)

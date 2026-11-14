@@ -22,9 +22,11 @@ from artemis.channels.voice.adapters import (
     WebRTCVAD,
 )
 from artemis.channels.voice.core import (
+    AudioSink,
     Microphone,
     SpeechRecognizer,
     SpeechSynthesizer,
+    VoiceActivityDetector,
     VoiceController,
 )
 from artemis.channels.voice.denoise import (
@@ -40,6 +42,7 @@ from artemis.channels.voice.echo import (
     EchoReference,
 )
 from artemis.channels.voice.live_text import SherpaLiveTranscriber
+from artemis.channels.voice.silero import SileroVAD
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 from artemis.config.settings import Settings, VoiceConfig
@@ -85,6 +88,17 @@ def _denoise_reason(error: Exception) -> str:
     return "model:model yüklenemedi (dosya bozuk olabilir)"
 
 
+def build_vad(voice: VoiceConfig, on_state: StateCallback) -> VoiceActivityDetector:
+    """Silero kurulamazsa ses hattı WebRTC ile sürer; düşüş ``vad:webrtc`` ile görünür olur."""
+    if voice.vad_backend != "webrtc":
+        try:
+            return SileroVAD(threshold=voice.vad_threshold)
+        except (OSError, ValueError, RuntimeError, ImportError) as error:
+            logger.warning("Silero VAD açılamadı, WebRTC VAD ile sürülüyor: %s", error)
+            on_state("vad:webrtc")
+    return WebRTCVAD(voice)
+
+
 def _live_reason(error: Exception) -> str:
     """``denoise`` ile aynı ``kind:metin`` kalıbı; deps ve model farklı çözüm ister."""
     if isinstance(error, ImportError) or (
@@ -102,8 +116,13 @@ async def build_voice_controller(
     runtime: Runtime, run_command: RunCommand, on_state: StateCallback,
     *, on_timing: Callable[[str, float], None] | None = None,
     on_event: Callable[[VoiceTimingEvent], None] | None = None,
+    microphone: Microphone | None = None,
+    sink: AudioSink | None = None,
 ) -> VoiceController:
     """STT/TTS modellerini hazırlar; eksik model OSError/RuntimeError/ValueError olarak çıkar.
+
+    ``microphone``/``sink`` yalnız ölçüm içindir (bench WAV mikrofonu, sessiz sink): verilirse
+    ses aygıtı açılmaz; yankı/gürültü sarmalayıcıları ve STT/TTS/model hattı aynen kurulur.
 
     Hazırlık engelleyici dosya/model yüklemesi olduğu için ``to_thread`` ile yapılır:
     işçi döngüsü (onay iptali, kapanış) hazırlık sürerken tıkanmaz. Onay çağrısı
@@ -128,11 +147,12 @@ async def build_voice_controller(
     # Gürültü engelleme açıksa mikrofon yerel 48 kHz yakalanır (modelin doğal hızı, >8 kHz bilgi
     # korunur); açılamazsa adaptör uyarıyla 16 kHz'e döner. Aşağı akış hep 16 kHz görür.
     async with AsyncExitStack() as cleanup:
-        microphone: Microphone = SoundDeviceMicrophone(
-            settings.voice,
-            device=settings.voice.input_device,
-            capture_rate=MODEL_SR if denoiser is not None else None,
-        )
+        if microphone is None:
+            microphone = SoundDeviceMicrophone(
+                settings.voice,
+                device=settings.voice.input_device,
+                capture_rate=MODEL_SR if denoiser is not None else None,
+            )
         cleanup.push_async_callback(_close_optional, microphone)
         echo_reference: EchoReference | None = None
         if settings.voice.echo_cancellation:
@@ -162,9 +182,9 @@ async def build_voice_controller(
             microphone = DenoisedMicrophone(
                 microphone, denoiser, on_state, raw_for_stt=not settings.voice.noise_suppression_stt
             )
-        if echo_reference is None:
+        if sink is None and echo_reference is None:
             sink = SoundDeviceSink()
-        else:
+        elif sink is None:
             sink = SoundDeviceSink(
                 echo_reference=echo_reference,
                 on_echo_failure=lambda: report_echo_state("echo:off"),
@@ -235,7 +255,7 @@ async def build_voice_controller(
             runtime.runner,
             settings.voice,
             microphone,
-            WebRTCVAD(settings.voice),
+            build_vad(settings.voice, on_state),
             recognizer,
             synthesizer,
             sink,
