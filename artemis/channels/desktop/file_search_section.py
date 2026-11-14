@@ -13,7 +13,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtWidgets import QFileDialog, QListWidget, QPushButton, QVBoxLayout, QWidget
 
-from artemis.channels.desktop.provider_section import button_row, group, meta_label
+from artemis.channels.desktop.form_kit import button_row, group, meta_label
 from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.config.settings import Settings, load_settings
 from artemis.safety.audit import AuditLog

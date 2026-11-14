@@ -45,8 +45,8 @@ from artemis.brain.models import Message
 from artemis.brain.router import ProviderRouter
 from artemis.channels.desktop import pet_animator, pet_creator, pet_sprite
 from artemis.channels.desktop import pet_image_pipeline as pipe
+from artemis.channels.desktop.page_kit import EmptyState
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError
-from artemis.channels.desktop.projects_panel import EmptyState
 from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import ModelConfig, load_settings
 from artemis.safety.audit import AuditLog

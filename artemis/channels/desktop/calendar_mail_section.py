@@ -14,7 +14,7 @@ from zoneinfo import ZoneInfo
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QWidget
 
-from artemis.channels.desktop.provider_section import button_row, field, meta_label
+from artemis.channels.desktop.form_kit import button_row, field, meta_label
 from artemis.config.settings import load_settings
 from artemis.tools import calendar_mail as core
 from artemis.tools.credentials import delete_secret, write_secret

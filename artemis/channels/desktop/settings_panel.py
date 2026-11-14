@@ -2,25 +2,18 @@
 
 from __future__ import annotations
 
-import copy
 import importlib
 import importlib.util
 import os
 import tempfile
-from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
 import yaml
 from PySide6.QtCore import (
-    QEvent,
     QFileSystemWatcher,
-    QObject,
-    QPoint,
-    QRect,
-    QRectF,
     QSettings,
     QSize,
     Qt,
@@ -30,18 +23,9 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
-    QFont,
-    QKeyEvent,
-    QMouseEvent,
-    QPainter,
-    QPainterPath,
-    QPixmap,
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
-    QAbstractScrollArea,
-    QAbstractSpinBox,
-    QApplication,
     QButtonGroup,
     QCheckBox,
     QComboBox,
@@ -56,12 +40,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QProgressBar,
     QPushButton,
-    QRadioButton,
     QScrollArea,
-    QSizePolicy,
-    QSlider,
-    QStyledItemDelegate,
-    QStyleOptionViewItem,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -71,20 +50,48 @@ from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.file_search_section import FileSearchSection
+from artemis.channels.desktop.form_kit import button_row, divider, field, group, meta_label
+from artemis.channels.desktop.page_kit import PAGE_MAX_WIDTH, CurrentPageStack
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
-from artemis.channels.desktop.projects_panel import PAGE_MAX_WIDTH, CurrentPageStack
 from artemis.channels.desktop.provider_section import (
     ConnectionTest,
     ProviderSection,
-    button_row,
-    divider,
-    field,
-    group,
-    meta_label,
     store_endpoint_key,
 )
 from artemis.channels.desktop.routines_section import RoutinesSection
+from artemis.channels.desktop.settings_io import (
+    PANEL_BINDINGS,
+    SettingPath,
+    _same,
+    microphone_choices,
+    save_code_agent,
+    setting_value,
+)
+from artemis.channels.desktop.settings_io import (
+    _write_validated as _write_validated,  # eski içe aktarma yolu
+)
+from artemis.channels.desktop.settings_io import (
+    save_choices as save_choices,
+)
+from artemis.channels.desktop.settings_io import (
+    save_computer_mode as save_computer_mode,
+)
+from artemis.channels.desktop.settings_widgets import (
+    _DIRTY_A11Y,
+    _DIRTY_ROLE,
+    _GROUP_ROLE,
+    _HEADER_HEIGHT,
+    _ITEM_HEIGHT,
+    _fold,
+    _install_wheel_guard,
+    _Notice,
+    _SavedNote,
+    _SearchBox,
+    _SectionDelegate,
+    _SectionList,
+    _ThemeCard,
+)
 from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS, THEMES
@@ -99,10 +106,7 @@ from artemis.config.settings import (
     Settings,
     load_settings,
 )
-from artemis.text import search_fold
 from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
-
-SettingPath = tuple[str, ...]
 
 _BLOCK_MAX_WIDTH = PAGE_MAX_WIDTH  # liste + sayfa bloğu; geniş pencerede ortalanır
 # Panel bundan darsa bölüm listesi yerine sayfanın üstünde açılır "Bölüm" listesi çıkar: 200px'lik
@@ -115,323 +119,6 @@ _REVERT_TOOLTIP = (
     "API anahtarları ve kasadaki parolalar geri alınmaz."
 )
 
-
-def _same(a: Any, b: Any) -> bool:
-    """Tür-katı eşitlik: True != 1, 1 != 1.0; sözlükte anahtar sırası önemsiz, listede önemli.
-
-    Python'un `==`i bool/int/float'ı eşit sayar; "geri al" ve "yazma gereksiz" kararı bu yüzden
-    sessizce yanlış çıkardı (örn. 1 yerine True kaydedilmiş sayılırdı)."""
-    if type(a) is not type(b):
-        return False
-    if isinstance(a, dict):
-        return a.keys() == b.keys() and all(_same(a[key], b[key]) for key in a)
-    if isinstance(a, list | tuple):
-        return len(a) == len(b) and all(_same(x, y) for x, y in zip(a, b, strict=True))
-    return bool(a == b)
-
-
-@dataclass(frozen=True)
-class PanelBinding:
-    """Paneldeki bir widget ile config'teki tek bir alan arasındaki iki yönlü bağ.
-
-    Yenileme (`write`) ve kaydetme (`read`) aynı satırdan beslenir: bir ayarı yalnız birinde
-    unutmak, eskiden panelin varsayılanı gösterip "Uygula"da kayıtlı değeri ezmesine yol
-    açabiliyordu. Widget'ın kendisi (etiket, ipucu, yerleşim) yine elle kurulur.
-    """
-
-    path: SettingPath
-    widget: str  # SettingsPanel öznitelik adı
-    read: Callable[[Any], Any]
-    write: Callable[[Any, Any], None]
-    # Yenilemede sinyal yayılmaz; ör. kesintisiz kip kutusu canlı ses kipini değiştirmemeli.
-    quiet: bool = False
-
-
-def _checkbox(path: SettingPath, widget: str, *, quiet: bool = False) -> PanelBinding:
-    return PanelBinding(
-        path, widget, lambda box: box.isChecked(), lambda box, value: box.setChecked(bool(value)),
-        quiet=quiet,
-    )
-
-
-def _combo(path: SettingPath, widget: str, *, fallback_first: bool) -> PanelBinding:
-    """`fallback_first`: kayıtlı değer listede yoksa ilk seçenek gösterilir, yoksa seçim kalır."""
-
-    def write(combo: Any, value: Any) -> None:
-        index = combo.findData(value)
-        if index >= 0 or fallback_first:
-            combo.setCurrentIndex(max(0, index))
-
-    return PanelBinding(path, widget, lambda combo: str(combo.currentData()), write)
-
-
-def _precision_binding() -> PanelBinding:
-    """stt_compute_type: kayıtlı değer iki standart seçenekten biri değilse (örn. `int8`) ayrı bir
-    öğe olarak gösterilir; böylece Uygula kullanıcının elle yazdığı değeri sessizce ezmez."""
-
-    def write(combo: Any, value: Any) -> None:
-        for index in range(combo.count() - 1, -1, -1):
-            if combo.itemData(index) not in _STANDARD_PRECISIONS:
-                combo.removeItem(index)
-        if combo.findData(value) < 0:
-            combo.addItem(f"Özel ({value})", value)
-        combo.setCurrentIndex(combo.findData(value))
-
-    return PanelBinding(
-        ("voice", "stt_compute_type"), "precision_combo",
-        lambda combo: str(combo.currentData()), write,
-    )
-
-
-_STANDARD_PRECISIONS = ("int8_float16", "float16")
-
-# Panelin "Uygula" ile yazdığı ve "yenile" ile okuduğu sade alanlar. Özel mantığı olanlar
-# (mikrofon aygıtı, STT model yolu, uygulama listesi, code_agent) save_choices'ta açık kalır.
-PANEL_BINDINGS: tuple[PanelBinding, ...] = (
-    PanelBinding(
-        ("voice", "wake_word"), "wake_name",
-        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
-    ),
-    _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
-    _precision_binding(),
-    _checkbox(("voice", "continuous_mode"), "continuous_mode", quiet=True),
-    PanelBinding(
-        ("voice", "stt_mode"), "hybrid_stt",
-        lambda box: "hybrid" if box.isChecked() else "local",
-        lambda box, value: box.setChecked(value == "hybrid"),
-    ),
-    PanelBinding(
-        ("voice", "stt_cloud_endpoint"), "cloud_server",
-        lambda combo: str(combo.currentData() or ""),
-        lambda combo, value: combo.setCurrentIndex(max(0, combo.findData(value))),
-    ),
-    _combo(("voice", "stt_cloud_protocol"), "cloud_protocol", fallback_first=True),
-    PanelBinding(
-        ("voice", "stt_cloud_model"), "cloud_model",
-        lambda combo: combo.currentText().strip(),
-        lambda combo, value: combo.setEditText(str(value)),
-    ),
-    _checkbox(("voice", "barge_in_without_wake"), "barge_in_box"),
-    _checkbox(("voice", "followup_listening"), "followup_box"),
-    _checkbox(("voice", "live_transcript"), "live_transcript"),
-    _checkbox(("voice", "noise_suppression"), "noise_suppression"),
-    _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
-    _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
-    _checkbox(("voice", "echo_cancellation"), "echo_cancellation"),
-    _checkbox(("dictation", "enabled"), "dictation_enabled"),
-    PanelBinding(
-        ("dictation", "hotkey"), "dictation_hotkey",
-        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
-    ),
-    _checkbox(("selection_actions", "enabled"), "selection_enabled"),
-    PanelBinding(
-        ("selection_actions", "hotkey"), "selection_hotkey",
-        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
-    ),
-    PanelBinding(
-        ("selection_actions", "translate_to"), "selection_translate_to",
-        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
-    ),
-    _checkbox(("proactive", "enabled"), "proactive_enabled"),
-    _checkbox(("routines", "enabled"), "routines_enabled"),
-    _checkbox(("calendar", "enabled"), "calendar_enabled"),
-    _checkbox(("calendar", "allow_cloud"), "calendar_cloud"),
-    _checkbox(("mail", "enabled"), "mail_enabled"),
-    _checkbox(("mail", "allow_cloud"), "mail_cloud"),
-    _checkbox(("skills", "enabled"), "skills_enabled"),
-    _checkbox(("triggers", "enabled"), "triggers_enabled"),
-    _checkbox(("research", "enabled"), "research_enabled"),
-    _checkbox(("daily_summary", "enabled"), "daily_summary_enabled"),
-    PanelBinding(
-        ("daily_summary", "at"), "daily_summary_at",
-        lambda edit: edit.text().strip() or "22:30", lambda edit, value: edit.setText(str(value)),
-    ),
-    _checkbox(("file_search", "enabled"), "file_search_enabled"),
-    PanelBinding(
-        ("file_search", "roots"), "file_search_roots",
-        lambda box: [box.item(row).text() for row in range(box.count())],
-        lambda box, value: (box.clear(), box.addItems([str(v) for v in value]))[0],
-    ),
-    _checkbox(("telegram", "accept_voice"), "telegram_voice"),
-    _checkbox(("telegram", "accept_photo"), "telegram_photo"),
-    _checkbox(("telegram", "accept_files"), "telegram_files"),
-    PanelBinding(
-        ("mail", "host"), "mail_host",
-        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
-    ),
-    PanelBinding(
-        ("mail", "username"), "mail_username",
-        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
-    ),
-    PanelBinding(
-        ("mail", "port"), "mail_port",
-        lambda edit: int(edit.text()) if edit.text().strip().isdigit() else 993,
-        lambda edit, value: edit.setText(str(value)),
-    ),
-    PanelBinding(
-        ("mail", "folder"), "mail_folder",
-        lambda edit: edit.text().strip() or "INBOX", lambda edit, value: edit.setText(str(value)),
-    ),
-    _checkbox(("allow_all_applications",), "all_applications"),
-    PanelBinding(
-        ("computer_use", "mode"),
-        "computer_auto",
-        lambda box: "auto" if box.isChecked() else "accept",
-        lambda box, value: box.setChecked(value == "auto"),
-    ),
-)
-_BOUND_PATHS = frozenset(binding.path for binding in PANEL_BINDINGS)
-
-
-def setting_value(settings: Settings, path: SettingPath) -> Any:
-    value: Any = settings
-    for key in path:
-        value = getattr(value, key)
-    return value
-
-
-def save_choices(
-    path: Path, device: int | str | None,
-    *, values: Mapping[SettingPath, Any] | None = None,
-    applications: dict[str, str] | None = None,
-    code_agent: dict[str, Any] | None = None,
-    stt_model: Path | None = None,
-) -> bool:
-    """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir.
-
-    Dosya içeriği değişmeyecekse yazmaz ve False döner (otomatik kayıt her duraksamada dosyayı
-    yeniden yazıp izleyicileri ve yeniden başlatmayı boşuna tetiklemesin); yazdıysa True.
-
-    `values` yalnız PANEL_BINDINGS yollarını kabul eder (yazım hatası sessizce yeni alan
-    açmasın diye KeyError); verilmeyen yolun kayıtlı değeri korunur.
-    """
-    unknown = set(values or {}) - _BOUND_PATHS
-    if unknown:
-        raise KeyError(f"Panel bağı olmayan ayar yolu: {sorted(unknown)}")
-    load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    before = copy.deepcopy(raw)
-    raw.setdefault("voice", {})["input_device"] = device
-    for setting_path, value in (values or {}).items():
-        section = raw
-        for key in setting_path[:-1]:
-            section = section.setdefault(key, {})
-        section[setting_path[-1]] = value
-    if stt_model is not None:
-        raw["voice"]["stt_model"] = str(stt_model)
-    if applications is not None:
-        raw["applications"] = applications
-        raw["close_without_confirmation"] = [
-            name for name in raw.get("close_without_confirmation", []) if name in applications
-        ]
-    if code_agent is not None:
-        _merge_code_agent(raw, code_agent)
-    if _same(before, raw):
-        return False
-    _write_validated(path, raw)
-    return True
-
-
-def save_computer_mode(path: Path, mode: str) -> None:
-    """Yalnız bilgisayar kullanımı kipini yazar; üst çubuktaki düğme Uygula beklemez."""
-    if mode not in {"accept", "auto"}:
-        raise ValueError(f"Geçersiz bilgisayar kullanımı kipi: {mode!r}")
-    load_settings(path)
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    raw.setdefault("computer_use", {})["mode"] = mode
-    _write_validated(path, raw)
-
-
-def save_code_agent(path: Path, code_agent: dict[str, Any]) -> None:
-    """Yalnız code_agent alanları; model/cihaz seçimine bağlı değil (GitHub bağı hemen kalıcı)."""
-    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    _merge_code_agent(raw, code_agent)
-    _write_validated(path, raw)
-
-
-def save_triggers(path: Path, items: list[dict[str, Any]], *, enable: bool = False) -> None:
-    """Tetikleyici listesini yazar (ADR 0061). Yalnız Ayarlar formundan, kullanıcı eylemiyle
-    çağrılır; hiçbir araç ya da model ulaşamaz. Diğer anahtarlar ve atomik yazım
-    `_write_validated`ta."""
-    load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
-    raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
-    section = raw.get("triggers") or {}
-    section["items"] = items
-    if enable:
-        section["enabled"] = True
-    raw["triggers"] = section
-    _write_validated(path, raw)
-
-
-def _merge_code_agent(raw: dict[str, Any], code_agent: dict[str, Any]) -> None:
-    # None değer alanı siler (örn. GitHub bağını kaldırmak); diğer code_agent alanları korunur.
-    section = raw.get("code_agent") or {}
-    for key, value in code_agent.items():
-        if value is None:
-            section.pop(key, None)
-        else:
-            section[key] = value
-    raw["code_agent"] = section
-
-
-def _write_validated(path: Path, raw: dict[str, Any]) -> None:
-    Settings.model_validate(raw)
-    descriptor, temporary = tempfile.mkstemp(prefix=".settings-", suffix=".yaml", dir=path.parent)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            yaml.safe_dump(raw, stream, allow_unicode=True, sort_keys=False)
-        load_settings(Path(temporary))
-        os.replace(temporary, path)
-    finally:
-        Path(temporary).unlink(missing_ok=True)
-
-
-def microphone_choices(
-    devices: list[Any], hosts: list[Any], active: int | str,
-    *, advanced: bool = False,
-) -> list[tuple[str, int, list[int]]]:
-    """Aynı fiziksel mikrofonun sürücü kopyalarını tek seçenekte birleştirir."""
-    inputs = [(i, d) for i, d in enumerate(devices) if d["max_input_channels"] > 0]
-    wasapi = [(i, d) for i, d in inputs if hosts[d["hostapi"]]["name"] == "Windows WASAPI"]
-    canonical = wasapi or sorted(inputs, key=lambda pair: -len(pair[1]["name"]))
-    result: list[tuple[str, int, list[int]]] = []
-    grouped: set[int] = set()
-    for _index, device in canonical:
-        name = device["name"].strip()
-        if any(word in name.casefold() for word in (
-            "ses eşleştiricisi", "birincil ses", "sound mapper"
-        )):
-            continue
-        if _index in grouped:
-            continue
-        matches = [
-            (i, d) for i, d in inputs
-            if name.casefold().startswith(d["name"].strip().casefold())
-        ]
-        indices = [i for i, _ in matches]
-        grouped.update(indices)
-        # MME burada 16 kHz mono akışıyla uyumlu mevcut sürücü yolunu korur.
-        selected = min(matches, key=lambda pair: hosts[pair[1]["hostapi"]]["name"] != "MME")[0]
-        if isinstance(active, int) and active in indices:
-            selected = active
-        if name.startswith("Microphone Array ("):
-            name = "Dahili mikrofon — " + name[len("Microphone Array ("):].rstrip(")")
-        elif name.startswith("Mikrofon ("):
-            name = "Mikrofon — " + name[len("Mikrofon ("):].rstrip(")")
-        result.append((name, selected, indices))
-    if advanced and wasapi:
-        seen = {name.casefold() for name, _, _ in result}
-        for index, device in inputs:
-            name = device["name"].strip()
-            if index in grouped or name.casefold() in seen:
-                continue
-            if any(word in name.casefold() for word in (
-                "ses eşleştiricisi", "birincil ses", "sound mapper"
-            )):
-                continue
-            seen.add(name.casefold())
-            result.append((name, index, [index]))
-    return result
 
 
 GitHubSyncFunction = Callable[[str, Path, Runner, Callable[[], bool]], SyncReport]
@@ -484,168 +171,9 @@ def default_repos_dir() -> str:
     return str(Path(os.environ.get("USERPROFILE") or Path.home()) / "Desktop" / "Projeler")
 
 
-_ITEM_HEIGHT = 30  # bölüm satırı; dar pencerede liste kendi kaydırıcısına ihtiyaç duymasın
-_HEADER_HEIGHT = 22  # grup başlığı, grubun ilk satırının üstünde
-_GROUP_ROLE = Qt.ItemDataRole.UserRole + 1
-_DIRTY_ROLE = Qt.ItemDataRole.UserRole + 2
-_DIRTY_A11Y = "kaydedilmemiş değişiklik var"
 _LAST_SECTION_KEY = "settings/section"
 
 
-def _fold(text: str) -> str:
-    """Arama için: büyük/küçük harf ve Türkçe İ/ı farkı yok sayılır."""
-    return search_fold(text)
-
-
-class _SectionDelegate(QStyledItemDelegate):
-    """Grup başlığını grubun ilk satırının üstüne çizer. Başlık ayrı bir öğe olmadığı için
-    seçilemez ve klavye gezintisinde atlanır; satır sırası sayfa sırasıyla aynı kalır."""
-
-    def __init__(self, parent: QWidget) -> None:
-        super().__init__(parent)
-        self.muted = QColor(THEMES[DEFAULT_THEME]["muted"])
-        self.accent = QColor(THEMES[DEFAULT_THEME]["accent"])
-
-    def sizeHint(self, option: QStyleOptionViewItem, index: Any) -> QSize:
-        hint = index.data(Qt.ItemDataRole.SizeHintRole)
-        return hint if isinstance(hint, QSize) else super().sizeHint(option, index)
-
-    def paint(self, painter: QPainter, option: QStyleOptionViewItem, index: Any) -> None:
-        title = index.data(_GROUP_ROLE)
-        if title:
-            painter.save()
-            font = QFont(option.font)
-            font.setPixelSize(11)
-            font.setBold(True)
-            font.setLetterSpacing(QFont.SpacingType.PercentageSpacing, 104)
-            painter.setFont(font)
-            painter.setPen(self.muted)
-            rect = QRect(option.rect.left() + 12, option.rect.top(), option.rect.width() - 12,
-                         _HEADER_HEIGHT - 3)
-            painter.drawText(rect, int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignBottom),
-                             str(title))
-            painter.restore()
-            option = QStyleOptionViewItem(option)
-            option.rect = option.rect.adjusted(0, _HEADER_HEIGHT, 0, 0)
-        super().paint(painter, option, index)
-        if index.data(_DIRTY_ROLE):  # renk tek başına değil: erişilebilir metin de var
-            painter.save()
-            painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(self.accent)
-            painter.drawEllipse(QPoint(option.rect.right() - 14, option.rect.center().y()), 4, 4)
-            painter.restore()
-
-
-class _SearchBox(QLineEdit):
-    """Esc aramayı temizler."""
-
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape and self.text():
-            self.clear()
-        else:
-            super().keyPressEvent(event)
-
-
-class _SectionList(QListWidget):
-    """Bölüm listesi. Kaydırma dışında, sabit durur; `scroll_area` sağdaki sayfa kaydırma
-    alanına işaret eder (başa dönme ve görünür kılma için)."""
-
-    scroll_area: QScrollArea
-
-    def _on_header(self, position: QPoint) -> bool:
-        item = self.itemAt(position)
-        return (
-            item is not None and bool(item.data(_GROUP_ROLE))
-            and position.y() - self.visualItemRect(item).top() < _HEADER_HEIGHT
-        )
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if not self._on_header(event.position().toPoint()):  # başlık alanı seçim yapmaz
-            super().mousePressEvent(event)
-
-
-# Tema adının yanındaki açıklama; anahtarlar themes.THEME_LABELS ile aynı.
-_THEME_HINTS = {
-    "light": "Açık gezinme, açık çalışma alanı",
-    "dark": "Koyu gezinme, koyu çalışma alanı",
-    "light-mixed": "Koyu gezinme, açık çalışma alanı",
-    "dark-mixed": "Açık gezinme, koyu çalışma alanı",
-}
-
-
-def _swatch(key: str) -> QPixmap:
-    """Gerçek arayüze yakın küçük önizleme: gezinme, çalışma alanı, balon ve birincil düğme."""
-    colors = THEMES[key]
-    width, height = 128, 76
-    pixmap = QPixmap(width, height)
-    pixmap.fill(Qt.GlobalColor.transparent)
-    painter = QPainter(pixmap)
-    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-    clip = QPainterPath()
-    clip.addRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
-    painter.setClipPath(clip)
-    painter.fillRect(0, 0, width, height, QColor(colors["bg"]))
-    painter.fillRect(0, 0, 32, height, QColor(colors["nav"]))
-    nav_text = QColor(colors["nav_muted"])
-    painter.fillRect(6, 24, 20, 6, QColor(colors["nav_selected"]))  # seçili gezinme satırı
-    for top in (10, 24, 36, 48):
-        painter.fillRect(8, top + 1, 16, 3, nav_text)
-    ink = QColor(colors["muted"])
-    painter.fillRect(40, 10, 40, 4, ink)  # asistan cevabı
-    painter.fillRect(40, 18, 56, 4, ink)
-    painter.setPen(Qt.PenStyle.NoPen)
-    painter.setBrush(QColor(colors["accent_soft"]))
-    painter.drawRoundedRect(QRectF(66, 30, 54, 16), 6, 6)  # kullanıcı balonu
-    painter.setBrush(QColor(colors["accent"]))
-    painter.drawRoundedRect(QRectF(88, 56, 32, 11), 4, 4)  # birincil düğme
-    painter.setBrush(QColor(colors["surface"]))
-    painter.setPen(QColor(colors["border"]))
-    painter.drawRoundedRect(QRectF(40, 56, 42, 11), 4, 4)  # ikincil alan
-    painter.setClipping(False)
-    painter.setPen(QColor(colors["border"]))
-    painter.setBrush(Qt.BrushStyle.NoBrush)
-    painter.drawRoundedRect(QRectF(0.5, 0.5, width - 1, height - 1), 8, 8)
-    painter.end()
-    return pixmap
-
-
-class _ThemeCard(QFrame):
-    """Tema kartı: tek seçim göstergesi 2px vurgu kenarlığıdır; radyo düğmesi yalnız klavye ve
-    ekran okuyucu için kalır (göstergesi QSS ile gizli), kart her yerinden tıklanır."""
-
-    def __init__(self, key: str, label: str) -> None:
-        super().__init__()
-        self.key = key
-        self.setObjectName("themeCard")
-        self.setProperty("selected", False)
-        row = QHBoxLayout(self)
-        row.setContentsMargins(12, 12, 12, 12)
-        row.setSpacing(12)
-        swatch = QLabel()
-        swatch.setPixmap(_swatch(key))
-        swatch.setAccessibleName(f"{label} önizleme")
-        self.radio = QRadioButton(label)
-        self.radio.toggled.connect(self._selected)
-        text = QVBoxLayout()
-        text.setSpacing(4)
-        text.addStretch(1)
-        text.addWidget(self.radio)
-        hint = meta_label(_THEME_HINTS.get(key, ""))
-        hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        text.addWidget(hint)
-        text.addStretch(1)
-        row.addWidget(swatch)
-        row.addLayout(text, 1)
-
-    def _selected(self, on: bool) -> None:
-        self.setProperty("selected", on)
-        self.style().unpolish(self)
-        self.style().polish(self)
-
-    def mousePressEvent(self, event: Any) -> None:
-        self.radio.click()
-        super().mousePressEvent(event)
 
 
 def _indent(box: QCheckBox, help: str = "") -> QHBoxLayout:  # noqa: A002
@@ -670,81 +198,6 @@ def _check_hint(text: str) -> QLabel:
     return label
 
 
-class _SavedNote(QLabel):
-    """Anında kaydedilen bir denetim çalışınca kısa süre "Kaydedildi" der (renge bağlı değil)."""
-
-    def __init__(self) -> None:
-        super().__init__("Kaydedildi")
-        self.setObjectName("meta")
-        self.setAccessibleName("Kayıt durumu")
-        self.setVisible(False)
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.setInterval(2500)
-        self._timer.timeout.connect(self.hide)
-
-    def flash(self) -> None:
-        self.show()
-        self._timer.start()
-
-
-class _Notice(QLabel):
-    """Üst satırdaki durum yazısı: `setText` geçicidir (~6 sn), `show_error` kalıcıdır.
-
-    Alt çubuk kalktığı için mesajlar sayfayı itmeden köşede belirir; hata ise kullanıcı bir
-    şey yapana (yeni kayıt/geri alma/yeni metin) kadar görünür kalmalı."""
-
-    def __init__(self) -> None:
-        super().__init__("")
-        self.setObjectName("meta")
-        self.setAccessibleName("Durum")
-        self.setWordWrap(True)
-        self.setTextFormat(Qt.TextFormat.PlainText)
-        self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        # Uzun mesaj satırın asgari genişliğini şişirip dar pencerede yatay kaydırma açmasın.
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self._timer = QTimer(self)
-        self._timer.setSingleShot(True)
-        self._timer.setInterval(6000)
-        self._timer.timeout.connect(self.clear)
-
-    def setText(self, arg__1: str) -> None:
-        super().setText(arg__1)
-        if arg__1:
-            self._timer.start()
-        else:
-            self._timer.stop()
-
-    def show_error(self, text: str) -> None:
-        super().setText(text)
-        self._timer.stop()
-
-
-class _WheelGuard(QObject):
-    """Kaydırılan sayfadaki açılır liste/sayı kutusu tekerlekle değişmez; tekerlek sayfayı kaydırır.
-
-    Kullanıcı sayfada aşağı inerken imlecin altına gelen seçim sessizce değişiyordu
-    (2026-11-13). Değer yalnız tıklayıp seçerek ya da klavyeyle değişir.
-    """
-
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
-        if event.type() != QEvent.Type.Wheel or not isinstance(
-            watched, QComboBox | QAbstractSpinBox | QSlider
-        ):
-            return False
-        parent = watched.parentWidget()
-        while parent is not None and not isinstance(parent, QAbstractScrollArea):
-            parent = parent.parentWidget()
-        if parent is None:
-            return False  # kaydırılan sayfada değil: normal davranış
-        QApplication.sendEvent(parent.viewport(), event)
-        return True
-
-
-def _install_wheel_guard() -> None:
-    app = QApplication.instance()
-    if app is not None and app.findChild(_WheelGuard) is None:
-        app.installEventFilter(_WheelGuard(app))
 
 
 class SettingsPanel(QWidget):

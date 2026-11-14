@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.channels.desktop.provider_section import button_row, group, meta_label
+from artemis.channels.desktop.form_kit import button_row, group, meta_label
+from artemis.channels.desktop.settings_io import _write_validated
 from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.channels.desktop.skill_dialog import SkillDialog, read_for_edit
 from artemis.config.settings import Settings, load_settings
@@ -299,9 +300,6 @@ class SkillsSection(QWidget):
         if problem:
             self.notice.setText(problem)
             return
-        # Ayar paneliyle aynı doğrulamalı, atomik yazım (diğer anahtarlar korunur).
-        from artemis.channels.desktop.settings_panel import _write_validated
-
         try:
             raw = yaml.safe_load(self._config_path.read_text(encoding="utf-8")) or {}
             section = raw.get("skills") or {}

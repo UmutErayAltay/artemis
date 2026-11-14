@@ -31,7 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop import themes
-from artemis.channels.desktop.projects_panel import (
+from artemis.channels.desktop.page_kit import (
     CurrentPageStack,
     EmptyState,
     make_card,

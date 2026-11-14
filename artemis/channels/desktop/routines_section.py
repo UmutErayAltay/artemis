@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
+from artemis.channels.desktop.form_kit import button_row, field, group, meta_label
 from artemis.channels.desktop.routine_dialog import RoutineDialog, RoutineFileDialog
 from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.config.settings import load_settings

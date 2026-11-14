@@ -28,14 +28,14 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop import pet_sprite
-from artemis.channels.desktop.pet_creator_panel import CreatorPanel
-from artemis.channels.desktop.pet_sprite import PetError, PetExistsError, PetInfo
-from artemis.channels.desktop.projects_panel import (
+from artemis.channels.desktop.page_kit import (
     AutoHideLabel,
     CurrentPageStack,
     PageBody,
     make_page_header,
 )
+from artemis.channels.desktop.pet_creator_panel import CreatorPanel
+from artemis.channels.desktop.pet_sprite import PetError, PetExistsError, PetInfo
 from artemis.channels.desktop.widgets import HelpTip
 
 _SOURCE_LABEL = {"artemis": "Artemis", "codex": "Codex"}

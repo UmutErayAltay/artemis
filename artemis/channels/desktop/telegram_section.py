@@ -18,7 +18,8 @@ import yaml
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
-from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
+from artemis.channels.desktop.form_kit import button_row, field, group, meta_label
+from artemis.channels.desktop.settings_io import _write_validated
 from artemis.channels.desktop.telegram_service import channel_blocker
 from artemis.channels.telegram.api import (
     TOKEN_TARGET,
@@ -318,9 +319,6 @@ class TelegramSection(QWidget):
 
     def _write_telegram_key(self, key: str, value: int | bool | None) -> bool:
         """`telegram.<key>` yazar (None = sil); doğrulanmış atomik yazıcı, hatada dosya korunur."""
-        # Döngüsel içe aktarmayı önlemek için geç alınır (settings_panel bu bölümü içerir).
-        from artemis.channels.desktop.settings_panel import _write_validated
-
         try:
             raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
             section = raw.get("telegram") or {}

@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.channels.desktop.projects_panel import (
+from artemis.channels.desktop.page_kit import (
     AutoHideLabel,
     EmptyState,
     make_card,

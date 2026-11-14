@@ -1,6 +1,6 @@
 """Kod ajanı ayarlarının yazımı ve ajan profili formu (ADR 0049 arayüzü).
 
-Yazım tek mekanizmadan geçer: `settings_panel.save_code_agent` (doğrula, aynı dizinde atomik
+Yazım tek mekanizmadan geçer: `settings_io.save_code_agent` (doğrula, aynı dizinde atomik
 değiştir, bilinmeyen anahtarları koru). Burada yalnız hangi değerin yazılacağı hesaplanır.
 Arayüz yol yazmaz/çözmez: klasörü kullanıcı seçer, ajan/klasör için model yalnız takma ad görür.
 """
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.dialog_shell import FormDialog
+from artemis.channels.desktop.settings_io import save_code_agent
 from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import (
     ALIAS_RE,
@@ -43,9 +44,6 @@ def _raw_code_agent(path: Path) -> dict[str, Any]:
 
 
 def _save(path: Path, values: dict[str, Any]) -> None:
-    # Döngüsel içe aktarmayı önlemek için geç: settings_panel zaten projects_panel'i içe aktarır.
-    from artemis.channels.desktop.settings_panel import save_code_agent
-
     save_code_agent(path, values)
 
 

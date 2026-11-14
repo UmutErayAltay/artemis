@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from PySide6.QtWidgets import QListWidget, QStackedWidget
 
-from artemis.channels.desktop.projects_panel import EmptyState
+from artemis.channels.desktop.page_kit import EmptyState
 
 
 class ListWithEmpty(QStackedWidget):

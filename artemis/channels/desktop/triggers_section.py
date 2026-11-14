@@ -23,7 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.channels.desktop.provider_section import button_row, group, meta_label
+from artemis.channels.desktop.form_kit import button_row, group, meta_label
+from artemis.channels.desktop.settings_io import save_triggers
 from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.channels.desktop.trigger_dialog import TriggerDialog
 from artemis.config.settings import MAX_TRIGGERS, TriggerConfig, load_settings
@@ -248,9 +249,6 @@ class TriggersSection(QWidget):
         self._write(items, enable=False, note="")
 
     def _write(self, items: list[TriggerConfig], *, enable: bool, note: str) -> None:
-        # Geç içe aktarma: settings_panel bu modülü içe aktarır.
-        from artemis.channels.desktop.settings_panel import save_triggers
-
         try:
             save_triggers(
                 self._config_path, [i.model_dump(exclude_none=True) for i in items], enable=enable
