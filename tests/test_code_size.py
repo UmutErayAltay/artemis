@@ -17,8 +17,6 @@ ROOT = Path(__file__).parents[1]
 
 ALLOW: dict[str, int] = {
     "artemis/channels/desktop/app.py": 2189,
-    "artemis/channels/desktop/settings_panel.py": 1863,
-    "artemis/channels/desktop/settings_panel.py::SettingsPanel.__init__": 825,
     "artemis/channels/desktop/app.py::DesktopWindow._handle_event": 206,
     # güvenlik çekirdeği; yalnız boyut için bölünmez (ADR gerekir)
     "artemis/safety/gate.py::SafetyGate.dispatch": 224,
