@@ -32,7 +32,7 @@ from artemis.config.settings import ModelConfig, Settings
 from artemis.mcp.client import MCPError, validate_command_arguments
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import ToolDefinition
-from artemis.tools.code_agent_process import NO_WINDOW, kill_tree
+from artemis.tools.code_agent_process import NO_WINDOW, kill_tree, own_process_tree
 from artemis.tools.credentials import read_secret
 from artemis.tools.platform import child_environment
 
@@ -961,6 +961,7 @@ class ClaudeCliProvider:
             )
         except OSError:
             raise ProviderError(_CLI_FAILED) from None
+        tree = own_process_tree(proc)  # Windows job; None ise yalnız kill_tree
         try:
             if stream is None:
                 out, _err = await asyncio.wait_for(
@@ -973,6 +974,9 @@ class ClaudeCliProvider:
         except TimeoutError:
             raise RetryableProviderError("Claude Code yanıt süresi doldu.") from None
         finally:
+            if tree is not None:
+                # Job'u sonlandırmak çıkmış CLI'nin bıraktığı torunları da temizler.
+                await asyncio.to_thread(tree.kill)
             if proc.returncode is None:
                 # kill_tree en çok CLEANUP_SECONDS bekler; döngüyü bloklamasın.
                 await asyncio.to_thread(kill_tree, proc)
