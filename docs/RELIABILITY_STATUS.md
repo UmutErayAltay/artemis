@@ -68,11 +68,24 @@ Bilerek değiştirilmeyenler / açık sınırlar:
 - Claude kod ajanı Bash'i OS sandbox değildir; `Bash(git push:*)` reddi aşılabilir önek
   kuralıdır. Bağımsız kontroller ajanın değiştirdiği depoda çalışır.
 - `computer_use` "ok" sonucu hâlâ ikinci model yargısıdır; UIA/OS durum doğrulaması yok.
-- MCP ve `claude_cli` süreçleri `taskkill /T` ile kapanır; ebeveyn önce ölürse torun yetim
-  kalabilir (Job Object yok).
-- Silme günlüğünde `prepared` satırları açılışta uzlaştırılmıyor (dürüstçe "çözülmemiş" görünür).
+- MCP ve `claude_cli` süreçleri artık spawn sonrası KILL_ON_JOB_CLOSE Job Object'ine bağlanır
+  (`own_process_tree`, kod ajanındaki `WindowsProcessTree` yeniden kullanıldı) ve kapanışta job
+  sonlandırılır; `kill_tree` yedektir. Kalan sınır: süreç askıda başlatılmadığı için atamadan
+  önce doğan çocuklar job dışında kalabilir (askıda başlatma kapsam dışı); atama başarısızsa
+  yalnız `kill_tree` çalışır (uyarı loglanır). Testler: `tests/test_job_ownership.py` (sahte
+  kernel; gerçek torun testi `disruptive`).
+- Silme günlüğünde süreci ölmüş eski `prepared` satırları açılışta (`create_runtime`)
+  `uncertain` yapılır (`UndoJournal.reconcile_prepared`, 60 sn'den eski; taze satıra dokunulmaz).
+  Dosya sisteminden "tamamlandı" çıkarılmaz; günlük hâlâ içerik yedeği değildir. Testler:
+  `tests/test_undo.py`, `tests/test_runtime_lifecycle.py`.
 - Hafıza varsayılan açık, SQLite şifresiz, geçmiş saklama varsayılan sınırsız (0 gün);
-  değiştirilmedi, README'de yazılı. Şema sürümü (`user_version`) ve yedek/geri yükleme yok.
+  değiştirilmedi, README'de yazılı. `memory.sqlite3` ve `degisiklikler.sqlite3` artık
+  `PRAGMA user_version = 1` taşır. Dolu eski dosya geçiş süresince `<db>.bak-v<eski>` olarak
+  yedeklenir (mkstemp + atomik değiştirme, 0o600, sembolik bağlantı/junction reddi); geçiş tek
+  işlemdir ve başarıyla bitince yedek SİLİNİR (kalıcı yedek `memory_forget`/geçmiş silmeyi
+  delerdi). Başarısız geçiş geri alınır, yedek kalır ve hata yolunu söyler; kullanıcı silmeleri
+  kalan yedeği de siler. Daha yeni sürüm açılmaz (`SchemaTooNewError`). Henüz yapısal geçiş
+  yok; otomatik geri yükleme yok. Testler: `tests/test_sqlite_schema.py`.
 
 Bu turun yerel doğrulaması (Windows 11, Python 3.12.9, gerçek cihaza dokunulmadı):
 
