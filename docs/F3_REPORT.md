@@ -9,8 +9,9 @@ penceresi ve konuşmayı kesme ses kanalının sorumluluğudur; tool onayı hâl
 argümanlarla terminalden alınır. Sesli “evet” onay değildir.
 
 Uygulama ve yerel izole test doğrulaması tamamlandı.
-**F3 kabulü Windows elle doğrulama ve medyan < 1.5 sn ölçümü bekler.** Bu Linux
-ortamında mikrofon/hoparlör açılmadı; sahte ölçüm gerçek gecikme iddiası değildir.
+**F3 kabulü Windows elle doğrulama ve medyan < 1.5 sn ölçümü bekler.** Aşağıdaki "Doğrulama"
+bölümü F3 teslimindeki Linux koşusudur (tarihsel); güncel durum için sondaki 2026-11-14 bölümlerine
+bakın: Windows 11'de dosya güdümlü gerçek donanım ölçümü yapıldı, gerçek mikrofon kabulü kullanıcıdadır.
 
 ## Doğrulama
 
@@ -99,8 +100,8 @@ Artemis'in kendi kontrolündeki süre. Son koşuda sağlayıcının ilk token s�
 çıktı (aynı akşam iki tekrar: 4,2 ve 3,4 sn); kontrol koşusu eski ayarla da 3,43 sn verdi, yani artış
 sağlayıcıdandır. Aynı saatte kıyas: konuşma sonu bekleme 1078 → 672 ms, uçtan uca medyan 5672 → 5016 ms. Yerel hat %25
 kısaldı. Uçtan uca medyan < 1,5 sn hedefi bu model/sağlayıcı ile tutmuyor: modelin ilk token süresi tek
-başına ~0,8 sn, yerel hat ~1,6 sn. Kalan büyük yerel kalem STT'dir (large-v3 + beam 5; `large-v3-turbo`
-veya beam 1 ile kısalabilir, doğruluk ölçülerek seçilmeli — kural 11).
+başına ~0,8 sn, yerel hat spekülatif STT ile ~1,33 sn (ADR 0071; öncesinde ~1,6 sn). Daha hızlı STT
+ayarları (turbo, beam 1) doğruluk ölçümüyle reddedildi (aşağıda).
 
 ## STT ayarı ve uyandırma yolu seçimi (ölçüm, 2026-11-14)
 
