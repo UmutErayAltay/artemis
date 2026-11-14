@@ -240,3 +240,34 @@ def test_database_rejects_invalid_status(context: ToolContext) -> None:
             "UPDATE undo_records SET status = 'deleted' WHERE record_id = ?",
             (record.record_id,),
         )
+
+
+def _age(journal: UndoJournal, record_id: str, seconds: int) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    old = (datetime.now(UTC) - timedelta(seconds=seconds)).isoformat()
+    with sqlite3.connect(journal.path) as db:
+        db.execute("UPDATE undo_records SET created_at = ? WHERE record_id = ?", (old, record_id))
+
+
+def test_reconcile_prepared_marks_only_stale_prepared_uncertain(tmp_path: Path) -> None:
+    journal = UndoJournal(tmp_path / "state")
+    make = lambda n: journal.prepare(  # noqa: E731
+        turn_id="t", root=tmp_path, relative_path=n, size=1
+    )
+    stale, _, done, failed = make("a"), make("b"), make("c"), make("d")
+    journal.set_status(done.record_id, "completed")
+    journal.set_status(failed.record_id, "failed")
+    for record in (stale, done, failed):
+        _age(journal, record.record_id, 3600)
+
+    assert journal.reconcile_prepared() == 1
+    assert journal.reconcile_prepared() == 0  # idempotent
+    by_name = {r.relative_path: r.status for r in journal.list_records(root=tmp_path)}
+    assert by_name == {"a": "uncertain", "b": "prepared", "c": "completed", "d": "failed"}
+
+
+def test_reconcile_prepared_without_journal_is_noop(tmp_path: Path) -> None:
+    journal = UndoJournal(tmp_path / "state")
+    assert journal.reconcile_prepared() == 0
+    assert not journal.path.exists()

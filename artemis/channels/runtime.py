@@ -19,6 +19,7 @@ from artemis.memory.store import MemoryStore
 from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate
+from artemis.safety.undo import UndoJournal, UndoJournalError
 from artemis.skills import ensure_example
 from artemis.tools.base import ToolContext
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
@@ -157,6 +158,13 @@ def create_runtime(
         if primary is not None:
             # Geçmiş modelin penceresinin yarısını aşmamalı; yanıt ve araç şeması de sığmalı.
             budget = min(budget, primary.context_window // 2)
+        try:
+            # Ölen sürecin yarım silmeleri sonsuza dek "prepared" kalmasın.
+            stale = UndoJournal(loaded.state_dir).reconcile_prepared()
+            if stale:
+                log.emit("undo_reconciled", count=stale)
+        except (UndoJournalError, sqlite3.Error) as error:
+            log.emit("undo_reconcile_error", error_type=type(error).__name__)
         try:
             # Artemis'in kendi hafıza iskeleti (ADR 0054); hata açılışı bozmaz.
             ensure_skeleton(loaded.state_dir)

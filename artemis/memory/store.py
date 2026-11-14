@@ -18,12 +18,15 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from artemis.brain.conversation import TurnRecord
+from artemis.memory.sqlite_schema import ensure_schema, purge_backups
 from artemis.memory.vault import tokenize
 from artemis.text import turkish_fold
 
 # ponytail: arama son N tur üzerinde bellekte yapılır; N'i aşan arşiv için FTS5 veya embedding.
 _SEARCH_SCAN_TURNS = 2000
 
+# 1: sürümsüz dönemin şeması (notes.private dahil). Yapı değişince artır ve _migrate'e ekle.
+_SCHEMA_VERSION = 1
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS history_policy (
     id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -57,6 +60,24 @@ CREATE TABLE IF NOT EXISTS notes (
 """
 
 
+def _migrate(db: sqlite3.Connection, _from_version: int) -> None:
+    # executescript commit ederdi; geçiş tek işlemde kalsın diye deyimler tek tek koşar.
+    for statement in _SCHEMA.split(";"):
+        if statement.strip():
+            db.execute(statement)
+    columns = {row[1] for row in db.execute("PRAGMA table_info(notes)")}
+    if "private" not in columns:
+        # ADR 0056 geçişi: eski notların gizlilik kökeni bilinmez ve notlar lekeyi de
+        # saklamadığı için çıkarılamaz. Gizli değil sayılırlar; bu sınır README'de
+        # yazılıdır ve kullanıcı şüpheli notu memory_forget ile silebilir.
+        # suppress: eşzamanlı bir geçiş sütunu az önce eklediyse hata beklenendir.
+        with suppress(sqlite3.OperationalError):
+            db.execute("ALTER TABLE notes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
+        # Bastırılan hata gerçek bir başarısızlığı gizleyebilir: sütun yoksa sürüm artmasın.
+        if "private" not in {row[1] for row in db.execute("PRAGMA table_info(notes)")}:
+            raise sqlite3.OperationalError("notes.private sütunu eklenemedi.")
+
+
 @dataclass(frozen=True)
 class Note:
     id: int
@@ -85,15 +106,7 @@ class MemoryStore:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
-            db.executescript(_SCHEMA)
-            columns = {row[1] for row in db.execute("PRAGMA table_info(notes)")}
-            if "private" not in columns:
-                # ADR 0056 geçişi: eski notların gizlilik kökeni bilinmez ve notlar lekeyi de
-                # saklamadığı için çıkarılamaz. Gizli değil sayılırlar; bu sınır README'de
-                # yazılıdır ve kullanıcı şüpheli notu memory_forget ile silebilir.
-                # suppress: eşzamanlı bir geçiş sütunu az önce eklediyse hata beklenendir.
-                with suppress(sqlite3.OperationalError), db:
-                    db.execute("ALTER TABLE notes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
+            ensure_schema(db, path, _SCHEMA_VERSION, _migrate)
 
     def _connect(self) -> closing[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=5)
@@ -113,7 +126,10 @@ class MemoryStore:
             raise ValueError("Saklama süresi 0–36500 gün olmalı; 0 otomatik silmeyi kapatır.")
         with self._connect() as db, db:
             db.execute("UPDATE history_policy SET retention_days = ? WHERE id = 1", (days,))
-            return self._prune(db, days)
+            pruned = self._prune(db, days)
+        if pruned:
+            purge_backups(self.path)
+        return pruned
 
     @staticmethod
     def _prune(db: sqlite3.Connection, days: int) -> int:
@@ -127,7 +143,10 @@ class MemoryStore:
             days = db.execute("SELECT retention_days FROM history_policy WHERE id = 1").fetchone()[
                 0
             ]
-            return self._prune(db, days)
+            pruned = self._prune(db, days)
+        if pruned:
+            purge_backups(self.path)
+        return pruned
 
     def delete_history(self) -> int:
         # Tek transaction: notlara dokunma; sıfırlama işaretleri artık gereksizdir.
@@ -141,7 +160,8 @@ class MemoryStore:
             db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
             db.execute("VACUUM")
             db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            return count
+        purge_backups(self.path)  # başarısız geçişten kalan yedek silineni saklamasın
+        return count
 
     def history_page(self, limit: int = 50) -> list[dict[str, str]]:
         with self._connect() as db:
@@ -261,4 +281,7 @@ class MemoryStore:
 
     def delete_note(self, note_id: int) -> bool:
         with self._connect() as db, db:
-            return db.execute("DELETE FROM notes WHERE id = ?", (note_id,)).rowcount > 0
+            deleted = db.execute("DELETE FROM notes WHERE id = ?", (note_id,)).rowcount > 0
+        if deleted:
+            purge_backups(self.path)
+        return deleted

@@ -14,6 +14,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from artemis.memory.sqlite_schema import ensure_schema
+
 COMPANION_FILES = {
     "kimlik": "Kimlik.md",
     "isler": "Isler.md",
@@ -71,6 +73,8 @@ def read_companion(state_dir: Path, key: str, limit: int) -> str:
 
 # Dosya başına en çok karakter: sınırı aşan metin sessizce kesilmez, reddedilir.
 MAX_CHARS = {"kimlik": 4000, "isler": 6000, "son_oturum": 3000}
+# 1: sürümsüz dönemin şeması (changes.private dahil). Yapı değişince artır.
+_SCHEMA_VERSION = 1
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS changes (
     id INTEGER PRIMARY KEY,
@@ -87,7 +91,7 @@ CREATE TABLE IF NOT EXISTS changes (
 """
 
 
-def _migrate(db: sqlite3.Connection) -> None:
+def _migrate(db: sqlite3.Connection, _from_version: int = 0) -> None:
     """ADR 0056: gizlilik kökeni sütunu yoksa ekler (eski kurulumlar).
 
     Eski kayıtta gizlilik bilgisi yoktu. Gizli içerik (izinsiz dosya/pano/ekran) yalnız dış
@@ -98,14 +102,19 @@ def _migrate(db: sqlite3.Connection) -> None:
     if "private" in columns:
         return
     try:
-        with db:
-            db.execute("ALTER TABLE changes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
-            db.execute("UPDATE changes SET private = tainted")
+        # Commit etmez: ensure_schema'nın tek işleminde koşar.
+        db.execute("ALTER TABLE changes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
+        db.execute("UPDATE changes SET private = tainted")
     except sqlite3.OperationalError:
-        # Eşzamanlı başka bir bağlantı sütunu az önce eklediyse geçiş zaten yapılmıştır.
+        # Başka bir bağlantı sütunu az önce eklediyse geçiş zaten yapılmıştır.
         columns = {row[1] for row in db.execute("PRAGMA table_info(changes)")}
         if "private" not in columns:
             raise
+
+
+def _migrate_all(db: sqlite3.Connection, from_version: int) -> None:
+    db.execute(_SCHEMA)
+    _migrate(db, from_version)
 
 
 class CompanionConflictError(Exception):
@@ -120,8 +129,7 @@ def _connect(state_dir: Path) -> closing[sqlite3.Connection]:
     db = sqlite3.connect(folder / "degisiklikler.sqlite3", timeout=5)
     db.execute("PRAGMA journal_mode=WAL")
     try:
-        db.execute(_SCHEMA)
-        _migrate(db)
+        ensure_schema(db, folder / "degisiklikler.sqlite3", _SCHEMA_VERSION, _migrate_all)
     except sqlite3.Error:
         db.close()
         raise
