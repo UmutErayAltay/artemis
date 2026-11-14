@@ -41,7 +41,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.brain.providers import provider_problem
 from artemis.channels.autostart import Autostart
 from artemis.channels.desktop import gui_gc, pet_sprite, shell_assets, themes
 from artemis.channels.desktop.approval_dialog import ApprovalDialog
@@ -74,7 +73,7 @@ from artemis.channels.desktop.pet import PetWidget
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.projects_panel import ProjectsPanel
 from artemis.channels.desktop.selection_popup import SelectionPopup
-from artemis.channels.desktop.settings_io import _same, save_choices, save_computer_mode
+from artemis.channels.desktop.settings_io import _same, save_computer_mode
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
 from artemis.channels.desktop.widgets import PetFace
@@ -99,8 +98,19 @@ from artemis.channels.desktop.window_layout import (
     build_topbar,
     page_frame,
 )
+from artemis.channels.desktop.window_restart import (
+    apply_settings,
+    check_provider,
+    code_agent_config_saved,
+    github_synced,
+    maybe_restart_for_config,
+    providers_changed,
+    request_restart,
+    restart_runtime,
+    telegram_changed,
+)
 from artemis.channels.runtime import Runtime, create_runtime
-from artemis.config.settings import load_settings, same_hotkey
+from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
 from artemis.tools.toast import ToastOutcome, show_toast
 
@@ -645,23 +655,7 @@ class DesktopWindow(QMainWindow):
             self._check_provider(open_settings=True)
 
     def _check_provider(self, *, open_settings: bool) -> None:
-        """Birincil model çağrılamayacaksa ilk tur patlamadan Ayarlar'ı sağlayıcı bölümünde açar."""
-        try:
-            reason = provider_problem(load_settings(self._config_path))
-        except (OSError, ValueError):
-            return
-        self.settings_panel.providers.show_problem(reason)
-        if reason and open_settings:
-            self.tabs.setCurrentWidget(self.settings_scroll)
-            # Sağlayıcı eksikse Ayarlar doğrudan Model bölümünde açılır.
-            names = self.settings_panel.section_names()
-            self.settings_panel.show_section(names.index("Model") if "Model" in names else 1)
-            QTimer.singleShot(
-                0,
-                lambda: self.settings_panel.sections.scroll_area.ensureWidgetVisible(
-                    self.settings_panel.providers
-                ),
-            )
+        check_provider(self, open_settings=open_settings)
 
     def _show_settings(self) -> None:
         self.tabs.setCurrentWidget(self.settings_scroll)
@@ -706,30 +700,10 @@ class DesktopWindow(QMainWindow):
         self._apply_theme(flipped)
 
     def _providers_changed(self) -> None:
-        if self.settings_panel.pet.creator is not None:
-            self.settings_panel.pet.creator.reload_models()
-        self._check_provider(open_settings=False)
-        if self._exiting or self._demo:
-            self.settings_panel.providers.status.setText(
-                "Kaydedildi; işlem bitince yeni ayarlar devreye girer."
-            )
-            return
-        self._request_restart(self.settings_panel.providers.status)
+        providers_changed(self)
 
     def _telegram_changed(self) -> None:
-        """chat_id/token değişti: proaktif Telegram teslimi yeniden kurulumla yeni durumu görür."""
-        status = self.settings_panel.telegram.message
-        if self._exiting or self._demo:
-            self._sync_telegram_service()
-            status.setText("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
-            return
-        # Kanal servisi çalışma zamanından bağımsızdır: yeni sohbet/token hemen eşitlenir.
-        # Yeniden kurulum hemen yapıldıysa o zaten eşitlemiştir (çift yeniden başlatma olmasın);
-        # ertelendiyse (meşgul) ya da sürüyorsa burada eşitlenir.
-        self._telegram_resynced = False
-        self._request_restart(status)
-        if not self._telegram_resynced:
-            self._sync_telegram_service()
+        telegram_changed(self)
 
     def _sync_telegram_service(self) -> None:
         """Config'e göre kanal servisini durdurup (gerekirse) yeniden başlatır; canlı, yeniden
@@ -746,67 +720,16 @@ class DesktopWindow(QMainWindow):
             service.start(self._config_path)
 
     def _code_agent_config_saved(self) -> None:
-        """Projeler'den yazılan ajan/klasör ayarı çalışma zamanına yeniden kurulumla ulaşır.
-
-        Takma adları çalışma zamanının ayarı çözer; yeniden kurulmazsa yeni klasör taslakta
-        "bilinmeyen klasör" olur. Meşgulken sahte bir uygulama iddiası yerine dürüst not düşülür.
-        """
-        if self._exiting or self._demo:
-            self.projects_panel.notice.setText(
-                "Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur."
-            )
-            return
-        self._request_restart()
+        code_agent_config_saved(self)
 
     def _request_restart(self, notice: QLabel | None = None) -> None:
-        """Config değişince çalışma zamanını kurmanın TEK girişi (Uygula, sağlayıcı, kod ajanı).
-
-        Yeniden kurulum çalışan turu/arka plan işini sessizce iptal eder ve bekleyen onayı
-        geçersiz kılar; bu yüzden hepsi boşta olana dek ertelenir (bayrak tek seferliktir).
-        Config zaten yazılmıştır: ertelenen yalnız canlı kuruluştur, ayar kaybolmaz.
-        """
-        # Bu istek o anki config'le kurar; sekmeden çıkış aynı içerik için ikinci kez kurmaz.
-        self._runtime_dump = self.settings_panel.config_dump()
-        if self._restart_settings:
-            # Sürmekte olan kuruluş config'i durma bittikten sonra okur; ikincisi gereksiz.
-            return
-        self._restart_notice = notice
-        self._config_restart_pending = True
-        self._config_restart_serial = self.projects_panel.status_serial
-        self._maybe_restart_for_config()
-
-    def _config_restart_blocker(self) -> str:
-        """Yeniden kurulumu engelleyen neden ('' = boşta)."""
-        if self._approval_dialog is not None:
-            return "Kaydedildi; bekleyen onay bitince uygulama yeniden başlayınca geçerli olur."
-        # Panel listesi bayat olabilir (sekme açık değilken yoklanmaz); sohbetten başlayan iş
-        # için doğrudan kaynak olan işçi tarafı sayımına da bakılır.
-        if self.projects_panel.active_job_count() or self.bridge.active_job_count():
-            return "Kaydedildi; çalışan iş bitince uygulama yeniden başlayınca geçerli olur."
-        if self._busy:
-            return "Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur."
-        return ""
+        request_restart(self, notice)
 
     def _maybe_restart_for_config(self) -> None:
-        if not self._config_restart_pending or self._exiting:
-            return
-        reason = self._config_restart_blocker()
-        if reason:
-            (self._restart_notice or self.projects_panel.notice).setText(reason)
-            return
-        self._config_restart_pending = False
-        self._restart_runtime()
+        maybe_restart_for_config(self)
 
     def _github_synced(self, report: Any, auto: bool) -> None:
-        if not (auto and report.cloned):
-            return
-        text = (
-            f"{len(report.cloned)} yeni GitHub reposu çekildi; "
-            "Ayarlar'dan çıkınca kullanıma girer."
-        )
-        self.pet.say(text, "job")
-        if self._tray is not None:
-            self._tray.showMessage("Artemis", text, QSystemTrayIcon.MessageIcon.Information, 6000)
+        github_synced(self, report, auto)
 
     def _build_overlay(self) -> None:
         self.overlay = QuickOverlay(self._submit_overlay, self._cancel_active, self._show_panel)
@@ -814,57 +737,10 @@ class DesktopWindow(QMainWindow):
         self._theme_placeholders(self.overlay)
 
     def _apply_settings(self, device: int | str | None) -> None:
-        """Otomatik kayıt: doğrular ve yazar, yeniden kurmaz (sekmeden çıkınca kurulur)."""
-        panel = self.settings_panel
-        if self._demo or self._exiting:
-            panel.save_failed("Ayarları değiştirmek için işlemin bitmesini bekle.")
-            return
-        values = panel.values()
-        try:
-            voice_key = load_settings(self._config_path).voice.listening_hotkey
-            dictation_key = str(values[("dictation", "hotkey")])
-            selection_key = str(values[("selection_actions", "hotkey")])
-            clash = same_hotkey(dictation_key, voice_key)
-            selection_clash = same_hotkey(selection_key, voice_key) or same_hotkey(
-                selection_key, dictation_key
-            )
-        except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            clash = selection_clash = False  # okunamayan config aşağıdaki kayıtta yakalanır
-        if clash:
-            panel.save_failed("Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seç.")
-            return
-        if selection_clash:
-            panel.save_failed("Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı.")
-            return
-        try:
-            written = save_choices(
-                self._config_path,
-                device,
-                values=values,
-                applications=panel.applications,
-                code_agent=panel.code_agent_values(),
-                stt_model=panel.stt_model_path(),
-            )
-        except (OSError, ValueError, KeyError, TypeError):
-            panel.save_failed("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
-            return
-        panel.mark_saved(written)
+        apply_settings(self, device)
 
     def _restart_runtime(self) -> None:
-        """Config değişince çalışma zamanını yeniden kurar (Uygula ve sağlayıcı kaydı)."""
-        if self.settings_panel.pet.creator is not None:
-            self.settings_panel.pet.creator.reload_models()
-        # Gömülü Telegram kanalı kendi runtime'ını açılışta okunan ayarla kurmuştu (örn. izinli
-        # uygulamalar); yeniden kurulmazsa eski, gevşek politikayla çalışmaya devam ederdi.
-        self._sync_telegram_service()
-        self._telegram_resynced = True
-        self._voice_on_ready = self.bridge.voice_active
-        self._restart_settings = True
-        self._worker_ready = False
-        self._busy = True
-        self.bridge.shutdown()
-        self._set_status("Ayarlar uygulanıyor…", "running")
-        self._set_controls()
+        restart_runtime(self)
 
     def _build_tray(self) -> None:
         if not QSystemTrayIcon.isSystemTrayAvailable():
