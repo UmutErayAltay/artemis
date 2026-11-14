@@ -102,11 +102,11 @@ def _migrate(db: sqlite3.Connection, _from_version: int = 0) -> None:
     if "private" in columns:
         return
     try:
-        with db:
-            db.execute("ALTER TABLE changes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
-            db.execute("UPDATE changes SET private = tainted")
+        # Commit etmez: ensure_schema'nın tek işleminde koşar.
+        db.execute("ALTER TABLE changes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
+        db.execute("UPDATE changes SET private = tainted")
     except sqlite3.OperationalError:
-        # Eşzamanlı başka bir bağlantı sütunu az önce eklediyse geçiş zaten yapılmıştır.
+        # Başka bir bağlantı sütunu az önce eklediyse geçiş zaten yapılmıştır.
         columns = {row[1] for row in db.execute("PRAGMA table_info(changes)")}
         if "private" not in columns:
             raise
