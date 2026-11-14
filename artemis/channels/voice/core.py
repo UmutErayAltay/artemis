@@ -151,6 +151,9 @@ class AudioSegmenter:
     def active(self) -> bool:
         return bool(self._active) or self._discarding
 
+    discarding = property(lambda self: self._discarding)
+    speech_start = property(lambda self: self._speech_start)
+
     @property
     def trailing_silence_frames(self) -> int:
         return self._silence if self._active else 0
@@ -353,11 +356,7 @@ class VoiceController:
         self._decoder: asyncio.Task[None] | None = None
         self._decode_busy = False
         self._capture_epoch = 0
-        self._spec = (
-            SpeculativeStt(recognizer, max(1, config.stt_speculative_after_ms // config.frame_ms))
-            if config.stt_speculative
-            else None
-        )
+        self._spec = SpeculativeStt.build(config, recognizer, self._wake_gate_blocks)
         self._seen_drops = 0
         self._playback: asyncio.Task[None] | None = None
         self._playback_cancelled: asyncio.Event | None = None
@@ -425,7 +424,7 @@ class VoiceController:
                 utterance = self.segmenter.push(frame.pcm, frame.timestamp, frame.raw_pcm)
                 if not was_active and self.segmenter.active:
                     self._capturing_id = self._new_utterance(frame.timestamp)
-                if self._capturing_id is not None and self.segmenter._discarding:
+                if self._capturing_id is not None and self.segmenter.discarding:
                     self._event(
                         self._capturing_id, "terminal", outcome="rejected", reason="max_utterance"
                     )
@@ -468,8 +467,8 @@ class VoiceController:
                 with suppress(asyncio.CancelledError):
                     await joined
 
-    async def _wake_gate_drops(self, segment: AudioSegment) -> bool:
-        """ADR 0069: KWS açıkken uyandırma işareti olmayan bölüt STT'ye gitmez."""
+    def _wake_gate_blocks(self, speech_start: float) -> bool:
+        """ADR 0069: eldeki kanıtla bölüt STT'ye gidemez mi (düşürme + spekülasyon)."""
         if (
             self._wake_spotter is None
             or self.continuous
@@ -478,14 +477,16 @@ class VoiceController:
             or (self.config.barge_in_without_wake and self._output_active)
         ):
             return False
-        limit = segment.speech_start - WAKE_HIT_SLACK
-        if self._wake_heard_at >= limit:
+        return self._wake_heard_at < speech_start - WAKE_HIT_SLACK
+
+    async def _wake_gate_drops(self, segment: AudioSegment) -> bool:
+        """ADR 0069: KWS açıkken uyandırma işareti olmayan bölüt STT'ye gitmez."""
+        if not self._wake_gate_blocks(segment.speech_start):
             return False
-        task = self._wake_task
-        if task is not None:
+        if (task := self._wake_task) is not None:
             # Besleme en çok bir toplu iş geride kalır; sonucu kısa bekle (iptal etmeden).
             await asyncio.wait({task}, timeout=WAKE_GATE_WAIT)
-        return self._wake_spotter is not None and self._wake_heard_at < limit
+        return self._wake_gate_blocks(segment.speech_start)
 
     async def _queue_segment(self, segment: AudioSegment) -> None:
         uid = self._capturing_id
@@ -878,7 +879,7 @@ class VoiceController:
         """Konuşma süren PCM'i toplar; ~100 ms'de bir, tek uçuşta işle thread'e gönderir."""
         if self._live is None:
             return
-        if not self.segmenter.active or self.segmenter._discarding:
+        if not self.segmenter.active or self.segmenter.discarding:
             if was_active:
                 self._live_reset()
             return

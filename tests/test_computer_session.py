@@ -1210,7 +1210,7 @@ async def test_os_uia_true_never_turns_model_no_into_yes() -> None:
 
 
 async def test_os_issue_makes_verified_false_even_if_model_says_yes() -> None:
-    env = Env(click(), click(), DONE, YES)
+    env = Env(click(), act(type="key", keys="enter"), DONE, YES)
     calls = 0
 
     def window_at(x: int, y: int) -> int:
@@ -1224,6 +1224,36 @@ async def test_os_issue_makes_verified_false_even_if_model_says_yes() -> None:
     assert result.verified is False
     assert "OS: çelişki: click girdisi gönderilemedi" in result.evidence
     assert env.audit.named("computer_verify")[0]["os_check"] == "contradiction"
+
+
+async def test_os_uia_skipped_after_enter_following_type() -> None:
+    backend = FakeBackend()
+    backend.uia = False  # alan Enter ile boşalmış gibi: sorulsaydı yanlış çelişki üretirdi
+    env = Env(act(type="type", text=TYPED_TEXT), act(type="key", keys="enter"), DONE, YES,
+              backend=backend)
+    result = await env.run()
+    assert backend.uia_asked == [] and result.verified is True
+    assert env.audit.named("computer_verify")[0]["os_check"] == "unknown"
+
+
+def _flaky_window_at(env: Env, fail_call: int) -> None:
+    calls = 0
+
+    def window_at(x: int, y: int) -> int:
+        nonlocal calls
+        calls += 1
+        return 8 if calls == fail_call else 7
+
+    env.backend.window_at = window_at  # type: ignore[method-assign]
+
+
+async def test_os_issue_cleared_by_successful_resend_of_same_action() -> None:
+    env = Env(click(), click(), DONE, YES)
+    _flaky_window_at(env, 2)  # ilk tıklama gönderimden hemen önce kayar, ikincisi gider
+    result = await env.run()
+    assert len(env.backend.calls) == 1
+    assert result.verified is True
+    assert env.audit.named("computer_verify")[0]["os_check"] == "unknown"
 
 
 async def test_os_typed_text_never_in_audit() -> None:

@@ -117,3 +117,39 @@ async def test_partial_transcript_never_dispatches():
 
 async def _async(value):
     return value
+
+
+# --- ADR 0069: KWS kapısı spekülasyonu da kapatır -----------------------------------------
+
+
+class _Spotter:
+    def feed(self, *_a, **_k):
+        return None
+
+    def close(self):
+        pass
+
+
+def _kws(voiced, recognizer):
+    controller, runner, timings = _controller(voiced, recognizer)
+    controller._wake_spotter = _Spotter()
+    return controller, runner, timings
+
+
+async def test_kws_no_hit_never_reaches_stt():
+    recognizer = SlowRecognizer(["artemis saat kaç?"])
+    controller, runner, timings = _kws(NORMAL, recognizer)
+    await controller.run()
+    assert recognizer.calls == 0 and recognizer.pcms == []
+    assert runner.commands == []
+    assert not any(k == "stt_speculative_hit" for k, _ in timings)
+
+
+async def test_kws_hit_allows_speculation_and_adopts():
+    recognizer = SlowRecognizer(["artemis saat kaç?"])
+    controller, runner, timings = _kws(NORMAL, recognizer)
+    controller._wake_heard_at = 1000.0
+    await controller.run()
+    assert recognizer.calls == 1
+    assert runner.commands == ["saat kaç?"]
+    assert ("stt_speculative_hit", 1.0) in timings

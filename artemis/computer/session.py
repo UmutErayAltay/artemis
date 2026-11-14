@@ -277,7 +277,7 @@ class ComputerSession:
         self._on_frame = on_frame
         self._layout: _Layout | None = None
         # ADR 0070: OS düzeyi kanıt. Yazılan metin yalnız bellekte tutulur, asla loglanmaz.
-        self._os_issues: list[str] = []
+        self._os_issues: dict[tuple[Any, ...], str] = {}  # imza → sorun
         self._last_typed: tuple[str, int | None] | None = None
 
     async def run(self, goal: str, turn_id: str, deadline: float | None) -> SessionResult:
@@ -499,7 +499,7 @@ class ComputerSession:
         """OS kanıtı (ADR 0070): girdi sonuçları ve yazımda odaktaki alan. Modelin "hayır"ını
         "evet" yapmaz; yalnız "evet"i geri çevirebilir. None: doğrulanamadı."""
         if self._os_issues:
-            return False, f"çelişki: {self._os_issues[0]}"
+            return False, f"çelişki: {next(iter(self._os_issues.values()))}"
         if not ask_ui or self._last_typed is None or self._stop.is_set():
             return None, "doğrulanamadı"
         text, target_id = self._last_typed
@@ -627,8 +627,9 @@ class ComputerSession:
             outcome, typed = await self._execute(action, point, limit, target_id)
         except (OSError, RuntimeError) as error:
             return self._result("error", f"Eylem uygulanamadı: {error}")
+        issue_key = _signature(action) or (action.type,)
         if outcome != "sent":
-            self._os_issues.append(
+            self._os_issues[issue_key] = (
                 f"{action.type} girdisi gönderilemedi ({outcome})"
                 + (f", {typed} karakter yazıldı" if typed else "")
             )
@@ -649,8 +650,11 @@ class ComputerSession:
                 return _Stale("Hedef pencere girdi gönderilmeden hemen önce değişti")
             return self._result(stopped, "İptal veya süre sınırı nedeniyle girdi gönderilmedi.")
 
+        self._os_issues.pop(issue_key, None)
         if action.type == "type":
             self._last_typed = (action.text or "", target_id)
+        elif action.type != "wait":
+            self._last_typed = None  # UIA yalnız yazımın hemen ardından anlamlı
         self._steps += 1
         self._memory.add(
             StepRecord(
