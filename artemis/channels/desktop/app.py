@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ValidationError
-from PySide6.QtCore import QSettings, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -36,7 +36,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QScrollArea,
-    QSizePolicy,
     QSystemTrayIcon,
     QTabWidget,
     QVBoxLayout,
@@ -62,14 +61,12 @@ from artemis.channels.desktop.bridge import (
     VoiceCommand,
 )
 from artemis.channels.desktop.chat_widgets import (
-    _CHAT_MAX_WIDTH,
     _VOICE_LABELS,
     ChatTranscript,
     OperationCard,
     PromptEdit,
     QuickOverlay,
     StepBlock,
-    _ChatPage,
     _Drawer,
     _TurnSteps,
     welcome_suggestions,
@@ -80,7 +77,7 @@ from artemis.channels.desktop.instance import InstanceServer, claim_instance, in
 from artemis.channels.desktop.operations import (
     OperationLog,
 )
-from artemis.channels.desktop.page_kit import center_page, make_page_header
+from artemis.channels.desktop.page_kit import center_page
 from artemis.channels.desktop.pet import PetWidget, level_from_message
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.projects_panel import ProjectsPanel, status_label
@@ -90,7 +87,15 @@ from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.steps import step_line
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
 from artemis.channels.desktop.text_viewer import open_text_file
-from artemis.channels.desktop.widgets import HelpTip, PetFace
+from artemis.channels.desktop.widgets import PetFace
+from artemis.channels.desktop.window_layout import (
+    _NAV_COMPACT_WIDTH,
+    _NAV_WIDTH,
+    build_chat_page,
+    build_sidebar,
+    build_topbar,
+    page_frame,
+)
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings, same_hotkey
 from artemis.proactive.daily_summary import VAULT_TEXT_LIMIT, parse_day, summary_path
@@ -104,18 +109,6 @@ PROJECTS_POLL_ACTIVE_MS = 2000
 PROJECTS_POLL_IDLE_MS = 15000
 
 
-_HELP_AUTO = (
-    "Onaylı: bilgisayar kullanımı, pencere kontrolü ve ekran okuma her seferinde sorar. Otomatik: "
-    "bu üçü onay sormadan çalışır (dış içerik okunmuş turda da); Esc durdurur. Diğer araçlar "
-    "etkilenmez. Anında geçerli."
-)
-_HELP_NEW_CHAT = (
-    "Modelin bağlamını sıfırlar; sonraki mesaj boş geçmişle başlar. Kalıcı konuşma arşivini "
-    "silmez. Çalışan tur varken sıfırlanmaz."
-)
-_HELP_QUICK = (
-    "Küçük, hep üstte duran hızlı komut penceresini açar; yazdığın komut aynı sohbete gider."
-)
 
 
 # Durum ve ses noktaları tema renk anahtarıyla okunur; hex değer koda gömülmez.
@@ -133,8 +126,6 @@ _VOICE_TONES = {
 _STEP_PANEL_MIN_WINDOW = 1100
 _COMPACT_HEADER_WINDOW = 1000
 _COMPACT_NAV_WINDOW = 900  # bunun altında yan gezinme yalnız ikon (UX-01)
-_NAV_WIDTH = 176
-_NAV_COMPACT_WIDTH = 72
 # Adım blokları yalnız son birkaç isteğin canlı bağlantısını tutar.
 _STEP_TURNS_KEPT = 8
 _STEP_EVENTS_PER_TURN = 200
@@ -151,6 +142,48 @@ class DesktopWindow(QMainWindow):
     _dictation_pressed = Signal()
     _selection_pressed = Signal()
     _toast_failed = Signal(str)
+    # Alanları window_layout kurar; burada yalnız tipleri bildirilir.
+    brand_pet: PetFace
+    demo_chip: QLabel | None
+    model_caption: QLabel
+    model_value: QPushButton
+    model_box: QPushButton
+    voice_dot: QLabel
+    voice_state: QLabel
+    voice_button: QPushButton
+    auto_button: QPushButton
+    status_pill: QFrame
+    status_dot: QLabel
+    status_label: QLabel
+    quick_action: QPushButton
+    new_chat_button: QPushButton
+    operations_button: QPushButton
+    _chat_row: QHBoxLayout
+    chat: ChatTranscript
+    _routine_name: str
+    _routine_suggest: str
+    _summary_day: str
+    routine_bar: QFrame
+    routine_label: QLabel
+    routine_run_button: QPushButton
+    routine_dismiss_button: QPushButton
+    summary_vault_button: QPushButton
+    prompt: PromptEdit
+    composer_voice: QPushButton
+    cancel_button: QPushButton
+    send_button: QPushButton
+    activity_panel: QFrame
+    activity_close: QPushButton
+    activity: QScrollArea
+    activity_cards: QVBoxLayout
+    activity_notice: QLabel
+    activity_empty: QLabel
+    _panel_in_drawer: bool
+    drawer: _Drawer
+    sidebar: QFrame
+    nav_buttons: dict[QWidget, QPushButton]
+    _nav_icon_names: dict[QPushButton, str]
+    theme_toggle: QPushButton
 
     def __init__(
         self,
@@ -464,274 +497,6 @@ class DesktopWindow(QMainWindow):
         dialog.raise_()
         dialog.activateWindow()
 
-    def _icon_toggle(self, accessible_name: str) -> QPushButton:
-        """32px simge anahtarı; işaretli durumu `iconToggle:checked` kuralı belirgin çizer."""
-        button = QPushButton()
-        button.setObjectName("iconToggle")
-        button.setCheckable(True)
-        button.setFixedSize(32, 32)
-        button.setIconSize(QSize(18, 18))
-        button.setAccessibleName(accessible_name)
-        return button
-
-    def _build_topbar(self) -> QFrame:
-        """56px üst çubuk: pet + marka (+Demo), model çipi, ses/oto onay simgeleri, durum."""
-        header = QFrame()
-        header.setObjectName("topbar")
-        header.setFixedHeight(56)
-        row = QHBoxLayout(header)
-        row.setContentsMargins(16, 8, 16, 8)
-        row.setSpacing(12)
-        self.brand_pet = PetFace(32, themes.THEMES[self._theme])
-        row.addWidget(self.brand_pet)
-        title = QLabel("Artemis")
-        title.setObjectName("sectionTitle")
-        title.setToolTip("Güvenli masaüstü asistanı")
-        row.addWidget(title)
-        self.demo_chip: QLabel | None = None
-        if self._demo:
-            self.demo_chip = QLabel("Demo")
-            self.demo_chip.setObjectName("chipWarning")
-            self.demo_chip.setToolTip("Demo modu; gerçek işlem yapılmaz")
-            self.demo_chip.setAccessibleName("Demo modu; gerçek işlem yapılmaz")
-            row.addWidget(self.demo_chip, 0, Qt.AlignmentFlag.AlignVCenter)
-        row.addStretch(1)
-
-        # Model: ortada tek çip; dar pencerede kısalır (bkz. _fit_shell).
-        # Çip düğmedir: Ayarlar > Model'i açar, klavyeyle de erişilir.
-        self.model_caption = QLabel("Model")
-        self.model_caption.setObjectName("meta")
-        self.model_value = QPushButton("Yükleniyor…")
-        self.model_value.setObjectName("chip")
-        self.model_value.setAccessibleName("Kullanılan beyin modeli")
-        self.model_value.setToolTip("Kullanılan beyin modeli")
-        self.model_value.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.model_value.clicked.connect(self._show_model_settings)
-        value_font = self.model_value.font()
-        value_font.setPixelSize(13)
-        self.model_value.setFont(value_font)
-        self.model_box = self.model_value
-        row.addWidget(self.model_caption, 0, Qt.AlignmentFlag.AlignVCenter)
-        row.addWidget(self.model_value, 0, Qt.AlignmentFlag.AlignVCenter)
-        row.addStretch(1)
-
-        # voice_dot/voice_state köprü ve testler için canlı kalan, görünmeyen aynalardır;
-        # görünür tek ses denetimi simge anahtarıdır, durum metni ipucunda okunur.
-        self.voice_dot = QLabel("●", self)
-        self.voice_dot.setObjectName("voiceDot")
-        self.voice_dot.hide()
-        self.voice_state = QLabel(_VOICE_LABELS["off"], self)
-        self.voice_state.setAccessibleName("Ses durumu")
-        self.voice_state.hide()
-        self.voice_button = self._icon_toggle("Sesi aç veya kapat")
-        self.voice_button.clicked.connect(self._toggle_voice)
-        row.addWidget(self.voice_button)
-        self.auto_button = self._icon_toggle(
-            "Bilgisayar kullanımında otomatik onayı aç veya kapat"
-        )
-        self.auto_button.toggled.connect(self._toggle_auto_mode)
-        row.addWidget(self.auto_button)
-        row.addWidget(HelpTip(_HELP_AUTO), 0, Qt.AlignmentFlag.AlignVCenter)
-        status_pill = QFrame()
-        self.status_pill = status_pill
-        status_pill.setObjectName("statusPill")
-        # Düz durum çipi tıklanmaz (simge anahtarları tıklanır); ikisi de ipucu taşır.
-        status_pill.setToolTip("Çalışma durumu")
-        status_pill.setAccessibleName("Çalışma durumu")
-        # Çip içeriğine sığar: genişlemez, metin değişince yeniden ölçülür.
-        status_pill.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        status_row = QHBoxLayout(status_pill)
-        status_row.setContentsMargins(0, 0, 0, 0)
-        status_row.setSpacing(6)
-        self.status_dot = QLabel("●")
-        self.status_dot.setObjectName("statusDot")
-        self.status_dot.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        self.status_label = QLabel("")
-        self.status_label.setObjectName("status")
-        self.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        self.status_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-        self._set_status("Başlatılıyor…", "running")
-        status_row.addWidget(self.status_dot)
-        status_row.addWidget(self.status_label)
-        row.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
-        return header
-
-    def _build_chat_page(self) -> QWidget:
-        page = _ChatPage()
-        page_row = QHBoxLayout(page)
-        page_row.setContentsMargins(0, 0, 0, 0)
-        page_row.setSpacing(0)
-        main_column = QWidget()
-        main_column.setObjectName("flat")
-        page_row.addWidget(main_column, 1)
-
-        column = QVBoxLayout(main_column)
-        column.setContentsMargins(24, 0, 24, 24)
-        column.setSpacing(16)
-        self.quick_action = QPushButton("Hızlı komut")
-        self.quick_action.clicked.connect(self._show_overlay)
-        self.new_chat_button = QPushButton("Yeni sohbet")
-        self.new_chat_button.setToolTip("Yeni bağlam açar; kalıcı konuşma arşivini silmez")
-        self.new_chat_button.clicked.connect(self._new_chat)
-        # Dar pencerede son işlem kartları bu düğmeyle yandan açılan sayfada görünür.
-        self.operations_button = QPushButton("İşlemler")
-        self.operations_button.setToolTip("Mesaj başına işlem kartlarını açar")
-        self.operations_button.setAccessibleName("Mesaj işlemlerini aç")
-        self.operations_button.clicked.connect(self._open_operations)
-        column.addWidget(
-            make_page_header(
-                # Marka üst çubukta, sayfa adı kenar çubuğunda zaten var; üçüncü kez yazılmaz.
-                "",
-                actions=(
-                    self.operations_button,
-                    (self.new_chat_button, _HELP_NEW_CHAT),
-                    (self.quick_action, _HELP_QUICK),
-                ),
-            )
-        )
-        # Başlıktan sonra iki sütun: sohbet+yazma alanı ve (geniş pencerede) son işlem kartı.
-        self._chat_row = QHBoxLayout()
-        self._chat_row.setSpacing(16)
-        column.addLayout(self._chat_row, 1)
-        left = QVBoxLayout()
-        left.setSpacing(16)
-        self._chat_row.addLayout(left, 1)
-
-        # Konuşma düz zemindedir (kart yok); okunur sütun ortalanır.
-        self.chat = ChatTranscript(
-            self._demo, self._on_welcome_chip, themes.THEMES[self._theme],
-            pet_source=self._pet_pixmap,
-        )
-        self.chat.setObjectName("chatTranscript")
-        self.chat.setAccessibleName("Seçilebilir sohbet geçmişi")
-        left.addWidget(self.chat, 1)
-
-        # Zamanı gelen rutin için soru satırı (ADR 0058): Çalıştır tıklaması normal, onaylı tur.
-        self._routine_name = ""
-        self._routine_suggest = ""
-        self._summary_day = ""
-        self.routine_bar = QFrame()
-        self.routine_bar.setObjectName("composer")
-        self.routine_bar.setMaximumWidth(_CHAT_MAX_WIDTH)
-        routine_row = QHBoxLayout(self.routine_bar)
-        routine_row.setContentsMargins(12, 8, 8, 8)
-        routine_row.setSpacing(8)
-        self.routine_label = QLabel("")
-        self.routine_label.setWordWrap(True)
-        self.routine_label.setTextFormat(Qt.TextFormat.PlainText)
-        self.routine_run_button = QPushButton("Çalıştır")
-        self.routine_run_button.setObjectName("primary")
-        self.routine_dismiss_button = QPushButton("Kapat")
-        # Yalnız gün özeti bildiriminde (ADR 0066) ve vault açıkken görünür.
-        self.summary_vault_button = QPushButton("Vault'a ekle")
-        self.summary_vault_button.hide()
-        self.summary_vault_button.clicked.connect(self._append_summary_to_vault)
-        self.routine_run_button.clicked.connect(self._run_routine_notice)
-        self.routine_dismiss_button.clicked.connect(self.routine_bar.hide)
-        routine_row.addWidget(self.routine_label, 1)
-        routine_row.addWidget(self.routine_dismiss_button)
-        routine_row.addWidget(self.summary_vault_button)
-        routine_row.addWidget(self.routine_run_button)
-        self.routine_bar.hide()
-        # Yazma alanıyla aynı ortalanmış sütun: genişlik ve sol kenar her pencerede aynı kalır.
-        notice_wrap = QHBoxLayout()
-        notice_wrap.addStretch(1)
-        notice_wrap.addWidget(self.routine_bar, 1000)
-        notice_wrap.addStretch(1)
-        left.addLayout(notice_wrap)
-
-        composer = QFrame()
-        composer.setObjectName("composer")
-        composer.setMaximumWidth(_CHAT_MAX_WIDTH)
-        composer_row = QHBoxLayout(composer)
-        composer_row.setContentsMargins(12, 8, 8, 8)
-        composer_row.setSpacing(8)
-        self.prompt = PromptEdit(self._submit_main)
-        self.prompt.setObjectName("mainPrompt")
-        self.prompt.setPlaceholderText("Artemis'e yaz…")
-        hint = "Enter gönderir, Shift+Enter yeni satır"
-        self.prompt.setToolTip(hint)
-        self.prompt.setAccessibleDescription(hint)
-        composer_row.addWidget(self.prompt, 1)
-        # Üst çubuktaki ses anahtarıyla aynı yol; yalnız tıklama ona iletilir.
-        self.composer_voice = self._icon_toggle("Sesi aç veya kapat (yazma alanı)")
-        self.composer_voice.clicked.connect(self._composer_voice_clicked)
-        self.cancel_button = QPushButton("İptal")
-        self.cancel_button.setMinimumWidth(72)
-        self.cancel_button.setFixedHeight(36)
-        self.cancel_button.hide()  # yalnız iş sürerken görünür (bkz. _set_controls)
-        self.send_button = QPushButton("Gönder")
-        self.send_button.setObjectName("primary")
-        self.send_button.setMinimumWidth(88)
-        self.send_button.setFixedHeight(36)
-        self.cancel_button.clicked.connect(self._cancel_active)
-        self.send_button.clicked.connect(self._submit_main)
-        bottom = Qt.AlignmentFlag.AlignBottom
-        composer_row.addWidget(self.composer_voice, 0, bottom)
-        composer_row.addWidget(self.cancel_button, 0, bottom)
-        composer_row.addWidget(self.send_button, 0, bottom)
-        # Sütun ortalanır: kenar boşlukları esner, yazma alanı 680px'e kadar genişler.
-        composer_wrap = QHBoxLayout()
-        composer_wrap.addStretch(1)
-        composer_wrap.addWidget(composer, 1000)
-        composer_wrap.addStretch(1)
-        left.addLayout(composer_wrap)
-
-        # Son işlem paneli: ≥1100px'te sağ sütun, daha darda yandan açılan sayfa.
-        self.activity_panel = QFrame()
-        self.activity_panel.setObjectName("stepPanel")
-        self.activity_panel.setFixedWidth(280)
-        panel_layout = QVBoxLayout(self.activity_panel)
-        panel_layout.setContentsMargins(16, 16, 16, 16)
-        panel_layout.setSpacing(12)
-        activity_title = QLabel("Mesaj işlemleri")
-        activity_title.setObjectName("sectionTitle")
-        self.activity_close = QPushButton("Kapat")
-        self.activity_close.setObjectName("ghost")
-        self.activity_close.setAccessibleName("Mesaj işlemleri sayfasını kapat")
-        self.activity_close.clicked.connect(self._close_operations)
-        self.activity_close.hide()
-        title_row = QHBoxLayout()
-        title_row.setSpacing(8)
-        title_row.addWidget(activity_title)
-        title_row.addStretch(1)
-        title_row.addWidget(self.activity_close)
-        # Her mesaj bir kart; en yeni üstte. Kartlar kaydırılır, yatay kaydırma yoktur.
-        self.activity = QScrollArea()
-        self.activity.setAccessibleName("Mesaj başına işlemler")
-        self.activity.setWidgetResizable(True)
-        self.activity.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.activity.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-        self.activity.setFrameShape(QFrame.Shape.NoFrame)
-        self.activity.setStyleSheet(
-            "QScrollArea { border: none; background: transparent; }"
-            "QScrollArea > QWidget > QWidget { background: transparent; }"
-        )
-        cards_host = QWidget()
-        cards_host.setObjectName("flat")
-        self.activity_cards = QVBoxLayout(cards_host)
-        self.activity_cards.setContentsMargins(0, 0, 8, 0)
-        self.activity_cards.setSpacing(8)
-        self.activity_cards.addStretch(1)
-        self.activity.setWidget(cards_host)
-        self.activity.hide()
-        self.activity_notice = QLabel("")
-        self.activity_notice.setObjectName("meta")
-        self.activity_notice.setWordWrap(True)
-        self.activity_notice.hide()
-        self.activity_empty = QLabel("Henüz bir işlem yok")
-        self.activity_empty.setObjectName("meta")
-        panel_layout.addLayout(title_row)
-        # Boş durumda başlığın hemen altında kalır; satırlar üstten dizilir.
-        panel_layout.addWidget(self.activity_notice)
-        panel_layout.addWidget(self.activity_empty, 1, Qt.AlignmentFlag.AlignTop)
-        panel_layout.addWidget(self.activity, 1)
-        self._chat_row.addWidget(self.activity_panel)
-        self._panel_in_drawer = False
-        self.drawer = _Drawer(page, self._close_operations)
-        page.drawer = self.drawer
-        return page
-
     def _open_operations(self) -> None:
         if not self._panel_in_drawer:
             return
@@ -767,61 +532,14 @@ class DesktopWindow(QMainWindow):
         """
         self.activity_panel.setVisible(self._panel_in_drawer or bool(self._op_widgets))
 
-    def _build_sidebar(self, pages: list[tuple[str, QWidget]]) -> QFrame:
-        sidebar = QFrame()
-        sidebar.setObjectName("sidebar")
-        sidebar.setFixedWidth(_NAV_WIDTH)
-        self.sidebar = sidebar
-        navigation = QVBoxLayout(sidebar)
-        navigation.setContentsMargins(12, 12, 12, 12)
-        navigation.setSpacing(4)
-        self.nav_buttons: dict[QWidget, QPushButton] = {}
-        self._nav_icon_names: dict[QPushButton, str] = {}
-        for label, page in pages:
-            if label == "Ayarlar":
-                navigation.addStretch(1)
-            button = QPushButton(label)
-            button.setObjectName("navItem")
-            button.setCheckable(True)
-            button.setAutoExclusive(True)
-            button.setAccessibleName(label)
-            button.setToolTip(label)  # dar pencerede yalnız ikon kalır; ad ipucunda
-            button.setIconSize(QSize(20, 20))
-            button.clicked.connect(
-                lambda _checked=False, target=page: self.tabs.setCurrentWidget(target)
-            )
-            self.nav_buttons[page] = button
-            self._nav_icon_names[button] = shell_assets.NAV_ICONS[label]
-            navigation.addWidget(button)
-        self.theme_toggle = QPushButton()
-        self.theme_toggle.setObjectName("themeToggle")
-        self.theme_toggle.setFixedHeight(32)
-        self.theme_toggle.setIconSize(QSize(16, 16))
-        self.theme_toggle.clicked.connect(self._toggle_theme)
-        navigation.addWidget(self.theme_toggle)
-        return sidebar
-
-    @staticmethod
-    def _page(widget: QWidget) -> QWidget:
-        """Kendi 24px iç boşluğu olmayan sayfa 24px kenar payıyla barındırılır.
-
-        Ayarlar ve sohbet bu payı kendisi taşır; diğerleri aynı hizada başlasın diye
-        burada eklenir. Sayfaların kendi kaydırıcısı korunur.
-        """
-        host = QWidget()
-        host_layout = QVBoxLayout(host)
-        host_layout.setContentsMargins(24, 0, 24, 24)
-        host_layout.addWidget(widget)
-        return host
-
     def _build_ui(self) -> None:
         root = QWidget()
         main = QVBoxLayout(root)
         main.setContentsMargins(16, 16, 16, 16)
         main.setSpacing(16)
-        main.addWidget(self._build_topbar())
+        main.addWidget(build_topbar(self))
 
-        self.chat_page = self._build_chat_page()
+        self.chat_page = build_chat_page(self)
         self.tabs = QTabWidget()
         self.tabs.addTab(self.chat_page, "Sohbet")
         self.projects_panel = ProjectsPanel(demo=self._demo, config_path=self._config_path)
@@ -873,16 +591,16 @@ class DesktopWindow(QMainWindow):
         self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
         self._settings_shortcut.activated.connect(self._show_settings)
         self.tabs.addTab(self.settings_scroll, "Ayarlar")
-        self.projects_page = self._page(self.projects_panel)
+        self.projects_page = page_frame(self.projects_panel)
         self.tabs.addTab(self.projects_page, "Projeler")
         self.data_panel = DataPanel(demo=self._demo)
         self.data_panel.tool_requested.connect(self._submit_project_tool)
-        self.data_page = self._page(self.data_panel)
+        self.data_page = page_frame(self.data_panel)
         self.tabs.addTab(self.data_page, "Geçmiş")
         self.automation_panel = AutomationPanel(demo=self._demo, config_path=self._config_path)
         self.automation_panel.tool_requested.connect(self._submit_automation_tool)
         self.automation_panel.settings_requested.connect(self._open_settings_section)
-        self.automation_page = self._page(self.automation_panel)
+        self.automation_page = page_frame(self.automation_panel)
         self.tabs.addTab(self.automation_page, "Otomasyon")
         # Pet atölyesi günlük ayarlardan ayrı sayfadır; PetSection kendi başlığını taşır
         # ama kaydırıcısı yoktur.
@@ -891,10 +609,10 @@ class DesktopWindow(QMainWindow):
         self.pet_scroll.setFrameShape(QFrame.Shape.NoFrame)
         center_page(self.pet_scroll)
         self.pet_scroll.setWidget(self.settings_panel.pet)
-        self.pet_page = self._page(self.pet_scroll)
+        self.pet_page = page_frame(self.pet_scroll)
         self.tabs.addTab(self.pet_page, "Petler")
         self.tabs.tabBar().hide()
-        sidebar = self._build_sidebar([
+        sidebar = build_sidebar(self, [
             ("Sohbet", self.chat_page), ("Projeler", self.projects_page),
             ("Otomasyon", self.automation_page), ("Petler", self.pet_page),
             ("Geçmiş", self.data_page),
