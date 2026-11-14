@@ -12,6 +12,7 @@ from collections.abc import AsyncGenerator, AsyncIterator, Awaitable, Callable
 from contextlib import aclosing, suppress
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
+from functools import partial
 from time import monotonic
 from typing import Protocol
 
@@ -237,6 +238,19 @@ class LiveTranscriber(Protocol):
     def close(self) -> None: ...
 
 
+class WakeSpotterLike(Protocol):
+    """ADR 0069: cihaz içi uyandırma ön-kapısı; ``feed`` iş parçacığında çağrılır."""
+
+    def feed(self, pcm16: bytes) -> bool: ...
+
+    def close(self) -> None: ...
+
+
+# Kapı kararı en çok bu kadar uçuştaki beslemeyi bekler; eşleşme sözün başından bu kadar geç
+# de olsa sayılır (uyandırma sözü bölütü başlatır).
+WAKE_GATE_WAIT = 0.3
+WAKE_HIT_SLACK = 0.5
+
 # ~100 ms'lik STT PCM'i birikince bir iş gönderilir; metin güncellemesi en çok ~150 ms'de bir.
 LIVE_BATCH_MS = 100
 LIVE_EMIT_INTERVAL = 0.15
@@ -268,8 +282,15 @@ class VoiceController:
         live_transcriber: LiveTranscriber | None = None,
         on_live_text: Callable[[str], None] | None = None,
         turn_detector: TurnDetector | None = None,
+        wake_spotter: WakeSpotterLike | None = None,
     ) -> None:
         self.runner = runner
+        # ADR 0069: eşleşme tek başına uyandırmaz/çalıştırmaz; yalnız eşleşmesiz bölütler STT'ye
+        # gitmeden elenir. Nihai uyandırma kararı hâlâ transkriptteki `find_wake_word`'dedir.
+        self._wake_spotter = wake_spotter
+        self._wake_buffer = bytearray()
+        self._wake_task: asyncio.Task[bool] | None = None
+        self._wake_heard_at = -math.inf
         # ADR 0047: canlı metin YALNIZ on_live_text'e gider; komut/uyandırma/yankı/söz kesme
         # hiçbir yerde okumaz.
         self._live = live_transcriber
@@ -398,13 +419,14 @@ class VoiceController:
                 # VAD gürültüyü/yankıyı da konuşma sanabilir. Oynatma yalnız nihai
                 # transcript kabul edilince _handle_utterance içinde kesilir (ADR 0040).
                 self._live_step(frame, was_active)
+                self._wake_step(frame)
                 if self.segmenter.active and self.config.stt_partial_enabled:
                     self._partial_frames += 1
                     if self._partial_frames >= max(1, 1000 // self.config.frame_ms):
                         self._partial_frames = 0
                         self._start_partial_decode()
                 if utterance is not None:
-                    self._queue_segment(utterance)
+                    await self._queue_segment(utterance)
             if not self._stop.is_set():
                 await self._drain_segments()
                 await self._settle_active()
@@ -428,7 +450,26 @@ class VoiceController:
                 with suppress(asyncio.CancelledError):
                     await joined
 
-    def _queue_segment(self, segment: AudioSegment) -> None:
+    async def _wake_gate_drops(self, segment: AudioSegment) -> bool:
+        """ADR 0069: KWS açıkken uyandırma işareti olmayan bölüt STT'ye gitmez."""
+        if (
+            self._wake_spotter is None
+            or self.continuous
+            or self._awaiting_followup
+            or self.clock() <= self._followup_until
+            or (self.config.barge_in_without_wake and self._output_active)
+        ):
+            return False
+        limit = segment.speech_start - WAKE_HIT_SLACK
+        if self._wake_heard_at >= limit:
+            return False
+        task = self._wake_task
+        if task is not None:
+            # Besleme en çok bir toplu iş geride kalır; sonucu kısa bekle (iptal etmeden).
+            await asyncio.wait({task}, timeout=WAKE_GATE_WAIT)
+        return self._wake_spotter is not None and self._wake_heard_at < limit
+
+    async def _queue_segment(self, segment: AudioSegment) -> None:
         uid = self._capturing_id
         self._capturing_id = None
         if uid is None:
@@ -437,6 +478,9 @@ class VoiceController:
         self.on_timing("speech_end", segment.speech_end)
         self._event(uid, "speech_end", timestamp=segment.speech_end)
         self._event(uid, "endpoint")
+        if await self._wake_gate_drops(segment):
+            self._event(uid, "terminal", outcome="rejected", reason="no_wake_kws")
+            return
         self._event(uid, "stt_queued")
         try:
             self._segments.put_nowait((segment, uid, self._capture_epoch, self.clock()))
@@ -458,6 +502,9 @@ class VoiceController:
 
     def _invalidate_segments(self) -> None:
         self._capture_epoch += 1
+        # Onay sırasındaki/eski ses uyandırma kanıtı olarak taşınmaz (CLAUDE.md ses kuralı).
+        self._wake_heard_at = -math.inf
+        self._wake_buffer.clear()
         while not self._segments.empty():
             _segment, uid, _epoch, _at = self._segments.get_nowait()
             self._segments.task_done()
@@ -815,6 +862,42 @@ class VoiceController:
             self._live_task = asyncio.create_task(asyncio.to_thread(self._live.feed, chunk))
             self._live_task.add_done_callback(self._live_finished)
 
+    def _wake_step(self, frame: AudioFrame) -> None:
+        """Her kareyi (konuşma başlamadan da) ~100 ms'de bir, tek uçuşta KWS'ye besler."""
+        if self._wake_spotter is None:
+            return
+        self._wake_buffer += frame.raw_pcm or frame.pcm
+        batch = 2 * self.config.sample_rate * LIVE_BATCH_MS // 1000
+        if self._wake_task is None and len(self._wake_buffer) >= batch:
+            chunk = bytes(self._wake_buffer)
+            self._wake_buffer.clear()
+            task = asyncio.create_task(asyncio.to_thread(self._wake_spotter.feed, chunk))
+            self._wake_task = task
+            task.add_done_callback(
+                partial(self._wake_finished, timestamp=frame.timestamp, epoch=self._capture_epoch)
+            )
+
+    def _wake_finished(self, task: asyncio.Task[bool], *, timestamp: float, epoch: int) -> None:
+        if self._wake_task is task:
+            self._wake_task = None
+        if task.cancelled():
+            return
+        try:
+            hit = task.result()
+        except (OSError, RuntimeError, ValueError) as error:
+            if self._wake_spotter is not None:
+                logger.warning(
+                    "Uyandırma ön-kapısı durdu, transkript uyandırmasına dönüldü (%s).",
+                    type(error).__name__,
+                )
+                self._wake_spotter = None
+                self._wake_buffer.clear()
+                self.on_state("wake:unavailable:runtime")
+            return
+        # Onay/iptal sonrası (epoch değişti) gelen eski parti uyandırma kanıtı sayılmaz.
+        if hit and epoch == self._capture_epoch:
+            self._wake_heard_at = timestamp
+
     def _live_reset(self) -> None:
         self._live_buffer.clear()
         self._live_text = ""
@@ -1164,6 +1247,12 @@ class VoiceController:
         if self._live is not None:
             self._live.close()
             self._live = None
+        if self._wake_task is not None:
+            with suppress(asyncio.CancelledError, OSError, RuntimeError, ValueError):
+                await self._wake_task
+        if self._wake_spotter is not None:
+            self._wake_spotter.close()
+            self._wake_spotter = None
         for label, closer in (
             ("mikrofon", self.microphone.close),
             ("ses çıkışı", self.sink.close),

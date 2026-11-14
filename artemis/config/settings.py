@@ -157,6 +157,10 @@ class VoiceConfig(BaseModel):
     live_transcript: bool = False
     live_transcript_model: str = ""
     live_transcript_revision: str = ""
+    # ADR 0069: "kws" iken cihaz içi anahtar sözcük algısı (live_transcript_model/revision'ı
+    # paylaşır) uyandırma sözü olmayan bölütleri STT'den ÖNCE eler; kararı yine transkript verir.
+    wake_backend: Literal["transcript", "kws"] = "transcript"
+    wake_kws_threshold: float = Field(default=0.2, gt=0, lt=1)
     tts_backend: Literal["piper", "edge", "ema"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True

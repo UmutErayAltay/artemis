@@ -125,6 +125,11 @@ voice:
   live_transcript: false
   # live_transcript_model: mihuai/turkish-stt-66m-v2
   # live_transcript_revision: bc2f77287cfc3ec2568cf5ba9f9181e1a43bfff4
+  # Uyandırma ön-kapısı (ADR 0069): kws = cihaz içi sözcük algısı, uyandırma sözü duyulmayan
+  # konuşmayı Whisper'a göndermeden eler (CPU/gecikme kazancı). Yukarıdaki live_transcript_model
+  # ve live_transcript_revision dolu olmalı; kurulamazsa transcript'e döner. Tek başına uyandırmaz.
+  wake_backend: transcript # transcript | kws
+  wake_kws_threshold: 0.2 # Düşük = daha çok yakalar, daha çok yanlış alarm.
   tts_backend: piper
   tts_local_fallback: true # Edge hatasında yerel sese dön; false seçili sesi korur.
   piper_model: ../models/tr_TR-dfki-medium.onnx

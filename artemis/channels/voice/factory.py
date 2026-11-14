@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 from collections.abc import Awaitable, Callable
 from contextlib import AsyncExitStack
@@ -42,6 +43,7 @@ from artemis.channels.voice.echo import (
     EchoCanceller,
     EchoReference,
 )
+from artemis.channels.voice.kws import WakeSpotter
 from artemis.channels.voice.live_text import SherpaLiveTranscriber
 from artemis.channels.voice.silero import SileroVAD
 from artemis.channels.voice.smart_turn import SmartTurnDetector
@@ -120,6 +122,26 @@ def _live_reason(error: Exception) -> str:
     ):
         return "deps:sherpa-onnx veya huggingface-hub kurulu değil"
     return "model:canlı yazı modeli indirilemedi veya yüklenemedi"
+
+
+async def build_wake_spotter(voice: VoiceConfig, on_state: StateCallback) -> WakeSpotter | None:
+    """KWS ön-kapısı (ADR 0069); kurulamazsa transkript uyandırmasıyla sürer, düşüş görünür olur."""
+    if voice.wake_backend != "kws":
+        return None
+    if not (voice.live_transcript_model and voice.live_transcript_revision):
+        on_state("wake:unavailable:model:live_transcript_model/revision boş")
+        return None
+    spotter = WakeSpotter(
+        voice.live_transcript_model, voice.live_transcript_revision, voice.wake_word,
+        threshold=voice.wake_kws_threshold,
+    )
+    try:
+        await _prepare(spotter)
+    except (OSError, ValueError, RuntimeError, ImportError) as error:
+        logger.warning("Uyandırma ön-kapısı açılamadı, transkriptle sürülüyor: %s", error)
+        on_state("wake:unavailable:" + _live_reason(error))
+        return None
+    return spotter
 
 
 RunCommand = Callable[[str], Awaitable[RunResult]]
@@ -265,6 +287,9 @@ async def build_voice_controller(
                 except (OSError, ValueError, RuntimeError, ImportError) as error:
                     logger.warning("Canlı yazı açılamadı, onsuz sürülüyor: %s", error)
                     on_state("live:unavailable:" + _live_reason(error))
+        wake_spotter = await build_wake_spotter(settings.voice, on_state)
+        if wake_spotter is not None:
+            cleanup.callback(wake_spotter.close)
         controller = VoiceController(
             runtime.runner,
             settings.voice,
@@ -284,6 +309,7 @@ async def build_voice_controller(
             live_transcriber=live,
             on_live_text=lambda text: on_state("live:" + text[:200]),
             turn_detector=build_turn_detector(settings.voice, on_state),
+            wake_spotter=wake_spotter,
         )
         cleanup.pop_all()
         return controller
@@ -313,7 +339,9 @@ async def _close_optional(resource: object) -> None:
     closer = getattr(resource, "close", None)
     if closer is not None:
         try:
-            await closer()
+            # WakeSpotter/SherpaLiveTranscriber.close eşzamanlıdır; ötekiler eşzamansız.
+            if inspect.isawaitable(result := closer()):
+                await result
         except (OSError, RuntimeError, ValueError) as error:
             logger.warning("Ses kaynağı kapatılamadı (%s).", type(error).__name__)
 

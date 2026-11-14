@@ -269,6 +269,11 @@ def _hardware(
             "requested": voice.turn_detection,
             "actual": voice.turn_detection and "turn:off" not in states,
         },
+        "wake_backend": {
+            "requested": voice.wake_backend,
+            "actual": "transcript" if voice.wake_backend == "transcript"
+            or "wake:unavailable" in states else "kws",
+        },
         "noise_suppression": {
             "requested": voice.noise_suppression,
             "actual": False if (not voice.noise_suppression or "denoise:off" in states
@@ -331,6 +336,8 @@ async def live_report(
             states.add("denoise:unavailable")
         elif state in {"denoise:off", "echo:off", "vad:webrtc", "turn:off"}:
             states.add(state)
+        elif state.startswith("wake:unavailable:"):
+            states.add("wake:unavailable")
 
     def approve(name: str, arguments: dict[str, Any]) -> bool:
         nonlocal approval_active
