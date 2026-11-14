@@ -23,7 +23,6 @@ ALLOW: dict[str, int] = {
     "artemis/channels/desktop/provider_section.py::ProviderSection.__init__": 310,
     "artemis/channels/desktop/themes.py::stylesheet": 255,
     "artemis/channels/desktop/app.py::DesktopWindow._handle_event": 206,
-    "artemis/channels/desktop/data_panel.py::DataPanel.__init__": 206,
     # güvenlik çekirdeği; yalnız boyut için bölünmez (ADR gerekir)
     "artemis/safety/gate.py::SafetyGate.dispatch": 224,
     "artemis/brain/agent_loop.py::AgentLoop.run": 337,
