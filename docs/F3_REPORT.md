@@ -90,10 +90,13 @@ mikrofon kabulünün yerini tutmaz.
 | WebRTC VAD, sessizlik 1000 ms | 2938 / 3359 ms | 1047 | 781 | 797 | 2156 ms |
 | Silero VAD (ADR 0067), 1000 ms | 2875 / 3610 ms | 1032 | 781 | 766 | 2128 ms |
 | Silero + Smart Turn (ADR 0068), 600 ms | 5062 / 8469 ms | 672 | 750 | 3438 | 1609 ms |
+| Aynı akşam kontrol: Silero, 1000 ms (9 tur) | 5672 ms | 1078 | 750 | 3430 | 1998 ms |
+| Aynı akşam: Silero + Smart Turn, 600 ms (2×21 tur) | 5016 / 5625 ms | 672 / 687 | 750 | 3437 / 4000 | ~1610 ms |
 
 \* Yerel hat = konuşma sonu bekleme + STT + (TTS ilk parça − model ilk token): modelin dışındaki,
 Artemis'in kendi kontrolündeki süre. Son koşuda sağlayıcının ilk token süresi 0,8 sn'den 3,4 sn'ye
-çıktı (aynı akşam iki tekrar: 4,2 ve 3,4 sn); uçtan uca fark bu dış gecikmedendir. Yerel hat %25
+çıktı (aynı akşam iki tekrar: 4,2 ve 3,4 sn); kontrol koşusu eski ayarla da 3,43 sn verdi, yani artış
+sağlayıcıdandır. Aynı saatte kıyas: konuşma sonu bekleme 1078 → 672 ms, uçtan uca medyan 5672 → 5016 ms. Yerel hat %25
 kısaldı. Uçtan uca medyan < 1,5 sn hedefi bu model/sağlayıcı ile tutmuyor: modelin ilk token süresi tek
 başına ~0,8 sn, yerel hat ~1,6 sn. Kalan büyük yerel kalem STT'dir (large-v3 + beam 5; `large-v3-turbo`
 veya beam 1 ile kısalabilir, doğruluk ölçülerek seçilmeli — kural 11).
