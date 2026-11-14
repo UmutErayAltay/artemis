@@ -79,7 +79,7 @@ class FormDialog(QDialog):
         natural = chrome + body.sizeHint().height()
         self.resize(self.width(), min(natural, limit))
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt adı)
+    def showEvent(self, event: QShowEvent) -> None:
         screen = self.screen()
         if screen is not None:
             self.fit_to_available(screen.availableGeometry())

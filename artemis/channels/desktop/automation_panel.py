@@ -416,7 +416,7 @@ class AutomationPanel(QWidget):
         for card in (self.routines, self.research, self.summaries, self.notices):
             card.show_disabled("Yükleniyor…", link=False)
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt adı)
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self.refresh()
 

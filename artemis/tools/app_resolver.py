@@ -21,6 +21,8 @@ from difflib import SequenceMatcher
 from pathlib import Path
 from typing import Literal
 
+from artemis.text import turkish_fold
+
 MAX_ALIASES = 200
 MAX_ALIAS_CHARS = 64
 # Yakın eşleşmenin kendiliğinden kabul eşiği ve en yakın ikinci adaydan farkı. Eşik altı
@@ -46,7 +48,7 @@ _SOUNDS: dict[int, str | None] = {
 
 def normalize(value: str) -> str:
     """Büyük harf, boşluk ve noktalama farkını siler; Türkçe I/İ doğru küçülür."""
-    lowered = value.replace("I", "ı").replace("İ", "i").casefold()
+    lowered = turkish_fold(value)
     return "".join(char for char in lowered if char.isalnum() or char in "+#")
 
 

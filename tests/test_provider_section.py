@@ -722,7 +722,7 @@ class _FakeProcess:
         self.out = b""
         self.calls: list[str] = []
 
-    def readAllStandardOutput(self) -> Any:  # noqa: N802
+    def readAllStandardOutput(self) -> Any:
         data, self.out = self.out, b""
         return type("B", (), {"data": lambda _s: data})()
 
@@ -735,7 +735,7 @@ class _FakeProcess:
     def state(self) -> Any:
         return section_module.QProcess.ProcessState.Running
 
-    def deleteLater(self) -> None:  # noqa: N802
+    def deleteLater(self) -> None:
         pass
 
 

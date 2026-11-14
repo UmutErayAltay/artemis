@@ -143,16 +143,16 @@ class HelpTip(QToolButton):
             return True
         return super().event(event)
 
-    def enterEvent(self, event: QEnterEvent) -> None:  # noqa: N802
+    def enterEvent(self, event: QEnterEvent) -> None:
         super().enterEvent(event)
         self._open()
 
-    def leaveEvent(self, event: QEvent) -> None:  # noqa: N802
+    def leaveEvent(self, event: QEvent) -> None:
         super().leaveEvent(event)
         if not self.isChecked():
             self._close()
 
-    def hideEvent(self, event: QHideEvent) -> None:  # noqa: N802
+    def hideEvent(self, event: QHideEvent) -> None:
         # Sayfa değişince ya da pencere gizlenince baloncuk ekranda asılı kalmasın.
         self.setChecked(False)
         self._close()
@@ -176,7 +176,7 @@ class HelpTip(QToolButton):
             # İkinci tıklama imleç hâlâ üstündeyken de kapatır; yeniden üstüne gelince açılır.
             self._close()
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         """Sabit baloncuk: dışarı tıklama, Esc ya da uygulamadan çıkış kapatır."""
         kind = event.type()
         if kind == QEvent.Type.MouseButtonPress and watched is not self and not (

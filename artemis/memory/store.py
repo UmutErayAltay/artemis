@@ -18,7 +18,8 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from artemis.brain.conversation import TurnRecord
-from artemis.memory.vault import tokenize, turkish_fold
+from artemis.memory.vault import tokenize
+from artemis.text import turkish_fold
 
 # ponytail: arama son N tur üzerinde bellekte yapılır; N'i aşan arşiv için FTS5 veya embedding.
 _SEARCH_SCAN_TURNS = 2000

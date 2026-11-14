@@ -114,7 +114,7 @@ class AutoHideLabel(QLabel):
         self.setTextFormat(Qt.TextFormat.PlainText)
         self.hide()
 
-    def setText(self, text: str) -> None:  # noqa: N802 - Qt imzası
+    def setText(self, text: str) -> None:
         super().setText(text)
         self.setVisible(bool(text))
 
@@ -143,7 +143,7 @@ class PathHint(QLabel):
         shown = self.fontMetrics().elidedText(self.full_text, Qt.TextElideMode.ElideMiddle, width)
         super().setText(shown)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt adı)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._elide()
 
@@ -217,7 +217,7 @@ class CurrentPageStack(QWidget):
         self._box = QVBoxLayout(self)
         self._box.setContentsMargins(0, 0, 0, 0)
 
-    def addWidget(self, page: QWidget) -> int:  # noqa: N802 (Qt)
+    def addWidget(self, page: QWidget) -> int:
         self._pages.append(page)
         self._box.addWidget(page)
         page.setVisible(len(self._pages) == 1)
@@ -231,16 +231,16 @@ class CurrentPageStack(QWidget):
     def widget(self, index: int) -> QWidget | None:
         return self._pages[index] if 0 <= index < len(self._pages) else None
 
-    def currentIndex(self) -> int:  # noqa: N802 (Qt)
+    def currentIndex(self) -> int:
         return self._current
 
-    def currentWidget(self) -> QWidget | None:  # noqa: N802 (Qt)
+    def currentWidget(self) -> QWidget | None:
         return self.widget(self._current)
 
-    def setCurrentWidget(self, page: QWidget) -> None:  # noqa: N802 (Qt)
+    def setCurrentWidget(self, page: QWidget) -> None:
         self.setCurrentIndex(self._pages.index(page))
 
-    def setCurrentIndex(self, index: int) -> None:  # noqa: N802 (Qt)
+    def setCurrentIndex(self, index: int) -> None:
         if not 0 <= index < len(self._pages) or index == self._current:
             return
         self._pages[self._current].hide()
@@ -696,7 +696,7 @@ class ProjectsPanel(QWidget):
         self._sync_list()
         self.set_busy(True)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt adı)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         wide = event.size().width() >= self.WIDE_BREAKPOINT
         self._columns.setDirection(
@@ -707,7 +707,7 @@ class ProjectsPanel(QWidget):
             QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
         )
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt adı)
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         # Ayarlar'da Uygula ile eklenen ajan/klasörler sayfaya dönünce görünür.
         self.reload_config()

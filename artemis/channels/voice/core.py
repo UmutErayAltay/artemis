@@ -28,6 +28,7 @@ from artemis.channels.voice.wake import _edit_distance, _fold
 from artemis.channels.voice.wake import find_wake_word as find_wake_word
 from artemis.channels.voice.wake import is_ghost_transcript as is_ghost_transcript
 from artemis.config.settings import VoiceConfig
+from artemis.text import turkish_fold
 
 logger = logging.getLogger(__name__)
 
@@ -620,7 +621,7 @@ class VoiceController:
 
     @staticmethod
     def _speech_words(text: str) -> list[str]:
-        return re.findall(r"\w+", text.replace("I", "ı").replace("İ", "i").lower())
+        return re.findall(r"\w+", turkish_fold(text))
 
     def set_continuous(self, enabled: bool) -> None:
         """Kesintisiz kipi çalışırken değiştirir; arayüze bildirir."""

@@ -16,6 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator, model_validator
 
+from artemis.text import turkish_fold
 from artemis.tools.registry import ToolRegistry
 
 MAX_STEPS = 12
@@ -34,7 +35,7 @@ def name_key(name: str) -> str:
     Türkçe İ/I önce çevrilir: düz `casefold` "İ"yi "i" + birleşik nokta yapar ve "İşe başla" ile
     "işe başla" ayrı rutin sayılırdı.
     """
-    return " ".join(name.split()).replace("İ", "i").replace("I", "ı").casefold()
+    return turkish_fold(" ".join(name.split()))
 
 
 class RoutineStep(BaseModel):

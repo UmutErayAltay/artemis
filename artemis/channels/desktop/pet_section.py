@@ -63,7 +63,7 @@ class _ElidedLabel(QLabel):
         width = max(self.width() - 4, 0) or 100
         self.setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, width))
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._elide()
 
@@ -164,12 +164,12 @@ class _GalleryList(QListWidget):
     focus_changed = Signal()
     keyboard_focus = False
 
-    def focusInEvent(self, event: QFocusEvent) -> None:  # noqa: N802 (Qt)
+    def focusInEvent(self, event: QFocusEvent) -> None:
         super().focusInEvent(event)
         self.keyboard_focus = True
         self.focus_changed.emit()
 
-    def focusOutEvent(self, event: QFocusEvent) -> None:  # noqa: N802 (Qt)
+    def focusOutEvent(self, event: QFocusEvent) -> None:
         super().focusOutEvent(event)
         self.keyboard_focus = False
         self.focus_changed.emit()
@@ -179,7 +179,7 @@ class _GalleryList(QListWidget):
         rows = max(1, -(-self.count() // per_row))
         self.setFixedHeight(rows * (_CARD_H + _GAP) + 4)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self.fit_height()
 
@@ -361,7 +361,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
     def show_gallery(self) -> None:
         self.stack.setCurrentIndex(0)
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt)
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self.sync_model_hook()
 

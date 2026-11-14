@@ -99,6 +99,7 @@ from artemis.config.settings import (
     Settings,
     load_settings,
 )
+from artemis.text import search_fold
 from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
 SettingPath = tuple[str, ...]
@@ -493,7 +494,7 @@ _LAST_SECTION_KEY = "settings/section"
 
 def _fold(text: str) -> str:
     """Arama için: büyük/küçük harf ve Türkçe İ/ı farkı yok sayılır."""
-    return text.replace("İ", "i").replace("I", "i").replace("ı", "i").lower()
+    return search_fold(text)
 
 
 class _SectionDelegate(QStyledItemDelegate):
@@ -505,7 +506,7 @@ class _SectionDelegate(QStyledItemDelegate):
         self.muted = QColor(THEMES[DEFAULT_THEME]["muted"])
         self.accent = QColor(THEMES[DEFAULT_THEME]["accent"])
 
-    def sizeHint(self, option: QStyleOptionViewItem, index: Any) -> QSize:  # noqa: N802
+    def sizeHint(self, option: QStyleOptionViewItem, index: Any) -> QSize:
         hint = index.data(Qt.ItemDataRole.SizeHintRole)
         return hint if isinstance(hint, QSize) else super().sizeHint(option, index)
 
@@ -539,7 +540,7 @@ class _SectionDelegate(QStyledItemDelegate):
 class _SearchBox(QLineEdit):
     """Esc aramayı temizler."""
 
-    def keyPressEvent(self, event: QKeyEvent) -> None:  # noqa: N802
+    def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape and self.text():
             self.clear()
         else:
@@ -559,7 +560,7 @@ class _SectionList(QListWidget):
             and position.y() - self.visualItemRect(item).top() < _HEADER_HEIGHT
         )
 
-    def mousePressEvent(self, event: QMouseEvent) -> None:  # noqa: N802
+    def mousePressEvent(self, event: QMouseEvent) -> None:
         if not self._on_header(event.position().toPoint()):  # başlık alanı seçim yapmaz
             super().mousePressEvent(event)
 
@@ -642,7 +643,7 @@ class _ThemeCard(QFrame):
         self.style().unpolish(self)
         self.style().polish(self)
 
-    def mousePressEvent(self, event: Any) -> None:  # noqa: N802
+    def mousePressEvent(self, event: Any) -> None:
         self.radio.click()
         super().mousePressEvent(event)
 
@@ -707,7 +708,7 @@ class _Notice(QLabel):
         self._timer.setInterval(6000)
         self._timer.timeout.connect(self.clear)
 
-    def setText(self, arg__1: str) -> None:  # noqa: N802
+    def setText(self, arg__1: str) -> None:
         super().setText(arg__1)
         if arg__1:
             self._timer.start()
@@ -726,7 +727,7 @@ class _WheelGuard(QObject):
     (2026-11-13). Değer yalnız tıklayıp seçerek ya da klavyeyle değişir.
     """
 
-    def eventFilter(self, watched: QObject, event: QEvent) -> bool:  # noqa: N802
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
         if event.type() != QEvent.Type.Wheel or not isinstance(
             watched, QComboBox | QAbstractSpinBox | QSlider
         ):
@@ -1869,7 +1870,7 @@ class SettingsPanel(QWidget):
             widget = widget.parentWidget()
         self.stack.updateGeometry()
 
-    def resizeEvent(self, event: Any) -> None:  # noqa: N802
+    def resizeEvent(self, event: Any) -> None:
         """Dar pencerede bölüm listesi 160px'e iner; içerik kırpılmasın."""
         super().resizeEvent(event)
         self._set_compact(self.width() < _COMPACT_PANEL_WIDTH)

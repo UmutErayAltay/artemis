@@ -27,6 +27,7 @@ from artemis.channels.voice.adapters import FasterWhisperRecognizer
 from artemis.channels.voice.core import find_wake_word
 from artemis.config.settings import Settings, VoiceConfig, load_settings
 from artemis.safety.paths import safe_join
+from artemis.text import turkish_fold
 from artemis.tools.app_resolver import resolve_application
 
 
@@ -66,7 +67,7 @@ class Recognizer(Protocol):
 
 def normalize(text: str) -> str:
     """Türkçe büyük harfleri doğru küçültüp noktalama işaretlerini kaldırır."""
-    text = unicodedata.normalize("NFKC", text).replace("İ", "i").replace("I", "ı").casefold()
+    text = turkish_fold(unicodedata.normalize("NFKC", text))
     text = unicodedata.normalize("NFKC", text)
     return " ".join("".join(
         "" if char in {"'", "’", "ʼ"} else (
@@ -96,7 +97,7 @@ def app_mentions(text: str, vocabulary: Sequence[str]) -> set[str]:
     # Uygulama adı karşılaştırmasında büyük/küçük Türkçe i farkı etkisizdir.
     def fold_app_text(value: str) -> str:
         value = unicodedata.normalize("NFKC", value)
-        value = value.replace("İ", "i").replace("I", "ı").casefold().replace("ı", "i")
+        value = turkish_fold(value).replace("ı", "i")
         return " ".join(value.split())
 
     folded_text = fold_app_text(text)

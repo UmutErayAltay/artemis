@@ -29,10 +29,10 @@ from datetime import datetime
 from pathlib import Path
 
 from artemis.config.settings import Settings
-from artemis.memory.vault import turkish_fold
 from artemis.proactive.triggers import sanitize_name
 from artemis.safety.audit import AuditLog
 from artemis.skills import skills_dir
+from artemis.text import turkish_fold
 
 DB_NAME = "dosya_arama.sqlite3"
 # Bir koşuda en çok bu kadar dosya görülür; dev klasör (örn. tüm disk) süresiz sürmesin.

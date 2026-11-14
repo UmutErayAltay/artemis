@@ -193,7 +193,7 @@ class _Silhouette(QFrame):
         self.setFixedSize(112, 96)
         self.setAccessibleName("Boş önizleme")
 
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (Qt)
+    def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
         body = QColor(self.palette().color(QPalette.ColorRole.WindowText))
         eye = self.palette().color(QPalette.ColorRole.Highlight)
@@ -449,7 +449,7 @@ class CreatorPanel(QFrame):
         self._load_models()
         self._update_buttons()
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         wide = event.size().width() >= _WIDE_MIN
         want = QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
         if self._columns.direction() != want:
@@ -838,6 +838,6 @@ class CreatorPanel(QFrame):
                 signal.disconnect()  # sonuç yok sayılır; iş parçacığı `_RUNNING`'de biter
             self._image_call = None
 
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt)
+    def closeEvent(self, event: QCloseEvent) -> None:
         self.shutdown()
         super().closeEvent(event)

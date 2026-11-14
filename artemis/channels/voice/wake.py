@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 
+from artemis.text import turkish_fold
+
 _FOLD = str.maketrans("ışçğöü", "iscgou")
 
 
@@ -13,7 +15,7 @@ def _fold(word: str) -> str:
     Whisper "Artemis"i "Artemıs/Artemiş" ve en sık "Artemiz" yazıyor (sondaki s'nin
     yumuşaması); bunlar yazım farkı değil, aynı söz.
     """
-    folded = word.replace("I", "ı").replace("İ", "i").lower().translate(_FOLD)
+    folded = turkish_fold(word).translate(_FOLD)
     return folded[:-1] + "s" if folded.endswith("z") else folded
 
 
@@ -60,7 +62,7 @@ def is_ghost_transcript(text: str) -> bool:
     kuyruk komut sanıldı (2026-10-26). Bu yüzden VoiceController uyandırma sonrası kuyruğa da
     uygular.
     """
-    normalized = text.replace("I", "ı").replace("İ", "i").lower()
+    normalized = turkish_fold(text)
     normalized = " ".join("".join(
         char for char in normalized if char.isalnum() or char.isspace()
     ).split())

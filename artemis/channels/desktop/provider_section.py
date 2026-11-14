@@ -226,34 +226,34 @@ class _FlowRow(QLayout):
         self._items: list[Any] = []
         self._gap = 8
 
-    def addItem(self, arg__1: Any) -> None:  # noqa: N802 (Qt adı)
+    def addItem(self, arg__1: Any) -> None:
         self._items.append(arg__1)
 
     def count(self) -> int:
         return len(self._items)
 
-    def itemAt(self, index: int) -> Any:  # noqa: N802 (Qt adı)
+    def itemAt(self, index: int) -> Any:
         return self._items[index] if 0 <= index < len(self._items) else None
 
-    def takeAt(self, index: int) -> Any:  # noqa: N802 (Qt adı)
+    def takeAt(self, index: int) -> Any:
         return self._items.pop(index) if 0 <= index < len(self._items) else None
 
-    def hasHeightForWidth(self) -> bool:  # noqa: N802 (Qt adı)
+    def hasHeightForWidth(self) -> bool:
         return True
 
-    def heightForWidth(self, arg__1: int) -> int:  # noqa: N802 (Qt adı)
+    def heightForWidth(self, arg__1: int) -> int:
         return self._arrange(QRect(0, 0, arg__1, 0), apply=False)
 
-    def setGeometry(self, arg__1: QRect) -> None:  # noqa: N802 (Qt adı)
+    def setGeometry(self, arg__1: QRect) -> None:
         super().setGeometry(arg__1)
         self._arrange(arg__1, apply=True)
 
-    def sizeHint(self) -> QSize:  # noqa: N802 (Qt adı)
+    def sizeHint(self) -> QSize:
         hints = [item.sizeHint() for item in self._items]
         width = sum(h.width() for h in hints) + self._gap * max(0, len(hints) - 1)
         return QSize(width, max((h.height() for h in hints), default=0))
 
-    def minimumSize(self) -> QSize:  # noqa: N802 (Qt adı)
+    def minimumSize(self) -> QSize:
         sizes = [item.minimumSize() for item in self._items]
         return QSize(max((s.width() for s in sizes), default=0),
                      max((s.height() for s in sizes), default=0))
@@ -723,7 +723,7 @@ class ProviderSection(QWidget):
         for button in (self.primary_button, self.hard_button, self.fallback_button):
             button.setStyleSheet(sheet)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         wide = event.size().width() >= WIDE_AT
         self.model_split.setDirection(

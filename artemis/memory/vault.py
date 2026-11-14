@@ -18,6 +18,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from artemis.safety.paths import safe_join
+from artemis.text import turkish_fold as turkish_fold
 
 _EXCERPT_LIMIT = 300
 _TITLE_LIMIT = 200
@@ -33,7 +34,7 @@ _PARAGRAPH_SPLIT = re.compile(r"\n\s*\n")
 _TOKEN = re.compile(r"\w+")
 
 
-class ExcludedNote(ValueError):  # noqa: N818 - ad sözleşmeden: durum bir hata değil, bir red nedenidir
+class ExcludedNote(ValueError):
     """Yol vault içinde ama gizli, hariç tutulmuş veya `.md` olmayan bir nota çıkıyor."""
 
 
@@ -45,16 +46,6 @@ class SearchHit:
     title: str
     score: float
     excerpt: str
-
-
-def turkish_fold(text: str) -> str:
-    """Türkçe büyük/küçük harf eşlemesiyle casefold uygular.
-
-    `casefold()` tek başına "I" harfini "i"ye çevirir ve "İ"yi "i̇" (noktalı birleşik
-    karakter) yapar; Türkçede ise "I"→"ı", "İ"→"i" olmalıdır. Önce bu iki harf elle
-    eşlenir, yoksa "ISPARTA" ile "ısparta" hiç eşleşmez.
-    """
-    return text.replace("I", "ı").replace("İ", "i").casefold()
 
 
 def _segments(path: str) -> list[str]:

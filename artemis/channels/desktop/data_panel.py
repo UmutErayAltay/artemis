@@ -31,6 +31,7 @@ from artemis.channels.desktop.projects_panel import (
     make_scroll_page,
 )
 from artemis.channels.desktop.widgets import HelpTip
+from artemis.text import search_fold
 from artemis.tools.base import ToolResult
 from artemis.tools.plugins.companion import ChangesArguments, RuleRemoveArguments
 from artemis.tools.plugins.history import HistoryArguments
@@ -48,7 +49,7 @@ _STATES = {
 
 def _fold(text: str) -> str:
     """Türkçe i/ı/İ/I ayrımını arama için eşitler; salt casefold 'IŞIK' ile 'ışık'ı eşlemez."""
-    return text.translate(str.maketrans("İIı", "iii")).casefold()
+    return search_fold(text)
 
 
 _HELP_RETENTION = (
@@ -319,7 +320,7 @@ class DataPanel(QWidget):
             self._memory_pending = False
             self._request_memory()
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt adı)
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self._schedule_autoload()
 
