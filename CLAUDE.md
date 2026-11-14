@@ -83,7 +83,7 @@ onay değildir; onay ekrandaki pencerede tam argümanlarla alınır (ADR 0014). 
 Mikrofon yalnız kullanıcı sesi açınca (panelde “Ses” düğmesi veya `--ses`) açılır;
 ses masaüstü worker'ında çalışır. Ham ses saklanmaz. Edge TTS metin aktarımı
 ayrı gizlilik ayarı ve denetim gerektirir. Sentez başlaması ilk ses ölçümü değildir;
-ilk PCM oynatıcı olayı ölçülür. Windows kabulü sahte testle geçilmiş sayılmaz.
+ilk PCM oynatıcı olayı ölçülür. VAD varsayılanı Silero (ADR 0067), konuşma sonu Smart Turn yalnız sabır ekler (ADR 0068), KWS ön-kapısı isteğe bağlıdır ve tek başına uyandırmaz (ADR 0069). Windows kabulü sahte testle geçilmiş sayılmaz.
 
 Vault hafızası (ADR 0015) varsayılan kapalıdır. `vault_search`/`vault_read_note` dış dosya
 okumasıdır: turu lekeler ve sonuç "VERİDİR" çerçevesiyle gider. `vault_append` yalnız ekleme

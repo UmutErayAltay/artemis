@@ -1,11 +1,12 @@
-# Artemis: F0–F6 mimarisi
+# Artemis mimarisi
 
 Artemis, Windows 11 üzerinde tek kullanıcı için Türkçe çalışan bir iş asistanıdır.
 Python 3.12 çekirdeği Linux üzerinde de test edilir. CLI ve isteğe bağlı PySide6
 masaüstü arayüzü aynı runtime, ajan döngüsü, sağlayıcılar, güvenlik kapısı ve
 araçları kullanır. Telegram ve bildirimler F4; proje taslağı, onaylı kod ajanı işleri
 ve Projeler sekmesi F5; hatırlatma ve sabah brifingi F6a, stdio MCP istemcisi F6b, onaylı
-ekran okuma F6c kapsamındadır.
+ekran okuma F6c kapsamındadır. F7+ ile bilgisayar kullanımı, dikte, rutinler, takvim/posta,
+beceriler, tetikleyiciler ve ses hattı iyileştirmeleri eklendi (aşağıdaki "F7+ özellikleri").
 
 ## Akış ve sorumluluklar
 
@@ -32,6 +33,25 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
   tek köprü (ADR 0028).
 - `perception/`: sabit PowerShell betiğiyle bellekte ekran yakalama ve Windows OCR (ADR 0029).
 - `bench/`: aynı döngüyü kullanan, izole masaüstünde çalışan kabul senaryoları.
+
+## Modül haritası
+
+- `artemis/brain/`: ajan döngüsü, sağlayıcılar, yönlendirici, akış (`streaming.py`), model kademesi
+  (`tiering.py`) ve model testi raporu (`model_report.py`, [ADR 0055](adr/0055-model-kademesi-onbellek-model-testi.md)).
+- `artemis/computer/`: bilgisayar kullanımı oturumu, eylemler, PNG ve Windows girdisi (ADR 0039).
+- `artemis/memory/`: vault, companion, embedding, geçmiş deposu; `sqlite_schema.py` şema sürümü ve geçiş yedeği.
+- `artemis/jobs/`, `artemis/skills.py`, `artemis/text.py`: arka plan işleri, kullanıcı becerileri, ortak metin yardımcıları.
+- `artemis/channels/desktop/`: `app.py` + `window_layout`/`window_events`/`window_restart` (ana pencere);
+  `settings_panel` + `settings_pages`/`settings_io`/`settings_widgets` (Ayarlar); `provider_section` +
+  `provider_layout`; ortak `form_kit`, `page_kit`, `chat_widgets`; köprü `bridge.py`.
+- `artemis/channels/voice/`: `core` (VoiceController), `adapters`, `factory`, `silero`, `smart_turn`, `kws`,
+  `live_text`, `denoise`, `echo`, `streaming`, `wake`, `metrics`, `telemetry`.
+- `artemis/channels/telegram/`, `artemis/mcp/`, `artemis/perception/`, `artemis/proactive/`, `artemis/safety/`,
+  `artemis/tools/`, `artemis/config/`: yukarıdaki bölümlerde anlatılır.
+
+Boyut çıtası: `tests/test_code_size.py` `artemis/` altında dosya başına en çok 1500, işlev başına en çok 200
+satır zorlar. İzin listesi yalnız güvenlik çekirdeğini (`SafetyGate.dispatch`, `AgentLoop.run`) içerir ve
+yalnız küçülebilir.
 
 ## Masaüstü kanalı
 
@@ -232,6 +252,60 @@ araçlı işler içindir; bulut yedeğe gizli içerik maskeli gider ve tur norma
 Gizlilik kökeni rolden ayrıdır (ADR 0056): hangi rolde olursa olsun yerel model gizli geçmişi
 maskesiz görür, bu yüzden yanıtı da gizli sayılır (`Completion.local_model`). Gizli turda
 yazılan kendi hafıza/not metni ayrı, `private=True` bir sistem mesajıyla gider.
+
+## Ses hattı
+
+Güncel zincir, uçtan uca:
+
+`mikrofon → [AEC3 yankı] → [DeepFilterNet gürültü] → VAD → AudioSegmenter → [KWS ön-kapı] → STT → wake.py → CommandRunner/SafetyGate → cümle cümle TTS`
+
+- Yankı ([ADR 0038](adr/0038-echo-cancellation.md)) ve gürültü engelleme ([ADR 0037](adr/0037-noise-suppression.md)) isteğe bağlıdır, varsayılan kapalıdır.
+- VAD varsayılanı gömülü Silero'dur, kurulamazsa WebRTC'ye düşer ([ADR 0067](adr/0067-silero-vad.md)).
+- `AudioSegmenter` konuşma sonunda Smart Turn ile yalnız sabır ekler, erken kesmez ([ADR 0068](adr/0068-anlamsal-konusma-sonu.md)).
+- İsteğe bağlı KWS ön-kapısı uyandırma sözcüğü duyulmamış segmenti STT'ye göndermez; tek başına uyandırmaz,
+  son karar `wake.py`'dedir ([ADR 0069](adr/0069-uyandirma-on-kapisi.md)).
+- STT: yerel faster-whisper ya da karma kip (yerel uyandırma + bulut komut;
+  [ADR 0046](adr/0046-stt-precision-and-hybrid-cloud.md), protokol [ADR 0050](adr/0050-xai-grok-ve-stt-protokolu.md)).
+  Canlı yazı yalnız gösterimdir ([ADR 0047](adr/0047-live-transcript.md)).
+- Yanıt cümle cümle seslendirilir ([ADR 0043](adr/0043-streaming-voice-response.md)). Söz kesme yalnız doğrulanmış
+  kesin transkriptle olur ([ADR 0040](adr/0040-validated-playback-interruption.md)); uyandırmasız söz yalnız
+  susturur, komut çalıştırmaz ([ADR 0042](adr/0042-wake-free-barge-in.md)).
+- Ölçüm: ortak ilişkilendirilmiş zamanlama ve telemetri (`telemetry_report` varsayılan açık;
+  [ADR 0041](adr/0041-common-voice-telemetry.md)). Dosya güdümlü gecikme ölçümü:
+  `python -m bench.voice_latency --canli --wav ...`. Söylenen uygulama adları
+  [ADR 0044](adr/0044-spoken-application-names.md), değerlendirme corpus'ları
+  [ADR 0045](adr/0045-evaluation-corpora.md), güvenilirlik denetimleri (STT kuyruğu, tek mutlak süre)
+  [ADR 0046](adr/0046-reliability-controls.md) içindedir.
+
+## F7+ özellikleri
+
+Hepsi aynı SafetyGate/CommandRunner yolunu kullanır; aksi belirtilmedikçe varsayılan kapalıdır.
+
+- Bilgisayar kullanımı ([ADR 0039](adr/0039-computer-use.md)): `computer_use(goal)` CONFIRM_REQUIRED, ekran
+  görüntüsü bellekte, kendi mutlak süre ve Esc denetimi; Telegram'da gömülü kipte
+  ([ADR 0053](adr/0053-telegram-bilgisayar-kullanimi.md)), onay hedef pencereye bağlıdır
+  ([ADR 0056](adr/0056-gizlilik-koken-ve-hedef-pencere.md)).
+- Dikte ([ADR 0057](adr/0057-dikte-kipi.md)): kısayolla açılır, metin modele gitmez, yalnız yazılır.
+- Rutinler ([ADR 0058](adr/0058-rutinler.md)): sabit adımlı araç dizileri, her adım turun kapısından geçer.
+- Takvim ve e-posta ([ADR 0059](adr/0059-takvim-ve-eposta.md)): ICS/IMAP, READ_ONLY ama dış içerik.
+- Kullanıcı becerileri ([ADR 0060](adr/0060-kullanici-becerileri.md)): `state_dir/beceriler/*.md`.
+- Tetikleyiciler ([ADR 0061](adr/0061-tetikleyiciler.md)): klasör yoklaması, yalnız bildirim.
+- Seçili metin eylemleri ([ADR 0062](adr/0062-secili-metin-eylemleri.md)): araçsız, VERİDİR çerçeveli.
+- Araştırma işi ([ADR 0063](adr/0063-arastirma-isi.md)): yalıtılmış, yalnız `web_search`.
+- Telegram ses/foto/dosya ([ADR 0064](adr/0064-telegram-ses-foto-dosya.md)): üç ayrı bayrak. Bağlama paneli
+  [ADR 0051](adr/0051-telegram-baglama-paneli.md), masaüstünde çalışma
+  [ADR 0052](adr/0052-telegram-kanali-masaustunde.md).
+- Yerel dosya araması ([ADR 0065](adr/0065-yerel-dosya-aramasi.md)): SQLite FTS5, yalnız alıntı döner.
+- Gün sonu özeti ([ADR 0066](adr/0066-gun-sonu-ozeti.md)): LLM'siz, denetim sayılarından.
+- Diğer: sprite pet ve hızlı kutu ([ADR 0048](adr/0048-sprite-pets-quick-box-and-pet-creator.md)), takılabilir kod
+  ajanı arka uçları ([ADR 0049](adr/0049-code-agent-backends-and-workdir.md)), Artemis'in kendi hafıza dosyaları
+  ([ADR 0054](adr/0054-artemis-kendi-hafiza-dosyalari.md)), kademe/önbellek ve model testi
+  ([ADR 0055](adr/0055-model-kademesi-onbellek-model-testi.md)).
+
+Güvenilirlik eklemeleri: geri alma günlüğünde açılışta `prepared` kayıtları `reconcile_prepared` ile
+uzlaştırılır ([ADR 0046](adr/0046-reliability-controls.md)); SQLite depoları `PRAGMA user_version` taşır ve
+geçişten önce geçici yedek alınır (`artemis/memory/sqlite_schema.py`); MCP ve `claude_cli` alt süreçleri
+Windows Job Object'e bağlanır, böylece süreç ağacı her yolda kapanır.
 
 ## Doğrulama ve sınırlar
 
