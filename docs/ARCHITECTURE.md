@@ -260,7 +260,7 @@ Güncel zincir, uçtan uca:
 
 - Yankı ([ADR 0038](adr/0038-echo-cancellation.md)) ve gürültü engelleme ([ADR 0037](adr/0037-noise-suppression.md)) isteğe bağlıdır, varsayılan kapalıdır.
 - VAD varsayılanı gömülü Silero'dur, kurulamazsa WebRTC'ye düşer ([ADR 0067](adr/0067-silero-vad.md)).
-- `AudioSegmenter` konuşma sonunda Smart Turn ile yalnız sabır ekler, erken kesmez ([ADR 0068](adr/0068-anlamsal-konusma-sonu.md)).
+- `AudioSegmenter` konuşma sonunda Smart Turn ile yalnız sabır ekler, erken kesmez ([ADR 0068](adr/0068-anlamsal-konusma-sonu.md)). Konuşma sonu sessizliği sürerken o ana kadarki sesli kısım nihai tanıyıcıyla spekülatif olarak çözülür; yalnız segment yalnız sessizlik eklenerek kapanırsa sonuç benimsenir ([ADR 0071](adr/0071-spekulatif-nihai-stt.md)).
 - İsteğe bağlı KWS ön-kapısı uyandırma sözcüğü duyulmamış segmenti STT'ye göndermez; tek başına uyandırmaz,
   son karar `wake.py`'dedir ([ADR 0069](adr/0069-uyandirma-on-kapisi.md)).
 - STT: yerel faster-whisper ya da karma kip (yerel uyandırma + bulut komut;

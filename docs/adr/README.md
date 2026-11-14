@@ -73,3 +73,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0068 — Anlamsal konuşma sonu (Smart Turn v3.2)](0068-anlamsal-konusma-sonu.md)
 - [0069 — Cihaz içi uyandırma sözcüğü ön-kapısı (isteğe bağlı)](0069-uyandirma-on-kapisi.md)
 - [0070 — computer_use "ok" için OS düzeyi kanıt](0070-computer-use-os-kaniti.md)
+- [0071 — Konuşma sonu sessizliğinde spekülatif nihai STT](0071-spekulatif-nihai-stt.md)

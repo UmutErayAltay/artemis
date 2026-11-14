@@ -135,6 +135,10 @@ class VoiceConfig(BaseModel):
     stt_beam_size: int = Field(default=5, ge=1, le=10)
     stt_partial_beam_size: int = Field(default=1, ge=1, le=10)
     stt_partial_enabled: bool = True
+    # ADR 0071: bitiş sessizliği sürerken nihai STT sessizliğin `stt_speculative_after_ms`inde
+    # önceden başlar; bölüt aynı sesle kapanırsa sonuç kullanılır, konuşma sürerse atılır.
+    stt_speculative: bool = True
+    stt_speculative_after_ms: int = Field(default=200, ge=60, le=2000)
     # Kapalı: Whisper'ın VAD süzgeci bant sınırlı seste baştaki uyandırma sözcüğünü kesiyor
     # (ADR 0045: telefon bandında kaçırma %40 -> %0). Canlı döngüde STT'ye zaten webrtc VAD'in
     # kestiği parça gider, boşta ek maliyet yoktur.

@@ -18,6 +18,7 @@ from typing import Protocol
 
 from artemis.brain.agent_loop import RunResult
 from artemis.channels.runner import CommandRunner
+from artemis.channels.voice.speculative import SpeculativeStt
 from artemis.channels.voice.streaming import SpeechStream
 from artemis.channels.voice.telemetry import (
     CommandClass,
@@ -149,6 +150,14 @@ class AudioSegmenter:
     @property
     def active(self) -> bool:
         return bool(self._active) or self._discarding
+
+    @property
+    def trailing_silence_frames(self) -> int:
+        return self._silence if self._active else 0
+
+    def voiced_snapshot(self) -> bytes:
+        """Sondaki sessizlik kareleri hariç ses (ADR 0071; tur dedektörüyle aynı kırpma)."""
+        return b"".join(self._active[: len(self._active) - self._silence])
 
     def _turn_over(self) -> bool:
         """Sessizlik eşiğinde dedektöre bu duraklama için bir kez sorulur; hata turu bloklamaz."""
@@ -344,6 +353,11 @@ class VoiceController:
         self._decoder: asyncio.Task[None] | None = None
         self._decode_busy = False
         self._capture_epoch = 0
+        self._spec = (
+            SpeculativeStt(recognizer, max(1, config.stt_speculative_after_ms // config.frame_ms))
+            if config.stt_speculative
+            else None
+        )
         self._seen_drops = 0
         self._playback: asyncio.Task[None] | None = None
         self._playback_cancelled: asyncio.Event | None = None
@@ -420,6 +434,10 @@ class VoiceController:
                 # transcript kabul edilince _handle_utterance içinde kesilir (ADR 0040).
                 self._live_step(frame, was_active)
                 self._wake_step(frame)
+                if self._spec is not None:
+                    self._spec.feed(
+                        self.segmenter, utterance, self._capturing_id, self._capture_epoch
+                    )
                 if self.segmenter.active and self.config.stt_partial_enabled:
                     self._partial_frames += 1
                     if self._partial_frames >= max(1, 1000 // self.config.frame_ms):
@@ -480,6 +498,7 @@ class VoiceController:
         self._event(uid, "endpoint")
         if await self._wake_gate_drops(segment):
             self._event(uid, "terminal", outcome="rejected", reason="no_wake_kws")
+            self._forget_spec(uid)
             return
         self._event(uid, "stt_queued")
         try:
@@ -487,6 +506,7 @@ class VoiceController:
         except asyncio.QueueFull:
             self.on_transcript("Ses tanıma yoğun; son söz alınamadı. Lütfen tekrar söyle.")
             self._event(uid, "terminal", outcome="rejected", reason="stt_queue_full")
+            self._forget_spec(uid)
         self.on_timing("stt_queue_depth", float(self._segments.qsize()))
 
     async def _decode_segments(self) -> None:
@@ -500,8 +520,14 @@ class VoiceController:
                 self._decode_busy = False
                 self._segments.task_done()
 
+    def _forget_spec(self, uid: int) -> None:
+        if self._spec is not None:
+            self._spec.forget(uid)
+
     def _invalidate_segments(self) -> None:
         self._capture_epoch += 1
+        if self._spec is not None:
+            self._spec.cancel_all()
         # Onay sırasındaki/eski ses uyandırma kanıtı olarak taşınmaz (CLAUDE.md ses kuralı).
         self._wake_heard_at = -math.inf
         self._wake_buffer.clear()
@@ -580,7 +606,12 @@ class VoiceController:
             await self._settle_partial()
             self._event(uid, "stt_start")
             stt_started = self.clock()
-            transcript = (await self.recognizer.transcribe(segment.pcm)).strip()
+            early = await self._spec.result(uid, epoch) if self._spec is not None else None
+            if self._spec is not None:
+                self.on_timing("stt_speculative_hit", 0.0 if early is None else 1.0)
+            if early is None:
+                early = await self.recognizer.transcribe(segment.pcm)
+            transcript = early.strip()
         except asyncio.CancelledError:
             self._event(uid, "terminal", outcome="cancelled", reason="stt_cancelled")
             raise

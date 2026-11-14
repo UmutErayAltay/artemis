@@ -92,6 +92,7 @@ mikrofon kabulünün yerini tutmaz.
 | Silero + Smart Turn (ADR 0068), 600 ms | 5062 / 8469 ms | 672 | 750 | 3438 | 1609 ms |
 | Aynı akşam kontrol: Silero, 1000 ms (9 tur) | 5672 ms | 1078 | 750 | 3430 | 1998 ms |
 | Aynı akşam: Silero + Smart Turn, 600 ms (2×21 tur) | 5016 / 5625 ms | 672 / 687 | 750 | 3437 / 4000 | ~1610 ms |
+| + spekülatif nihai STT (ADR 0071), 21 tur | 4985 ms | 672 | 312 | 3688 | ~1330 ms |
 
 \* Yerel hat = konuşma sonu bekleme + STT + (TTS ilk parça − model ilk token): modelin dışındaki,
 Artemis'in kendi kontrolündeki süre. Son koşuda sağlayıcının ilk token süresi 0,8 sn'den 3,4 sn'ye
