@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import sys
 import tempfile
-import threading
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -49,16 +48,9 @@ from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.automation_panel import AutomationPanel
 from artemis.channels.desktop.bridge import (
     Activity,
-    ActivityGap,
     Approval,
     BridgeEvent,
     DesktopBridge,
-    Failed,
-    Finished,
-    Proactive,
-    State,
-    ToolFinished,
-    VoiceCommand,
 )
 from artemis.channels.desktop.chat_widgets import (
     _VOICE_LABELS,
@@ -78,16 +70,27 @@ from artemis.channels.desktop.operations import (
     OperationLog,
 )
 from artemis.channels.desktop.page_kit import center_page
-from artemis.channels.desktop.pet import PetWidget, level_from_message
+from artemis.channels.desktop.pet import PetWidget
 from artemis.channels.desktop.pet_sprite import pets_dir_for
-from artemis.channels.desktop.projects_panel import ProjectsPanel, status_label
+from artemis.channels.desktop.projects_panel import ProjectsPanel
 from artemis.channels.desktop.selection_popup import SelectionPopup
 from artemis.channels.desktop.settings_io import _same, save_choices, save_computer_mode
 from artemis.channels.desktop.settings_panel import SettingsPanel
-from artemis.channels.desktop.steps import step_line
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
-from artemis.channels.desktop.text_viewer import open_text_file
 from artemis.channels.desktop.widgets import PetFace
+from artemis.channels.desktop.window_events import (
+    add_step,
+    append_chat,
+    append_summary_to_vault,
+    begin_card,
+    decide_approval,
+    handle_event,
+    notify_job,
+    render_card,
+    reset_cards,
+    run_routine_notice,
+    show_toast_failure,
+)
 from artemis.channels.desktop.window_layout import (
     _NAV_COMPACT_WIDTH,
     _NAV_WIDTH,
@@ -98,10 +101,7 @@ from artemis.channels.desktop.window_layout import (
 )
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings, same_hotkey
-from artemis.proactive.daily_summary import VAULT_TEXT_LIMIT, parse_day, summary_path
 from artemis.safety.audit import AuditLog
-from artemis.tools.plugins.memory import AppendArguments
-from artemis.tools.plugins.routines import RoutineNameArguments
 from artemis.tools.toast import ToastOutcome, show_toast
 
 _STYLE = themes.stylesheet(themes.DEFAULT_THEME)
@@ -126,9 +126,6 @@ _VOICE_TONES = {
 _STEP_PANEL_MIN_WINDOW = 1100
 _COMPACT_HEADER_WINDOW = 1000
 _COMPACT_NAV_WINDOW = 900  # bunun altında yan gezinme yalnız ikon (UX-01)
-# Adım blokları yalnız son birkaç isteğin canlı bağlantısını tutar.
-_STEP_TURNS_KEPT = 8
-_STEP_EVENTS_PER_TURN = 200
 
 
 def _dot_style(color: str) -> str:
@@ -1077,66 +1074,11 @@ class DesktopWindow(QMainWindow):
         self.overlay.set_busy(True)
         return True
 
-    def _show_routine_notice(
-        self, name: str, text: str, suggest: str = "", summary_day: str = ""
-    ) -> None:
-        """Ana düğme: rutin "Çalıştır", tetikleyici önerisi "Yaz" (ADR 0061), gün özeti "Aç";
-        özet için vault açıksa ikinci düğme "Vault'a ekle" (ADR 0066)."""
-        self._routine_name = name
-        self._routine_suggest = suggest
-        self._summary_day = summary_day
-        self.routine_run_button.setText(
-            "Aç" if summary_day else "Yaz" if suggest else "Çalıştır"
-        )
-        self.summary_vault_button.setVisible(bool(summary_day) and self._vault_note() is not None)
-        self.routine_label.setText(text)
-        self.routine_bar.show()
-
-    def _vault_note(self) -> str | None:
-        """Vault kapalıysa ya da config okunamazsa None, değilse eklenecek not adı."""
-        try:
-            settings = load_settings(self._config_path)
-        except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            return None
-        if settings.memory.vault_path is None:
-            return None
-        return settings.daily_summary.vault_note
-
-    def _summary_file(self) -> Path | None:
-        day = parse_day(self._summary_day)
-        if day is None:
-            return None
-        try:
-            return summary_path(load_settings(self._config_path).state_dir, day)
-        except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            return None
-
     def _append_summary_to_vault(self) -> None:
-        """Normal, onaylı `vault_append` turu: onay penceresi eklenecek metni gösterir."""
-        path, note = self._summary_file(), self._vault_note()
-        self.routine_bar.hide()
-        if path is None or note is None:
-            return
-        try:
-            text = path.read_text(encoding="utf-8")[:VAULT_TEXT_LIMIT].strip()
-        except (OSError, UnicodeError):
-            self._set_status("Özet dosyası okunamadı.", "running")
-            return
-        if text:
-            self._submit_routine_tool("vault_append", AppendArguments(path=note, text=text))
+        append_summary_to_vault(self)
 
     def _run_routine_notice(self) -> None:
-        self.routine_bar.hide()
-        if self._summary_day:
-            path = self._summary_file()
-            if path is not None and path.is_file():
-                open_text_file(path, "Gün özeti", self)
-        elif self._routine_suggest:
-            # Gönderilmez: metin yalnız sohbet kutusuna yazılır, kullanıcı okuyup kendisi yollar.
-            self.prompt.setPlainText(self._routine_suggest)
-            self.prompt.setFocus()
-        elif self._routine_name:
-            self._submit_routine_tool("routine_run", RoutineNameArguments(name=self._routine_name))
+        run_routine_notice(self)
 
     def _submit_automation_tool(self, name: str, arguments: BaseModel) -> None:
         self._submit_routine_tool(name, arguments, from_automation=True)
@@ -1403,219 +1345,7 @@ class DesktopWindow(QMainWindow):
                 self._finish_exit()
 
     def _handle_event(self, event: BridgeEvent) -> None:
-        if isinstance(event, State):
-            if event.request_id is not None and event.request_id != self._active_request:
-                return
-            if event.state == "ready":
-                if (
-                    event.request_id is None
-                    and not self._busy
-                    and event.message.startswith("Hazır · ")
-                ):
-                    self._show_model(event.message.removeprefix("Hazır · "))
-                if event.request_id is not None or not self._busy:
-                    self._worker_ready = True
-                    self._set_status("Hazır", "ready")
-                    self._busy = False
-                    self._active_request = None
-                    self._set_controls()
-                    self.overlay.set_busy(False, "Hazır")
-                if self._voice_on_ready and self._worker_ready:
-                    self._voice_on_ready = False
-                    self.bridge.start_voice()
-                if event.request_id is not None:
-                    self._dismiss_approval_for(event.request_id)
-            elif event.state == "running":
-                self._busy = True
-                self._set_status("Çalışıyor…", "running")
-                self._set_controls()
-                self.overlay.set_busy(True)
-            elif event.state == "computer":
-                # Bilgisayar kullanımı oturumu (ADR 0039): ne yaptığı ve nasıl durdurulacağı
-                # hep görünür; boş metin oturum bitti demektir, normal duruma dönülür.
-                if event.message:
-                    line = f"Bilgisayarı kullanıyorum · {event.message} · durdurmak için Esc"
-                    self._set_status(line, "running")
-                    self.overlay.set_busy(True, line)
-                elif self._busy:
-                    self._set_status("Çalışıyor…", "running")
-                    self.overlay.set_busy(True)
-                else:
-                    self._set_status("Hazır", "ready")
-            elif event.state.startswith("selection_"):
-                self._show_selection(event.state.removeprefix("selection_"), event.message)
-            elif event.state.startswith("dictation_"):
-                self._show_dictation(event.state.removeprefix("dictation_"), event.message)
-            elif event.state == "cleanup_pending":
-                self._busy = True
-                self._set_status("Önceki işlem temizleniyor…", "running")
-                self.overlay.set_busy(True, "Temizleniyor…")
-                self._set_controls()
-            elif event.state == "voice":
-                self._show_voice_state(event.message)
-            elif event.state == "voice_mode":
-                self._show_continuous(event.message == "on")
-            elif event.state == "voice_level":
-                level = level_from_message(event.message)
-                if level is not None:
-                    self.settings_panel.input_level.setValue(round(level * 100))
-                    self.pet.set_level(level)
-            elif event.state == "voice_heard":
-                self.settings_panel.last_heard.setText(event.message)
-                self.pet.heard(event.message)
-            elif event.state == "voice_live":
-                # Kullanıcı konuşurken pete bakar; ayarlar paneli yalnız nihai metni gösterir.
-                # Her güncelleme balon süresini yeniler, nihai `voice_heard` üzerine yazar.
-                self.pet.live(event.message)
-            elif event.state == "voice_live_unavailable":
-                kind, _, reason = event.message.partition(":")
-                if kind == "runtime":
-                    # Çalışırken düşen canlı yazı bir yapılandırma sorunu değildir.
-                    self._append_chat(
-                        "Artemis",
-                        "Canlı yazı çalışırken hata verdi ve bu oturumda kapatıldı; "
-                        "ses canlı yazısız sürüyor.",
-                    )
-                else:
-                    fix = (
-                        'Paketleri pip install -e ".[stream]" ile kurun.'
-                        if kind == "deps"
-                        else "Ayarlar > Ses bölümündeki canlı yazı modelini kontrol et."
-                    )
-                    self._append_chat(
-                        "Artemis",
-                        f"Canlı yazı açılamadı: {reason}. {fix} Ses canlı yazısız sürüyor.",
-                    )
-            elif event.state == "voice_denoise":
-                if event.message.startswith("unavailable:"):
-                    kind, _, reason = event.message.removeprefix("unavailable:").partition(":")
-                    fix = (
-                        'Paketleri pip install -e ".[voice]" ile kurun.'
-                        if kind == "deps"
-                        else "Artemis'i yeniden kurun ya da Ayarlar > Ses bölümündeki "
-                        "ses temizleme ayarlarını kontrol et."
-                    )
-                    self._append_chat(
-                        "Artemis",
-                        f"Gürültü engelleme açılamadı: {reason}. {fix} Ses işlenmeden sürüyor.",
-                    )
-                elif event.message == "off":
-                    self._append_chat(
-                        "Artemis",
-                        "Gürültü engelleme hata verdi ve bu oturumda kapatıldı; "
-                        "ses işlenmeden devam ediyor.",
-                    )
-            elif event.state == "voice_echo":
-                if event.message == "off":
-                    self._append_chat(
-                        "Artemis",
-                        "Yankı engelleme hata verdi ve bu oturumda kapatıldı; "
-                        "ses yankı gidermeden sürüyor.",
-                    )
-            elif event.state == "voice_error":
-                self._append_chat("Artemis", event.message)
-                self.pet.flash_error()
-                self._show_voice_state("off")
-            elif event.state == "context_reset":
-                # Adım blokları eski balonlarla birlikte silinir; kayıt da sıfırlanır.
-                # Karşılama geri gelir; işlem kartları da sıfırlanır (denetim günlüğü değişmez).
-                self._clear_chat_view()
-            elif event.state == "cancelling":
-                self._set_status("İptal ediliyor…", "running")
-            elif event.state == "stopping":
-                self._set_status("Temizleniyor…", "running")
-            elif event.state == "stopped":
-                self._finish_exit()
-            elif event.state == "cancelled":
-                self._set_status("İptal edildi", "ready")
-            return
-        if isinstance(event, VoiceCommand):
-            self._active_request = event.request_id
-            self._busy = True
-            self._begin_card(event.request_id, event.text)
-            self._append_chat("Siz (ses)", event.text)
-            self._set_status("Çalışıyor…", "running")
-            self._set_controls()
-            self.overlay.set_busy(True)
-            return
-        if isinstance(event, Approval):
-            self._show_approval(event)
-            return
-        if isinstance(event, ToolFinished):
-            if event.request_id == self._active_request:
-                self._dismiss_approval_for(event.request_id)
-                if event.tool_name.startswith("routine_"):
-                    self.settings_panel.routines.accept_result(event.tool_name, event.result)
-                    self._append_chat("Artemis", event.result.message)
-                    return
-                if event.tool_name == "research_cancel":
-                    self.automation_panel.accept_result(event.tool_name, event.result)
-                    self._append_chat("Artemis", event.result.message)
-                    return
-                panel = (self.projects_panel if event.tool_name.startswith("code_agent_")
-                         else self.data_panel)
-                panel.accept_result(event.tool_name, event.result)
-                # Silinen geçmişin balonları ekranda kalırsa kullanıcı silmenin başarısız
-                # olduğunu sanır; "Yeni sohbet" ile aynı temizlik yapılır.
-                if (
-                    event.tool_name == "conversation_history"
-                    and event.result.success
-                    and event.result.data.get("action") == "delete"
-                ):
-                    self._clear_chat_view()
-            return
-        if isinstance(event, Finished):
-            if event.request_id == self._active_request:
-                self._dismiss_approval_for(event.request_id)
-                self._append_chat(
-                    "Artemis", event.result.text, self._step_block_for(event.request_id)
-                )
-                self.pet.answer(event.result.text)
-                self.overlay.status.setText("Yanıt hazır")
-            return
-        if isinstance(event, Failed):
-            if not event.request_id:
-                self._set_status(f"Başlatılamadı · {event.error_type}", "error")
-                self._append_chat("Artemis", event.message)
-            elif event.request_id == self._active_request:
-                self._dismiss_approval_for(event.request_id)
-                self._ops.fail(event.request_id)
-                self._render_card(event.request_id)
-                self._append_chat(
-                    "Artemis",
-                    f"İstek tamamlanamadı ({event.error_type}).",
-                    self._step_block_for(event.request_id),
-                )
-                self.pet.flash_error()
-            return
-        if isinstance(event, Proactive):
-            # Kendiliğinden mesaj ayrı konuşmacıyla görünür; modelin geçmişine eklenmez.
-            self._append_chat("Artemis (kendiliğinden)", f"{event.title}\n{event.body}")
-            self.pet.answer(event.body)
-            if event.routine or event.suggest or event.summary_day:
-                self._show_routine_notice(
-                    event.routine, event.body, event.suggest, event.summary_day
-                )
-            return
-        if isinstance(event, ActivityGap):
-            self._ops.dropped += event.dropped_count
-            self.activity_notice.setText(
-                f"{self._ops.dropped} eski etkinlik görünümden düştü; kartlar eksik olabilir."
-            )
-            self.activity_notice.show()
-            return
-        if isinstance(event, Activity):
-            self._pet_activity(event)
-            self._feed_card(event)
-            self._collect_step(event)
-
-    def _clear_chat_view(self) -> None:
-        self._turn_steps.clear()
-        self._reset_cards()
-        self.chat.clear()
-        if not self._busy:
-            self._set_status("Hazır", "ready")
-        self._set_controls()
+        handle_event(self, event)
 
     def _pet_activity(self, event: Activity) -> None:
         self.pet.code_agent_event(event.event, event.fields)
@@ -1624,162 +1354,30 @@ class DesktopWindow(QMainWindow):
             self._projects_timer.setInterval(PROJECTS_POLL_ACTIVE_MS)
             self._projects_timer.start()
         if event.event in {"code_agent_waiting", "code_agent_done"}:
-            self._notify_job(event.fields)
-
-    def _notify_job(self, fields: dict[str, Any]) -> None:
-        """Sekme açık olmasa da görünür bildirim: sohbet satırı + Windows toast.
-
-        Tepsi balonu Windows bildirimleri kapalıyken sonuçsuz kayboluyordu; toast sonucu verir.
-
-        Aynı iş/durum çifti bir kez bildirilir (kilit bırakma ve zaman aşımı yolları da
-        `code_agent_done` yazar). Kullanıcının kendi iptali bildirim gerektirmez.
-        """
-        status = str(fields.get("status", ""))
-        key = (str(fields.get("job_id", "")), status, str(fields.get("question_id") or ""))
-        if status == "cancelled" or key in self._notified_jobs:
-            return
-        self._notified_jobs.add(key)
-        project = str(fields.get("project") or "kod ajanı")
-        summary = str(fields.get("summary") or "").strip()
-        text = f"Kod işi · {project}: {status_label(fields)}" + (f". {summary}" if summary else "")
-        # Makbuz ipucu yalnız sohbet satırında; toast metni değişmez.
-        hint = " Makbuz için: “bu işin makbuzunu yaz”." if status == "done" else ""
-        self._append_chat("Artemis", text + hint)
-        toast = self._toast
-        if toast is None:
-            return
-
-        def deliver() -> None:
-            # powershell çalıştırır (15 sn'ye dek): arayüz iş parçacığını dondurmamak için ayrı
-            # iş parçacığı; sonuç sinyalle ana iş parçacığına döner.
-            outcome = toast("Artemis", text[:240])
-            if outcome.status != "ok":
-                self._toast_failed.emit(outcome.message)
-
-        threading.Thread(target=deliver, name="job-toast", daemon=True).start()
+            notify_job(self, event.fields)
 
     def _show_toast_failure(self, message: str) -> None:
-        # Sohbet satırı zaten gösterildi; bildirimin neden görünmediği dürüstçe eklenir.
-        self._append_chat("Sistem", f"(Windows bildirimi gösterilmedi: {message})")
-
-    def _show_approval(self, item: Approval) -> None:
-        if item.request_id != self._active_request:
-            self.bridge.decide(item.request_id, item.turn_id, item.approval_id, False)
-            return
-        if self._approval_dialog is not None:
-            self._approval_dialog.reject()
-        self.overlay.hide()
-        self._show_panel()
-        dialog = ApprovalDialog(item, self._decide_approval, self)
-        self._approval_dialog = dialog
-        dialog.finished.connect(lambda _result, current=dialog: self._clear_approval(current))
-        dialog.open()
-        self.pet.set_approval(True)
+        show_toast_failure(self, message)
 
     def _decide_approval(
         self, item: Approval, approved: bool, remember_site: bool = False
     ) -> bool:
-        return self.bridge.decide(
-            item.request_id, item.turn_id, item.approval_id, approved, remember_site
-        )
-
-    def _dismiss_approval_for(self, request_id: str) -> None:
-        dialog = self._approval_dialog
-        if dialog is not None and dialog.item.request_id == request_id:
-            dialog.reject()
-
-    def _clear_approval(self, dialog: ApprovalDialog) -> None:
-        if self._approval_dialog is dialog:
-            self._approval_dialog = None
-            self.pet.set_approval(False)
+        return decide_approval(self, item, approved, remember_site)
 
     def _begin_card(self, request_id: str, text: str) -> None:
-        self._ops.begin(request_id, text)
-        self._render_card(request_id)
-
-    def _feed_card(self, event: Activity) -> None:
-        # Etiket tablosu işçi açılınca dolar; her olayda güncel kopya okunur.
-        card = self._ops.feed(event.request_id, event.event, event.fields, self.bridge.labels())
-        if card is not None:
-            self._render_card(card.request_id)
-
-    def _drop_card(self, widget: OperationCard) -> None:
-        """Kartı hemen kaldırır. `deleteLater` tek başına yetmez: silme olay döngüsüne kalır ve
-        o ana dek widget eski konumunda çizilmeye devam eder (kartın altında hayalet kopya).
-        Bu yüzden önce gizlenir ve ebeveynden koparılır."""
-        self.activity_cards.removeWidget(widget)
-        widget.hide()
-        widget.setParent(None)
-        widget.deleteLater()
+        begin_card(self, request_id, text)
 
     def _render_card(self, request_id: str) -> None:
-        """Kartı (yeniden) kurar; yeni kart listenin en üstüne, 20'yi aşan eskiler düşer."""
-        card = self._ops.cards.get(request_id)
-        if card is None:
-            return
-        if not self.activity_empty.isHidden():
-            self.activity_empty.hide()
-            self.activity.show()
-        widget = OperationCard(card, themes.THEMES[self._theme])
-        old = self._op_widgets.get(request_id)
-        index = 0
-        if old is not None:
-            index = self.activity_cards.indexOf(old)
-            self._drop_card(old)
-        self._op_widgets[request_id] = widget
-        self.activity_cards.insertWidget(index, widget)
-        self._sync_activity_panel()
-        for stale in [key for key in self._op_widgets if key not in self._ops.cards]:
-            self._drop_card(self._op_widgets.pop(stale))
+        render_card(self, request_id)
 
     def _reset_cards(self) -> None:
-        """Yeni sohbette işlem kartları temizlenir; denetim günlüğüne dokunulmaz."""
-        for widget in self._op_widgets.values():
-            self._drop_card(widget)
-        self._op_widgets.clear()
-        self._ops.clear()
-        self.activity_notice.hide()
-        self.activity.hide()
-        self.activity_empty.show()
-        self._sync_activity_panel()
+        reset_cards(self)
 
     def _append_chat(self, speaker: str, text: str, steps: StepBlock | None = None) -> None:
-        self.chat.append(speaker, text, steps)
-
-    def _turn_for(self, request_id: str) -> _TurnSteps:
-        turn = self._turn_steps.get(request_id)
-        if turn is None:
-            turn = _TurnSteps()
-            self._turn_steps[request_id] = turn
-            while len(self._turn_steps) > _STEP_TURNS_KEPT:
-                del self._turn_steps[next(iter(self._turn_steps))]
-        return turn
-
-    def _collect_step(self, event: Activity) -> None:
-        if event.request_id is None:
-            return
-        turn = self._turn_for(event.request_id)
-        if len(turn.activities) >= _STEP_EVENTS_PER_TURN:
-            return
-        turn.activities.append(event)
-        if turn.block is not None:
-            self._add_step(turn.block, event)
-
-    def _step_block_for(self, request_id: str) -> StepBlock:
-        """Yanıt balonunun üstündeki blok; bloğa henüz satır gelmediyse gizli kalır."""
-        turn = self._turn_for(request_id)
-        if turn.block is None:
-            block = StepBlock(themes.THEMES[self._theme])
-            for activity in turn.activities:
-                self._add_step(block, activity)
-            turn.block = block
-        return turn.block
+        append_chat(self, speaker, text, steps)
 
     def _add_step(self, block: StepBlock, activity: Activity) -> None:
-        # Etiket tablosu işçi açılınca dolar; her satırda güncel kopya okunur.
-        line = step_line(activity.event, activity.fields, self.bridge.labels())
-        if line is not None:
-            block.add_line(activity, line)
+        add_step(self, block, activity)
 
     def _request_exit(self) -> None:
         # Bekleyen düzenleme kaybolmasın; _exiting kayıtları reddeder, o yüzden önce.
