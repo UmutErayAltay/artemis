@@ -66,6 +66,9 @@ voice:
   vad_backend: auto # auto: Silero (paketle gelir), olmazsa webrtc
   vad_threshold: 0.5
   end_silence_ms: 600
+  turn_detection: true # Sessizlikte cümle bitmiş mi diye bakar (Smart Turn, ADR 0068); bitmediyse daha çok bekler.
+  turn_max_silence_ms: 1600 # Cümle bitmemiş görünürse en çok bu kadar sessizlik beklenir.
+  turn_threshold: 0.5 # "Tur tamam" olasılığı eşiği.
   barge_in_ms: 180 # Uyandırmasız söz kesmede en kısa söz süresi (ADR 0042); VAD tek başına kesmez.
   require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
   barge_in_without_wake: true # Konuşurken herhangi bir söz susturur; komut için wake ya da takip sözü gerekir.

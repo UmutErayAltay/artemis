@@ -84,6 +84,13 @@ class VoiceConfig(BaseModel):
     # Silero konuşma olasılığı eşiği; yalnız `vad_aggressiveness` WebRTC'ye uygulanır.
     vad_threshold: float = Field(default=0.5, gt=0, lt=1)
     end_silence_ms: int = Field(default=600, ge=100, le=3000)
+    # Anlamsal konuşma sonu (ADR 0068): sessizlik `end_silence_ms`e varınca Smart Turn modeli
+    # cümlenin bitip bitmediğine bakar; bitmemişse en çok `turn_max_silence_ms`e kadar beklenir.
+    # Yalnız sabır ekler, turu hiç erken bitirmez; kurulamazsa eski davranışla sürer.
+    turn_detection: bool = True
+    turn_max_silence_ms: int = Field(default=1600, ge=200, le=5000)
+    # Smart Turn "tur tamam" olasılığı eşiği.
+    turn_threshold: float = Field(default=0.5, gt=0, lt=1)
     # Eski config uyumluluğu; söz kesme artık nihai STT doğrulamasını bekler (ADR 0040).
     barge_in_ms: int = Field(default=180, ge=100, le=1000)
     require_wake_during_output: bool = True

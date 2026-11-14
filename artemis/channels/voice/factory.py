@@ -26,6 +26,7 @@ from artemis.channels.voice.core import (
     Microphone,
     SpeechRecognizer,
     SpeechSynthesizer,
+    TurnDetector,
     VoiceActivityDetector,
     VoiceController,
 )
@@ -43,6 +44,7 @@ from artemis.channels.voice.echo import (
 )
 from artemis.channels.voice.live_text import SherpaLiveTranscriber
 from artemis.channels.voice.silero import SileroVAD
+from artemis.channels.voice.smart_turn import SmartTurnDetector
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 from artemis.config.settings import Settings, VoiceConfig
@@ -97,6 +99,18 @@ def build_vad(voice: VoiceConfig, on_state: StateCallback) -> VoiceActivityDetec
             logger.warning("Silero VAD açılamadı, WebRTC VAD ile sürülüyor: %s", error)
             on_state("vad:webrtc")
     return WebRTCVAD(voice)
+
+
+def build_turn_detector(voice: VoiceConfig, on_state: StateCallback) -> TurnDetector | None:
+    """Smart Turn kurulamazsa ses hattı onsuz sürer; düşüş ``turn:off`` ile görünür olur."""
+    if not voice.turn_detection:
+        return None
+    try:
+        return SmartTurnDetector(threshold=voice.turn_threshold)
+    except (OSError, ValueError, RuntimeError, ImportError) as error:
+        logger.warning("Smart Turn açılamadı, yalnız sessizlikle sürülüyor: %s", error)
+        on_state("turn:off")
+        return None
 
 
 def _live_reason(error: Exception) -> str:
@@ -269,6 +283,7 @@ async def build_voice_controller(
             cloud_recognizer=cloud_recognizer,
             live_transcriber=live,
             on_live_text=lambda text: on_state("live:" + text[:200]),
+            turn_detector=build_turn_detector(settings.voice, on_state),
         )
         cleanup.pop_all()
         return controller

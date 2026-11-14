@@ -79,6 +79,12 @@ class VoiceActivityDetector(Protocol):
     def is_speech(self, pcm: bytes) -> bool: ...
 
 
+class TurnDetector(Protocol):
+    """Sessizlikte "cümle bitti mi?" sorusu (ADR 0068); yalnız sabır ekler, turu erken bitirmez."""
+
+    def is_complete(self, pcm16: bytes) -> bool: ...
+
+
 class SpeechRecognizer(Protocol):
     async def transcribe(self, pcm: bytes) -> str: ...
 
@@ -113,11 +119,23 @@ class AudioSink(Protocol):
 class AudioSegmenter:
     """VAD segmentasyonu; kısa sessizlikleri ve konuşma öncesi PCM'i korur."""
 
-    def __init__(self, config: VoiceConfig, vad: VoiceActivityDetector) -> None:
+    def __init__(
+        self,
+        config: VoiceConfig,
+        vad: VoiceActivityDetector,
+        turn_detector: TurnDetector | None = None,
+    ) -> None:
         self.config = config
         self.vad = vad
         self.frame_limit = max(1, config.pre_roll_ms // config.frame_ms)
         self.silence_limit = max(1, config.end_silence_ms // config.frame_ms)
+        # ADR 0068: cümle bitmemiş görünürse sessizlik bu kareye kadar beklenir (hiç kısalmaz).
+        self.turn_silence_limit = max(
+            self.silence_limit, config.turn_max_silence_ms // config.frame_ms
+        )
+        self.turn_detector = turn_detector
+        self._judged = False
+        self._turn_warned = False
         self.max_frames = max(1, int(config.max_utterance_seconds * 1000 / config.frame_ms))
         self._pre: deque[bytes] = deque(maxlen=self.frame_limit)
         self._active: list[bytes] = []
@@ -130,6 +148,25 @@ class AudioSegmenter:
     @property
     def active(self) -> bool:
         return bool(self._active) or self._discarding
+
+    def _turn_over(self) -> bool:
+        """Sessizlik eşiğinde dedektöre bu duraklama için bir kez sorulur; hata turu bloklamaz."""
+        if self.turn_detector is None or self._silence >= self.turn_silence_limit:
+            return True
+        if self._judged:
+            return False
+        self._judged = True
+        # Model sondaki sessizliği "bitti" diye okur: gerçek Türkçe konuşmada (Common Voice, 80
+        # klip) cümle ortası kesimde 600 ms sessizlikle %5, sessizlik kırpılınca %30 "yarım" dedi.
+        # Bu yüzden ses son konuşma karesinde kesilip verilir (2026-11-14 ölçümü, ADR 0068).
+        voiced = self._active[: len(self._active) - self._silence]
+        try:
+            return self.turn_detector.is_complete(b"".join(voiced))
+        except (OSError, ValueError, RuntimeError) as error:
+            if not self._turn_warned:
+                self._turn_warned = True
+                logger.warning("Konuşma sonu dedektörü başarısız, sessizlikle sürülüyor: %s", error)
+            return True
 
     def push(
         self, pcm: bytes, timestamp: float, stt_pcm: bytes | None = None
@@ -159,7 +196,9 @@ class AudioSegmenter:
         if speech:
             self._speech_end = timestamp
         self._silence = 0 if speech else self._silence + 1
-        if self._silence >= self.silence_limit:
+        if speech:
+            self._judged = False
+        if self._silence >= self.silence_limit and self._turn_over():
             result = AudioSegment(b"".join(self._active), self._speech_start, self._speech_end)
             self.reset()
             return result
@@ -178,6 +217,7 @@ class AudioSegmenter:
         self._active.clear()
         self._pre.clear()
         self._silence = 0
+        self._judged = False
         self._discarding = False
         self._speech_start = 0.0
         self._speech_end = 0.0
@@ -227,6 +267,7 @@ class VoiceController:
         cloud_recognizer: SpeechRecognizer | None = None,
         live_transcriber: LiveTranscriber | None = None,
         on_live_text: Callable[[str], None] | None = None,
+        turn_detector: TurnDetector | None = None,
     ) -> None:
         self.runner = runner
         # ADR 0047: canlı metin YALNIZ on_live_text'e gider; komut/uyandırma/yankı/söz kesme
@@ -242,7 +283,7 @@ class VoiceController:
         self.cloud_recognizer = cloud_recognizer
         self.config = config
         self.microphone = microphone
-        self.segmenter = AudioSegmenter(config, vad)
+        self.segmenter = AudioSegmenter(config, vad, turn_detector)
         self.recognizer = recognizer
         self.synthesizer = synthesizer
         self.sink = sink

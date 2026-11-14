@@ -54,6 +54,11 @@ ticari olarak dağıtacaksanız `[stream]` ekstrasını ve canlı yazı özelli�
 Pakete dahil model (MIT) ve lisans bildirimi için
 [`artemis/channels/voice/models/silero/NOTICE`](artemis/channels/voice/models/silero/NOTICE) dosyasına bakın.
 
+## Smart Turn v3.2 (konuşma sonu tahmini)
+
+Pakete dahil model (BSD-2-Clause) ve lisans bildirimi için
+[`artemis/channels/voice/models/smart_turn/NOTICE`](artemis/channels/voice/models/smart_turn/NOTICE) dosyasına bakın.
+
 ## DeepFilterNet3 (gürültü engelleme)
 
 Pakete dahil model ve lisans bildirimi için

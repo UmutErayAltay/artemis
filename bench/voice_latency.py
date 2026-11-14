@@ -265,6 +265,10 @@ def _hardware(
             "actual": "webrtc" if voice.vad_backend == "webrtc" or "vad:webrtc" in states
             else "silero",
         },
+        "turn_detection": {
+            "requested": voice.turn_detection,
+            "actual": voice.turn_detection and "turn:off" not in states,
+        },
         "noise_suppression": {
             "requested": voice.noise_suppression,
             "actual": False if (not voice.noise_suppression or "denoise:off" in states
@@ -325,7 +329,7 @@ async def live_report(
         # heard/level durumları kişisel içerik taşır; rapora yalnız sabit durumlar girer.
         if state.startswith("denoise:unavailable:"):
             states.add("denoise:unavailable")
-        elif state in {"denoise:off", "echo:off", "vad:webrtc"}:
+        elif state in {"denoise:off", "echo:off", "vad:webrtc", "turn:off"}:
             states.add(state)
 
     def approve(name: str, arguments: dict[str, Any]) -> bool:
