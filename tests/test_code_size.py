@@ -1,4 +1,4 @@
-"""Kod düzeni ratchet'i: dosya <= 1500 satır, fonksiyon <= 200 satır.
+"""Kod düzeni ratchet'i: dosya <= 1300 satır, fonksiyon <= 200 satır.
 
 Büyük dosya/fonksiyonlar gözden geçirmeyi ve bölmeyi zorlaştırır. Sınırı aşan
 mevcut yerler ALLOW içinde kayıtlıdır; kayıtlar yalnız küçülebilir (liste
@@ -10,15 +10,13 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-MAX_FILE = 1500
+MAX_FILE = 1300
 MAX_FUNC = 200
 
 ROOT = Path(__file__).parents[1]
 
 ALLOW: dict[str, int] = {
-    # güvenlik çekirdeği; yalnız boyut için bölünmez (ADR gerekir)
-    "artemis/safety/gate.py::SafetyGate.dispatch": 224,
-    "artemis/brain/agent_loop.py::AgentLoop.run": 337,
+    # Boş kalmalı: yeni istisna eklemek yerine dosyayı/işlevi bölün.
 }
 
 
