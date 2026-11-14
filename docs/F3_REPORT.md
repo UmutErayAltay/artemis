@@ -52,26 +52,26 @@ okumada tutulmuş eski mikrofon karesi zaman sınırıyla reddedilir. Edge'in ke
 hata ailesi ve ağ hataları normalize edilir; ilk PCM'den sonra oluşan hata eski
 yanıtı baştan yerel sesle tekrar oynatmaz.
 
-## Bilinçli sınırlar
+## Bilinçli sınırlar (F3 dönemi; durum 2026-11-14)
 
-- 32 GB RAM ve RTX 4050 için CUDA/float16 başlangıç profili seçildi; VRAM,
-  sürücü, mikrofon ve gerçek gecikme burada ölçülmedi.
-- STT özel uyandırma modelinin yerine kullanılır. Sürekli yerel STT'nin kaynak
-  tüketimi ve yanlış/kaçırılan uyanma oranı Windows'ta ölçülmelidir.
-- STT pencere sonuçları kesin komut değildir. Model yanıtı mevcut AgentLoop'ta
-  tamamlandıktan sonra seslendirilir; LLM token akışı bu fazda değiştirilmedi.
-- Senkron terminal onayı tamamen eller serbest kullanım sağlamaz. Onay
-  aralığındaki ses sonraki komuta taşınmaz.
-- Akustik yankı giderme yoktur. İlk söz kesme doğrulaması kulaklıkla yapılır;
-  hoparlör kaynaklı yanlış kesmeler ayrıca sayılmalıdır.
-- Native STT/TTS inference hesabı Python task iptaliyle anında durdurulamaz.
-  Model erişimi tekilleştirilir; iptal edilmiş sonuç komut/oynatma üretmez.
-  Native çağrı takılırsa süreç kapanışı da bekleyebilir; zorla kesilebilir
-  inference işçisi bu sürümde yoktur.
-- Edge yolu FFmpeg kurulumu ve metin aktarımı izni gerektirir. Yerel modeller
-  önceden hazırlanır; uygulama kendiliğinden model indirmez.
-- Windows ve uzak CI çalışması henüz yapılmadı. API anahtarları yok; canlı veya
-  ücretli beyin çağrısı yapılmadı. Ölçülmemiş tehlike/gecikme oranı sıfır yazılmaz.
+Bu bölüm F3 tesliminde (Linux, mikrofonsuz) yazıldı; her maddenin bugünkü durumu yanında.
+
+- ~~Gerçek gecikme ölçülmedi.~~ Dosya güdümlü gerçek donanım ölçümü aşağıda (RTX 4050, CUDA).
+  Gerçek mikrofonla ölçüm hâlâ kullanıcıda.
+- ~~STT özel uyandırma modelinin yerine kullanılır.~~ İsteğe bağlı cihaz içi ön-kapı var
+  (ADR 0069); varsayılan hâlâ STT metni, nihai uyandırma kararı her iki kipte Whisper'dadır.
+- STT pencere sonuçları kesin komut değildir (değişmedi). ~~LLM token akışı değiştirilmedi.~~
+  Yanıt cümle cümle seslendirilir (ADR 0043).
+- ~~Senkron terminal onayı~~ Onay masaüstü penceresinde tam argümanlarla alınır (ADR 0014); onay
+  aralığındaki ses sonraki komuta taşınmaz, uyandırma kanıtı da sıfırlanır.
+- ~~Akustik yankı giderme yoktur.~~ WebRTC AEC3 isteğe bağlı (ADR 0038, varsayılan kapalı);
+  hoparlörle söz kesme kabulü kullanıcıda.
+- Native STT/TTS çağrısı Python iptaliyle anında durmaz (değişmedi); iptal edilmiş sonuç komut ya da
+  oynatma üretmez.
+- Edge yolu FFmpeg ve metin aktarımı izni ister (değişmedi). Paketle gelen modeller (DeepFilterNet3,
+  Silero VAD, Smart Turn) indirme gerektirmez; Whisper ve canlı yazı modelleri kullanıcı seçimiyle iner.
+- ~~Windows çalışması yapılmadı.~~ Test paketi Windows 11'de koşuyor; kabul tablosu
+  [RELIABILITY_STATUS.md](RELIABILITY_STATUS.md). Ölçülmemiş tehlike/gecikme oranı sıfır yazılmaz.
 
 Kurulum ve elle kabul adımları [VOICE_SETUP.md](VOICE_SETUP.md), mimari gerekçesi
 [ADR 0008](adr/0008-voice-channel.md) ve [ADR 0009](adr/0009-streaming-speech.md)

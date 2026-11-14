@@ -34,5 +34,8 @@ kesitleri devam tonlaması taşımadığı için ölçüm aracı olarak kullanı
 
 - Duraklamaların yaklaşık üçte biri bölünmek yerine birleşir; tam cümlede gecikme değişmez
   (%2,5 durumda en çok `turn_max_silence_ms`'e kadar bekler). CPU maliyeti duraklama başına bir çağrı.
+- Çağrı segmenter içinde, ses döngüsünde eşzamanlıdır: ölçülen süre medyan 40 ms, en çok 44 ms
+  (bu makine, 4 sn ses). Mikrofon kuyruğu 32 kare (640 ms) tuttuğu için kare kaybı olmaz; duraklama
+  başına tek sefer olduğundan iş parçacığına taşınmadı. Daha yavaş makinede ölçülüp taşınmalı.
 - Kazanç sınırlıdır; gerçek mikrofon kabulü ve eşik ayarı kullanıcıdadır.
 - Test: `tests/test_voice_turn.py`.
