@@ -44,6 +44,6 @@ Windows form, with the project virtual environment:
 .\.venv\Scripts\python.exe -m bench.run --sahte
 ```
 
-- `tests/test_code_size.py` enforces ≤ 1500 lines per file and ≤ 200 lines per function under `artemis/` (the allowlist may only shrink).
+- `tests/test_code_size.py` enforces ≤ 1300 lines per file and ≤ 200 lines per function under `artemis/` (the allowlist is empty and must stay so).
 
 For safety regressions, show that the relevant test fails when the taint or approval check is temporarily removed (then revert the mutation). A passing fake bench is not proof of live model quality.

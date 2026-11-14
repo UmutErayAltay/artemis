@@ -14,12 +14,10 @@ from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
-    QColor,
     QFont,
     QFontMetrics,
     QIcon,
     QKeySequence,
-    QPalette,
     QPixmap,
     QShortcut,
 )
@@ -28,11 +26,9 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSystemTrayIcon,
@@ -42,7 +38,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.autostart import Autostart
-from artemis.channels.desktop import gui_gc, pet_sprite, shell_assets, themes
+from artemis.channels.desktop import gui_gc, pet_sprite, themes
 from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.automation_panel import AutomationPanel
 from artemis.channels.desktop.bridge import (
@@ -77,6 +73,7 @@ from artemis.channels.desktop.settings_io import _same, save_computer_mode
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
 from artemis.channels.desktop.widgets import PetFace
+from artemis.channels.desktop.window_autostart import autostart_state, toggle_autostart
 from artemis.channels.desktop.window_events import (
     add_step,
     append_chat,
@@ -109,6 +106,13 @@ from artemis.channels.desktop.window_restart import (
     restart_runtime,
     telegram_changed,
 )
+from artemis.channels.desktop.window_theme import (
+    STATUS_TONES,
+    apply_theme,
+    dot_style,
+    refresh_tones,
+    theme_placeholders,
+)
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
@@ -119,28 +123,10 @@ PROJECTS_POLL_ACTIVE_MS = 2000
 PROJECTS_POLL_IDLE_MS = 15000
 
 
-
-
-# Durum ve ses noktaları tema renk anahtarıyla okunur; hex değer koda gömülmez.
-_STATUS_TONES = {"ready": "success", "running": "warning", "error": "error"}
-_VOICE_TONES = {
-    "off": "muted",
-    "preparing": "warning",
-    "listening": "success",
-    "awaiting_command": "success",
-    "thinking": "warning",
-    "speaking": "success",
-    "error": "error",
-}
 # Bu pencere genişliğinin altında adım paneli gizlenir, üst çubuk daralır.
 _STEP_PANEL_MIN_WINDOW = 1100
 _COMPACT_HEADER_WINDOW = 1000
 _COMPACT_NAV_WINDOW = 900  # bunun altında yan gezinme yalnız ikon (UX-01)
-
-
-def _dot_style(color: str) -> str:
-    """Durum noktasının rengi; metin ayrı etikette düz kalır."""
-    return f"QLabel {{ color: {color}; font-size: 12px; background: transparent; }}"
 
 
 class DesktopWindow(QMainWindow):
@@ -151,6 +137,7 @@ class DesktopWindow(QMainWindow):
     _toast_failed = Signal(str)
     # Alanları window_layout kurar; burada yalnız tipleri bildirilir.
     brand_pet: PetFace
+    _theme_toggle_text: str
     demo_chip: QLabel | None
     model_caption: QLabel
     model_value: QPushButton
@@ -327,69 +314,10 @@ class DesktopWindow(QMainWindow):
         self.chat.refresh_pet()
 
     def _apply_theme(self, name: str) -> None:
-        self._theme = name if name in themes.THEMES else themes.DEFAULT_THEME
-        style = themes.stylesheet(self._theme)
-        self.setStyleSheet(style)
-        # Her yoldan gelen tema değişimi Görünüm kartlarını da eşitler; set_theme sinyal yaymaz.
-        self.settings_panel.set_theme(self._theme)
-        self.settings_panel.providers.set_theme(themes.THEMES[self._theme])
-        self.automation_panel.set_theme(themes.THEMES[self._theme])
-        palette = themes.THEMES[self._theme]
-        for block in self.findChildren(StepBlock):
-            block.apply_theme(palette)
-        self.chat.apply_theme(palette)
-        self.brand_pet.set_palette_tokens(palette)
-        for request_id in list(self._op_widgets):
-            self._render_card(request_id)
-        if hasattr(self, "overlay"):
-            self.overlay.setStyleSheet(style)
-            self._theme_placeholders(self.overlay)
-        # Masaüstü pet ve yanındaki hızlı kutu ayrı pencereler; aynı jetonlarla boyanır
-        # (pet.apply_theme hızlı kutuyu da günceller; sabit lacivert yok).
-        self.pet.apply_theme(self._theme)
-        if hasattr(self, "selection_popup"):
-            self.selection_popup.apply_theme(palette)
-        self._theme_placeholders(self)
-        self._refresh_tones()
-        self._refresh_icons()
-        dark = self._theme.startswith("dark")
-        self._theme_toggle_text = "Açık tema" if dark else "Koyu tema"
-        compact = self.sidebar.width() == _NAV_COMPACT_WIDTH
-        self.theme_toggle.setText("" if compact else self._theme_toggle_text)
-        self.theme_toggle.setAccessibleName("Açık temaya geç" if dark else "Koyu temaya geç")
-        if not self._demo:
-            self._appearance.setValue("theme", self._theme)
+        apply_theme(self, name)
 
     def _token(self, key: str) -> str:
         return themes.THEMES[self._theme][key]
-
-    def _refresh_tones(self) -> None:
-        """Durum ve ses noktaları tema değişince yeni renk anahtarıyla yeniden boyanır."""
-        self.status_dot.setStyleSheet(_dot_style(self._token(_STATUS_TONES[self._status_tone])))
-        tone = _VOICE_TONES.get(self._voice_state, _VOICE_TONES["off"])
-        self.voice_dot.setStyleSheet(_dot_style(self._token(tone)))
-
-    def _refresh_icons(self) -> None:
-        """İkonlar temanın rengini çalışma anında alır; menü ve çalışma alanı ayrı olabilir."""
-        nav_color = self._token("nav_text")
-        for button, name in self._nav_icon_names.items():
-            button.setIcon(shell_assets.icon(name, nav_color))
-        dark = self._theme.startswith("dark")
-        self.theme_toggle.setIcon(shell_assets.icon("sun" if dark else "moon", nav_color, 16))
-        muted, accent = self._token("muted"), self._token("accent")
-        for button, name in (
-            (self.voice_button, "mic"),
-            (self.composer_voice, "mic"),
-            (self.auto_button, "shield"),
-        ):
-            button.setIcon(shell_assets.icon(name, muted, 18, accent))
-
-    def _theme_placeholders(self, root: QWidget) -> None:
-        color = QColor(themes.THEMES[self._theme]["muted"])
-        for widget in [*root.findChildren(QLineEdit), *root.findChildren(QPlainTextEdit)]:
-            palette = widget.palette()
-            palette.setColor(QPalette.ColorRole.PlaceholderText, color)
-            widget.setPalette(palette)
 
     def _start_hotkey(self) -> None:
         try:
@@ -734,7 +662,7 @@ class DesktopWindow(QMainWindow):
     def _build_overlay(self) -> None:
         self.overlay = QuickOverlay(self._submit_overlay, self._cancel_active, self._show_panel)
         self.overlay.setStyleSheet(themes.stylesheet(self._theme))
-        self._theme_placeholders(self.overlay)
+        theme_placeholders(self, self.overlay)
 
     def _apply_settings(self, device: int | str | None) -> None:
         apply_settings(self, device)
@@ -776,25 +704,10 @@ class DesktopWindow(QMainWindow):
         return Autostart(self._config_path, emit=AuditLog(settings.audit_path).emit)
 
     def _autostart_state(self) -> str:
-        autostart = self._autostart()
-        return autostart.status().state if autostart is not None else "off"
+        return autostart_state(self)
 
     def _toggle_autostart(self, enabled: bool) -> None:
-        autostart = self._autostart()
-        if autostart is None:
-            message, success = "Ayarlar okunamadı; açılış kaydı değiştirilmedi.", False
-        else:
-            result = autostart.enable() if enabled else autostart.disable()
-            message, success = result.message, result.success
-        if not success and self._autostart_action is not None:
-            # Seçim kutusu gerçek durumu göstermeli: başarısızlıkta eski haline döner.
-            self._autostart_action.blockSignals(True)
-            self._autostart_action.setChecked(not enabled)
-            self._autostart_action.blockSignals(False)
-        if self._tray is not None:
-            self._tray.showMessage(
-                "Artemis", message, QSystemTrayIcon.MessageIcon.Information, 6000
-            )
+        toggle_autostart(self, enabled)
 
     def present(self, *, background: bool) -> None:
         """`--arka-plan` paneli göstermez; tepsi yoksa görünmez süreç bırakılmaz.
@@ -1135,7 +1048,7 @@ class DesktopWindow(QMainWindow):
         # Durum düz metindir; ton yalnız yanındaki noktanın rengini belirler.
         self.status_label.setText(text)
         self._status_tone = tone
-        self.status_dot.setStyleSheet(_dot_style(self._token(_STATUS_TONES[tone])))
+        self.status_dot.setStyleSheet(dot_style(self._token(STATUS_TONES[tone])))
         self.status_pill.adjustSize()
 
     def _show_voice_state(self, state: str) -> None:
@@ -1149,7 +1062,7 @@ class DesktopWindow(QMainWindow):
         self.overlay.voice_state.setText(text)
         on = state in {"preparing", "listening", "awaiting_command", "thinking", "speaking"}
         self._describe_voice(text, on)
-        self._refresh_tones()
+        refresh_tones(self)
         self.pet.set_voice(state)
         if state == "off":
             self.settings_panel.input_level.setValue(0)

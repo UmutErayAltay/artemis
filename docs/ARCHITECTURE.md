@@ -41,7 +41,7 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
 - `artemis/computer/`: bilgisayar kullanımı oturumu, eylemler, PNG ve Windows girdisi (ADR 0039).
 - `artemis/memory/`: vault, companion, embedding, geçmiş deposu; `sqlite_schema.py` şema sürümü ve geçiş yedeği.
 - `artemis/jobs/`, `artemis/skills.py`, `artemis/text.py`: arka plan işleri, kullanıcı becerileri, ortak metin yardımcıları.
-- `artemis/channels/desktop/`: `app.py` + `window_layout`/`window_events`/`window_restart` (ana pencere);
+- `artemis/channels/desktop/`: `app.py` + `window_layout`/`window_events`/`window_restart`/`window_theme`/`window_autostart` (ana pencere);
   `settings_panel` + `settings_pages`/`settings_io`/`settings_widgets` (Ayarlar); `provider_section` +
   `provider_layout`; ortak `form_kit`, `page_kit`, `chat_widgets`; köprü `bridge.py`.
 - `artemis/channels/voice/`: `core` (VoiceController), `adapters`, `factory`, `silero`, `smart_turn`, `kws`,
@@ -49,9 +49,8 @@ ikinci bir onay politikası bulunmaz. CLI yalnızca kapının istediği onayı s
 - `artemis/channels/telegram/`, `artemis/mcp/`, `artemis/perception/`, `artemis/proactive/`, `artemis/safety/`,
   `artemis/tools/`, `artemis/config/`: yukarıdaki bölümlerde anlatılır.
 
-Boyut çıtası: `tests/test_code_size.py` `artemis/` altında dosya başına en çok 1500, işlev başına en çok 200
-satır zorlar. İzin listesi yalnız güvenlik çekirdeğini (`SafetyGate.dispatch`, `AgentLoop.run`) içerir ve
-yalnız küçülebilir.
+Boyut çıtası: `tests/test_code_size.py` `artemis/` altında dosya başına en çok 1300, işlev başına en çok 200
+satır zorlar. İzin listesi boştur ve boş kalmalıdır (`SafetyGate.dispatch` ve `AgentLoop.run` bölündü).
 
 ## Masaüstü kanalı
 
