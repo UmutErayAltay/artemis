@@ -18,12 +18,15 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from artemis.brain.conversation import TurnRecord
+from artemis.memory.sqlite_schema import ensure_schema
 from artemis.memory.vault import tokenize
 from artemis.text import turkish_fold
 
 # ponytail: arama son N tur üzerinde bellekte yapılır; N'i aşan arşiv için FTS5 veya embedding.
 _SEARCH_SCAN_TURNS = 2000
 
+# 1: sürümsüz dönemin şeması (notes.private dahil). Yapı değişince artır ve _migrate'e ekle.
+_SCHEMA_VERSION = 1
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS history_policy (
     id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -57,6 +60,18 @@ CREATE TABLE IF NOT EXISTS notes (
 """
 
 
+def _migrate(db: sqlite3.Connection, _from_version: int) -> None:
+    db.executescript(_SCHEMA)
+    columns = {row[1] for row in db.execute("PRAGMA table_info(notes)")}
+    if "private" not in columns:
+        # ADR 0056 geçişi: eski notların gizlilik kökeni bilinmez ve notlar lekeyi de
+        # saklamadığı için çıkarılamaz. Gizli değil sayılırlar; bu sınır README'de
+        # yazılıdır ve kullanıcı şüpheli notu memory_forget ile silebilir.
+        # suppress: eşzamanlı bir geçiş sütunu az önce eklediyse hata beklenendir.
+        with suppress(sqlite3.OperationalError), db:
+            db.execute("ALTER TABLE notes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
+
+
 @dataclass(frozen=True)
 class Note:
     id: int
@@ -85,15 +100,7 @@ class MemoryStore:
         self.path = path
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
-            db.executescript(_SCHEMA)
-            columns = {row[1] for row in db.execute("PRAGMA table_info(notes)")}
-            if "private" not in columns:
-                # ADR 0056 geçişi: eski notların gizlilik kökeni bilinmez ve notlar lekeyi de
-                # saklamadığı için çıkarılamaz. Gizli değil sayılırlar; bu sınır README'de
-                # yazılıdır ve kullanıcı şüpheli notu memory_forget ile silebilir.
-                # suppress: eşzamanlı bir geçiş sütunu az önce eklediyse hata beklenendir.
-                with suppress(sqlite3.OperationalError), db:
-                    db.execute("ALTER TABLE notes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
+            ensure_schema(db, path, _SCHEMA_VERSION, _migrate)
 
     def _connect(self) -> closing[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=5)
