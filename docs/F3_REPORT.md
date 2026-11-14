@@ -97,3 +97,23 @@ Artemis'in kendi kontrolündeki süre. Son koşuda sağlayıcının ilk token s�
 kısaldı. Uçtan uca medyan < 1,5 sn hedefi bu model/sağlayıcı ile tutmuyor: modelin ilk token süresi tek
 başına ~0,8 sn, yerel hat ~1,6 sn. Kalan büyük yerel kalem STT'dir (large-v3 + beam 5; `large-v3-turbo`
 veya beam 1 ile kısalabilir, doğruluk ölçülerek seçilmeli — kural 11).
+
+## STT ayarı ve uyandırma yolu seçimi (ölçüm, 2026-11-14)
+
+`python -m bench.speech_accuracy --canli` üç ayarla, üç corpus'ta (`umut_tr`: kullanıcının gerçek sesi,
+47 örnek; `wake_noise_tr`: pembe/babble/telefon gürültülü 150 örnek; Common Voice TR dev'den 150 klip).
+Süre: tek segment çözme medyanı (CUDA, int8_float16). Paralel test koşuları açıktı; oransal kıyas.
+
+| Ayar | Gerçek ses WER / uygulama adı | Gürültülü WER / kaçan uyanma | CV WER | Süre medyan |
+| --- | --- | --- | --- | --- |
+| large-v3, beam 5 (mevcut) | 0,109 / %71 | 0,194 / %4,0 | 0,158 | 483 ms |
+| large-v3, beam 1 | 0,217 / %64 | 0,198 / %6,7 | 0,186 | 423 ms |
+| large-v3-turbo, beam 5 | 0,101 / %50 | 0,208 / %0 | 0,231 | 288 ms |
+
+Karar (kural 11): **large-v3 + beam 5 kalır.** Turbo %40 hızlı ama uygulama adı doğruluğu %71'den
+%50'ye düşüyor (komutun hedefi) ve genel Türkçe WER kötüleşiyor; beam 1 hem yavaş kazanç hem doğruluk
+kaybı. Yanlış uyanma üç ayarda da 0.
+
+Uyandırma yolu: aynı corpus'larda Whisper metni (mevcut varsayılan) gerçek seste %0, gürültüde %4
+kaçırıyor; KWS ön-kapısı (ADR 0069) %3,7 ve %18,7 kaçırıyor (yanlış alarm ikisinde de 0). Bu yüzden KWS
+varsayılan değil, isteğe bağlı kalır: kazancı gizlilik/GPU tasarrufudur, isabet değil.

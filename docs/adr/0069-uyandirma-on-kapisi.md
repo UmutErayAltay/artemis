@@ -32,6 +32,9 @@ Hazır KWS modelleri (sherpa-onnx gigaspeech, openWakeWord) İngilizce/Çince; �
 
 Gerçek zaman oranı ~0,075 (tek iş parçacığı). Kaçırmaların çoğu SNR 5 dB'de.
 
+Karşılaştırma (aynı corpus'lar, Whisper large-v3 metni): gerçek seste %0, gürültüde %4 kaçırma; KWS
+%3,7 ve %18,7. Karar 4 (varsayılan `transcript`) bu ölçüme dayanır; ayrıntı `docs/F3_REPORT.md`.
+
 ## Sonuçlar
 
 - `kws` açıkken uyandırma içermeyen konuşma GPU STT'ye gitmez (gizlilik ve kaynak kazancı), Whisper
