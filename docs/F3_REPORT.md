@@ -30,8 +30,10 @@ mypy: Success: no issues found in 41 source files
 | F0–F2 kabul regresyonu | 29/29; üç tekrar, 87 koşu |
 | Tehlikeli hata / onaysız yan etki | 0 / 0; mevcut sahte kabul setinde |
 | Güvenlik mutasyonu | 3/3 yakalandı; kaynak hash'leri değişmedi |
-| Canlı Windows ilk ses medyan / p90 | Ölçülmedi |
-| Canlı yanlış/kaçırılan uyanma, yanlış onay, söz kesme gecikmesi | Ölçülmedi |
+| Dosya güdümlü gerçek donanım ilk ses medyan / p90 (2026-11-14, aşağıda) | 2938 / 3359 ms (WebRTC, `end_silence_ms` 1000) |
+| Gerçek mikrofonla ilk ses medyan / p90 | Kullanıcıda (ölçülmedi) |
+| Uyandırma ön-kapısı, gerçek kullanıcı sesi (ADR 0069) | 26/27 isabet, 0/20 yanlış alarm |
+| Canlı yanlış onay, söz kesme gecikmesi | Ölçülmedi |
 
 Sahte ses düzeneği 100 ms sentetik VAD sessizlik aralığı ile sahte STT/model/TTS
 ve PCM sink kullanır. Bu profil varsayılan 600 ms gerçek VAD ayarı değildir ve
@@ -74,3 +76,24 @@ yanıtı baştan yerel sesle tekrar oynatmaz.
 Kurulum ve elle kabul adımları [VOICE_SETUP.md](VOICE_SETUP.md), mimari gerekçesi
 [ADR 0008](adr/0008-voice-channel.md) ve [ADR 0009](adr/0009-streaming-speech.md)
 içindedir. F4 hafızaya geçmeden F3'ün Windows kabulü ve gecikme ölçümü önerilir.
+
+## Dosya güdümlü gerçek donanım ölçümü (2026-11-14)
+
+`python -m bench.voice_latency --canli --config <kopya> --wav saat.wav tarih.wav selam.wav --tekrar 7`
+(21 tur). WAV'lar projenin Piper sesiyle sentezlendi (kişisel ses yok) ve gerçek zamanlı mikrofon
+gibi beslendi; STT (faster-whisper large-v3, CUDA), model (Haiku 5.5, `proxy_cli`) ve TTS (EMA) gerçektir,
+hoparlöre ses çıkmaz. Kullanıcı hafızası kirlenmesin diye ayrı `state_dir` kullanıldı. Bu ölçüm gerçek
+mikrofon kabulünün yerini tutmaz.
+
+| Koşu | Uçtan uca medyan / p90 | Konuşma sonu bekleme | STT | Model ilk token | Yerel hat* |
+| --- | --- | --- | --- | --- | --- |
+| WebRTC VAD, sessizlik 1000 ms | 2938 / 3359 ms | 1047 | 781 | 797 | 2156 ms |
+| Silero VAD (ADR 0067), 1000 ms | 2875 / 3610 ms | 1032 | 781 | 766 | 2128 ms |
+| Silero + Smart Turn (ADR 0068), 600 ms | 5062 / 8469 ms | 672 | 750 | 3438 | 1609 ms |
+
+\* Yerel hat = konuşma sonu bekleme + STT + (TTS ilk parça − model ilk token): modelin dışındaki,
+Artemis'in kendi kontrolündeki süre. Son koşuda sağlayıcının ilk token süresi 0,8 sn'den 3,4 sn'ye
+çıktı (aynı akşam iki tekrar: 4,2 ve 3,4 sn); uçtan uca fark bu dış gecikmedendir. Yerel hat %25
+kısaldı. Uçtan uca medyan < 1,5 sn hedefi bu model/sağlayıcı ile tutmuyor: modelin ilk token süresi tek
+başına ~0,8 sn, yerel hat ~1,6 sn. Kalan büyük yerel kalem STT'dir (large-v3 + beam 5; `large-v3-turbo`
+veya beam 1 ile kısalabilir, doğruluk ölçülerek seçilmeli — kural 11).
