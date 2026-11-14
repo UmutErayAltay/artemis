@@ -17,7 +17,6 @@ ROOT = Path(__file__).parents[1]
 
 ALLOW: dict[str, int] = {
     # güvenlik çekirdeği; yalnız boyut için bölünmez (ADR gerekir)
-    "artemis/brain/agent_loop.py::AgentLoop.run": 337,
 }
 
 

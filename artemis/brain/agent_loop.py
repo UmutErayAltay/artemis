@@ -7,6 +7,7 @@ import re
 import sqlite3
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Literal, cast
 
@@ -21,11 +22,12 @@ from artemis.brain.conversation import (
     local_stamp,
 )
 from artemis.brain.errors import BudgetExceeded, ProviderError
-from artemis.brain.models import Message, ToolCall, Usage
+from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.providers import Provider
 from artemis.brain.router import ProviderRouter
 from artemis.brain.streaming import ResponseStream
 from artemis.brain.tiering import choose_model
+from artemis.config.settings import Settings
 from artemis.memory.companion import content_private, content_tainted, read_companion
 from artemis.safety.gate import SafetyGate, TurnState
 from artemis.skills import Catalog, explicit_hint, load_skills, prompt_section
@@ -418,6 +420,33 @@ def companion_block(context: ToolContext) -> str:
     return companion_blocks(context)[0]
 
 
+@dataclass
+class _Turn:
+    """Bir turun değişken durumu; `AgentLoop.run` ile adım yardımcıları arasında paylaşılır."""
+
+    text: str
+    state: TurnState
+    settings: Settings
+    start: float
+    messages: list[Message]
+    route: dict[str, str]
+    stream: ResponseStream | None
+    history_private: bool
+    private_seen: bool
+    record_steps: list[Message | ToolExchange] = field(default_factory=list)
+    phases: list[PhaseTiming] = field(default_factory=list)
+    usage: Usage = field(default_factory=Usage)
+    steps: int = 0
+    calls: int = 0
+    local_calls: int = 0
+    seen: set[str] = field(default_factory=set)
+    denied: set[str] = field(default_factory=set)
+    memory_saved: bool = False
+
+    def remaining(self) -> float:
+        return self.settings.max_seconds - (time.monotonic() - self.start)
+
+
 class AgentLoop:
     def __init__(
         self,
@@ -451,39 +480,16 @@ class AgentLoop:
             or (result.content_kind == "screen" and not settings.perception.allow_cloud_screen)
         )
 
-    async def run(
-        self, text: str, history: ContextWindow | None = None, *, unattended: bool = False,
-        stream: ResponseStream | None = None, attachment: ToolResult | None = None,
-    ) -> RunResult:
-        # Gözetimsiz tur (ADR 0027): yan etki kararı kapıdadır, döngü yalnız bayrağı taşır.
-        state = TurnState(unattended=unattended)
-        # Kullanıcı mesajına eklenen dış veri (Telegram fotoğrafı OCR'ı, ADR 0064) araç sonucu
-        # gibi davranır: tur lekelenir, gizlilik kararı aynı kurallardan çıkar, metin "VERİDİR"
-        # çerçevesiyle gider. Kapı ve onay kuralları değişmez.
-        if attachment is not None:
-            state.tainted = True
-        # Taint yeni tura taşınmaz (ADR 0012) ama bağlamda kalan dış içerik dışarı giden
-        # araçlar için onay nedenidir (ADR 0013).
-        isolated = self.system_prompt is not None
-        state.history_external = (history is not None and history.external) or (
-            not isolated
-            and any(
-                content_tainted(self.context.settings.state_dir, key)
-                for key, _ in _COMPANION_SHARES
-            )
-        )
-        start = time.monotonic()
+    def _opening_messages(
+        self,
+        text: str,
+        attachment: ToolResult | None,
+        isolated: bool,
+        past: list[Message],
+        private_seen: bool,
+    ) -> tuple[list[Message], bool, str]:
+        """Turun açılış mesajları, gizli geçmiş bayrağı ve başlangıç zamanı."""
         settings = self.context.settings
-        state.deadline = start + settings.max_seconds
-        usage = Usage()
-        steps = calls = local_calls = 0
-        seen: set[str] = set()
-        denied: set[str] = set()
-        memory_saved = False
-        private_seen = False
-        if attachment is not None:
-            private_seen = self._result_private(attachment)
-        past = history.messages if history is not None else []
         public_notes, private_notes = ("", "") if isolated else notes_blocks(self.context)
         public_companion, private_companion = (
             ("", "") if isolated else companion_blocks(self.context)
@@ -494,8 +500,6 @@ class AgentLoop:
         # sayılır: yerel model onu yanıtına kopyalayabilir.
         private_memory = private_notes + private_companion
         history_private = bool(private_memory) or any(message.private for message in past)
-        record_steps: list[Message | ToolExchange] = []
-        phases: list[PhaseTiming] = []
         # Önbellek: sistem istemi tur tur değişmez (saat ve tura özel ipucu burada değil);
         # kullanıcı mesajı geçmişte göründüğü biçimle ([tarih saat] öneki, aynı zaman) gider.
         # Böylece her istek bir öncekinin uzantısı olur ve sağlayıcı önbelleği tutar.
@@ -532,6 +536,18 @@ class AgentLoop:
                 + ("" if isolated else memory_hint(text) + explicit_hint(skills, text)),
             ),
         ]
+        return messages, history_private, started_at
+
+    def _emit_turn_start(
+        self,
+        text: str,
+        history: ContextWindow | None,
+        past: list[Message],
+        attachment: ToolResult | None,
+        state: TurnState,
+        private_seen: bool,
+        unattended: bool,
+    ) -> dict[str, str]:
         audit = self.context.audit
         audit.emit(
             "turn_start",
@@ -545,7 +561,7 @@ class AgentLoop:
             unattended=unattended,
         )
         # Model kademesi tur başında seçilir ve tur boyunca sabittir (önbellek, tutarlılık).
-        tier_model, tier_reason = choose_model(text, past, settings)
+        tier_model, tier_reason = choose_model(text, past, self.context.settings)
         route: dict[str, str] = {}
         if tier_model and isinstance(self.provider, ProviderRouter):
             route = {"model": tier_model}
@@ -561,6 +577,54 @@ class AgentLoop:
                 content_kind=attachment.content_kind,
                 cloud_allowed=not private_seen,
             )
+        return route
+
+    async def run(
+        self, text: str, history: ContextWindow | None = None, *, unattended: bool = False,
+        stream: ResponseStream | None = None, attachment: ToolResult | None = None,
+    ) -> RunResult:
+        # Gözetimsiz tur (ADR 0027): yan etki kararı kapıdadır, döngü yalnız bayrağı taşır.
+        state = TurnState(unattended=unattended)
+        # Kullanıcı mesajına eklenen dış veri (Telegram fotoğrafı OCR'ı, ADR 0064) araç sonucu
+        # gibi davranır: tur lekelenir, gizlilik kararı aynı kurallardan çıkar, metin "VERİDİR"
+        # çerçevesiyle gider. Kapı ve onay kuralları değişmez.
+        if attachment is not None:
+            state.tainted = True
+        # Taint yeni tura taşınmaz (ADR 0012) ama bağlamda kalan dış içerik dışarı giden
+        # araçlar için onay nedenidir (ADR 0013).
+        isolated = self.system_prompt is not None
+        state.history_external = (history is not None and history.external) or (
+            not isolated
+            and any(
+                content_tainted(self.context.settings.state_dir, key)
+                for key, _ in _COMPANION_SHARES
+            )
+        )
+        start = time.monotonic()
+        settings = self.context.settings
+        state.deadline = start + settings.max_seconds
+        private_seen = False
+        if attachment is not None:
+            private_seen = self._result_private(attachment)
+        past = history.messages if history is not None else []
+        messages, history_private, started_at = self._opening_messages(
+            text, attachment, isolated, past, private_seen
+        )
+        audit = self.context.audit
+        route = self._emit_turn_start(
+            text, history, past, attachment, state, private_seen, unattended
+        )
+        turn = _Turn(
+            text=text,
+            state=state,
+            settings=settings,
+            start=start,
+            messages=messages,
+            route=route,
+            stream=stream,
+            history_private=history_private,
+            private_seen=private_seen,
+        )
 
         finished = False
 
@@ -574,30 +638,27 @@ class AgentLoop:
                     created_at=started_at,
                     turn_id=state.turn_id,
                     user_text=text,
-                    steps=_recordable_steps(record_steps),
+                    steps=_recordable_steps(turn.record_steps),
                     answer=answer,
-                    answer_private=private_seen,
+                    answer_private=turn.private_seen,
                     tainted=state.tainted,
                 )
             result = RunResult(
                 text=answer,
                 stop_reason=reason,
-                steps=steps,
-                tool_calls=calls,
-                usage=usage,
+                steps=turn.steps,
+                tool_calls=turn.calls,
+                usage=turn.usage,
                 elapsed_seconds=time.monotonic() - start,
                 turn_id=state.turn_id,
                 error_type=error_type,
                 record=record,
-                phases=phases,
+                phases=turn.phases,
             )
             if not finished:
                 audit.emit("turn_end", **result.model_dump(mode="json"))
                 finished = True
             return result
-
-        def remaining() -> float:
-            return settings.max_seconds - (time.monotonic() - start)
 
         if not text.strip():
             return finish("completed", "Bir komut yazabilirsiniz.", remember=False)
@@ -611,149 +672,9 @@ class AgentLoop:
         self.context.deadline = state.deadline
         try:
             for _ in range(settings.max_steps):
-                if self.context.cancelled.is_set():
-                    return finish("cancelled", "İşlem iptal edildi.")
-                if remaining() <= 0:
-                    return finish("timeout", TIMEOUT_MESSAGE)
-                steps += 1
-                phases.append(PhaseTiming(stage="model_request", timestamp=time.monotonic()))
-                definitions = self.gate.registry.definitions()
-                step_stream = None
-                if stream is not None:
-                    # ADR 0043: akışa yalnız metin gider; araç çağrısı yine tam Completion'dan
-                    # ayrıştırılır ve aşağıda SafetyGate'ten geçer.
-                    stream.step_start()
-                    step_stream = _StepStream(stream, phases)
-                if route:
-                    request = cast(ProviderRouter, self.provider).complete(
-                        messages, definitions, timeout=remaining(), stream=step_stream,
-                        model=route["model"],
-                    )
-                elif step_stream is None:
-                    request = self.provider.complete(messages, definitions, timeout=remaining())
-                else:
-                    request = self.provider.complete(
-                        messages, definitions, timeout=remaining(), stream=step_stream,
-                    )
-                completion = await _wait_for_turn(
-                    request,
-                    self.context.cancelled,
-                    remaining(),
-                    self._pending_cleanup,
-                )
-                phases.append(PhaseTiming(stage="model_response", timestamp=time.monotonic()))
-                if stream is not None:
-                    stream.step_end(bool(completion.tool_calls))
-                if self.context.cancelled.is_set():
-                    return finish("cancelled", _cancelled_message())
-                usage.input_tokens += completion.usage.input_tokens
-                usage.output_tokens += completion.usage.output_tokens
-                usage.cached_input_tokens += completion.usage.cached_input_tokens
-                usage.cost_usd += completion.usage.cost_usd
-                if (completion.local_model or completion.local_fallback) and history_private:
-                    # Yerel model (yedek, ana ya da zor işler modeli) gizli geçmişi maskesiz
-                    # gördü ve yanıtına kopyalamış olabilir; bu turun yeni mesajları, araç
-                    # argümanları ve kalıcı yanıtı da gizli sayılır (ADR 0056). Rol bayrağı
-                    # (local_fallback) yalnız tek-araç sınırı içindir.
-                    private_seen = True
-                audit.emit(
-                    "model_response",
-                    turn_id=state.turn_id,
-                    step=steps,
-                    provider=completion.provider,
-                    model=completion.model,
-                    usage=completion.usage.model_dump(mode="json"),
-                    content=completion.content,
-                    tool_calls=[call.model_dump() for call in completion.tool_calls],
-                )
-                if usage.cost_usd > settings.daily_budget_usd:
-                    return finish("budget", "Günlük maliyet tavanı aşıldı; yeni işlem yapılmadı.")
-                if not completion.tool_calls:
-                    answer = completion.content or "Model boş yanıt döndürdü."
-                    return finish("completed", honest_memory_claim(answer, memory_saved, text))
-                assistant_message = Message(
-                    role="assistant",
-                    content=completion.content,
-                    tool_calls=completion.tool_calls,
-                    private=private_seen,
-                )
-                messages.append(assistant_message)
-                record_steps.append(assistant_message)
-                for call in completion.tool_calls:
-                    if self.context.cancelled.is_set():
-                        return finish("cancelled", "İşlem iptal edildi.")
-                    if remaining() <= 0:
-                        return finish("timeout", TIMEOUT_MESSAGE)
-                    normalized_call = call
-                    tool = self.gate.registry.get(call.name)
-                    if tool is not None:
-                        try:
-                            normalized = tool.args_model.model_validate(call.arguments)
-                            normalized_call = call.model_copy(
-                                update={"arguments": normalized.model_dump(mode="json")}
-                            )
-                        except ValidationError:
-                            # Hatalı argüman için kullanıcıya görünen tek hata kapıdan gelir.
-                            pass
-                    fingerprint = call_fingerprint(normalized_call)
-                    if fingerprint in denied:
-                        return finish(
-                            "denied_repeat", "Reddedilen çağrı tekrar istendi; durduruldu."
-                        )
-                    if fingerprint in seen:
-                        return finish(
-                            "repeated_call", "Aynı araç çağrısı tekrar istendi; durduruldu."
-                        )
-                    if completion.local_fallback and local_calls >= 1:
-                        return finish("local_limit", "Yerel yedekte tek araç sınırı doldu.")
-                    seen.add(fingerprint)
-                    calls += 1
-                    if completion.local_fallback:
-                        local_calls += 1
-                    self.context.turn_private = private_seen or history_private
-                    phases.append(PhaseTiming(stage="tool_start", timestamp=time.monotonic()))
-                    result = await _wait_for_turn(
-                        self.gate.dispatch(normalized_call, self.context, state, self.approve),
-                        self.context.cancelled,
-                        remaining(),
-                        self._pending_cleanup,
-                    )
-                    phases.append(PhaseTiming(stage="tool_end", timestamp=time.monotonic()))
-                    if self.context.cancelled.is_set():
-                        return finish("cancelled", _cancelled_message())
-                    if remaining() <= 0:
-                        return finish("timeout", TIMEOUT_MESSAGE)
-                    if result.status == "denied":
-                        denied.add(fingerprint)
-                    elif result.success and tool is not None and tool.risk is not Risk.READ_ONLY:
-                        # Durum değişti (ör. klasör açıldı): önceki çağrıların aynısı artık
-                        # meşru yeniden deneme ya da doğrulamadır. Arada değişiklik yoksa aynı
-                        # çağrı yine "tekrar" sayılıp durdurulur (sonsuz döngü yok). Bu yan
-                        # etkinin kendisi yasak kalır: aynı ekleme/taşıma iki kez yürümez.
-                        seen.clear()
-                        seen.add(fingerprint)
-                    if call.name in MEMORY_WRITE_TOOLS and result.success:
-                        memory_saved = True
-                    private = self._result_private(result)
-                    private_seen = private_seen or private
-                    audit.emit(
-                        "privacy_decision",
-                        turn_id=state.turn_id,
-                        tool=call.name,
-                        content_kind=result.content_kind,
-                        cloud_allowed=not private_seen,
-                    )
-                    messages.append(
-                        Message(
-                            role="tool",
-                            content=frame_result(result),
-                            tool_call_id=call.id,
-                            private=private_seen,
-                        )
-                    )
-                    record_steps.append(
-                        ToolExchange(call_id=call.id, result=result, private=private_seen)
-                    )
+                stop = await self._step(turn)
+                if stop:
+                    return finish(*stop)
             return finish("max_steps", "Adım sınırı doldu; işlem durduruldu.")
         except TimeoutError:
             audit.emit("turn_timeout", turn_id=state.turn_id)
@@ -788,3 +709,160 @@ class AgentLoop:
             audit.emit("turn_cancelled", turn_id=state.turn_id, cleanup_pending=False)
             finish("cancelled", _cancelled_message())
             raise
+
+    async def _step(self, turn: _Turn) -> tuple[str, str] | None:
+        """Tek model adımı ve istediği araç çağrıları; tur bitecekse (neden, yanıt) döner."""
+        state, settings, audit = turn.state, turn.settings, self.context.audit
+        if self.context.cancelled.is_set():
+            return "cancelled", "İşlem iptal edildi."
+        if turn.remaining() <= 0:
+            return "timeout", TIMEOUT_MESSAGE
+        turn.steps += 1
+        turn.phases.append(PhaseTiming(stage="model_request", timestamp=time.monotonic()))
+        definitions = self.gate.registry.definitions()
+        step_stream = None
+        if turn.stream is not None:
+            # ADR 0043: akışa yalnız metin gider; araç çağrısı yine tam Completion'dan
+            # ayrıştırılır ve aşağıda SafetyGate'ten geçer.
+            turn.stream.step_start()
+            step_stream = _StepStream(turn.stream, turn.phases)
+        if turn.route:
+            request = cast(ProviderRouter, self.provider).complete(
+                turn.messages, definitions, timeout=turn.remaining(), stream=step_stream,
+                model=turn.route["model"],
+            )
+        elif step_stream is None:
+            request = self.provider.complete(
+                turn.messages, definitions, timeout=turn.remaining()
+            )
+        else:
+            request = self.provider.complete(
+                turn.messages, definitions, timeout=turn.remaining(), stream=step_stream,
+            )
+        completion = await _wait_for_turn(
+            request,
+            self.context.cancelled,
+            turn.remaining(),
+            self._pending_cleanup,
+        )
+        turn.phases.append(PhaseTiming(stage="model_response", timestamp=time.monotonic()))
+        if turn.stream is not None:
+            turn.stream.step_end(bool(completion.tool_calls))
+        if self.context.cancelled.is_set():
+            return "cancelled", _cancelled_message()
+        usage = turn.usage
+        usage.input_tokens += completion.usage.input_tokens
+        usage.output_tokens += completion.usage.output_tokens
+        usage.cached_input_tokens += completion.usage.cached_input_tokens
+        usage.cost_usd += completion.usage.cost_usd
+        if (completion.local_model or completion.local_fallback) and turn.history_private:
+            # Yerel model (yedek, ana ya da zor işler modeli) gizli geçmişi maskesiz
+            # gördü ve yanıtına kopyalamış olabilir; bu turun yeni mesajları, araç
+            # argümanları ve kalıcı yanıtı da gizli sayılır (ADR 0056). Rol bayrağı
+            # (local_fallback) yalnız tek-araç sınırı içindir.
+            turn.private_seen = True
+        audit.emit(
+            "model_response",
+            turn_id=state.turn_id,
+            step=turn.steps,
+            provider=completion.provider,
+            model=completion.model,
+            usage=completion.usage.model_dump(mode="json"),
+            content=completion.content,
+            tool_calls=[call.model_dump() for call in completion.tool_calls],
+        )
+        if usage.cost_usd > settings.daily_budget_usd:
+            return "budget", "Günlük maliyet tavanı aşıldı; yeni işlem yapılmadı."
+        if not completion.tool_calls:
+            answer = completion.content or "Model boş yanıt döndürdü."
+            return "completed", honest_memory_claim(answer, turn.memory_saved, turn.text)
+        assistant_message = Message(
+            role="assistant",
+            content=completion.content,
+            tool_calls=completion.tool_calls,
+            private=turn.private_seen,
+        )
+        turn.messages.append(assistant_message)
+        turn.record_steps.append(assistant_message)
+        for call in completion.tool_calls:
+            if self.context.cancelled.is_set():
+                return "cancelled", "İşlem iptal edildi."
+            if turn.remaining() <= 0:
+                return "timeout", TIMEOUT_MESSAGE
+            stop = await self._call_tool(turn, call, completion)
+            if stop:
+                return stop
+        return None
+
+    async def _call_tool(
+        self, turn: _Turn, call: ToolCall, completion: Completion
+    ) -> tuple[str, str] | None:
+        """Tek araç çağrısı: tekrar/red korumaları, kapı, sonuç kaydı."""
+        state, audit = turn.state, self.context.audit
+        normalized_call = call
+        tool = self.gate.registry.get(call.name)
+        if tool is not None:
+            try:
+                normalized = tool.args_model.model_validate(call.arguments)
+                normalized_call = call.model_copy(
+                    update={"arguments": normalized.model_dump(mode="json")}
+                )
+            except ValidationError:
+                # Hatalı argüman için kullanıcıya görünen tek hata kapıdan gelir.
+                pass
+        fingerprint = call_fingerprint(normalized_call)
+        if fingerprint in turn.denied:
+            return "denied_repeat", "Reddedilen çağrı tekrar istendi; durduruldu."
+        if fingerprint in turn.seen:
+            return "repeated_call", "Aynı araç çağrısı tekrar istendi; durduruldu."
+        if completion.local_fallback and turn.local_calls >= 1:
+            return "local_limit", "Yerel yedekte tek araç sınırı doldu."
+        turn.seen.add(fingerprint)
+        turn.calls += 1
+        if completion.local_fallback:
+            turn.local_calls += 1
+        self.context.turn_private = turn.private_seen or turn.history_private
+        turn.phases.append(PhaseTiming(stage="tool_start", timestamp=time.monotonic()))
+        result = await _wait_for_turn(
+            self.gate.dispatch(normalized_call, self.context, state, self.approve),
+            self.context.cancelled,
+            turn.remaining(),
+            self._pending_cleanup,
+        )
+        turn.phases.append(PhaseTiming(stage="tool_end", timestamp=time.monotonic()))
+        if self.context.cancelled.is_set():
+            return "cancelled", _cancelled_message()
+        if turn.remaining() <= 0:
+            return "timeout", TIMEOUT_MESSAGE
+        if result.status == "denied":
+            turn.denied.add(fingerprint)
+        elif result.success and tool is not None and tool.risk is not Risk.READ_ONLY:
+            # Durum değişti (ör. klasör açıldı): önceki çağrıların aynısı artık
+            # meşru yeniden deneme ya da doğrulamadır. Arada değişiklik yoksa aynı
+            # çağrı yine "tekrar" sayılıp durdurulur (sonsuz döngü yok). Bu yan
+            # etkinin kendisi yasak kalır: aynı ekleme/taşıma iki kez yürümez.
+            turn.seen.clear()
+            turn.seen.add(fingerprint)
+        if call.name in MEMORY_WRITE_TOOLS and result.success:
+            turn.memory_saved = True
+        private = self._result_private(result)
+        turn.private_seen = turn.private_seen or private
+        audit.emit(
+            "privacy_decision",
+            turn_id=state.turn_id,
+            tool=call.name,
+            content_kind=result.content_kind,
+            cloud_allowed=not turn.private_seen,
+        )
+        turn.messages.append(
+            Message(
+                role="tool",
+                content=frame_result(result),
+                tool_call_id=call.id,
+                private=turn.private_seen,
+            )
+        )
+        turn.record_steps.append(
+            ToolExchange(call_id=call.id, result=result, private=turn.private_seen)
+        )
+        return None
