@@ -115,6 +115,12 @@ def build_shell(panel: SettingsPanel) -> None:
     title_row.addWidget(panel.notice, 1)
     title_row.addWidget(panel.retry_button)
     title_row.addWidget(panel.revert_button)
+    panel.save_button = QPushButton("Kaydet")
+    panel.save_button.setObjectName("primary")
+    panel.save_button.setToolTip("Değişiklikleri hemen kaydeder ve uygular.")
+    panel.save_button.setVisible(False)
+    panel.save_button.clicked.connect(panel._save_now)
+    title_row.addWidget(panel.save_button)
     panel.title_row = title_row
     layout.addLayout(title_row)
     # Bölüm listesi kaydırma alanının dışında: uzun sayfayı kaydırınca liste yerinde kalır.

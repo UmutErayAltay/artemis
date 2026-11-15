@@ -495,6 +495,7 @@ class DesktopWindow(QMainWindow):
                             "Artemis", "appearance"),
         )
         self.settings_panel.apply_requested.connect(self._apply_settings)
+        self.settings_panel.save_requested.connect(self._settings_saved_now)
         # Otomatik kayıt config'i yazar ama çalışma zamanı (= yeni sohbet) yalnız Ayarlar
         # sekmesinden çıkılınca bir kez yeniden kurulur; her düzenlemede sohbet sıfırlanmaz.
         # Karar bayrakla değil içerikle verilir: çalışma zamanının kurulduğu config'in dökümü
@@ -609,6 +610,11 @@ class DesktopWindow(QMainWindow):
             self.settings_panel.begin_session()
             return
         self.settings_panel.flush()
+        if self._settings_restart_pending:
+            self._request_restart(self.settings_panel.notice)
+
+    def _settings_saved_now(self) -> None:
+        """Kaydet: sekmeden çıkmayı beklemeden uygular (meşgulse yeniden kurulum ertelenir)."""
         if self._settings_restart_pending:
             self._request_restart(self.settings_panel.notice)
 

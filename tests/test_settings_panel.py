@@ -1255,3 +1255,18 @@ def test_direct_atomic_write_by_another_section_shows_revert(tmp_path: Path, qt_
     assert _wait(lambda: not panel.revert_button.isHidden())
     assert str(path) in panel._watcher.files()  # atomik değiştirmeden sonra yeniden eklendi
     panel.deleteLater()
+
+
+def test_save_button_beside_revert_writes_now_and_requests_apply(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    writes: list[bool] = []
+    _wire(panel, path, writes)
+    applied: list[bool] = []
+    panel.save_requested.connect(lambda: applied.append(True))
+    assert panel.save_button.isHidden()
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    assert not panel.save_button.isHidden() and panel._save_timer.isActive()
+    panel.save_button.click()  # debounce beklenmez
+    assert writes == [True] and not panel._dirty and applied == [True]
+    panel.deleteLater()

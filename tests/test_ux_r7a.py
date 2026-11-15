@@ -107,6 +107,23 @@ def test_settings_section_combo_replaces_list_when_narrow(
     assert panel.stack.currentIndex() == target
     panel.show_section(names.index("Model"))  # kodla gezinme seçiciyi de günceller
     assert combo.currentText() == "Model"
+    # Grup başlığı ölü değil: tıklanınca grubun ilk sayfasına gider, kutuda sayfa adı görünür.
+    header = next(i for i in range(combo.count()) if combo.itemText(i) == "Bağlantılar")
+    combo.setCurrentIndex(header)
+    combo.activated.emit(header)
+    assert panel.stack.currentIndex() == names.index("Telegram")
+    assert combo.currentText() == "Telegram"
+
+
+def test_settings_list_shows_at_default_window_size(
+    window: DesktopWindow, app: QApplication
+) -> None:
+    """Varsayılan 1180px pencerede bölüm listesi yanda durur, açılır seçiciye düşmez."""
+    window.tabs.setCurrentWidget(window.settings_scroll)
+    window.resize(1180, 780)
+    _settle(app)
+    assert window.settings_panel.nav.isVisible()
+    assert not window.settings_panel.section_combo.isVisible()
 
 
 def test_main_pages_share_one_shell(window: DesktopWindow, app: QApplication) -> None:
