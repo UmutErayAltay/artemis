@@ -70,6 +70,12 @@ voice:
   piper_model: ../models/tr_TR-dfki-medium.onnx
   piper_config: ../models/tr_TR-dfki-medium.onnx.json
   allow_cloud_tts_text: false
+  # Varsayılanlar (değiştirmeniz gerekmez): Silero VAD (ADR 0067), Smart Turn konuşma sonu (ADR 0068),
+  # konuşma sonu sessizliğinde spekülatif nihai STT (ADR 0071). Uyandırma ön-kapısı isteğe bağlıdır (ADR 0069).
+  vad_backend: auto
+  turn_detection: true
+  stt_speculative: true
+  wake_backend: transcript
 ```
 
 Mevcut beyin modeli kurulumu ayrıca gerekir; README'deki `primary_model` ve

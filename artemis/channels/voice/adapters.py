@@ -384,11 +384,14 @@ class OpenAICompatibleTranscriber:
 
     def __init__(
         self, config: VoiceConfig, endpoint_id: str, endpoint: EndpointConfig, audit: AuditLog,
+        content_kind: str = "command_audio",
     ) -> None:
         self.config = config
         self.endpoint_id = endpoint_id
         self.endpoint = endpoint
         self.audit = audit
+        # Denetim kaydı buluta ne gittiğini doğru söylemeli: dikte komut sesi değildir (ADR 0057).
+        self.content_kind = content_kind
 
     @staticmethod
     def _wav(pcm: bytes, sample_rate: int) -> bytes:
@@ -415,7 +418,7 @@ class OpenAICompatibleTranscriber:
         # prompt yok: Whisper gürültüde prompt metnini yankılıyor (ADR 0046 eki).
         # Gizlilik denetimi sesi göndermeden önce yazılır; ses ve metin kaydedilmez.
         self.audit.emit(
-            "cloud_stt_transfer", service=self.endpoint_id, content_kind="command_audio",
+            "cloud_stt_transfer", service=self.endpoint_id, content_kind=self.content_kind,
             allowed=True,
         )
         files = {"file": ("command.wav", self._wav(pcm, self.config.sample_rate), "audio/wav")}

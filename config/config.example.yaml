@@ -63,7 +63,12 @@ voice:
   sample_rate: 16000
   frame_ms: 20
   vad_aggressiveness: 2
+  vad_backend: auto # auto: Silero (paketle gelir), olmazsa webrtc
+  vad_threshold: 0.5
   end_silence_ms: 600
+  turn_detection: true # Sessizlikte cümle bitmiş mi diye bakar (Smart Turn, ADR 0068); bitmediyse daha çok bekler.
+  turn_max_silence_ms: 1600 # Cümle bitmemiş görünürse en çok bu kadar sessizlik beklenir.
+  turn_threshold: 0.5 # "Tur tamam" olasılığı eşiği.
   barge_in_ms: 180 # Uyandırmasız söz kesmede en kısa söz süresi (ADR 0042); VAD tek başına kesmez.
   require_wake_during_output: true # Yanıt/yankı aralığında yeni komut açık wake ister.
   barge_in_without_wake: true # Konuşurken herhangi bir söz susturur; komut için wake ya da takip sözü gerekir.
@@ -71,7 +76,7 @@ voice:
   wake_ack_text: Seni dinliyorum. # Uyandırma karşılığı (en çok 40 karakter); bir kez sentezlenip önbellekten çalınır.
   streaming: true # Model yazarken cümle cümle seslendirir (ADR 0043); başarı iddiası araç sonucunu bekler.
   continuous_mode: false # true: "artemis" demeden dinler (ADR 0024).
-  telemetry_report: false # true: ses kapanınca içeriksiz gecikme raporu (state_dir/voice-telemetry/).
+  telemetry_report: true # true: ses kapanınca içeriksiz gecikme raporu (state_dir/voice-telemetry/).
   listening_hotkey: ctrl+space # Masaüstünde sesi aç/kapat (Windows); boş: kapalı.
   # Gürültü engelleme (ADR 0037): DeepFilterNet3, işlemcide çalışır, ekran kartı gerekmez.
   # Model pakete dahildir (indirme yok), yaklaşık 34 ms gecikme ekler. Yankı giderme DEĞİLDİR.
@@ -99,6 +104,8 @@ voice:
   stt_beam_size: 5 # Kesin sonuç; daha yüksek değer daha yavaş olabilir.
   stt_partial_beam_size: 1
   stt_partial_enabled: true # Konuşurken ara tanıma; kısmi metin komut çalıştırmaz.
+  stt_speculative: true # Bitiş sessizliğinde nihai tanımayı önceden başlatır (ADR 0071); konuşma sürerse atılır.
+  stt_speculative_after_ms: 200 # Sessizliğin bu kadarında spekülatif tanıma başlar.
   stt_hotwords: [] # İsteğe bağlı yerel ipuçları; prompt veya transcript düzeltmesi değildir.
   stt_alias_hotwords: false # Öğretilmiş uygulama takma adlarının hedefleri STT ipucuna eklenir (ADR 0044).
   # Karma tanıma (ADR 0046): uyandırma, yankı ve söz kesme yerel metinle karar verilir; yalnız
@@ -120,6 +127,11 @@ voice:
   live_transcript: false
   # live_transcript_model: mihuai/turkish-stt-66m-v2
   # live_transcript_revision: bc2f77287cfc3ec2568cf5ba9f9181e1a43bfff4
+  # Uyandırma ön-kapısı (ADR 0069): kws = cihaz içi sözcük algısı, uyandırma sözü duyulmayan
+  # konuşmayı Whisper'a göndermeden eler (CPU/gecikme kazancı). Yukarıdaki live_transcript_model
+  # ve live_transcript_revision dolu olmalı; kurulamazsa transcript'e döner. Tek başına uyandırmaz.
+  wake_backend: transcript # transcript | kws
+  wake_kws_threshold: 0.2 # Düşük = daha çok yakalar, daha çok yanlış alarm.
   tts_backend: piper
   tts_local_fallback: true # Edge hatasında yerel sese dön; false seçili sesi korur.
   piper_model: ../models/tr_TR-dfki-medium.onnx
@@ -174,6 +186,15 @@ voice:
 #   # karesini sohbete yollar. Kare buluta (Telegram) gider: gizli turda ve
 #   # perception.allow_cloud_screen kapalıyken ASLA gönderilmez. /dur oturumu durdurur.
 #   send_computer_screenshot: false
+#   # Telegram'dan ses/fotoğraf/dosya (ADR 0064). Üçü ayrı ve KAPALI. Ses: <=1 MB/60 sn, ayarlı
+#   # STT ile yazıya çevrilir ("Şunu duydum: ..." sonra komut olarak çalışır; sesli "evet" onay
+#   # değildir); bulut STT voice.stt_mode ayarını izler. Fotoğraf: <=5 MB, yerel Windows OCR;
+#   # metin dış veridir ve perception.allow_cloud_screen kapalıyken gizlidir. Dosya: <=20 MB,
+#   # çalışma alanındaki Telegram/ klasörüne kaydedilir, üzerine yazılmaz, hiç açılmaz.
+#   accept_voice: false
+#   accept_photo: false
+#   accept_files: false
+#   file_extensions: [pdf, txt, md, docx, xlsx, csv, png, jpg, zip]   # SON uzantı denetlenir
 
 # Kod ajanı (ADR 0023/0026). KAPALI gelir: projects boşsa araçlar çalışmaz. Her iş
 # tam taslak için onay ister; ajan headless `claude -p` olarak çalışır, yerel commit
@@ -213,6 +234,77 @@ voice:
 #       days: [0, 1, 2, 3, 4]
 #       prompt: >-
 #         Bekleyen hatırlatmalarımı ve kod ajanı işlerinin durumunu kısaca özetle.
+
+# Takvim ve posta, salt okunur (ADR 0059). KAPALI gelir. Takvim: Google/Outlook'un gizli ICS adresi
+# (https zorunlu). Posta: IMAP/TLS (Gmail için uygulama parolası). Adres ve parola YAML'a YAZILMAZ:
+# Ayarlar > Takvim ve posta (kimlik kasası) ya da ARTEMIS_CALENDAR_ICS_TOKEN / ARTEMIS_MAIL_PASSWORD
+# ortam değişkeni. Posta okundu işaretlenmez, silinmez, eki indirilmez. İçerik kişiseldir: allow_cloud
+# false iken bulut modele ve Telegram'a gitmez (yalnız yerel model görür).
+# calendar:
+#   enabled: true
+#   lookahead_days: 7        # 1-60; calendar_events en çok bu kadar gün bakar
+#   allow_cloud: false
+# mail:
+#   enabled: true
+#   host: imap.gmail.com
+#   port: 993
+#   username: ben@example.com
+#   folder: INBOX
+#   max_messages: 10         # 1-50
+#   allow_cloud: false
+# Sabah brifingine takvim ve posta eklemek için proactive.briefings[].prompt örneği (gözetimsiz
+# turda yalnız READ_ONLY araçlar çalışır; ikisi de öyledir):
+#   prompt: >-
+#     Bugünkü takvimimi (calendar_events) ve önemli okunmamış postalarımı (mail_unread)
+#     kısaca özetle; sonra bekleyen hatırlatmalarımı say.
+
+# Kullanıcı becerileri (ADR 0060). KAPALI gelir. Açıkken state_dir/beceriler/ klasörüne elle
+# yazdığınız <ad>.md dosyaları (başlıkta name ve description, altında Markdown tarif) Artemis'e
+# yeni bir çalışma yöntemi öğretir; mesajı /<ad> ile başlatınca o beceri istenir. Klasör yoksa bir
+# örnekle açılır. Beceri izin vermez: araç çağrıları normal onaydan geçer. Metin yerel kullanıcı
+# metnidir; bulut modele giden istemin parçası olur. Klasör (varsayılan state_dir/beceriler) çalışma
+# alanı, vault ve proje depolarının DIŞINDA olmalı, yoksa beceriler yüklenmez; state_dir bunlardan
+# birinin içindeyse folder ile ayrı bir mutlak klasör verin.
+# skills:
+#   enabled: true
+#   folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler
+
+# Gün sonu özeti (ADR 0066). KAPALI gelir; proactive.enabled gerekir. `at` saatinde (yerel,
+# proactive.timezone) günün denetim kayıtlarından LLM'siz kısa bir Markdown yazılır:
+# state_dir/gunluk/YYYY-MM-DD.md (tur sayıları, araçlar ve başarısızlar, dosya işlemleri, biten işler,
+# hatırlatmalar, reddedilen onaylar, günün model harcaması). Konuşma metni ve araç sonuçları girmez.
+# Boş gün dosya yazmaz. Uygulama kapalıyken kaçan gün, briefing_grace_hours içinde açılışta "gecikmeli"
+# diye üretilir. Bildirimde "Aç" ve (memory.vault_path varsa) "Vault'a ekle" düğmesi çıkar; ekleme
+# normal vault_append onayıyla vault_note'a yapılır, kendiliğinden hiçbir şey yazılmaz. Özet Telegram'a gitmez.
+# daily_summary:
+#   enabled: true
+#   at: "22:30"
+#   vault_note: Artemis-Gunluk.md
+
+# Arka plan araştırma işi (ADR 0063). KAPALI gelir. "Şunu araştır" isteği arka planda web
+# aramasıyla çalışır ve state_dir/arastirma/<iş-kimliği>.md raporunu yazar. Başlatma HER ZAMAN
+# onay sorar; onay gösterilen konu için en fazla max_searches web araması içindir. İş kendi
+# döngüsünde, boş geçmişle ve notlarınızı/hafızanızı/becerilerinizi görmeden çalışır; yalnız
+# web_search aracı vardır. Rapor webden türer; kasaya kendiliğinden yazılmaz (istersen vault_append,
+# normal onayla). Günlük bütçe ve allow_paid geçerlidir. Aynı anda tek araştırma çalışır.
+# research:
+#   enabled: true
+#   max_searches: 12
+#   max_seconds: 600
+
+# Yerel dosya araması (ADR 0065). KAPALI gelir. Seçtiğin klasörlerde dosya adı ve içeriğiyle tam
+# metin arama ("kira sözleşmesi geçen belge"). İndeks state_dir/dosya_arama.sqlite3'te durur
+# (kişisel metin içerir; Ayarlar'dan "Dizini sil"). Açılışta ve "Yeniden dizinle" ile arka planda
+# dizinlenir. Metin/kod/docx içeriği, PDF'in yalnız adı aranır. Bağlantılar, boyut sınırını aşan
+# ve gizli görünen dosyalar (.env, *.pem, *.key, adında secret/token/password/credentials)
+# dizinlenmez. roots mutlak klasör yollarıdır, yalnız sen yazarsın; state_dir ve beceri klasörü
+# kök olamaz. Sonuç dosya içeriği sayılır: allow_cloud_file_content kapalıyken buluta gitmez.
+# file_search:
+#   enabled: true
+#   roots:
+#     - C:/Users/<ad>/Documents/Belgeler
+#   max_file_mb: 5
+#   exclude_dirs: [.git, node_modules, .venv, __pycache__, AppData]
 
 # MCP sunucuları (ADR 0028). KAPALI gelir: servers boşken hiçbir süreç başlatılmaz.
 # Yalnız stdio (yerel süreç) desteklenir; her çağrıda sunucu yeniden başlatılır ve iş
@@ -276,6 +368,49 @@ voice:
 #   screenshot_width: 1280   # 640-2560
 #   step_delay_seconds: 0.3  # 0-3
 #   mode: accept             # accept: adımlar sorulur | auto: sormaz (Esc durdurur)
+
+# Dikte kipi (ADR 0057): kısayola bas, konuş, tekrar bas; tanınan metin odaktaki uygulamaya
+# yazılır. Komut DEĞİLDİR: metin modele, geçmişe ya da hafızaya gitmez. Mikrofon yalnız iki
+# basış arasında açıktır. Ses açıkken kullanılamaz; hedef pencere değişirse metin yazılmaz,
+# panelde gösterilir; Esc yazımı durdurur. Hotkey voice.listening_hotkey ile aynı olamaz.
+# dictation:
+#   enabled: true            # varsayılan false
+#   hotkey: ctrl+alt+d
+#   max_seconds: 120         # 1-600; kayıt kendiliğinden biter
+
+# Seçili metin eylemleri (ADR 0062): bir uygulamada metin seçip kısayola basın; Çevir / Düzelt /
+# Özetle / Açıkla çıkar, sonuç kopyalanır ya da "Yerine yaz" ile hedef pencereye yazılır. Seçimi
+# almak için pano geçici kullanılır, eski METİN geri konur (resim/dosya gibi metin dışı pano içeriği
+# geri konamaz). Metin modele araçsız ve "VERİDİR" çerçevesiyle gider, geçmişe/hafızaya girmez;
+# pano içeriği sayıldığı için allow_cloud_clipboard kapalıyken yalnız yerel (ollama) model kullanılır,
+# yoksa reddedilir. Hotkey ses ve dikte kısayolundan farklı olmalı.
+# selection_actions:
+#   enabled: true            # varsayılan false
+#   hotkey: ctrl+alt+s
+#   translate_to: en         # "Çevir" eyleminin hedef dili
+
+# Rutinler (ADR 0058): adlandırılmış, sabit adımlı işler ("işe başla": VS Code aç, Spotify aç,
+# sesi 30 yap). Adımlar `state_dir/routines.json` dosyasındadır; sohbetle (onaylı routine_save)
+# ya da dosyayı elle düzenleyerek oluşur. Çalışırken model yoktur, her adım kendi onay kurallarıyla
+# SafetyGate'ten geçer. Zaman yalnız Ayarlar > Rutinler'den kurulur; zamanı gelince Artemis
+# çalıştırmaz, panelde "Çalıştırılsın mı?" diye sorar (proactive.enabled gerekir).
+# routines:
+#   enabled: true            # varsayılan false
+
+# Tetikleyiciler (ADR 0061). KAPALI gelir; proactive.enabled gerekir. İzlenen klasöre yeni dosya
+# gelince (indirme bitince, bir kez) Artemis bildirim gösterir; kendiliğinden hiçbir şey çalıştırmaz.
+# Yalnız burada tanımlanır, hiçbir araç eklemez/değiştirmez (en çok 10). Açılışta var olan dosyalar
+# bildirilmez. message: {name} tetikleyici adı, {file} dosya adı. Bildirim en çok bir düğme taşır:
+# suggest (metin sohbet kutusuna yazılır, GÖNDERİLMEZ; {path} tam yol) ya da routine (ADR 0058
+# rutin adı; normal, onaylı çalışır). Dosya adları Telegram'a gönderilmez.
+# triggers:
+#   enabled: true
+#   items:
+#     - name: indirilenler
+#       folder: C:/Users/ben/Downloads     # mutlak yol
+#       pattern: "*.pdf"                   # varsayılan "*"
+#       message: "Yeni dosya geldi: {file}"
+#       suggest: "Şu dosyayı özetle: {path}"
 
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1

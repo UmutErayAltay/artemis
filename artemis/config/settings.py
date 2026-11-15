@@ -1,9 +1,10 @@
 """Sırların YAML veya repr içine girmemesi için ayarlarda sır alanı bulunmaz."""
 
+import os
 import re
 from datetime import time
 from decimal import Decimal
-from pathlib import Path
+from pathlib import Path, PureWindowsPath
 from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -77,7 +78,19 @@ class VoiceConfig(BaseModel):
     sample_rate: Literal[16000] = 16000
     frame_ms: Literal[20, 30] = 20
     vad_aggressiveness: int = Field(default=2, ge=0, le=3)
+    # Konuşma algılayıcı (ADR 0067): `auto` paketle gelen Silero VAD'ı (sinir ağı, gürültüde daha az
+    # yanlış tetik) kullanır, kurulamazsa WebRTC'ye döner; `webrtc` eski davranıştır.
+    vad_backend: Literal["auto", "webrtc", "silero"] = "auto"
+    # Silero konuşma olasılığı eşiği; yalnız `vad_aggressiveness` WebRTC'ye uygulanır.
+    vad_threshold: float = Field(default=0.5, gt=0, lt=1)
     end_silence_ms: int = Field(default=600, ge=100, le=3000)
+    # Anlamsal konuşma sonu (ADR 0068): sessizlik `end_silence_ms`e varınca Smart Turn modeli
+    # cümlenin bitip bitmediğine bakar; bitmemişse en çok `turn_max_silence_ms`e kadar beklenir.
+    # Yalnız sabır ekler, turu hiç erken bitirmez; kurulamazsa eski davranışla sürer.
+    turn_detection: bool = True
+    turn_max_silence_ms: int = Field(default=1600, ge=200, le=5000)
+    # Smart Turn "tur tamam" olasılığı eşiği.
+    turn_threshold: float = Field(default=0.5, gt=0, lt=1)
     # Eski config uyumluluğu; söz kesme artık nihai STT doğrulamasını bekler (ADR 0040).
     barge_in_ms: int = Field(default=180, ge=100, le=1000)
     require_wake_during_output: bool = True
@@ -92,7 +105,9 @@ class VoiceConfig(BaseModel):
     streaming: bool = True
     continuous_mode: bool = False
     # Ses kapanınca içeriksiz gecikme raporu state_dir/voice-telemetry/ altına yazılır (ADR 0041).
-    telemetry_report: bool = False
+    # Varsayılan açık: rapor yalnız süre/sayı taşır (metin, ses yok); gerçek kullanımda gecikme
+    # ölçülmeden "hızlı" denemez.
+    telemetry_report: bool = True
     # Masaüstünde sesi açıp kapatan Windows genel kısayolu ("Ses" düğmesiyle aynı yol);
     # tek elle basılabilsin diye ctrl+space. Boş dize kısayolu kapatır.
     listening_hotkey: str = Field(default="ctrl+space", max_length=40)
@@ -120,6 +135,10 @@ class VoiceConfig(BaseModel):
     stt_beam_size: int = Field(default=5, ge=1, le=10)
     stt_partial_beam_size: int = Field(default=1, ge=1, le=10)
     stt_partial_enabled: bool = True
+    # ADR 0071: bitiş sessizliği sürerken nihai STT sessizliğin `stt_speculative_after_ms`inde
+    # önceden başlar; bölüt aynı sesle kapanırsa sonuç kullanılır, konuşma sürerse atılır.
+    stt_speculative: bool = True
+    stt_speculative_after_ms: int = Field(default=200, ge=60, le=2000)
     # Kapalı: Whisper'ın VAD süzgeci bant sınırlı seste baştaki uyandırma sözcüğünü kesiyor
     # (ADR 0045: telefon bandında kaçırma %40 -> %0). Canlı döngüde STT'ye zaten webrtc VAD'in
     # kestiği parça gider, boşta ek maliyet yoktur.
@@ -142,6 +161,10 @@ class VoiceConfig(BaseModel):
     live_transcript: bool = False
     live_transcript_model: str = ""
     live_transcript_revision: str = ""
+    # ADR 0069: "kws" iken cihaz içi anahtar sözcük algısı (live_transcript_model/revision'ı
+    # paylaşır) uyandırma sözü olmayan bölütleri STT'den ÖNCE eler; kararı yine transkript verir.
+    wake_backend: Literal["transcript", "kws"] = "transcript"
+    wake_kws_threshold: float = Field(default=0.2, gt=0, lt=1)
     tts_backend: Literal["piper", "edge", "ema"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True
@@ -229,6 +252,22 @@ class TelegramConfig(BaseModel):
     # Kare buluta (Telegram) gider: gizli tur/geçmişte ve `perception.allow_cloud_screen`
     # kapalıyken hiç gönderilmez.
     send_computer_screenshot: bool = False
+    # Telegram'dan ses, fotoğraf ve dosya girdisi (ADR 0064); üçü ayrı ve varsayılan kapalıdır.
+    accept_voice: bool = False
+    accept_photo: bool = False
+    accept_files: bool = False
+    # Kaydedilecek belgelerin SON uzantısı bu listede olmalıdır (x.pdf.exe -> exe, reddedilir).
+    file_extensions: tuple[str, ...] = (
+        "pdf", "txt", "md", "docx", "xlsx", "csv", "png", "jpg", "zip",
+    )
+
+    @field_validator("file_extensions")
+    @classmethod
+    def validate_file_extensions(cls, value: tuple[str, ...]) -> tuple[str, ...]:
+        cleaned = tuple(item.strip().lstrip(".").lower() for item in value)
+        if not all(re.fullmatch(r"[a-z0-9]{1,10}", item) for item in cleaned):
+            raise ValueError("file_extensions yalnız harf/rakamdan oluşan uzantılar içerebilir")
+        return cleaned
 
     @field_validator("token_env")
     @classmethod
@@ -619,6 +658,186 @@ class ComputerUseConfig(BaseModel):
     fallback_models: tuple[str, ...] = ()
 
 
+def same_hotkey(first: str, second: str) -> bool:
+    """"Ctrl+Alt+D" ile "alt + ctrl + d" aynı kısayoldur; iki özellik aynı tuşu kaydedemez."""
+    def normal(text: str) -> tuple[frozenset[str], str]:
+        *modifiers, key = [part.strip().lower() for part in text.split("+")]
+        return frozenset(modifiers), key
+
+    return bool(first.strip() and second.strip()) and normal(first) == normal(second)
+
+
+class DictationConfig(BaseModel):
+    """Dikte kipi (ADR 0057): kısayola bas, konuş, tekrar bas; metin odaktaki uygulamaya yazılır.
+
+    Komut yolu DEĞİLDİR: metin modele, geçmişe ya da hafızaya gitmez. Varsayılan kapalı.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    hotkey: str = Field(default="ctrl+alt+d", min_length=1, max_length=40)
+    # Kayıt bu süreyi aşarsa kendiliğinden biter ve o ana kadarki ses yazılır.
+    max_seconds: float = Field(default=120.0, ge=1, le=600)
+
+
+class SelectionActionsConfig(BaseModel):
+    """Seçili metin eylemleri (ADR 0062): kısayolla Çevir/Düzelt/Özetle/Açıkla. Varsayılan kapalı.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    hotkey: str = Field(default="ctrl+alt+s", min_length=1, max_length=40)
+    # "Çevir" eyleminin hedef dili (ör. en, tr, de); modele düz metin olarak söylenir.
+    translate_to: str = Field(default="en", min_length=1, max_length=40)
+
+
+class RoutinesConfig(BaseModel):
+    """Rutinler (ADR 0058): adlandırılmış sabit araç adımları. Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+
+
+MAX_TRIGGERS = 10
+
+
+class TriggerConfig(BaseModel):
+    """Config'te tanımlı tetikleyici (ADR 0061): yalnız kullanıcı yazar, hiçbir araç yazamaz."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    name: str = Field(pattern=r"^[A-Za-z0-9_-]{1,32}$")
+    folder: str = Field(min_length=1, max_length=500)
+    pattern: str = Field(default="*", min_length=1, max_length=100)
+    # Yer tutucular: {name} (tetikleyici adı), {file} (yalnız dosya adı).
+    message: str = Field(default="Yeni dosya geldi: {file}", min_length=1, max_length=300)
+    # Kullanıcının yazdığı istem şablonu; {path} dosyanın tam yoludur. Sohbet kutusuna yazılır.
+    suggest: str | None = Field(default=None, min_length=1, max_length=500)
+    # ADR 0058 rutin adı; düğme normal, onaylı bir rutin çalıştırır.
+    routine: str | None = Field(default=None, min_length=1, max_length=40)
+
+    @field_validator("folder")
+    @classmethod
+    def validate_folder(cls, value: str) -> str:
+        absolute = Path(value).is_absolute() or PureWindowsPath(value).is_absolute()
+        if chr(0) in value or not absolute:
+            raise ValueError("folder mutlak bir yol olmalı (ör. C:/Users/ben/Downloads)")
+        return value
+
+    @model_validator(mode="after")
+    def one_button(self) -> Self:
+        if self.suggest is not None and self.routine is not None:
+            raise ValueError("Bir tetikleyici en çok bir düğme taşır: suggest ya da routine")
+        return self
+
+
+class TriggersConfig(BaseModel):
+    """Tetikleyiciler (ADR 0061): klasöre yeni dosya gelince bildirim. Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    items: tuple[TriggerConfig, ...] = Field(default=(), max_length=MAX_TRIGGERS)
+
+    @field_validator("items")
+    @classmethod
+    def unique_names(cls, values: tuple[TriggerConfig, ...]) -> tuple[TriggerConfig, ...]:
+        names = [item.name.casefold() for item in values]
+        if len(names) != len(set(names)):
+            raise ValueError("Tetikleyici adları benzersiz olmalı")
+        return values
+
+
+class CalendarConfig(BaseModel):
+    """Takvim, salt okunur (ADR 0059). ICS adresi sırdır: ortam/kasa, YAML'a yazılmaz."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    lookahead_days: int = Field(default=7, ge=1, le=60)
+    # Takvim içeriği kişiseldir: bu açılmadıkça bulut modele ve Telegram'a gitmez.
+    allow_cloud: bool = False
+
+
+class MailConfig(BaseModel):
+    """Posta, salt okunur IMAP/TLS (ADR 0059). Parola sırdır: ortam/kasa, YAML'a yazılmaz."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    host: str = Field(default="", max_length=255, pattern=r"^[A-Za-z0-9.-]*$")
+    port: int = Field(default=993, ge=1, le=65535)
+    username: str = Field(default="", max_length=255)
+    folder: str = Field(default="INBOX", min_length=1, max_length=100)
+    max_messages: int = Field(default=10, ge=1, le=50)
+    allow_cloud: bool = False
+
+
+class SkillsConfig(BaseModel):
+    """Kullanıcı becerileri (ADR 0060): <klasör>/*.md. Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    # Boşsa güvenliyse mevcut state_dir/beceriler, yoksa kullanıcı veri klasörü (skills.skills_dir).
+    # Seçilen klasör vault/proje deposu/çalışma alanı içindeyse beceriler yüklenmez.
+    folder: Path | None = None
+
+    @field_validator("folder")
+    @classmethod
+    def _absolute_folder(cls, value: Path | None) -> Path | None:
+        if value is not None and not value.is_absolute():
+            raise ValueError("skills.folder mutlak yol olmalı")
+        return value
+
+
+class ResearchConfig(BaseModel):
+    """Arka plan araştırma işi (ADR 0063). Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    # Başlatma onayı tam bu kadar web araması için ön onaydır; sayaç bitince arama reddedilir.
+    max_searches: int = Field(default=12, ge=1, le=50)
+    max_seconds: float = Field(default=600.0, ge=1, le=3600)
+
+
+class DailySummaryConfig(BaseModel):
+    """Gün sonu özeti (ADR 0066): audit'ten LLM'siz, yerel Markdown. Varsayılan kapalı."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    # Yerel saat (proactive.timezone), "SS:DD".
+    at: str = Field(default="22:30", pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    # "Vault'a ekle" düğmesinin ekleyeceği not (vault köküne göreli); yalnız memory.vault_path
+    # tanımlıysa düğme görünür ve ekleme her zaman onaylıdır.
+    vault_note: str = Field(default="Artemis-Gunluk.md", min_length=1, max_length=200)
+
+
+class FileSearchConfig(BaseModel):
+    """Yerel dosya araması (ADR 0065). Varsayılan kapalı; kökleri yalnız kullanıcı yazar."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    enabled: bool = False
+    roots: list[str] = Field(default_factory=list)  # mutlak klasörler; hiçbir araç değiştirmez
+    max_file_mb: int = Field(default=5, ge=1, le=100)
+    exclude_dirs: list[str] = Field(
+        default_factory=lambda: [".git", "node_modules", ".venv", "__pycache__", "AppData"]
+    )
+
+    @field_validator("roots")
+    @classmethod
+    def _absolute_roots(cls, values: list[str]) -> list[str]:
+        if any(not os.path.isabs(value) for value in values):
+            raise ValueError("file_search.roots mutlak klasör yolları olmalı")
+        return values
+
+
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -660,6 +879,16 @@ class Settings(BaseModel):
     perception: PerceptionConfig = Field(default_factory=PerceptionConfig)
     system_control: SystemControlConfig = Field(default_factory=SystemControlConfig)
     computer_use: ComputerUseConfig = Field(default_factory=ComputerUseConfig)
+    dictation: DictationConfig = Field(default_factory=DictationConfig)
+    selection_actions: SelectionActionsConfig = Field(default_factory=SelectionActionsConfig)
+    routines: RoutinesConfig = Field(default_factory=RoutinesConfig)
+    triggers: TriggersConfig = Field(default_factory=TriggersConfig)
+    calendar: CalendarConfig = Field(default_factory=CalendarConfig)
+    mail: MailConfig = Field(default_factory=MailConfig)
+    skills: SkillsConfig = Field(default_factory=SkillsConfig)
+    research: ResearchConfig = Field(default_factory=ResearchConfig)
+    file_search: FileSearchConfig = Field(default_factory=FileSearchConfig)
+    daily_summary: DailySummaryConfig = Field(default_factory=DailySummaryConfig)
     openrouter_base_url: str = "https://openrouter.ai/api/v1"
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     ollama_base_url: str = "http://127.0.0.1:11434"
@@ -684,6 +913,13 @@ class Settings(BaseModel):
         ):
             raise ValueError("Modelin endpoint değeri endpoints içinde tanımlanmalı")
         voice = self.voice
+        if same_hotkey(self.dictation.hotkey, voice.listening_hotkey):
+            raise ValueError("Dikte kısayolu ses kısayoluyla aynı olamaz")
+        selection = self.selection_actions.hotkey
+        if same_hotkey(selection, voice.listening_hotkey) or same_hotkey(
+            selection, self.dictation.hotkey
+        ):
+            raise ValueError("Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı")
         if voice.stt_mode == "hybrid" and (
             voice.stt_cloud_endpoint not in self.endpoints
             or (voice.stt_cloud_protocol == "openai" and not voice.stt_cloud_model.strip())

@@ -15,9 +15,18 @@ pytest.importorskip("PySide6")
 from PySide6.QtCore import QPoint
 from PySide6.QtWidgets import QApplication, QLabel, QScrollArea
 
-from artemis.channels.desktop import data_panel, projects_panel, themes
+from artemis.channels.desktop import (
+    automation_panel,
+    data_panel,
+    projects_panel,
+    selection_popup,
+    settings_lists,
+    settings_panel,
+    themes,
+)
 from artemis.channels.desktop.data_panel import DataPanel
 from artemis.channels.desktop.projects_panel import (
+    EDITOR_MIN_HEIGHT,
     LIST_MAX_ROWS,
     EmptyState,
     ProjectsPanel,
@@ -99,7 +108,9 @@ def test_disabled_reasons_are_shown_and_cleared(app: QApplication) -> None:
 def test_demo_reasons(app: QApplication) -> None:
     panel = ProjectsPanel(demo=True)
     panel.set_busy(False)
-    assert "Demo" in panel.prepare_reason.text() and "Demo" in panel.start_reason.text()
+    # UX-11: demo nedeni her düğmede tekrarlanmaz; sayfanın üstünde bir kez söylenir.
+    assert not panel.demo_note.isHidden() and "Demo" in panel.demo_note.text()
+    assert not panel.prepare_button.isEnabled() and not panel.start_button.isEnabled()
 
 
 def test_preview_escapes_user_text(app: QApplication) -> None:
@@ -190,15 +201,15 @@ def test_prepare_action_row_visible_at_1280x850(app: QApplication) -> None:
     panel.close()
 
 
-def test_editors_start_at_72_and_grow_to_120(app: QApplication) -> None:
+def test_editors_start_at_min_and_grow_to_120(app: QApplication) -> None:
     panel = ProjectsPanel()
     panel.show()
-    assert panel.task.height() == 72
+    assert panel.task.height() == EDITOR_MIN_HEIGHT
     panel.task.setPlainText("satır\n" * 30)
     app.processEvents()
     assert panel.task.height() == 120
     panel.task.clear()
-    assert panel.task.height() == 72
+    assert panel.task.height() == EDITOR_MIN_HEIGHT
     panel.close()
 
 
@@ -305,7 +316,7 @@ def test_retry_label_short_with_separate_warning(app: QApplication) -> None:
 def test_history_search_is_first_class_and_content_capped(app: QApplication) -> None:
     panel = DataPanel()
     assert panel.search.placeholderText().startswith("Konuşmalarda ara")
-    assert panel.MAX_CONTENT_WIDTH == 960
+    # UX-02: genişlik tavanı artık bütün sekmelerin ortak sayfa kabuğunda (PAGE_MAX_WIDTH).
     assert panel.search.accessibleName() == "Geçmişte ara"
 
 
@@ -313,7 +324,10 @@ def test_history_search_is_first_class_and_content_capped(app: QApplication) -> 
 
 
 def test_no_hardcoded_hex_in_list_panels() -> None:
-    for module in (projects_panel, data_panel):
+    for module in (
+        projects_panel, data_panel, automation_panel, settings_lists,
+        selection_popup, settings_panel,
+    ):
         source = Path(module.__file__).read_text(encoding="utf-8")
         assert not re.search(r"#[0-9a-fA-F]{3,8}\b", source), module.__name__
 

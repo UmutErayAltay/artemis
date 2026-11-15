@@ -93,6 +93,8 @@ class ComputerBackend(Protocol):
     # Her kod noktasından önce `should_continue` sorulur; gönderilen kod noktası sayısı döner.
     def type_text(self, text: str, should_continue: Callable[[], bool]) -> int: ...
     def press_keys(self, keys: tuple[str, ...]) -> None: ...
+    # Odaktaki denetimin değeri `expected` metnini içeriyor mu; okunamazsa None (ADR 0070).
+    def focused_value_contains(self, expected: str, timeout: float) -> bool | None: ...
 
 
 class _Audit(Protocol):
@@ -274,6 +276,9 @@ class ComputerSession:
         # Son taze kare (yalnız RAM); sahibi karar verir, burada diske/denetime yazılmaz.
         self._on_frame = on_frame
         self._layout: _Layout | None = None
+        # ADR 0070: OS düzeyi kanıt. Yazılan metin yalnız bellekte tutulur, asla loglanmaz.
+        self._os_issues: dict[tuple[Any, ...], str] = {}  # imza → sorun
+        self._last_typed: tuple[str, int | None] | None = None
 
     async def run(self, goal: str, turn_id: str, deadline: float | None) -> SessionResult:
         limit = self._clock() + self._config.max_minutes * 60
@@ -477,12 +482,44 @@ class ComputerSession:
                         verdict = (False, "Doğrulama çalışamadı: model geçerli yanıt vermedi.")
                     else:
                         verdict = (parsed.verified, parsed.evidence)
+        os_ok, os_text = await self._os_check(limit, ask_ui=verdict[0])
+        verdict = (
+            verdict[0] and os_ok is not False,
+            f"{verdict[1]} | OS: {os_text}",
+        )
         self._audit.emit(
-            "computer_verify", turn_id=turn_id, verified=verdict[0], evidence=verdict[1]
+            "computer_verify", turn_id=turn_id, verified=verdict[0], evidence=verdict[1],
+            os_check="unknown" if os_ok is None else "ok" if os_ok else "contradiction",
         )
         # "Bitti" notu da modelin ekrandan aktardığı metin olabilir; kanıtla aynı süzgeçten geçer.
         note = mask_screen_secrets(done_text)
         return SessionResult("done", note, self._steps, verdict[0], verdict[1])
+
+    async def _os_check(self, limit: float, *, ask_ui: bool) -> tuple[bool | None, str]:
+        """OS kanıtı (ADR 0070): girdi sonuçları ve yazımda odaktaki alan. Modelin "hayır"ını
+        "evet" yapmaz; yalnız "evet"i geri çevirebilir. None: doğrulanamadı."""
+        if self._os_issues:
+            return False, f"çelişki: {next(iter(self._os_issues.values()))}"
+        if not ask_ui or self._last_typed is None or self._stop.is_set():
+            return None, "doğrulanamadı"
+        text, target_id = self._last_typed
+        remaining = limit - self._clock()
+        if not text or target_id is None or remaining <= 0:
+            return None, "doğrulanamadı"
+        try:
+            window = await asyncio.to_thread(self._backend.foreground_window)
+            if window[0] != target_id:
+                return None, "doğrulanamadı"
+            found = await asyncio.to_thread(
+                self._backend.focused_value_contains, text, min(3.0, remaining)
+            )
+        except (OSError, RuntimeError):
+            return None, "doğrulanamadı"
+        if found is None:
+            return None, "doğrulanamadı"
+        if not found:
+            return False, "çelişki: odaktaki alanda yazılan metin bulunamadı"
+        return True, "doğrulandı"
 
     async def _ask[T](
         self, messages: list[Message], limit: float, parse: Callable[[str], T]
@@ -590,7 +627,12 @@ class ComputerSession:
             outcome, typed = await self._execute(action, point, limit, target_id)
         except (OSError, RuntimeError) as error:
             return self._result("error", f"Eylem uygulanamadı: {error}")
+        issue_key = _signature(action) or (action.type,)
         if outcome != "sent":
+            self._os_issues[issue_key] = (
+                f"{action.type} girdisi gönderilemedi ({outcome})"
+                + (f", {typed} karakter yazıldı" if typed else "")
+            )
             stopped: Reason = "stopped" if outcome == "stopped" else "timeout"
             if typed:
                 # Yarım yazım başarı değildir ve gönderilen girdi geri alınmış sayılmaz.
@@ -608,6 +650,11 @@ class ComputerSession:
                 return _Stale("Hedef pencere girdi gönderilmeden hemen önce değişti")
             return self._result(stopped, "İptal veya süre sınırı nedeniyle girdi gönderilmedi.")
 
+        self._os_issues.pop(issue_key, None)
+        if action.type == "type":
+            self._last_typed = (action.text or "", target_id)
+        elif action.type != "wait":
+            self._last_typed = None  # UIA yalnız yazımın hemen ardından anlamlı
         self._steps += 1
         self._memory.add(
             StepRecord(

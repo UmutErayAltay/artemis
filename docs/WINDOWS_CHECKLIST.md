@@ -127,7 +127,7 @@ koşmak içindir; araçlar main'de.
   (`COMPUTERNAME` düzeltmesi sonrası 60 sn kapatma uyarısı + iptal), 20 (uyku ve uyanınca
   Artemis), 22 (ADR 0036 sonrası tarayıcı okumasında onay penceresi), 24 (çağrı sonrası
   `chrome` süreci kalmıyor).
-- [ ] Gürültü engelleme / NVIDIA Broadcast sanal mikrofonu (2026-10-19 thread'i) açık.
+- [x] Gürültü engelleme: entegrasyon yok (2026-11-15 kararı). İsteyen NVIDIA Broadcast sanal mikrofonunu `input_device` olarak seçer.
 
 ## C. Umut'un kararı bekleyenler
 

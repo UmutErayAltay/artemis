@@ -19,9 +19,13 @@ from artemis.memory.store import MemoryStore
 from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate
+from artemis.safety.undo import UndoJournal, UndoJournalError
+from artemis.skills import ensure_example
 from artemis.tools.base import ToolContext
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
+from artemis.tools.file_index import FileIndex
 from artemis.tools.registry import ToolRegistry, discover_tools
+from artemis.tools.research_jobs import ResearchJobs
 
 Approval = Callable[[str, dict[str, Any]], bool]
 AuditObserver = Callable[[dict[str, Any]], None]
@@ -47,6 +51,12 @@ class Runtime:
         jobs = self.context.services.get("code_agent_jobs")
         if isinstance(jobs, CodeAgentJobs):
             jobs.shutdown()
+        research = self.context.services.get("research_jobs")
+        if isinstance(research, ResearchJobs):
+            research.shutdown()
+        index = self.context.services.get("file_index")
+        if isinstance(index, FileIndex):
+            index.shutdown()
 
 
 def create_runtime(
@@ -89,6 +99,20 @@ def create_runtime(
         from artemis.mcp.bridge import discover_mcp_tools
 
         tools = discover_mcp_tools(loaded, log, tools)
+    if not loaded.routines.enabled:
+        tools = tools.without_prefix("routine_")  # ADR 0058: kapalıyken model araçları görmez
+    if not loaded.calendar.enabled:
+        tools = tools.without_prefix("calendar_")  # ADR 0059
+    if not loaded.mail.enabled:
+        tools = tools.without_prefix("mail_")
+    if not loaded.skills.enabled:
+        tools = tools.without_prefix("skill_")  # ADR 0060
+    if not loaded.research.enabled:
+        tools = tools.without_prefix("research_")  # ADR 0063
+    if not loaded.file_search.enabled:
+        tools = tools.without_prefix("file_search")  # ADR 0065
+    if not loaded.daily_summary.enabled:
+        tools = tools.without_prefix("daily_summary_")  # ADR 0066
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
     # Runtime kurulamazsa sahibi dışarıya dönmez; callback kilidi kapatır.
@@ -114,16 +138,42 @@ def create_runtime(
         builder = provider_builder if provider_builder is not None else build_provider
         selected_provider = provider if provider is not None else builder(loaded, log)
         agent = AgentLoop(selected_provider, gate, context, approve)
+        if loaded.research.enabled and with_code_agent:
+            # Kod işleriyle aynı sahiplik: ikinci runtime (Telegram) işi `uncertain` yapmasın.
+            try:
+                context.services["research_jobs"] = ResearchJobs(
+                    loaded, log, selected_provider, tools, context.services
+                )
+            except (OSError, sqlite3.Error) as error:
+                log.emit("research_unavailable", error_type=type(error).__name__)
+        if loaded.file_search.enabled:
+            # Her kanal sorgulayabilir; dizinlemeyi yalnız sahip runtime başlatır (ikili koşu yok).
+            file_index = FileIndex.shared(loaded, log)
+            cleanup.callback(file_index.shutdown)
+            context.services["file_index"] = file_index
+            if with_code_agent and not file_index.start() and not file_index.available:
+                log.emit("file_search_unavailable", reason="fts5")
         budget = loaded.context_token_budget
         primary = loaded.models.get(loaded.primary_model)
         if primary is not None:
             # Geçmiş modelin penceresinin yarısını aşmamalı; yanıt ve araç şeması de sığmalı.
             budget = min(budget, primary.context_window // 2)
         try:
+            # Ölen sürecin yarım silmeleri sonsuza dek "prepared" kalmasın.
+            stale = UndoJournal(loaded.state_dir).reconcile_prepared()
+            if stale:
+                log.emit("undo_reconciled", count=stale)
+        except (UndoJournalError, sqlite3.Error) as error:
+            log.emit("undo_reconcile_error", error_type=type(error).__name__)
+        try:
             # Artemis'in kendi hafıza iskeleti (ADR 0054); hata açılışı bozmaz.
             ensure_skeleton(loaded.state_dir)
         except OSError as error:
             log.emit("companion_error", error=str(error))
+        try:
+            ensure_example(loaded)  # ADR 0060: açıkken klasör yoksa örnek beceriyle açılır
+        except OSError as error:
+            log.emit("skills_error", error=str(error))
         store: MemoryStore | None = None
         if loaded.persist_memory:
             try:

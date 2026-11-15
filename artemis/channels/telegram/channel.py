@@ -10,10 +10,12 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import secrets
+import tempfile
 import threading
 import time
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -23,6 +25,7 @@ import yaml
 from artemis.brain.conversation import ToolExchange, TurnRecord
 from artemis.brain.models import Message
 from artemis.channels.desktop.computer_host import ComputerHost
+from artemis.channels.desktop.dictation import clean_transcript
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.channels.telegram.api import (
     TELEGRAM_TEXT_LIMIT,
@@ -30,9 +33,18 @@ from artemis.channels.telegram.api import (
     TelegramError,
     build_telegram_client,
 )
+from artemis.channels.telegram.media import (
+    decode_voice,
+    extension_allowed,
+    sanitize_filename,
+    save_document,
+)
+from artemis.channels.voice.core import SpeechRecognizer
+from artemis.channels.voice.factory import build_dictation_recognizer
 from artemis.config.settings import load_settings
+from artemis.perception.screen import ScreenOutcome, read_image
 from artemis.safety.audit import AuditLog
-from artemis.tools.base import Risk, normalize_risk
+from artemis.tools.base import Risk, ToolResult, normalize_risk
 
 # İletilmiş mesajın herhangi bir alanı varsa metin başkasının yazdığıdır: kullanıcının
 # komutu değil, dış içeriktir (ADR 0016).
@@ -72,9 +84,28 @@ _NO_SESSION = "Çalışan bir bilgisayar kullanımı oturumu yok."
 _STOP_POLL_SECONDS = 1.0
 _REJECTION_NOTICES = {
     "forwarded": "İletilen mesajlar komut olarak çalıştırılmaz.",
-    "not_text": "Yalnız metin mesajları desteklenir.",
+    "not_text": "Bu mesaj türü desteklenmiyor.",
     "stale": "Bu mesaj geç ulaştı; güvenlik için çalıştırılmadı. Yeniden yazın.",
 }
+# Ses, fotoğraf ve dosya girdisi (ADR 0064): sınırlar indirmeden ÖNCE bildirilen boyutla,
+# okurken de gerçek bayt sayısıyla uygulanır.
+_VOICE_MAX_BYTES = 1_000_000
+_VOICE_MAX_SECONDS = 60
+_PHOTO_MAX_BYTES = 5_000_000
+_FILE_MAX_BYTES = 20_000_000
+_TRANSCRIPT_LIMIT = 2000
+_CAPTION_LIMIT = 1000
+_MEDIA_OFF = {
+    "voice": "Ses mesajları kapalı (telegram.accept_voice).",
+    "photo": "Fotoğraflar kapalı (telegram.accept_photo).",
+    "document": "Dosya alımı kapalı (telegram.accept_files).",
+}
+_PHOTO_WITHHELD = (
+    "Yanıt fotoğraftaki gizli içeriği kullandığı için Telegram'a gönderilmedi. "
+    "Konuyu masaüstünden sorun."
+)
+_DOWNLOAD_FAILED = "Dosya Telegram'dan indirilemedi."
+_TOO_BIG = "Dosya çok büyük; işlenmedi."
 # Boş poll'larda CPU'yu yakmamak için kısa bekleme (yalnız zaman aşımı 0 ise gerekir).
 _IDLE_SLEEP = 0.1
 _MAX_BACKOFF = 30.0
@@ -98,6 +129,21 @@ def _nested_id(container: object, key: str) -> int | None:
     return node if isinstance(node, int) and not isinstance(node, bool) else None
 
 
+def message_kind(message: Mapping[str, Any]) -> str:
+    """"text", "voice", "photo", "document" ya da "other". Metin önceliklidir."""
+    text = message.get("text")
+    if isinstance(text, str) and text.strip():
+        return "text"
+    if isinstance(message.get("voice"), Mapping):
+        return "voice"
+    photo = message.get("photo")
+    if isinstance(photo, list) and photo:
+        return "photo"
+    if isinstance(message.get("document"), Mapping):
+        return "document"
+    return "other"
+
+
 def check_message(
     message: Mapping[str, Any], chat_id: int, now: float, max_age_seconds: int
 ) -> Rejection | None:
@@ -113,8 +159,7 @@ def check_message(
         return Rejection("unauthorized_chat")
     if any(key in message for key in _FORWARD_KEYS):
         return Rejection("forwarded")
-    text = message.get("text")
-    if not isinstance(text, str) or not text.strip():
+    if message_kind(message) == "other":
         return Rejection("not_text")
     sent = message.get("date")
     if not isinstance(sent, int) or isinstance(sent, bool) or now - sent > max_age_seconds:
@@ -183,6 +228,13 @@ class TelegramChannel:
         self._stop_seen: set[int] = set()
         # Son ekran karesi: yalnız RAM, tur başında ve gönderimden sonra atılır.
         self._frame: tuple[bytes, ...] | None = None
+        # Medya girdisi (ADR 0064): değiştirilebilir bağlantı noktaları (testler sahtesini koyar).
+        self.audio_decoder: Callable[[bytes, int], bytes] = decode_voice
+        self.image_reader: Callable[..., ScreenOutcome] = read_image
+        self.recognizer_factory: Callable[[Runtime], Awaitable[SpeechRecognizer]] = (
+            lambda runtime: build_dictation_recognizer(runtime, "telegram_audio")
+        )
+        self._recognizer: SpeechRecognizer | None = None
 
     def observe(self, record: dict[str, Any]) -> None:
         """AuditLog.on_record'a bağlanır: hangi turun gizli içerik gördüğünü izler.
@@ -266,10 +318,11 @@ class TelegramChannel:
         if isinstance(update_id, int) and not isinstance(update_id, bool):
             self._offset = update_id + 1
 
-    def _notify(self, text: str, kind: str = "notice") -> None:
+    def _notify(self, text: str, kind: str = "notice", *, redact_audit: bool = False) -> None:
         """Bildirim hatası turu bozmaz: istemci başarısızlığı zaten denetime yazdı."""
+        extra: dict[str, Any] = {"redact_audit": True} if redact_audit else {}
         with contextlib.suppress(TelegramError, ValueError):
-            self.client.send_message(self.chat_id, text, kind=kind)
+            self.client.send_message(self.chat_id, text, kind=kind, **extra)
 
     def _answer(self, callback_id: object, text: str) -> None:
         if not isinstance(callback_id, str):
@@ -506,6 +559,10 @@ class TelegramChannel:
             if rejection.reason in _REJECTION_NOTICES:
                 self._notify(_REJECTION_NOTICES[rejection.reason])
             return
+        kind = message_kind(message)
+        if kind != "text":
+            await self._handle_media(kind, message)
+            return
         raw = message.get("text")
         text = raw.strip() if isinstance(raw, str) else ""
         command = _command(message)
@@ -523,12 +580,24 @@ class TelegramChannel:
         if command == "/dur":
             self._stop_session()
             return
+        await self._run_turn(runtime, text)
+
+    async def _run_turn(
+        self,
+        runtime: Runtime,
+        text: str,
+        attachment: ToolResult | None = None,
+        withheld: str = _PRIVATE_WITHHELD,
+    ) -> None:
         self._loop = asyncio.get_running_loop()
         self._sync_computer_mode(runtime)
         self._frame = None
         watcher = asyncio.create_task(self._watch_stop()) if self.computer_host else None
         try:
-            result = await runtime.runner.run(text)
+            if attachment is None:
+                result = await runtime.runner.run(text)
+            else:
+                result = await runtime.runner.run(text, attachment=attachment)
         finally:
             if watcher is not None:
                 watcher.cancel()
@@ -536,9 +605,207 @@ class TelegramChannel:
                     await watcher
         frame, self._frame = self._frame, None
         answer_private = result.record is not None and result.record.answer_private
-        self._reply(result)
+        self._reply(result, withheld)
         # Kare yanıt metninden bağımsız karar verilir; kapılar `_send_frame` içindedir.
         self._send_frame(runtime, frame, answer_private)
+
+    # ------------------------------------------------------------------ ses/fotoğraf/dosya
+
+    def _audit_download(self, kind: str, size: int | None, outcome: str) -> None:
+        # İçerik ve dosya adı yazılmaz; yalnız tür, bayt sayısı ve sonuç.
+        self.audit.emit("telegram_download", kind=kind, size=size, outcome=outcome)
+
+    def _refuse_media(self, kind: str, size: int | None, outcome: str, notice: str) -> None:
+        self._audit_download(kind, size, outcome)
+        self._notify(notice)
+
+    async def _fetch(
+        self, kind: str, file_id: object, reported: object, limit: int
+    ) -> bytes | None:
+        """Boyutu indirmeden ÖNCE sınar, okurken yine sınar. Hata/ret yanıtı burada verilir."""
+        known = reported if isinstance(reported, int) and not isinstance(reported, bool) else None
+        if not isinstance(file_id, str) or not file_id:
+            self._refuse_media(kind, known, "bad_message", _DOWNLOAD_FAILED)
+            return None
+        if known is not None and known > limit:
+            self._refuse_media(kind, known, "too_large", _TOO_BIG)
+            return None
+        try:
+            path, size = await asyncio.to_thread(self.client.get_file, file_id)
+            if size is not None and size > limit:
+                self._refuse_media(kind, size, "too_large", _TOO_BIG)
+                return None
+            return await asyncio.to_thread(self.client.download_file, path, limit)
+        except TelegramError as error:
+            if error.error_type == "TooLarge":
+                self._refuse_media(kind, None, "too_large", _TOO_BIG)
+            else:
+                self._refuse_media(kind, known, "download_failed", _DOWNLOAD_FAILED)
+            return None
+
+    async def _handle_media(self, kind: str, message: Mapping[str, Any]) -> None:
+        runtime = self.runtime
+        if runtime is None:
+            return
+        config = runtime.context.settings.telegram
+        enabled = {
+            "voice": config.accept_voice,
+            "photo": config.accept_photo,
+            "document": config.accept_files,
+        }
+        if not enabled[kind]:
+            self._audit_rejected(message, f"{kind}_disabled")
+            self._notify(_MEDIA_OFF[kind])
+            return
+        if kind == "voice":
+            await self._handle_voice(runtime, message)
+        elif kind == "photo":
+            await self._handle_photo(runtime, message)
+        else:
+            await self._handle_document(runtime, message)
+
+    async def _handle_voice(self, runtime: Runtime, message: Mapping[str, Any]) -> None:
+        voice = message.get("voice")
+        if not isinstance(voice, Mapping):
+            return
+        duration = voice.get("duration")
+        if (
+            isinstance(duration, int)
+            and not isinstance(duration, bool)
+            and duration > _VOICE_MAX_SECONDS
+        ):
+            self._refuse_media("voice", None, "too_long", "Ses 60 saniyeden uzun; işlenmedi.")
+            return
+        data = await self._fetch(
+            "voice", voice.get("file_id"), voice.get("file_size"), _VOICE_MAX_BYTES
+        )
+        if data is None:
+            return
+        # Ses yalnız bellekte çözülür; hiçbir yolda diske yazılmaz.
+        try:
+            pcm = await asyncio.to_thread(self.audio_decoder, data, _VOICE_MAX_SECONDS)
+        except ImportError:
+            self._refuse_media(
+                "voice", len(data), "no_decoder",
+                "Bu kurulumda ses çözücü yok (voice ekini kurun); ses işlenmedi.",
+            )
+            return
+        except ValueError:
+            self._refuse_media("voice", len(data), "decode_failed", "Ses çözülemedi.")
+            return
+        try:
+            if self._recognizer is None:
+                self._recognizer = await self.recognizer_factory(runtime)
+            transcript = clean_transcript(await self._recognizer.transcribe(pcm))
+        except (OSError, RuntimeError, ValueError, ImportError):
+            # İstisna metni sır/yol taşıyabilir; sabit ileti.
+            self._refuse_media(
+                "voice", len(data), "stt_failed", "Ses yazıya çevrilemedi; komut çalıştırılmadı."
+            )
+            return
+        if not transcript:
+            self._refuse_media(
+                "voice", len(data), "empty", "Ses anlaşılamadı; komut çalıştırılmadı."
+            )
+            return
+        transcript = transcript[:_TRANSCRIPT_LIMIT]
+        self._audit_download("voice", len(data), "ok")
+        self._notify(f"Şunu duydum: {transcript}")
+        # Yazıya çevrilen ses sıradan bir metin komutudur: onay yine yalnız düğmeyle, ve "/..."
+        # kanal komutu sayılmaz (yalnız gerçek metin mesajında komut çözümlenir).
+        await self._run_turn(runtime, transcript)
+
+    async def _handle_photo(self, runtime: Runtime, message: Mapping[str, Any]) -> None:
+        raw = message.get("photo")
+        items = raw if isinstance(raw, list) else []
+        photos = [item for item in items if isinstance(item, Mapping)]
+
+        def area(item: Mapping[str, Any]) -> int:
+            width, height = item.get("width"), item.get("height")
+            return width * height if isinstance(width, int) and isinstance(height, int) else 0
+
+        def small_enough(item: Mapping[str, Any]) -> bool:
+            size = item.get("file_size")
+            return not isinstance(size, int) or size <= _PHOTO_MAX_BYTES
+
+        candidates = [item for item in photos if small_enough(item)]
+        if not candidates:
+            self._refuse_media("photo", None, "too_large", _TOO_BIG)
+            return
+        best = max(candidates, key=area)
+        data = await self._fetch(
+            "photo", best.get("file_id"), best.get("file_size"), _PHOTO_MAX_BYTES
+        )
+        if data is None:
+            return
+        if not data.startswith(b"\xff\xd8"):  # Telegram fotoğrafı her zaman JPEG'dir
+            self._refuse_media("photo", len(data), "not_image", "Fotoğraf okunamadı.")
+            return
+        # OCR yol ister: geçici dosya HER yolda silinir (başarı, hata, iptal).
+        handle, name = tempfile.mkstemp(prefix="artemis-tg-", suffix=".jpg")
+        try:
+            try:
+                with os.fdopen(handle, "wb") as image:
+                    image.write(data)
+                outcome = await asyncio.to_thread(
+                    self.image_reader,
+                    name,
+                    timeout=runtime.context.settings.perception.timeout_seconds,
+                )
+            except OSError:
+                self._refuse_media("photo", len(data), "error", "Fotoğraf işlenemedi.")
+                return
+        finally:
+            with contextlib.suppress(OSError):
+                os.unlink(name)
+        if outcome.status != "ok":
+            self._refuse_media("photo", len(data), f"ocr_{outcome.status}", outcome.message)
+            return
+        self._audit_download("photo", len(data), "ok")
+        caption = message.get("caption")
+        command = clean_transcript(caption)[:_CAPTION_LIMIT] if isinstance(caption, str) else ""
+        if not command:
+            # Fotoğraf metni gizli ekran içeriğidir: kullanıcıya döner ama denetime yazılmaz.
+            for chunk in split_text(outcome.text):
+                self._notify(chunk, "ocr_text", redact_audit=True)
+            return
+        # OCR metni dış veridir: tur lekelenir, gizlilik `content_kind="screen"` kuralından çıkar
+        # (perception.allow_cloud_screen kapalıyken gizli). Görüntünün kendisi hiç modele gitmez.
+        attachment = ToolResult(
+            success=True,
+            status="ok",
+            message="Telegram fotoğrafından okunan metin.",
+            data={"text": outcome.text, "language": outcome.language},
+            external=True,
+            content_kind="screen",
+        )
+        await self._run_turn(runtime, command, attachment, _PHOTO_WITHHELD)
+
+    async def _handle_document(self, runtime: Runtime, message: Mapping[str, Any]) -> None:
+        document = message.get("document")
+        if not isinstance(document, Mapping):
+            return
+        config = runtime.context.settings.telegram
+        name = sanitize_filename(document.get("file_name"))
+        if name is None:
+            self._refuse_media("document", None, "bad_name", "Dosya adı kabul edilmedi.")
+            return
+        if not extension_allowed(name, config.file_extensions):
+            self._refuse_media("document", None, "bad_extension", "Bu dosya türü kabul edilmiyor.")
+            return
+        data = await self._fetch(
+            "document", document.get("file_id"), document.get("file_size"), _FILE_MAX_BYTES
+        )
+        if data is None:
+            return
+        try:
+            saved = save_document(runtime.context.workspace, name, data)
+        except (ValueError, OSError):
+            self._refuse_media("document", len(data), "save_failed", "Dosya kaydedilemedi.")
+            return
+        self._audit_download("document", len(data), "ok")
+        # Başlık (caption) bilerek komut sayılmaz (ADR 0064): dosya + talimat ayrı bir adımdır.
+        self._notify(f"Kaydedildi: {saved}")
 
     def _status_footer(self, record: TurnRecord) -> str:
         """Yan etkili araçların gerçek sonucunu modelin anlatısından bağımsız bildirir.
@@ -573,11 +840,11 @@ class TelegramChannel:
         lines = (f"{title}: {', '.join(labels)}" for title, labels in groups.items())
         return "\n\n" + "\n".join(lines)
 
-    def _reply(self, result: Any) -> None:
+    def _reply(self, result: Any, withheld: str = _PRIVATE_WITHHELD) -> None:
         if result.record is None:
             self._notify(f"Tur tamamlanmadı ({result.stop_reason}).")
         elif result.record.answer_private:
-            self._notify(_PRIVATE_WITHHELD)
+            self._notify(withheld)
         else:
             body = (result.text or "(boş yanıt)") + self._status_footer(result.record)
             for chunk in split_text(body):

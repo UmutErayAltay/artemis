@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.channels.desktop.projects_panel import (
+from artemis.channels.desktop.page_kit import (
     AutoHideLabel,
     EmptyState,
     make_card,
@@ -30,6 +30,8 @@ from artemis.channels.desktop.projects_panel import (
     make_page_header,
     make_scroll_page,
 )
+from artemis.channels.desktop.widgets import HelpTip
+from artemis.text import search_fold
 from artemis.tools.base import ToolResult
 from artemis.tools.plugins.companion import ChangesArguments, RuleRemoveArguments
 from artemis.tools.plugins.history import HistoryArguments
@@ -47,14 +49,21 @@ _STATES = {
 
 def _fold(text: str) -> str:
     """Türkçe i/ı/İ/I ayrımını arama için eşitler; salt casefold 'IŞIK' ile 'ışık'ı eşlemez."""
-    return text.translate(str.maketrans("İIı", "iii")).casefold()
+    return search_fold(text)
+
+
+_HELP_RETENTION = (
+    "Süreyi kaydeder ve bundan eski konuşmaları hemen siler; geri gelmez, yedek değildir. 0 "
+    "seçiliyse bir şey silinmez. Onay sorar."
+)
+_HELP_DELETE = (
+    "Tüm konuşma arşivini siler ve dosyayı yeniden yazar; geri alınamaz. Öz notlar, denetim "
+    "günlüğü ve proje işi kayıtları kalır. SSD/yedek kopyalarını kapsamaz. Onay sorar."
+)
 
 
 class DataPanel(QWidget):
     tool_requested = Signal(str, object)
-
-    # Sayfa içeriği okunabilir genişlikte kalır; fazlası kenar boşluğu olur.
-    MAX_CONTENT_WIDTH = 960
 
     def __init__(self, *, demo: bool = False) -> None:
         super().__init__()
@@ -70,18 +79,11 @@ class DataPanel(QWidget):
         self._memory_keep_notice = False
         self._undo_buttons: list[QPushButton] = []
         outer = make_scroll_page(self)
-        body = QWidget()
-        body.setMaximumWidth(self.MAX_CONTENT_WIDTH)
-        layout = QVBoxLayout(body)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout = outer  # genişlik sınırı ve ortalama ortak kabuktan (make_scroll_page) gelir
         layout.setSpacing(16)
-        holder = QHBoxLayout()
-        holder.setContentsMargins(0, 0, 0, 0)
-        holder.addWidget(body, 1)
-        outer.addLayout(holder)
         layout.addWidget(
             make_page_header(
-                "Geçmiş ve hatırlatmalar",
+                "Geçmiş",
                 "Konuşma geçmişini incele, saklama süresini ayarla, "
                 "hatırlatma teslimlerini izle.",
             )
@@ -127,6 +129,11 @@ class DataPanel(QWidget):
         self.days.setSuffix(" gün")
         self.days.setSpecialValueText("Otomatik silme kapalı")
         self.days.setAccessibleName("Saklama süresi")
+        # Kutunun iç satırı çerçeveye bitişik başlar (QSS dolgusu ona işlemez): metin diğer
+        # girişlerle aynı 8px içeriden başlasın (UX-10).
+        self.days.lineEdit().setTextMargins(8, 0, 0, 0)  # type: ignore[union-attr]
+        # Ok düğmeleri kutuyu ~39px'e uzatıyordu; tema ölçüsü: 26 + 2*4 dolgu + 2*1 çerçeve = 36.
+        self.days.setFixedHeight(36)
         self.days.valueChanged.connect(lambda _: self.set_busy(self._busy))
         self.retention = QPushButton("Uygula")
         self.retention.clicked.connect(
@@ -138,7 +145,9 @@ class DataPanel(QWidget):
         retention_row = QHBoxLayout()
         retention_row.setSpacing(8)
         retention_row.addWidget(make_field("Saklama süresi", self.days))
+        # Düğme alt kenara hizalı: alan etiketi üstte olsa da düğme kutuyla aynı çizgide durur.
         retention_row.addWidget(self.retention, 0, Qt.AlignmentFlag.AlignBottom)
+        retention_row.addWidget(HelpTip(_HELP_RETENTION), 0, Qt.AlignmentFlag.AlignBottom)
         retention_row.addStretch()
         hist.addLayout(retention_row)
         self.retention_hint = make_label(
@@ -177,7 +186,10 @@ class DataPanel(QWidget):
         self.retry_warning.setVisible(False)
         retry_col = QVBoxLayout()
         retry_col.setSpacing(4)
-        retry_col.addWidget(self.retry, 0, Qt.AlignmentFlag.AlignRight)
+        retry_row = QHBoxLayout()
+        retry_row.setSpacing(6)
+        retry_row.addWidget(self.retry)
+        retry_col.addLayout(retry_row)
         retry_col.addWidget(self.retry_warning, 0, Qt.AlignmentFlag.AlignRight)
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
@@ -230,6 +242,10 @@ class DataPanel(QWidget):
         layout.addWidget(self.notice)
 
         # Yıkıcı eylem sayfanın en altında kendi bloğunda; onay akışı araç kapısında kalır.
+        layout.addWidget(self._build_danger_zone())
+        self.set_busy(True)
+
+    def _build_danger_zone(self) -> QFrame:
         self.danger_zone = QFrame()
         self.danger_zone.setObjectName("dangerZone")
         danger = QVBoxLayout(self.danger_zone)
@@ -254,10 +270,10 @@ class DataPanel(QWidget):
         delete_row = QHBoxLayout()
         delete_row.setSpacing(12)
         delete_row.addWidget(self.delete, 0, Qt.AlignmentFlag.AlignLeft)
+        delete_row.addWidget(HelpTip(_HELP_DELETE), 0, Qt.AlignmentFlag.AlignVCenter)
         delete_row.addWidget(self.delete_reason, 1)
         danger.addLayout(delete_row)
-        layout.addWidget(self.danger_zone)
-        self.set_busy(True)
+        return self.danger_zone
 
     def _request_history(self) -> None:
         self.tool_requested.emit("conversation_history", HistoryArguments(action="list"))
@@ -307,7 +323,7 @@ class DataPanel(QWidget):
             self._memory_pending = False
             self._request_memory()
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt adı)
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self._schedule_autoload()
 

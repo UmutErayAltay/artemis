@@ -45,8 +45,9 @@ from artemis.brain.models import Message
 from artemis.brain.router import ProviderRouter
 from artemis.channels.desktop import pet_animator, pet_creator, pet_sprite
 from artemis.channels.desktop import pet_image_pipeline as pipe
+from artemis.channels.desktop.page_kit import EmptyState
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError
-from artemis.channels.desktop.projects_panel import EmptyState
+from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import ModelConfig, load_settings
 from artemis.safety.audit import AuditLog
 
@@ -161,6 +162,19 @@ def price_warning(model: ModelConfig) -> str:
 
 
 _STAGES = ("Tarif", "Görsel", "Animasyon", "Kaydet")
+_HELP_METHOD = (
+    "SVG: metin modeli çizimi SVG olarak yazar, animasyonlar yerelde üretilir; hızlı ve ucuz. "
+    "Resim modeli: temel görsel ve her animasyon satırı için ayrı çağrı yapar; ~4-6 dk sürer, "
+    "daha çok kota/maliyet harcar."
+)
+_HELP_MODEL = (
+    "Çizimi yapacak model. Bulut modeliyse yazdığın tarif ona gider; ücretliyse bütçeden düşer "
+    "ve allow_paid kapalıysa reddedilir (tutar altındaki uyarıda yazar)."
+)
+_HELP_SEND = (
+    "Tarifini seçili modele gönderir. Sonraki düzeltmeler ('daha mavi yap') mevcut çizimi "
+    "(SVG ya da temel görsel) de gönderir. Başka dosya ya da sohbet geçmişin gitmez."
+)
 # Bunun altında sütunlar alt alta dizilir; 900px pencerede sağ sütun 240'ın altına inmesin.
 _WIDE_MIN = 760
 _COMPACT_MAX = 480  # modelsiz boş durum kartının azami genişliği
@@ -179,7 +193,7 @@ class _Silhouette(QFrame):
         self.setFixedSize(112, 96)
         self.setAccessibleName("Boş önizleme")
 
-    def paintEvent(self, event: QPaintEvent) -> None:  # noqa: N802 (Qt)
+    def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
         body = QColor(self.palette().color(QPalette.ColorRole.WindowText))
         eye = self.palette().color(QPalette.ColorRole.Highlight)
@@ -208,13 +222,16 @@ def _flat(widget: QWidget) -> QWidget:
     return widget
 
 
-def _field(caption: str, widget: QWidget) -> QWidget:
-    """Etiket alanın üstünde (DESIGN.md: 13px muted, 4px aralık)."""
+def _field(caption: str, widget: QWidget, help: str = "") -> QWidget:  # noqa: A002
+    """Etiket alanın üstünde (DESIGN.md: 13px muted, 4px aralık); `help` "?" etiketin yanına."""
     box = _flat(QWidget())
     lay = QVBoxLayout(box)
     lay.setContentsMargins(0, 0, 0, 0)
     lay.setSpacing(4)
-    lay.addWidget(_label(caption, "fieldLabel"))
+    if help:
+        lay.addLayout(with_help(_label(caption, "fieldLabel"), help))
+    else:
+        lay.addWidget(_label(caption, "fieldLabel"))
     lay.addWidget(widget)
     return box
 
@@ -296,8 +313,8 @@ class CreatorPanel(QFrame):
         fields_lay.setSpacing(12)
         pair = QHBoxLayout()
         pair.setSpacing(12)
-        pair.addWidget(_field("Yöntem", self.method), 1)
-        pair.addWidget(_field("Model", self.model_combo), 2)
+        pair.addWidget(_field("Yöntem", self.method, _HELP_METHOD), 1)
+        pair.addWidget(_field("Model", self.model_combo, _HELP_MODEL), 2)
         fields_lay.addLayout(pair)
         self.warning = _label("", "meta")
         self.warning.setWordWrap(True)
@@ -338,6 +355,7 @@ class CreatorPanel(QFrame):
         self.send_button.clicked.connect(self.send)
         send_row.addWidget(self.input, 1)
         send_row.addWidget(self.send_button)
+        send_row.addWidget(HelpTip(_HELP_SEND), 0, Qt.AlignmentFlag.AlignVCenter)
         left_lay.addLayout(send_row)
 
         right, right_lay = _column()
@@ -431,7 +449,7 @@ class CreatorPanel(QFrame):
         self._load_models()
         self._update_buttons()
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         wide = event.size().width() >= _WIDE_MIN
         want = QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
         if self._columns.direction() != want:
@@ -820,6 +838,6 @@ class CreatorPanel(QFrame):
                 signal.disconnect()  # sonuç yok sayılır; iş parçacığı `_RUNNING`'de biter
             self._image_call = None
 
-    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802 (Qt)
+    def closeEvent(self, event: QCloseEvent) -> None:
         self.shutdown()
         super().closeEvent(event)

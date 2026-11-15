@@ -236,7 +236,7 @@ def test_identity_is_checked_before_forwarding() -> None:
 def test_non_text_messages_are_rejected(message_text: str | None) -> None:
     extra: dict[str, Any] = {}
     if message_text is None:
-        extra["photo"] = [{"file_id": "fotoğraf-test"}]
+        extra["sticker"] = {"file_id": "cikartma-test"}
     message = make_message(1, message_text, date=int(NOW), **extra)["message"]
     rejection = check_message(message, CHAT_ID, NOW, 120)
     assert rejection is not None and rejection.reason == "not_text"

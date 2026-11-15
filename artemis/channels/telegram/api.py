@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
@@ -40,6 +41,7 @@ logging.getLogger("httpx").addFilter(_DropTokenUrlRecords())
 TELEGRAM_TEXT_LIMIT = 4096
 # Ayarlar > Telegram panelinin yazdığı Windows Kimlik Bilgisi Yöneticisi kaydı (ADR 0051).
 TOKEN_TARGET = "Artemis/telegram"
+_FILE_PATH = re.compile(r"[A-Za-z0-9_./-]{1,256}")
 
 
 class TelegramError(RuntimeError):
@@ -160,6 +162,44 @@ class TelegramClient:
             )
         return username
 
+    def get_file(self, file_id: str) -> tuple[str, int | None]:
+        """`getFile`: (indirme yolu, bildirilen boyut). Yol URL'ye girdiği için biçimi sınanır."""
+        result = self._call("getFile", {"file_id": file_id}, self._timeout)
+        path = result.get("file_path") if isinstance(result, dict) else None
+        size = result.get("file_size") if isinstance(result, dict) else None
+        if not isinstance(path, str) or not _FILE_PATH.fullmatch(path) or ".." in path:
+            raise TelegramError("Telegram getFile başarısız (geçersiz yol)", error_type="BadResult")
+        known = size if isinstance(size, int) and not isinstance(size, bool) else None
+        return path, known
+
+    def download_file(self, file_path: str, max_bytes: int) -> bytes:
+        """Dosyayı en çok `max_bytes` okuyarak indirir; sınır aşılınca okuma BIRAKILIR.
+
+        Boyut bildirimi (file_size) güvenilmez sayılır: sınır burada okurken de uygulanır.
+        Hata mesajı token'ı taşıyan URL'yi içermez (yalnız tür adı).
+        """
+        if not _FILE_PATH.fullmatch(file_path) or ".." in file_path:
+            raise TelegramError("Telegram indirme başarısız (geçersiz yol)", error_type="BadPath")
+        url = f"{self._api_base}/file/bot{self._token}/{file_path}"
+        data = bytearray()
+        try:
+            with self._http.stream("GET", url, timeout=self._timeout * 3) as response:
+                if response.status_code != 200:
+                    raise TelegramError(
+                        f"Telegram indirme başarısız (HTTP {response.status_code})",
+                        error_type=f"HTTP {response.status_code}",
+                    )
+                for chunk in response.iter_bytes():
+                    data += chunk
+                    if len(data) > max_bytes:
+                        raise TelegramError(
+                            "Telegram indirme sınırı aşıldı", error_type="TooLarge"
+                        )
+        except (httpx.HTTPError, httpx.InvalidURL, ValueError) as error:
+            name = type(error).__name__
+            raise TelegramError(f"Telegram indirme başarısız ({name})", error_type=name) from None
+        return bytes(data)
+
     def _outbound(
         self,
         method: str,
@@ -170,8 +210,13 @@ class TelegramClient:
         text: str,
         need_message_id: bool = False,
         files: dict[str, tuple[str, bytes, str]] | None = None,
+        redact_audit: bool = False,
     ) -> int | None:
-        """Her giden çağrı sonuç ne olursa olsun, deneme SONRASI denetime yazılır."""
+        """Her giden çağrı sonuç ne olursa olsun, deneme SONRASI denetime yazılır.
+
+        `redact_audit`: metin gönderilir ama denetime yazılmaz (gizli fotoğraf OCR metni, ADR 0064).
+        """
+        audited = "" if redact_audit else text
         if len(text) > TELEGRAM_TEXT_LIMIT:
             raise ValueError("Telegram metni 4096 karakter sınırını aşıyor")
         message_id: int | None = None
@@ -191,7 +236,7 @@ class TelegramClient:
                 method=method,
                 kind=kind,
                 chat_id=chat_id,
-                text=text,
+                text=audited,
                 ok=False,
                 error_type=error.error_type,
             )
@@ -202,7 +247,7 @@ class TelegramClient:
             method=method,
             kind=kind,
             chat_id=chat_id,
-            text=text,
+            text=audited,
             ok=True,
             **fields,
         )
@@ -215,6 +260,7 @@ class TelegramClient:
         *,
         kind: str,
         reply_markup: dict[str, Any] | None = None,
+        redact_audit: bool = False,
     ) -> SentMessage:
         # parse_mode yok: düz metin; model/araç çıktısıyla biçim (HTML/Markdown) enjekte edilemez.
         payload: dict[str, Any] = {
@@ -225,7 +271,8 @@ class TelegramClient:
         if reply_markup is not None:
             payload["reply_markup"] = reply_markup
         message_id = self._outbound(
-            "sendMessage", payload, kind=kind, chat_id=chat_id, text=text, need_message_id=True
+            "sendMessage", payload, kind=kind, chat_id=chat_id, text=text, need_message_id=True,
+            redact_audit=redact_audit,
         )
         if message_id is None:  # need_message_id=True iken ulaşılmaz; mypy için dürüst dal
             raise TelegramError("Telegram sendMessage başarısız (message_id yok)")

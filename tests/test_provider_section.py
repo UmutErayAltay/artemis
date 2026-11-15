@@ -321,8 +321,7 @@ def test_remove_model_ok_and_refused_for_primary(app: QApplication, tmp_path: Pa
         section.model_name.setEditText(name)
         section.make_primary.setChecked(primary)
         section._add_model()
-    section._remove_model()  # seçim yok
-    assert "seçin" in section.status.text()
+    assert section._current_alias() == "first"  # ayrıntı paneli hep bir modeli gösterir
     section.select_model("m-1")
     section._remove_model()
     assert "kaldırılamaz" in section.status.text()
@@ -449,7 +448,7 @@ def test_paid_image_model_shows_image_price_field_and_budget_warning(
     assert model.image_cost_usd == Decimal("0.04")
     assert (model.input_per_million, model.output_per_million) == (0, 0)
     text = section.status.text()
-    assert "allow_paid" in text and "rezervasyon" in text
+    assert "ücretli kullanım izni" in text and "rezervasyon" in text
     section.kind.setCurrentIndex(0)  # Sohbet'e dönünce eski fiyat alanları
     assert section.image_box.isHidden() and not section.price_box.isHidden()
 
@@ -586,7 +585,7 @@ def test_hard_role_toggles_and_shows_in_rows_and_banner(app: QApplication, tmp_p
     assert load_settings(path).hard_model == "sonnet 5-5"
     assert "Zor işler" in dict(section.model_rows())["sonnet 5-5"]
     assert "Zor işler: sonnet 5-5" in section.banner.text()
-    assert section.hard_button.text() == "Zor işlerden çıkar"
+    assert section.hard_button.isChecked() and section.hard_button.text() == "✓ Zor işler"
     section._remove_model()  # zor işler modeli kaldırılamaz
     assert "sonnet 5-5" in load_settings(path).models
     section._toggle_role("hard_model")
@@ -599,8 +598,10 @@ def test_test_results_and_suggested_layout_apply(app: QApplication, tmp_path: Pa
     _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
     section = ProviderSection(path)
     rows = dict(section.model_rows())
-    assert "temel 7/7 · zor 5/8" in rows["haiku 5-5"] and "ana model" in rows["haiku 5-5"]
-    assert "zor işler" in rows["sonnet 5-5"]
+    assert rows["haiku 5-5"].endswith("Beyin %80")  # (7+5)/15
+    assert rows["sonnet 5-5"].endswith("Rol yok %100")
+    assert "test yok" in rows["first"]
+    assert "temel 7/7 · zor 5/8" in section.test_result.text()
     assert "Ana: haiku 5-5 · Zor işler: sonnet 5-5" in section.layout_label.text()
     assert not section.apply_layout_button.isHidden()
     section._apply_layout()
@@ -610,7 +611,8 @@ def test_test_results_and_suggested_layout_apply(app: QApplication, tmp_path: Pa
     # Bozuk rapor ekranı çökertmez, yalnız yok sayılır.
     (tmp_path / "state" / "model_testleri" / "haiku-5-5.json").write_text("{", encoding="utf-8")
     section.reload()
-    assert "Test:" not in dict(section.model_rows())["haiku 5-5"]
+    assert "%" not in dict(section.model_rows())["haiku 5-5"]
+    assert "test yok" in dict(section.model_rows())["haiku 5-5"]
 
 
 def test_paid_model_test_needs_confirmation(
@@ -646,7 +648,7 @@ def test_fallback_role_from_ui(app: QApplication, tmp_path: Path) -> None:
     assert load_settings(path).fallback_model == "sonnet 5-5"
     assert "Yedek" in dict(section.model_rows())["sonnet 5-5"]
     assert "Yedek: sonnet 5-5" in section.banner.text()
-    assert section.fallback_button.text() == "Yedekten çıkar"
+    assert section.fallback_button.isChecked() and section.fallback_button.text() == "✓ Yedek"
     section._remove_model()
     assert "sonnet 5-5" in load_settings(path).models  # yedek kaldırılamaz
     section._make_primary()  # beyin olunca yedek rolü düşer
@@ -663,9 +665,297 @@ def test_provider_section_has_no_reference_cycle(app: QApplication, tmp_path: Pa
     section = ProviderSection(_three_models(tmp_path))
     section.select_model("sonnet 5-5")  # seçim sinyali bağlı yöntemden çalışır
     ref = weakref.ref(section)
+    # Önceki durum geri yüklenir: gui_gc otomatik GC'yi kapalı tutar, burada açılırsa
+    # kalan testlerde döngüler köprü iş parçacığında toplanıp Qt'yi çökertir.
+    was_enabled = gc.isenabled()
     gc.disable()
     try:
         del section
         assert ref() is None
     finally:
-        gc.enable()
+        if was_enabled:
+            gc.enable()
+
+
+def test_parallel_checkbox_flag_also_for_local(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from PySide6.QtCore import QSettings
+
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "qs"))
+    path = _three_models(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"]["bulut"] = {"base_url": "https://api.example.com/v1"}
+    raw["models"]["bulut"] = {
+        "provider": "openai_compatible", "endpoint": "bulut", "model": "b",
+        "input_per_million": "0", "output_per_million": "0",
+    }
+    raw["endpoints"]["lokal"] = {"base_url": "http://localhost:8080/v1", "api_key": False}
+    raw["models"]["yerel"] = {
+        "provider": "openai_compatible", "endpoint": "lokal", "model": "q",
+        "input_per_million": "0", "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+    started: list[list[str]] = []
+    monkeypatch.setattr(section_module.QProcess, "start", lambda _s, _e, args: started.append(args))
+    section = ProviderSection(path)
+    section.select_model("bulut")
+    section._test_model()
+    assert "--paralel" not in started[-1]
+    section._model_test = None
+    section.parallel_test.setChecked(True)
+    section._test_model()
+    assert started[-1][started[-1].index("--paralel") + 1] == "4"
+    section._model_test = None
+    section.select_model("yerel")
+    # Yerel (ör. proxy) modelde de seçilebilir; ipucu yavaşlayabileceğini söyler.
+    assert section.parallel_test.isEnabled() and section.parallel_test.isChecked()
+    assert "bu bilgisayarda" in section.parallel_test.toolTip()
+    section._test_model()
+    assert started[-1][started[-1].index("--paralel") + 1] == "4"
+
+
+class _FakeProcess:
+    """QProcess yerine: çıktı satırları elle verilir, terminate/kill sayılır."""
+
+    def __init__(self) -> None:
+        self.out = b""
+        self.calls: list[str] = []
+
+    def readAllStandardOutput(self) -> Any:
+        data, self.out = self.out, b""
+        return type("B", (), {"data": lambda _s: data})()
+
+    def terminate(self) -> None:
+        self.calls.append("terminate")
+
+    def kill(self) -> None:
+        self.calls.append("kill")
+
+    def state(self) -> Any:
+        return section_module.QProcess.ProcessState.Running
+
+    def deleteLater(self) -> None:
+        pass
+
+
+def _running(tmp_path: Path) -> tuple[ProviderSection, _FakeProcess]:
+    section = ProviderSection(_three_models(tmp_path))
+    fake = _FakeProcess()
+    section._model_test, section._testing = fake, "haiku 5-5"  # type: ignore[assignment]
+    section._test_rows = {"temel_dosya_oku": "bekliyor", "zor_toplam": "bekliyor"}
+    section._render_test_list()
+    return section, fake
+
+
+def test_live_list_updates_from_progress_lines(app: QApplication, tmp_path: Path) -> None:
+    section, fake = _running(tmp_path)
+    assert section.test_list.item(0).text() == "○ dosya oku: bekliyor"
+    fake.out = b"ilerleme 1/2 temel_dosya_oku ge\xc3\xa7ti\nilerleme 2/2 zor_to"
+    section._model_test_output()  # yarım satır tamponlanır
+    fake.out = b"plam kald\xc4\xb1\n"
+    section._model_test_output()
+    items = [section.test_list.item(i).text() for i in range(section.test_list.count())]
+    assert items == ["✓ dosya oku: geçti", "✗ toplam: kaldı"]
+
+
+def test_test_widgets_hidden_until_a_test_runs(app: QApplication, tmp_path: Path) -> None:
+    section = ProviderSection(_three_models(tmp_path))
+    assert section.test_list.isHidden() and section.model_test_button.text() == "Test et"
+    assert section.retry_button.isHidden()
+    section, _ = _running(tmp_path)
+    assert not section.test_list.isHidden() and section.model_test_button.text() == "Durdur"
+
+
+def test_test_button_slot_switches_to_stop_and_acts(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section, fake = _running(tmp_path)  # beyin modeli (haiku) seçili ve test ediliyor
+    monkeypatch.setattr(section_module.QTimer, "singleShot", lambda ms, _cb: None)
+    assert section._current_alias() == "haiku 5-5" and section.model_test_button.isEnabled()
+    section.model_test_button.click()  # aynı düğme artık durdurur
+    assert fake.calls == ["terminate"]
+    section.select_model("sonnet 5-5")  # başka modelde: test kapalı, satırlar gizli
+    assert section.model_test_button.text() == "Test et"
+    assert not section.model_test_button.isEnabled() and section.test_list.isHidden()
+    section.select_model("haiku 5-5")
+    assert section.model_test_button.text() == "Durdur" and not section.test_list.isHidden()
+
+
+def test_role_buttons_use_existing_actions_and_reflect_state(
+    app: QApplication, tmp_path: Path
+) -> None:
+    path = _three_models(tmp_path)
+    section = ProviderSection(path)
+    assert section.primary_button.isChecked() and section.primary_button.text() == "✓ Beyin"
+    assert not section.hard_button.isEnabled() and not section.fallback_button.isEnabled()
+    section.select_model("sonnet 5-5")
+    section.hard_button.click()
+    assert load_settings(path).hard_model == "sonnet 5-5" and section.hard_button.isChecked()
+    section.fallback_button.click()
+    assert load_settings(path).fallback_model == "sonnet 5-5"
+    section.hard_button.click()  # ikinci tık rolü kapatır
+    assert load_settings(path).hard_model is None and not section.hard_button.isChecked()
+    section.primary_button.click()
+    settings = load_settings(path)
+    assert (settings.primary_model, settings.fallback_model) == ("sonnet 5-5", None)
+    section.primary_button.click()  # beyin kendi kendine kapatılamaz
+    assert load_settings(path).primary_model == "sonnet 5-5" and section.primary_button.isChecked()
+
+
+def test_detail_stacks_when_narrow_and_sits_beside_when_wide(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from PySide6.QtWidgets import QBoxLayout
+
+    section = ProviderSection(_three_models(tmp_path))
+    section.resize(1200, 700)
+    section.show()
+    app.processEvents()
+    assert section.model_split.direction() == QBoxLayout.Direction.LeftToRight
+    assert section.detail.geometry().left() > section.model_list.geometry().right()
+    section.resize(700, 900)
+    app.processEvents()
+    assert section.model_split.direction() == QBoxLayout.Direction.TopToBottom
+    section.layout().activate()  # yük altında ertelenen yerleşimi beklemeden uygula
+    assert section.detail.mapTo(section, section.detail.rect().topLeft()).y() > (
+        section.model_list.mapTo(section, section.model_list.rect().bottomLeft()).y()
+    )
+    section.close()
+
+
+def test_stop_terminates_then_kills_and_saves_nothing(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section, fake = _running(tmp_path)
+    delays: list[int] = []
+    monkeypatch.setattr(section_module.QTimer, "singleShot", lambda ms, _cb: delays.append(ms))
+    section._test_report = tmp_path / "state" / "model_testleri" / "haiku-5-5.json"
+    section._stop_test()
+    assert fake.calls == ["terminate"] and delays == [3000]
+    section._kill_test()
+    assert fake.calls == ["terminate", "kill"]
+    section._model_test_finished()
+    assert section.status.text() == "Test durduruldu"
+    assert section._model_test is None and not section._test_report.exists()
+    assert section.test_list.count() == 2  # biten satırlar kalır
+
+
+def test_retry_failed_runs_only_failed_and_merges(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section = ProviderSection(_three_models(tmp_path))
+    started: list[list[str]] = []
+    monkeypatch.setattr(section_module.QProcess, "start", lambda _s, _e, args: started.append(args))
+    base = {
+        "model": "haiku 5-5", "temel": {"passed": 1, "total": 2, "rate": 0.5},
+        "zor": {"passed": 1, "total": 1, "rate": 1.0}, "dangerous_errors": 0,
+        "median_seconds": 5.0, "cost_usd": "0", "roles": [], "summary": "",
+        "scenarios": [
+            {"id": "temel_a", "success": True}, {"id": "temel_b", "success": False},
+            {"id": "zor_c", "success": True},
+        ],
+    }
+    folder = tmp_path / "state" / "model_testleri"
+    folder.mkdir(parents=True, exist_ok=True)
+    path = folder / "haiku-5-5.json"
+    path.write_text(json.dumps(base), encoding="utf-8")
+    section._test_rows = {"temel_a": "geçti", "temel_b": "kaldı", "zor_c": "geçti"}
+    section._last = (path, base)
+    section._sync_test_buttons()
+    assert not section.retry_button.isHidden()  # beyin (haiku) seçili, rapor onun
+    section.select_model("sonnet 5-5")
+    assert section.retry_button.isHidden()  # satırlar başka modelin
+    section.select_model("haiku 5-5")
+    assert not section.retry_button.isHidden()
+    section._retry_failed()
+    args = started[-1]
+    assert [args[i + 1] for i, a in enumerate(args) if a == "--senaryo"] == ["temel_b"]
+    assert args[args.index("--rapor") + 1].endswith("haiku-5-5.yeniden.json")
+    assert section.retry_button.isHidden()
+    retry_path = folder / "haiku-5-5.yeniden.json"
+    retry_path.write_text(json.dumps({
+        "dangerous_errors": 0, "cost_usd": "0",
+        "scenarios": [{"id": "temel_b", "success": True}],
+    }), encoding="utf-8")
+    section._model_test_finished()
+    assert not retry_path.exists()
+    assert json.loads(path.read_text(encoding="utf-8"))["temel"]["passed"] == 2
+    assert section.test_list.item(1).text() == "✓ b: geçti (2. deneme)"
+    assert "temel 2/2" in section.status.text()
+
+
+def test_paid_estimate_is_in_confirmation(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    section = ProviderSection(_three_models(tmp_path, paid="3"))
+    seen: list[str] = []
+
+    def ask(_parent: object, _title: str, text: str, *_a: object) -> Any:
+        seen.append(text)
+        return section_module.QMessageBox.StandardButton.No
+
+    monkeypatch.setattr(section_module.QMessageBox, "question", ask)
+    section.select_model("sonnet 5-5")
+    section._test_model()
+    assert "USD" in seen[0] and "yaklaşık" in seen[0]
+
+
+def test_model_sort_by_score_connection_and_remembered(
+    app: QApplication, tmp_path: Path
+) -> None:
+    from PySide6.QtCore import QSettings
+
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "qs"))
+    path = _three_models(tmp_path)
+    _report(tmp_path, "haiku 5-5", 6, 5, ["ana"])
+    _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
+    section = ProviderSection(path)
+    added = [alias for alias, _ in section.model_rows()]
+    section.model_sort.setCurrentIndex(section.model_sort.findData("score"))
+    scored = [alias for alias, _ in section.model_rows()]
+    assert scored[:2] == ["sonnet 5-5", "haiku 5-5"]  # test edilmemiş en sonda
+    assert set(scored) == set(added)
+    section.model_sort.setCurrentIndex(section.model_sort.findData("name"))
+    names = [alias for alias, _ in section.model_rows()]
+    assert names == sorted(names, key=str.casefold)
+    # Seçim hatırlanır; config'teki sıra değişmez.
+    again = ProviderSection(path)
+    assert again.model_sort.currentData() == "name"
+    assert list(load_settings(path).models) == added
+
+
+def test_endpoint_list_shows_four_rows(app: QApplication, tmp_path: Path) -> None:
+    section = ProviderSection(_three_models(tmp_path))
+    row = section.endpoint_list.sizeHintForRow(0)
+    assert row > 0
+    assert section.endpoint_list.height() >= 4 * row
+
+
+def test_wheel_over_combo_scrolls_page_not_value(app: QApplication) -> None:
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+    from PySide6.QtWidgets import QComboBox, QScrollArea, QVBoxLayout, QWidget
+
+    from artemis.channels.desktop.settings_panel import _install_wheel_guard
+
+    _install_wheel_guard()
+    area = QScrollArea()
+    page = QWidget()
+    page.setMinimumHeight(2000)
+    combo = QComboBox(page)
+    combo.addItems(["a", "b", "c"])
+    QVBoxLayout(page).addWidget(combo)
+    area.setWidget(page)
+    area.resize(300, 200)
+    area.show()
+    app.processEvents()
+    event = QWheelEvent(
+        QPointF(5, 5), QPointF(combo.mapToGlobal(QPoint(5, 5))), QPoint(0, 0), QPoint(0, -120),
+        Qt.MouseButton.NoButton, Qt.KeyboardModifier.NoModifier, Qt.ScrollPhase.NoScrollPhase,
+        False,
+    )
+    QApplication.sendEvent(combo, event)
+    assert combo.currentIndex() == 0
+    assert area.verticalScrollBar().value() > 0
+    area.close()

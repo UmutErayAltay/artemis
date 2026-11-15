@@ -22,8 +22,6 @@ from PySide6.QtWidgets import (
     QListWidget,
     QPlainTextEdit,
     QPushButton,
-    QScrollArea,
-    QSizePolicy,
     QStackedWidget,
     QTextBrowser,
     QVBoxLayout,
@@ -37,6 +35,22 @@ from artemis.channels.desktop.code_agent_config import (
     slug_alias,
     workdir_alias_error,
 )
+from artemis.channels.desktop.page_kit import (
+    PAGE_MAX_WIDTH as PAGE_MAX_WIDTH,  # eski içe aktarma yolu
+)
+from artemis.channels.desktop.page_kit import (
+    AutoHideLabel,
+    CollapsibleSection,
+    EmptyState,
+    PathHint,
+    make_card,
+    make_field,
+    make_label,
+    make_page_header,
+    make_scroll_page,
+    repolish,
+)
+from artemis.channels.desktop.widgets import HelpTip
 from artemis.config.settings import (
     OWN_REPO_ALIAS,
     CodeAgentConfig,
@@ -95,211 +109,6 @@ def checks_text(record: dict[str, Any]) -> str:
     return "; ".join(rows) or "yok"
 
 
-def make_label(text: str, name: str) -> QLabel:
-    label = QLabel(text)
-    label.setObjectName(name)
-    label.setTextFormat(Qt.TextFormat.PlainText)
-    label.setWordWrap(True)
-    return label
-
-
-class AutoHideLabel(QLabel):
-    """Metin boşken gizlenen `meta` etiketi; boş durum satırı kartta boşluk bırakmaz."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("meta")
-        self.setWordWrap(True)
-        self.setTextFormat(Qt.TextFormat.PlainText)
-        self.hide()
-
-    def setText(self, text: str) -> None:  # noqa: N802 - Qt imzası
-        super().setText(text)
-        self.setVisible(bool(text))
-
-
-class PathHint(QLabel):
-    """Tek satır, ortadan kısaltılan yol ipucu: uzun yol kartı büyütmez, tam yol ipucundadır.
-
-    Sarmalı etiket boşluksuz uzun yolda ya taşar ya satırı katlar ve altındaki eylem satırını
-    kıvrımın altına iter (Projeler 1280x850 sözleşmesi).
-    """
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.setObjectName("meta")
-        self.setTextFormat(Qt.TextFormat.PlainText)
-        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-        self.full_text = ""
-
-    def set_full_text(self, text: str, tooltip: str = "") -> None:
-        self.full_text = text
-        self.setToolTip(tooltip or text)
-        self._elide()
-
-    def _elide(self) -> None:
-        width = max(self.width(), 0)
-        shown = self.fontMetrics().elidedText(self.full_text, Qt.TextElideMode.ElideMiddle, width)
-        super().setText(shown)
-
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt adı)
-        super().resizeEvent(event)
-        self._elide()
-
-
-def make_field(caption: str, widget: QWidget) -> QWidget:
-    """Etiket alanın üstünde kalıcıdır; placeholder yalnız örnek verir."""
-    box = QWidget()
-    lay = QVBoxLayout(box)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(4)
-    lay.addWidget(make_label(caption, "fieldLabel"))
-    lay.addWidget(widget)
-    return box
-
-
-def make_page_header(
-    title: str, subtitle: str | None = None, actions: tuple[QWidget, ...] = ()
-) -> QWidget:
-    """Her sayfanın aynı başlık satırı: 48px sabit, sağda eylemler, 4px altında alt başlık.
-
-    Sayfalar arası başlık konumu bu tek yerden gelir; sayfa düzenindeki 16px aralık
-    ilk karta kadar olan boşluğu verir.
-    """
-    host = QWidget()
-    column = QVBoxLayout(host)
-    column.setContentsMargins(0, 0, 0, 0)
-    column.setSpacing(4)
-    row = QHBoxLayout()
-    row.setSpacing(8)
-    heading = QLabel(title)
-    heading.setObjectName("pageTitle")
-    heading.setTextFormat(Qt.TextFormat.PlainText)
-    heading.setFixedHeight(48)
-    row.addWidget(heading)
-    row.addStretch(1)
-    for action in actions:
-        row.addWidget(action)
-    column.addLayout(row)
-    if subtitle:
-        column.addWidget(make_label(subtitle, "meta"))
-    return host
-
-
-class CurrentPageStack(QWidget):
-    """Boyutu yalnız GÖRÜNEN sayfadan gelen yığın (QStackedWidget'ın küçük API'si).
-
-    QStackedLayout sizeHint, minimumSize VE heightForWidth'te tüm sayfaların en büyüğünü
-    döndürür; kaydırma bölgesinin içinde kısa sayfa uzun sayfa kadar boş kaydırma bırakır
-    (boyut ipuçlarını ezmek yetmedi: kaydırma alanı yerleşimin heightForWidth'ini sorar).
-    Gizli widget yerleşimden düştüğü için burada yalnız mevcut sayfa gösterilir.
-    """
-
-    currentChanged = Signal(int)
-
-    def __init__(self) -> None:
-        super().__init__()
-        self._pages: list[QWidget] = []
-        self._current = -1
-        self._box = QVBoxLayout(self)
-        self._box.setContentsMargins(0, 0, 0, 0)
-
-    def addWidget(self, page: QWidget) -> int:  # noqa: N802 (Qt)
-        self._pages.append(page)
-        self._box.addWidget(page)
-        page.setVisible(len(self._pages) == 1)
-        if self._current < 0:
-            self._current = 0
-        return len(self._pages) - 1
-
-    def count(self) -> int:
-        return len(self._pages)
-
-    def widget(self, index: int) -> QWidget | None:
-        return self._pages[index] if 0 <= index < len(self._pages) else None
-
-    def currentIndex(self) -> int:  # noqa: N802 (Qt)
-        return self._current
-
-    def currentWidget(self) -> QWidget | None:  # noqa: N802 (Qt)
-        return self.widget(self._current)
-
-    def setCurrentWidget(self, page: QWidget) -> None:  # noqa: N802 (Qt)
-        self.setCurrentIndex(self._pages.index(page))
-
-    def setCurrentIndex(self, index: int) -> None:  # noqa: N802 (Qt)
-        if not 0 <= index < len(self._pages) or index == self._current:
-            return
-        self._pages[self._current].hide()
-        self._current = index
-        self._pages[index].show()
-        self.currentChanged.emit(index)
-
-
-def make_scroll_page(panel: QWidget) -> QVBoxLayout:
-    """Sayfada tek kaydırma bölgesi: dar pencerede kartlar sıkışmak yerine kayar."""
-    outer = QVBoxLayout(panel)
-    outer.setContentsMargins(0, 0, 0, 0)
-    scroll = QScrollArea()
-    scroll.setWidgetResizable(True)
-    scroll.setFrameShape(QFrame.Shape.NoFrame)
-    content = QWidget()
-    scroll.setWidget(content)
-    outer.addWidget(scroll)
-    layout = QVBoxLayout(content)
-    layout.setContentsMargins(0, 0, 0, 0)
-    layout.setSpacing(16)
-    return layout
-
-
-def make_card() -> tuple[QFrame, QVBoxLayout]:
-    card = QFrame()
-    card.setObjectName("card")
-    lay = QVBoxLayout(card)
-    lay.setContentsMargins(16, 16, 16, 16)
-    lay.setSpacing(12)
-    return card, lay
-
-
-class EmptyState(QFrame):
-    """Boş durum kutusu; başlık ve gövde etiketleri açık alan olarak tutulur."""
-
-    def __init__(self, title: str, body: str, action_text: str | None = None) -> None:
-        super().__init__()
-        self.setObjectName("emptyState")
-        lay = QVBoxLayout(self)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.setSpacing(4)
-        self.title_label = make_label(title, "emptyTitle")
-        self.body_label = make_label(body, "emptyBody")
-        for label in (self.title_label, self.body_label):
-            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            lay.addWidget(label)
-        # Yalnız "yüklenmedi" durumunda eylem sunulur (DESIGN: yüklendi-boş durumunda eylem yok).
-        self.action_button: QPushButton | None = None
-        if action_text:
-            self.action_button = QPushButton(action_text)
-            lay.addWidget(self.action_button, 0, Qt.AlignmentFlag.AlignCenter)
-        self.set_text(title, body)
-
-    def set_text(self, title: str, body: str) -> None:
-        self.title_label.setText(title)
-        self.body_label.setText(body)
-        self._fit_width()
-
-    def _fit_width(self) -> None:
-        """Sarmalı etiket dar ipucu verir ("Göster'e / bas."); gövde ~360px'e kadar tek satır kalır.
-
-        Ölçü stil uygulandıktan sonraki yazı tipiyle alınmalı; bu yüzden gösterimde de çağrılır.
-        """
-        wide = self.body_label.fontMetrics().horizontalAdvance(self.body_label.text()) + 8
-        self.body_label.setFixedWidth(min(360, wide))
-        title = self.title_label.fontMetrics().horizontalAdvance(self.title_label.text())
-        self.title_label.setMinimumWidth(title + 8)
-
-    def showEvent(self, event: QShowEvent) -> None:
-        super().showEvent(event)
-        self._fit_width()
 
 
 # Durum çipi: (etiket, ton). Ton QSS'te `tone` özelliğiyle renklenir; renk kodu burada yok.
@@ -333,6 +142,23 @@ def status_chip(record: dict[str, Any]) -> tuple[str, str]:
 ACTIVE_JOB_STATUSES = frozenset({"queued", "running", "waiting", "cancelling", "cleanup_pending"})
 WORKDIR_WARNING = "Ajan bu klasörde başlar ve oradaki kuralları yükler; dosyaları değiştirebilir."
 FLOW_STEPS = ("Hazırla", "İncele", "Başlat")
+_HELP_PROJECT = (
+    "İşin yapılacağı, Ayarlar'da tanımlı yerel depo. Ajan dosyaları bu depoda düzenler ve "
+    "yerel commit atabilir; push yapmaz."
+)
+_HELP_MODE = (
+    "Arka planda: pencere açılmaz, durumu buradan izlersin. Görünür pencerede: ajan kendi "
+    "penceresinde çalışır; pencereyi kapatırsan iş kesilir ve Artemis soru-cevap yapamaz."
+)
+_HELP_START = (
+    "Durumu yenile: listeyi şimdi yeniden okur. Taslağı onayla ve başlat: seçili taslağı ajanda "
+    "çalıştırır; onay penceresi tam kapsamı gösterir. Ajan Artemis kapısı dışında da çalışabilir."
+)
+_HELP_ROW_ACTIONS = (
+    "İşi durdur: yarım dosya değişiklikleri kalır, geri alınmaz. Taslağı sil: başlamamış taslağı "
+    "siler. Kilidi bırak: Artemis çöktüyse kalan depo kilidini açar. Biten işleri temizle: biten "
+    "kayıtları listeden siler; repoya dokunmaz."
+)
 # Seçicide gösterilen ad; saklanan takma ad değişmez (claude).
 AGENT_LABELS = {"claude": "Claude Code"}
 # Proje listesi boşken combo boş ve etiketsiz görünürdü; devre dışı satır nedenini söyler
@@ -343,48 +169,12 @@ AGENT_MISSING_TIP = "Bulunamadı. Ayarlar > GitHub > Kod ajanları bölümünden
 MODE_LABELS = (("Arka planda", "background"), ("Görünür pencerede", "visible"))
 LIST_MIN_ROWS = 1  # tek taslak tek satır yüksekliği alır; boşken EmptyState gösterilir
 LIST_MAX_ROWS = 6
-EDITOR_MIN_HEIGHT = 72
+# 60: üç düzenleyici, "?" baloncuklu etiket satırları (18px) ve 36 px kontrollerle birincil düğme
+# 1000x700 pencerede görünür kalır.
+EDITOR_MIN_HEIGHT = 60
 EDITOR_MAX_HEIGHT = 120
 
 
-def repolish(widget: QWidget) -> None:
-    """Dinamik özellik seçicileri (tone/state) yalnız unpolish+polish ile güncellenir."""
-    style = widget.style()
-    style.unpolish(widget)
-    style.polish(widget)
-
-
-class CollapsibleSection(QWidget):
-    """Başlık satırı (ok + başlık) ve katlı gövde; varsayılan kapalı.
-
-    Güvenlik metni silinmez, yalnız katlı durur; bu yüzden gövde etiketi ayrı tutulur.
-    """
-
-    def __init__(self, title: str, body: str, trailing: QWidget | None = None) -> None:
-        super().__init__()
-        self._title = title
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(0, 0, 0, 0)
-        lay.setSpacing(4)
-        self.toggle = QPushButton()
-        self.toggle.setObjectName("disclosure")
-        self.toggle.setCheckable(True)
-        self.toggle.setAccessibleName(title)
-        self.body = make_label(body, "fieldLabel")
-        self.body.setVisible(False)
-        self.toggle.toggled.connect(self._sync)
-        self._sync(False)
-        row = QHBoxLayout()
-        row.addWidget(self.toggle)
-        row.addStretch()
-        if trailing is not None:
-            row.addWidget(trailing)  # başlık satırının sağı: ayrı satır olsaydı dikey yer yerdi
-        lay.addLayout(row)
-        lay.addWidget(self.body)
-
-    def _sync(self, opened: bool) -> None:
-        self.body.setVisible(opened)
-        self.toggle.setText(("▾  " if opened else "▸  ") + self._title)
 
 
 def spec_to_html(kind: str, record: dict[str, Any]) -> str:
@@ -456,6 +246,13 @@ class ProjectsPanel(QWidget):
                 "Yerel bir depoda iş taslağı hazırla, kapsamını incele, onaylayıp başlat.",
             )
         )
+        # Demo notu sayfa başında bir kez verilir; her eylemin altında tekrarlanmaz (UX-11).
+        self.demo_note = make_label(
+            "Demo modunda proje süreçleri kapalı: taslak hazırlama ve başlatma etkin sürümde "
+            "çalışır.", "meta",
+        )
+        self.demo_note.setVisible(demo)
+        layout.addWidget(self.demo_note)
         # Üç adımlı akış yalnız seçili taslak/iş durumundan türer (_update_flow); durum tutmaz.
         self.flow_bar = QFrame()
         self.flow_bar.setObjectName("stageBar")
@@ -500,7 +297,7 @@ class ProjectsPanel(QWidget):
             editor.textChanged.connect(self._editor_text_changed)
         self.project.setAccessibleName("Proje")
         self._set_projects([])
-        left_lay.addWidget(make_field("Proje", self.project))
+        left_lay.addWidget(make_field("Proje", self.project, _HELP_PROJECT))
         left_lay.addWidget(self._build_agent_row())
         for caption, widget in (
             ("Görev", self.task),
@@ -574,6 +371,7 @@ class ProjectsPanel(QWidget):
         actions.addStretch()
         actions.addWidget(self.refresh_button)
         actions.addWidget(self.start_button)
+        actions.addWidget(HelpTip(_HELP_START), 0, Qt.AlignmentFlag.AlignVCenter)
         right_lay.addLayout(actions)
         self.start_reason = AutoHideLabel()
         self.start_reason.setAlignment(Qt.AlignmentFlag.AlignRight)
@@ -595,11 +393,13 @@ class ProjectsPanel(QWidget):
         cancel_row.addWidget(self.release_button)
         cancel_row.addWidget(self.discard_button)
         cancel_row.addWidget(self.clear_button)
+        # Düğmeler seçime göre görünür/gizlenir; tek "?" satırın sonunda kalır ve hepsini anlatır.
+        cancel_row.addWidget(HelpTip(_HELP_ROW_ACTIONS), 0, Qt.AlignmentFlag.AlignVCenter)
         cancel_row.addStretch()
         right_lay.addSpacing(8)
         right_lay.addLayout(cancel_row)
         self.notice = make_label(
-            "Demo modunda proje süreçleri kapalı." if demo else "Durum bekleniyor.", "meta"
+            "" if demo else "Durum bekleniyor.", "meta"
         )
         right_lay.addWidget(self.notice)
 
@@ -626,7 +426,7 @@ class ProjectsPanel(QWidget):
         self._sync_list()
         self.set_busy(True)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt adı)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         wide = event.size().width() >= self.WIDE_BREAKPOINT
         self._columns.setDirection(
@@ -637,7 +437,7 @@ class ProjectsPanel(QWidget):
             QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
         )
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt adı)
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         # Ayarlar'da Uygula ile eklenen ajan/klasörler sayfaya dönünce görünür.
         self.reload_config()
@@ -678,8 +478,10 @@ class ProjectsPanel(QWidget):
         self._agent_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._agent_row.setSpacing(12)
         self._agent_row.addWidget(make_field("Kod ajanı", self.agent_combo), 3)
-        self._agent_row.addWidget(make_field("Çalışma kipi", self.mode_combo), 3)
-        self._agent_row.addWidget(make_field("Başlangıç klasörü", folder_box), 4)
+        self._agent_row.addWidget(make_field("Çalışma kipi", self.mode_combo, _HELP_MODE), 3)
+        self._agent_row.addWidget(
+            make_field("Başlangıç klasörü", folder_box), 4
+        )
         column.addLayout(self._agent_row)
         # Çözülmüş yol 12px soluk ipucudur; uyarı yalnız proje dışı klasörde görünür.
         self.workdir_hint = PathHint()
@@ -1037,14 +839,14 @@ class ProjectsPanel(QWidget):
         enabled = not busy and not self._demo
         prepare_reason = self._prepare_block()
         self.prepare_button.setEnabled(not prepare_reason)
-        self.prepare_reason.setText(prepare_reason)
+        self.prepare_reason.setText("" if self._demo else prepare_reason)
         self.refresh_button.setEnabled(enabled)
         selected = self._selected()
         kind, record = selected if selected else ("", {})
         lock_reason = self._lock_block(record) if kind == "draft" else ""
         self.start_button.setEnabled(enabled and kind == "draft" and not lock_reason)
         if self._demo:
-            start_reason = "Demo modunda proje süreçleri kapalı."
+            start_reason = ""  # neden sayfa başındaki demo notunda
         elif busy:
             start_reason = "Artemis meşgul; hazır olunca açılır."
         elif lock_reason:

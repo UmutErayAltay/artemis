@@ -13,9 +13,9 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 from uuid import uuid4
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from artemis.tools.base import Risk, ToolContext, ToolResult, normalize_risk
+from artemis.tools.base import BaseTool, GateHandle, Risk, ToolContext, ToolResult, normalize_risk
 from artemis.tools.registry import ToolRegistry
 
 if TYPE_CHECKING:
@@ -99,6 +99,10 @@ class SafetyGate:
         # okunan metinden kurulan hatırlatma da "dış içerikten" sayılır. Onay kuralı değişmez.
         context.turn_tainted = state.tainted or state.history_external
         context.turn_read_external = state.tainted
+        # Rutin gibi araçlar adımlarını bu turun kapısından geçirir (ADR 0058).
+        context.gate_handle = GateHandle(
+            self.registry, lambda step: self.dispatch(step, context, state, approve)
+        )
         self.pending_notice = ""
         self.pending_site = ""
         context.audit.emit(
@@ -138,6 +142,11 @@ class SafetyGate:
             )
         risk = normalize_risk(tool.risk_for(arguments, context))
         normalized = arguments.model_dump(mode="json")
+        refusal = tool.refuse(arguments, context)
+        if refusal is not None:
+            # Onay penceresi hiç açılmaz: kullanıcının onaylayamayacağı bir işi onaya sunmak
+            # yanıltıcıdır (ör. dış içerik okunmuş turda kalıcı rutin kaydı).
+            return self._finish(ToolResult(message=refusal), call, context, state, started)
         if state.unattended and risk is not Risk.READ_ONLY:
             # approve çağrılmaz: karşıda kimse yokken açık kalan onay, saatler sonra eski
             # bağlamla yan etki üretebilirdi. Red yine onay olayı olarak denetime yazılır.
@@ -166,8 +175,7 @@ class SafetyGate:
         site = site_of(tool.external, normalized)
         steps = normalized.get("steps")
         fills = isinstance(steps, list) and not all(
-            isinstance(step, dict) and step.get("action") in _TRUSTED_STEP_ACTIONS
-            for step in steps
+            isinstance(step, dict) and step.get("action") in _TRUSTED_STEP_ACTIONS for step in steps
         )
         url = normalized.get("url")
         parts = urlsplit(url) if isinstance(url, str) else None
@@ -183,9 +191,7 @@ class SafetyGate:
         # ekran adımları her tur yeni dış içerik ürettiği için aksi hâlde kip hiç işe
         # yaramazdı. Diğer her araç kural 4'e aynen uyar.
         auto_skipped = (
-            tool.auto_mode_ok
-            and context.settings.computer_use.mode == "auto"
-            and site is None
+            tool.auto_mode_ok and context.settings.computer_use.mode == "auto" and site is None
         )
         would_require_approval = not trusted_site and (
             site is not None
@@ -265,6 +271,18 @@ class SafetyGate:
             history_external=state.history_external,
             trusted_site=trusted_site,
         )
+        return await self._execute(tool, arguments, call, context, state, started)
+
+    async def _execute(
+        self,
+        tool: BaseTool,
+        arguments: BaseModel,
+        call: ToolCall,
+        context: ToolContext,
+        state: TurnState,
+        started: float,
+    ) -> ToolResult:
+        # dispatch'in onay sonrası kuyruğu: araç yürütme, leke işaretleme ve sonuç denetimi.
         try:
             result = await tool.execute(arguments, context)
         except asyncio.CancelledError:

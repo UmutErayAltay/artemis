@@ -21,6 +21,9 @@ from artemis.tools.toast import ToastOutcome, show_toast
 
 # Panele (Qt kuyruğuna) başlık ve gövde ekler; eklenemezse False döner.
 PanelSink = Callable[[str, str], bool]
+# Aynısı, ek olarak düğme için rutin adı (ADR 0058), sohbet kutusuna yazılacak istem (ADR 0061)
+# ya da gün özeti tarihi (ADR 0066); üçünden en çok biri doludur.
+RoutinePanelSink = Callable[[str, str, str, str, str], bool]
 ToastFunction = Callable[[str, str], ToastOutcome]
 
 PRIVATE_WITHHELD = (
@@ -43,12 +46,14 @@ class Deliverer:
         audit: AuditLog,
         *,
         panel: PanelSink | None = None,
+        routine_panel: RoutinePanelSink | None = None,
         toast: ToastFunction | None = show_toast,
         telegram: TelegramClient | None = None,
     ) -> None:
         self.settings = settings
         self.audit = audit
         self.panel = panel
+        self.routine_panel = routine_panel
         self.toast = toast
         self.telegram = telegram
 
@@ -61,15 +66,28 @@ class Deliverer:
         title: str,
         body: str,
         private: bool,
+        routine: str = "",
+        suggest: str = "",
+        summary_day: str = "",
+        local_only: bool = False,
     ) -> DeliveryOutcome:
+        """`local_only`: dosya adı gibi kişisel metin; Telegram'a hiç gitmez (ADR 0061)."""
         targets: dict[str, str] = {}
-        if self.panel is not None:
+        if (routine or suggest or summary_day) and self.routine_panel is not None:
+            sent = self.routine_panel(title, body, routine, suggest, summary_day)
+            targets["panel"] = "ok" if sent else "error"
+        elif self.panel is not None:
             targets["panel"] = "ok" if self.panel(title, body) else "error"
         if self.toast is not None:
             outcome = await asyncio.to_thread(self.toast, title, body)
             targets["toast"] = outcome.status
         chat_id = self.settings.telegram.chat_id
-        if self.telegram is not None and chat_id is not None and self.settings.proactive.telegram:
+        if (
+            self.telegram is not None
+            and chat_id is not None
+            and self.settings.proactive.telegram
+            and not local_only
+        ):
             targets["telegram"] = await asyncio.to_thread(
                 self._send_telegram, chat_id, title, body, private
             )

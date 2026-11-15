@@ -33,7 +33,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from artemis.tools.code_agent_process import NO_WINDOW, kill_tree
+from artemis.tools.code_agent_process import NO_WINDOW, kill_tree, own_process_tree
 
 SUPPORTED_PROTOCOL_VERSIONS: tuple[str, ...] = ("2025-06-18", "2025-03-26", "2024-11-05")
 MAX_MESSAGE_BYTES = 1 << 20
@@ -133,6 +133,7 @@ class _Session:
         self._outgoing: queue.Queue[bytes | None] = queue.Queue()
         self._threads: list[threading.Thread] = []
         self._proc = self._spawn(command, env, cwd)
+        self._tree = own_process_tree(self._proc)  # Windows job; None ise kill_tree
         self._start_threads()
 
     @staticmethod
@@ -296,12 +297,15 @@ class _Session:
         try:
             proc.wait(timeout=GRACEFUL_EXIT_SECONDS if graceful else 0)
         except subprocess.TimeoutExpired:
-            kill_tree(proc)
+            if self._tree is None or not self._tree.kill():
+                kill_tree(proc)
             # Sınır dolarsa vazgeçilir; bekleme sınırsız olmaz.
             with contextlib.suppress(subprocess.TimeoutExpired):
                 proc.wait(timeout=CLEANUP_SECONDS)
         else:
-            if os.name != "nt":
+            if self._tree is not None:
+                self._tree.kill()  # çıkan liderin bıraktığı torunlar da job ile biter
+            elif os.name != "nt":
                 # Lider düzgün çıkmış olabilir ama bıraktığı torun boruları açık tutar
                 # (okuyucu EOF görmez). Grup boşsa killpg ProcessLookupError verir, zararsız.
                 kill_tree(proc)

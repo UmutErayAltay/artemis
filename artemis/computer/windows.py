@@ -503,6 +503,16 @@ def type_text(text: str, should_continue: Callable[[], bool] | None = None) -> i
     return sent
 
 
+def modifiers_down() -> bool:
+    """Ctrl/Alt/Shift/Win'den biri hâlâ basılı mı. Kısayolun kendi tuşları bırakılmadan gönderilen
+    Ctrl+C hedefte Ctrl+Alt+C gibi okunur; çağıran bırakılmasını sınırlı süre bekler."""
+    _require_windows()
+    user32 = _libs()[0]
+    user32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+    user32.GetAsyncKeyState.restype = ctypes.c_short
+    return any(user32.GetAsyncKeyState(vk) & 0x8000 for vk in (0x10, 0x11, 0x12, 0x5B, 0x5C))
+
+
 def press_keys(keys: tuple[str, ...]) -> None:
     """Tuş birleşimi; hata olsa bile basılı kalan tuşlar finally'de bırakılır, aksi hâlde
     Ctrl/Shift takılı kalıp kullanıcının klavyesini bozar."""
@@ -524,3 +534,69 @@ def press_keys(keys: tuple[str, ...]) -> None:
             flags = _KEYEVENTF_KEYUP | (_KEYEVENTF_EXTENDEDKEY if vk in _EXTENDED else 0)
             with contextlib.suppress(OSError):  # asıl hatayı gölgelemesin
                 _send([_key(vk, 0, flags)])
+
+
+def focus_window(hwnd: int) -> bool:
+    """Pencereyi ön plana getirmeyi dener; gerçekten ön planda olduğu çağıranca ayrıca doğrulanır
+    (SetForegroundWindow'un True dönmesi odağın geçtiğini garanti etmez)."""
+    _require_windows()
+    user32 = _libs()[0]
+    user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
+    user32.SetForegroundWindow.restype = wintypes.BOOL
+    return bool(user32.SetForegroundWindow(hwnd))
+
+
+# Odaktaki denetimin değerini UI Automation ile okur ve beklenen metinle karşılaştırır. Betik
+# sabittir; beklenen metin (özel, ekran içeriği sayılır) yalnız ortam değişkeniyle çocuğa gider,
+# argv'de ve logda yoktur. Yalnız `1`/`0`/`?` basılır: okunan değer süreçten çıkmaz.
+_FOCUS_SCRIPT = "\n".join(
+    [
+        "$ErrorActionPreference = 'Stop'",
+        "try {",
+        "  Add-Type -AssemblyName UIAutomationClient",
+        "  Add-Type -AssemblyName UIAutomationTypes",
+        "  $e = [System.Windows.Automation.AutomationElement]::FocusedElement",
+        "  $p = $null",
+        "  $vp = [System.Windows.Automation.ValuePattern]::Pattern",
+        "  $tp = [System.Windows.Automation.TextPattern]::Pattern",
+        "  if ($e.TryGetCurrentPattern($vp, [ref]$p)) {",
+        "    $v = $p.Current.Value",
+        "  } elseif ($e.TryGetCurrentPattern($tp, [ref]$p)) {",
+        "    $v = $p.DocumentRange.GetText(65536)",
+        "  } else { '?'; exit 0 }",
+        "  $x = $env:ARTEMIS_EXPECTED_TEXT",
+        "  $v = $v -replace \"`r`n\", \"`n\"; $x = $x -replace \"`r`n\", \"`n\"",
+        "  if ($v.Contains($x)) { '1' } else { '0' }",
+        "} catch { '?' }",
+    ]
+)
+_FOCUS_TEXT_LIMIT = 8000  # ortam değişkeni sınırı (32 KB) altında kalmak için
+
+
+def focused_value_contains(
+    expected: str, timeout: float, runner: Callable[..., Any] | None = None
+) -> bool | None:
+    """Odaktaki alanın değeri `expected`i içeriyor mu; her başarısızlıkta None (ADR 0070)."""
+    if sys.platform != "win32" or not expected or len(expected) > _FOCUS_TEXT_LIMIT:
+        return None
+    import base64
+    import subprocess
+
+    from artemis.tools.platform import child_environment
+
+    encoded = base64.b64encode(_FOCUS_SCRIPT.encode("utf-16-le")).decode("ascii")
+    command = [
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-EncodedCommand", encoded,
+    ]
+    env = {**child_environment(), "ARTEMIS_EXPECTED_TEXT": expected}
+    try:
+        completed = (runner or subprocess.run)(
+            command, env=env, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    answer = (completed.stdout or "").strip()
+    return {"1": True, "0": False}.get(answer) if completed.returncode == 0 else None
