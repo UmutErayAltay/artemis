@@ -803,6 +803,27 @@ def test_role_buttons_use_existing_actions_and_reflect_state(
     assert load_settings(path).primary_model == "sonnet 5-5" and section.primary_button.isChecked()
 
 
+def test_computer_role_sets_alias_and_is_cleared_on_second_click(
+    app: QApplication, tmp_path: Path
+) -> None:
+    path = _three_models(tmp_path)
+    section = ProviderSection(path)
+    section.select_model("haiku 5-5")
+    assert not section.computer_button.isEnabled()
+    section.select_model("sonnet 5-5")
+    section.computer_button.click()
+    assert load_settings(path).computer_use.model == "sonnet 5-5"
+    assert section.computer_button.text() == "✓ Bilgisayar"
+    section.computer_button.click()
+    assert load_settings(path).computer_use.model == ""
+    section.computer_button.click()
+    section._remove_model()
+    assert "sonnet 5-5" in load_settings(path).models
+    assert "Bilgisayar kullanımı modeli kaldırılamaz" in section.status.text()
+    section.computer_button.click()
+    assert load_settings(path).computer_use.model == ""
+
+
 def test_detail_stacks_when_narrow_and_sits_beside_when_wide(
     app: QApplication, tmp_path: Path
 ) -> None:

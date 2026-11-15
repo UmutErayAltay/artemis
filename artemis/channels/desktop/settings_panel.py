@@ -291,6 +291,7 @@ class SettingsPanel(QWidget):
     file_search_roots: QListWidget
     all_applications: QCheckBox
     computer_auto: QCheckBox
+    computer_observation: QComboBox
     application_list: QListWidget
     add_application_button: QPushButton
     remove_application_button: QPushButton

@@ -60,6 +60,7 @@ from artemis.channels.desktop import themes
 from artemis.channels.desktop.provider_layout import (
     PARALLEL_TEST,
     PRESETS,
+    ROLE_TEXTS,
     build_add_box,
     build_connections_box,
     build_models_box,
@@ -230,6 +231,8 @@ class ProviderSection(QWidget):
     primary_button: QPushButton
     hard_button: QPushButton
     fallback_button: QPushButton
+    computer_button: QPushButton
+    role_buttons: tuple[QPushButton, ...]
     remove_button: QPushButton
     model_test_button: QPushButton
     parallel_test: QCheckBox
@@ -286,6 +289,7 @@ class ProviderSection(QWidget):
         self._model_test: QProcess | None = None
         self._testing = ""
         self._fallback = ""
+        self._computer = ""
         self._test_report = Path()
         self._test_rows: dict[str, str] = {}  # senaryo kimliği -> bekliyor/geçti/kaldı
         self._second: set[str] = set()  # 2. denemede geçenler
@@ -330,7 +334,7 @@ class ProviderSection(QWidget):
     def _style_roles(self) -> None:
         # İşaretli rol vurgu çerçevesi alır; "✓" metni durumu renksiz de belli eder.
         sheet = f"QPushButton:checked {{ border: 1px solid {self._colors['accent']}; }}"
-        for button in (self.primary_button, self.hard_button, self.fallback_button):
+        for button in self.role_buttons:
             button.setStyleSheet(sheet)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
@@ -391,6 +395,7 @@ class ProviderSection(QWidget):
             self.connection_toggle.setChecked(True)  # ilk kurulumda form gizli kalmasın
         reports = self._reports_seen = self._reports(settings)
         self._fallback = settings.fallback_model or ""
+        self._computer = settings.computer_use.model or ""
         self._model_data = [
             (
                 alias,
@@ -848,6 +853,9 @@ class ProviderSection(QWidget):
         for role in ("hard_model", "fallback_model"):
             if raw.get(role) == alias:
                 raw.pop(role)  # beyin olan model ayrıca zor işler/yedek sayılmaz
+        computer = raw.get("computer_use")
+        if isinstance(computer, dict) and computer.get("model") == alias:
+            computer["model"] = ""
         if not self._write(raw):
             return
         self.reload()
@@ -866,12 +874,14 @@ class ProviderSection(QWidget):
         if alias == settings.primary_model:
             self.status.setText("Beyin modeli kaldırılamaz; önce başka bir modeli beyin yapın.")
             return
-        if alias == settings.fallback_model:
-            self.status.setText("Arıza yedeği kaldırılamaz; önce Rol'den Yedek'i kapat.")
-            return
-        if alias == settings.hard_model:
-            self.status.setText("Zor işler modeli kaldırılamaz; önce Rol'den Zor işler'i kapat.")
-            return
+        for holder, role, button in (
+            (settings.fallback_model, "Arıza yedeği", "Yedek'i"),
+            (settings.hard_model, "Zor işler modeli", "Zor işler'i"),
+            (settings.computer_use.model, "Bilgisayar kullanımı modeli", "Bilgisayar'ı"),
+        ):
+            if alias == holder:
+                self.status.setText(f"{role} kaldırılamaz; önce Rol'den {button} kapat.")
+                return
         raw = self._raw()
         raw["models"].pop(alias, None)  # type: ignore[attr-defined]
         if not self._write(raw):
@@ -911,6 +921,9 @@ class ProviderSection(QWidget):
 
     def _toggle_fallback_role(self) -> None:
         self._toggle_role("fallback_model")
+
+    def _toggle_computer_role(self) -> None:
+        self._toggle_role("computer_use")
 
     def _selection_changed(self, *_args: object) -> None:
         self._sync_detail()  # paralel kutusunu da günceller
@@ -959,6 +972,7 @@ class ProviderSection(QWidget):
         row = next((r for r in self._model_data if r[0] == selected), None)
         brain, image, hard = (row[1], row[5], row[6]) if row else (False, False, False)
         fallback = bool(selected) and selected == self._fallback
+        computer = bool(selected) and selected == self._computer
         self.detail_title.setText(selected or "")
         reason = "Resim modeli bu rolü üstlenemez." if image else (
             "Bu model zaten beyin; bu rol için başka bir model seç." if brain else ""
@@ -967,10 +981,12 @@ class ProviderSection(QWidget):
         fallback_tip = (
             "Beyin modeli kotaya takılır ya da yanıt vermezse Artemis bu modelle devam eder."
         )
+        computer_tip = "Ekranı görüp tıklama bu modelle çalışır; seçilmezse beyin kullanılır."
         for button, name, on, tip, free in (
             (self.primary_button, "Beyin", brain, None, not image),
             (self.hard_button, "Zor işler", hard, hard_tip, not image and not brain),
             (self.fallback_button, "Yedek", fallback, fallback_tip, not image and not brain),
+            (self.computer_button, "Bilgisayar", computer, computer_tip, not image and not brain),
         ):
             button.setChecked(on)
             button.setText(("✓ " if on else "") + name)
@@ -987,11 +1003,11 @@ class ProviderSection(QWidget):
         self._parallel_tip()
 
     def _toggle_role(self, key: str) -> None:
-        """Seçili modeli zor işler (hard_model) ya da arıza yedeği (fallback_model) yapar."""
+        """Seçili modele zor işler/yedek/bilgisayar (computer_use.model) rolü; 2. tık kapatır."""
         alias = self._selected_alias()
         if alias is None:
             return
-        name = "Zor işler" if key == "hard_model" else "Arıza yedeği"
+        name, off, on = ROLE_TEXTS[key]
         try:
             settings = load_settings(self.config_path)
             raw = self._raw()
@@ -1005,29 +1021,21 @@ class ProviderSection(QWidget):
         if alias == settings.primary_model:
             self.status.setText(f"Bu model zaten beyin; {name.lower()} için başka bir model seçin.")
             return
-        removing = raw.get(key) == alias
+        # computer_use.model iç içe alandır; diğer roller kök anahtardır.
+        section = raw.setdefault("computer_use", {}) if key == "computer_use" else raw
+        field = "model" if key == "computer_use" else key
+        if not isinstance(section, dict):
+            self.status.setText("Ayarlar okunamadı.")
+            return
+        removing = section.get(field) == alias
         if removing:
-            raw.pop(key, None)
+            section.pop(field, None)
         else:
-            raw[key] = alias
+            section[field] = alias
         if not self._write(raw):
             return
         self.reload()
-        if key == "hard_model":
-            done = (
-                "Zor işler modeli kapatıldı; her tur beyin modeliyle çalışır."
-                if removing
-                else f"Zor işler modeli: {alias}. Çok adımlı ve planlama isteyen turlar bunu "
-                "kullanır."
-            )
-        else:
-            done = (
-                "Arıza yedeği kapatıldı; beyin modeli yanıt vermezse tur hata ile biter."
-                if removing
-                else f"Arıza yedeği: {alias}. Beyin modeli kotaya takılır ya da yanıt vermezse "
-                "Artemis bununla sürer."
-            )
-        self.status.setText(done)
+        self.status.setText(off if removing else on.format(alias=alias))
         self.changed.emit()
 
     def _confirm_paid(self, alias: str, cost: Decimal) -> bool:

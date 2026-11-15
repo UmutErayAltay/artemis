@@ -184,6 +184,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda box: "auto" if box.isChecked() else "accept",
         lambda box, value: box.setChecked(value == "auto"),
     ),
+    _combo(("computer_use", "observation"), "computer_observation", fallback_first=True),
 )
 _BOUND_PATHS = frozenset(binding.path for binding in PANEL_BINDINGS)
 

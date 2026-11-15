@@ -81,6 +81,15 @@ def test_tts_backend_choice_is_saved(tmp_path: Path) -> None:
     assert load_settings(path).voice.tts_backend == "ema"
 
 
+def test_computer_observation_choice_is_saved(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    panel.computer_observation.setCurrentIndex(panel.computer_observation.findData("uia"))
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).computer_use.observation == "uia"
+    panel.deleteLater()
+
+
 def test_settings_panel_has_no_model_combo_or_inventory(tmp_path: Path) -> None:
     from PySide6.QtWidgets import QApplication
 
