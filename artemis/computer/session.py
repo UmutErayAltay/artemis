@@ -487,7 +487,8 @@ class ComputerSession:
         if element is None:
             return None
         name = mask_screen_secrets(_LIST_SYNTAX.sub(" ", element.name))
-        return f"{element.kind} \"{name}\""
+        kind = " ".join(_LIST_SYNTAX.sub(" ", element.kind).split())[:40]
+        return f'{kind} "{name}"'
 
     async def _read_elements(self, hwnd: int) -> list[UiElement]:
         """Ön plan penceresinin UIA öğelerini okur; arka uç desteklemiyorsa ya da hatada `[]`."""

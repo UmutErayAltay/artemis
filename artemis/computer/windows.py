@@ -747,11 +747,18 @@ def ui_elements(
         w, h = rect[2], rect[3]
         if w < 2 or h < 2:
             continue
-        clean_name = " ".join(name.split())[:80]
+        # Ekrandan gelen metin kontrol karakterleri taşıyamaz: her tüketicide (istem, onay
+        # penceresi, günlük) satır bölme/biçim kaçamağı olmasın diye burada sıyırılır.
+        clean_name = "".join(c for c in name if c.isprintable())
+        clean_name = " ".join(clean_name.split())[:80]
+        kind = "".join(c for c in kind if c.isprintable())
+        kind = " ".join(kind.split())[:40]
+        if not kind:
+            continue
         result.append(
             UiElement(
                 id=len(result) + 1,
-                kind=kind[:40],
+                kind=kind,
                 name=clean_name,
                 rect=(rect[0], rect[1], w, h),
                 interactive=interactive,
