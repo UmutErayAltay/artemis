@@ -526,7 +526,11 @@ class AgentLoop:
                     "Steam oyunu) onu barındıran uygulamayı açıp computer_use ile başlat; "
                     "denemeden reddetme."
                     if settings.allow_all_applications
+                    # İzin listesi computer_use ile (Başlat menüsünden) dolanılmaz (Umut,
+                    # 2026-11-16); içerideki iş için yukarıdaki computer_use kuralı geçerli.
                     else ". Yalnız bu adları kullan; listede bulunan bir uygulamayı izinsiz sanma."
+                    " Listede olmayan uygulamayı computer_use ile de açmaya çalışma; kullanıcıya"
+                    " Ayarlar > Uygulamalar'dan eklemesini söyle."
                 )
                 + public_notes
                 + public_companion
