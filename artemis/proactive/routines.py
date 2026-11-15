@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Any
@@ -81,6 +82,24 @@ class RoutineFile(BaseModel):
         return self
 
 
+# Bazı vekil sunucular (ör. Antigravity önündeki CLIProxyAPI) araç adlarını modelden gizler:
+# `open_application` modele `mcp__organ_enhance__clip_open_application` diye görünür. Araç
+# çağrısının adını vekil geri çevirir, ama rutin adımı gibi ARGÜMAN içinde yazılan adı çeviremez.
+_FOREIGN_PREFIX = re.compile(r"^mcp__[A-Za-z0-9_-]+?__")
+
+
+def resolve_tool_name(name: str, registry: ToolRegistry) -> str | None:
+    """Kayıtlı araç adı; gizlenmiş adda önce `mcp__x__` öneki, sonra tek ön sözcük atılır.
+
+    Yalnız kayıtlı bir araca çıkan ad kabul edilir; tahmin yoktur. Artemis'in kendi MCP
+    araçları tek alt çizgiyle (`mcp_<sunucu>_<araç>`) adlanır, çift alt çizgili önek yabancıdır."""
+    base = _FOREIGN_PREFIX.sub("", name)
+    candidates = [name, base]
+    if "_" in base:
+        candidates.append(base.split("_", 1)[1])
+    return next((item for item in candidates if registry.get(item) is not None), None)
+
+
 def validate_steps(steps: list[RoutineStep], registry: ToolRegistry) -> list[RoutineStep]:
     """Her adımı aracın kendi `args_model`'ine karşı doğrular; normalleşmiş kopya döner.
 
@@ -90,16 +109,21 @@ def validate_steps(steps: list[RoutineStep], registry: ToolRegistry) -> list[Rou
     """
     checked: list[RoutineStep] = []
     for number, step in enumerate(steps, start=1):
-        if step.tool.startswith(FORBIDDEN_PREFIX):
+        resolved = resolve_tool_name(step.tool, registry)
+        # Yasak önek ÇÖZÜLMÜŞ adda denetlenir: "x_routine_run" yasağı aşamasın.
+        if resolved is not None and resolved.startswith(FORBIDDEN_PREFIX) or (
+            step.tool.startswith(FORBIDDEN_PREFIX)
+        ):
             raise ValueError(f"Adım {number}: rutin içinden rutin aracı çağrılamaz.")
-        tool = registry.get(step.tool)
-        if tool is None:
+        if resolved is None:
             raise ValueError(f"Adım {number}: böyle bir araç yok ({step.tool}).")
+        tool = registry.get(resolved)
+        assert tool is not None
         try:
             normalized = tool.args_model.model_validate(step.arguments).model_dump(mode="json")
         except ValidationError as error:
-            raise ValueError(f"Adım {number}: {step.tool} argümanları şemaya uymuyor.") from error
-        checked.append(RoutineStep(tool=step.tool, arguments=normalized))
+            raise ValueError(f"Adım {number}: {resolved} argümanları şemaya uymuyor.") from error
+        checked.append(RoutineStep(tool=resolved, arguments=normalized))
     return checked
 
 

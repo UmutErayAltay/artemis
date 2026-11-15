@@ -186,6 +186,10 @@ async def test_save_after_external_read_in_same_turn_is_refused(env: Env) -> Non
         ([step("probe_write", value="kotu")], "şemaya uymuyor"),
         ([step("probe_write", ekstra=1)], "şemaya uymuyor"),
         ([step("routine_run", name="x")], "rutin içinden rutin"),
+        # Gizlenmiş ad çözülünce rutin aracına çıkıyorsa da yasak (önek denetimi çözülmüş adda).
+        ([step("mcp__organ_enhance__clip_routine_run", name="x")], "rutin içinden rutin"),
+        ([step("clip_routine_run", name="x")], "rutin içinden rutin"),
+        ([step("mcp__organ_enhance__clip_yok_boyle")], "böyle bir araç yok"),
         ([step("routine_save", name="x", steps=[step("probe_read")])], "rutin içinden rutin"),
     ],
 )
@@ -195,6 +199,19 @@ async def test_invalid_steps_are_rejected_at_save(
     result = await env.call("routine_save", name="r", steps=steps)
     assert not result.success and needle in result.message
     assert env.store.load() == []
+
+
+async def test_proxy_obfuscated_step_names_resolve_to_registered_tools(env: Env) -> None:
+    """Antigravity vekili araç adlarını gizler (`mcp__organ_enhance__clip_<ad>`); kayıt gerçek adı
+    yazar. Yalnız kayıtlı bir araca çıkan ad kabul edilir (2026-11-15 canlı kabul bulgusu)."""
+    result = await env.call(
+        "routine_save",
+        name="r",
+        steps=[step("mcp__organ_enhance__clip_probe_write", value=1), step("lake_probe_read")],
+    )
+    assert result.success
+    [routine] = env.store.load()
+    assert [s.tool for s in routine.steps] == ["probe_write", "probe_read"]
 
 
 async def test_save_schema_limits_steps_and_forbids_schedule(env: Env) -> None:
