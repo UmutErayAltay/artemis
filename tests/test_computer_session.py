@@ -821,6 +821,23 @@ async def test_verified_true_and_audit() -> None:
     assert env.audit.named("computer_session_end")[0]["reason"] == "done"
 
 
+async def test_verify_evidence_masks_screen_secrets_in_result_and_audit() -> None:
+    fake_jwt = "eyJ" + "a" * 12 + "." + "b" * 12 + "." + "c" * 8
+    verdict = json.dumps(
+        {
+            "verified": True,
+            "evidence": "Ekranda parola: " + "Hunter2" + "Secret ve " + fake_jwt + " görünüyor.",
+        }
+    )
+    env = Env(DONE, verdict)
+    result = await env.run()
+    assert "Hunter2Secret" not in result.evidence
+    assert fake_jwt not in result.evidence
+    assert "Hunter2Secret" not in str(env.audit.named("computer_verify"))
+    assert fake_jwt not in str(env.audit.named("computer_verify"))
+    assert "[GİZLENDİ]" in result.evidence
+
+
 async def test_verification_uses_fresh_screenshot_and_verify_prompt() -> None:
     env = Env(DONE, NO)
     result = await env.run("hedef X")
