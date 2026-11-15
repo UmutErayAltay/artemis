@@ -200,3 +200,24 @@ Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sa
 - [ ] Artemis'i özet saatinde kapalı tut, `briefing_grace_hours` içinde aç: özet "gecikmeli" diye üretiliyor.
 - [ ] "Dün ne yaptık" de: `daily_summary_read` ile dünkü özet okunuyor; kayıt olmayan günde "kayıtlı özet yok" deniyor.
 - [ ] `daily_summary.enabled: false` iken araç modele görünmüyor ve bildirim gelmiyor.
+
+## 2026-11-15 canlı kabul (Claude Code, `1575521`, Windows 11, `claude-haiku-5-5`)
+
+Gerçek model ve araçlarla, sohbet yolundan (panel/ses/telefon değil) yürütüldü; onaylar otomatik,
+ret denenen maddelerde bilerek "Hayır" verildi. Dosya araması, beceriler ve araştırma ayrı
+`state_dir` ile koştu (gerçek kullanıcı durumu değişmedi). Yukarıdaki kutular yalnız panel/ses
+dahil tam deneme sonrası işaretlenir; burası sohbet yolunun kanıtıdır.
+
+**Bulunan ve düzeltilen hata:** Antigravity önündeki CLIProxyAPI araç adlarını modelden gizliyor
+(`open_application` → `mcp__organ_enhance__clip_open_application`). Çağrıyı vekil geri çeviriyor,
+ama `routine_save` adımındaki ad argüman olduğu için çevrilmiyordu; her rutin kaydı "böyle bir araç
+yok" diye düşüyordu. `1575521` adı kayıtlı araca çözer.
+
+| Bölüm | Sohbet yolunda geçti | Kalan (Umut) |
+| --- | --- | --- |
+| Rutinler | Kayıt onayı (ret → yazılmadı, onay → gerçek adlarla yazıldı); "işe başla" 3/3 adım, ses 30 geri okundu; `close_application` reddedilince 0/2'de durdu; dış içerik okunan turda kayıt onaysız reddedildi; sohbetle silme onay istedi, ret → durdu; bozuk `routines.json` → "Rutin dosyası bozuk", dosya değişmedi; denetimde `routine_run_start/end` | Panel listesi/düğmeleri, sesle çalıştırma, zamanlı bildirim, grace |
+| Araştırma | Onayda konu + arama sınırı, ret → başlamadı; arka planda sürerken sohbet sürdü; ikinci iş reddedildi; iptal → `cancelled`, rapor yok; tam iş → `done`, 6 arama, `arastirma/<iş-kimliği>.md` (adında konu yok); süreç öldürülünce `uncertain`, yeniden başlamadı; `research_search` sayısı sınırı aşmadı | Bildirim (panel), "notlarıma ekle" → model hangi notu sordu, `vault_append` onayı tetiklenmedi |
+| Dosya araması | İfade araması 200 karakterlik alıntıyla; BÜYÜK/aksansız ("GOCMEN KUS") buldu; dosya adı ("fatura") buldu; `.env`, `.ssh/`, `Cookies` içeriği bulunmadı; sonuçtan sonra yan etki "dış içerik okundu" uyarısıyla onay istedi | Panel durum satırı, Dizini sil / Yeniden dizinle, kök çıkarma |
+| Beceriler | `/haftalik-rapor` ve `/bomlu` (BOM'lu UTF-8) beceriyi okudu; tarifteki silme adımı yine onay istedi, ret → dosya kaldı; başlıksız ve UTF-16 dosyalar nedenleriyle geçersiz listede, diğer 10 beceri çalışıyor | Panel "Yenile"/"Klasörü aç", kutuyu kapatma |
+| Gün özeti | `daily_summary_read`: kayıtsız günde "kayıtlı özet yok"; dünkü özet okundu ama içerik bulut modele gösterilmedi (özet `private`+`local_only`, ADR 0066) — içeriği yanıtlamak için yerel model gerekir | Bildirim, "Aç", "Vault'a ekle", gecikmeli üretim |
+| Dikte, Tetikleyiciler, Seçili metin, Telegram ek, Takvim/posta | — | Mikrofon, dosya indirme, seçim kısayolu, telefon ve Gmail/ICS kimliği gerektirir |
