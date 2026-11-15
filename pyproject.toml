@@ -96,6 +96,10 @@ module = ["livekit.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
+module = ["av", "av.*"]  # PyAV: [voice] ekiyle gelir (faster-whisper), CI checks işinde yok
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
 module = ["PySide6.*"]
 ignore_missing_imports = true
 
