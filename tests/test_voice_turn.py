@@ -111,6 +111,7 @@ class FakeSession:
 
 
 def test_detector_input_shape_threshold_and_padding() -> None:
+    pytest.importorskip("faster_whisper")  # öznitelik çıkarıcı [voice] ekinde
     session = FakeSession(0.6)
     detector = SmartTurnDetector(threshold=0.7, session=session)
     short = (np.full(16000, 3000, dtype="<i2")).tobytes()  # 1 sn: sola sıfırla dolar

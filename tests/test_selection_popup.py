@@ -31,6 +31,7 @@ def test_close_button_hides_popup_and_is_named() -> None:
 
 
 def test_escape_closes_popup() -> None:
+    pytest.importorskip("PySide6")
     from PySide6.QtCore import QEvent, Qt
     from PySide6.QtGui import QKeyEvent
 

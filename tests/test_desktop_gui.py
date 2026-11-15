@@ -26,11 +26,11 @@ from artemis.brain.agent_loop import RunResult
 from artemis.channels.desktop.app import (
     _STYLE,
     DesktopWindow,
-    StepBlock,
     build_window,
 )
 from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.bridge import Activity, Finished, State, VoiceCommand
+from artemis.channels.desktop.chat_widgets import StepBlock
 from artemis.channels.desktop.demo import DemoReadTool, DemoWriteTool
 from artemis.channels.desktop.themes import THEMES
 from artemis.channels.runtime import Runtime
@@ -1545,7 +1545,7 @@ def test_trigger_notice_routine_button_uses_the_normal_tool_path(
     window = _window(app, tmp_path)
     try:
         calls: list[tuple[str, Any]] = []
-        window.bridge.submit_tool = lambda name, arguments, **k: calls.append((name, arguments))  # type: ignore[method-assign,assignment]
+        window.bridge.submit_tool = lambda name, arguments, **k: calls.append((name, arguments))  # type: ignore[method-assign]
         window._handle_event(bridge_module.Proactive("Tetikleyici · t", "Geldi", "işe başla", ""))
         assert window.routine_run_button.text() == "Çalıştır"
         window.routine_run_button.click()
@@ -1560,7 +1560,7 @@ def test_summary_notice_open_and_vault_button_follow_vault_setting(
     window = _window(app, tmp_path)
     try:
         calls: list[tuple[str, Any]] = []
-        window.bridge.submit_tool = lambda name, arguments, **k: calls.append((name, arguments))  # type: ignore[method-assign,assignment]
+        window.bridge.submit_tool = lambda name, arguments, **k: calls.append((name, arguments))  # type: ignore[method-assign]
         event = bridge_module.Proactive("Günün özeti hazır", "özet", "", "", "2026-10-15")
         # Vault kapalı (config yok/okunamaz): yalnız "Aç".
         window._handle_event(event)
@@ -1598,7 +1598,7 @@ def test_busy_refusal_lands_in_the_panel_that_started_the_action(
 ) -> None:
     window = _window(app, tmp_path)
     try:
-        window.bridge.submit_tool = lambda name, arguments, **k: None  # type: ignore[method-assign,assignment]
+        window.bridge.submit_tool = lambda name, arguments, **k: None  # type: ignore[method-assign]
         window.settings_panel.routines.notice.setText("ayar-önce")
         window.automation_panel.notice.setText("otomasyon-önce")
         window.automation_panel.tool_requested.emit(

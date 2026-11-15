@@ -13,6 +13,7 @@ def test_auto_uses_bundled_silero() -> None:
 
 
 def test_webrtc_backend_keeps_old_behavior() -> None:
+    pytest.importorskip("webrtcvad")
     assert isinstance(factory.build_vad(VoiceConfig(vad_backend="webrtc"), [].append), WebRTCVAD)
 
 
@@ -20,6 +21,8 @@ def test_webrtc_backend_keeps_old_behavior() -> None:
 def test_silero_failure_falls_back_visibly(
     monkeypatch: pytest.MonkeyPatch, error: Exception
 ) -> None:
+    pytest.importorskip("webrtcvad")  # yedek WebRTC VAD [voice] ekinde
+
     def broken(**_kwargs: object) -> SileroVAD:
         raise error
 

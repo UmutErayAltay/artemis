@@ -13,11 +13,12 @@ def _frames(n):
     return [AudioFrame(bytes([i % 250]) * 2, float(i)) for i in range(n)]
 
 
-def _controller(voiced, recognizer, **overrides):
+def _controller(voiced, recognizer, mic_delay=0, **overrides):
     runner = FakeRunner()
     timings = []
     controller = VoiceController(
-        runner, VoiceConfig(**CFG, **overrides), FakeMic(_frames(len(voiced))), FakeVAD(voiced),
+        runner, VoiceConfig(**CFG, **overrides),
+        FakeMic(_frames(len(voiced)), delay=mic_delay), FakeVAD(voiced),
         recognizer, FakeTTS(), FakeSink(), on_timing=lambda k, v: timings.append((k, v)),
     )
     return controller, runner, timings
@@ -57,7 +58,9 @@ async def test_resumed_speech_discards_speculation():
     # 12 sessizlik karesi (>=10: spekülasyon başlar) sonra konuşma devam eder.
     voiced = [True] * 5 + [False] * 12 + [True] * 3 + [False] * 30
     recognizer = SlowRecognizer(["artemis erken", "artemis tam komut"])
-    controller, runner, _ = _controller(voiced, recognizer)
+    # Kareler arası bekleme: spekülasyon (0,01 sn) konuşma dönmeden kesin biter;
+    # beklemesiz kareler yavaş CI'da spekülasyonu bitmeden iptal ettiriyordu (yarış).
+    controller, runner, _ = _controller(voiced, recognizer, mic_delay=0.03)
     await controller.run()
     assert recognizer.calls == 2
     assert runner.commands == ["tam komut"]
