@@ -74,3 +74,5 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0069 — Cihaz içi uyandırma sözcüğü ön-kapısı (isteğe bağlı)](0069-uyandirma-on-kapisi.md)
 - [0070 — computer_use "ok" için OS düzeyi kanıt](0070-computer-use-os-kaniti.md)
 - [0071 — Konuşma sonu sessizliğinde spekülatif nihai STT](0071-spekulatif-nihai-stt.md)
+- [0072 — Oyun modu: tam ekranda büyük STT modelini bırakma](0072-oyun-modu.md)
+- [0073 — Bilgisayar kullanımında UI Automation gözlemi ve öğeye tıklama](0073-computer-use-uia-gozlem.md)

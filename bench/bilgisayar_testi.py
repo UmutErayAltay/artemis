@@ -269,6 +269,9 @@ class SimBackend:
     def focused_value_contains(self, expected: str, timeout: float) -> bool | None:
         return None  # UIA kanıtı yok: model kararı kalır (ADR 0070)
 
+    def ui_elements(self, hwnd: int) -> list[Any]:
+        return []  # Benzetimde UIA ağacı yok (ADR 0073); bench görüntü kipini ölçer.
+
 
 @dataclass
 class ComputerScenario:

@@ -640,13 +640,13 @@ class PerceptionConfig(BaseModel):
 
 
 class ComputerUseConfig(BaseModel):
-    """Bilgisayar kullanımı (ADR 0039); varsayılan kapalı, görsel model açıkça seçilir."""
+    """Bilgisayar kullanımı (ADR 0039, 0073); varsayılan kapalı, model açıkça seçilir."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = False
-    # `Settings.models` anahtarı; ekran görüntüsünü kabul eden bir model olmalı.
-    # Boşsa Artemis'in o anki ana modeli (Settings.primary_model) kullanılır.
+    # `Settings.models` anahtarı; `observation` "screen"/"both" iken görüntü kabul eden bir model
+    # olmalı, "uia" iken metin modeli de çalışır. Boşsa `Settings.primary_model` kullanılır.
     model: str = ""
     max_steps: int = Field(default=25, ge=1, le=100)
     max_minutes: float = Field(default=5.0, ge=0.5, le=30)
@@ -658,6 +658,9 @@ class ComputerUseConfig(BaseModel):
     # atlama `approval_skipped` olarak denetime yazılır); kodla zorlanan engeller,
     # sınırlar ve Esc iki kipte de aynıdır.
     mode: Literal["accept", "auto"] = "accept"
+    # ADR 0073: "screen" görüntü (varsayılan), "uia" yalnız UI Automation öğe listesi (görsel
+    # olmayan modeller de çalışır), "both" ikisi birden.
+    observation: Literal["screen", "uia", "both"] = "screen"
     # Kotaya takılan görsel model için sırayla denenecek diğer görüntü kabul eden modeller.
     fallback_models: tuple[str, ...] = ()
 
