@@ -128,6 +128,10 @@ class VoiceConfig(BaseModel):
     max_utterance_seconds: float = Field(default=15.0, gt=0, le=120)
     queue_frames: int = Field(default=32, ge=2, le=256)
     stt_model: Path | None = None
+    # Oyun modu: tam ekran uygulama öndeyken büyük STT modeli GPU'dan bırakılır, hafif model
+    # devralır; boşsa yerelde kurulu faster-whisper `small` aranır.
+    game_mode: bool = False
+    game_mode_stt_model: Path | None = None
     stt_device: Literal["cuda", "cpu"] = "cuda"
     stt_compute_type: str = "float16"
     cuda_library_dirs: list[Path] = Field(default_factory=list)
@@ -975,7 +979,9 @@ def load_settings(path: Path) -> Settings:
         value = getattr(settings, field)
         updates[field] = value if value.is_absolute() else (base / value).resolve()
     voice_updates: dict[str, Path] = {}
-    for field in ("stt_model", "piper_model", "piper_config", "noise_model_dir"):
+    for field in (
+        "stt_model", "game_mode_stt_model", "piper_model", "piper_config", "noise_model_dir"
+    ):
         value = getattr(settings.voice, field)
         if value is not None:
             path_value = value

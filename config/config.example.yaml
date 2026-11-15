@@ -106,6 +106,8 @@ voice:
   stt_partial_enabled: true # Konuşurken ara tanıma; kısmi metin komut çalıştırmaz.
   stt_speculative: true # Bitiş sessizliğinde nihai tanımayı önceden başlatır (ADR 0071); konuşma sürerse atılır.
   stt_speculative_after_ms: 200 # Sessizliğin bu kadarında spekülatif tanıma başlar.
+  game_mode: false # Tam ekran oyun öndeyken büyük STT modeli GPU'dan bırakılır, hafif model devralır (ADR 0072).
+  game_mode_stt_model: null # Oyun modundaki hafif model; boşsa yerelde kurulu faster-whisper small.
   stt_hotwords: [] # İsteğe bağlı yerel ipuçları; prompt veya transcript düzeltmesi değildir.
   stt_alias_hotwords: false # Öğretilmiş uygulama takma adlarının hedefleri STT ipucuna eklenir (ADR 0044).
   # Karma tanıma (ADR 0046): uyandırma, yankı ve söz kesme yerel metinle karar verilir; yalnız

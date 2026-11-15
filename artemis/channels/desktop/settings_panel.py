@@ -236,6 +236,7 @@ class SettingsPanel(QWidget):
     followup_box: QCheckBox
     live_transcript: QCheckBox
     noise_suppression: QCheckBox
+    game_mode: QCheckBox
     echo_cancellation: QCheckBox
     advanced_toggle: QToolButton
     noise_level: QComboBox

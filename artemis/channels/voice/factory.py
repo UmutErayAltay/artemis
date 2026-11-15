@@ -43,6 +43,11 @@ from artemis.channels.voice.echo import (
     EchoCanceller,
     EchoReference,
 )
+from artemis.channels.voice.game_mode import (
+    GameModeRecognizer,
+    fullscreen_app_active,
+    resolve_light_model,
+)
 from artemis.channels.voice.kws import WakeSpotter
 from artemis.channels.voice.live_text import SherpaLiveTranscriber
 from artemis.channels.voice.silero import SileroVAD
@@ -240,8 +245,23 @@ async def build_voice_controller(
             local_voice = VoiceConfig.model_validate(
                 {**local_voice.model_dump(), "stt_hotwords": (local_voice.wake_word,)}
             )
-        recognizer = FasterWhisperRecognizer(local_voice)
-        await _prepare(recognizer)
+        whisper = FasterWhisperRecognizer(local_voice)
+        await _prepare(whisper)
+        recognizer: SpeechRecognizer = whisper
+        if settings.voice.game_mode:
+            light_path = resolve_light_model(settings.voice)
+            if light_path is None:
+                # Hafif model yoksa büyük model GPU'da kalır; durum görünür olur.
+                on_state("game:unavailable")
+            else:
+                light = FasterWhisperRecognizer(
+                    local_voice.model_copy(update={"stt_model": light_path})
+                )
+                game = GameModeRecognizer(whisper, light, fullscreen_app_active, on_state)
+                game.start()
+                # Kurulum yarıda kalırsa izleyici iş parçacığı da durur.
+                cleanup.callback(game.close)
+                recognizer = game
         synthesizer: SpeechSynthesizer
         if settings.voice.tts_backend == "edge":
             edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)

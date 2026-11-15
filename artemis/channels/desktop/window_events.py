@@ -238,6 +238,22 @@ def handle_state(window: DesktopWindow, event: State) -> None:
                 "Yankı engelleme hata verdi ve bu oturumda kapatıldı; "
                 "ses yankı gidermeden sürüyor.",
             )
+    elif event.state == "voice_game":
+        game_messages = {
+            "on": (
+                "Oyun modu: tam ekran uygulama algılandı; büyük tanıma modeli bırakıldı, "
+                "hafif model dinliyor."
+            ),
+            "off": "Oyun modu bitti; büyük tanıma modeli geri yüklendi.",
+            "error": "Oyun modu model geçişi başarısız oldu; mevcut tanıma modeli sürüyor.",
+            "unavailable": (
+                "Oyun modu açık ama hafif model (small) bulunamadı; "
+                "Ayarlar > Ses'ten Small modelini indirin."
+            ),
+        }
+        msg = game_messages.get(event.message)
+        if msg:
+            window._append_chat("Artemis", msg)
     elif event.state == "voice_error":
         window._append_chat("Artemis", event.message)
         window.pet.flash_error()

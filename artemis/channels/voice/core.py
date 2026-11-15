@@ -1114,6 +1114,9 @@ class VoiceController:
         if self._wake_spotter is not None:
             self._wake_spotter.close()
             self._wake_spotter = None
+        closer = getattr(self.recognizer, "close", None)
+        if callable(closer):
+            closer()  # oyun modu izleyici iş parçacığı; düz tanıyıcıda yok
         for label, closer in (
             ("mikrofon", self.microphone.close),
             ("ses çıkışı", self.sink.close),

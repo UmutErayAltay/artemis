@@ -437,6 +437,13 @@ def _cleanup_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         "Değişiklik ses yeniden başlayınca uygulanır."
     )
     clean.addWidget(panel.noise_suppression)
+    panel.game_mode = QCheckBox("Oyun modu")
+    panel.game_mode.setToolTip(
+        "Tam ekran oyun öndeyken büyük tanıma modeli ekran kartı belleğinden bırakılır, "
+        "hafif model (Small) devralır; oyundan çıkınca büyük model geri yüklenir. "
+        "Değişiklik ses yeniden başlayınca uygulanır."
+    )
+    clean.addWidget(panel.game_mode)
     panel.echo_cancellation = QCheckBox("Yankı engelleme")
     panel.echo_cancellation.setToolTip(
         "WebRTC yankı giderici; Artemis'in hoparlörden çıkan kendi sesini mikrofondan "

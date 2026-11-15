@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
 import io
 import logging
@@ -299,6 +300,15 @@ class FasterWhisperRecognizer:
     def prepare(self) -> None:
         """Ses aygıtı açılmadan önce yerel modeli doğrular; indirme yapmaz."""
         self._load()
+
+    def unload(self) -> None:
+        """Modeli bırakır (GPU belleği); sonraki çağrı yeniden yükler. Süren çıkarımı bekler."""
+        # Önce çıkarım kilidi: çözüm sürerken model altından çekilmez. Sonra yükleme kilidi:
+        # eşzamanlı bir _load yarım kalmış modeli yeniden atamasın.
+        with self._inference_lock, self._load_lock:
+            self._model = None
+        # CTranslate2 belleği nesne toplanınca bırakılır; döngüsel referans beklemesin.
+        gc.collect()
 
     async def transcribe(self, pcm: bytes) -> str:
         self._final_waiting.set()
