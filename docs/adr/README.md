@@ -77,3 +77,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0072 — Oyun modu: tam ekranda büyük STT modelini bırakma](0072-oyun-modu.md)
 - [0073 — Bilgisayar kullanımında UI Automation gözlemi ve öğeye tıklama](0073-computer-use-uia-gozlem.md)
 - [0074 — OpenAI uyumlu bulut konuşma sesi](0074-bulut-konusma-sesi.md)
+- [0075 — Ürünleştirme planı ve kullanıcı başına ayar klasörü](0075-urunlestirme-plani.md)
