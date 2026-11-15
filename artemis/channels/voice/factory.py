@@ -10,6 +10,7 @@ from contextlib import AsyncExitStack
 from typing import Protocol
 
 from artemis.brain.agent_loop import RunResult
+from artemis.brain.emotion import emotion_tags_active
 from artemis.channels.runtime import Runtime
 from artemis.channels.voice.adapters import (
     EdgeTTSynthesizer,
@@ -301,7 +302,9 @@ async def build_voice_controller(
                 local_tts = PiperSynthesizer(settings.voice)
                 await _prepare(local_tts)
                 cleanup.push_async_callback(_close_optional, local_tts)
-                synthesizer = FallbackSynthesizer(cloud_tts, local_tts)
+                synthesizer = FallbackSynthesizer(
+                    cloud_tts, local_tts, strip_tags=emotion_tags_active(settings.voice)
+                )
             else:
                 synthesizer = cloud_tts
         else:

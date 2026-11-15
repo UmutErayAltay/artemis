@@ -63,6 +63,10 @@ def test_tts_cloud_save_roundtrip(tmp_path: Path, qt_app: QApplication) -> None:
     panel.tts_cloud_voice.setEditText("Kore")
     panel.tts_cloud_consent.setChecked(True)
     panel.tts_cloud_paid.setChecked(True)
+    assert not panel.tts_cloud_emotion_tags.isEnabled()
+    panel.tts_cloud_emotion.setChecked(True)
+    assert panel.tts_cloud_emotion_tags.isEnabled()
+    panel.tts_cloud_emotion_tags.setText("[laugh] [whisper]")
 
     save_choices(path, None, values=panel.values())
     voice = load_settings(path).voice
@@ -73,6 +77,8 @@ def test_tts_cloud_save_roundtrip(tmp_path: Path, qt_app: QApplication) -> None:
     assert voice.tts_cloud_voice == "Kore"
     assert voice.allow_cloud_tts_text is True
     assert voice.tts_cloud_allow_paid is True
+    assert voice.tts_cloud_emotion_tags is True
+    assert voice.tts_cloud_emotion_tag_list == ("[laugh]", "[whisper]")
 
     reloaded = SettingsPanel(path)
     assert reloaded.tts_combo.currentData() == "cloud"
@@ -82,6 +88,9 @@ def test_tts_cloud_save_roundtrip(tmp_path: Path, qt_app: QApplication) -> None:
     assert reloaded.tts_cloud_voice.currentText() == "Kore"
     assert reloaded.tts_cloud_consent.isChecked() is True
     assert reloaded.tts_cloud_paid.isChecked() is True
+    assert reloaded.tts_cloud_emotion.isChecked() is True
+    assert reloaded.tts_cloud_emotion_tags.text() == "[laugh] [whisper]"
+    assert reloaded.tts_cloud_emotion_tags.isEnabled() is True
 
     panel.deleteLater()
     reloaded.deleteLater()

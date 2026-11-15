@@ -148,6 +148,8 @@ voice:
   # tts_cloud_voice: ''            # Boşsa sağlayıcı varsayılanı kullanılır
   # tts_cloud_sample_rate: 24000   # Sağlayıcı hızı bildirmediğinde kullanılacak PCM örnekleme hızı
   # tts_cloud_allow_paid: false    # :free olmayan veya Gemini modelleri için açık ücretli izni
+  # tts_cloud_emotion_tags: false  # Modelin desteklediği satır içi duygu etiketlerine izin ver
+  # tts_cloud_emotion_tag_list: ["[laugh]", "[sigh]", "[whisper]", "[anger]"]  # Yalnız bulut TTS'e gider
   allow_cloud_tts_text: false
   ffmpeg: ffmpeg
 

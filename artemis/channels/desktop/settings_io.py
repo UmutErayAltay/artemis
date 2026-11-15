@@ -122,6 +122,13 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     ),
     _checkbox(("voice", "allow_cloud_tts_text"), "tts_cloud_consent"),
     _checkbox(("voice", "tts_cloud_allow_paid"), "tts_cloud_paid"),
+    _checkbox(("voice", "tts_cloud_emotion_tags"), "tts_cloud_emotion"),
+    PanelBinding(
+        ("voice", "tts_cloud_emotion_tag_list"),
+        "tts_cloud_emotion_tags",
+        lambda edit: tuple(edit.text().split()),
+        lambda edit, value: edit.setText(" ".join(str(v) for v in value)),
+    ),
     _precision_binding(),
     _checkbox(("voice", "continuous_mode"), "continuous_mode", quiet=True),
     PanelBinding(
@@ -247,7 +254,8 @@ def save_choices(
         section = raw
         for key in setting_path[:-1]:
             section = section.setdefault(key, {})
-        section[setting_path[-1]] = value
+        # Config tuple alanları panelde tuple okunur; YAML yalnız liste yazabilir.
+        section[setting_path[-1]] = list(value) if isinstance(value, tuple) else value
     if stt_model is not None:
         raw["voice"]["stt_model"] = str(stt_model)
     if applications is not None:

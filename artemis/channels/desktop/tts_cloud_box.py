@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QHBoxLayout,
+    QLineEdit,
     QPushButton,
     QVBoxLayout,
     QWidget,
@@ -182,6 +183,15 @@ class TtsCloudBox(QWidget):
         panel.tts_cloud_paid.setAccessibleName("Ücretli modele izin ver")
         layout.addWidget(panel.tts_cloud_paid)
 
+        panel.tts_cloud_emotion = QCheckBox("Bu model duygu etiketlerini destekliyor")
+        panel.tts_cloud_emotion.setAccessibleName("Bu model duygu etiketlerini destekliyor")
+        layout.addWidget(panel.tts_cloud_emotion)
+
+        panel.tts_cloud_emotion_tags = QLineEdit()
+        panel.tts_cloud_emotion_tags.setPlaceholderText("[laugh] [sigh] [whisper]")
+        panel.tts_cloud_emotion_tags.setAccessibleName("Duygu etiketleri")
+        field(layout, "Duygu etiketleri", panel.tts_cloud_emotion_tags)
+
         panel.tts_cloud_hint = meta_label("")
         panel.tts_cloud_hint.setAccessibleName("Bulut konuşma bilgisi")
         layout.addWidget(panel.tts_cloud_hint)
@@ -192,6 +202,7 @@ class TtsCloudBox(QWidget):
         panel.tts_cloud_model.currentTextChanged.connect(self._model_changed)
         panel.tts_cloud_consent.toggled.connect(self._sync_state)
         panel.tts_cloud_paid.toggled.connect(self._sync_state)
+        panel.tts_cloud_emotion.toggled.connect(self._sync_state)
 
         model_edit = panel.tts_cloud_model.lineEdit()
         if model_edit is not None:
@@ -199,6 +210,7 @@ class TtsCloudBox(QWidget):
         voice_edit = panel.tts_cloud_voice.lineEdit()
         if voice_edit is not None:
             voice_edit.textEdited.connect(panel._mark_dirty)
+        panel.tts_cloud_emotion_tags.textEdited.connect(panel._mark_dirty)
 
         if not panel._demo:
             self.reload_servers()
@@ -322,6 +334,9 @@ class TtsCloudBox(QWidget):
         name, endpoint = self._endpoint()
         live = not panel._demo
         panel.tts_cloud_fetch_button.setEnabled(live and endpoint is not None)
+        panel.tts_cloud_emotion_tags.setEnabled(
+            live and panel.tts_cloud_emotion.isChecked()
+        )
 
         parts: list[str] = []
         if status_prefix:

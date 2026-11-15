@@ -185,8 +185,32 @@ class VoiceConfig(BaseModel):
     # Sağlayıcı belgelemediğinde örnekleme hızı ayarı
     tts_cloud_sample_rate: int = Field(default=24000, ge=8000, le=48000)
     tts_cloud_allow_paid: bool = False  # Ücretli bulut ses modeli için açık kullanıcı izni
+    tts_cloud_emotion_tags: bool = False
+    tts_cloud_emotion_tag_list: tuple[str, ...] = (
+        "[laugh]",
+        "[sigh]",
+        "[whisper]",
+        "[anger]",
+    )
     allow_cloud_tts_text: bool = False
     ffmpeg: str = "ffmpeg"
+
+    @field_validator("tts_cloud_emotion_tag_list")
+    @classmethod
+    def validate_tts_cloud_emotion_tag_list(
+        cls, values: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        if len(values) > 20:
+            raise ValueError("En çok 20 duygu etiketi tanımlanabilir")
+        if len(values) != len(set(values)):
+            raise ValueError("Duygu etiketleri yinelenemez")
+        for tag in values:
+            if not re.fullmatch(r"\[[a-z][a-z _-]{1,23}\]", tag):
+                raise ValueError(
+                    "Her duygu etiketi [a-z] ile başlayan 2-24 karakterlik "
+                    "köşeli parantez biçiminde olmalı (ör. [laugh])"
+                )
+        return values
 
     @model_validator(mode="before")
     @classmethod

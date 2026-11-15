@@ -21,6 +21,7 @@ from artemis.brain.conversation import (
     frame_history,
     local_stamp,
 )
+from artemis.brain.emotion import emotion_tags_active
 from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.providers import Provider
@@ -508,6 +509,15 @@ class AgentLoop:
         # kullanıcı mesajı geçmişte göründüğü biçimle ([tarih saat] öneki, aynı zaman) gider.
         # Böylece her istek bir öncekinin uzantısı olur ve sağlayıcı önbelleği tutar.
         started_at = datetime.now(UTC).isoformat(timespec="seconds")
+        emotion_tags = emotion_tags_active(settings.voice)
+        emotion_instruction = (
+            "\nYanıtların sesli okunabilir. Duyguyu güçlendirmek için yerinde ve az "
+            "(en çok cümle başına bir) yalnız şu etiketleri kullanabilirsin: "
+            f"{', '.join(emotion_tags)}. Başka köşeli parantezli etiket uydurma; "
+            "yazılı içerikte (kod, liste, dosya) etiket kullanma."
+            if emotion_tags
+            else ""
+        )
         messages = [
             Message(
                 role="system",
@@ -532,6 +542,7 @@ class AgentLoop:
                     " Listede olmayan uygulamayı computer_use ile de açmaya çalışma; kullanıcıya"
                     " Ayarlar > Uygulamalar'dan eklemesini söyle."
                 )
+                + emotion_instruction
                 + public_notes
                 + public_companion
                 + prompt_section(skills),

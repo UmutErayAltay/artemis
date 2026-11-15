@@ -442,6 +442,8 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
         widget = getattr(first, binding.widget)
         if binding.widget == "cloud_server":  # "Seçilmedi" karma kipte geçersiz olurdu
             widget.setCurrentIndex(widget.count() - 1)
+        elif binding.widget == "tts_cloud_emotion_tags":  # yalnız [etiket] biçimi geçerli
+            widget.setText("[laugh] [cry]")
         else:
             _flip(widget)
     chosen = first.values()
