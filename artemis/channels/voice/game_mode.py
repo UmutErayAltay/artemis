@@ -189,12 +189,17 @@ class GameModeRecognizer:
             )
             self._on_state("game:error")
             return
+        if self._stop.is_set():
+            target.unload()
+            return
         with self._lock:
             self._active = target
             self._in_game = to_game
             # Yeni çağrılar artık hedefe gider; eskisini almış olanların bitmesi beklenir.
             while self._inflight.get(id(previous), 0) and not self._stop.is_set():
                 self._lock.wait(0.5)
+            if self._stop.is_set() and self._inflight.get(id(previous), 0) > 0:
+                return
         previous.unload()
         self._on_state("game:on" if to_game else "game:off")
 

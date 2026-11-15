@@ -15,12 +15,15 @@ from __future__ import annotations
 import contextlib
 import ctypes
 import functools
+import logging
 import sys
 import time
 from collections.abc import Callable
 from ctypes import wintypes
 from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _NOT_WINDOWS = "Bilgisayar kullanımı yalnız Windows'ta çalışır."
 
@@ -708,8 +711,10 @@ def ui_elements(
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
         )
     except (OSError, subprocess.SubprocessError):
+        logger.warning("UIA okuma başarısız (%s).", "zaman_asimi")
         return []
     if completed.returncode != 0:
+        logger.warning("UIA okuma başarısız (%s).", "cikis_kodu")
         return []
     raw = (completed.stdout or "").strip()
     if not raw:
@@ -717,6 +722,7 @@ def ui_elements(
     try:
         parsed: object = json.loads(raw)
     except json.JSONDecodeError:
+        logger.warning("UIA okuma başarısız (%s).", "json")
         return []
     if isinstance(parsed, dict):
         parsed = [parsed]

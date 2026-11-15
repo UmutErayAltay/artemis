@@ -192,12 +192,13 @@ class SessionMemory:
     def learn(self, action: Action) -> None:
         """Yeni eylemin `observed`'ı son adımın sonucudur; `progress` en son not olur."""
         if action.observed:
+            masked_observed = mask_screen_secrets(action.observed)
             for record in reversed(self.steps):
                 if not record.note:
-                    record.result = action.observed
+                    record.result = masked_observed
                     break
         if action.progress:
-            self.progress = action.progress
+            self.progress = mask_screen_secrets(action.progress)
 
     def is_repeat(self, signature: tuple[Any, ...]) -> bool:
         """Önerilen eylem dahil aynı imza son 6 uygulanmış adımda >=3 olur mu?"""
@@ -568,12 +569,18 @@ class ComputerSession:
                 verdict = (False, f"Doğrulama çalışamadı: {captured.summary}")
             else:
                 if with_images:
+                    elements_block = ""
+                    if self._config.observation == "both":
+                        hwnd = self._layout.window[0] if self._layout else 0
+                        elements_block = "\n" + _render_elements(await self._read_elements(hwnd))
                     messages = [
                         Message(role="system", content=VERIFY_PROMPT),
                         Message(
                             role="user",
-                            content=f"Hedef: {goal}\nModelin bitti notu: {done_text}\n"
-                            f"Ekran sayısı: {len(captured)}.",
+                            content=(
+                                f"Hedef: {goal}\nModelin bitti notu: {done_text}\n"
+                                f"Ekran sayısı: {len(captured)}.{elements_block}"
+                            ),
                         ),
                         *(
                             Message(
@@ -827,9 +834,10 @@ class ComputerSession:
             auto_approved=auto_approved,
             screen=action.screen,
             # observed/progress modelin ekrandan türettiği serbest metindir ve ekran verisi
-            # (ör. sayfa başlığı) taşıyabilir; yalnız kısaltılıp yazılır, burada filtrelenemez.
-            observed=(action.observed or "")[:200] or None,
-            progress=(action.progress or "")[:200] or None,
+            # (ör. sayfa başlığı) taşıyabilir; sır kalıpları burada filtrelenip
+            # kısaltılarak yazılır.
+            observed=mask_screen_secrets(action.observed or "")[:200] or None,
+            progress=mask_screen_secrets(action.progress or "")[:200] or None,
         )
         return None
 

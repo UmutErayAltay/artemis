@@ -18,14 +18,20 @@ from pydantic import ValidationError
 from artemis.brain.models import Completion, Message
 from artemis.computer import windows
 from artemis.computer.actions import (
-     SYSTEM_PROMPT_UIA,
+    SYSTEM_PROMPT_UIA,
     UIA_ADDENDUM,
     VERIFY_PROMPT_UIA,
     Action,
     is_sensitive,
     parse_action,
 )
-from artemis.computer.session import ComputerSession, SessionResult
+from artemis.computer.session import (
+    _ELEMENTS_HEADER,
+    ComputerSession,
+    SessionMemory,
+    SessionResult,
+    StepRecord,
+)
 from artemis.computer.windows import UiElement
 from artemis.config.settings import ComputerUseConfig
 
@@ -455,3 +461,96 @@ async def test_repeat_guard_catches_same_element_under_new_ids() -> None:
     await env.run()
     assert len([c for c in env.backend.calls if c[0] == "click"]) < 4
     assert any("TEKRAR" in b["reason"] for b in env.audit.named("computer_blocked"))
+
+
+async def test_session_memory_and_audit_mask_secrets_in_observed_and_progress() -> None:
+    secret = "sk-" + "b" * 40
+    memory = SessionMemory()
+    memory.add(StepRecord(n=1, action="wait", reason="bekle"))
+    action = Action(
+        type="wait",
+        seconds=1.0,
+        reason="test",
+        observed=f"anahtar bulundu: {secret}",
+        progress=f"durum: {secret}",
+    )
+    memory.learn(action)
+    assert secret not in memory.steps[0].result
+    assert "[GİZLENDİ]" in memory.steps[0].result
+    assert secret not in memory.progress
+    assert "[GİZLENDİ]" in memory.progress
+    rendered = memory.render()
+    assert secret not in rendered
+    assert "[GİZLENDİ]" in rendered
+
+    # _emit_step path
+    env = Env(
+        act(
+            type="wait",
+            seconds=1.0,
+            observed=f"ekrandaki {secret}",
+            progress=f"not {secret}",
+        ),
+        DONE,
+        YES,
+    )
+    await env.run()
+    steps = env.audit.named("computer_step")
+    assert len(steps) >= 1
+    step_event = steps[0]
+    assert secret not in (step_event["observed"] or "")
+    assert "[GİZLENDİ]" in (step_event["observed"] or "")
+    assert secret not in (step_event["progress"] or "")
+    assert "[GİZLENDİ]" in (step_event["progress"] or "")
+
+
+async def test_both_observation_verify_includes_elements_header() -> None:
+    env = Env(DONE, YES, observation="both")
+    result = await env.run()
+
+    assert result.reason == "done"
+    assert len(env.provider.seen) == 2
+    verify_msgs = env.provider.seen[1]
+    first_user_msg = verify_msgs[1].content
+    assert "Ekran sayısı:" in first_user_msg
+    assert _ELEMENTS_HEADER in first_user_msg
+    assert '[1] Button "Gönder"' in first_user_msg
+
+
+def test_windows_ui_elements_logs_warnings_on_failures(
+    monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    monkeypatch.setattr(windows.sys, "platform", "win32")
+
+    def timeout_runner(*a: Any, **k: Any) -> Any:
+        raise subprocess.TimeoutExpired("powershell.exe", 1)
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        items = windows.ui_elements(10, runner=timeout_runner)
+    assert items == []
+    assert any(
+        "UIA okuma başarısız (zaman_asimi)." in record.message for record in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        items = windows.ui_elements(
+            10, runner=lambda *a, **k: SimpleNamespace(stdout="[]", returncode=4)
+        )
+    assert items == []
+    assert any(
+        "UIA okuma başarısız (cikis_kodu)." in record.message for record in caplog.records
+    )
+
+    caplog.clear()
+    with caplog.at_level(logging.WARNING):
+        items = windows.ui_elements(
+            10, runner=lambda *a, **k: SimpleNamespace(stdout="bozuk json", returncode=0)
+        )
+    assert items == []
+    assert any(
+        "UIA okuma başarısız (json)." in record.message for record in caplog.records
+    )

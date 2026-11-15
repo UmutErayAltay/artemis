@@ -231,3 +231,44 @@ def test_old_model_is_not_unloaded_while_a_call_still_uses_it() -> None:
     finally:
         release.set()
         game.close()
+
+
+def test_stop_during_prepare_does_not_swap_and_unloads_target() -> None:
+    log: list[str] = []
+    states: list[str] = []
+    primary = FakeRecognizer("primary", log)
+
+    class StoppingLight(FakeRecognizer):
+        def prepare(self) -> None:
+            super().prepare()
+            game.close()
+
+    light = StoppingLight("light", log)
+    game = GameModeRecognizer(
+        primary, light, ScriptedDetector([True]), states.append, poll_seconds=0.01
+    )
+    game._switch(to_game=True)
+
+    assert game.active is primary
+    assert not game.in_game
+    assert primary.unload_calls == 0
+    assert light.prepare_calls == 1
+    assert light.unload_calls == 1
+    assert states == []
+
+
+def test_stop_during_inflight_wait_does_not_unload_previous() -> None:
+    log: list[str] = []
+    states: list[str] = []
+    primary = FakeRecognizer("primary", log)
+    light = FakeRecognizer("light", log)
+    game = GameModeRecognizer(
+        primary, light, ScriptedDetector([True]), states.append, poll_seconds=0.01
+    )
+    rec = game._acquire()
+    assert rec is primary
+    threading.Timer(0.05, game.close).start()
+    game._switch(to_game=True)
+    assert primary.unload_calls == 0
+    assert "game:on" not in states
+    game._release(rec)

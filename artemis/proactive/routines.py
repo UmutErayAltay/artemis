@@ -95,7 +95,7 @@ def resolve_tool_name(name: str, registry: ToolRegistry) -> str | None:
     araçları tek alt çizgiyle (`mcp_<sunucu>_<araç>`) adlanır, çift alt çizgili önek yabancıdır."""
     base = _FOREIGN_PREFIX.sub("", name)
     candidates = [name, base]
-    if "_" in base:
+    if base != name and "_" in base:
         candidates.append(base.split("_", 1)[1])
     return next((item for item in candidates if registry.get(item) is not None), None)
 
