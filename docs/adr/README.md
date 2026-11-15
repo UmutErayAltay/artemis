@@ -76,3 +76,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0071 — Konuşma sonu sessizliğinde spekülatif nihai STT](0071-spekulatif-nihai-stt.md)
 - [0072 — Oyun modu: tam ekranda büyük STT modelini bırakma](0072-oyun-modu.md)
 - [0073 — Bilgisayar kullanımında UI Automation gözlemi ve öğeye tıklama](0073-computer-use-uia-gozlem.md)
+- [0074 — OpenAI uyumlu bulut konuşma sesi](0074-bulut-konusma-sesi.md)

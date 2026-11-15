@@ -53,6 +53,7 @@ from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS
 from artemis.channels.desktop.triggers_section import TriggersSection
+from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
 from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import BUILTIN_AGENT
 
@@ -367,11 +368,13 @@ def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     if ema_missing:
         ema_index = panel.tts_combo.count() - 1
         panel.tts_combo.model().item(ema_index).setEnabled(False)  # type: ignore[attr-defined]
+    panel.tts_combo.addItem("Bulut modeli (OpenRouter, Gemini…)", "cloud")
     field(speech, "Konuşma sesi", panel.tts_combo, help=(
         "Edge (bulut): yanıt metni konuşmaya çevrilmek üzere internete, bir bulut hizmetine "
         "gider. Piper ve EMA bu bilgisayarda çalışır, metin dışarı çıkmaz. Ses yeniden "
         "başlayınca uygulanır."
     ))
+    build_tts_cloud_box(panel, speech)
     panel.continuous_mode = QCheckBox("Kesintisiz sohbet")
     speech.addLayout(with_help(panel.continuous_mode, (
         "Uyandırma adı söylemeden sürekli dinler. Karma tanıma açıksa kesintisiz kipte her söz "

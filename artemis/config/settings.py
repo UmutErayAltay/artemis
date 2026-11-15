@@ -169,13 +169,22 @@ class VoiceConfig(BaseModel):
     # paylaşır) uyandırma sözü olmayan bölütleri STT'den ÖNCE eler; kararı yine transkript verir.
     wake_backend: Literal["transcript", "kws"] = "transcript"
     wake_kws_threshold: float = Field(default=0.2, gt=0, lt=1)
-    tts_backend: Literal["piper", "edge", "ema"] = "piper"
+    tts_backend: Literal["piper", "edge", "ema", "cloud"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True
     piper_model: Path | None = None
     piper_config: Path | None = None
     piper_voice: str = ""
     edge_voice: str = ""
+    tts_cloud_endpoint: str = ""  # Üst düzey `endpoints` kimliği (stt_cloud_endpoint ile aynı)
+    # ADR 0074: Gemini, /audio/speech yerine :streamGenerateContent?alt=sse + x-goog-api-key.
+    tts_cloud_protocol: Literal["openai", "gemini"] = "openai"
+    tts_cloud_model: str = ""  # Bulut konuşma sesi model kimliği
+    # Boşsa sağlayıcı varsayılanı kullanılır, alan gönderilmez
+    tts_cloud_voice: str = Field(default="", max_length=120)
+    # Sağlayıcı belgelemediğinde örnekleme hızı ayarı
+    tts_cloud_sample_rate: int = Field(default=24000, ge=8000, le=48000)
+    tts_cloud_allow_paid: bool = False  # Ücretli bulut ses modeli için açık kullanıcı izni
     allow_cloud_tts_text: bool = False
     ffmpeg: str = "ffmpeg"
 
@@ -934,6 +943,10 @@ class Settings(BaseModel):
             raise ValueError(
                 "Karma tanıma için stt_cloud_endpoint endpoints içinde tanımlı ve "
                 "stt_cloud_model dolu olmalı (xai protokolünde model gerekmez)"
+            )
+        if voice.tts_backend == "cloud" and voice.tts_cloud_endpoint not in self.endpoints:
+            raise ValueError(
+                "Bulut konuşma sesi için tts_cloud_endpoint endpoints içinde tanımlı olmalı"
             )
         if any(name not in self.applications for name in self.close_without_confirmation):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")

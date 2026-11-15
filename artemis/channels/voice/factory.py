@@ -22,6 +22,7 @@ from artemis.channels.voice.adapters import (
     SoundDeviceSink,
     WebRTCVAD,
 )
+from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
 from artemis.channels.voice.core import (
     AudioSink,
     Microphone,
@@ -286,6 +287,23 @@ async def build_voice_controller(
                 synthesizer = FallbackSynthesizer(primary_tts, local_tts)
             else:
                 synthesizer = primary_tts
+        elif settings.voice.tts_backend == "cloud":
+            endpoint_id = settings.voice.tts_cloud_endpoint
+            cloud_tts = CloudSpeechSynthesizer(
+                settings.voice,
+                endpoint_id,
+                settings.endpoints[endpoint_id],
+                runtime.audit,
+            )
+            cleanup.push_async_callback(_close_optional, cloud_tts)
+            # Ücretsiz model süresi dolduğunda veya kota sınırında yerel Piper'a düşülür.
+            if settings.voice.tts_local_fallback and settings.voice.piper_model:
+                local_tts = PiperSynthesizer(settings.voice)
+                await _prepare(local_tts)
+                cleanup.push_async_callback(_close_optional, local_tts)
+                synthesizer = FallbackSynthesizer(cloud_tts, local_tts)
+            else:
+                synthesizer = cloud_tts
         else:
             local_tts = PiperSynthesizer(settings.voice)
             await _prepare(local_tts)

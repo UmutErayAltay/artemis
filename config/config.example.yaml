@@ -140,6 +140,14 @@ voice:
   piper_config: ../models/tr_TR-dfki-medium.onnx.json
   piper_voice: tr_TR-dfki-medium
   edge_voice: ''
+  # Bulut konuşma sesi (ADR 0074): tts_backend: cloud seçildiğinde kullanılır.
+  # OpenRouter örneği: tts_cloud_model: heygen/heygen-voice-1-turbo:free
+  # tts_cloud_endpoint: openrouter # Üstteki `endpoints` içinde tanımlı bir kimlik
+  # tts_cloud_protocol: openai     # openai (/audio/speech) | gemini (:streamGenerateContent?alt=sse)
+  # tts_cloud_model: ''            # Bulut konuşma sesi model kimliği
+  # tts_cloud_voice: ''            # Boşsa sağlayıcı varsayılanı kullanılır
+  # tts_cloud_sample_rate: 24000   # Sağlayıcı hızı bildirmediğinde kullanılacak PCM örnekleme hızı
+  # tts_cloud_allow_paid: false    # :free olmayan veya Gemini modelleri için açık ücretli izni
   allow_cloud_tts_text: false
   ffmpeg: ffmpeg
 

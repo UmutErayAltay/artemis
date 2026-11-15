@@ -226,6 +226,15 @@ class SettingsPanel(QWidget):
     _cloud_fetch_for: str
     cloud_stt_hint: QLabel
     tts_combo: QComboBox
+    tts_cloud_box: QWidget
+    tts_cloud_server: QComboBox
+    tts_cloud_protocol: QComboBox
+    tts_cloud_model: QComboBox
+    tts_cloud_fetch_button: QPushButton
+    tts_cloud_voice: QComboBox
+    tts_cloud_consent: QCheckBox
+    tts_cloud_paid: QCheckBox
+    tts_cloud_hint: QLabel
     continuous_mode: QCheckBox
     dictation_enabled: QCheckBox
     dictation_hotkey: QLineEdit
