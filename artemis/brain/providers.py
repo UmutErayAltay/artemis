@@ -38,6 +38,7 @@ from artemis.tools.platform import child_environment
 
 _PRIVATE_PLACEHOLDER = "[Gizlilik ayarı nedeniyle içerik buluta gönderilmedi.]"
 _TOOL_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_CREDENTIAL_PREFIX_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 
 class Provider(Protocol):
@@ -390,6 +391,11 @@ def _key(name: str) -> str:
     return key
 
 
+def credential_prefix() -> str:
+    raw = os.environ.get("ARTEMIS_CREDENTIAL_PREFIX", "Artemis")
+    return raw if _CREDENTIAL_PREFIX_RE.fullmatch(raw) else "Artemis"
+
+
 def endpoint_key_variable(endpoint_id: str) -> str:
     return f"ARTEMIS_{endpoint_id.upper().replace('-', '_')}_API_KEY"
 
@@ -397,7 +403,7 @@ def endpoint_key_variable(endpoint_id: str) -> str:
 def stored_endpoint_key(endpoint_id: str) -> str | None:
     """Özel uç anahtarı: önce ortam, sonra kasa. Ortama yazılmaz (alt süreçlere geçmesin)."""
     return os.environ.get(endpoint_key_variable(endpoint_id)) or read_secret(
-        f"Artemis/{endpoint_id}"
+        f"{credential_prefix()}/{endpoint_id}"
     )
 
 

@@ -17,8 +17,14 @@ import yaml
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from PySide6.QtCore import QObject, Signal
+
 from artemis.channels.desktop.connect_wizard import (
     CLAUDE_DOC_URL,
+    GEMINI_KEY_URL,
+    GEMINI_MODEL_ALIAS,
+    GEMINI_MODEL_ID,
+    GEMINI_OPENAI_BASE_URL,
     ConnectWizard,
     OpenRouterPkce,
     free_tool_models,
@@ -69,7 +75,39 @@ class _FakeResponse:
         return self._body
 
 
-def test_three_main_buttons_have_equal_size_and_expected_labels(
+class _FakeClipboard(QObject):
+    dataChanged = Signal()
+
+    def __init__(self, initial: str = "") -> None:
+        super().__init__()
+        self._text = initial
+        self.cleared = 0
+
+    def text(self) -> str:
+        return self._text
+
+    def set_text(self, value: str) -> None:
+        self._text = value
+        self.dataChanged.emit()
+
+    def clear(self) -> None:
+        self._text = ""
+        self.cleared += 1
+
+
+
+def _settle(app, wizard, timeout: float = 3.0) -> None:
+    """Gemini doğrulaması arka plan iş parçacığında: sonuç sinyali gelene dek olayları işlet."""
+    import time
+
+    end = time.monotonic() + timeout
+    app.processEvents()
+    while getattr(wizard, "_gemini_thread", None) is not None and time.monotonic() < end:
+        app.processEvents()
+        time.sleep(0.01)
+    app.processEvents()
+
+def test_four_main_buttons_have_equal_size_and_expected_labels(
     tmp_path: Path, qt_app
 ) -> None:
     path = _write_base_config(tmp_path)
@@ -79,9 +117,11 @@ def test_three_main_buttons_have_equal_size_and_expected_labels(
         oauth=OpenRouterPkce(http=_UnexpectedNetworkHttp()),
         run_cli=lambda _name: None,
         store_key=lambda _ep, _key: None,
+        clipboard=_FakeClipboard(),
+        gemini_validator=lambda _key: 500,
     )
     buttons = wizard.choice_buttons
-    assert len(buttons) == 3
+    assert len(buttons) == 4
     widths = {b.minimumWidth() for b in buttons}
     heights = {b.minimumHeight() for b in buttons}
     policies = {
@@ -91,11 +131,12 @@ def test_three_main_buttons_have_equal_size_and_expected_labels(
     assert len(heights) == 1 and next(iter(heights)) > 0
     assert len(policies) == 1
 
-    first_lines = [b.text().splitlines()[0] for b in buttons]
-    assert first_lines == [
-        "Ücretsiz hesapla giriş",
-        "Aboneliğimle bağlan",
-        "API anahtarı ya da yerel model",
+    texts = [b.text() for b in buttons]
+    assert texts == [
+        "Ücretsiz hesapla giriş\nOpenRouter · anahtar görmeden",
+        "Google hesabımla\nGemini · ücretsiz kota",
+        "Aboneliğimle bağlan\nClaude",
+        "API anahtarı ya da yerel model\nOllama · LM Studio · Groq…",
     ]
     for button in buttons:
         assert len(button.text().splitlines()) == 2
@@ -225,30 +266,142 @@ def test_api_key_preset_writes_config_and_stores_key(tmp_path: Path, qt_app) -> 
         oauth=OpenRouterPkce(http=_UnexpectedNetworkHttp()),
         run_cli=lambda _name: None,
         store_key=lambda ep, k: (stored.append((ep, k)) or None),
+        clipboard=_FakeClipboard(),
     )
     wizard.apikey_button.click()
-    # Gemini şablonunu seç
-    gemini_index = next(
-        i for i in range(wizard.preset_combo.count()) if "Gemini" in wizard.preset_combo.itemText(i)
+    # Gemini şablonu artık bu listede olmamalı (kendi düğmesi var)
+    preset_texts = [wizard.preset_combo.itemText(i) for i in range(wizard.preset_combo.count())]
+    assert all("Gemini" not in text and "Google AI Studio" not in text for text in preset_texts)
+
+    groq_index = next(
+        i for i in range(wizard.preset_combo.count()) if "Groq" in wizard.preset_combo.itemText(i)
     )
-    wizard.preset_combo.setCurrentIndex(gemini_index)
+    wizard.preset_combo.setCurrentIndex(groq_index)
     assert not wizard.key_edit.isHidden()
     wizard.get_key_button.click()
-    assert opened == ["https://aistudio.google.com/apikey"]
+    assert opened == ["https://console.groq.com/keys"]
 
-    wizard.key_edit.setText("gemini-secret-key")
-    wizard.model_edit.setText("gemini-2.5-flash")
+    wizard.key_edit.setText("groq-secret-key")
+    wizard.model_edit.setText("llama-3.3-70b-versatile")
     wizard.bind_button.click()
 
-    assert stored == [("gemini", "gemini-secret-key")]
+    assert stored == [("groq", "groq-secret-key")]
     settings = load_settings(path)
-    assert settings.primary_model == "gemini-2-5-flash"
-    assert settings.endpoints["gemini"].api_key is True
+    assert settings.primary_model == "llama-3-3-70b-versatile"
+    assert settings.endpoints["groq"].api_key is True
     model = settings.models[settings.primary_model]
     assert model.provider == "openai_compatible"
+    assert model.endpoint == "groq"
+    assert model.model == "llama-3.3-70b-versatile"
+    assert "groq-secret-key" not in path.read_text(encoding="utf-8")
+    wizard.deleteLater()
+
+
+def test_gemini_guided_flow_clipboard_detection_and_disconnect(
+    tmp_path: Path, qt_app
+) -> None:
+    fake_key = "AIza" + "A" * 35  # 39 karakter sahte anahtar
+    path = _write_base_config(tmp_path)
+    stored: list[tuple[str, str]] = []
+    opened: list[str] = []
+    validated: list[str] = []
+    clipboard = _FakeClipboard()
+
+    wizard = ConnectWizard(
+        path,
+        open_url=opened.append,
+        oauth=OpenRouterPkce(http=_UnexpectedNetworkHttp()),
+        run_cli=lambda _name: None,
+        store_key=lambda ep, k: (stored.append((ep, k)) or None),
+        clipboard=clipboard,
+        gemini_validator=lambda k: (validated.append(k) or 200),
+    )
+    wizard.gemini_button.click()
+    assert opened == [GEMINI_KEY_URL]
+
+    # 1. Anahtar biçimine uymayan pano metni yok sayılır
+    clipboard.set_text("merhaba dünya normal metin")
+    _settle(qt_app, wizard)
+    assert validated == []
+    assert stored == []
+
+    # 2. Adımdan çıkılınca pano izleyicisi ayrılır
+    wizard.apikey_button.click()
+    clipboard.set_text(fake_key)
+    _settle(qt_app, wizard)
+    assert validated == []
+    assert stored == []
+
+    # 3. Gemini adımına dönülür; geçerli anahtar kopyalanınca doğrulanır, saklanır, pano temizlenir
+    clipboard.set_text("")
+    wizard.gemini_button.click()
+    clipboard.set_text(f"  {fake_key}\n")
+    # Pano metni tam eşleştiğinde temizlendiğini doğrulamak için tam metni koyalım
+    clipboard._text = fake_key
+    _settle(qt_app, wizard)
+
+    assert validated == [fake_key]
+    assert stored == [("gemini", fake_key)]
+    assert clipboard.text() == ""
+    assert clipboard.cleared == 1
+
+    settings = load_settings(path)
+    assert settings.primary_model == GEMINI_MODEL_ALIAS
+    assert settings.endpoints["gemini"].base_url == GEMINI_OPENAI_BASE_URL
+    assert settings.endpoints["gemini"].api_key is True
+    model = settings.models[GEMINI_MODEL_ALIAS]
+    assert model.provider == "openai_compatible"
     assert model.endpoint == "gemini"
-    assert model.model == "gemini-2.5-flash"
-    assert "gemini-secret-key" not in path.read_text(encoding="utf-8")
+    assert model.model == GEMINI_MODEL_ID
+    assert fake_key not in path.read_text(encoding="utf-8")
+
+    # Başarıdan sonra pano tekrar değişirse doğrulayıcı bir daha çağrılmaz
+    clipboard.set_text(fake_key)
+    _settle(qt_app, wizard)
+    assert len(validated) == 1
+    wizard.deleteLater()
+
+
+def test_gemini_invalid_key_and_manual_paste(tmp_path: Path, qt_app) -> None:
+    fake_key = "AIza" + "B" * 35
+    path = _write_base_config(tmp_path)
+    stored: list[tuple[str, str]] = []
+    validated: list[str] = []
+    clipboard = _FakeClipboard("başka bir metin")
+    status_to_return = 401
+
+    wizard = ConnectWizard(
+        path,
+        open_url=lambda _url: None,
+        oauth=OpenRouterPkce(http=_UnexpectedNetworkHttp()),
+        run_cli=lambda _name: None,
+        store_key=lambda ep, k: (stored.append((ep, k)) or None),
+        clipboard=clipboard,
+        gemini_validator=lambda k: (validated.append(k) or status_to_return),
+    )
+    wizard.gemini_button.click()
+
+    # 401 dönen doğrulama: hata mesajı gösterilir, anahtar saklanmaz, mesajda anahtar geçmez
+    clipboard.set_text(fake_key)
+    _settle(qt_app, wizard)
+    assert validated == [fake_key]
+    assert stored == []
+    assert wizard.status.text() == "Anahtar geçersiz görünüyor."
+    assert fake_key not in wizard.status.text()
+
+    # Elle yapıştırma yolu (pano başka bir metin tutarken panoyu silmez)
+    status_to_return = 200
+    clipboard._text = "kullanıcının başka panosu"
+    wizard.gemini_key_edit.setText(fake_key)
+    wizard.gemini_bind_button.click()
+    _settle(qt_app, wizard)
+
+    assert len(validated) == 2
+    assert stored == [("gemini", fake_key)]
+    assert clipboard.text() == "kullanıcının başka panosu"
+    assert clipboard.cleared == 0
+    settings = load_settings(path)
+    assert settings.primary_model == GEMINI_MODEL_ALIAS
     wizard.deleteLater()
 
 

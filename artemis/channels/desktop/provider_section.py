@@ -52,6 +52,7 @@ from artemis.brain.model_report import SCENARIO_IDS, merge_retry, suggest_layout
 from artemis.brain.models import Message
 from artemis.brain.providers import (
     ClaudeCliProvider,
+    credential_prefix,
     endpoint_key_variable,
     provider_problem,
     stored_endpoint_key,
@@ -91,8 +92,6 @@ _BAD_URL = "Adres geçersiz: https:// ile başlamalı (http yalnız yerel sunucu
 # Satır içi renkler (HTML etiketleri) temadan gelir; sabit onaltılık renk yok, tema değişince
 # set_theme yeniden çizer.
 _COLOR_KEYS = ("muted", "accent", "warning", "error")
-
-
 
 
 WIDE_AT = 900  # bu genişlikten itibaren model ayrıntısı listenin yanında durur
@@ -209,7 +208,7 @@ class CliTest(QThread):
 def store_endpoint_key(name: str, typed: str) -> str | None:
     """Anahtarı kasaya yazar (YAML'a asla); kasa yoksa "ortamda X tanımlayın." döner."""
     try:
-        write_secret(typed, f"Artemis/{name}")
+        write_secret(typed, f"{credential_prefix()}/{name}")
     except OSError:
         return f"ortamda {endpoint_key_variable(name)} tanımlayın."
     return None
@@ -734,7 +733,7 @@ class ProviderSection(QWidget):
         raw["endpoints"].pop(name, None)  # type: ignore[attr-defined]
         if not self._write(raw):
             return
-        delete_secret(f"Artemis/{name}")
+        delete_secret(f"{credential_prefix()}/{name}")
         self.endpoint_id.clear()
         self.base_url.clear()
         self.key.clear()

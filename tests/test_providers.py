@@ -12,6 +12,7 @@ from typing import Any, Literal
 
 import pytest
 
+import artemis.brain.providers as providers_mod
 from artemis.brain.errors import BudgetExceeded, ProviderError, RetryableProviderError
 from artemis.brain.models import Completion, Message, ToolCall
 from artemis.brain.providers import (
@@ -19,6 +20,8 @@ from artemis.brain.providers import (
     OllamaProvider,
     OpenRouterProvider,
     Provider,
+    credential_prefix,
+    stored_endpoint_key,
 )
 from artemis.brain.router import ProviderRouter
 from artemis.config.settings import ModelConfig, Settings
@@ -729,3 +732,34 @@ async def test_anthropic_broken_streamed_tool_input_is_rejected(http_server, tmp
         await provider_for("anthropic", http_server, tmp_path).complete(
             STREAM_MESSAGES, STREAM_TOOLS, timeout=5, stream=Recorder(),
         )
+
+
+def test_credential_prefix_changes_read_target_and_falls_back_on_invalid(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen_targets: list[str] = []
+    monkeypatch.delenv("ARTEMIS_GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(
+        providers_mod,
+        "read_secret",
+        lambda target: (seen_targets.append(target) or "sahte-deger"),
+    )
+
+    # Varsayılan önek: Artemis
+    monkeypatch.delenv("ARTEMIS_CREDENTIAL_PREFIX", raising=False)
+    assert credential_prefix() == "Artemis"
+    assert stored_endpoint_key("gemini") == "sahte-deger"
+    assert seen_targets[-1] == "Artemis/gemini"
+
+    # Geçerli özel önek: Artemis-test
+    monkeypatch.setenv("ARTEMIS_CREDENTIAL_PREFIX", "Artemis-test")
+    assert credential_prefix() == "Artemis-test"
+    assert stored_endpoint_key("gemini") == "sahte-deger"
+    assert seen_targets[-1] == "Artemis-test/gemini"
+
+    # Geçersiz önekler ("bad prefix!", boş veya 32 karakterden uzun) "Artemis"e döner
+    for invalid in ("bad prefix!", "", "a" * 33, "Artemis/alt"):
+        monkeypatch.setenv("ARTEMIS_CREDENTIAL_PREFIX", invalid)
+        assert credential_prefix() == "Artemis"
+        assert stored_endpoint_key("gemini") == "sahte-deger"
+        assert seen_targets[-1] == "Artemis/gemini"

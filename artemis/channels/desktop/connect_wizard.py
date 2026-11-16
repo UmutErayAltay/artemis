@@ -11,6 +11,7 @@ import contextlib
 import hashlib
 import hmac
 import http.server
+import re
 import secrets
 import shutil
 import threading
@@ -22,8 +23,8 @@ from urllib.parse import parse_qs, quote, urlsplit
 import httpx
 import yaml
 from pydantic import ValidationError
-from PySide6.QtCore import Qt, QUrl
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtCore import Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -60,6 +61,12 @@ OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1"
 OPENROUTER_AUTH_URL = "https://openrouter.ai/auth"
 OPENROUTER_KEYS_URL = "https://openrouter.ai/api/v1/auth/keys"
 OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models"
+GEMINI_KEY_URL = "https://aistudio.google.com/apikey"
+GEMINI_VALIDATE_URL = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1"
+GEMINI_OPENAI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai"
+GEMINI_MODEL_ALIAS = "gemini-3-flash"
+GEMINI_MODEL_ID = "gemini-3-flash-preview"
+GEMINI_KEY_RE = re.compile(r"^(AIza[0-9A-Za-z_-]{35}|AQ\.[0-9A-Za-z_-]{30,})$")
 
 _CALLBACK_HTML = (
     "<!doctype html><html><head><meta charset='utf-8'><title>Artemis</title></head>"
@@ -298,6 +305,38 @@ def _default_open_url(url: str) -> object:
     return QDesktopServices.openUrl(QUrl(url))
 
 
+def validate_gemini_key(key: str) -> int:
+    """Google AI Studio anahtarını tek bir GET isteğiyle doğrular; sır mesaja/loga girmez."""
+    try:
+        response = httpx.get(
+            GEMINI_VALIDATE_URL,
+            headers={"x-goog-api-key": key},
+            timeout=15,
+            follow_redirects=False,
+        )
+    except httpx.HTTPError:
+        return 0
+    return response.status_code
+
+
+class _GeminiValidateThread(QThread):
+    finished_with = Signal(str, int)
+
+    def __init__(
+        self,
+        key: str,
+        validator: Callable[[str], int],
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._key = key
+        self._validator = validator
+
+    def run(self) -> None:
+        status = self._validator(self._key)
+        self.finished_with.emit(self._key, status)
+
+
 def _load_raw(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         return {}
@@ -306,7 +345,7 @@ def _load_raw(config_path: Path) -> dict[str, Any]:
 
 
 class ConnectWizard(QDialog):
-    """İlk kurulumda kullanıcıya 3 yoldan biriyle beyin modeli bağlatan pencere."""
+    """İlk kurulumda kullanıcıya 4 yoldan biriyle beyin modeli bağlatan pencere."""
 
     def __init__(
         self,
@@ -316,6 +355,8 @@ class ConnectWizard(QDialog):
         oauth: OpenRouterPkce | None = None,
         run_cli: Callable[[str], str | None] | None = None,
         store_key: Callable[[str, str], str | None] | None = None,
+        clipboard: Any = None,
+        gemini_validator: Callable[[str], int] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -324,6 +365,10 @@ class ConnectWizard(QDialog):
         self._oauth: OpenRouterPkce = oauth or OpenRouterPkce()
         self._which: Callable[[str], str | None] = run_cli or shutil.which
         self._store_key: Callable[[str, str], str | None] = store_key or store_endpoint_key
+        self._clipboard: Any = clipboard
+        self._gemini_validator: Callable[[str], int] = gemini_validator or validate_gemini_key
+        self._watching_clipboard = False
+        self._gemini_thread: _GeminiValidateThread | None = None
 
         self.setWindowTitle("Artemis'i bir beyne bağla")
         root = QVBoxLayout(self)
@@ -339,14 +384,18 @@ class ConnectWizard(QDialog):
         self.openrouter_button = QPushButton(
             "Ücretsiz hesapla giriş\nOpenRouter · anahtar görmeden"
         )
+        self.gemini_button = QPushButton(
+            "Google hesabımla\nGemini · ücretsiz kota"
+        )
         self.subscription_button = QPushButton(
-            "Aboneliğimle bağlan\nClaude · ChatGPT"
+            "Aboneliğimle bağlan\nClaude"
         )
         self.apikey_button = QPushButton(
-            "API anahtarı ya da yerel model\nGemini · Groq · Ollama…"
+            "API anahtarı ya da yerel model\nOllama · LM Studio · Groq…"
         )
         self.choice_buttons = (
             self.openrouter_button,
+            self.gemini_button,
             self.subscription_button,
             self.apikey_button,
         )
@@ -360,9 +409,11 @@ class ConnectWizard(QDialog):
 
         self.stack = QStackedWidget()
         self._openrouter_page = self._build_openrouter_page()
+        self._gemini_page = self._build_gemini_page()
         self._subscription_page = self._build_subscription_page()
         self._apikey_page = self._build_apikey_page()
         self.stack.addWidget(self._openrouter_page)
+        self.stack.addWidget(self._gemini_page)
         self.stack.addWidget(self._subscription_page)
         self.stack.addWidget(self._apikey_page)
         root.addWidget(self.stack)
@@ -380,8 +431,10 @@ class ConnectWizard(QDialog):
         root.addLayout(bottom)
 
         self.openrouter_button.clicked.connect(self._start_openrouter_flow)
+        self.gemini_button.clicked.connect(self._show_gemini_panel)
         self.subscription_button.clicked.connect(self._show_subscription_panel)
         self.apikey_button.clicked.connect(self._show_apikey_panel)
+        self.finished.connect(self._on_dialog_finished)
 
         self._apply_preset_choice()
 
@@ -438,6 +491,31 @@ class ConnectWizard(QDialog):
         layout.addWidget(self.codex_add_button)
         return page
 
+    def _build_gemini_page(self) -> QWidget:
+        page = QWidget()
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 8, 0, 0)
+        layout.setSpacing(10)
+
+        self.gemini_steps = QLabel(
+            "1) Açılan sayfada Google hesabınla gir. "
+            "2) 'Create API key' / 'Anahtar oluştur' de. "
+            "3) Anahtarı kopyala — Artemis kendisi algılar."
+        )
+        self.gemini_steps.setWordWrap(True)
+        layout.addWidget(self.gemini_steps)
+
+        self.gemini_key_edit = QLineEdit()
+        self.gemini_key_edit.setAccessibleName("Gemini API anahtarı")
+        self.gemini_key_edit.setPlaceholderText("Anahtarı buraya da yapıştırabilirsiniz")
+        self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
+        layout.addWidget(self.gemini_key_edit)
+
+        self.gemini_bind_button = QPushButton("Bağla")
+        self.gemini_bind_button.clicked.connect(self._bind_gemini_manual)
+        layout.addWidget(self.gemini_bind_button)
+        return page
+
     def _build_apikey_page(self) -> QWidget:
         page = QWidget()
         layout = QVBoxLayout(page)
@@ -447,7 +525,7 @@ class ConnectWizard(QDialog):
         self.preset_combo = QComboBox()
         self.preset_combo.setAccessibleName("Sağlayıcı")
         for index, (label, slug, _url, _needs_key) in enumerate(PRESETS):
-            if not slug:
+            if not slug or slug == "gemini":
                 continue
             self.preset_combo.addItem(label, index)
         self.preset_combo.currentIndexChanged.connect(self._apply_preset_choice)
@@ -477,6 +555,7 @@ class ConnectWizard(QDialog):
     # --- 1. OpenRouter PKCE ---------------------------------------------------------------
 
     def _start_openrouter_flow(self) -> None:
+        self._stop_clipboard_watch()
         self.stack.setCurrentWidget(self._openrouter_page)
         self.openrouter_models.clear()
         self.openrouter_bind_button.setEnabled(False)
@@ -517,9 +596,105 @@ class ConnectWizard(QDialog):
         ):
             self.accept()
 
-    # --- 2. Abonelik (Claude / ChatGPT CLI) ----------------------------------------------
+    # --- 2. Google (Gemini) rehberli anahtar ---------------------------------------------
+
+    def _get_clipboard(self) -> Any:
+        if self._clipboard is not None:
+            return self._clipboard
+        return QGuiApplication.clipboard()
+
+    def _start_clipboard_watch(self) -> None:
+        if self._watching_clipboard:
+            return
+        clip = self._get_clipboard()
+        if clip is not None:
+            clip.dataChanged.connect(self._on_clipboard_changed)
+            self._watching_clipboard = True
+
+    def _stop_clipboard_watch(self) -> None:
+        if not self._watching_clipboard:
+            return
+        clip = self._get_clipboard()
+        self._watching_clipboard = False
+        if clip is not None:
+            with contextlib.suppress(RuntimeError, TypeError):
+                clip.dataChanged.disconnect(self._on_clipboard_changed)
+
+    def _on_dialog_finished(self, _result: int) -> None:
+        self._stop_clipboard_watch()
+
+    def closeEvent(self, event: Any) -> None:
+        self._stop_clipboard_watch()
+        super().closeEvent(event)
+
+    def _show_gemini_panel(self) -> None:
+        self.stack.setCurrentWidget(self._gemini_page)
+        self.status.setText("")
+        self._open_url(GEMINI_KEY_URL)
+        self._start_clipboard_watch()
+
+    def _on_clipboard_changed(self) -> None:
+        if not self._watching_clipboard or self.stack.currentWidget() is not self._gemini_page:
+            return
+        clip = self._get_clipboard()
+        if clip is None:
+            return
+        candidate = (clip.text() or "").strip()
+        if not GEMINI_KEY_RE.fullmatch(candidate):
+            return
+        self._validate_and_bind_gemini(candidate)
+
+    def _bind_gemini_manual(self) -> None:
+        candidate = self.gemini_key_edit.text().strip()
+        self.gemini_key_edit.clear()
+        if not GEMINI_KEY_RE.fullmatch(candidate):
+            self.status.setText("Anahtar geçersiz görünüyor.")
+            return
+        self._validate_and_bind_gemini(candidate)
+
+    def _validate_and_bind_gemini(self, key: str) -> None:
+        if self._gemini_thread is not None and self._gemini_thread.isRunning():
+            return
+        thread = _GeminiValidateThread(key, self._gemini_validator, self)
+        self._gemini_thread = thread
+        thread.finished_with.connect(self._on_gemini_validated)
+        # Bekleme yok: doğrulama arka planda, sonuç sinyalle gelir (arayüz donmaz).
+        self.status.setText("Anahtar doğrulanıyor…")
+        thread.start()
+
+    def _on_gemini_validated(self, key: str, status_code: int) -> None:
+        thread, self._gemini_thread = self._gemini_thread, None
+        if thread is not None:
+            thread.deleteLater()
+        if status_code == 200:
+            self._stop_clipboard_watch()
+            failure = self._store_key("gemini", key)
+            if failure is not None:
+                self.status.setText(failure)
+                return
+            if not self._write_endpoint_and_model(
+                endpoint_id="gemini",
+                base_url=GEMINI_OPENAI_BASE_URL,
+                api_key=True,
+                model_id=GEMINI_MODEL_ID,
+                alias=GEMINI_MODEL_ALIAS,
+            ):
+                return
+            clip = self._get_clipboard()
+            if clip is not None and clip.text() == key:
+                clip.clear()
+            self.status.setText("Gemini bağlandı.")
+            self.accept()
+            return
+        if status_code in {400, 401, 403}:
+            self.status.setText("Anahtar geçersiz görünüyor.")
+            return
+        self.status.setText(f"HTTP {status_code}")
+
+    # --- 3. Abonelik (Claude / ChatGPT CLI) ----------------------------------------------
 
     def _show_subscription_panel(self) -> None:
+        self._stop_clipboard_watch()
         self.stack.setCurrentWidget(self._subscription_page)
         self._select_claude_cli()
 
@@ -577,9 +752,10 @@ class ConnectWizard(QDialog):
             return
         self.accept()
 
-    # --- 3. API anahtarı ya da yerel model ------------------------------------------------
+    # --- 4. API anahtarı ya da yerel model ------------------------------------------------
 
     def _show_apikey_panel(self) -> None:
+        self._stop_clipboard_watch()
         self.stack.setCurrentWidget(self._apikey_page)
         self._apply_preset_choice()
 
@@ -633,8 +809,9 @@ class ConnectWizard(QDialog):
         base_url: str,
         api_key: bool,
         model_id: str,
+        alias: str | None = None,
     ) -> bool:
-        alias = _slug(model_id) or endpoint_id
+        alias = alias or _slug(model_id) or endpoint_id
         try:
             raw = _load_raw(self.config_path)
             endpoints: dict[str, Any] = raw.setdefault("endpoints", {})
