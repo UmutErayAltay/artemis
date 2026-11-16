@@ -587,7 +587,7 @@ async def test_memory_is_shared_within_same_turn_and_reset_for_new_turn(tmp_path
 
 
 def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
-    """ADR 0039: onay atlaması yalnız bu üç araçta; dördüncüsü ADR'siz eklenirse kırılır."""
+    """ADR 0039 + 0057: onay atlaması yalnız bu araçlarda; yenisi ADR'siz eklenirse kırılır."""
     from artemis.tools.registry import discover_tools
 
     registry = discover_tools()
@@ -596,4 +596,4 @@ def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
         for definition in registry.definitions()
         if getattr(registry.get(definition.name), "auto_mode_ok", False)
     }
-    assert skipping == {"computer_use", "window_control", "screen_read"}
+    assert skipping == {"computer_use", "window_control", "screen_read", "open_url"}

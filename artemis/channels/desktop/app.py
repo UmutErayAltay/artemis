@@ -1776,7 +1776,8 @@ class DesktopWindow(QMainWindow):
         )
         box.setInformativeText(
             "Yanlış anlaşılan bir komut ya da ekrandaki zararlı bir metin, istemediğin bir "
-            "işlemi tetikleyebilir. Terminal, Artemis ve parola yöneticisi yine engelli."
+            "işlemi tetikleyebilir; web okuduktan sonra bağlantılar da sorulmadan açılır. "
+            "Terminal, Artemis ve parola yöneticisi yine engelli."
         )
         yes = box.addButton("Riski anlıyorum, aç", QMessageBox.ButtonRole.AcceptRole)
         no = box.addButton("Vazgeç", QMessageBox.ButtonRole.RejectRole)

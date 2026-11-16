@@ -334,13 +334,16 @@ class OpenURL(BaseTool):
     args_model = URLArguments
     risk = Risk.SIDE_EFFECT
     outbound = True
+    # ADR 0057: otomatik onay kipinde lekeli turdaki adres sorulmaz (kullanıcının bilerek
+    # açtığı kip); normal kipte sorulur.
+    auto_mode_ok = True
 
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
-        # Kullanıcı kararı (ADR 0036): site açmak sorulmaz. Tek istisna: bağlamda dış içerik
-        # varken sorgu/parça (`?`, `#`) veri taşıyabilir; o zaman taint/ADR 0013 onayı işler.
-        # ponytail: yoldaki veri (site.com/GIZLI) yakalanmaz; gerekirse host izin listesi.
-        parts = urlsplit(cast(URLArguments, arguments).url)
-        if context.turn_tainted and (parts.query or parts.fragment):
+        # Kullanıcı kararı (ADR 0036): temiz turda site açmak sorulmaz. ADR 0057: bağlamda dış
+        # içerik varken her adres sorulur. Yalnız `?`/`#` sormak yolda (site.com/GIZLI) ve alt
+        # alan adında (GIZLI.site.com) taşınan veriyi kaçırıyordu; tarayıcı isteği gönderdiği
+        # anda veri karşı sunucunun kaydına düşer.
+        if context.turn_tainted:
             return Risk.SIDE_EFFECT
         return Risk.READ_ONLY
 

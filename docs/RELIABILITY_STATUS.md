@@ -62,7 +62,8 @@ görünmüyor; kod ajanı süreç ağacı Windows Job Object ile kapanıyor; hat
 çökme sonrası `uncertain` oluyor, iki kez çalışmıyor; SafetyGate dışında araç yürütme yolu yok.
 
 Bilerek değiştirilmeyenler / açık sınırlar:
-- `open_url` yol/alt alan adı sızıntısı (ADR 0036): Umut kararıyla aynı kaldı.
+- `open_url` yol/alt alan adı sızıntısı (ADR 0036): ADR 0057 ile normal kipte kapandı (lekeli turda
+  her adres sorulur); otomatik onay kipinde Umut kararıyla bilerek açık.
 - `read_only_tools` listesindeki MCP aracı, outbound olsa da geçmiş leke onayını atlar
   (kullanıcının açık seçimi; `test_gate.py` bunu kilitler).
 - Claude kod ajanı Bash'i OS sandbox değildir; `Bash(git push:*)` reddi aşılabilir önek

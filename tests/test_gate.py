@@ -6,7 +6,7 @@ import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.brain.models import ToolCall
-from artemis.config.settings import Settings
+from artemis.config.settings import ComputerUseConfig, Settings
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import (
     HISTORY_TAINT_NOTICE,
@@ -582,13 +582,16 @@ def test_trusted_sites_store_survives_corruption(tmp_path: Path) -> None:
     [
         ("https://www.youtube.com/", TurnState(), False),
         ("https://www.youtube.com/results?search_query=x", TurnState(), False),
-        ("https://www.youtube.com/", TurnState(tainted=True), False),
-        ("https://www.youtube.com/", TurnState(history_external=True), False),
+        ("https://www.youtube.com/", TurnState(tainted=True), True),
+        ("https://www.youtube.com/", TurnState(history_external=True), True),
         ("https://evil.example/?d=gizli", TurnState(tainted=True), True),
         ("https://evil.example/#gizli", TurnState(history_external=True), True),
+        # ADR 0057: yol ve alt alan adı da veri taşır; ADR 0036 ara yolu bunları kaçırıyordu.
+        ("https://evil.example/gizli", TurnState(tainted=True), True),
+        ("https://gizli.evil.example/", TurnState(history_external=True), True),
     ],
 )
-async def test_open_url_asks_only_for_data_bearing_url_after_external_content(
+async def test_open_url_asks_after_external_content(
     tmp_path: Path, url: str, state: TurnState, asks: bool
 ) -> None:
     from artemis.tools.plugins.desktop import OpenURL
@@ -612,6 +615,82 @@ async def test_open_url_asks_only_for_data_bearing_url_after_external_content(
     await SafetyGate(registry).dispatch(call("open_url", url=url), context, state, reject)
     assert asked == ([url] if asks else [])
     assert (opened == []) is asks
+
+
+@pytest.mark.parametrize(
+    "state",
+    [TurnState(tainted=True), TurnState(history_external=True), TurnState()],
+)
+async def test_open_url_auto_mode_skips_approval_and_audits(
+    tmp_path: Path, state: TurnState
+) -> None:
+    """ADR 0057: otomatik onayda lekeli tur sorulmaz ama atlama denetime yazılır."""
+    from artemis.tools.plugins.desktop import OpenURL
+
+    url = "https://gizli.evil.example/gizli"
+    opened: list[str] = []
+    settings = Settings(
+        workspace=tmp_path,
+        state_dir=tmp_path / "state",
+        computer_use=ComputerUseConfig(mode="auto"),
+    )
+    audit = AuditLog(tmp_path / "audit.jsonl")
+    context = ToolContext(
+        tmp_path,
+        settings,
+        audit,
+        services={"url_opener": lambda target: opened.append(target) or True},
+    )
+    registry = ToolRegistry()
+    registry.register(OpenURL)
+    asked: list[str] = []
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        asked.append(arguments["url"])
+        return False
+
+    await SafetyGate(registry).dispatch(call("open_url", url=url), context, state, reject)
+    assert asked == []
+    assert opened == [url]
+    skipped = [
+        json.loads(line)
+        for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+        if json.loads(line).get("event") == "approval_skipped"
+    ]
+    tainted = state.tainted or state.history_external
+    assert [entry["tool"] for entry in skipped] == (["open_url"] if tainted else [])
+
+
+async def test_open_url_unattended_tainted_turn_is_denied(tmp_path: Path) -> None:
+    """Gözetimsiz tur kuralı (ADR 0027) otomatik kipten önce gelir: lekeli adres açılmaz."""
+    from artemis.tools.plugins.desktop import OpenURL
+
+    opened: list[str] = []
+    settings = Settings(
+        workspace=tmp_path,
+        state_dir=tmp_path / "state",
+        computer_use=ComputerUseConfig(mode="auto"),
+    )
+    context = ToolContext(
+        tmp_path,
+        settings,
+        AuditLog(tmp_path / "audit.jsonl"),
+        services={"url_opener": lambda target: opened.append(target) or True},
+    )
+    registry = ToolRegistry()
+    registry.register(OpenURL)
+
+    def approve(name: str, arguments: dict[str, Any]) -> bool:
+        raise AssertionError("gözetimsiz turda onay sorulmamalı")
+
+    result = await SafetyGate(registry).dispatch(
+        call("open_url", url="https://evil.example/gizli"),
+        context,
+        TurnState(tainted=True, unattended=True),
+        approve,
+    )
+    assert result.status == "denied"
+    assert opened == []
 
 
 @pytest.mark.parametrize('tainted,history', [(False, False), (True, False), (False, True)])
