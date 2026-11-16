@@ -6,9 +6,10 @@ araçları paylaşır. Yan etkili her adım ekranda tam argümanlarla onay ister
 hayırdır.
 
 > **Durum: teknik önizleme.** Çekirdek (güvenlik kapısı, araçlar, ajan döngüsü, UI, ses hattı)
-> testlidir (2400+ test, Windows ve Ubuntu CI). Windows'ta gerçek cihaz kabulü kısmendir; neyin
-> doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Hazır kurulum
-> paketi (.exe) yoktur, kaynaktan kurulur ([Kurulum](#kurulum)).
+> testlidir (3200+ test, Windows ve Ubuntu CI). Windows'ta gerçek cihaz kabulü kısmendir; neyin
+> doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Windows kurucusu
+> kaynaktan derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)); henüz yayımlanmış bir sürüm
+> ve lisans yoktur.
 
 Neler var:
 
@@ -16,14 +17,21 @@ Neler var:
   kontrolü; her biri aynı `SafetyGate` üzerinden geçer.
 - **Bilgisayar kullanımı:** ekranı görüp fare ve klavyeyle iş yapar, Esc her an durdurur
   ([ADR 0039](docs/adr/0039-computer-use.md); [aşağıda](#bilgisayar-kullanımı-ve-otomatik-onay)).
+  UI Automation gözleminde pencerenin düğme ve alanlarını adlarıyla okur, görsel olmayan modeller de
+  çalışır; canlı ölçümde aynı YouTube görevi 4 adım / 25 sn (ekran görüntüsüyle 13 adım, bitmedi)
+  ([ADR 0073](docs/adr/0073-computer-use-uia-gozlem.md)).
 - **Ses:** "artemis" uyandırma sözcüğü, yerel Türkçe STT (faster-whisper), isteğe bağlı bulut/karma
-  tanıma (Groq, xAI), Piper/Edge TTS, gürültü engelleme.
+  tanıma (Groq, xAI), Piper/Edge/EMA TTS, gürültü engelleme. **Bulut konuşma sesi:** OpenRouter'daki
+  konuşma modelleri (ör. HeyGen, ElevenLabs) ve Gemini TTS; destekleyen modellerde `[laugh]` gibi
+  duygu etiketleri ([ADR 0074](docs/adr/0074-bulut-konusma-sesi.md)). Oyun modu tam ekranda büyük
+  STT modelini bırakır ([ADR 0072](docs/adr/0072-oyun-modu.md)).
 - **Telegram:** panelden bağlanır, uzaktan komut alır, onaylar düğmeyle sorulur
   ([aşağıda](#telegram-ve-bildirimler)).
 - **Sağlayıcılar:** OpenRouter, Anthropic, Ollama, OpenAI uyumlu uçlar (Groq, xAI Grok, LM Studio…),
   Claude abonelik CLI'si; sağlayıcı ve model Ayarlar'dan eklenir.
 - **Gizlilik:** sırlar yalnız ortam değişkeninde ya da Windows Kimlik Bilgisi Yöneticisi'nde;
-  ham ses saklanmaz; ekran görüntüsü diske yazılmaz.
+  ham ses saklanmaz; ekran görüntüsü diske yazılmaz; konuşma hafızası isteğe bağlı olarak Windows
+  DPAPI ile şifrelenir (yeni kurulumlarda açık, [ADR 0076](docs/adr/0076-hafiza-sifreleme.md)).
 
 Konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012). Artemis'in kendi kalıcı hafızası
 (geçmiş, öz notlar, konuşma araması) varsayılan açıktır ve `state_dir/memory.sqlite3`'te
@@ -254,6 +262,29 @@ bağlı ipucudur. Gerçek ses kaydıyla kelime/karakter ve uygulama adı hatalar
 yazıya çevirmek, niyeti ve doğru araç hedefini anlamakla aynı ölçüm değildir.
 Genel konuşma doğruluğu gerçek, farklı konuşmacı kayıtlarıyla henüz doğrulanmadı.
 Son değişiklik ve doğrulamalar [konuşma raporunda](docs/SPEECH_ACCURACY_REPORT.md).
+
+## Windows paketi ve ilk açılış
+
+Kurucu kaynaktan derlenir (PyInstaller + Inno Setup, [ADR 0075](docs/adr/0075-urunlestirme-plani.md),
+ayrıntı [docs/PACKAGING.md](docs/PACKAGING.md)):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scriptsuild_windows.ps1
+# çıktı: dist\Artemis\Artemis.exe ve dist\installer\Artemis-Setup-<sürüm>.exe
+```
+
+Kurucu yönetici izni istemez (`%LOCALAPPDATA%\Programs\Artemis`). Ayarlar ve hafıza kullanıcı
+başına `%APPDATA%\Artemis` altında durur; ilk açılışta örnek ayar kopyalanır, kaldırma kullanıcı
+verisine dokunmaz. Kurucu henüz imzasız olduğu için Windows SmartScreen uyarısı görülebilir.
+
+İlk açılışta **"Artemis'i bir beyne bağla"** sihirbazı dört eşit seçenek sunar: OpenRouter ile
+anahtar görmeden giriş (OAuth PKCE; kota ve ücret kullanıcının kendi hesabında), Google hesabıyla
+Gemini (AI Studio anahtar sayfası açılır, kopyalanan anahtar algılanıp doğrulanır), Claude aboneliği
+(`claude` CLI) ve API anahtarı ya da yerel model (Ollama, LM Studio, Groq). Anahtarlar yalnız Windows
+Kimlik Bilgisi Yöneticisi'ne yazılır. Başka uygulamaların kimliğiyle giriş (ör. Gemini CLI) bilinçli
+olarak yoktur. Ayarlar > Hakkında'dan elle güncelleme denetimi yapılır (yalnız sürüm sorgusu).
+
+Depodan çalışırken `config/config.yaml` varsa eskisi gibi o kullanılır.
 
 ## Kurulum
 

@@ -81,6 +81,15 @@ def test_tts_backend_choice_is_saved(tmp_path: Path) -> None:
     assert load_settings(path).voice.tts_backend == "ema"
 
 
+def test_computer_observation_choice_is_saved(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    panel.computer_observation.setCurrentIndex(panel.computer_observation.findData("uia"))
+    save_choices(path, None, values=panel.values())
+    assert load_settings(path).computer_use.observation == "uia"
+    panel.deleteLater()
+
+
 def test_settings_panel_has_no_model_combo_or_inventory(tmp_path: Path) -> None:
     from PySide6.QtWidgets import QApplication
 
@@ -212,13 +221,13 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
         "Ses", "Model", "Görünüm",
         "Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma",
         "Telegram", "Takvim ve posta", "GitHub",
-        "Beceriler", "Dosya araması", "Uygulamalar",
+        "Beceriler", "Dosya araması", "Uygulamalar", "Hakkında",
     ]
     assert panel.section_groups() == {
         "Temel": ["Ses", "Model", "Görünüm"],
         "Otomasyon": ["Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma"],
         "Bağlantılar": ["Telegram", "Takvim ve posta", "GitHub"],
-        "Bilgi": ["Beceriler", "Dosya araması", "Uygulamalar"],
+        "Bilgi": ["Beceriler", "Dosya araması", "Uygulamalar", "Hakkında"],
     }
     assert panel.sections.objectName() == "sectionList"
     assert panel.sections.currentRow() == 0
@@ -433,6 +442,8 @@ def test_every_bound_setting_survives_save_and_refresh(tmp_path: Path) -> None:
         widget = getattr(first, binding.widget)
         if binding.widget == "cloud_server":  # "Seçilmedi" karma kipte geçersiz olurdu
             widget.setCurrentIndex(widget.count() - 1)
+        elif binding.widget == "tts_cloud_emotion_tags":  # yalnız [etiket] biçimi geçerli
+            widget.setText("[laugh] [cry]")
         else:
             _flip(widget)
     chosen = first.values()
@@ -769,7 +780,7 @@ def test_group_headers_are_not_selectable_rows(tmp_path: Path, qt_app) -> None:
     panel.resize(900, 700)
     panel.show()
     qt_app.processEvents()
-    assert panel.sections.count() == 13  # başlıklar satır değil: satır = sayfa
+    assert panel.sections.count() == 14  # başlıklar satır değil: satır = sayfa
     panel.show_section(1)
     first_of_group = panel.sections.item(3)  # Rutinler, "Otomasyon" başlığının altında
     rect = panel.sections.visualItemRect(first_of_group)
@@ -1254,4 +1265,19 @@ def test_direct_atomic_write_by_another_section_shows_revert(tmp_path: Path, qt_
     _write_validated(path, raw)
     assert _wait(lambda: not panel.revert_button.isHidden())
     assert str(path) in panel._watcher.files()  # atomik değiştirmeden sonra yeniden eklendi
+    panel.deleteLater()
+
+
+def test_save_button_beside_revert_writes_now_and_requests_apply(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    writes: list[bool] = []
+    _wire(panel, path, writes)
+    applied: list[bool] = []
+    panel.save_requested.connect(lambda: applied.append(True))
+    assert panel.save_button.isHidden()
+    panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
+    assert not panel.save_button.isHidden() and panel._save_timer.isActive()
+    panel.save_button.click()  # debounce beklenmez
+    assert writes == [True] and not panel._dirty and applied == [True]
     panel.deleteLater()

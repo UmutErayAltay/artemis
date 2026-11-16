@@ -23,6 +23,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtGui import (
     QColor,
+    QFont,
 )
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -72,6 +73,7 @@ from artemis.channels.desktop.settings_io import (
     save_computer_mode as save_computer_mode,
 )
 from artemis.channels.desktop.settings_pages import (
+    build_about_page,
     build_apps_page,
     build_calendar_mail_page,
     build_files_page,
@@ -107,6 +109,7 @@ from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEMES
 from artemis.channels.desktop.triggers_section import TriggersSection
+from artemis.channels.desktop.update_section import UpdateSection
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import (
     BUILTIN_AGENT,
@@ -121,7 +124,10 @@ from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_comm
 _BLOCK_MAX_WIDTH = PAGE_MAX_WIDTH  # liste + sayfa bloğu; geniş pencerede ortalanır
 # Panel bundan darsa bölüm listesi yerine sayfanın üstünde açılır "Bölüm" listesi çıkar: 200px'lik
 # liste sayfa sütununu ~270px'e düşürüyor, düğme satırları kırpılıyordu (UX-01/UX-12).
-_COMPACT_PANEL_WIDTH = 1000
+# 1000 iken varsayılan 1180px pencere (panel 956) bile seçiciye düşüyordu; 760'ta sayfa sütunu
+# ~500px kalır ve hiçbir sayfa taşmaz (2026-11-15 ölçüm).
+_COMPACT_PANEL_WIDTH = 760
+_GROUP_TARGET_ROLE = Qt.ItemDataRole.UserRole + 2  # seçicide grup başlığı -> ilk sayfa satırı
 _AUTOSAVE_MS = 800  # son düzenlemeden sonra bu kadar durulunca kaydedilir
 
 
@@ -182,6 +188,7 @@ class SettingsPanel(QWidget):
     # Otomatik kayıt isteği (düzenleme durulunca ya da flush): mikrofon aygıtı; model seçimi
     # ProviderSection'da. Pencere yazar, sonra mark_saved()/save_failed() ile geri bildirir.
     apply_requested = Signal(object)
+    save_requested = Signal()  # "Kaydet": yazıldı, beklemeden uygula
     reverted = Signal()  # config dosyası oturum başındaki hâline döndü; canlı kuruluş gerekir
     # (SyncReport, otomatik_mi): otomatik eşitleme sonucu pencere tarafından baloncukla duyurulur.
     github_synced = Signal(object, bool)
@@ -189,6 +196,7 @@ class SettingsPanel(QWidget):
     notice: _Notice
     retry_button: QPushButton
     revert_button: QPushButton
+    save_button: QPushButton
     title_row: QHBoxLayout
     sections: _SectionList
     _section_delegate: _SectionDelegate
@@ -220,6 +228,17 @@ class SettingsPanel(QWidget):
     _cloud_fetch_for: str
     cloud_stt_hint: QLabel
     tts_combo: QComboBox
+    tts_cloud_box: QWidget
+    tts_cloud_server: QComboBox
+    tts_cloud_protocol: QComboBox
+    tts_cloud_model: QComboBox
+    tts_cloud_fetch_button: QPushButton
+    tts_cloud_voice: QComboBox
+    tts_cloud_consent: QCheckBox
+    tts_cloud_paid: QCheckBox
+    tts_cloud_emotion: QCheckBox
+    tts_cloud_emotion_tags: QLineEdit
+    tts_cloud_hint: QLabel
     continuous_mode: QCheckBox
     dictation_enabled: QCheckBox
     dictation_hotkey: QLineEdit
@@ -230,6 +249,7 @@ class SettingsPanel(QWidget):
     followup_box: QCheckBox
     live_transcript: QCheckBox
     noise_suppression: QCheckBox
+    game_mode: QCheckBox
     echo_cancellation: QCheckBox
     advanced_toggle: QToolButton
     noise_level: QComboBox
@@ -284,11 +304,13 @@ class SettingsPanel(QWidget):
     file_search_roots: QListWidget
     all_applications: QCheckBox
     computer_auto: QCheckBox
+    computer_observation: QComboBox
     application_list: QListWidget
     add_application_button: QPushButton
     remove_application_button: QPushButton
     application_hint: QLabel
     advanced_box: QWidget
+    update_section: UpdateSection
 
     def __init__(
         self,
@@ -348,6 +370,7 @@ class SettingsPanel(QWidget):
         build_skills_page(self)
         build_files_page(self)
         build_apps_page(self)
+        build_about_page(self)
         self._build_section_combo()
         self.sections.currentRowChanged.connect(self._on_section)
         self.section_combo.activated.connect(self._combo_picked)
@@ -424,19 +447,25 @@ class SettingsPanel(QWidget):
             self._navigating = False
 
     def _build_section_combo(self) -> None:
-        """Bölüm listesinin açılır kopyası: grup başlığı seçilemez, sayfa satırı veri=satır."""
-        model = self.section_combo.model()
+        """Bölüm listesinin açılır kopyası: sayfa satırı veri=satır. Grup başlığı kalın görünür;
+        tıklanınca ölü kalmaz, grubun ilk sayfasına gider (Umut 2026-11-15: "bir şey olmuyor")."""
+        bold = QFont(self.section_combo.font())
+        bold.setBold(True)
         for row, (group_name, first) in enumerate(self._row_groups):
             if first:
                 self.section_combo.addItem(group_name)
-                header = model.item(self.section_combo.count() - 1)  # type: ignore[attr-defined]
-                header.setFlags(Qt.ItemFlag.NoItemFlags)
+                index = self.section_combo.count() - 1
+                self.section_combo.setItemData(index, row, _GROUP_TARGET_ROLE)
+                self.section_combo.setItemData(index, bold, Qt.ItemDataRole.FontRole)
             self.section_combo.addItem(self.sections.item(row).text(), row)
 
     def _combo_picked(self, index: int) -> None:
         row = self.section_combo.itemData(index)
+        if not isinstance(row, int):
+            row = self.section_combo.itemData(index, _GROUP_TARGET_ROLE)
         if isinstance(row, int):
             self.sections.setCurrentRow(row)
+            self._sync_combo(row)  # başlık seçildiyse kutuda sayfa adı görünsün
 
     def _sync_combo(self, row: int) -> None:
         self.section_combo.setCurrentIndex(self.section_combo.findData(row))
@@ -638,10 +667,18 @@ class SettingsPanel(QWidget):
         """Düğme: kirli ya da kayıtlı hâl taban çizgisinden (tür-katı) farklıysa görünür."""
         if self._demo or self._baseline_dump is None or self._baseline_bytes is None:
             self.revert_button.setVisible(False)
+            self.save_button.setVisible(False)
             return
         # Okunamayan/geçersiz config "değişti" sayılır: kullanıcı geri alabilsin.
         changed = self._dirty or not _same(self._dump(), self._baseline_dump)
         self.revert_button.setVisible(changed)
+        self.save_button.setVisible(changed)
+
+    def _save_now(self) -> None:
+        """Kaydet: bekleyen düzenleme hemen yazılır, pencere sekmeden çıkmayı beklemeden uygular."""
+        self.flush()
+        if not self._failed:
+            self.save_requested.emit()
 
     def _revert(self) -> None:
         baseline = self._baseline_bytes

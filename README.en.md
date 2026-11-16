@@ -2,14 +2,14 @@
 
 Artemis is a Turkish, single-user personal desktop assistant for Windows 11. The core is Python 3.12 and also runs on Linux. The UI is a PySide6 desktop app, with voice and a Telegram channel. Every tool and channel goes through one SafetyGate, with approvals (default answer: no) and taint tracking. The primary documentation language is Turkish.
 
-**Status: technical preview.** The core (safety gate, tools, agent loop, UI, voice pipeline) is tested. Real Windows device acceptance is partial; see docs/RELIABILITY_STATUS.md. There is no prebuilt installer; install from source.
+**Status: technical preview.** The core (safety gate, tools, agent loop, UI, voice pipeline) is tested. 3200+ tests on Windows and Ubuntu CI. Real Windows device acceptance is partial; see docs/RELIABILITY_STATUS.md. A Windows installer can be built from source (see [Windows package](#windows-package-and-first-run)); there is no published release or license yet.
 
 ## Features
 
 - **Desktop chat and approvals:** chat panel; every side-effecting step asks for approval showing the full tool name and validated arguments; default answer is no; voice approvals happen in the on-screen dialog, a spoken "yes" is not approval.
-- **Voice pipeline:** wake word "artemis"; Silero VAD as default speech detector (ADR 0067); local faster-whisper STT, optional hybrid cloud STT (OpenAI-compatible or xAI protocol, ADR 0046, 0050); Smart Turn end-of-turn detection (ADR 0068); optional on-device wake-word pre-gate (ADR 0069); Piper TTS by default, Edge TTS only with a separate privacy setting; sentence-streamed speech (ADR 0043); optional echo cancellation (ADR 0038, WebRTC AEC3) and noise suppression (ADR 0037, DeepFilterNet3), both off by default.
-- **Computer use:** sees the screen and works with mouse and keyboard; Esc stops it (ADR 0039).
-- **Memory:** persistent self-memory in `state_dir/memory.sqlite3` (ADR 0025); optional Obsidian vault read/search tools; vault append is append-only and always approved (ADR 0015).
+- **Voice pipeline:** wake word "artemis"; Silero VAD as default speech detector (ADR 0067); local faster-whisper STT, optional hybrid cloud STT (OpenAI-compatible or xAI protocol, ADR 0046, 0050); Smart Turn end-of-turn detection (ADR 0068); optional on-device wake-word pre-gate (ADR 0069); Piper TTS by default, Edge TTS only with a separate privacy setting; cloud TTS through any OpenAI-compatible `/audio/speech` model (e.g. OpenRouter speech models) or Gemini TTS, with optional emotion tags such as `[laugh]` for models that support them (ADR 0074); game mode releases the large STT model in full-screen apps (ADR 0072); sentence-streamed speech (ADR 0043); optional echo cancellation (ADR 0038, WebRTC AEC3) and noise suppression (ADR 0037, DeepFilterNet3), both off by default.
+- **Computer use:** sees the screen and works with mouse and keyboard; Esc stops it (ADR 0039). UI Automation observation reads the window's controls by name so text-only models work too; in a live test the same YouTube task took 4 steps / 25 s versus 13 steps and no finish with screenshots (ADR 0073).
+- **Memory:** persistent self-memory in `state_dir/memory.sqlite3` (ADR 0025), optionally encrypted at rest with Windows DPAPI (on for new installs, ADR 0076); optional Obsidian vault read/search tools; vault append is append-only and always approved (ADR 0015).
 - **Telegram:** connected from the desktop panel; remote commands; approvals as buttons; default no (ADR 0016, 0052).
 - **Code agent and GitHub:** hands coding work to a pluggable code-agent backend (ADR 0023, 0049).
 - **Routines, triggers and user skills** (ADR 0058, 0061, 0060).
@@ -17,6 +17,19 @@ Artemis is a Turkish, single-user personal desktop assistant for Windows 11. The
 - **Read-only calendar and mail** (ADR 0059); local file search (ADR 0065).
 - **Reminders and a morning briefing** (ADR 0027); screen reading with local OCR, images not stored (ADR 0029); window and system control (ADR 0031); start on Windows sign-in (ADR 0030).
 - **Providers:** OpenRouter, Anthropic, Ollama, OpenAI-compatible endpoints (ADR 0033), Claude Code CLI subscription (ADR 0035).
+
+## Windows package and first run
+
+Build the installer from source (PyInstaller + Inno Setup, ADR 0075, details in docs/PACKAGING.md):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scriptsuild_windows.ps1
+# output: dist\Artemis\Artemis.exe and dist\installer\Artemis-Setup-<version>.exe
+```
+
+The installer needs no admin rights. Settings and memory live per user in `%APPDATA%\Artemis`; the example config is copied on first start and uninstalling never touches user data. The installer is not code-signed yet, so SmartScreen may warn.
+
+On first start the **"connect Artemis to a brain"** wizard offers four equal options: OpenRouter sign-in without seeing a key (OAuth PKCE; quota and cost stay on the user's own account), Gemini with a Google account (opens the AI Studio key page and detects the copied key), a Claude subscription (`claude` CLI), and an API key or local model (Ollama, LM Studio, Groq). Keys are stored only in Windows Credential Manager. Signing in with another app's identity (e.g. Gemini CLI) is deliberately not supported. Settings > About offers a manual update check (version query only).
 
 ## Install
 

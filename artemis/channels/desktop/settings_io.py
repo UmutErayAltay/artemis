@@ -87,6 +87,13 @@ def _precision_binding() -> PanelBinding:
     )
 
 
+def _write_tts_cloud_server(combo: Any, value: Any) -> None:
+    # Liste kutunun kendisinde yenilenir; kayıtlı ama listede olmayan sunucu kaybolmasın.
+    if value and combo.findData(value) < 0:
+        combo.addItem(str(value), value)
+    combo.setCurrentIndex(max(0, combo.findData(value)))
+
+
 _STANDARD_PRECISIONS = ("int8_float16", "float16")
 
 # Panelin "Uygula" ile yazdığı ve "yenile" ile okuduğu sade alanlar. Özel mantığı olanlar
@@ -97,6 +104,31 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
     _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
+    PanelBinding(
+        ("voice", "tts_cloud_endpoint"), "tts_cloud_server",
+        lambda combo: str(combo.currentData() or ""),
+        _write_tts_cloud_server,
+    ),
+    _combo(("voice", "tts_cloud_protocol"), "tts_cloud_protocol", fallback_first=True),
+    PanelBinding(
+        ("voice", "tts_cloud_model"), "tts_cloud_model",
+        lambda combo: combo.currentText().strip(),
+        lambda combo, value: combo.setEditText(str(value)),
+    ),
+    PanelBinding(
+        ("voice", "tts_cloud_voice"), "tts_cloud_voice",
+        lambda combo: combo.currentText().strip(),
+        lambda combo, value: combo.setEditText(str(value)),
+    ),
+    _checkbox(("voice", "allow_cloud_tts_text"), "tts_cloud_consent"),
+    _checkbox(("voice", "tts_cloud_allow_paid"), "tts_cloud_paid"),
+    _checkbox(("voice", "tts_cloud_emotion_tags"), "tts_cloud_emotion"),
+    PanelBinding(
+        ("voice", "tts_cloud_emotion_tag_list"),
+        "tts_cloud_emotion_tags",
+        lambda edit: tuple(edit.text().split()),
+        lambda edit, value: edit.setText(" ".join(str(v) for v in value)),
+    ),
     _precision_binding(),
     _checkbox(("voice", "continuous_mode"), "continuous_mode", quiet=True),
     PanelBinding(
@@ -119,6 +151,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("voice", "followup_listening"), "followup_box"),
     _checkbox(("voice", "live_transcript"), "live_transcript"),
     _checkbox(("voice", "noise_suppression"), "noise_suppression"),
+    _checkbox(("voice", "game_mode"), "game_mode"),
     _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
     _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
     _checkbox(("voice", "echo_cancellation"), "echo_cancellation"),
@@ -183,6 +216,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda box: "auto" if box.isChecked() else "accept",
         lambda box, value: box.setChecked(value == "auto"),
     ),
+    _combo(("computer_use", "observation"), "computer_observation", fallback_first=True),
 )
 _BOUND_PATHS = frozenset(binding.path for binding in PANEL_BINDINGS)
 
@@ -220,7 +254,8 @@ def save_choices(
         section = raw
         for key in setting_path[:-1]:
             section = section.setdefault(key, {})
-        section[setting_path[-1]] = value
+        # Config tuple alanları panelde tuple okunur; YAML yalnız liste yazabilir.
+        section[setting_path[-1]] = list(value) if isinstance(value, tuple) else value
     if stt_model is not None:
         raw["voice"]["stt_model"] = str(stt_model)
     if applications is not None:

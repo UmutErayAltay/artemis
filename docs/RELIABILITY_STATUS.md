@@ -134,8 +134,8 @@ Tarih: eski kayıtlarda 2026-10-15–19; tek tek commit her kayıtta yok, uyduru
 | 1 | Kısmi geçti | Toast kullanıcı ayarında kapalı |
 | 2 | Yapılmadı | Yeniden açılışta kaçan hatırlatma |
 | 3 | Geçti (2026-11-04, `b945876`, Windows 11, `claude-haiku-5-5`) | İki parça, kanıt `.jarvis/audit.jsonl`. (a) Zamanlayıcı yolu, turn `d6465dc3`: 00:04 «kabul» brifingi gözetimsiz koştu, yalnız `reminder_list` çağrıldı, teslim `panel: ok`; model yazma aracını kendisi çağırmadı. (b) Kapı reddi, turn `ccd2c303`: `_run_briefing` ile aynı kurulumu yapan elle başlatılmış betik (önek + `unattended=True` + `_refuse`; hafıza/MCP/kod ajanı kapalı). Model `create_file` çağırdı; `approval` `approved: false, unattended: true`, sonuç `denied`, dosya oluşmadı. Zamanlayıcı saatiyle tetiklenen turda kapı reddi ayrıca görülmedi. Brifing config'ten kaldırıldı. |
-| 4–6 | Geçti | MCP okuma/onay/süreç temizliği; bu sürümde tekrar bekliyor |
-| 7 | Odak düzeltmesi canlı denendi | Türkçe OCR harf hataları sürüyor |
+| 4–6 | Geçti (2026-11-15, `1575521`) | MCP listeleme, yazma onayı/ret, node süreç temizliği yeniden doğrulandı |
+| 7 | Kısmi geçti (2026-11-15) | Doğru pencere okunuyor; ğ/ü/ş doğru, OCR i/ö büyük-küçük kayması sürüyor |
 | 8 | Yapılmadı | Farklı ekran ölçeği |
 | 9 | Uygulanamadı | OCR dil paketi yokluğu senaryosu |
 | 10 | Geçti | Açılış kaydı; kimlik bilgisi okuma sonradan düzeltildi |
@@ -143,15 +143,15 @@ Tarih: eski kayıtlarda 2026-10-15–19; tek tek commit her kayıtta yok, uyduru
 | 12 | Kısmi geçti | Tepside ikinci örnek |
 | 13 | Yapılmadı | Tepsi menüsünden açılışı kapatma |
 | 14 | Düzeltme canlı denendi | Pencere listesinden masaüstü elendi |
-| 15 | Düzeltme tek ekranda canlı denendi | Çoklu monitör |
-| 16 | Düzeltme ses düzeyinde canlı denendi | Tam sessize al/aç matrisi yeniden doğrulanmalı |
+| 15 | Geçti (2026-11-15) | İkinci ekranda sol/sağ yarı doğru |
+| 16 | Geçti (2026-11-15) | 25/sessiz/aç/100 geri okundu |
 | 17 | Geçti | Parlaklık geri okundu |
 | 18 | Bekliyor | Kilit kabulü |
 | 19 | İlk deneme kaldı; ortam düzeltildi | 60 sn kapatma uyarısı ve iptal tekrar denenecek |
 | 20 | Bekliyor | Uyku kabulü |
 | 21 | Geçti | Browser MCP keşfi |
-| 22 | Önceki beklenti testi kaldı | Yeni site onay politikasıyla tekrar denenecek |
-| 23 | Kısmi geçti | file:// sunucu reddi doğrudan tetiklenmedi |
+| 22 | Geçti (2026-11-15) | Site okuma onay istedi |
+| 23 | Geçti (2026-11-15) | file:// ve 127.0.0.1 sunucu tarafında reddedildi |
 | 24 | Geçti | Chromium süreç temizliği |
 
 ## Güncel cihaz kabulü

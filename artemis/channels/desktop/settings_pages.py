@@ -53,6 +53,8 @@ from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS
 from artemis.channels.desktop.triggers_section import TriggersSection
+from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
+from artemis.channels.desktop.update_section import UpdateSection
 from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import BUILTIN_AGENT
 
@@ -115,6 +117,12 @@ def build_shell(panel: SettingsPanel) -> None:
     title_row.addWidget(panel.notice, 1)
     title_row.addWidget(panel.retry_button)
     title_row.addWidget(panel.revert_button)
+    panel.save_button = QPushButton("Kaydet")
+    panel.save_button.setObjectName("primary")
+    panel.save_button.setToolTip("Değişiklikleri hemen kaydeder ve uygular.")
+    panel.save_button.setVisible(False)
+    panel.save_button.clicked.connect(panel._save_now)
+    title_row.addWidget(panel.save_button)
     panel.title_row = title_row
     layout.addLayout(title_row)
     # Bölüm listesi kaydırma alanının dışında: uzun sayfayı kaydırınca liste yerinde kalır.
@@ -361,11 +369,13 @@ def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     if ema_missing:
         ema_index = panel.tts_combo.count() - 1
         panel.tts_combo.model().item(ema_index).setEnabled(False)  # type: ignore[attr-defined]
+    panel.tts_combo.addItem("Bulut modeli (OpenRouter, Gemini…)", "cloud")
     field(speech, "Konuşma sesi", panel.tts_combo, help=(
         "Edge (bulut): yanıt metni konuşmaya çevrilmek üzere internete, bir bulut hizmetine "
         "gider. Piper ve EMA bu bilgisayarda çalışır, metin dışarı çıkmaz. Ses yeniden "
         "başlayınca uygulanır."
     ))
+    build_tts_cloud_box(panel, speech)
     panel.continuous_mode = QCheckBox("Kesintisiz sohbet")
     speech.addLayout(with_help(panel.continuous_mode, (
         "Uyandırma adı söylemeden sürekli dinler. Karma tanıma açıksa kesintisiz kipte her söz "
@@ -431,6 +441,13 @@ def _cleanup_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         "Değişiklik ses yeniden başlayınca uygulanır."
     )
     clean.addWidget(panel.noise_suppression)
+    panel.game_mode = QCheckBox("Oyun modu")
+    panel.game_mode.setToolTip(
+        "Tam ekran oyun öndeyken büyük tanıma modeli ekran kartı belleğinden bırakılır, "
+        "hafif model (Small) devralır; oyundan çıkınca büyük model geri yüklenir. "
+        "Değişiklik ses yeniden başlayınca uygulanır."
+    )
+    clean.addWidget(panel.game_mode)
     panel.echo_cancellation = QCheckBox("Yankı engelleme")
     panel.echo_cancellation.setToolTip(
         "WebRTC yankı giderici; Artemis'in hoparlörden çıkan kendi sesini mikrofondan "
@@ -865,6 +882,18 @@ def build_apps_page(panel: SettingsPanel) -> None:
         "Adımları sormadan yapar; Esc her an durdurur. Üst çubuktaki otomatik onay "
         "düğmesiyle aynı ayardır."
     ))
+    panel.computer_observation = QComboBox()
+    panel.computer_observation.setAccessibleName("Bilgisayar kullanımı gözlemi")
+    for label, key in (
+        ("Ekran öğeleri (UIA) · hızlı, metin modeli de çalışır", "uia"),
+        ("Ekran görüntüsü · görsel model gerekir", "screen"),
+        ("İkisi birden · en sağlam, en yavaş", "both"),
+    ):
+        panel.computer_observation.addItem(label, key)
+    field(access, "Gözlem", panel.computer_observation, help=(
+        "UIA pencerenin düğme ve alanlarını adlarıyla okur; oyun ve çizim uygulamalarında "
+        "boş kalabilir, o zaman ekran görüntüsü ya da ikisi birden seçin."
+    ))
     list_box, listing = group("İzinli uygulamalar", help=(
         "Artemis yalnız bu listedeki uygulamaları açabilir. Uygulama ekle bir .exe seçtirir, "
         "Listeden çıkar seçili kaydı siler. Onaysız kapatma izni panelde yok, ayar "
@@ -884,3 +913,11 @@ def build_apps_page(panel: SettingsPanel) -> None:
     panel.application_hint = meta_label("Artemis listedeki uygulamaları açabilir.")
     listing.addWidget(panel.application_hint)
     apps.addStretch(1)
+
+
+def build_about_page(panel: SettingsPanel) -> None:
+    about = add_page(panel, "Hakkında", "Sürüm ve güncelleme denetimi.")
+    box, body = group("Güncelleme", divided=False)
+    panel.update_section = UpdateSection(panel)
+    body.addWidget(panel.update_section)
+    about.addWidget(box)

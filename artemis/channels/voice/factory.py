@@ -10,6 +10,7 @@ from contextlib import AsyncExitStack
 from typing import Protocol
 
 from artemis.brain.agent_loop import RunResult
+from artemis.brain.emotion import emotion_tags_active
 from artemis.channels.runtime import Runtime
 from artemis.channels.voice.adapters import (
     EdgeTTSynthesizer,
@@ -22,6 +23,7 @@ from artemis.channels.voice.adapters import (
     SoundDeviceSink,
     WebRTCVAD,
 )
+from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
 from artemis.channels.voice.core import (
     AudioSink,
     Microphone,
@@ -42,6 +44,11 @@ from artemis.channels.voice.echo import (
     EchoCancelledMicrophone,
     EchoCanceller,
     EchoReference,
+)
+from artemis.channels.voice.game_mode import (
+    GameModeRecognizer,
+    fullscreen_app_active,
+    resolve_light_model,
 )
 from artemis.channels.voice.kws import WakeSpotter
 from artemis.channels.voice.live_text import SherpaLiveTranscriber
@@ -240,8 +247,23 @@ async def build_voice_controller(
             local_voice = VoiceConfig.model_validate(
                 {**local_voice.model_dump(), "stt_hotwords": (local_voice.wake_word,)}
             )
-        recognizer = FasterWhisperRecognizer(local_voice)
-        await _prepare(recognizer)
+        whisper = FasterWhisperRecognizer(local_voice)
+        await _prepare(whisper)
+        recognizer: SpeechRecognizer = whisper
+        if settings.voice.game_mode:
+            light_path = resolve_light_model(settings.voice)
+            if light_path is None:
+                # Hafif model yoksa büyük model GPU'da kalır; durum görünür olur.
+                on_state("game:unavailable")
+            else:
+                light = FasterWhisperRecognizer(
+                    local_voice.model_copy(update={"stt_model": light_path})
+                )
+                game = GameModeRecognizer(whisper, light, fullscreen_app_active, on_state)
+                game.start()
+                # Kurulum yarıda kalırsa izleyici iş parçacığı da durur.
+                cleanup.callback(game.close)
+                recognizer = game
         synthesizer: SpeechSynthesizer
         if settings.voice.tts_backend == "edge":
             edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
@@ -266,6 +288,25 @@ async def build_voice_controller(
                 synthesizer = FallbackSynthesizer(primary_tts, local_tts)
             else:
                 synthesizer = primary_tts
+        elif settings.voice.tts_backend == "cloud":
+            endpoint_id = settings.voice.tts_cloud_endpoint
+            cloud_tts = CloudSpeechSynthesizer(
+                settings.voice,
+                endpoint_id,
+                settings.endpoints[endpoint_id],
+                runtime.audit,
+            )
+            cleanup.push_async_callback(_close_optional, cloud_tts)
+            # Ücretsiz model süresi dolduğunda veya kota sınırında yerel Piper'a düşülür.
+            if settings.voice.tts_local_fallback and settings.voice.piper_model:
+                local_tts = PiperSynthesizer(settings.voice)
+                await _prepare(local_tts)
+                cleanup.push_async_callback(_close_optional, local_tts)
+                synthesizer = FallbackSynthesizer(
+                    cloud_tts, local_tts, strip_tags=emotion_tags_active(settings.voice)
+                )
+            else:
+                synthesizer = cloud_tts
         else:
             local_tts = PiperSynthesizer(settings.voice)
             await _prepare(local_tts)

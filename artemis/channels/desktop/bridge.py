@@ -937,6 +937,9 @@ class DesktopBridge:
         if state.startswith("echo:"):
             self._events.put(State("voice_echo", state.removeprefix("echo:")))
             return
+        if state.startswith("game:"):
+            self._events.put(State("voice_game", state.removeprefix("game:")))
+            return
         if state.startswith("heard:"):
             self._events.put(State("voice_heard", state.removeprefix("heard:")))
             return

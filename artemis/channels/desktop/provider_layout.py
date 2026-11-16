@@ -58,6 +58,24 @@ _SORTS = (
 )
 
 
+# Rol anahtarı -> (ad, kapatınca, açınca) durum metni.
+ROLE_TEXTS = {
+    "hard_model": (
+        "Zor işler", "Zor işler modeli kapatıldı; her tur beyin modeliyle çalışır.",
+        "Zor işler modeli: {alias}. Çok adımlı ve planlama isteyen turlar bunu kullanır.",
+    ),
+    "fallback_model": (
+        "Arıza yedeği", "Arıza yedeği kapatıldı; beyin modeli yanıt vermezse tur hata ile biter.",
+        "Arıza yedeği: {alias}. Beyin modeli kotaya takılır ya da yanıt vermezse Artemis bununla "
+        "sürer.",
+    ),
+    "computer_use": (
+        "Bilgisayar kullanımı", "Bilgisayar kullanımı modeli kapatıldı; beyin modeli kullanılır.",
+        "Bilgisayar kullanımı modeli: {alias}.",
+    ),
+}
+
+
 def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     model_box, models = group(
         "Modeller", "Eklediğin modeller. Beyin olan model sohbetlere cevap verir.",
@@ -93,7 +111,13 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     # Arıza yedeği: beyin modeli kota/bağlantı/sunucu hatası verince tur bununla sürer.
     section.fallback_button = QPushButton("Yedek")
     section.fallback_button.clicked.connect(section._toggle_fallback_role)
-    for button in (section.primary_button, section.hard_button, section.fallback_button):
+    section.computer_button = QPushButton("Bilgisayar")
+    section.computer_button.clicked.connect(section._toggle_computer_role)
+    section.role_buttons = (
+        section.primary_button, section.hard_button, section.fallback_button,
+        section.computer_button,
+    )
+    for button in section.role_buttons:
         button.setCheckable(True)
         # Eylem reddedilirse (yazılamadı, resim modeli) işaret gerçek duruma döner.
         button.clicked.connect(section._sync_detail)
@@ -101,6 +125,7 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     section.primary_button.setAccessibleName("Beyin modeli yap")
     section.hard_button.setAccessibleName("Zor işler modeli yap")
     section.fallback_button.setAccessibleName("Arıza yedeği yap")
+    section.computer_button.setAccessibleName("Bilgisayar kullanımı modeli yap")
     section._style_roles()
     section.remove_button = QPushButton("Modeli kaldır")
     section.remove_button.setObjectName("danger")
@@ -133,13 +158,13 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     detail.addWidget(section.detail_title)
     role_row = QHBoxLayout()
     role_row.setSpacing(8)
-    for button in (section.primary_button, section.hard_button, section.fallback_button):
+    for button in section.role_buttons:
         role_row.addWidget(button)
     role_row.addStretch(1)
     field(detail, "Rol", role_row, help=(
         "Beyin: sohbetlere bu model cevap verir. Zor işler: çok adımlı ve planlama isteyen "
         "turları bu model alır. Yedek: beyin kota, bağlantı ya da sunucu hatası verince tur "
-        "bununla sürer. Ayarlardan çıkınca geçerli olur."
+        "bununla sürer. Bilgisayar: ekranı görüp tıklama bu modelle çalışır."
     ))
     test_row = QHBoxLayout()
     test_row.setSpacing(12)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
 import io
 import logging
@@ -20,6 +21,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from artemis.brain.emotion import strip_emotion_tags
 from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.voice.core import (
     AudioFrame,
@@ -299,6 +301,15 @@ class FasterWhisperRecognizer:
     def prepare(self) -> None:
         """Ses aygıtı açılmadan önce yerel modeli doğrular; indirme yapmaz."""
         self._load()
+
+    def unload(self) -> None:
+        """Modeli bırakır (GPU belleği); sonraki çağrı yeniden yükler. Süren çıkarımı bekler."""
+        # Önce çıkarım kilidi: çözüm sürerken model altından çekilmez. Sonra yükleme kilidi:
+        # eşzamanlı bir _load yarım kalmış modeli yeniden atamasın.
+        with self._inference_lock, self._load_lock:
+            self._model = None
+        # CTranslate2 belleği nesne toplanınca bırakılır; döngüsel referans beklemesin.
+        gc.collect()
 
     async def transcribe(self, pcm: bytes) -> str:
         self._final_waiting.set()
@@ -956,11 +967,17 @@ class EdgeTTSynthesizer:
 
 
 class FallbackSynthesizer:
-    """Edge ilk PCM'den önce başarısızsa Piper'a düşer; yarım cümleyi yinelemez."""
+    """Edge/Bulut ilk PCM'den önce başarısızsa Piper'a düşer; yarım cümleyi yinelemez."""
 
-    def __init__(self, primary: SpeechSynthesizer, local: SpeechSynthesizer) -> None:
+    def __init__(
+        self,
+        primary: SpeechSynthesizer,
+        local: SpeechSynthesizer,
+        strip_tags: tuple[str, ...] = (),
+    ) -> None:
         self.primary = primary
         self.local = local
+        self.strip_tags = strip_tags
 
     async def stream(self, text: str, cancelled: asyncio.Event) -> AsyncIterator[PCMChunk]:
         first = True
@@ -974,7 +991,8 @@ class FallbackSynthesizer:
             logger.warning("Birincil TTS başarısız (%s).", type(error).__name__)
             if not first or cancelled.is_set():
                 raise
-            async for chunk in self.local.stream(text, cancelled):
+            local_text = strip_emotion_tags(text, self.strip_tags)
+            async for chunk in self.local.stream(local_text, cancelled):
                 if cancelled.is_set():
                     return
                 yield chunk

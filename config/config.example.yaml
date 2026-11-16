@@ -106,6 +106,8 @@ voice:
   stt_partial_enabled: true # Konuşurken ara tanıma; kısmi metin komut çalıştırmaz.
   stt_speculative: true # Bitiş sessizliğinde nihai tanımayı önceden başlatır (ADR 0071); konuşma sürerse atılır.
   stt_speculative_after_ms: 200 # Sessizliğin bu kadarında spekülatif tanıma başlar.
+  game_mode: false # Tam ekran oyun öndeyken büyük STT modeli GPU'dan bırakılır, hafif model devralır (ADR 0072).
+  game_mode_stt_model: null # Oyun modundaki hafif model; boşsa yerelde kurulu faster-whisper small.
   stt_hotwords: [] # İsteğe bağlı yerel ipuçları; prompt veya transcript düzeltmesi değildir.
   stt_alias_hotwords: false # Öğretilmiş uygulama takma adlarının hedefleri STT ipucuna eklenir (ADR 0044).
   # Karma tanıma (ADR 0046): uyandırma, yankı ve söz kesme yerel metinle karar verilir; yalnız
@@ -138,6 +140,16 @@ voice:
   piper_config: ../models/tr_TR-dfki-medium.onnx.json
   piper_voice: tr_TR-dfki-medium
   edge_voice: ''
+  # Bulut konuşma sesi (ADR 0074): tts_backend: cloud seçildiğinde kullanılır.
+  # OpenRouter örneği: tts_cloud_model: heygen/heygen-voice-1-turbo:free
+  # tts_cloud_endpoint: openrouter # Üstteki `endpoints` içinde tanımlı bir kimlik
+  # tts_cloud_protocol: openai     # openai (/audio/speech) | gemini (:streamGenerateContent?alt=sse)
+  # tts_cloud_model: ''            # Bulut konuşma sesi model kimliği
+  # tts_cloud_voice: ''            # Boşsa sağlayıcı varsayılanı kullanılır
+  # tts_cloud_sample_rate: 24000   # Sağlayıcı hızı bildirmediğinde kullanılacak PCM örnekleme hızı
+  # tts_cloud_allow_paid: false    # :free olmayan veya Gemini modelleri için açık ücretli izni
+  # tts_cloud_emotion_tags: false  # Modelin desteklediği satır içi duygu etiketlerine izin ver
+  # tts_cloud_emotion_tag_list: ["[laugh]", "[sigh]", "[whisper]", "[anger]"]  # Yalnız bulut TTS'e gider
   allow_cloud_tts_text: false
   ffmpeg: ffmpeg
 
@@ -146,7 +158,7 @@ voice:
 # allow_cloud_file_content açıksa gider. Yazma yalnız ekleme kipindedir (mevcut not
 # yeniden yazılmaz) ve her seferinde onay ister. Gizli klasörler (.git, .obsidian)
 # ve exclude kalıpları aranmaz, okunmaz, yazılmaz.
-# memory:
+memory:
 #   vault_path: C:/Users/siz/Vault   # göreli yol bu dosyaya göre çözülür
 #   exclude: [daily/, receipts/, knowledge/index.md, knowledge/log.md, 850-Companion/]
 #   max_results: 5
@@ -158,6 +170,9 @@ voice:
 #   # "Açık/yarım işimiz var mı" sorusunda memory_open_work'ün okuyacağı vault dosyaları
 #   # (vault'a göreli; exclude'u aşar ama yalnız bu araçtan okunur, tura eklenmez).
 #   companion_vault_files: ["850-Companion/Threads.md", "850-Companion/Last-Session.md"]
+#   # Konuşma hafızasını (memory.sqlite3) diskte Windows DPAPI ile şifreler (ADR 0076).
+#   # Yeni kurulumlar şifrelidir; mevcut config dosyaları değişmez.
+  encrypt_at_rest: true
 
 # Telegram (ADR 0016). KAPALI gelir: chat_id verilmedikçe ne araç ne kanal çalışır.
 # Bot token'ı BURAYA YAZILMAZ ve YAML'da `token:` alanı yoktur (eklenirse doğrulama
@@ -368,6 +383,7 @@ voice:
 #   screenshot_width: 1280   # 640-2560
 #   step_delay_seconds: 0.3  # 0-3
 #   mode: accept             # accept: adımlar sorulur | auto: sormaz (Esc durdurur)
+#   observation: screen      # screen: görüntü | uia: yalnız UI Automation öğe listesi (görsel olmayan model de çalışır) | both: ikisi birden (ADR 0073)
 
 # Dikte kipi (ADR 0057): kısayola bas, konuş, tekrar bas; tanınan metin odaktaki uygulamaya
 # yazılır. Komut DEĞİLDİR: metin modele, geçmişe ya da hafızaya gitmez. Mikrofon yalnız iki

@@ -15,6 +15,7 @@ from artemis.brain.providers import Provider, build_provider
 from artemis.channels.runner import CommandRunner
 from artemis.config.settings import Settings, load_settings
 from artemis.memory.companion import ensure_skeleton
+from artemis.memory.protect import protector_for
 from artemis.memory.store import MemoryStore
 from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 from artemis.safety.audit import AuditLog
@@ -177,7 +178,10 @@ def create_runtime(
         store: MemoryStore | None = None
         if loaded.persist_memory:
             try:
-                store = MemoryStore(loaded.state_dir / "memory.sqlite3")
+                store = MemoryStore(
+                    loaded.state_dir / "memory.sqlite3",
+                    protector=protector_for(loaded.memory.encrypt_at_rest),
+                )
                 store.apply_retention()
             except (OSError, sqlite3.Error) as error:
                 log.emit("memory_error", error=str(error))

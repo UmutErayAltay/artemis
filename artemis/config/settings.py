@@ -128,6 +128,10 @@ class VoiceConfig(BaseModel):
     max_utterance_seconds: float = Field(default=15.0, gt=0, le=120)
     queue_frames: int = Field(default=32, ge=2, le=256)
     stt_model: Path | None = None
+    # Oyun modu: tam ekran uygulama öndeyken büyük STT modeli GPU'dan bırakılır, hafif model
+    # devralır; boşsa yerelde kurulu faster-whisper `small` aranır.
+    game_mode: bool = False
+    game_mode_stt_model: Path | None = None
     stt_device: Literal["cuda", "cpu"] = "cuda"
     stt_compute_type: str = "float16"
     cuda_library_dirs: list[Path] = Field(default_factory=list)
@@ -165,15 +169,48 @@ class VoiceConfig(BaseModel):
     # paylaşır) uyandırma sözü olmayan bölütleri STT'den ÖNCE eler; kararı yine transkript verir.
     wake_backend: Literal["transcript", "kws"] = "transcript"
     wake_kws_threshold: float = Field(default=0.2, gt=0, lt=1)
-    tts_backend: Literal["piper", "edge", "ema"] = "piper"
+    tts_backend: Literal["piper", "edge", "ema", "cloud"] = "piper"
     # ema: yerel Türkçe EMA Lightning (`pip install .[ema]`, torch CPU)
     tts_local_fallback: bool = True
     piper_model: Path | None = None
     piper_config: Path | None = None
     piper_voice: str = ""
     edge_voice: str = ""
+    tts_cloud_endpoint: str = ""  # Üst düzey `endpoints` kimliği (stt_cloud_endpoint ile aynı)
+    # ADR 0074: Gemini, /audio/speech yerine :streamGenerateContent?alt=sse + x-goog-api-key.
+    tts_cloud_protocol: Literal["openai", "gemini"] = "openai"
+    tts_cloud_model: str = ""  # Bulut konuşma sesi model kimliği
+    # Boşsa sağlayıcı varsayılanı kullanılır, alan gönderilmez
+    tts_cloud_voice: str = Field(default="", max_length=120)
+    # Sağlayıcı belgelemediğinde örnekleme hızı ayarı
+    tts_cloud_sample_rate: int = Field(default=24000, ge=8000, le=48000)
+    tts_cloud_allow_paid: bool = False  # Ücretli bulut ses modeli için açık kullanıcı izni
+    tts_cloud_emotion_tags: bool = False
+    tts_cloud_emotion_tag_list: tuple[str, ...] = (
+        "[laugh]",
+        "[sigh]",
+        "[whisper]",
+        "[anger]",
+    )
     allow_cloud_tts_text: bool = False
     ffmpeg: str = "ffmpeg"
+
+    @field_validator("tts_cloud_emotion_tag_list")
+    @classmethod
+    def validate_tts_cloud_emotion_tag_list(
+        cls, values: tuple[str, ...]
+    ) -> tuple[str, ...]:
+        if len(values) > 20:
+            raise ValueError("En çok 20 duygu etiketi tanımlanabilir")
+        if len(values) != len(set(values)):
+            raise ValueError("Duygu etiketleri yinelenemez")
+        for tag in values:
+            if not re.fullmatch(r"\[[a-z][a-z _-]{1,23}\]", tag):
+                raise ValueError(
+                    "Her duygu etiketi [a-z] ile başlayan 2-24 karakterlik "
+                    "köşeli parantez biçiminde olmalı (ör. [laugh])"
+                )
+        return values
 
     @model_validator(mode="before")
     @classmethod
@@ -228,6 +265,9 @@ class MemoryConfig(BaseModel):
     # Kullanıcının açıkça seçtiği vault'a göreli dosyalar (örn. Threads.md); yalnız
     # memory_open_work aracından, safe_join ile okunur. exclude'u aşar (açık tercih).
     companion_vault_files: tuple[str, ...] = ()
+    # Konuşma hafızasını (memory.sqlite3) Windows DPAPI ile diskte şifreler (ADR 0076);
+    # mevcut kurulumları değiştirmemek için varsayılan kapalıdır.
+    encrypt_at_rest: bool = False
 
 
 class TelegramConfig(BaseModel):
@@ -636,13 +676,13 @@ class PerceptionConfig(BaseModel):
 
 
 class ComputerUseConfig(BaseModel):
-    """Bilgisayar kullanımı (ADR 0039); varsayılan kapalı, görsel model açıkça seçilir."""
+    """Bilgisayar kullanımı (ADR 0039, 0073); varsayılan kapalı, model açıkça seçilir."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = False
-    # `Settings.models` anahtarı; ekran görüntüsünü kabul eden bir model olmalı.
-    # Boşsa Artemis'in o anki ana modeli (Settings.primary_model) kullanılır.
+    # `Settings.models` anahtarı; `observation` "screen"/"both" iken görüntü kabul eden bir model
+    # olmalı, "uia" iken metin modeli de çalışır. Boşsa `Settings.primary_model` kullanılır.
     model: str = ""
     max_steps: int = Field(default=25, ge=1, le=100)
     max_minutes: float = Field(default=5.0, ge=0.5, le=30)
@@ -654,6 +694,9 @@ class ComputerUseConfig(BaseModel):
     # atlama `approval_skipped` olarak denetime yazılır); kodla zorlanan engeller,
     # sınırlar ve Esc iki kipte de aynıdır.
     mode: Literal["accept", "auto"] = "accept"
+    # ADR 0073: "screen" görüntü (varsayılan), "uia" yalnız UI Automation öğe listesi (görsel
+    # olmayan modeller de çalışır), "both" ikisi birden.
+    observation: Literal["screen", "uia", "both"] = "screen"
     # Kotaya takılan görsel model için sırayla denenecek diğer görüntü kabul eden modeller.
     fallback_models: tuple[str, ...] = ()
 
@@ -928,6 +971,10 @@ class Settings(BaseModel):
                 "Karma tanıma için stt_cloud_endpoint endpoints içinde tanımlı ve "
                 "stt_cloud_model dolu olmalı (xai protokolünde model gerekmez)"
             )
+        if voice.tts_backend == "cloud" and voice.tts_cloud_endpoint not in self.endpoints:
+            raise ValueError(
+                "Bulut konuşma sesi için tts_cloud_endpoint endpoints içinde tanımlı olmalı"
+            )
         if any(name not in self.applications for name in self.close_without_confirmation):
             raise ValueError("Onaysız kapatılacak uygulama izin listesinde tanımlanmalı")
         if self.primary_model and self.primary_model not in self.models:
@@ -975,7 +1022,9 @@ def load_settings(path: Path) -> Settings:
         value = getattr(settings, field)
         updates[field] = value if value.is_absolute() else (base / value).resolve()
     voice_updates: dict[str, Path] = {}
-    for field in ("stt_model", "piper_model", "piper_config", "noise_model_dir"):
+    for field in (
+        "stt_model", "game_mode_stt_model", "piper_model", "piper_config", "noise_model_dir"
+    ):
         value = getattr(settings.voice, field)
         if value is not None:
             path_value = value

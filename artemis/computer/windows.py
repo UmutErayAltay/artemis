@@ -15,11 +15,15 @@ from __future__ import annotations
 import contextlib
 import ctypes
 import functools
+import logging
 import sys
 import time
 from collections.abc import Callable
 from ctypes import wintypes
+from dataclasses import dataclass
 from typing import Any
+
+logger = logging.getLogger(__name__)
 
 _NOT_WINDOWS = "Bilgisayar kullanımı yalnız Windows'ta çalışır."
 
@@ -600,3 +604,171 @@ def focused_value_contains(
         return None
     answer = (completed.stdout or "").strip()
     return {"1": True, "0": False}.get(answer) if completed.returncode == 0 else None
+
+
+@dataclass(frozen=True)
+class UiElement:
+    """Ön plan penceresinin tek bir UI Automation denetimi (ADR 0073)."""
+
+    id: int  # 1-based, order of the list
+    kind: str  # ControlType programmatic name without "ControlType." (Button, Edit, ...)
+    name: str  # max 80 chars, whitespace collapsed; "<parola>" for password fields
+    rect: tuple[int, int, int, int]  # x, y, width, height in virtual-desktop pixels
+    interactive: bool  # Invoke / Value / Toggle pattern available
+    focused: bool
+
+
+# Ön plan penceresinin erişilebilirlik ağacını tek geçişte (CacheRequest + genişlik öncelikli)
+# okur. Pencere kimliği ve sınır argv'ye değil ortama gider; ValuePattern değeri ASLA okunmaz,
+# parola alanının adı `<parola>` olarak döner (ADR 0073).
+# ponytail: breadth-first 200 cap may cut web page content; upgrade = interactive-first ordering.
+_UIA_SCRIPT = "\n".join(
+    [
+        "$ErrorActionPreference = 'Stop'",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "try {",
+        "  Add-Type -AssemblyName UIAutomationClient",
+        "  Add-Type -AssemblyName UIAutomationTypes",
+        "  $hwnd = [IntPtr][long]$env:ARTEMIS_UIA_HWND",
+        "  $max = [int]$env:ARTEMIS_UIA_MAX",
+        "  $ae = [System.Windows.Automation.AutomationElement]",
+        "  $cr = New-Object System.Windows.Automation.CacheRequest",
+        "  $cr.TreeScope = [System.Windows.Automation.TreeScope]::Subtree",
+        "  $cr.TreeFilter = [System.Windows.Automation.Automation]::ControlViewCondition",
+        "  foreach ($p in @(",
+        "    $ae::NameProperty, $ae::ControlTypeProperty, $ae::BoundingRectangleProperty,",
+        "    $ae::IsOffscreenProperty, $ae::IsPasswordProperty, $ae::HasKeyboardFocusProperty,",
+        "    $ae::IsInvokePatternAvailableProperty, $ae::IsValuePatternAvailableProperty,",
+        "    $ae::IsTogglePatternAvailableProperty",
+        "  )) { [void]$cr.Add($p) }",
+        "  $cr.Push()",
+        "  try { $root = $ae::FromHandle($hwnd) } finally { [void]$cr.Pop() }",
+        "  if ($null -eq $root) { '[]'; exit 0 }",
+        "  $q = New-Object 'System.Collections.Generic.Queue[System.Windows.Automation."
+        "AutomationElement]'",
+        "  $ch = $root.CachedChildren",
+        "  if ($null -ne $ch) { foreach ($c in $ch) { $q.Enqueue($c) } }",
+        "  $out = New-Object System.Collections.Generic.List[object]",
+        "  while ($q.Count -gt 0 -and $out.Count -lt $max) {",
+        "    $el = $q.Dequeue()",
+        "    $kids = $el.CachedChildren",
+        "    if ($null -ne $kids) { foreach ($k in $kids) { $q.Enqueue($k) } }",
+        "    $c = $el.Cached",
+        "    if ($c.IsOffscreen) { continue }",
+        "    $r = $c.BoundingRectangle",
+        "    if ($r.IsEmpty -or [double]::IsInfinity($r.Width) -or [double]::IsInfinity($r.Height)"
+        " -or $r.Width -lt 2 -or $r.Height -lt 2) { continue }",
+        "    $inv = [bool]$el.GetCachedPropertyValue($ae::IsInvokePatternAvailableProperty)",
+        "    $val = [bool]$el.GetCachedPropertyValue($ae::IsValuePatternAvailableProperty)",
+        "    $tog = [bool]$el.GetCachedPropertyValue($ae::IsTogglePatternAvailableProperty)",
+        "    $inter = $inv -or $val -or $tog",
+        "    $name = if ($c.IsPassword) { '<parola>' } else { [string]$c.Name }",
+        "    $name = ($name -replace '\\s+', ' ').Trim()",
+        "    if (-not $name -and -not $inter) { continue }",
+        "    if ($name.Length -gt 80) { $name = $name.Substring(0, 80) }",
+        "    $kind = ($c.ControlType.ProgrammaticName -replace '^ControlType\\.', '')",
+        "    $rect = @([int][math]::Round($r.Left), [int][math]::Round($r.Top),"
+        " [int][math]::Round($r.Width), [int][math]::Round($r.Height))",
+        "    $out.Add([pscustomobject]@{ k = $kind; n = $name; r = $rect;"
+        " i = $inter; f = [bool]$c.HasKeyboardFocus })",
+        "  }",
+        "  if ($out.Count -eq 0) { '[]' } else {"
+        " ConvertTo-Json -InputObject $out.ToArray() -Compress -Depth 4 }",
+        "} catch { exit 4 }",
+    ]
+)
+
+
+def ui_elements(
+    hwnd: int,
+    timeout: float = 5.0,
+    runner: Callable[..., Any] | None = None,
+    max_items: int = 200,
+) -> list[UiElement]:
+    """Verilen pencerenin görünür UI Automation öğelerini döndürür; hatada `[]` (ADR 0073)."""
+    if sys.platform != "win32" or hwnd <= 0 or max_items <= 0:
+        return []
+    import base64
+    import json
+    import subprocess
+
+    from artemis.tools.platform import child_environment
+
+    encoded = base64.b64encode(_UIA_SCRIPT.encode("utf-16-le")).decode("ascii")
+    command = [
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-EncodedCommand", encoded,
+    ]
+    env = {
+        **child_environment(),
+        "ARTEMIS_UIA_HWND": str(int(hwnd)),
+        "ARTEMIS_UIA_MAX": str(int(max_items)),
+    }
+    try:
+        completed = (runner or subprocess.run)(
+            command, env=env, capture_output=True, text=True, encoding="utf-8",
+            errors="replace", timeout=timeout, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        logger.warning("UIA okuma başarısız (%s).", "zaman_asimi")
+        return []
+    if completed.returncode != 0:
+        logger.warning("UIA okuma başarısız (%s).", "cikis_kodu")
+        return []
+    raw = (completed.stdout or "").strip()
+    if not raw:
+        return []
+    try:
+        parsed: object = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("UIA okuma başarısız (%s).", "json")
+        return []
+    if isinstance(parsed, dict):
+        parsed = [parsed]
+    if not isinstance(parsed, list):
+        return []
+    result: list[UiElement] = []
+    for item in parsed:
+        if len(result) >= max_items:
+            break
+        if not isinstance(item, dict):
+            continue
+        kind = item.get("k")
+        name = item.get("n")
+        rect = item.get("r")
+        interactive = item.get("i")
+        focused = item.get("f")
+        if (
+            not isinstance(kind, str)
+            or not kind
+            or not isinstance(name, str)
+            or not isinstance(interactive, bool)
+            or not isinstance(focused, bool)
+            or not isinstance(rect, list)
+            or len(rect) != 4
+            or any(isinstance(v, bool) or not isinstance(v, int) for v in rect)
+        ):
+            continue
+        w, h = rect[2], rect[3]
+        if w < 2 or h < 2:
+            continue
+        # Ekrandan gelen metin kontrol karakterleri taşıyamaz: her tüketicide (istem, onay
+        # penceresi, günlük) satır bölme/biçim kaçamağı olmasın diye burada sıyırılır.
+        clean_name = "".join(c for c in name if c.isprintable())
+        clean_name = " ".join(clean_name.split())[:80]
+        kind = "".join(c for c in kind if c.isprintable())
+        kind = " ".join(kind.split())[:40]
+        if not kind:
+            continue
+        result.append(
+            UiElement(
+                id=len(result) + 1,
+                kind=kind,
+                name=clean_name,
+                rect=(rect[0], rect[1], w, h),
+                interactive=interactive,
+                focused=focused,
+            )
+        )
+    return result

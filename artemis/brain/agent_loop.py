@@ -21,6 +21,7 @@ from artemis.brain.conversation import (
     frame_history,
     local_stamp,
 )
+from artemis.brain.emotion import emotion_tags_active
 from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.providers import Provider
@@ -75,7 +76,11 @@ ile numarayı bulup memory_forget kullan. "Daha önce / geçen sefer ne konuşmu
 sorularda conversation_search kullan.
 Ekranı görüp tıklamayı gerektiren işlerde (tarayıcıda video seçme/sarma, sekme kapatma,
 pencere içi gezinme) computer_use aracını ÇAĞIR ve hedefin tamamını tek çağrıda ver; aracı
-denemeden "yapamıyorum" ya da "araç hata verdi" deme. Araç gerçekten hata dönerse hata
+denemeden "yapamıyorum" ya da "araç hata verdi" deme. "Yapamam" demeden önce düşün: iş açık ya
+da açılabilir bir uygulamanın içinde ekranda yapılabiliyorsa (Steam'de oyun başlatmak, bir
+menüden ayar değiştirmek, bir sitede düğmeye basmak) gerekirse uygulamayı open_application ile
+açıp computer_use ile yap. Yalnız hiçbir araçla yapılamıyorsa ya da araç gerçekten reddederse
+yapamadığını söyle. Araç gerçekten hata dönerse hata
 metnini aynen aktar. Sonucundaki doğrulama durumunu (ekranda doğrulandı / doğrulanamadı)
 olduğu gibi yansıt, "doğrulayamadım" kalıbına kendin ekleme yapma.
 Yanıtların kısa ve doğrudan olsun: çoğu yanıt bir iki cümle, başlık ve liste yok. Sorulmadıkça
@@ -504,6 +509,15 @@ class AgentLoop:
         # kullanıcı mesajı geçmişte göründüğü biçimle ([tarih saat] öneki, aynı zaman) gider.
         # Böylece her istek bir öncekinin uzantısı olur ve sağlayıcı önbelleği tutar.
         started_at = datetime.now(UTC).isoformat(timespec="seconds")
+        emotion_tags = emotion_tags_active(settings.voice)
+        emotion_instruction = (
+            "\nYanıtların sesli okunabilir. Duyguyu güçlendirmek için yerinde ve az "
+            "(en çok cümle başına bir) yalnız şu etiketleri kullanabilirsin: "
+            f"{', '.join(emotion_tags)}. Başka köşeli parantezli etiket uydurma; "
+            "yazılı içerikte (kod, liste, dosya) etiket kullanma."
+            if emotion_tags
+            else ""
+        )
         messages = [
             Message(
                 role="system",
@@ -514,7 +528,21 @@ class AgentLoop:
                 "son mesajınki şu anki zamandır. Eski bir işi şimdi sürüyor sanma."
                 + "\nİzinli uygulama takma adları (name argümanı): "
                 + json.dumps(list(settings.applications), ensure_ascii=False)
-                + ". Yalnız bu adları kullan; listede bulunan bir uygulamayı izinsiz sanma."
+                + (
+                    # "Yalnız bu adlar" modeli aracı denemeden "listede yok, açamam" demeye
+                    # itiyordu (2026-11-15 Deadlock, 2026-11-04 Opera → "Opera GX tarayıcı").
+                    ". Bu liste kurulu uygulamaların tamamı. Ad tam eşleşmese de "
+                    "open_application'ı dene, yakın adı kendisi bulur. Listede hiç yoksa (ör. "
+                    "Steam oyunu) onu barındıran uygulamayı açıp computer_use ile başlat; "
+                    "denemeden reddetme."
+                    if settings.allow_all_applications
+                    # İzin listesi computer_use ile (Başlat menüsünden) dolanılmaz (Umut,
+                    # 2026-11-16); içerideki iş için yukarıdaki computer_use kuralı geçerli.
+                    else ". Yalnız bu adları kullan; listede bulunan bir uygulamayı izinsiz sanma."
+                    " Listede olmayan uygulamayı computer_use ile de açmaya çalışma; kullanıcıya"
+                    " Ayarlar > Uygulamalar'dan eklemesini söyle."
+                )
+                + emotion_instruction
                 + public_notes
                 + public_companion
                 + prompt_section(skills),
