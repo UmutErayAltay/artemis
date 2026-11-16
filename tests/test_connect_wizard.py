@@ -336,8 +336,6 @@ def test_gemini_guided_flow_clipboard_detection_and_disconnect(
     clipboard.set_text("")
     wizard.gemini_button.click()
     clipboard.set_text(f"  {fake_key}\n")
-    # Pano metni tam eşleştiğinde temizlendiğini doğrulamak için tam metni koyalım
-    clipboard._text = fake_key
     _settle(qt_app, wizard)
 
     # Pano yetki değildir: algılama yalnız alanı doldurur, hiçbir şey doğrulanmaz/saklanmaz.
@@ -345,7 +343,8 @@ def test_gemini_guided_flow_clipboard_detection_and_disconnect(
     assert stored == []
     assert wizard.gemini_key_edit.text() == fake_key
     assert "Bağla" in wizard.status.text()
-    assert clipboard.cleared == 0
+    assert fake_key[-4:] in wizard.status.text() and fake_key not in wizard.status.text()
+    assert clipboard.cleared == 1  # anahtar alana alınır alınmaz panodan silinir
 
     wizard.gemini_bind_button.click()  # kullanıcının açık eylemi
     _settle(qt_app, wizard)
@@ -353,7 +352,7 @@ def test_gemini_guided_flow_clipboard_detection_and_disconnect(
     assert validated == [fake_key]
     assert stored == [("gemini", fake_key)]
     assert clipboard.text() == ""
-    assert clipboard.cleared == 1
+    assert clipboard.cleared == 1  # bağlamada ikinci kez silinmez (pano zaten boş)
 
     settings = load_settings(path)
     assert settings.primary_model == GEMINI_MODEL_ALIAS
@@ -412,7 +411,7 @@ def test_gemini_invalid_key_and_manual_paste(tmp_path: Path, qt_app) -> None:
     assert len(validated) == 2
     assert stored == [("gemini", fake_key)]
     assert clipboard.text() == "kullanıcının başka panosu"
-    assert clipboard.cleared == 0
+    assert clipboard.cleared == 1  # yalnız algılamadaki silme; elle yapıştırma dokunmaz
     settings = load_settings(path)
     assert settings.primary_model == GEMINI_MODEL_ALIAS
     wizard.deleteLater()

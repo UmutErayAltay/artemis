@@ -512,6 +512,9 @@ class ConnectWizard(QDialog):
         layout.addWidget(self.gemini_key_edit)
 
         self.gemini_bind_button = QPushButton("Bağla")
+        # Varsayılan düğme değil: Enter tuşu bağlamayı tetiklemesin, yalnız açık tıklama.
+        self.gemini_bind_button.setAutoDefault(False)
+        self.gemini_bind_button.setDefault(False)
         self.gemini_bind_button.clicked.connect(self._bind_gemini_manual)
         layout.addWidget(self.gemini_bind_button)
         return page
@@ -644,9 +647,17 @@ class ConnectWizard(QDialog):
             return
         # Pano yetki değildir: başka bir yerel süreç de panoya anahtar koyabilir. Algılama yalnız
         # alanı doldurur; doğrulama, kayıt ve pano temizliği kullanıcının "Bağla"sıyla olur.
+        if self.gemini_key_edit.text():
+            return  # kullanıcının yazdığının üzerine yazılmaz
+        # İlk algılamada izleme biter: ikinci bir pano yazımı alanı değiştiremez. Odak taşınmaz
+        # (yanlışlıkla Enter onay sayılmasın); anahtar panoda beklemesin diye hemen temizlenir.
+        self._stop_clipboard_watch()
         self.gemini_key_edit.setText(candidate)
-        self.gemini_bind_button.setFocus()
-        self.status.setText("Panoda bir anahtar algılandı; bağlamak için 'Bağla'ya bas.")
+        if clip.text().strip() == candidate:
+            clip.clear()
+        self.status.setText(
+            f"Panoda bir anahtar algılandı (…{candidate[-4:]}); bağlamak için 'Bağla'ya bas."
+        )
 
     def _bind_gemini_manual(self) -> None:
         candidate = self.gemini_key_edit.text().strip()
