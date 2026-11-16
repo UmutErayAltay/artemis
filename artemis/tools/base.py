@@ -68,6 +68,9 @@ class ToolResult(BaseModel):
     data: dict[str, Any] = Field(default_factory=dict)
     external: bool = False
     content_kind: ContentKind = "text"
+    # İçeriğin gizlilik kökeni (ADR 0056): gizli bir turda yazılmış hafıza gibi, türü ne olursa
+    # olsun buluta yalnız maskeli gidecek sonuç. content_kind'e göre verilen karara eklenir.
+    private: bool = False
 
     @model_validator(mode="after")
     def validate_status(self) -> ToolResult:

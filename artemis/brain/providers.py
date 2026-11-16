@@ -789,6 +789,7 @@ class OllamaProvider:
             usage=_usage(self.model, data.get("prompt_eval_count"), data.get("eval_count")),
             provider="ollama",
             model=self.model.model,
+            local_model=True,  # maske uygulanmaz: girdiyi tam gördü (ADR 0056)
         )
 
     @staticmethod

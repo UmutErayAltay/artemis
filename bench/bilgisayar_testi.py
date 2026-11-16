@@ -241,6 +241,9 @@ class SimBackend:
     def process_at(self, x: int, y: int) -> tuple[str, int]:
         return _EXE, _PID
 
+    def window_at(self, x: int, y: int) -> int:
+        return 1
+
     def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None:
         with self._lock:
             self.app.click(x, y, double)
@@ -249,9 +252,15 @@ class SimBackend:
         with self._lock:
             self.app.wheel(notches)
 
-    def type_text(self, text: str) -> None:
-        with self._lock:
-            self.app.type_text(text)
+    def type_text(self, text: str, should_continue: Callable[[], bool]) -> int:
+        sent = 0
+        for char in text:
+            if not should_continue():
+                break
+            with self._lock:
+                self.app.type_text(char)
+            sent += 1
+        return sent
 
     def press_keys(self, keys: tuple[str, ...]) -> None:
         with self._lock:

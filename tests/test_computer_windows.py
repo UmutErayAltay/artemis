@@ -89,3 +89,27 @@ def test_type_text_sends_each_unit_separately_with_pause(monkeypatch: pytest.Mon
     w.type_text("aü")
     assert calls == [[0x61, 0x61], w._TYPE_DELAY_SECONDS, [0xFC, 0xFC], w._TYPE_DELAY_SECONDS]
     assert w._TYPE_DELAY_SECONDS >= 0.03
+
+
+def test_type_text_keeps_surrogate_pair_in_one_send_and_stops_between_chars(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # ADR 0056: iptal vekil çiftinin ortasına düşemez; her SendInput basma ve bırakmayı birlikte
+    # taşır (basılı tuş kalmaz). Durdurma sonrası kalan karakter gönderilmez.
+    batches: list[list[tuple[int, bool]]] = []
+    monkeypatch.setattr(w, "_require_windows", lambda: None)
+    monkeypatch.setattr(
+        w,
+        "_send",
+        lambda inputs: batches.append(
+            [(i.ki.wScan, bool(i.ki.dwFlags & w._KEYEVENTF_KEYUP)) for i in inputs]
+        ),
+    )
+    monkeypatch.setattr(w.time, "sleep", lambda s: None)
+    answers = iter([True, True, False])
+    sent = w.type_text("a😀b", lambda: next(answers))
+    assert sent == 2
+    assert batches == [
+        [(0x61, False), (0x61, True)],
+        [(0xD83D, False), (0xD83D, True), (0xDE00, False), (0xDE00, True)],
+    ]

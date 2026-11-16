@@ -79,7 +79,8 @@ class MemoryRemember(BaseTool):
             return ToolResult(status="error", message=_DISABLED)
         try:
             outcome, note_id = await run_blocking(
-                store.add_note, args.text, context.turn_id, MAX_NOTES
+                # Gizli turda yazılan not buluta maskeli gider (ADR 0056); onay yerel yazmanındır.
+                store.add_note, args.text, context.turn_id, MAX_NOTES, context.turn_private
             )
         except (OSError, sqlite3.Error) as error:
             return _error(error)
@@ -137,7 +138,8 @@ class MemoryList(BaseTool):
             return _error(error)
         items = [{"id": n.id, "text": n.text, "created_at": n.created_at} for n in notes]
         return ToolResult(
-            success=True, status="ok", message=f"{len(notes)} not var.", data={"notes": items}
+            success=True, status="ok", message=f"{len(notes)} not var.", data={"notes": items},
+            private=any(note.private for note in notes),
         )
 
 

@@ -10,7 +10,7 @@ from __future__ import annotations
 import math
 import sqlite3
 from collections import Counter
-from contextlib import closing
+from contextlib import closing, suppress
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -50,7 +50,8 @@ CREATE TABLE IF NOT EXISTS notes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     text TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    turn_id TEXT NOT NULL
+    turn_id TEXT NOT NULL,
+    private INTEGER NOT NULL DEFAULT 0
 );
 """
 
@@ -60,6 +61,8 @@ class Note:
     id: int
     text: str
     created_at: str
+    # Gizli (izinsiz dosya/pano/ekran görülen) turda yazıldı: buluta maskeli gider (ADR 0056).
+    private: bool = False
 
 
 @dataclass(frozen=True)
@@ -82,6 +85,14 @@ class MemoryStore:
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
             db.executescript(_SCHEMA)
+            columns = {row[1] for row in db.execute("PRAGMA table_info(notes)")}
+            if "private" not in columns:
+                # ADR 0056 geçişi: eski notların gizlilik kökeni bilinmez ve notlar lekeyi de
+                # saklamadığı için çıkarılamaz. Gizli değil sayılırlar; bu sınır README'de
+                # yazılıdır ve kullanıcı şüpheli notu memory_forget ile silebilir.
+                # suppress: eşzamanlı bir geçiş sütunu az önce eklediyse hata beklenendir.
+                with suppress(sqlite3.OperationalError), db:
+                    db.execute("ALTER TABLE notes ADD COLUMN private INTEGER NOT NULL DEFAULT 0")
 
     def _connect(self) -> closing[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=5)
@@ -219,22 +230,31 @@ class MemoryStore:
     def list_notes(self) -> list[Note]:
         """Yeniden eskiye."""
         with self._connect() as db:
-            rows = db.execute("SELECT id, text, created_at FROM notes ORDER BY id DESC")
-            return [Note(*row) for row in rows.fetchall()]
+            rows = db.execute(
+                "SELECT id, text, created_at, private FROM notes ORDER BY id DESC"
+            )
+            return [Note(row[0], row[1], row[2], bool(row[3])) for row in rows.fetchall()]
 
-    def add_note(self, text: str, turn_id: str, max_notes: int) -> tuple[str, int | None]:
-        """("added", id), ("duplicate", id) veya ("full", None)."""
+    def add_note(
+        self, text: str, turn_id: str, max_notes: int, private: bool = False
+    ) -> tuple[str, int | None]:
+        """("added", id), ("duplicate", id) veya ("full", None).
+
+        Aynı metin gizli bir turda yeniden yazılırsa var olan not gizli işaretlenir: gizlilik
+        yalnız artar, temiz bir tekrar onu düşürmez (ADR 0056)."""
         folded = turkish_fold(text)
         with self._connect() as db, db:
             rows = db.execute("SELECT id, text FROM notes").fetchall()
             for note_id, existing in rows:
                 if turkish_fold(existing) == folded:
+                    if private:
+                        db.execute("UPDATE notes SET private = 1 WHERE id = ?", (note_id,))
                     return "duplicate", note_id
             if len(rows) >= max_notes:
                 return "full", None
             cursor = db.execute(
-                "INSERT INTO notes (text, created_at, turn_id) VALUES (?,?,?)",
-                (text, _now(), turn_id),
+                "INSERT INTO notes (text, created_at, turn_id, private) VALUES (?,?,?,?)",
+                (text, _now(), turn_id, int(private)),
             )
             return "added", cursor.lastrowid
 

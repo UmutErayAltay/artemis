@@ -202,7 +202,10 @@ class ProviderRouter:
             )
         except OSError:
             raise ProviderError("Sağlayıcı tamamlandı ancak denetim kaydı yazılamadı.") from None
-        return completion.model_copy(update={"local_fallback": local_fallback})
+        # Gizlilik kökeni rolden ayrı: zor işler/ana model de yerel olabilir (ADR 0056).
+        return completion.model_copy(
+            update={"local_fallback": local_fallback, "local_model": self._local(alias)}
+        )
 
     async def complete(
         self,

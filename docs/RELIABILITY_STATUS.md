@@ -4,6 +4,24 @@ Bu dosya güncel durumun kanonik kaynağıdır. Her satır üç durumu ayırır:
 **Otomatik test** (sahte arka uçla; gerçek cihaz değildir) ve **Gerçek cihaz** (Windows,
 tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.md).
 
+## Gizlilik ve hedef pencere turu — 2026-11-07 (dal `fix/gizlilik-ve-hedef-pencere`, base `cb5389b`)
+
+Dış inceleme bulguları güncel kodda yan etkisiz yeniden üretilerek doğrulandı; her biri için
+eski kodda kırılan (mutasyonla da denetlenen) regresyon testi eklendi
+([ADR 0056](adr/0056-gizlilik-koken-ve-hedef-pencere.md)).
+
+| Bulgu (sınıf) | Kodlandı | Otomatik test | Gerçek cihaz |
+|---|---|---|---|
+| Gizli dosyadan companion hafızasına yazılan metin sonraki turda buluta maskesiz gidiyordu (doğrulanmış hata) | `e8517fa` | geçti (`tests/test_privacy_provenance.py`) | — (platformdan bağımsız) |
+| Aynı yol `memory_remember` notlarında da vardı (incelemede bulundu) | `e8517fa` | geçti | — |
+| Yerel (Ollama) zor işler/ana modelin gizli geçmişten yanıtı `answer_private=False` kaydediliyordu (doğrulanmış hata) | `01ad823` | geçti (akışlı + akışsız, iki yön) | canlı Ollama bekliyor (WINDOWS_CHECKLIST F) |
+| `memory_changes` arşivdeki dış içeriği lekesiz döndürüyordu; sonraki yan etki onaysızdı (doğrulanmış hata) | `4fe7f2f` | geçti | — |
+| Hassas adım onayı pencereye bağlı değildi: tarayıcı için onaylanan Enter posta uygulamasına gidebiliyordu (doğrulanmış hata) | `89b6099` | geçti (sahte arka uç) | bekliyor (WINDOWS_CHECKLIST F) |
+| Uzun yazım Esc/süre sonrası sürüyordu: 10 karakterin 9'u durdurmadan sonra gönderildi (doğrulanmış hata) | `89b6099` | geçti (session → `windows.type_text`, sahte `_send`) | bekliyor (WINDOWS_CHECKLIST F) |
+
+Bilinen sınırlar: eski öz notların gizlilik kökeni bilinmez (gizli sayılmaz); odak kontrolü ile
+`SendInput` arasında bir karakterlik yarış kalır.
+
 ## Güvenilirlik turu — 2026-11-03 (dal `fix/guvenilirlik-turu`, base `aa70baf`)
 
 Ürünleştirme öncesi inceleme; yeni özellik yok. Bulgular güncel kodda yeniden doğrulandı.
