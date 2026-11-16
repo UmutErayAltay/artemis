@@ -94,8 +94,8 @@ kısaltılır, sonra en eski turlar düşer. Eski araç çıktıları her göste
 çerçevesine alınır; taint yeni tura taşınmaz, gizlilik işareti taşınır. Sıfırlama CLI'da
 `/yeni`, panelde "Yeni sohbet"tir. Karar [ADR 0012](adr/0012-conversation-context.md).
 Tek istisna: bağlamda dış içerikli tur kaldığı sürece `outbound` bildiren araçlar
-(`open_url`, `web_search`, `notify_telegram`; `open_url` otomatik onayda sorulmaz, ADR 0057) yeni turda da onay ister; karar
-[ADR 0013](adr/0013-outbound-after-history-taint.md). Temiz turda site açmak sorulmaz, dış içerikten sonra her adres sorulur ([ADR 0057](adr/0057-open-url-lekeli-turda-sorulur.md)); site okumak her zaman sorulur; masaüstü onayında "bu site için bir daha sorma" vardır ([ADR 0036](adr/0036-site-acma-okuma-onayi.md)).
+(`open_url`, `web_search`, `notify_telegram`; `open_url` otomatik onayda sorulmaz, ADR 0077) yeni turda da onay ister; karar
+[ADR 0013](adr/0013-outbound-after-history-taint.md). Temiz turda site açmak sorulmaz, dış içerikten sonra her adres sorulur ([ADR 0077](adr/0077-open-url-lekeli-turda-sorulur.md)); site okumak her zaman sorulur; masaüstü onayında "bu site için bir daha sorma" vardır ([ADR 0036](adr/0036-site-acma-okuma-onayi.md)).
 
 ## Hafıza
 

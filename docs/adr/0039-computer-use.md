@@ -95,7 +95,7 @@ Claude Code'daki gibi bir otomatik kip olsun ("kontrol bende, gerekirse Esc ile 
      sormadan modele verirken yerel OCR daha azını açar. Gözetimsiz tur yine okuyamaz,
      buluta gönderim `allow_cloud_screen`'e bağlı kalır. Diğer araçlar kural 4'le
      dış içerikten sonra onay beklemeye devam eder. `open_url` de `auto_mode_ok` taşır
-     (ADR 0057, 2026-11-16, kullanıcı isteği): lekeli turda normal kipte sorulur, bu kipte sorulmaz.
+     (ADR 0077, 2026-11-16, kullanıcı isteği): lekeli turda normal kipte sorulur, bu kipte sorulmaz.
    - Kodla zorlanan engeller (4. madde), adım/süre sınırı ve Esc iki kipte de aynıdır.
    - Bedel: ekrandaki bir enjeksiyon `auto` kipte sorulmadan mesaj gönderebilir ya da form
      onaylayabilir. Bu kullanıcının bilerek seçtiği bir takastır; varsayılan `accept` kalır.

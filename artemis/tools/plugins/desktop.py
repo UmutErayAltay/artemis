@@ -334,12 +334,12 @@ class OpenURL(BaseTool):
     args_model = URLArguments
     risk = Risk.SIDE_EFFECT
     outbound = True
-    # ADR 0057: otomatik onay kipinde lekeli turdaki adres sorulmaz (kullanıcının bilerek
+    # ADR 0077: otomatik onay kipinde lekeli turdaki adres sorulmaz (kullanıcının bilerek
     # açtığı kip); normal kipte sorulur.
     auto_mode_ok = True
 
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
-        # Kullanıcı kararı (ADR 0036): temiz turda site açmak sorulmaz. ADR 0057: bağlamda dış
+        # Kullanıcı kararı (ADR 0036): temiz turda site açmak sorulmaz. ADR 0077: bağlamda dış
         # içerik varken her adres sorulur. Yalnız `?`/`#` sormak yolda (site.com/GIZLI) ve alt
         # alan adında (GIZLI.site.com) taşınan veriyi kaçırıyordu; tarayıcı isteği gönderdiği
         # anda veri karşı sunucunun kaydına düşer.

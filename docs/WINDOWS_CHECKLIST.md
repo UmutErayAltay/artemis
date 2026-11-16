@@ -133,7 +133,7 @@ koşmak içindir; araçlar main'de.
 
 - [x] `open_url` yol/sorgu sızıntısı (ADR 0036): bugünkü kural yalnız dış içerik varken
   `?`/`#` taşıyan adreste sorar; yol bölümü sorulmuyor. **Karar (Umut, 2026-10-31): değişmesin.**
-  **Yeni karar (Umut, 2026-11-16, ADR 0057):** normal kipte lekeli turda her adres sorulur,
+  **Yeni karar (Umut, 2026-11-16, ADR 0077):** normal kipte lekeli turda her adres sorulur,
   otomatik onayda sorulmaz.
 - [ ] LinkedIn taslağı (2026-10-23).
 
@@ -214,7 +214,7 @@ Yalnız zararsız hedef (boş Not Defteri, taslak) kullanın; gönderilen girdi 
 
 Sonuçları bu listede ikinci bir tablo açmadan kanonik durum tablosuna tarih/commit/kanıtla yazın.
 
-## G. `open_url` lekeli turda onay (ADR 0057)
+## G. `open_url` lekeli turda onay (ADR 0077)
 
 - [ ] Web sayfası okuttuktan sonra "YouTube'u aç": normal kipte onay penceresi dış içerik uyarısıyla
   çıkıyor; Hayır deyince tarayıcı açılmıyor.

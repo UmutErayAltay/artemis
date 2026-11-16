@@ -1,4 +1,4 @@
-# ADR 0057 — `open_url` lekeli turda sorulur, otomatik onayda sorulmaz
+# ADR 0077 — `open_url` lekeli turda sorulur, otomatik onayda sorulmaz
 
 **Bağlam:** ADR 0036 ara yolu, bağlamda dış içerik varken yalnız `?`/`#` taşıyan adresi
 soruyordu. Bilinen sınır açıktı: veri yolda (`kotu.com/GIZLI`) ya da alt alan adında

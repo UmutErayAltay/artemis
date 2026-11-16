@@ -587,7 +587,7 @@ async def test_memory_is_shared_within_same_turn_and_reset_for_new_turn(tmp_path
 
 
 def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
-    """ADR 0039 + 0057: onay atlaması yalnız bu araçlarda; yenisi ADR'siz eklenirse kırılır."""
+    """ADR 0039 + 0077: onay atlaması yalnız bu araçlarda; yenisi ADR'siz eklenirse kırılır."""
     from artemis.tools.registry import discover_tools
 
     registry = discover_tools()

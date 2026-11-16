@@ -147,7 +147,7 @@ class BaseTool(ABC):
     outbound: ClassVar[bool] = False
     # Bilgisayar kullanımı otomatik kipindeyken (`computer_use.mode: auto`) bu aracın tur
     # içi/dış içerik kaynaklı onayı atlanır. Yalnız ADR ile seçilen araçlarda True (ADR 0039 ek
-    # karar, ADR 0057 `open_url`); diğer araçların kural 4 davranışı değişmez.
+    # karar, ADR 0077 `open_url`); diğer araçların kural 4 davranışı değişmez.
     auto_mode_ok: ClassVar[bool] = False
     # Kullanıcıya gösterilen okunur ad (onay başlığı) ve başarı satırı (ADR 0014).
     # Boşsa arayüz ham adı gösterir; ayrı bir ad tablosu tutulmaz.

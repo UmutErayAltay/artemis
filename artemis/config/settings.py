@@ -689,7 +689,7 @@ class ComputerUseConfig(BaseModel):
     screenshot_width: int = Field(default=1280, ge=640, le=2560)
     step_delay_seconds: float = Field(default=0.3, ge=0, le=3)
     # ADR 0039 ek karar: "auto" oturum içi hassas adımları ve başlangıcı sormaz
-    # (`computer_use`, `window_control`, `screen_read`, ADR 0057 ile `open_url`; `auto_mode_ok`
+    # (`computer_use`, `window_control`, `screen_read`, ADR 0077 ile `open_url`; `auto_mode_ok`
     # ile lekeli turda da onaylanmaz,
     # atlama `approval_skipped` olarak denetime yazılır); kodla zorlanan engeller,
     # sınırlar ve Esc iki kipte de aynıdır.

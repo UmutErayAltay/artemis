@@ -31,6 +31,6 @@ onay istesin, onay kısmında bu site için bir daha sorma seçeneği de olsun".
 2026-10-27, ADR 0046: host güveni CONFIRM_REQUIRED riskini atlamaz; zorunlu onayda
 host hatırlama düğmesi gösterilmez. Önceki "hiç sorulmaz" ifadesi yalnız bu sınır içinde geçerlidir.
 
-2026-11-16, ADR 0057: `open_url` ara yolu (`?`/`#`) kaldırıldı. Lekeli turda her adres sorulur
+2026-11-16, ADR 0077: `open_url` ara yolu (`?`/`#`) kaldırıldı. Lekeli turda her adres sorulur
 (yol ve alt alan adı da veri taşır); otomatik onay kipinde sorulmaz. Temiz turda site açmak
 hâlâ sorulmaz.

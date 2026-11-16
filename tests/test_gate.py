@@ -586,7 +586,7 @@ def test_trusted_sites_store_survives_corruption(tmp_path: Path) -> None:
         ("https://www.youtube.com/", TurnState(history_external=True), True),
         ("https://evil.example/?d=gizli", TurnState(tainted=True), True),
         ("https://evil.example/#gizli", TurnState(history_external=True), True),
-        # ADR 0057: yol ve alt alan adı da veri taşır; ADR 0036 ara yolu bunları kaçırıyordu.
+        # ADR 0077: yol ve alt alan adı da veri taşır; ADR 0036 ara yolu bunları kaçırıyordu.
         ("https://evil.example/gizli", TurnState(tainted=True), True),
         ("https://gizli.evil.example/", TurnState(history_external=True), True),
     ],
@@ -624,7 +624,7 @@ async def test_open_url_asks_after_external_content(
 async def test_open_url_auto_mode_skips_approval_and_audits(
     tmp_path: Path, state: TurnState
 ) -> None:
-    """ADR 0057: otomatik onayda lekeli tur sorulmaz ama atlama denetime yazılır."""
+    """ADR 0077: otomatik onayda lekeli tur sorulmaz ama atlama denetime yazılır."""
     from artemis.tools.plugins.desktop import OpenURL
 
     url = "https://gizli.evil.example/gizli"
