@@ -763,3 +763,40 @@ def test_credential_prefix_changes_read_target_and_falls_back_on_invalid(
         assert credential_prefix() == "Artemis"
         assert stored_endpoint_key("gemini") == "sahte-deger"
         assert seen_targets[-1] == "Artemis/gemini"
+
+
+def test_gemini_thought_signature_round_trips_through_tool_calls() -> None:
+    # 2026-11-16 canlı: Gemini 3 araç çağrısına extra_content.google.thought_signature ekler;
+    # sonraki istekte geri gönderilmezse 400 döner. Akışsız, akışlı ve geri gönderim yolları.
+    import json as _json
+
+    from artemis.brain.models import Message
+    from artemis.brain.providers import _chat_calls, _chat_messages, _ChatStreamAccumulator
+
+    extra = {"google": {"thought_signature": "c2lnbmF0dXJl"}}
+    calls = _chat_calls([{"id": "c1", "type": "function", "extra_content": extra,
+                          "function": {"name": "read_file", "arguments": "{\"path\": \"a.txt\"}"}}])
+    assert calls[0].extra_content == extra
+
+    class _Sink:
+        def text(self, _delta: str) -> None: ...
+        def tool_call(self) -> None: ...
+
+    acc = _ChatStreamAccumulator(_Sink())  # type: ignore[arg-type]
+    acc("data: " + _json.dumps({"choices": [{"delta": {"tool_calls": [{"index": 0, "id": "c1",
+        "extra_content": extra, "function": {"name": "read_file", "arguments": "{}"}}]}}]}))
+    acc("data: " + _json.dumps({"choices": [{"delta": {}, "finish_reason": "tool_calls"}]}))
+    acc("data: [DONE]")
+    streamed = _chat_calls(acc.response()["choices"][0]["message"]["tool_calls"])
+    assert streamed[0].extra_content == extra
+
+    sent = _chat_messages([
+        Message(role="user", content="oku"),
+        Message(role="assistant", content="", tool_calls=calls),
+        Message(role="tool", content="içerik", tool_call_id="c1"),
+    ])
+    assert sent[1]["tool_calls"][0]["extra_content"] == extra
+    # Alan yoksa hiç gönderilmez (diğer sağlayıcılar bilinmeyen alanı reddedebilir).
+    plain = _chat_calls([{"id": "c2", "function": {"name": "x", "arguments": "{}"}}])
+    no_extra = _chat_messages([Message(role="assistant", content="", tool_calls=plain)])
+    assert "extra_content" not in no_extra[0]["tool_calls"][0]
