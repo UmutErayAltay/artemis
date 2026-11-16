@@ -155,3 +155,15 @@ def suggest_layout(
         if computer else None
     )
     return ana, (zor if zor != ana else None), (pc if pc != ana else None)
+
+
+def pass_rate(report: dict[str, object]) -> float | None:
+    """Geçen senaryoların oranı (0..1); sayılabilir bölüm yoksa None."""
+    passed = total = 0
+    for key in ("temel", "zor", "bilgisayar"):
+        part = report.get(key)
+        if isinstance(part, dict) and isinstance(part.get("passed"), int) and isinstance(
+            part.get("total"), int
+        ):
+            passed, total = passed + part["passed"], total + part["total"]
+    return passed / total if total else None

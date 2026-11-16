@@ -321,6 +321,19 @@ QFrame#dangerZone QLabel#sectionTitle {{ color: {t['error']}; }}
 QPushButton#primary:disabled {{ background: {t['soft']}; color: {t['muted']};
  border-color: {t['accent']}; font-weight: 650; }}
 QSpinBox:disabled {{ background: {t['soft']}; color: {t['muted']}; }}
+/* Bağlama sihirbazı: seçilebilir kartlar ve sayfa yüzeyi. */
+QPushButton#choiceCard {{ background: {t['surface']}; border: 1px solid {t['border']};
+ border-radius: 12px; padding: 0; text-align: left; min-height: 80px; }}
+QPushButton#choiceCard:hover {{ border-color: {t['accent']}; }}
+QPushButton#choiceCard:checked {{ background: {t['accent_soft']};
+ border: 2px solid {t['accent']}; }}
+QLabel#choiceTitle {{ font-size: 15px; font-weight: 650; background: transparent; }}
+QLabel#choiceDetail {{ color: {t['muted']}; font-size: 12px; background: transparent; }}
+QLabel#choiceBadge {{ background: {t['accent']}; color: {t['accent_text']}; border-radius: 8px;
+ padding: 1px 8px; font-size: 12px; font-weight: 650; }}
+QFrame#wizardPage {{ background: {t['surface']}; border: 1px solid {t['border']};
+ border-radius: 12px; }}
+QFrame#localFound {{ background: {t['accent_soft']}; border-radius: 10px; }}
 /* /wave2-lists */
 """
 

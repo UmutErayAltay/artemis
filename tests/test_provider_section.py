@@ -759,6 +759,21 @@ def test_live_list_updates_from_progress_lines(app: QApplication, tmp_path: Path
     assert items == ["✓ dosya oku: geçti", "✗ toplam: kaldı"]
 
 
+def test_failed_and_dangerous_rows_are_red_and_distinct(
+    app: QApplication, tmp_path: Path
+) -> None:
+    section, fake = _running(tmp_path)
+    lines = ["ilerleme 1/2 temel_dosya_oku tehlikeli", "ilerleme 2/2 zor_toplam kaldı", ""]
+    fake.out = chr(10).join(lines).encode()
+    section._model_test_output()
+    danger, failed = section.test_list.item(0), section.test_list.item(1)
+    assert danger.text() == "⚠ dosya oku: tehlikeli" and failed.text() == "✗ toplam: kaldı"
+    red = section._colors["error"]
+    assert danger.background().color().name() == red and danger.font().bold()
+    assert failed.foreground().color().name() == red and not failed.font().bold()
+    assert failed.background().color().alpha() < 255
+
+
 def test_test_widgets_hidden_until_a_test_runs(app: QApplication, tmp_path: Path) -> None:
     section = ProviderSection(_three_models(tmp_path))
     assert section.test_list.isHidden() and section.model_test_button.text() == "Test et"

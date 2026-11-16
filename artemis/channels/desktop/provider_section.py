@@ -30,7 +30,7 @@ from PySide6.QtCore import (
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QResizeEvent
+from PySide6.QtGui import QColor, QResizeEvent
 from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
@@ -48,7 +48,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.errors import ProviderError
-from artemis.brain.model_report import SCENARIO_IDS, merge_retry, suggest_layout
+from artemis.brain.model_report import SCENARIO_IDS, merge_retry, pass_rate, suggest_layout
 from artemis.brain.models import Message
 from artemis.brain.providers import (
     ClaudeCliProvider,
@@ -91,7 +91,7 @@ _BAD_URL = "Adres geçersiz: https:// ile başlamalı (http yalnız yerel sunucu
 
 # Satır içi renkler (HTML etiketleri) temadan gelir; sabit onaltılık renk yok, tema değişince
 # set_theme yeniden çizer.
-_COLOR_KEYS = ("muted", "accent", "warning", "error")
+_COLOR_KEYS = ("muted", "accent", "warning", "error", "bg")
 
 
 WIDE_AT = 900  # bu genişlikten itibaren model ayrıntısı listenin yanında durur
@@ -123,9 +123,7 @@ def _scenario_label(scenario_id: str) -> str:
 
 _Row = tuple[str, bool, bool, str, str, bool, bool, str]
 
-_STATE_TEXT = {"bekliyor": "○", "geçti": "✓", "kaldı": "✗"}
-
-
+_STATE_TEXT = {"bekliyor": "○", "geçti": "✓", "kaldı": "✗", "tehlikeli": "⚠"}
 
 
 def probe_models(base_url: str, key: str | None) -> tuple[str, list[str]]:
@@ -518,7 +516,7 @@ class ProviderSection(QWidget):
         if key == "score":
             def score(row: _Row) -> float:
                 report = self._reports_seen.get(row[0])
-                rate = _pass_rate(report) if report else None
+                rate = pass_rate(report) if report else None
                 if report is None or rate is None:
                     return 2.0  # test edilmemiş en sonda
                 # Tehlikeli hatalı model aynı yüzdedeki güvenli modelin altına iner.
@@ -1052,7 +1050,7 @@ class ProviderSection(QWidget):
         self._start_test(self._selected_alias(), None)
 
     def _retry_failed(self) -> None:
-        failed = [key for key, state in self._test_rows.items() if state == "kaldı"]
+        failed = [key for key, state in self._test_rows.items() if state in ("kaldı", "tehlikeli")]
         if self._last is None or not failed:
             return
         alias = str(self._last[1].get("model", ""))
@@ -1146,14 +1144,26 @@ class ProviderSection(QWidget):
         self.test_list.clear()
         for key, state in self._test_rows.items():
             note = " (2. deneme)" if state == "geçti" and key in self._second else ""
-            self.test_list.addItem(f"{_STATE_TEXT[state]} {_scenario_label(key)}: {state}{note}")
+            item = QListWidgetItem(f"{_STATE_TEXT[state]} {_scenario_label(key)}: {state}{note}")
+            # Kalan adım kırmızı tonla parlar; tehlikeli adım dolu kırmızı ve kalın: ayırt edilir.
+            if state in ("kaldı", "tehlikeli"):
+                red = QColor(self._colors["error"])
+                fill = QColor(red)
+                if state == "kaldı":
+                    fill.setAlpha(45)
+                item.setBackground(fill)
+                item.setForeground(QColor(self._colors["bg"]) if state == "tehlikeli" else red)
+                font = item.font()
+                font.setBold(state == "tehlikeli")
+                item.setFont(font)
+            self.test_list.addItem(item)
         self._sync_test_buttons()
 
     def _sync_test_buttons(self) -> None:
         running = self._model_test is not None
         selected = self._current_alias()
         mine = running and self._testing == selected
-        failed = any(state == "kaldı" for state in self._test_rows.values())
+        failed = any(state in ("kaldı", "tehlikeli") for state in self._test_rows.values())
         # Satırlar son/çalışan testin modeline aittir; başka model seçiliyken gösterilmez.
         shown = self._testing or (str(self._last[1].get("model", "")) if self._last else "")
         here = shown == selected
@@ -1217,7 +1227,8 @@ class ProviderSection(QWidget):
         done = report.get("scenarios", [])
         self._second = {item["id"] for item in done if item.get("attempt") == 2}
         self._test_rows.update(
-            {item["id"]: "geçti" if item["success"] else "kaldı" for item in done}
+            {item["id"]: "tehlikeli" if item.get("dangerous") else "geçti" if item["success"]
+             else "kaldı" for item in done}
         )
         self._render_test_list()
         self.reload()
@@ -1258,21 +1269,9 @@ def _write_json(path: Path, data: object) -> None:
     os.replace(temp, path)
 
 
-def _pass_rate(report: dict[str, object]) -> float | None:
-    """Geçen senaryoların oranı (0..1); sayılabilir bölüm yoksa None."""
-    passed = total = 0
-    for key in ("temel", "zor", "bilgisayar"):
-        part = report.get(key)
-        if isinstance(part, dict) and isinstance(part.get("passed"), int) and isinstance(
-            part.get("total"), int
-        ):
-            passed, total = passed + part["passed"], total + part["total"]
-    return passed / total if total else None
-
-
 def _score(report: dict[str, object]) -> str:
     """Listede tek sayı: geçen senaryoların yüzdesi ('%87'); tehlikeli hata metinle belirtilir."""
-    rate = _pass_rate(report)
+    rate = pass_rate(report)
     if rate is None:
         return ""
     return f"%{round(100 * rate)}" + (
