@@ -82,6 +82,8 @@ async def _create_worker() -> asyncio.subprocess.Process:
         stderr=asyncio.subprocess.DEVNULL,
         cwd=_worker_cwd(),
         env=child_environment(),
+        # Kurulu pakette işçi konsol exe'siyle başlar; pencere açılmasın.
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
     )
 
 

@@ -83,8 +83,29 @@ exe = EXE(
     icon=str(ROOT / "artemis" / "channels" / "desktop" / "artemis.ico"),
 )
 
+# Pencereli exe'de sys.stdout yok; stdio ile JSON konuşan alt süreçler (masaüstü işçisi, MCP,
+# model testi) bu konsol kardeşiyle başlar (entry.py sys.executable'ı buna çevirir). Aynı
+# _internal klasörünü paylaşır, ek boyut yalnız önyükleyicidir.
+cli_exe = EXE(
+    pyz,
+    a.scripts,
+    [],
+    exclude_binaries=True,
+    name="artemis-cli",
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=True,
+    console=True,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon=str(ROOT / "artemis" / "channels" / "desktop" / "artemis.ico"),
+)
+
 coll = COLLECT(
     exe,
+    cli_exe,
     a.binaries,
     a.datas,
     strip=False,

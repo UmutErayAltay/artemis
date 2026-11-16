@@ -3,10 +3,24 @@
 import multiprocessing
 import runpy
 import sys
+from pathlib import Path
+
+
+def _use_console_sibling() -> None:
+    """Pencereli Artemis.exe'de stdout/stdin yoktur: `sys.executable -m ...` ile başlayan ve stdio
+    üzerinden konuşan alt süreçler sessizce kırılırdı. Yanındaki konsol exe'sini (artemis-cli.exe)
+    alt süreç başlatıcısı yapar; konsol penceresi açılmasını çağıranlar CREATE_NO_WINDOW ile önler.
+    """
+    if not getattr(sys, "frozen", False) or sys.stdout is not None:
+        return
+    sibling = Path(sys.executable).with_name("artemis-cli.exe")
+    if sibling.is_file():
+        sys.executable = str(sibling)
 
 
 def main(argv: list[str] | None = None) -> None:
     """Alt süreç `-m` öykünmesini veya masaüstü/CLI girişini çalıştırır."""
+    _use_console_sibling()
     args = sys.argv[1:] if argv is None else list(argv)
     if args[:1] == ["-m"] and len(args) >= 2:
         module_name = args[1]

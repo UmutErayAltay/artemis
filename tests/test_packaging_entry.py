@@ -94,3 +94,30 @@ def test_iss_uninstall_does_not_touch_userappdata() -> None:
     _, _, uninstall_section = iss_text.partition("[UninstallDelete]")
     assert uninstall_section
     assert "{userappdata}" not in uninstall_section.casefold()
+
+
+def test_windowed_exe_spawns_children_with_console_sibling(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    # Pencereli exe'de stdout yok: alt süreçler artemis-cli.exe ile başlamalı, yoksa stdio kırık.
+    entry = _load_entry_module()
+    gui = tmp_path / "Artemis.exe"
+    gui.write_bytes(b"")
+    (tmp_path / "artemis-cli.exe").write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(gui))
+    monkeypatch.setattr(sys, "stdout", None)
+    entry._use_console_sibling()
+    assert sys.executable == str(tmp_path / "artemis-cli.exe")
+
+
+def test_console_exe_keeps_its_own_executable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    entry = _load_entry_module()
+    cli = tmp_path / "artemis-cli.exe"
+    cli.write_bytes(b"")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "executable", str(cli))
+    entry._use_console_sibling()  # stdout var (konsol exe): değişmez
+    assert sys.executable == str(cli)
