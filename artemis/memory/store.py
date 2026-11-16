@@ -19,7 +19,13 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from artemis.brain.conversation import TurnRecord
-from artemis.memory.protect import PREFIX, PlainProtector, Protector, UnreadableMemory
+from artemis.memory.protect import (
+    PLAIN_PREFIX,
+    PREFIX,
+    PlainProtector,
+    Protector,
+    UnreadableMemory,
+)
 from artemis.memory.sqlite_schema import ensure_schema, purge_backups
 from artemis.memory.vault import tokenize
 from artemis.text import turkish_fold
@@ -65,9 +71,7 @@ CREATE TABLE IF NOT EXISTS notes (
 """
 
 
-def _migrate(
-    db: sqlite3.Connection, from_version: int, protector: Protector | None = None
-) -> None:
+def _migrate(db: sqlite3.Connection, from_version: int) -> None:
     # executescript commit ederdi; geçiş tek işlemde kalsın diye deyimler tek tek koşar.
     for statement in _SCHEMA.split(";"):
         if statement.strip():
@@ -83,42 +87,57 @@ def _migrate(
         # Bastırılan hata gerçek bir başarısızlığı gizleyebilir: sütun yoksa sürüm artmasın.
         if "private" not in {row[1] for row in db.execute("PRAGMA table_info(notes)")}:
             raise sqlite3.OperationalError("notes.private sütunu eklenemedi.")
-    if from_version < 2 and protector is not None and not isinstance(protector, PlainProtector):
-        _encrypt_existing_rows(db, protector)
 
 
-def _encrypt_existing_rows(db: sqlite3.Connection, protector: Protector) -> None:
-    """Açık geçişte (1 -> 2) düz metin satırları tek işlemde şifreler (ADR 0076)."""
-    turn_rows = db.execute(
-        "SELECT id, record_json, user_text, answer, search_text FROM turns"
-    ).fetchall()
-    for row_id, record_json, user_text, answer, search_text in turn_rows:
-        new_record = (
-            record_json if record_json.startswith(PREFIX) else protector.protect(record_json)
-        )
-        new_user = user_text if user_text.startswith(PREFIX) else protector.protect(user_text)
-        new_answer = answer if answer.startswith(PREFIX) else protector.protect(answer)
-        new_search = (
-            search_text if search_text.startswith(PREFIX) else protector.protect(search_text)
-        )
-        if (
-            new_record != record_json
-            or new_user != user_text
-            or new_answer != answer
-            or new_search != search_text
-        ):
-            db.execute(
-                "UPDATE turns SET record_json = ?, user_text = ?, answer = ?, search_text = ?"
-                " WHERE id = ?",
-                (new_record, new_user, new_answer, new_search, row_id),
-            )
-    note_rows = db.execute("SELECT id, text FROM notes").fetchall()
-    for row_id, text in note_rows:
-        if not text.startswith(PREFIX):
-            db.execute(
-                "UPDATE notes SET text = ? WHERE id = ?",
-                (protector.protect(text), row_id),
-            )
+def _protect_cell(val: str, protector: Protector, prefix: str) -> str:
+    if val.startswith(PLAIN_PREFIX):
+        return protector.protect(val[len(PLAIN_PREFIX) :])
+    if val.startswith(prefix):
+        return val
+    return protector.protect(val)
+
+
+def _sweep_encrypted(db: sqlite3.Connection, protector: Protector) -> None:
+    """Açılışta düz metin satırları tek işlemde şifreler (ADR 0076)."""
+    prefix = getattr(protector, "prefix", getattr(protector, "FAKE_PREFIX", PREFIX))
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        turn_rows = db.execute(
+            "SELECT id, record_json, user_text, answer, search_text FROM turns"
+        ).fetchall()
+        for row_id, record_json, user_text, answer, search_text in turn_rows:
+            new_record = _protect_cell(record_json, protector, prefix)
+            new_user = _protect_cell(user_text, protector, prefix)
+            new_answer = _protect_cell(answer, protector, prefix)
+            new_search = _protect_cell(search_text, protector, prefix)
+            if (
+                new_record != record_json
+                or new_user != user_text
+                or new_answer != answer
+                or new_search != search_text
+            ):
+                db.execute(
+                    "UPDATE turns SET record_json = ?, user_text = ?, answer = ?, search_text = ?"
+                    " WHERE id = ?",
+                    (new_record, new_user, new_answer, new_search, row_id),
+                )
+        note_rows = db.execute("SELECT id, text FROM notes").fetchall()
+        for row_id, text in note_rows:
+            new_text = _protect_cell(text, protector, prefix)
+            if new_text != text:
+                db.execute(
+                    "UPDATE notes SET text = ? WHERE id = ?",
+                    (new_text, row_id),
+                )
+        db.commit()
+    except (UnreadableMemory, ValueError, OSError) as error:
+        with suppress(sqlite3.Error):
+            db.rollback()
+        raise sqlite3.OperationalError("Hafıza şifrelemesi uygulanamadı.") from error
+    except sqlite3.Error:
+        with suppress(sqlite3.Error):
+            db.rollback()
+        raise
 
 
 @dataclass(frozen=True)
@@ -154,8 +173,10 @@ class MemoryStore:
                 db,
                 path,
                 _SCHEMA_VERSION,
-                lambda conn, from_version: _migrate(conn, from_version, self._protector),
+                _migrate,
             )
+            if self._protector.encrypts:
+                _sweep_encrypted(db, self._protector)
 
     @staticmethod
     def _log_unreadable(table: str, row_id: int, error: UnreadableMemory) -> None:

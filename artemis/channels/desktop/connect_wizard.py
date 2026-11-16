@@ -9,6 +9,7 @@ from __future__ import annotations
 import base64
 import contextlib
 import hashlib
+import hmac
 import http.server
 import secrets
 import shutil
@@ -16,7 +17,7 @@ import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import httpx
 import yaml
@@ -99,11 +100,12 @@ def free_tool_models(catalog_json: object) -> list[str]:
 
 
 class _CallbackServer(http.server.HTTPServer):
-    allow_reuse_address = True
+    allow_reuse_address = False
 
     def __init__(self, address: tuple[str, int], handler: type[http.server.BaseHTTPRequestHandler]):
         super().__init__(address, handler)
         self.code: str | None = None
+        self.expected_state: str = ""
         self.got_request = threading.Event()
 
 
@@ -111,12 +113,31 @@ def _default_server_factory() -> _CallbackServer:
     class Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
             server: _CallbackServer = self.server  # type: ignore[assignment]
+            # Tarayıcı dışı/XHR isteklerini ve CSRF girişimlerini engelle:
+            # Gerçek üst düzey yönlendirmede Origin başlığı olmaz ve Sec-Fetch-Mode 'navigate' olur.
+            if "Origin" in self.headers:
+                self.send_response(400)
+                self.end_headers()
+                return
+            fetch_mode = self.headers.get("Sec-Fetch-Mode")
+            if fetch_mode is not None and fetch_mode != "navigate":
+                self.send_response(400)
+                self.end_headers()
+                return
+
             parsed = urlsplit(self.path)
             if parsed.path != "/callback":
                 self.send_response(404)
                 self.end_headers()
                 return
             params = parse_qs(parsed.query)
+            received_state = params.get("state", [""])[0]
+            if not received_state or not hmac.compare_digest(
+                received_state, server.expected_state
+            ):
+                self.send_response(400)
+                self.end_headers()
+                return
             values = params.get("code")
             if values and values[0]:
                 server.code = values[0]
@@ -147,31 +168,37 @@ class OpenRouterPkce:
         self._server_factory = server_factory or _default_server_factory
         self.code_verifier: str = secrets.token_urlsafe(64)
         self.code_challenge: str = pkce_challenge(self.code_verifier)
+        self.state: str | None = None
         self._server: _CallbackServer | None = None
         self._thread: threading.Thread | None = None
 
     def start(self) -> str:
         """127.0.0.1 üzerinde tek kullanımlık geri dönüş sunucusu açar, auth adresini döner."""
         self.close()
+        self.state = secrets.token_urlsafe(32)
         server = self._server_factory()
-        server.timeout = 300
+        server.expected_state = self.state
+        server.timeout = 0.5
         self._server = server
         port = server.server_port
 
-        def serve_once() -> None:
+        def serve() -> None:
             try:
-                server.handle_request()
+                while not server.got_request.is_set():
+                    server.handle_request()
             except OSError:
                 server.got_request.set()
             finally:
                 with contextlib.suppress(OSError):
                     server.server_close()
 
-        thread = threading.Thread(target=serve_once, daemon=True)
+        thread = threading.Thread(target=serve, daemon=True)
         self._thread = thread
         thread.start()
+        callback_url = f"http://127.0.0.1:{port}/callback?state={self.state}"
+        quoted_callback = quote(callback_url, safe="")
         return (
-            f"{OPENROUTER_AUTH_URL}?callback_url=http://127.0.0.1:{port}/callback"
+            f"{OPENROUTER_AUTH_URL}?callback_url={quoted_callback}"
             f"&code_challenge={self.code_challenge}&code_challenge_method=S256"
         )
 
@@ -191,6 +218,7 @@ class OpenRouterPkce:
     def close(self) -> None:
         server, self._server = self._server, None
         if server is not None:
+            server.got_request.set()
             with contextlib.suppress(OSError):
                 server.server_close()
 

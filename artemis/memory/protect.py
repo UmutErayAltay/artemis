@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     pass
 
 PREFIX = "dpapi1:"
+PLAIN_PREFIX = "plain1:"
 _ENTROPY = b"artemis-memory-v1"
 _CRYPTPROTECT_UI_FORBIDDEN = 0x1
 
@@ -25,6 +26,8 @@ class UnreadableMemory(ValueError):
 
 
 class Protector(Protocol):
+    encrypts: bool
+
     def protect(self, text: str) -> str: ...
 
     def unprotect(self, text: str) -> str: ...
@@ -33,10 +36,16 @@ class Protector(Protocol):
 class PlainProtector:
     """Şifreleme kapalıyken kullanılan koruyucu; düz metni olduğu gibi bırakır."""
 
+    encrypts: bool = False
+
     def protect(self, text: str) -> str:
+        if text.startswith(PREFIX) or text.startswith(PLAIN_PREFIX):
+            return PLAIN_PREFIX + text
         return text
 
     def unprotect(self, text: str) -> str:
+        if text.startswith(PLAIN_PREFIX):
+            return text[len(PLAIN_PREFIX) :]
         if text.startswith(PREFIX):
             raise UnreadableMemory("Şifreli hafıza kaydı şifreleme kapalıyken okunamıyor.")
         return text
@@ -100,6 +109,9 @@ def _make_blob(blob_cls: type[ctypes.Structure], data: bytes) -> tuple[Any, Any]
 class DpapiProtector:
     """Windows kullanıcı kapsamlı DPAPI koruyucusu."""
 
+    encrypts: bool = True
+    prefix: str = PREFIX
+
     def protect(self, text: str) -> str:
         try:
             crypt32, kernel32, blob_cls = _load_dpapi()
@@ -130,6 +142,8 @@ class DpapiProtector:
         return PREFIX + base64.b64encode(cipher).decode("ascii")
 
     def unprotect(self, text: str) -> str:
+        if text.startswith(PLAIN_PREFIX):
+            return text[len(PLAIN_PREFIX) :]
         if not text.startswith(PREFIX):
             return text
         encoded = text[len(PREFIX) :]
@@ -168,7 +182,11 @@ class _ReadOnlyDpapi(DpapiProtector):
     """Şifreleme kapalı ama Windows: yeni yazımlar düz metin, önceki şifreli dönemin kayıtları
     yine çözülür (kapatmak hiçbir kaydı okunmaz yapmamalı)."""
 
+    encrypts: bool = False
+
     def protect(self, text: str) -> str:
+        if text.startswith(PREFIX) or text.startswith(PLAIN_PREFIX):
+            return PLAIN_PREFIX + text
         return text
 
 

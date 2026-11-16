@@ -11,6 +11,7 @@ import pytest
 
 from artemis.brain.conversation import TurnRecord
 from artemis.memory.protect import (
+    PLAIN_PREFIX,
     PREFIX,
     DpapiProtector,
     PlainProtector,
@@ -23,6 +24,8 @@ from artemis.memory.store import MemoryStore
 class FakeProtector:
     """Tersine çevrilebilir sahte koruyucu: 'fake1:' öneki + ters metin."""
 
+    encrypts: bool = True
+    prefix: str = "fake1:"
     FAKE_PREFIX = "fake1:"
 
     def protect(self, text: str) -> str:
@@ -31,6 +34,8 @@ class FakeProtector:
     def unprotect(self, text: str) -> str:
         if text.startswith(self.FAKE_PREFIX):
             return text[len(self.FAKE_PREFIX) :][::-1]
+        if text.startswith(PLAIN_PREFIX):
+            return text[len(PLAIN_PREFIX) :]
         if text.startswith(PREFIX) or text.startswith("bad1:"):
             raise UnreadableMemory("Sahte koruyucu bu öneki çözemez.")
         return text
@@ -278,3 +283,128 @@ class TestDpapiProtector:
         tampered = PREFIX + base64.b64encode(bytes(raw)).decode("ascii")
         with pytest.raises(UnreadableMemory):
             protector.unprotect(tampered)
+
+
+def test_enabling_encryption_on_v2_plaintext_db_encrypts_on_reopen(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    plain_store = MemoryStore(db_path, protector=PlainProtector())
+    plain_store.add_turn(
+        TurnRecord(
+            steps=(),
+            answer_private=False,
+            tainted=False,
+            turn_id="t1",
+            created_at="2026-11-10T12:00:00+00:00",
+            user_text="Düz metin soru",
+            answer="Düz metin yanıt",
+        )
+    )
+    plain_store.add_note("Düz metin not", "t1", max_notes=10)
+
+    with sqlite3.connect(db_path) as db:
+        assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+    turns_before = _raw_turns(db_path)
+    assert not turns_before[0][2].startswith("fake1:")
+    assert not turns_before[0][2].startswith(PREFIX)
+
+    enc_store = MemoryStore(db_path, protector=FakeProtector())
+    turns_after = _raw_turns(db_path)
+    notes_after = _raw_notes(db_path)
+    for col in turns_after[0][1:]:
+        assert col.startswith("fake1:")
+    assert notes_after[0][1].startswith("fake1:")
+
+    assert enc_store.recent_turns(5)[0].user_text == "Düz metin soru"
+    assert enc_store.list_notes()[0].text == "Düz metin not"
+
+
+def test_failing_protector_during_sweep_leaves_rows_unchanged_and_raises(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    plain_store = MemoryStore(db_path, protector=PlainProtector())
+    plain_store.add_turn(
+        TurnRecord(
+            steps=(),
+            answer_private=False,
+            tainted=False,
+            turn_id="t1",
+            created_at="2026-11-10T12:00:00+00:00",
+            user_text="Kritik soru",
+            answer="Kritik yanıt",
+        )
+    )
+    plain_store.add_note("Kritik not", "t1", max_notes=10)
+    turns_before = _raw_turns(db_path)
+    notes_before = _raw_notes(db_path)
+
+    class FailingProtector:
+        encrypts: bool = True
+        prefix: str = "fail1:"
+
+        def protect(self, text: str) -> str:
+            raise OSError("Donanım hatası")
+
+        def unprotect(self, text: str) -> str:
+            return text
+
+    with pytest.raises(sqlite3.OperationalError) as exc_info:
+        MemoryStore(db_path, protector=FailingProtector())
+    assert "Hafıza şifrelemesi uygulanamadı." in str(exc_info.value)
+    assert isinstance(exc_info.value.__cause__, OSError)
+
+    assert _raw_turns(db_path) == turns_before
+    assert _raw_notes(db_path) == notes_before
+
+
+def test_user_text_dpapi_prefix_round_trips_through_plain_protector() -> None:
+    protector = PlainProtector()
+    user_text = "dpapi1:abc"
+    protected = protector.protect(user_text)
+    assert protected == "plain1:dpapi1:abc"
+    assert protector.unprotect(protected) == user_text
+
+
+def test_user_text_dpapi_prefix_written_with_encryption_off_reads_back_intact(
+    tmp_path: Path,
+) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    store = MemoryStore(db_path, protector=PlainProtector())
+    store.add_turn(
+        TurnRecord(
+            steps=(),
+            answer_private=False,
+            tainted=False,
+            turn_id="t1",
+            created_at="2026-11-10T12:00:00+00:00",
+            user_text="dpapi1:abc",
+            answer="dpapi1:def",
+        )
+    )
+    store.add_note("dpapi1:ghi", "t1", max_notes=10)
+
+    raw_turns = _raw_turns(db_path)
+    assert raw_turns[0][2] == "plain1:dpapi1:abc"
+    assert raw_turns[0][3] == "plain1:dpapi1:def"
+    raw_notes = _raw_notes(db_path)
+    assert raw_notes[0][1] == "plain1:dpapi1:ghi"
+
+    recent = store.recent_turns(5)
+    assert recent[0].user_text == "dpapi1:abc"
+    assert recent[0].answer == "dpapi1:def"
+    notes = store.list_notes()
+    assert notes[0].text == "dpapi1:ghi"
+
+
+def test_stored_plain_prefix_encrypted_as_unescaped_text_by_sweep(tmp_path: Path) -> None:
+    db_path = tmp_path / "memory.sqlite3"
+    plain_store = MemoryStore(db_path, protector=PlainProtector())
+    plain_store.add_note("plain1:x", "t1", max_notes=10)
+
+    raw_notes_before = _raw_notes(db_path)
+    assert raw_notes_before[0][1] == "plain1:plain1:x"
+
+    enc_store = MemoryStore(db_path, protector=FakeProtector())
+    raw_notes_after = _raw_notes(db_path)
+    assert raw_notes_after[0][1] == "fake1:x:1nialp"
+
+    notes = enc_store.list_notes()
+    assert notes[0].text == "plain1:x"

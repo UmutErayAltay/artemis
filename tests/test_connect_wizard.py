@@ -5,10 +5,11 @@ from __future__ import annotations
 import base64
 import hashlib
 import os
+import urllib.error
 import urllib.request
 from pathlib import Path
 from typing import Any
-from urllib.parse import parse_qs, urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import pytest
 import yaml
@@ -128,11 +129,13 @@ def test_callback_server_receives_code_on_loopback() -> None:
     parsed = urlsplit(auth_url)
     query = parse_qs(parsed.query)
     callback_url = query["callback_url"][0]
-    assert callback_url.startswith("http://127.0.0.1:") and callback_url.endswith("/callback")
+    assert callback_url.startswith("http://127.0.0.1:")
+    assert urlsplit(callback_url).path == "/callback"
+    assert parse_qs(urlsplit(callback_url).query)["state"] == [pkce.state]
     assert query["code_challenge"] == [pkce.code_challenge]
     assert query["code_challenge_method"] == ["S256"]
 
-    with urllib.request.urlopen(f"{callback_url}?code=abc", timeout=5) as response:
+    with urllib.request.urlopen(f"{callback_url}&code=abc", timeout=5) as response:
         html_body = response.read().decode("utf-8")
     assert "Artemis'e dönebilirsin" in html_body
     assert pkce.wait_code(timeout=5) == "abc"
@@ -177,7 +180,8 @@ def test_exchange_and_wizard_openrouter_flow_stores_key_without_leaking(
     def open_and_hit_callback(auth_url: str) -> None:
         opened_urls.append(auth_url)
         cb = parse_qs(urlsplit(auth_url).query)["callback_url"][0]
-        with urllib.request.urlopen(f"{cb}?code=test-code", timeout=5) as resp:
+        sep = "&" if "?" in cb else "?"
+        with urllib.request.urlopen(f"{cb}{sep}code=test-code", timeout=5) as resp:
             resp.read()
 
     path = _write_base_config(tmp_path)
@@ -350,6 +354,64 @@ def test_free_tool_models_filters_correctly() -> None:
         ]
     }
     assert free_tool_models(catalog) == ["qwen/qwen-2.5-72b-instruct:free"]
+
+
+def test_callback_server_rejects_missing_or_wrong_state_and_accepts_correct_state() -> None:
+    pkce = OpenRouterPkce(http=_UnexpectedNetworkHttp())
+    auth_url = pkce.start()
+    assert pkce.state is not None
+    assert pkce._server is not None
+    port = pkce._server.server_port
+
+    # Auth URL encode edilmiş state içeren geri dönüş URL'sini taşır
+    expected_cb = f"http://127.0.0.1:{port}/callback?state={pkce.state}"
+    assert f"callback_url={quote(expected_cb, safe='')}" in auth_url
+
+    # 1. State eksik: 400 döner, kod saklanmaz, sunucu beklemeyi sürdürür
+    req_no_state = urllib.request.Request(f"http://127.0.0.1:{port}/callback?code=bad-code-1")
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(req_no_state, timeout=5)
+    assert exc_info.value.code == 400
+    assert pkce._server.code is None
+
+    # 2. Yanlış state: 400 döner, kod saklanmaz
+    req_wrong_state = urllib.request.Request(
+        f"http://127.0.0.1:{port}/callback?state=wrong-state&code=bad-code-2"
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(req_wrong_state, timeout=5)
+    assert exc_info.value.code == 400
+    assert pkce._server.code is None
+
+    # 3. Origin başlığı olan istek (XHR/CORS): 400 döner
+    req_origin = urllib.request.Request(
+        f"http://127.0.0.1:{port}/callback?state={pkce.state}&code=bad-code-3",
+        headers={"Origin": "http://evil.local"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(req_origin, timeout=5)
+    assert exc_info.value.code == 400
+    assert pkce._server.code is None
+
+    # 4. Sec-Fetch-Mode != navigate: 400 döner
+    req_cors = urllib.request.Request(
+        f"http://127.0.0.1:{port}/callback?state={pkce.state}&code=bad-code-4",
+        headers={"Sec-Fetch-Mode": "cors"},
+    )
+    with pytest.raises(urllib.error.HTTPError) as exc_info:
+        urllib.request.urlopen(req_cors, timeout=5)
+    assert exc_info.value.code == 400
+    assert pkce._server.code is None
+
+    # 5. Doğru state ve navigate modu: 200 döner, kod saklanır
+    req_ok = urllib.request.Request(
+        f"http://127.0.0.1:{port}/callback?state={pkce.state}&code=valid-code",
+        headers={"Sec-Fetch-Mode": "navigate"},
+    )
+    with urllib.request.urlopen(req_ok, timeout=5) as resp:
+        assert resp.status == 200
+        assert "Artemis'e dönebilirsin" in resp.read().decode("utf-8")
+    assert pkce.wait_code(timeout=5) == "valid-code"
 
 
 def test_claude_missing_shows_hint_and_leaves_config_unchanged(
