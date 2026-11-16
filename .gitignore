@@ -18,7 +18,6 @@ config/config.yaml.bak*
 *.jsonl
 *.sqlite*
 *.db
-.jarvis/
 .artemis/
 state/
 reports/

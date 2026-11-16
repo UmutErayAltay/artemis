@@ -8,7 +8,6 @@ from typing import Any
 import pytest
 
 from artemis.channels.autostart import (
-    LEGACY_VALUE_NAME,
     VALUE_NAME,
     Autostart,
     autostart_command,
@@ -19,14 +18,13 @@ from artemis.tools.registry import discover_tools
 
 
 class FakeStore:
-    def __init__(self, value: str | None = None, legacy: str | None = None) -> None:
+    def __init__(self, value: str | None = None) -> None:
         self.value = value
-        self.legacy = legacy
         self.calls: list[str] = []
 
     def read(self, name: str = VALUE_NAME) -> str | None:
         self.calls.append("read")
-        return self.legacy if name == LEGACY_VALUE_NAME else self.value
+        return self.value
 
     def write(self, command: str) -> None:
         self.calls.append("write")
@@ -34,10 +32,7 @@ class FakeStore:
 
     def delete(self, name: str = VALUE_NAME) -> None:
         self.calls.append("delete")
-        if name == LEGACY_VALUE_NAME:
-            self.legacy = None
-        else:
-            self.value = None
+        self.value = None
 
 
 class ForbiddenStore(FakeStore):
@@ -88,7 +83,7 @@ def test_enable_writes_reads_back_and_audits(tmp_path: Path) -> None:
     result = manager.enable()
     assert result.success and result.state == "on"
     assert store.value == manager.expected
-    assert store.calls == ["write", "delete", "read"]
+    assert store.calls == ["write", "read"]
     assert events == [{"event": "autostart", "action": "enable", "success": True, "state": "on"}]
     assert manager.status().state == "on"
 
@@ -183,23 +178,3 @@ def test_model_has_no_tool_that_touches_autostart_or_registry() -> None:
         assert "winreg" not in text, source
 
 
-def test_enable_removes_legacy_value(tmp_path: Path) -> None:
-    store = FakeStore(legacy=r'"C:\eski\pythonw.exe" -m jarvis desktop')
-    result = _manager(tmp_path, store).enable()
-    assert result.success and result.state == "on"
-    assert store.legacy is None
-
-
-def test_status_flags_legacy_value_as_stale(tmp_path: Path) -> None:
-    manager = _manager(tmp_path, FakeStore(legacy="eski"))
-    status = manager.status()
-    assert status.state == "stale" and "yeniden" in status.message
-    manager.enable()
-    assert manager.status().state == "on"
-
-
-def test_disable_removes_both_values(tmp_path: Path) -> None:
-    store = FakeStore("yeni", legacy="eski")
-    result = _manager(tmp_path, store).disable()
-    assert result.success and result.state == "off"
-    assert store.value is None and store.legacy is None

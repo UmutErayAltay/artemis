@@ -116,7 +116,7 @@ Aşağıdakiler tarihsel ham gözlemlerdir. Güncel yorum ve kalan kabul işleri
 ### 2026-11-15 canlı tekrar (Claude Code, `1575521`, Windows 11, iki 1920×1080 ekran, `claude-haiku-5-5`)
 
 Umut'un isteğiyle onaylar otomatik verildi; kritik olanlar (`power`: kapatma, uyku, kilit) verilmedi.
-Gerçek config, gerçek model, gerçek araçlar; kanıt `.jarvis/audit.jsonl`.
+Gerçek config, gerçek model, gerçek araçlar; kanıt `.artemis/audit.jsonl`.
 
 | # | Sonuç | Gözlem |
 | --- | --- | --- |
