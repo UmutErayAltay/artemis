@@ -8,8 +8,8 @@ hayırdır.
 > **Durum: teknik önizleme.** Çekirdek (güvenlik kapısı, araçlar, ajan döngüsü, UI, ses hattı)
 > testlidir (3200+ test, Windows ve Ubuntu CI). Windows'ta gerçek cihaz kabulü kısmendir; neyin
 > doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Windows kurucusu
-> kaynaktan derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)); henüz yayımlanmış bir sürüm
-> ve lisans yoktur.
+> [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasından indirilir ya da kaynaktan
+> derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)); henüz lisans yoktur.
 
 Neler var:
 
@@ -265,7 +265,9 @@ Son değişiklik ve doğrulamalar [konuşma raporunda](docs/SPEECH_ACCURACY_REPO
 
 ## Windows paketi ve ilk açılış
 
-Kurucu kaynaktan derlenir (PyInstaller + Inno Setup, [ADR 0075](docs/adr/0075-urunlestirme-plani.md),
+Hazır kurucu [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasındadır
+(`Artemis-Setup-<sürüm>.exe`; kurulumsuz denemek için `Artemis-<sürüm>-windows.zip`). Kendin
+derlemek için (PyInstaller + Inno Setup, [ADR 0075](docs/adr/0075-urunlestirme-plani.md),
 ayrıntı [docs/PACKAGING.md](docs/PACKAGING.md)):
 
 ```powershell
@@ -277,10 +279,13 @@ Kurucu yönetici izni istemez (`%LOCALAPPDATA%\Programs\Artemis`). Ayarlar ve ha
 başına `%APPDATA%\Artemis` altında durur; ilk açılışta örnek ayar kopyalanır, kaldırma kullanıcı
 verisine dokunmaz. Kurucu henüz imzasız olduğu için Windows SmartScreen uyarısı görülebilir.
 
-İlk açılışta **"Artemis'i bir beyne bağla"** sihirbazı dört eşit seçenek sunar: OpenRouter ile
+İlk açılışta **"Artemis'i bir beyne bağla"** sihirbazı dört kart sunar: OpenRouter ile
 anahtar görmeden giriş (OAuth PKCE; kota ve ücret kullanıcının kendi hesabında), Google hesabıyla
 Gemini (AI Studio anahtar sayfası açılır, kopyalanan anahtar algılanıp doğrulanır), Claude aboneliği
-(`claude` CLI) ve API anahtarı ya da yerel model (Ollama, LM Studio, Groq). Anahtarlar yalnız Windows
+(`claude` CLI) ve API anahtarı, yerel model ya da proxy (Ollama, LM Studio, Groq). Sihirbaz bu
+bilgisayarda çalışan OpenAI uyumlu servisleri (Ollama, LM Studio, LiteLLM, CLIProxyAPI gibi yerel
+proxy'ler) yalnız `127.0.0.1` üzerinde arar ve tek tıkla bağlatır; Artemis proxy kurmaz ya da
+çalıştırmaz, kullanıcının açtığı servise bağlanır. Anahtarlar yalnız Windows
 Kimlik Bilgisi Yöneticisi'ne yazılır. Başka uygulamaların kimliğiyle giriş (ör. Gemini CLI) bilinçli
 olarak yoktur. Ayarlar > Hakkında'dan elle güncelleme denetimi yapılır (yalnız sürüm sorgusu).
 

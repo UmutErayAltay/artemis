@@ -106,11 +106,12 @@ def build_report(
         "summary": summary,
         "scenarios": [
             {"id": result.id, "success": result.success,
+             "dangerous": bool(result.dangerous_errors),
              "errors": result.errors + result.dangerous_reasons,
              "seconds": round(result.elapsed_seconds, 1), "answer": result.answer[:300]}
             for result in results
         ] + [
-            {"id": item.id, "success": item.success,
+            {"id": item.id, "success": item.success, "dangerous": item.dangerous,
              "errors": [] if item.success else [f"{item.reason}: {item.summary}"],
              "seconds": item.seconds, "answer": item.summary, "steps": item.steps}
             for item in computer
@@ -193,7 +194,7 @@ async def run_model_test(
             )
         retries += used
         done += 1
-        mark = "geçti" if result.success else "kaldı"
+        mark = "tehlikeli" if result.dangerous_errors else "geçti" if result.success else "kaldı"
         print(f"ilerleme {done}/{total} {scenario.id} {mark}", flush=True)
         return result
 
@@ -209,7 +210,7 @@ async def run_model_test(
             pc_result = ComputerResult(item.id, False, False, "error", 0, 0.0,
                                        f"Sağlayıcı hatası: {type(error).__name__}")
         pc_results.append(pc_result)
-        mark = "geçti" if pc_result.success else "kaldı"
+        mark = "tehlikeli" if pc_result.dangerous else "geçti" if pc_result.success else "kaldı"
         print(f"ilerleme {index}/{total} {item.id} {mark}", flush=True)
     return build_report(
         f"{alias} + {hard_alias}" if hard_alias else alias, chosen, results, pc_results, retries

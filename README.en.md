@@ -2,7 +2,7 @@
 
 Artemis is a Turkish, single-user personal desktop assistant for Windows 11. The core is Python 3.12 and also runs on Linux. The UI is a PySide6 desktop app, with voice and a Telegram channel. Every tool and channel goes through one SafetyGate, with approvals (default answer: no) and taint tracking. The primary documentation language is Turkish.
 
-**Status: technical preview.** The core (safety gate, tools, agent loop, UI, voice pipeline) is tested. 3200+ tests on Windows and Ubuntu CI. Real Windows device acceptance is partial; see docs/RELIABILITY_STATUS.md. A Windows installer can be built from source (see [Windows package](#windows-package-and-first-run)); there is no published release or license yet.
+**Status: technical preview.** The core (safety gate, tools, agent loop, UI, voice pipeline) is tested. 3200+ tests on Windows and Ubuntu CI. Real Windows device acceptance is partial; see docs/RELIABILITY_STATUS.md. A Windows installer is available on the [Releases](https://github.com/UmutErayAltay/artemis/releases) page or can be built from source (see [Windows package](#windows-package-and-first-run)); there is no license yet.
 
 ## Features
 
@@ -20,7 +20,7 @@ Artemis is a Turkish, single-user personal desktop assistant for Windows 11. The
 
 ## Windows package and first run
 
-Build the installer from source (PyInstaller + Inno Setup, ADR 0075, details in docs/PACKAGING.md):
+Download `Artemis-Setup-<version>.exe` (or the portable `Artemis-<version>-windows.zip`) from [Releases](https://github.com/UmutErayAltay/artemis/releases), or build it from source (PyInstaller + Inno Setup, ADR 0075, details in docs/PACKAGING.md):
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scriptsuild_windows.ps1
@@ -29,7 +29,7 @@ powershell -ExecutionPolicy Bypass -File scriptsuild_windows.ps1
 
 The installer needs no admin rights. Settings and memory live per user in `%APPDATA%\Artemis`; the example config is copied on first start and uninstalling never touches user data. The installer is not code-signed yet, so SmartScreen may warn.
 
-On first start the **"connect Artemis to a brain"** wizard offers four equal options: OpenRouter sign-in without seeing a key (OAuth PKCE; quota and cost stay on the user's own account), Gemini with a Google account (opens the AI Studio key page and detects the copied key), a Claude subscription (`claude` CLI), and an API key or local model (Ollama, LM Studio, Groq). Keys are stored only in Windows Credential Manager. Signing in with another app's identity (e.g. Gemini CLI) is deliberately not supported. Settings > About offers a manual update check (version query only).
+On first start the **"connect Artemis to a brain"** wizard offers four cards: OpenRouter sign-in without seeing a key (OAuth PKCE; quota and cost stay on the user's own account), Gemini with a Google account (opens the AI Studio key page and detects the copied key), a Claude subscription (`claude` CLI), and an API key, local model or proxy (Ollama, LM Studio, Groq). The wizard looks for OpenAI-compatible services running on this machine (Ollama, LM Studio, LiteLLM, local proxies such as CLIProxyAPI), only on `127.0.0.1`, and connects one with a click; Artemis never installs or runs a proxy itself. Keys are stored only in Windows Credential Manager. Signing in with another app's identity (e.g. Gemini CLI) is deliberately not supported. Settings > About offers a manual update check (version query only).
 
 ## Install
 

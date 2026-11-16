@@ -16,6 +16,7 @@ import secrets
 import shutil
 import threading
 from collections.abc import Callable, Mapping
+from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
@@ -28,6 +29,8 @@ from PySide6.QtGui import QDesktopServices, QGuiApplication
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -73,8 +76,9 @@ _CALLBACK_HTML = (
     "<body><p>Artemis'e dönebilirsin</p></body></html>"
 ).encode()
 
-_CHOICE_BUTTON_WIDTH = 220
-_CHOICE_BUTTON_HEIGHT = 64
+_CHOICE_BUTTON_WIDTH = 280
+_CHOICE_BUTTON_HEIGHT = 84
+_DIALOG_WIDTH = 660
 
 
 def pkce_challenge(verifier: str) -> str:
@@ -337,11 +341,156 @@ class _GeminiValidateThread(QThread):
         self.finished_with.emit(self._key, status)
 
 
+LOCAL_SERVICE_PORTS: tuple[tuple[int, str], ...] = (
+    (8317, "CLIProxyAPI / EasyProxy"),
+    (8787, "Yerel proxy"),
+    (4000, "LiteLLM"),
+    (1234, "LM Studio"),
+    (11434, "Ollama"),
+)
+_MAX_PROBED_MODELS = 200
+LocalService = tuple[str, str, bool, list[str]]  # ad, base_url, anahtar ister mi, modeller
+
+
+def probe_local_services(get: Callable[..., Any] | None = None) -> list[LocalService]:
+    """Bu bilgisayarda OpenAI uyumlu model servisi arar.
+
+    Yalnız 127.0.0.1'e kısa GET atılır; yanıt dış veridir, yalnız model kimlikleri listeye girer.
+    Artemis proxy kurmaz, çalıştırmaz, kimseye giriş yapmaz: kullanıcının açtığı servise bağlanır.
+    """
+    fetch = get or httpx.get
+    found: list[LocalService] = []
+    for port, name in LOCAL_SERVICE_PORTS:
+        base_url = f"http://127.0.0.1:{port}/v1"
+        try:
+            response = fetch(f"{base_url}/models", timeout=0.8, follow_redirects=False)
+        except httpx.HTTPError:
+            continue
+        if response.status_code in {401, 403}:
+            found.append((name, base_url, True, []))
+            continue
+        if response.status_code != 200:
+            continue
+        try:
+            body = response.json()
+        except ValueError:
+            continue
+        data = body.get("data") if isinstance(body, Mapping) else None
+        if not isinstance(data, list):
+            continue
+        ids = {
+            item["id"] for item in data
+            if isinstance(item, Mapping) and isinstance(item.get("id"), str)
+            and 0 < len(item["id"]) <= 200
+        }
+        found.append((name, base_url, False, sorted(ids)[:_MAX_PROBED_MODELS]))
+    return found
+
+
+class _LocalProbeThread(QThread):
+    finished_with = Signal(list)
+
+    def __init__(self, probe: Callable[[], list[Any]], parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._probe = probe
+
+    def run(self) -> None:
+        self.finished_with.emit(self._probe())
+
+
+class _OpenRouterLoginThread(QThread):
+    """Tarayıcı geri dönüşünü bekler (en çok 5 dk); arayüz bu sırada donmaz."""
+
+    finished_with = Signal(str, list, str)  # anahtar, modeller, hata
+
+    def __init__(self, oauth: OpenRouterPkce, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._oauth = oauth
+
+    def run(self) -> None:
+        try:
+            key = self._oauth.exchange(self._oauth.wait_code())
+        except (OSError, TimeoutError, ValueError) as error:
+            self.finished_with.emit("", [], str(error))
+            return
+        try:
+            models = self._oauth.fetch_free_models()
+        except ValueError as error:
+            self.finished_with.emit(key, [], str(error))
+            return
+        self.finished_with.emit(key, models, "")
+
+
+_RUNNING: set[QThread] = set()
+
+
+def _release(
+    thread: _LocalProbeThread | _OpenRouterLoginThread | _GeminiValidateThread | None,
+) -> None:
+    """Pencere kapanırken süren iş parçacığını sahipsiz bırakır, bitene dek canlı tutar."""
+    if thread is None or not thread.isRunning():
+        return
+    with contextlib.suppress(RuntimeError, TypeError):
+        thread.finished_with.disconnect()
+    thread.setParent(None)
+    _RUNNING.add(thread)
+    thread.finished.connect(partial(_RUNNING.discard, thread))
+
+
 def _load_raw(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         return {}
     loaded = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     return loaded if isinstance(loaded, dict) else {}
+
+
+class ChoiceCard(QPushButton):
+    """Başlık, açıklama ve isteğe bağlı rozet taşıyan seçilebilir kart."""
+
+    def __init__(self, title: str, detail: str, badge: str = "") -> None:
+        super().__init__()
+        self.title, self.detail = title, detail
+        self.setObjectName("choiceCard")
+        self.setCheckable(True)
+        self.setAutoDefault(False)
+        self.setAccessibleName(f"{title}. {detail}")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 12)
+        layout.setSpacing(4)
+        top = QHBoxLayout()
+        top.setSpacing(8)
+        labels = [QLabel(title), QLabel(detail)]
+        labels[0].setObjectName("choiceTitle")
+        labels[1].setObjectName("choiceDetail")
+        labels[1].setWordWrap(True)
+        top.addWidget(labels[0])
+        top.addStretch(1)
+        if badge:
+            labels.append(QLabel(badge))
+            labels[-1].setObjectName("choiceBadge")
+            top.addWidget(labels[-1])
+        layout.addLayout(top)
+        layout.addWidget(labels[1])
+        layout.addStretch(1)
+        for label in labels:
+            label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
+
+
+def _page(title: str, text: str) -> tuple[QFrame, QVBoxLayout, QLabel]:
+    page = QFrame()
+    page.setObjectName("wizardPage")
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(20, 18, 20, 18)
+    layout.setSpacing(10)
+    heading = QLabel(title)
+    heading.setObjectName("sectionTitle")
+    info = QLabel(text)
+    info.setObjectName("muted")
+    info.setWordWrap(True)
+    layout.addWidget(heading)
+    layout.addWidget(info)
+    return page, layout, info
 
 
 class ConnectWizard(QDialog):
@@ -357,6 +506,7 @@ class ConnectWizard(QDialog):
         store_key: Callable[[str, str], str | None] | None = None,
         clipboard: Any = None,
         gemini_validator: Callable[[str], int] | None = None,
+        local_probe: Callable[[], list[Any]] | None = None,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
@@ -367,111 +517,146 @@ class ConnectWizard(QDialog):
         self._store_key: Callable[[str, str], str | None] = store_key or store_endpoint_key
         self._clipboard: Any = clipboard
         self._gemini_validator: Callable[[str], int] = gemini_validator or validate_gemini_key
+        self._local_probe = local_probe or probe_local_services
         self._watching_clipboard = False
         self._gemini_thread: _GeminiValidateThread | None = None
+        self._login_thread: _OpenRouterLoginThread | None = None
+        self._probe_thread: _LocalProbeThread | None = None
+        self._found: dict[str, tuple[str, bool, list[str]]] = {}
+        self._local: tuple[str, str, bool] | None = None  # seçilen yerel servis: ad, adres, anahtar
 
         self.setWindowTitle("Artemis'i bir beyne bağla")
+        self.setMinimumWidth(_DIALOG_WIDTH)
         root = QVBoxLayout(self)
-        root.setContentsMargins(20, 20, 20, 20)
-        root.setSpacing(16)
+        root.setContentsMargins(28, 24, 28, 20)
+        root.setSpacing(14)
 
-        intro = QLabel("Başlamak için bir bağlantı yöntemi seçin:")
+        title = QLabel("Artemis'i bir beyne bağla")
+        title.setObjectName("pageTitle")
+        intro = QLabel(
+            "Artemis düşünmek için bir dil modeline bağlanır. Sana uyan yolu seç; "
+            "sonra Ayarlar > Modeller'den istediğin kadar model ekleyebilirsin."
+        )
+        intro.setObjectName("muted")
         intro.setWordWrap(True)
+        root.addWidget(title)
         root.addWidget(intro)
 
-        row = QHBoxLayout()
-        row.setSpacing(12)
-        self.openrouter_button = QPushButton(
-            "Ücretsiz hesapla giriş\nOpenRouter · anahtar görmeden"
+        self.openrouter_button = ChoiceCard(
+            "Ücretsiz hesapla giriş",
+            "OpenRouter · anahtar kopyalamadan, tarayıcıda tek giriş", "Önerilen",
         )
-        self.gemini_button = QPushButton(
-            "Google hesabımla\nGemini · ücretsiz kota"
+        self.gemini_button = ChoiceCard(
+            "Google hesabımla", "Gemini · AI Studio'dan ücretsiz anahtar, Artemis panodan alır"
         )
-        self.subscription_button = QPushButton(
-            "Aboneliğimle bağlan\nClaude"
+        self.subscription_button = ChoiceCard(
+            "Aboneliğimle bağlan", "Claude · bilgisayarındaki Claude Code girişini kullanır"
         )
-        self.apikey_button = QPushButton(
-            "API anahtarı ya da yerel model\nOllama · LM Studio · Groq…"
+        self.apikey_button = ChoiceCard(
+            "API, yerel model ya da proxy", "Ollama · LM Studio · Groq · kendi proxy'n…"
         )
         self.choice_buttons = (
-            self.openrouter_button,
-            self.gemini_button,
-            self.subscription_button,
+            self.openrouter_button, self.gemini_button, self.subscription_button,
             self.apikey_button,
         )
+        grid = QGridLayout()
+        grid.setSpacing(12)
         policy = QSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        for button in self.choice_buttons:
+        for index, button in enumerate(self.choice_buttons):
             button.setMinimumWidth(_CHOICE_BUTTON_WIDTH)
             button.setMinimumHeight(_CHOICE_BUTTON_HEIGHT)
             button.setSizePolicy(policy)
-            row.addWidget(button)
-        root.addLayout(row)
+            grid.addWidget(button, index // 2, index % 2)
+        root.addLayout(grid)
 
         self.stack = QStackedWidget()
+        self._empty_page, empty_layout, _info = _page(
+            "Bir yol seç",
+            "Kararsızsan 'Ücretsiz hesapla giriş' en kısa yol: kart, fatura ya da anahtar "
+            "kopyalama yok.",
+        )
+        empty_layout.addStretch(1)
         self._openrouter_page = self._build_openrouter_page()
         self._gemini_page = self._build_gemini_page()
         self._subscription_page = self._build_subscription_page()
         self._apikey_page = self._build_apikey_page()
-        self.stack.addWidget(self._openrouter_page)
-        self.stack.addWidget(self._gemini_page)
-        self.stack.addWidget(self._subscription_page)
-        self.stack.addWidget(self._apikey_page)
-        root.addWidget(self.stack)
-
-        self.status = QLabel()
-        self.status.setWordWrap(True)
-        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        root.addWidget(self.status)
+        for page in (self._empty_page, self._openrouter_page, self._gemini_page,
+                     self._subscription_page, self._apikey_page):
+            self.stack.addWidget(page)
+        root.addWidget(self.stack, 1)
 
         bottom = QHBoxLayout()
-        bottom.addStretch(1)
+        self.status = QLabel()
+        self.status.setObjectName("hint")
+        self.status.setWordWrap(True)
+        self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        bottom.addWidget(self.status, 1)
         self.later_button = QPushButton("Sonra")
+        self.later_button.setAutoDefault(False)
         self.later_button.clicked.connect(self.reject)
         bottom.addWidget(self.later_button)
         root.addLayout(bottom)
 
-        self.openrouter_button.clicked.connect(self._start_openrouter_flow)
+        self.openrouter_button.clicked.connect(self._show_openrouter_panel)
         self.gemini_button.clicked.connect(self._show_gemini_panel)
         self.subscription_button.clicked.connect(self._show_subscription_panel)
         self.apikey_button.clicked.connect(self._show_apikey_panel)
         self.finished.connect(self._on_dialog_finished)
 
+        self._probed = False
         self._apply_preset_choice()
 
+    def showEvent(self, event: Any) -> None:
+        super().showEvent(event)
+        self._start_local_probe()
+
+    def _select_card(self, card: ChoiceCard) -> None:
+        for button in self.choice_buttons:
+            button.setChecked(button is card)
+
     def _build_openrouter_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.setSpacing(10)
-        self.openrouter_info = QLabel(
-            "Tarayıcıda OpenRouter ile giriş yapın; ardından ücretsiz bir model seçip bağlayın."
+        page, layout, self.openrouter_info = _page(
+            "OpenRouter ile ücretsiz giriş",
+            "Tarayıcıda OpenRouter hesabınla giriş yap (Google ile de olur). Artemis anahtarı "
+            "kendisi alır ve Windows Kimlik Bilgisi Yöneticisi'ne kaydeder. Ücretsiz modeller "
+            "günlük kotayla çalışır, kart istemez.",
         )
-        self.openrouter_info.setWordWrap(True)
-        layout.addWidget(self.openrouter_info)
+        self.openrouter_login_button = QPushButton("Tarayıcıda giriş yap")
+        self.openrouter_login_button.setObjectName("primary")
+        self.openrouter_login_button.setAutoDefault(False)
+        self.openrouter_login_button.clicked.connect(self._start_openrouter_flow)
+        layout.addWidget(self.openrouter_login_button, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.openrouter_models = QComboBox()
         self.openrouter_models.setAccessibleName("OpenRouter ücretsiz modelleri")
+        self.openrouter_models.setVisible(False)
         layout.addWidget(self.openrouter_models)
 
         self.openrouter_bind_button = QPushButton("Seçili modeli bağla")
+        self.openrouter_bind_button.setObjectName("primary")
+        self.openrouter_bind_button.setAutoDefault(False)
         self.openrouter_bind_button.setEnabled(False)
+        self.openrouter_bind_button.setVisible(False)
         self.openrouter_bind_button.clicked.connect(self._bind_openrouter_model)
-        layout.addWidget(self.openrouter_bind_button)
+        layout.addWidget(self.openrouter_bind_button, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addStretch(1)
         return page
 
     def _build_subscription_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.setSpacing(10)
-
+        page, layout, _info = _page(
+            "Abonelikle bağlan",
+            "Bilgisayarında Claude Code kuruluysa Artemis onu çalıştırır; giriş ve kota senin "
+            "aboneliğinde kalır, Artemis kimlik bilgilerine dokunmaz.",
+        )
         choice_row = QHBoxLayout()
         self.claude_choice_button = QPushButton("Claude")
         self.chatgpt_choice_button = QPushButton("ChatGPT")
+        for button in (self.claude_choice_button, self.chatgpt_choice_button):
+            button.setObjectName("chip")
+            button.setAutoDefault(False)
+            choice_row.addWidget(button)
         self.claude_choice_button.clicked.connect(self._select_claude_cli)
         self.chatgpt_choice_button.clicked.connect(self._select_chatgpt_cli)
-        choice_row.addWidget(self.claude_choice_button)
-        choice_row.addWidget(self.chatgpt_choice_button)
         choice_row.addStretch(1)
         layout.addLayout(choice_row)
 
@@ -481,49 +666,64 @@ class ConnectWizard(QDialog):
         layout.addWidget(self.cli_hint)
 
         self.claude_add_button = QPushButton("Claude modelini ekle")
+        self.claude_add_button.setObjectName("primary")
+        self.claude_add_button.setAutoDefault(False)
         self.claude_add_button.setVisible(False)
         self.claude_add_button.clicked.connect(self._add_claude_cli_model)
-        layout.addWidget(self.claude_add_button)
+        layout.addWidget(self.claude_add_button, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.codex_add_button = QPushButton("ChatGPT modelini ekle (yakında)")
         self.codex_add_button.setEnabled(False)
         self.codex_add_button.setVisible(False)
-        layout.addWidget(self.codex_add_button)
+        layout.addWidget(self.codex_add_button, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addStretch(1)
         return page
 
     def _build_gemini_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.setSpacing(10)
-
-        self.gemini_steps = QLabel(
-            "1) Açılan sayfada Google hesabınla gir. "
-            "2) 'Create API key' / 'Anahtar oluştur' de. "
-            "3) Anahtarı kopyala — Artemis kendisi algılar."
+        page, layout, self.gemini_steps = _page(
+            "Google hesabınla Gemini",
+            "1) Açılan AI Studio sayfasında Google hesabınla gir.  2) 'Create API key' de.  "
+            "3) Anahtarı kopyala; Artemis panodan kendisi alır.",
         )
-        self.gemini_steps.setWordWrap(True)
-        layout.addWidget(self.gemini_steps)
-
+        key_row = QHBoxLayout()
         self.gemini_key_edit = QLineEdit()
         self.gemini_key_edit.setAccessibleName("Gemini API anahtarı")
-        self.gemini_key_edit.setPlaceholderText("Anahtarı buraya da yapıştırabilirsiniz")
+        self.gemini_key_edit.setPlaceholderText("Anahtarı buraya da yapıştırabilirsin")
         self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        layout.addWidget(self.gemini_key_edit)
-
+        key_row.addWidget(self.gemini_key_edit, 1)
         self.gemini_bind_button = QPushButton("Bağla")
+        self.gemini_bind_button.setObjectName("primary")
         # Varsayılan düğme değil: Enter tuşu bağlamayı tetiklemesin, yalnız açık tıklama.
         self.gemini_bind_button.setAutoDefault(False)
         self.gemini_bind_button.setDefault(False)
         self.gemini_bind_button.clicked.connect(self._bind_gemini_manual)
-        layout.addWidget(self.gemini_bind_button)
+        key_row.addWidget(self.gemini_bind_button)
+        layout.addLayout(key_row)
+        reopen = QPushButton("AI Studio sayfasını yeniden aç")
+        reopen.setObjectName("ghost")
+        reopen.setAutoDefault(False)
+        reopen.clicked.connect(self._open_gemini_page)
+        layout.addWidget(reopen, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addStretch(1)
         return page
 
     def _build_apikey_page(self) -> QWidget:
-        page = QWidget()
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(0, 8, 0, 0)
-        layout.setSpacing(10)
+        page, layout, _info = _page(
+            "API anahtarı, yerel model ya da proxy",
+            "Sağlayıcıyı seç, anahtarını ve model kimliğini yaz. Yerel servisler anahtar istemez.",
+        )
+        self.local_box = QFrame()
+        self.local_box.setObjectName("localFound")
+        local_layout = QVBoxLayout(self.local_box)
+        local_layout.setContentsMargins(12, 10, 12, 10)
+        local_title = QLabel("Bu bilgisayarda çalışan servis bulundu:")
+        local_title.setObjectName("choiceTitle")
+        local_layout.addWidget(local_title)
+        self.local_row = QHBoxLayout()
+        local_layout.addLayout(self.local_row)
+        self.local_box.setVisible(False)
+        layout.addWidget(self.local_box)
+        self.local_buttons: list[QPushButton] = []
 
         self.preset_combo = QComboBox()
         self.preset_combo.setAccessibleName("Sağlayıcı")
@@ -540,51 +740,131 @@ class ConnectWizard(QDialog):
         self.key_edit.setPlaceholderText("API anahtarı")
         self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         self.get_key_button = QPushButton("Anahtar al")
+        self.get_key_button.setAutoDefault(False)
         self.get_key_button.clicked.connect(self._open_key_page)
         key_row.addWidget(self.key_edit, 1)
         key_row.addWidget(self.get_key_button)
         layout.addLayout(key_row)
 
+        model_row = QHBoxLayout()
         self.model_edit = QLineEdit()
         self.model_edit.setAccessibleName("Model kimliği")
-        self.model_edit.setPlaceholderText("Model kimliği (ör. gemini-2.5-flash, llama3.2)")
-        layout.addWidget(self.model_edit)
+        self.model_edit.setPlaceholderText("Model kimliği (ör. llama-3.3-70b, qwen2.5:7b)")
+        self.model_pick = QComboBox()
+        self.model_pick.setAccessibleName("Servisteki modeller")
+        self.model_pick.setVisible(False)
+        self.model_pick.currentTextChanged.connect(self.model_edit.setText)
+        model_row.addWidget(self.model_edit, 1)
+        model_row.addWidget(self.model_pick, 1)
+        layout.addLayout(model_row)
 
         self.bind_button = QPushButton("Bağla")
+        self.bind_button.setObjectName("primary")
+        self.bind_button.setAutoDefault(False)
         self.bind_button.clicked.connect(self._bind_preset_model)
-        layout.addWidget(self.bind_button)
+        layout.addWidget(self.bind_button, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addStretch(1)
         return page
+
+    # --- Yerel servis taraması ------------------------------------------------------------
+
+    def _start_local_probe(self) -> None:
+        if self._probed:
+            return
+        self._probed = True
+        thread = _LocalProbeThread(self._local_probe, self)
+        self._probe_thread = thread
+        thread.finished_with.connect(self._on_local_found)
+        thread.start()
+
+    def _on_local_found(self, found: list[Any]) -> None:
+        thread, self._probe_thread = self._probe_thread, None
+        if thread is not None:
+            thread.wait()
+            thread.deleteLater()
+        self._found = {base: (name, needs_key, models) for name, base, needs_key, models in found}
+        for base_url, (name, needs_key, models) in self._found.items():
+            note = "anahtar ister" if needs_key else f"{len(models)} model"
+            button = QPushButton(f"{name} · :{urlsplit(base_url).port} · {note}")
+            button.setObjectName("chip")
+            button.setAutoDefault(False)
+            button.setProperty("base_url", base_url)
+            button.clicked.connect(self._use_local_from_sender)
+            self.local_row.addWidget(button)
+            self.local_buttons.append(button)
+        self.local_row.addStretch(1)
+        self.local_box.setVisible(bool(self._found))
+
+    def _use_local_from_sender(self) -> None:
+        sender = self.sender()
+        if isinstance(sender, QPushButton):
+            self.use_local_service(str(sender.property("base_url")))
+
+    def use_local_service(self, base_url: str) -> None:
+        name, needs_key, models = self._found[base_url]
+        self._local = (name, base_url, needs_key)
+        self.preset_combo.setVisible(False)
+        self.key_edit.setVisible(needs_key)
+        self.key_edit.clear()
+        self.get_key_button.setVisible(False)
+        self.model_pick.clear()
+        self.model_pick.addItems(models)
+        self.model_pick.setVisible(bool(models))
+        self.model_edit.setVisible(not models)
+        self.status.setText(
+            f"{name} ({base_url}) seçildi"
+            + ("; proxy'nin API anahtarını yaz." if needs_key else "; bir model seç ve bağla.")
+        )
 
     # --- 1. OpenRouter PKCE ---------------------------------------------------------------
 
-    def _start_openrouter_flow(self) -> None:
+    def _show_openrouter_panel(self) -> None:
         self._stop_clipboard_watch()
+        self._select_card(self.openrouter_button)
         self.stack.setCurrentWidget(self._openrouter_page)
+        self.status.setText("")
+
+    def _start_openrouter_flow(self) -> None:
+        if self._login_thread is not None:
+            return
+        self._show_openrouter_panel()
         self.openrouter_models.clear()
         self.openrouter_bind_button.setEnabled(False)
         try:
-            auth_url = self._oauth.start()
-            self._open_url(auth_url)
-            code = self._oauth.wait_code()
-            key = self._oauth.exchange(code)
-        except (OSError, TimeoutError, ValueError) as error:
+            self._open_url(self._oauth.start())
+        except OSError as error:
             self.status.setText(str(error))
             return
-        failure = self._store_key("openrouter", key)
-        if failure is not None:
-            self.status.setText(failure)
-            return
-        try:
-            models = self._oauth.fetch_free_models()
-        except ValueError as error:
-            self.status.setText(str(error))
+        thread = _OpenRouterLoginThread(self._oauth, self)
+        self._login_thread = thread
+        thread.finished_with.connect(self._on_openrouter_done)
+        self.openrouter_login_button.setEnabled(False)
+        self.status.setText("Tarayıcıda girişi tamamla; Artemis bekliyor…")
+        thread.start()
+
+    def _on_openrouter_done(self, key: str, models: list[str], error: str) -> None:
+        thread, self._login_thread = self._login_thread, None
+        if thread is not None:
+            thread.wait()
+            thread.deleteLater()
+        self.openrouter_login_button.setEnabled(True)
+        if key:
+            failure = self._store_key("openrouter", key)
+            if failure is not None:
+                self.status.setText(failure)
+                return
+        if error or not key:
+            self.status.setText(error or "OpenRouter girişi tamamlanamadı.")
             return
         if not models:
             self.status.setText("OpenRouter üzerinde uygun ücretsiz model bulunamadı.")
             return
         self.openrouter_models.addItems(models)
+        self.openrouter_models.setVisible(True)
+        self.openrouter_bind_button.setVisible(True)
         self.openrouter_bind_button.setEnabled(True)
-        self.status.setText("OpenRouter bağlandı; bir ücretsiz model seçin.")
+        self.openrouter_login_button.setVisible(False)
+        self.status.setText("OpenRouter bağlandı; bir ücretsiz model seç.")
 
     def _bind_openrouter_model(self) -> None:
         model_id = self.openrouter_models.currentText().strip()
@@ -625,14 +905,22 @@ class ConnectWizard(QDialog):
 
     def _on_dialog_finished(self, _result: int) -> None:
         self._stop_clipboard_watch()
+        self._oauth.close()  # bekleyen tarayıcı girişi hemen biter
+        for thread in (self._login_thread, self._probe_thread, self._gemini_thread):
+            _release(thread)
+        self._login_thread = self._probe_thread = self._gemini_thread = None
 
     def closeEvent(self, event: Any) -> None:
         self._stop_clipboard_watch()
         super().closeEvent(event)
 
     def _show_gemini_panel(self) -> None:
+        self._select_card(self.gemini_button)
         self.stack.setCurrentWidget(self._gemini_page)
         self.status.setText("")
+        self._open_gemini_page()
+
+    def _open_gemini_page(self) -> None:
         self._open_url(GEMINI_KEY_URL)
         self._start_clipboard_watch()
 
@@ -710,6 +998,7 @@ class ConnectWizard(QDialog):
 
     def _show_subscription_panel(self) -> None:
         self._stop_clipboard_watch()
+        self._select_card(self.subscription_button)
         self.stack.setCurrentWidget(self._subscription_page)
         self._select_claude_cli()
 
@@ -771,8 +1060,11 @@ class ConnectWizard(QDialog):
 
     def _show_apikey_panel(self) -> None:
         self._stop_clipboard_watch()
+        self._select_card(self.apikey_button)
         self.stack.setCurrentWidget(self._apikey_page)
+        self.status.setText("")
         self._apply_preset_choice()
+        self._start_local_probe()
 
     def _current_preset(self) -> tuple[str, str, str, bool]:
         index = self.preset_combo.currentData()
@@ -781,6 +1073,10 @@ class ConnectWizard(QDialog):
         return PRESETS[1]
 
     def _apply_preset_choice(self, *_args: object) -> None:
+        self._local = None
+        self.preset_combo.setVisible(True)
+        self.model_pick.setVisible(False)
+        self.model_edit.setVisible(True)
         _label, slug, _url, key_required = self._current_preset()
         self.key_edit.setVisible(key_required)
         self.key_edit.clear()
@@ -795,6 +1091,9 @@ class ConnectWizard(QDialog):
 
     def _bind_preset_model(self) -> None:
         _label, endpoint_id, base_url, key_required = self._current_preset()
+        if self._local is not None:
+            _name, base_url, key_required = self._local
+            endpoint_id = f"yerel-{urlsplit(base_url).port}"
         model_id = self.model_edit.text().strip()
         if not model_id:
             self.status.setText("Model kimliği yazın.")

@@ -19,6 +19,7 @@ pytest.importorskip("PySide6")
 
 from PySide6.QtCore import QObject, Signal
 
+from artemis.channels.desktop import connect_wizard as wizard_module
 from artemis.channels.desktop.connect_wizard import (
     CLAUDE_DOC_URL,
     GEMINI_KEY_URL,
@@ -30,6 +31,7 @@ from artemis.channels.desktop.connect_wizard import (
     free_tool_models,
     needs_wizard,
     pkce_challenge,
+    probe_local_services,
 )
 from artemis.config.settings import EndpointConfig, ModelConfig, Settings, load_settings
 
@@ -39,6 +41,12 @@ def qt_app():
     from PySide6.QtWidgets import QApplication
 
     return QApplication.instance() or QApplication([])
+
+
+@pytest.fixture(autouse=True)
+def _no_local_probe(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Testler bu makinedeki gerçek yerel servisleri taramaz."""
+    monkeypatch.setattr(wizard_module, "probe_local_services", lambda: [])
 
 
 def _write_base_config(tmp_path: Path) -> Path:
@@ -102,7 +110,8 @@ def _settle(app, wizard, timeout: float = 3.0) -> None:
 
     end = time.monotonic() + timeout
     app.processEvents()
-    while getattr(wizard, "_gemini_thread", None) is not None and time.monotonic() < end:
+    names = ("_gemini_thread", "_login_thread", "_probe_thread")
+    while any(getattr(wizard, n, None) is not None for n in names) and time.monotonic() < end:
         app.processEvents()
         time.sleep(0.01)
     app.processEvents()
@@ -131,15 +140,15 @@ def test_four_main_buttons_have_equal_size_and_expected_labels(
     assert len(heights) == 1 and next(iter(heights)) > 0
     assert len(policies) == 1
 
-    texts = [b.text() for b in buttons]
-    assert texts == [
-        "Ücretsiz hesapla giriş\nOpenRouter · anahtar görmeden",
-        "Google hesabımla\nGemini · ücretsiz kota",
-        "Aboneliğimle bağlan\nClaude",
-        "API anahtarı ya da yerel model\nOllama · LM Studio · Groq…",
+    assert [b.title for b in buttons] == [
+        "Ücretsiz hesapla giriş", "Google hesabımla", "Aboneliğimle bağlan",
+        "API, yerel model ya da proxy",
     ]
-    for button in buttons:
-        assert len(button.text().splitlines()) == 2
+    assert all(b.accessibleName().startswith(b.title) for b in buttons)
+    # Kart seçimi tek seçimlidir; giriş kendiliğinden başlamaz (ağ çağrısı yok).
+    wizard.openrouter_button.click()
+    wizard.gemini_button.click()
+    assert [b.isChecked() for b in buttons] == [False, True, False, False]
     wizard.deleteLater()
 
 
@@ -234,6 +243,9 @@ def test_exchange_and_wizard_openrouter_flow_stores_key_without_leaking(
         store_key=lambda ep, k: (stored.append((ep, k)) or None),
     )
     wizard.openrouter_button.click()
+    assert stored == [] and not opened_urls  # kart yalnız sayfayı açar
+    wizard.openrouter_login_button.click()
+    _settle(qt_app, wizard)
     assert stored == [("openrouter", secret_key)]
     assert len(post_calls) == 1
     assert post_calls[0][1] == {
@@ -599,4 +611,88 @@ def test_claude_missing_shows_hint_and_leaves_config_unchanged(
     assert wizard.claude_add_button.isHidden()
     wizard._add_claude_cli_model()
     assert path.read_bytes() == before
+    wizard.deleteLater()
+
+
+class _ProbeResponse:
+    def __init__(self, status_code: int, body: object) -> None:
+        self.status_code, self._body = status_code, body
+
+    def json(self) -> object:
+        if isinstance(self._body, Exception):
+            raise self._body
+        return self._body
+
+
+def test_probe_local_services_reads_only_loopback_model_ids() -> None:
+    import httpx
+
+    seen: list[str] = []
+
+    def fake_get(url: str, *, timeout: float, follow_redirects: bool) -> _ProbeResponse:
+        seen.append(url)
+        assert timeout < 2 and follow_redirects is False
+        if ":8317/" in url:
+            return _ProbeResponse(401, {"error": "Missing API key"})
+        if ":8787/" in url:
+            return _ProbeResponse(200, {"data": [{"id": "b"}, {"id": "a"}, {"id": 5}, "x"]})
+        if ":4000/" in url:
+            return _ProbeResponse(200, ValueError("html"))
+        raise httpx.ConnectError("refused")
+
+    found = probe_local_services(fake_get)
+    assert seen and all(url.startswith("http://127.0.0.1:") for url in seen)
+    assert found == [
+        ("CLIProxyAPI / EasyProxy", "http://127.0.0.1:8317/v1", True, []),
+        ("Yerel proxy", "http://127.0.0.1:8787/v1", False, ["a", "b"]),
+    ]
+
+
+_SERVICES = [
+    ("CLIProxyAPI / EasyProxy", "http://127.0.0.1:8317/v1", True, []),
+    ("Yerel proxy", "http://127.0.0.1:8787/v1", False, ["m1", "m2"]),
+]
+
+
+def _local_wizard(path: Path, stored: list[tuple[str, str]], qt_app) -> ConnectWizard:
+    wizard = ConnectWizard(
+        path, open_url=lambda _u: None, oauth=OpenRouterPkce(http=_UnexpectedNetworkHttp()),
+        run_cli=lambda _n: None, store_key=lambda ep, k: (stored.append((ep, k)) or None),
+        clipboard=_FakeClipboard(), local_probe=lambda: _SERVICES,
+    )
+    wizard.apikey_button.click()
+    _settle(qt_app, wizard)
+    assert not wizard.local_box.isHidden() and len(wizard.local_buttons) == 2
+    return wizard
+
+
+def test_found_keyless_local_service_binds_picked_model(tmp_path: Path, qt_app) -> None:
+    path = _write_base_config(tmp_path)
+    stored: list[tuple[str, str]] = []
+    wizard = _local_wizard(path, stored, qt_app)
+    wizard.local_buttons[1].click()
+    assert wizard.key_edit.isHidden() and wizard.model_pick.count() == 2
+    wizard.model_pick.setCurrentIndex(1)
+    wizard.bind_button.click()
+    settings = load_settings(path)
+    assert settings.endpoints["yerel-8787"].base_url == "http://127.0.0.1:8787/v1"
+    assert settings.endpoints["yerel-8787"].api_key is False
+    assert settings.models[settings.primary_model].model == "m2" and stored == []
+    wizard.deleteLater()
+
+
+def test_found_keyed_proxy_stores_key_only_in_vault(tmp_path: Path, qt_app) -> None:
+    path = _write_base_config(tmp_path)
+    stored: list[tuple[str, str]] = []
+    wizard = _local_wizard(path, stored, qt_app)
+    wizard.local_buttons[0].click()
+    assert not wizard.key_edit.isHidden() and not wizard.model_edit.isHidden()
+    wizard.key_edit.setText("proxy-secret")
+    wizard.model_edit.setText("gemini-x")
+    wizard.bind_button.click()
+    assert stored == [("yerel-8317", "proxy-secret")]
+    text = path.read_text(encoding="utf-8")
+    assert "proxy-secret" not in text and "127.0.0.1:8317" in text
+    wizard.preset_combo.setCurrentIndex(1)  # başka sağlayıcı seçilince yerel kip biter
+    assert wizard._local is None and not wizard.preset_combo.isHidden()
     wizard.deleteLater()
