@@ -73,6 +73,7 @@ from artemis.channels.desktop.settings_io import (
     save_computer_mode as save_computer_mode,
 )
 from artemis.channels.desktop.settings_pages import (
+    build_about_page,
     build_apps_page,
     build_calendar_mail_page,
     build_files_page,
@@ -108,6 +109,7 @@ from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEMES
 from artemis.channels.desktop.triggers_section import TriggersSection
+from artemis.channels.desktop.update_section import UpdateSection
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import (
     BUILTIN_AGENT,
@@ -308,6 +310,7 @@ class SettingsPanel(QWidget):
     remove_application_button: QPushButton
     application_hint: QLabel
     advanced_box: QWidget
+    update_section: UpdateSection
 
     def __init__(
         self,
@@ -367,6 +370,7 @@ class SettingsPanel(QWidget):
         build_skills_page(self)
         build_files_page(self)
         build_apps_page(self)
+        build_about_page(self)
         self._build_section_combo()
         self.sections.currentRowChanged.connect(self._on_section)
         self.section_combo.activated.connect(self._combo_picked)

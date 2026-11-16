@@ -54,6 +54,7 @@ from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS
 from artemis.channels.desktop.triggers_section import TriggersSection
 from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
+from artemis.channels.desktop.update_section import UpdateSection
 from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import BUILTIN_AGENT
 
@@ -912,3 +913,11 @@ def build_apps_page(panel: SettingsPanel) -> None:
     panel.application_hint = meta_label("Artemis listedeki uygulamaları açabilir.")
     listing.addWidget(panel.application_hint)
     apps.addStretch(1)
+
+
+def build_about_page(panel: SettingsPanel) -> None:
+    about = add_page(panel, "Hakkında", "Sürüm ve güncelleme denetimi.")
+    box, body = group("Güncelleme", divided=False)
+    panel.update_section = UpdateSection(panel)
+    body.addWidget(panel.update_section)
+    about.addWidget(box)
