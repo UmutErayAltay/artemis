@@ -1,6 +1,6 @@
 """Kod ajanı ayarlarının yazımı ve ajan profili formu (ADR 0049 arayüzü).
 
-Yazım tek mekanizmadan geçer: `settings_panel.save_code_agent` (doğrula, aynı dizinde atomik
+Yazım tek mekanizmadan geçer: `settings_io.save_code_agent` (doğrula, aynı dizinde atomik
 değiştir, bilinmeyen anahtarları koru). Burada yalnız hangi değerin yazılacağı hesaplanır.
 Arayüz yol yazmaz/çözmez: klasörü kullanıcı seçer, ajan/klasör için model yalnız takma ad görür.
 """
@@ -17,14 +17,14 @@ import yaml
 from pydantic import ValidationError
 from PySide6.QtWidgets import (
     QComboBox,
-    QDialog,
-    QDialogButtonBox,
     QLabel,
     QLineEdit,
     QPlainTextEdit,
-    QVBoxLayout,
 )
 
+from artemis.channels.desktop.dialog_shell import FormDialog
+from artemis.channels.desktop.settings_io import save_code_agent
+from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import (
     ALIAS_RE,
     BUILTIN_AGENTS,
@@ -44,9 +44,6 @@ def _raw_code_agent(path: Path) -> dict[str, Any]:
 
 
 def _save(path: Path, values: dict[str, Any]) -> None:
-    # Döngüsel içe aktarmayı önlemek için geç: settings_panel zaten projects_panel'i içe aktarır.
-    from artemis.channels.desktop.settings_panel import save_code_agent
-
     save_code_agent(path, values)
 
 
@@ -192,21 +189,15 @@ def parse_agent_form(
     return name, profile.model_dump(mode="json", exclude_defaults=True)
 
 
-class AgentDialog(QDialog):
+class AgentDialog(FormDialog):
     """Özel ajan ekleme penceresi; doğrulama `parse_agent_form`da, hata satır içi gösterilir."""
 
     def __init__(self, taken: Iterable[str], parent: Any = None) -> None:
-        super().__init__(parent)
+        super().__init__("Özel kod ajanı", 480, parent)
         self._taken = tuple(taken)
         self.result_profile: tuple[str, dict[str, Any]] | None = None
         self.setWindowTitle("Özel kod ajanı ekle")
-        self.setMinimumWidth(480)
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(24, 24, 24, 24)
-        layout.setSpacing(12)
-        title = QLabel("Özel kod ajanı")
-        title.setObjectName("title")
-        layout.addWidget(title)
+        layout = self.form
         self.name = QLineEdit()
         self.name.setPlaceholderText("Örn. aider")
         self.command = QLineEdit()
@@ -226,26 +217,42 @@ class AgentDialog(QDialog):
         self.prompt_via.addItem("Geçici dosya ({prompt_file})", "file")
         self.env = QLineEdit()
         self.env.setPlaceholderText("Örn. OPENAI_API_KEY, AIDER_MODEL")
-        for caption, widget, hint in (
-            ("Ad", self.name, "Küçük harf, rakam, _ veya -"),
-            ("Komut", self.command, None),
-            ("Argümanlar", self.args, None),
-            ("İstem biçimi", self.prompt_via, None),
+        for caption, widget, hint, help_text in (
+            (
+                "Ad", self.name, "Küçük harf, rakam, _ veya -",
+                "",
+            ),
+            (
+                "Komut", self.command, None,
+                "Ajanı başlatan program. Bu bilgisayarda bulunabilir olmalı; Artemis bu komutu "
+                "kod işi sırasında çalıştırır.",
+            ),
+            (
+                "Argümanlar", self.args, None,
+"",
+            ),
+            (
+                "İstem biçimi", self.prompt_via, None,
+"",
+            ),
             (
                 "Görünür pencere argümanları (isteğe bağlı)",
                 self.visible_args,
                 "Satır başına bir argüman. {prompt} kısa yönerge, {prompt_file} tam istemdir.",
+"",
             ),
             (
                 "Ortam değişkeni adları (isteğe bağlı)",
                 self.env,
                 "Yalnız adlar saklanır; değerler asla yazılmaz. Değeri kendi ortamında tanımla.",
+                "Ajana aktarılacak ortam değişkenlerinin adları. Değerler ayar dosyasına "
+                "yazılmaz; senin ortamından okunur.",
             ),
         ):
             widget.setAccessibleName(caption)
             label = QLabel(caption)
             label.setObjectName("fieldLabel")
-            layout.addWidget(label)
+            layout.addLayout(with_help(label, help_text)) if help_text else layout.addWidget(label)
             layout.addWidget(widget)
             if hint:
                 note = QLabel(hint)
@@ -258,14 +265,7 @@ class AgentDialog(QDialog):
         self.error.setWordWrap(True)
         self.error.hide()
         layout.addWidget(self.error)
-        buttons = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Cancel | QDialogButtonBox.StandardButton.Ok
-        )
-        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Ekle")
-        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Vazgeç")
-        buttons.accepted.connect(self.submit)
-        buttons.rejected.connect(self.reject)
-        layout.addWidget(buttons)
+        self.add_buttons("Ekle")
 
     def submit(self) -> None:
         try:

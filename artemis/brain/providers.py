@@ -32,12 +32,13 @@ from artemis.config.settings import ModelConfig, Settings
 from artemis.mcp.client import MCPError, validate_command_arguments
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import ToolDefinition
-from artemis.tools.code_agent_process import NO_WINDOW, kill_tree
+from artemis.tools.code_agent_process import NO_WINDOW, kill_tree, own_process_tree
 from artemis.tools.credentials import read_secret
 from artemis.tools.platform import child_environment
 
 _PRIVATE_PLACEHOLDER = "[Gizlilik ayarı nedeniyle içerik buluta gönderilmedi.]"
 _TOOL_NAME = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_CREDENTIAL_PREFIX_RE = re.compile(r"^[A-Za-z0-9_-]{1,32}$")
 
 
 class Provider(Protocol):
@@ -132,6 +133,7 @@ def _chat_messages(
                         if native_arguments
                         else json.dumps(call.arguments, ensure_ascii=False),
                     },
+                    **({"extra_content": call.extra_content} if call.extra_content else {}),
                 }
                 for call in message.tool_calls
             ]
@@ -224,6 +226,7 @@ def _chat_calls(value: Any) -> list[ToolCall]:
                 id=_string(item["id"]) if "id" in item else uuid4().hex,
                 name=_string(function.get("name")),
                 arguments=_arguments(function.get("arguments")),
+                extra_content=_object(item["extra_content"]) if item.get("extra_content") else None,
             )
         )
     return calls
@@ -356,6 +359,8 @@ class _ChatStreamAccumulator:
                     target["function"]["name"] += _string(function["name"])
                 if function.get("arguments"):
                     target["function"]["arguments"] += _string(function["arguments"])
+                if call.get("extra_content"):  # Gemini thought_signature; aynen geri gider
+                    target["extra_content"] = _object(call["extra_content"])
             text = delta.get("content")
             if text:
                 piece = _string(text)
@@ -390,6 +395,11 @@ def _key(name: str) -> str:
     return key
 
 
+def credential_prefix() -> str:
+    raw = os.environ.get("ARTEMIS_CREDENTIAL_PREFIX", "Artemis")
+    return raw if _CREDENTIAL_PREFIX_RE.fullmatch(raw) else "Artemis"
+
+
 def endpoint_key_variable(endpoint_id: str) -> str:
     return f"ARTEMIS_{endpoint_id.upper().replace('-', '_')}_API_KEY"
 
@@ -397,7 +407,7 @@ def endpoint_key_variable(endpoint_id: str) -> str:
 def stored_endpoint_key(endpoint_id: str) -> str | None:
     """Özel uç anahtarı: önce ortam, sonra kasa. Ortama yazılmaz (alt süreçlere geçmesin)."""
     return os.environ.get(endpoint_key_variable(endpoint_id)) or read_secret(
-        f"Artemis/{endpoint_id}"
+        f"{credential_prefix()}/{endpoint_id}"
     )
 
 
@@ -961,6 +971,7 @@ class ClaudeCliProvider:
             )
         except OSError:
             raise ProviderError(_CLI_FAILED) from None
+        tree = own_process_tree(proc)  # Windows job; None ise yalnız kill_tree
         try:
             if stream is None:
                 out, _err = await asyncio.wait_for(
@@ -973,6 +984,9 @@ class ClaudeCliProvider:
         except TimeoutError:
             raise RetryableProviderError("Claude Code yanıt süresi doldu.") from None
         finally:
+            if tree is not None:
+                # Job'u sonlandırmak çıkmış CLI'nin bıraktığı torunları da temizler.
+                await asyncio.to_thread(tree.kill)
             if proc.returncode is None:
                 # kill_tree en çok CLEANUP_SECONDS bekler; döngüyü bloklamasın.
                 await asyncio.to_thread(kill_tree, proc)

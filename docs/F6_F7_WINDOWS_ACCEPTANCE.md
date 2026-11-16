@@ -112,3 +112,22 @@ Aşağıdakiler tarihsel ham gözlemlerdir. Güncel yorum ve kalan kabul işleri
 | 22 | kaldı (beklenti) | Başlık "Example Domain" doğru döndü, ama onay penceresi açılmadı: temiz turda MCP aracı SIDE_EFFECT olduğu için onaysız çalıştı (CLAUDE.md kural 3 ile uyumlu). Liste ya da risk sınıfı düzeltilmeli. |
 | 23 | geçti (kısmen) | 127.0.0.1:8080 → sunucu "yerel veya özel ağa çözülüyor" diye reddetti. file:// isteğini model aracı çağırmadan kendisi reddetti; sunucu tarafı reddi gerçek olarak denenmedi. |
 | 24 | geçti | Çağrı sonrası ms-playwright Chromium süreci yok. |
+
+### 2026-11-15 canlı tekrar (Claude Code, `1575521`, Windows 11, iki 1920×1080 ekran, `claude-haiku-5-5`)
+
+Umut'un isteğiyle onaylar otomatik verildi; kritik olanlar (`power`: kapatma, uyku, kilit) verilmedi.
+Gerçek config, gerçek model, gerçek araçlar; kanıt `.jarvis/audit.jsonl`.
+
+| # | Sonuç | Gözlem |
+| --- | --- | --- |
+| 4 | geçti | `notlar` MCP: test klasörü a.txt, b.txt, ocr.txt doğru listelendi. |
+| 5 | geçti | `mcp_notlar_write_file` onay istedi; reddedildi, `kabul.txt` oluşmadı. |
+| 6 | geçti | Çağrı sonrası `server-filesystem` node süreci yok (kalan iki node cor'a ait). |
+| 7 | geçti (kısmen) | Not Defteri öndeyken doğru pencere okundu. "Merhaba dünya ğüşiöç" → "ğüşİöç" / "ğüşiÖç": ğ/ü/ş artık doğru, kalan hata OCR'ın i/ö büyük-küçük kayması. |
+| 15 | geçti | Çoklu monitör: ikinci ekrandaki (x=1920) Not Defteri "sol yarı" → 1920–2880, "sağ yarı" → 2880–3840, yükseklik iş alanı (1032). |
+| 16 | geçti | 25 → sessiz → aç → 100; her adım geri okundu (25/sessiz, 25/açık, 100/açık); ses eski hâline (100, açık) döndü. |
+| 22 | geçti | `mcp_browser_browse` onay istedi (ADR 0036 site okuma); "Example Domain" döndü. |
+| 23 | geçti | Sunucu tarafı ret doğrudan denendi: `file:///C:/Windows/win.ini` → "Yalnız http ve https", `http://127.0.0.1:8080/` → "yerel veya özel ağa çözülüyor". |
+| 12 | yapılmadı (tepsi) | Çalışan Artemis'i tepsiye indirmek Claude Code güvenlik denetimince engellendi; Umut'ta. |
+| 2, 8, 11, 13, 18, 19, 20 | Umut'ta | Kaçan hatırlatma için Artemis'i kapatma, ekran ölçeği, oturum kapatma, tepsi menüsü, kilit, kapatma, uyku: kritik ya da kullanıcı oturumunu bozar. |
+

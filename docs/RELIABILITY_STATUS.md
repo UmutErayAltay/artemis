@@ -17,7 +17,7 @@ eski kodda kırılan (mutasyonla da denetlenen) regresyon testi eklendi
 | Yerel (Ollama) zor işler/ana modelin gizli geçmişten yanıtı `answer_private=False` kaydediliyordu (doğrulanmış hata) | `01ad823` | geçti (akışlı + akışsız, iki yön) | canlı Ollama bekliyor (WINDOWS_CHECKLIST F) |
 | `memory_changes` arşivdeki dış içeriği lekesiz döndürüyordu; sonraki yan etki onaysızdı (doğrulanmış hata) | `4fe7f2f` | geçti | — |
 | Hassas adım onayı pencereye bağlı değildi: tarayıcı için onaylanan Enter posta uygulamasına gidebiliyordu (doğrulanmış hata) | `89b6099` | geçti (sahte arka uç) | bekliyor (WINDOWS_CHECKLIST F) |
-| Uzun yazım Esc/süre sonrası sürüyordu: 10 karakterin 9'u durdurmadan sonra gönderildi (doğrulanmış hata) | `89b6099` | geçti (session → `windows.type_text`, sahte `_send`) | bekliyor (WINDOWS_CHECKLIST F) |
+| Uzun yazım Esc/süre sonrası sürüyordu: 10 karakterin 9'u durdurmadan sonra gönderildi (doğrulanmış hata) | `89b6099` | geçti (session → `windows.type_text`, sahte `_send`) | arka uç geçti 2026-11-11 (betik, gerçek `SendInput`, Not Defteri: durdurma, süre, odak değişimi, emoji); arayüz Esc + audit bekliyor (WINDOWS_CHECKLIST F) |
 
 Bilinen sınırlar: eski öz notların gizlilik kökeni bilinmez (gizli sayılmaz); odak kontrolü ile
 `SendInput` arasında bir karakterlik yarış kalır.
@@ -68,12 +68,28 @@ Bilerek değiştirilmeyenler / açık sınırlar:
   (kullanıcının açık seçimi; `test_gate.py` bunu kilitler).
 - Claude kod ajanı Bash'i OS sandbox değildir; `Bash(git push:*)` reddi aşılabilir önek
   kuralıdır. Bağımsız kontroller ajanın değiştirdiği depoda çalışır.
-- `computer_use` "ok" sonucu hâlâ ikinci model yargısıdır; UIA/OS durum doğrulaması yok.
-- MCP ve `claude_cli` süreçleri `taskkill /T` ile kapanır; ebeveyn önce ölürse torun yetim
-  kalabilir (Job Object yok).
-- Silme günlüğünde `prepared` satırları açılışta uzlaştırılmıyor (dürüstçe "çözülmemiş" görünür).
+- `computer_use` "ok" sonucu hâlâ esas olarak ikinci model yargısıdır; ADR 0070 ile OS kanıtı VE
+  kuralıyla eklendi: gönderilemeyen girdi ya da (yazma görevinde) odaktaki alanda UIA ile
+  bulunamayan metin "ok"u geri çevirir, asla "hayır"ı "evet" yapmaz. Tıklama/kaydırma/tuş
+  görevlerinde yalnız girdi-sonuç denetimi var; sonucun doğruluğu model yargısı kalır.
+- MCP ve `claude_cli` süreçleri artık spawn sonrası KILL_ON_JOB_CLOSE Job Object'ine bağlanır
+  (`own_process_tree`, kod ajanındaki `WindowsProcessTree` yeniden kullanıldı) ve kapanışta job
+  sonlandırılır; `kill_tree` yedektir. Kalan sınır: süreç askıda başlatılmadığı için atamadan
+  önce doğan çocuklar job dışında kalabilir (askıda başlatma kapsam dışı); atama başarısızsa
+  yalnız `kill_tree` çalışır (uyarı loglanır). Testler: `tests/test_job_ownership.py` (sahte
+  kernel; gerçek torun testi `disruptive`).
+- Silme günlüğünde süreci ölmüş eski `prepared` satırları açılışta (`create_runtime`)
+  `uncertain` yapılır (`UndoJournal.reconcile_prepared`, 60 sn'den eski; taze satıra dokunulmaz).
+  Dosya sisteminden "tamamlandı" çıkarılmaz; günlük hâlâ içerik yedeği değildir. Testler:
+  `tests/test_undo.py`, `tests/test_runtime_lifecycle.py`.
 - Hafıza varsayılan açık, SQLite şifresiz, geçmiş saklama varsayılan sınırsız (0 gün);
-  değiştirilmedi, README'de yazılı. Şema sürümü (`user_version`) ve yedek/geri yükleme yok.
+  değiştirilmedi, README'de yazılı. `memory.sqlite3` ve `degisiklikler.sqlite3` artık
+  `PRAGMA user_version = 1` taşır. Dolu eski dosya geçiş süresince `<db>.bak-v<eski>` olarak
+  yedeklenir (mkstemp + atomik değiştirme, 0o600, sembolik bağlantı/junction reddi); geçiş tek
+  işlemdir ve başarıyla bitince yedek SİLİNİR (kalıcı yedek `memory_forget`/geçmiş silmeyi
+  delerdi). Başarısız geçiş geri alınır, yedek kalır ve hata yolunu söyler; kullanıcı silmeleri
+  kalan yedeği de siler. Daha yeni sürüm açılmaz (`SchemaTooNewError`). Henüz yapısal geçiş
+  yok; otomatik geri yükleme yok. Testler: `tests/test_sqlite_schema.py`.
 
 Bu turun yerel doğrulaması (Windows 11, Python 3.12.9, gerçek cihaza dokunulmadı):
 
@@ -119,8 +135,8 @@ Tarih: eski kayıtlarda 2026-10-15–19; tek tek commit her kayıtta yok, uyduru
 | 1 | Kısmi geçti | Toast kullanıcı ayarında kapalı |
 | 2 | Yapılmadı | Yeniden açılışta kaçan hatırlatma |
 | 3 | Geçti (2026-11-04, `b945876`, Windows 11, `claude-haiku-5-5`) | İki parça, kanıt `.jarvis/audit.jsonl`. (a) Zamanlayıcı yolu, turn `d6465dc3`: 00:04 «kabul» brifingi gözetimsiz koştu, yalnız `reminder_list` çağrıldı, teslim `panel: ok`; model yazma aracını kendisi çağırmadı. (b) Kapı reddi, turn `ccd2c303`: `_run_briefing` ile aynı kurulumu yapan elle başlatılmış betik (önek + `unattended=True` + `_refuse`; hafıza/MCP/kod ajanı kapalı). Model `create_file` çağırdı; `approval` `approved: false, unattended: true`, sonuç `denied`, dosya oluşmadı. Zamanlayıcı saatiyle tetiklenen turda kapı reddi ayrıca görülmedi. Brifing config'ten kaldırıldı. |
-| 4–6 | Geçti | MCP okuma/onay/süreç temizliği; bu sürümde tekrar bekliyor |
-| 7 | Odak düzeltmesi canlı denendi | Türkçe OCR harf hataları sürüyor |
+| 4–6 | Geçti (2026-11-15, `1575521`) | MCP listeleme, yazma onayı/ret, node süreç temizliği yeniden doğrulandı |
+| 7 | Kısmi geçti (2026-11-15) | Doğru pencere okunuyor; ğ/ü/ş doğru, OCR i/ö büyük-küçük kayması sürüyor |
 | 8 | Yapılmadı | Farklı ekran ölçeği |
 | 9 | Uygulanamadı | OCR dil paketi yokluğu senaryosu |
 | 10 | Geçti | Açılış kaydı; kimlik bilgisi okuma sonradan düzeltildi |
@@ -128,15 +144,15 @@ Tarih: eski kayıtlarda 2026-10-15–19; tek tek commit her kayıtta yok, uyduru
 | 12 | Kısmi geçti | Tepside ikinci örnek |
 | 13 | Yapılmadı | Tepsi menüsünden açılışı kapatma |
 | 14 | Düzeltme canlı denendi | Pencere listesinden masaüstü elendi |
-| 15 | Düzeltme tek ekranda canlı denendi | Çoklu monitör |
-| 16 | Düzeltme ses düzeyinde canlı denendi | Tam sessize al/aç matrisi yeniden doğrulanmalı |
+| 15 | Geçti (2026-11-15) | İkinci ekranda sol/sağ yarı doğru |
+| 16 | Geçti (2026-11-15) | 25/sessiz/aç/100 geri okundu |
 | 17 | Geçti | Parlaklık geri okundu |
 | 18 | Bekliyor | Kilit kabulü |
 | 19 | İlk deneme kaldı; ortam düzeltildi | 60 sn kapatma uyarısı ve iptal tekrar denenecek |
 | 20 | Bekliyor | Uyku kabulü |
 | 21 | Geçti | Browser MCP keşfi |
-| 22 | Önceki beklenti testi kaldı | Yeni site onay politikasıyla tekrar denenecek |
-| 23 | Kısmi geçti | file:// sunucu reddi doğrudan tetiklenmedi |
+| 22 | Geçti (2026-11-15) | Site okuma onay istedi |
+| 23 | Geçti (2026-11-15) | file:// ve 127.0.0.1 sunucu tarafında reddedildi |
 | 24 | Geçti | Chromium süreç temizliği |
 
 ## Güncel cihaz kabulü

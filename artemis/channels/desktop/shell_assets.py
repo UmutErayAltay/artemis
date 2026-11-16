@@ -27,6 +27,7 @@ _ICONS: dict[str, str] = {
         '<path d="M12 12.3c-3 0-5.5 2.8-5.5 5 0 1.6 1.4 2.3 3 2.3 1 0 1.6-.4 2.5-.4s1.5.4 2.5.4'
         'c1.6 0 3-.7 3-2.3 0-2.2-2.5-5-5.5-5z"/></g>'
     ),
+    "automation": '<path d="M13 3L5 13.5h6L10 21l8-10.5h-6z"/>',
     "history": '<circle cx="12" cy="12" r="8"/><path d="M12 7.5V12l3 1.8"/>',
     "settings": (
         '<path d="M4 8h7M17 8h3M4 16h3M13 16h7"/>'
@@ -50,7 +51,7 @@ _ICONS: dict[str, str] = {
 
 # Sayfa adı -> ikon adı (kenar çubuğu).
 NAV_ICONS = {
-    "Sohbet": "chat", "Projeler": "projects", "Petler": "pets",
+    "Sohbet": "chat", "Projeler": "projects", "Otomasyon": "automation", "Petler": "pets",
     "Geçmiş": "history", "Ayarlar": "settings",
 }
 

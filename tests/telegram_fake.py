@@ -438,6 +438,7 @@ def build_harness(
     approval_timeout: float = 5.0,
     max_message_age: int = 120,
     send_computer_screenshot: bool = False,
+    telegram_fields: dict[str, Any] | None = None,
     **settings_fields: Any,
 ) -> Harness:
     """Loopback sunucu, sahte token ortamı ve gerçek AuditLog ile kurulum yapar."""
@@ -456,6 +457,7 @@ def build_harness(
         approval_timeout_seconds=approval_timeout,
         max_message_age_seconds=max_message_age,
         send_computer_screenshot=send_computer_screenshot,
+        **(telegram_fields or {}),
     )
     settings = Settings(
         workspace=workspace,

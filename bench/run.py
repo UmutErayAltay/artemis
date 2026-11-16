@@ -213,6 +213,7 @@ class ScenarioResult(StrictModel):
     approvals: list[dict[str, Any]]
     answer: str
     stop_reason: str
+    error_type: str | None = None  # provider_error'da hata sınıfı adı
 
 
 def load_scenarios(path: Path = SCENARIOS_PATH) -> list[Scenario]:
@@ -559,6 +560,7 @@ async def run_scenario(
             output_tokens=sum(turn.usage.output_tokens for turn in turns),
             cost_usd=sum((turn.usage.cost_usd for turn in turns), Decimal("0")),
             approvals=approvals, answer=last.text, stop_reason=last.stop_reason,
+            error_type=last.error_type,
         )
 
 

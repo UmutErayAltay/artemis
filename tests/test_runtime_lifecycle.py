@@ -44,3 +44,31 @@ def test_provider_setup_failure_releases_ownership(tmp_path: Path):
         assert "code_agent_jobs" in runtime.context.services
     finally:
         runtime.shutdown()
+
+
+def test_startup_reconciles_stale_prepared_once_and_tolerates_broken_journal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    from artemis.safety import undo
+
+    calls: list[int] = []
+    real = undo.UndoJournal.reconcile_prepared
+
+    def counting(self: undo.UndoJournal, **kwargs: float) -> int:
+        calls.append(1)
+        return real(self, **kwargs)
+
+    monkeypatch.setattr(undo.UndoJournal, "reconcile_prepared", counting)
+    settings = Settings(workspace=tmp_path, state_dir=tmp_path / "state")
+    create_runtime(
+        tmp_path / "unused", lambda *_: False, settings=settings, provider=ScriptedProvider([])
+    ).shutdown()
+    assert calls == [1]
+
+    def broken(self: undo.UndoJournal, **kwargs: float) -> int:
+        raise undo.UndoJournalError("bozuk")
+
+    monkeypatch.setattr(undo.UndoJournal, "reconcile_prepared", broken)
+    create_runtime(
+        tmp_path / "unused", lambda *_: False, settings=settings, provider=ScriptedProvider([])
+    ).shutdown()

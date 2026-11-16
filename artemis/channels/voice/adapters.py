@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import gc
 import importlib
 import io
 import logging
@@ -20,6 +21,7 @@ from typing import Any, Protocol
 
 import httpx
 
+from artemis.brain.emotion import strip_emotion_tags
 from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.voice.core import (
     AudioFrame,
@@ -300,6 +302,15 @@ class FasterWhisperRecognizer:
         """Ses aygıtı açılmadan önce yerel modeli doğrular; indirme yapmaz."""
         self._load()
 
+    def unload(self) -> None:
+        """Modeli bırakır (GPU belleği); sonraki çağrı yeniden yükler. Süren çıkarımı bekler."""
+        # Önce çıkarım kilidi: çözüm sürerken model altından çekilmez. Sonra yükleme kilidi:
+        # eşzamanlı bir _load yarım kalmış modeli yeniden atamasın.
+        with self._inference_lock, self._load_lock:
+            self._model = None
+        # CTranslate2 belleği nesne toplanınca bırakılır; döngüsel referans beklemesin.
+        gc.collect()
+
     async def transcribe(self, pcm: bytes) -> str:
         self._final_waiting.set()
         try:
@@ -384,11 +395,14 @@ class OpenAICompatibleTranscriber:
 
     def __init__(
         self, config: VoiceConfig, endpoint_id: str, endpoint: EndpointConfig, audit: AuditLog,
+        content_kind: str = "command_audio",
     ) -> None:
         self.config = config
         self.endpoint_id = endpoint_id
         self.endpoint = endpoint
         self.audit = audit
+        # Denetim kaydı buluta ne gittiğini doğru söylemeli: dikte komut sesi değildir (ADR 0057).
+        self.content_kind = content_kind
 
     @staticmethod
     def _wav(pcm: bytes, sample_rate: int) -> bytes:
@@ -415,7 +429,7 @@ class OpenAICompatibleTranscriber:
         # prompt yok: Whisper gürültüde prompt metnini yankılıyor (ADR 0046 eki).
         # Gizlilik denetimi sesi göndermeden önce yazılır; ses ve metin kaydedilmez.
         self.audit.emit(
-            "cloud_stt_transfer", service=self.endpoint_id, content_kind="command_audio",
+            "cloud_stt_transfer", service=self.endpoint_id, content_kind=self.content_kind,
             allowed=True,
         )
         files = {"file": ("command.wav", self._wav(pcm, self.config.sample_rate), "audio/wav")}
@@ -953,11 +967,17 @@ class EdgeTTSynthesizer:
 
 
 class FallbackSynthesizer:
-    """Edge ilk PCM'den önce başarısızsa Piper'a düşer; yarım cümleyi yinelemez."""
+    """Edge/Bulut ilk PCM'den önce başarısızsa Piper'a düşer; yarım cümleyi yinelemez."""
 
-    def __init__(self, primary: SpeechSynthesizer, local: SpeechSynthesizer) -> None:
+    def __init__(
+        self,
+        primary: SpeechSynthesizer,
+        local: SpeechSynthesizer,
+        strip_tags: tuple[str, ...] = (),
+    ) -> None:
         self.primary = primary
         self.local = local
+        self.strip_tags = strip_tags
 
     async def stream(self, text: str, cancelled: asyncio.Event) -> AsyncIterator[PCMChunk]:
         first = True
@@ -971,7 +991,8 @@ class FallbackSynthesizer:
             logger.warning("Birincil TTS başarısız (%s).", type(error).__name__)
             if not first or cancelled.is_set():
                 raise
-            async for chunk in self.local.stream(text, cancelled):
+            local_text = strip_emotion_tags(text, self.strip_tags)
+            async for chunk in self.local.stream(local_text, cancelled):
                 if cancelled.is_set():
                     return
                 yield chunk

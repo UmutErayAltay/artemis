@@ -26,14 +26,15 @@ from artemis.brain.agent_loop import RunResult
 from artemis.channels.desktop.app import (
     _STYLE,
     DesktopWindow,
-    StepBlock,
     build_window,
 )
 from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.bridge import Activity, Finished, State, VoiceCommand
+from artemis.channels.desktop.chat_widgets import StepBlock
 from artemis.channels.desktop.demo import DemoReadTool, DemoWriteTool
 from artemis.channels.desktop.themes import THEMES
 from artemis.channels.runtime import Runtime
+from artemis.tools.plugins.routines import RoutineNameArguments
 
 
 @pytest.fixture
@@ -558,7 +559,7 @@ def test_settings_apply_restarts_runtime_with_selected_device_and_keeps_model(
         window.settings_panel.device_combo.addItem("Test mikrofonu", 9)
         combo = window.settings_panel.device_combo  # başta "Mikrofon bulunamadı" satırı var
         combo.setCurrentIndex(combo.findData(9))
-        window.settings_panel._apply()
+        window.tabs.setCurrentWidget(window.chat_page)  # çıkış bekleyen düzenlemeyi yazar, kurar
         _wait(app, lambda: len(settings_seen) == 2 and window._worker_ready)
         assert settings_seen[-1].models[settings_seen[-1].primary_model].model == "first-model"
         assert settings_seen[-1].voice.input_device == 9
@@ -617,6 +618,13 @@ def _deferred_settings_window(
     return window, path, seen, blocker
 
 
+def _apply_and_leave(window: DesktopWindow) -> None:
+    """Otomatik kaydı tetikler, sonra Ayarlar'dan çıkar: yeniden kurulum yalnız çıkışta olur."""
+    window.tabs.setCurrentWidget(window.settings_scroll)
+    window.settings_panel._apply()
+    window.tabs.setCurrentWidget(window.chat_page)
+
+
 def _pick_device(window: DesktopWindow, device: int) -> None:
     combo = window.settings_panel.device_combo
     combo.addItem("Test mikrofonu", device)
@@ -642,7 +650,7 @@ def test_settings_apply_during_active_turn_defers_rebuild_and_keeps_turn(
         _wait(app, lambda: blocker.entered.is_set())
         _pick_device(window, 9)
         # Düğme tur sürerken normalde pasif; sinyal yine de gelebilir.
-        window.settings_panel._apply()
+        _apply_and_leave(window)
         app.processEvents()
         # Ayar diske yazıldı ama canlı kuruluş yapılmadı: tur iptal edilmedi, köprü aynı.
         assert load_settings(path).voice.input_device == 9
@@ -691,8 +699,9 @@ def test_settings_apply_when_idle_rebuilds_immediately_and_pending_approval_defe
         assert len(seen) == 1 and window._config_restart_pending
         window._approval_dialog = None
         window._config_restart_pending = False
-        # Boştayken eskisi gibi hemen kurulur.
-        window.settings_panel._apply()
+        # Boştayken Ayarlar'dan çıkınca kurulur (yeni bir değişiklik yazılmış olmalı).
+        _pick_device(window, 10)
+        _apply_and_leave(window)
         _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
         assert not window._config_restart_pending
     finally:
@@ -725,7 +734,8 @@ def test_settings_apply_resyncs_embedded_telegram_once(
     monkeypatch.setattr(app_module, "should_run", lambda _config: True)
     try:
         # Uygula: gömülü kanal runtime'ı eski ayarla kalmasın, durup config'ten yeniden başlar.
-        window.settings_panel._apply()
+        _pick_device(window, 5)
+        _apply_and_leave(window)
         _wait(app, lambda: len(seen) == 2 and window._worker_ready, timeout=8)
         assert fake.calls == ["stop", "start"]
         # Telegram ayarı değişince hemen yeniden kurulum da olsa çift yeniden başlatma olmaz.
@@ -1508,3 +1518,205 @@ def test_running_visible_job_shows_honest_close_window_line(app: QApplication) -
     ))
     assert "pencereyi kapatın" in panel.start_reason.text()
     panel.close()
+
+
+def test_trigger_notice_suggest_fills_prompt_without_sending(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        sent: list[str] = []
+        window.bridge.submit = lambda text, *a, **k: sent.append(text)  # type: ignore[method-assign]
+        window._handle_event(
+            bridge_module.Proactive("Tetikleyici · t", "Geldi: r.pdf", "", "Özetle: C:/r.pdf")
+        )
+        assert not window.routine_bar.isHidden()
+        assert window.routine_run_button.text() == "Yaz"
+        window.routine_run_button.click()
+        assert window.prompt.toPlainText() == "Özetle: C:/r.pdf"
+        assert sent == [] and not window._busy and window.routine_bar.isHidden()
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_trigger_notice_routine_button_uses_the_normal_tool_path(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        calls: list[tuple[str, Any]] = []
+        window.bridge.submit_tool = lambda name, arguments, **k: calls.append((name, arguments))  # type: ignore[method-assign]
+        window._handle_event(bridge_module.Proactive("Tetikleyici · t", "Geldi", "işe başla", ""))
+        assert window.routine_run_button.text() == "Çalıştır"
+        window.routine_run_button.click()
+        assert [(name, args.name) for name, args in calls] == [("routine_run", "işe başla")]
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_summary_notice_open_and_vault_button_follow_vault_setting(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        calls: list[tuple[str, Any]] = []
+        window.bridge.submit_tool = lambda name, arguments, **k: calls.append((name, arguments))  # type: ignore[method-assign]
+        event = bridge_module.Proactive("Günün özeti hazır", "özet", "", "", "2026-10-15")
+        # Vault kapalı (config yok/okunamaz): yalnız "Aç".
+        window._handle_event(event)
+        assert window.routine_run_button.text() == "Aç"
+        assert window.summary_vault_button.isHidden()
+        # Vault açık: "Vault'a ekle" görünür ve onaylı vault_append yolunu (submit_tool) kullanır.
+        vault = tmp_path / "vault"
+        vault.mkdir()
+        state = tmp_path / "state"
+        (state / "gunluk").mkdir(parents=True)
+        (state / "gunluk" / "2026-10-15.md").write_text("# Gün özeti\n- x\n", encoding="utf-8")
+        config = tmp_path / "config.yaml"
+        config.write_text(
+            f"state_dir: {state.as_posix()}\nmemory:\n  vault_path: {vault.as_posix()}\n",
+            encoding="utf-8",
+        )
+        window._config_path = config
+        window._handle_event(event)
+        assert not window.summary_vault_button.isHidden()
+        window.summary_vault_button.click()
+        assert [(n, a.path, a.text) for n, a in calls] == [
+            ("vault_append", "Artemis-Gunluk.md", "# Gün özeti\n- x")
+        ]
+        assert not list(vault.iterdir())  # düğme doğrudan dosya yazmaz
+        # Geçersiz gün: hiçbir şey açılmaz/eklenmez.
+        window._handle_event(bridge_module.Proactive("t", "b", "", "", "../x"))
+        window.summary_vault_button.click()
+        assert len(calls) == 1
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_busy_refusal_lands_in_the_panel_that_started_the_action(
+    app: QApplication, tmp_path: Path
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        window.bridge.submit_tool = lambda name, arguments, **k: None  # type: ignore[method-assign]
+        window.settings_panel.routines.notice.setText("ayar-önce")
+        window.automation_panel.notice.setText("otomasyon-önce")
+        window.automation_panel.tool_requested.emit(
+            "routine_run", RoutineNameArguments(name="işe başla")
+        )
+        assert window.automation_panel.notice.text() == "Başka işlem sürüyor; çalıştırılmadı."
+        assert window.settings_panel.routines.notice.text() == "ayar-önce"
+
+        window.automation_panel.notice.setText("otomasyon-sonra")
+        window.settings_panel.routines.notice.setText("ayar-sonra")
+        window._submit_routine_tool("routine_run", RoutineNameArguments(name="işe başla"))
+        refusal = "Başka işlem sürüyor; çalıştırılmadı."
+        assert window.settings_panel.routines.notice.text() == refusal
+        assert window.automation_panel.notice.text() == "otomasyon-sonra"
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_ctrl_comma_opens_settings_from_anywhere(app: QApplication, tmp_path: Path) -> None:
+    window = _window(app, tmp_path)
+    window.tabs.setCurrentIndex(0)
+    assert window.tabs.currentWidget() is not window.settings_scroll
+    window._settings_shortcut.activated.emit()
+    assert window.tabs.currentWidget() is window.settings_scroll
+    assert window._settings_shortcut.key().toString() == "Ctrl+,"
+    _close_cleanly(app, window)
+
+
+def test_settings_hotkey_clash_blocks_autosave_until_fixed_then_retry_saves(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.config.settings import load_settings
+
+    window, path, seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    panel = window.settings_panel
+    try:
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        panel.dictation_hotkey.setText("ctrl+space")  # ses kısayoluyla çakışır
+        panel._mark_dirty()
+        panel.flush()
+        assert panel._dirty and not panel.retry_button.isHidden()
+        assert "aynı olamaz" in panel.notice.text()
+        assert load_settings(path).dictation.hotkey != "ctrl+space"
+        assert not window._settings_restart_pending
+        panel.dictation_hotkey.setText("ctrl+alt+k")
+        panel.retry_button.click()
+        assert not panel._dirty and panel.retry_button.isHidden()
+        assert load_settings(path).dictation.hotkey == "ctrl+alt+k"
+        assert window._settings_restart_pending
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
+def test_leaving_settings_flushes_pending_edit_and_restarts_exactly_once(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.config.settings import load_settings
+
+    window, path, _seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    panel = window.settings_panel
+    requests: list[object] = []
+
+    def fake_restart(notice: object = None) -> None:
+        window._runtime_dump = panel.config_dump()  # gerçek _request_restart da böyle yapar
+        requests.append(notice)
+
+    monkeypatch.setattr(window, "_request_restart", fake_restart)
+    try:
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        _pick_device(window, 7)  # düzenleme bekliyor, debounce dolmadı
+        assert panel._dirty and requests == []
+        window.tabs.setCurrentWidget(window.chat_page)
+        assert load_settings(path).voice.input_device == 7  # çıkış bekleyeni yazdı
+        assert len(requests) == 1
+        # Yeniden girince taban çizgisi kayıtlı dosyadan yenilenir: geri al gizli.
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        assert panel.revert_button.isHidden()
+        assert panel._baseline_bytes == path.read_bytes()
+        # Değişiklik yoksa çıkış yeniden kurulum istemez.
+        window.tabs.setCurrentWidget(window.chat_page)
+        assert len(requests) == 1
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)
+
+
+def test_leaving_settings_restarts_for_direct_section_write_but_not_after_revert(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Tetikleyici formu/beceri klasörü config'i kendisi yazar; çıkışta yine kurulmalı.
+    Geri alma eski hâle döndürünce çalışma zamanı zaten o config'le kurulu: kurulum yok."""
+    import yaml
+
+    from artemis.channels.desktop.settings_panel import _write_validated
+
+    window, path, _seen, blocker = _deferred_settings_window(app, tmp_path, monkeypatch)
+    panel = window.settings_panel
+    requests: list[object] = []
+
+    def fake_restart(notice: object = None) -> None:
+        window._runtime_dump = panel.config_dump()
+        requests.append(notice)
+
+    monkeypatch.setattr(window, "_request_restart", fake_restart)
+    try:
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+        raw.setdefault("skills", {})["folder"] = str(tmp_path / "beceri")
+        _write_validated(path, raw)  # bölümün doğrudan yazımı (panel kirli değil)
+        window.tabs.setCurrentWidget(window.chat_page)
+        assert len(requests) == 1
+        window.tabs.setCurrentWidget(window.settings_scroll)
+        raw["skills"]["folder"] = str(tmp_path / "baska")
+        _write_validated(path, raw)
+        panel._revert()  # oturum başındaki (çalışma zamanının kurulu olduğu) hâle döner
+        window.tabs.setCurrentWidget(window.chat_page)
+        assert len(requests) == 1
+    finally:
+        blocker.release.set()
+        _close_cleanly(app, window)

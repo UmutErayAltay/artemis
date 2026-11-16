@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import json
 import signal
+import sys
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from artemis.brain.errors import ProviderError
 from artemis.brain.providers import build_provider
 from artemis.channels.autostart import Autostart
 from artemis.channels.runtime import Runtime, create_runtime
+from artemis.config.paths import default_config_path, ensure_config
 from artemis.config.settings import load_settings
 from artemis.safety.audit import AuditLog
 from artemis.tools.registry import discover_tools
@@ -161,13 +163,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Türkçe güvenli masaüstü asistanı")
     commands = parser.add_subparsers(dest="command", required=True)
     chat_parser = commands.add_parser("chat", help="CLI sohbetini başlat")
-    chat_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
+    chat_parser.add_argument("--config", type=Path, default=None)
     voice_parser = commands.add_parser(
         "voice", help="Masaüstünü ses açık başlatır (`desktop --ses` ile aynı)"
     )
-    voice_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
+    voice_parser.add_argument("--config", type=Path, default=None)
     desktop_parser = commands.add_parser("desktop", help="Masaüstü panelini başlat")
-    desktop_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
+    desktop_parser.add_argument("--config", type=Path, default=None)
     desktop_parser.add_argument(
         "--demo", action="store_true", help="Gerçek araç kullanmayan çevrimdışı demoyu aç"
     )
@@ -186,16 +188,23 @@ def main() -> None:
         "autostart", help="Windows açılışında tepside başlamayı aç/kapat (ADR 0030)"
     )
     autostart_parser.add_argument("action", choices=["ac", "kapat", "durum"])
-    autostart_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
+    autostart_parser.add_argument("--config", type=Path, default=None)
     telegram_parser = commands.add_parser(
         "telegram", help="Telegram kanalını başlat (yalnız yapılandırılmış özel sohbet, ADR 0016)"
     )
-    telegram_parser.add_argument("--config", type=Path, default=Path("config/config.yaml"))
+    telegram_parser.add_argument("--config", type=Path, default=None)
     args = parser.parse_args()
     from artemis.tools.credentials import load_into_environment
 
     load_into_environment()
     try:
+        config = args.config or default_config_path()
+        if args.config is None and ensure_config(config):
+            print(
+                f"İlk açılış: ayarlar {config} konumunda oluşturuldu; "
+                "modeli Ayarlar > Model sağlayıcıları'ndan ekleyin.",
+                file=sys.stderr,
+            )
         if args.command in {"voice", "desktop"}:
             try:
                 from artemis.channels.desktop.app import run_desktop
@@ -211,17 +220,17 @@ def main() -> None:
             demo = args.command == "desktop" and args.demo
             background = args.command == "desktop" and args.background
             raise SystemExit(
-                run_desktop(args.config, demo=demo, voice=use_voice, background=background)
+                run_desktop(config, demo=demo, voice=use_voice, background=background)
             )
         elif args.command == "autostart":
-            raise SystemExit(autostart(args.config, args.action))
+            raise SystemExit(autostart(config, args.action))
         elif args.command == "telegram":
             # Lazy import: sohbet/ses kullanıcıları Telegram modüllerini yüklemez.
             from artemis.channels.telegram.channel import run_telegram
 
-            raise SystemExit(asyncio.run(run_telegram(args.config)))
+            raise SystemExit(asyncio.run(run_telegram(config)))
         else:
-            asyncio.run(chat(args.config))
+            asyncio.run(chat(config))
     except (OSError, ValueError, ValidationError, yaml.YAMLError, ProviderError) as error:
         # Config doğrulama hatasının ham metni kullanıcı yanlışlıkla sır yazmış olabilir.
         print(

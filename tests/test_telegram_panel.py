@@ -318,7 +318,7 @@ def test_pairing_409_shows_stop_other_process_message(
     panel = section(make_config(tmp_path, fake))
     panel._pair()
     settle(panel)
-    assert "artemis telegram" in panel.message.text() and "durdur" in panel.message.text()
+    assert "terminalde Telegram botu" in panel.message.text() and "durdur" in panel.message.text()
     assert len(method_bodies(fake, "getUpdates")) == 1
     panel.deleteLater()
 

@@ -9,7 +9,7 @@ import stat
 import uuid
 from contextlib import closing
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Literal, cast
 
@@ -141,6 +141,37 @@ class UndoJournal:
         if row is None:
             raise UndoJournalError("Geri alma kaydı bulunamadı.")
         return _record(row)
+
+    def reconcile_prepared(self, *, older_than_seconds: float = 60.0) -> int:
+        """Süreci ölmüş silmelerin eski `prepared` kayıtlarını `uncertain` yapar.
+
+        Dosya sisteminden "completed" çıkarılmaz: öğenin nereye gittiği kanıtlanamaz.
+        Taze kayıtlara dokunulmaz; bu süreçte yarım kalmış bir silme olabilir.
+        """
+        if not self.path.exists():
+            return 0
+        cutoff = (datetime.now(UTC) - timedelta(seconds=older_than_seconds)).isoformat()
+        try:
+            with closing(self._connect(create=False)) as connection, connection:
+                ids = [
+                    row[0]
+                    for row in connection.execute(
+                        "SELECT record_id FROM undo_records "
+                        "WHERE status = 'prepared' AND created_at < ?",
+                        (cutoff,),
+                    )
+                ]
+        except (sqlite3.Error, OSError):
+            raise UndoJournalError("Geri alma kayıtları okunamadı.") from None
+        count = 0
+        for record_id in ids:
+            # set_status yalnız 'prepared'tan geçer; yarışta sonuçlanmış kayıt atlanır.
+            try:
+                self.set_status(record_id, "uncertain")
+            except UndoJournalError:
+                continue
+            count += 1
+        return count
 
     def list_records(self, *, root: Path, limit: int = 20) -> list[UndoRecord]:
         if not 1 <= limit <= 100:

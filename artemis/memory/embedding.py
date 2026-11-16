@@ -55,7 +55,7 @@ _CACHE_VERSION = 1
 _MAX_NOTE_BYTES = 1_000_000
 
 
-class EmbeddingUnavailable(RuntimeError):  # noqa: N818 - ad sözleşmeden: "kullanılamıyor" bir durumdur
+class EmbeddingUnavailable(RuntimeError):
     """`fastembed`/`numpy` kurulu değil ya da model yüklenemedi (indirme, ağ, bozuk dosya)."""
 
 

@@ -1,6 +1,7 @@
 """Tek kullanıcıdan eşzamanlı gelen turların onay bağlamını karıştırmaz."""
 
 import asyncio
+import dataclasses
 from time import monotonic
 from typing import Any
 
@@ -8,6 +9,7 @@ from pydantic import BaseModel
 
 from artemis.brain.agent_loop import AgentLoop, RunResult
 from artemis.brain.conversation import ConversationContext
+from artemis.brain.emotion import emotion_tags_active, strip_emotion_tags
 from artemis.brain.models import ToolCall
 from artemis.brain.streaming import ResponseStream
 from artemis.safety.gate import TurnState
@@ -43,28 +45,45 @@ class CommandRunner:
 
     async def _run_locked(
         self, text: str, unattended: bool, stream: ResponseStream | None = None,
+        attachment: ToolResult | None = None,
     ) -> RunResult:
         window = self.conversation.render()
-        if stream is None:
+        if stream is None and attachment is None:
             result = await self.loop.run(text, window, unattended=unattended)
-        else:
+        elif attachment is None:
             result = await self.loop.run(text, window, unattended=unattended, stream=stream)
+        else:
+            result = await self.loop.run(
+                text, window, unattended=unattended, stream=stream, attachment=attachment
+            )
+        tags = emotion_tags_active(self.loop.context.settings.voice)
+        if tags:
+            stripped_text = strip_emotion_tags(result.text, tags)
+            record = result.record
+            if record is not None:
+                stripped_answer = strip_emotion_tags(record.answer, tags)
+                if isinstance(record, BaseModel):
+                    record = record.model_copy(update={"answer": stripped_answer})
+                elif dataclasses.is_dataclass(record) and not isinstance(record, type):
+                    record = dataclasses.replace(record, answer=stripped_answer)
+            result = result.model_copy(update={"text": stripped_text, "record": record})
         if result.record is not None:
             self.conversation.record(result.record)
         return result
 
     async def run(
         self, text: str, *, unattended: bool = False, stream: ResponseStream | None = None,
+        attachment: ToolResult | None = None,
     ) -> RunResult:
         async with self._lock:
             if not self.loop.cleanup_pending:
                 self.loop.context.cancelled.clear()
             task = asyncio.current_task()
             if task is None:
-                return await self._run_locked(text, unattended, stream)
+                return await self._run_locked(text, unattended, stream, attachment)
             self._active_task = task
             try:
-                return await self._run_locked(text, unattended, stream)
+                return await self._run_locked(text, unattended, stream, attachment)
             finally:
                 if self._active_task is task:
                     self._active_task = None

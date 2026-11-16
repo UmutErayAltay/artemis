@@ -12,6 +12,8 @@ import asyncio
 import re
 from collections.abc import AsyncIterator
 
+from artemis.text import turkish_fold
+
 # Cümle sonu: noktalama + boşluk (3.5 gibi sayıları bölmez) ya da satır sonu.
 _SENTENCE_END = re.compile(r"[.!?…:;]+[\"'”’)\]]*\s+|\n+")
 # Uzun ve noktalamasız ilk cümle ilk sesi geciktirmesin: bu uzunlukta virgülde bölünür.
@@ -30,7 +32,7 @@ _CLAUSE = re.compile(r"[,;:]|\s+(?:ve|ama|sonra|ardından)\s+")
 
 
 def _lower(text: str) -> str:
-    return text.replace("I", "ı").replace("İ", "i").lower()
+    return turkish_fold(text)
 
 
 def claims_success(sentence: str) -> bool:

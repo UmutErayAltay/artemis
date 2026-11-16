@@ -18,7 +18,8 @@ import yaml
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import QCheckBox, QLabel, QLineEdit, QPushButton, QVBoxLayout, QWidget
 
-from artemis.channels.desktop.provider_section import button_row, field, group, meta_label
+from artemis.channels.desktop.form_kit import button_row, field, group, meta_label
+from artemis.channels.desktop.settings_io import _write_validated
 from artemis.channels.desktop.telegram_service import channel_blocker
 from artemis.channels.telegram.api import (
     TOKEN_TARGET,
@@ -46,7 +47,8 @@ LOCKED_TEXT = (
 TEST_TEXT = "Artemis test mesajı: bağlantı çalışıyor."
 NOTICE_TEXT = "Artemis bağlandı."
 CONFLICT_TEXT = (
-    "Botu başka bir süreç dinliyor (`artemis telegram` açık olabilir). Onu durdurup tekrar dene."
+    "Botu başka bir süreç dinliyor (terminalde Telegram botu açık olabilir). "
+    "Onu durdurup tekrar dene."
 )
 
 
@@ -165,6 +167,10 @@ class TelegramSection(QWidget):
         field(
             body, "Bot token'ı", self.token,
             "@BotFather'dan alınan token yalnız kimlik kasasına yazılır.",
+            help=(
+                "Botun kimliği. Windows kimlik kasasına yazılır, ayar dosyasına ve loga girmez. "
+                "Kaydet ve doğrula önce Telegram'a sorup doğrular, geçerliyse kaydeder."
+            ),
         )
         body.addLayout(button_row(self.save_button))
         pair_box, pair = group("Sohbet")
@@ -181,7 +187,7 @@ class TelegramSection(QWidget):
         self.disconnect_button = QPushButton("Bağlantıyı kes")
         self.disconnect_button.clicked.connect(self._disconnect)
         pair.addLayout(button_row(
-            self.disconnect_button, self.test_button, self.cancel_button, self.pair_button
+            self.disconnect_button, self.test_button, self.cancel_button, self.pair_button,
         ))
         channel_box, channel = group("Telegram'dan komut")
         layout.addWidget(channel_box)
@@ -194,7 +200,7 @@ class TelegramSection(QWidget):
         channel.addWidget(self.channel_label)
         self.hint = meta_label(
             "Komutlar bu sohbetin kendi geçmişinde çalışır; onaylar yalnız Telegram "
-            "düğmeleriyle sorulur. `artemis telegram` de açıksa bot tek dinleyiciye izin "
+            "düğmeleriyle sorulur. Terminalde Telegram botu da açıksa bot tek dinleyiciye izin "
             "verdiğinden çakışma olur."
         )
         channel.addWidget(self.hint)
@@ -313,9 +319,6 @@ class TelegramSection(QWidget):
 
     def _write_telegram_key(self, key: str, value: int | bool | None) -> bool:
         """`telegram.<key>` yazar (None = sil); doğrulanmış atomik yazıcı, hatada dosya korunur."""
-        # Döngüsel içe aktarmayı önlemek için geç alınır (settings_panel bu bölümü içerir).
-        from artemis.channels.desktop.settings_panel import _write_validated
-
         try:
             raw = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
             section = raw.get("telegram") or {}
@@ -415,7 +418,10 @@ class TelegramSection(QWidget):
         if not self._write_chat_id(chat_id):
             return
         self.changed.emit()
-        suffix = "" if confirmed else " Kod mesajı onaylanamadı; `artemis telegram` açıksa dikkat."
+        suffix = (
+            "" if confirmed
+            else " Kod mesajı onaylanamadı; terminalde Telegram botu açıksa dikkat."
+        )
         self.message.setText(f"Sohbet {chat_id} bağlandı.{suffix}")
         self._send(token, config, audit_path, chat_id, NOTICE_TEXT, "Artemis bağlandı bildirimi")
 

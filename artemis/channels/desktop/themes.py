@@ -9,6 +9,8 @@ DEFAULT_THEME = "light-mixed"
 
 # Sıcak yoldaş paleti (DESIGN.md "Warm companion direction"): krem/kemik ve sıcak mürekkep;
 # kurumsal slate-mavi bırakıldı. Düz tonlar, gradyan/parıltı yok.
+# accent #0f7f7a -> #0b7570: bağlantı/ghost düğme metni küçük yazıda accent_soft üstünde 4.04:1 idi
+# (AA için 4.5); artık bg, surface, soft ve accent_soft üstünde >= 4.5:1 (testte kilitli).
 # nav_muted #6b5f55 -> #5f544a: krem menüde nav_selected üstünde 4.23:1 idi (AA için 4.5 gerekir).
 # Menü/çalışma alanı ayrımı: nav önce bg ile ~1.07:1 (açık), ~1.06:1 (koyu) idi, görünmüyordu;
 # artık her temada >= 1.15:1 (testte kilitli). Koyu menü artık bg'den biraz AÇIK sıcak ton.
@@ -19,7 +21,9 @@ _LIGHT = {
     "text": "#2a2420",
     "muted": "#6b5f55",
     "border": "#e2d8c8",
-    "accent": "#0f7f7a",
+    # Giriş denetimi kenarı: kart/ayraç kenarı sade kalır, alan sınırı >= 3:1 olmalı (WCAG 1.4.11).
+    "control_border": "#8a7b69",
+    "accent": "#0b7570",
     "accent_text": "#ffffff",
     "accent_soft": "#d9efec",
     "nav": "#e8dfcf",
@@ -37,6 +41,7 @@ _DARK = {
     "text": "#f0e9df",
     "muted": "#b3a698",
     "border": "#3b332c",
+    "control_border": "#7d7064",
     "accent": "#5fd0c5",
     "accent_text": "#0d2926",
     "accent_soft": "#1f3a37",
@@ -71,19 +76,7 @@ def _tokens(name: str) -> dict[str, str]:
     return THEMES.get(name, THEMES[DEFAULT_THEME])
 
 
-def stylesheet(name: str) -> str:
-    """Semantic Qt style shared by the window and its dialogs.
-
-    Dynamic-property selectors ([selected="true"], [state="current"]) only update
-    after the caller runs widget.style().unpolish(widget) and polish(widget).
-    Controls: 1px border + 4px 8px padding; focus swaps to 2px border + 3px 7px
-    (the only off-scale padding) so the box never shifts.
-    """
-    t = _tokens(name)
-    tone = "dark" if t["bg"] == THEMES["dark"]["bg"] else "light"
-    down = (_ASSETS / f"arrow-down-{tone}.svg").as_posix()
-    up = (_ASSETS / f"arrow-up-{tone}.svg").as_posix()
-    radio = (_ASSETS / f"radio-on-{tone}.svg").as_posix()
+def _qss_controls(t: dict[str, str], up: str, down: str) -> str:
     # Plain containers inside a surface would otherwise paint the page bg as a stain.
     # Exact-class selectors (.QWidget) leave inputs, which subclass QWidget, untouched.
     surfaces = ", ".join(
@@ -100,6 +93,7 @@ def stylesheet(name: str) -> str:
 QWidget {{ background: {t['bg']}; color: {t['text']};
  font-family: 'Segoe UI Variable Text', 'Segoe UI'; font-size: 14px; }}
 QDialog {{ background: {t['surface']}; }}
+QDialog QRadioButton, QDialog QCheckBox {{ background: transparent; }}
 QLabel {{ background: transparent; }}
 QLabel#status {{ border: none; background: transparent; font-weight: 600; }}
 QLabel#greeting {{ font-size: 28px; font-weight: 650; }}
@@ -146,11 +140,17 @@ QPlainTextEdit[readOnly="true"], QTextEdit[readOnly="true"] {{ background: {t['s
 QFrame#sidebar QLabel {{ color: {t['nav_text']}; }}
 {ctl} {{ background: {t['soft']}; border: 1px solid {t['border']};
  border-radius: 8px; padding: 4px 8px; min-height: 22px; }}
-QLineEdit, QComboBox, QSpinBox {{ background: {t['surface']}; color: {t['text']};
- selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
+/* Tek kontrol yüksekliği: min-height içerik kutusudur, Qt üstüne 4px dolgu ve 1px çerçeve ekler.
+   26px + 2*4 + 2*1 = 36px toplam; düğme, metin alanı, kutu ve sayaç aynı hizada kalır. */
+QPushButton {{ padding: 4px 12px; min-height: 26px; }}
+QLineEdit, QComboBox, QSpinBox {{ min-height: 26px; background: {t['surface']};
+ color: {t['text']}; selection-background-color: {t['accent']};
+ selection-color: {t['accent_text']}; }}
 QPlainTextEdit, QTextEdit, QListWidget {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; border-radius: 8px; padding: 4px 8px;
  selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
+QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QTextEdit {{
+ border: 1px solid {t['control_border']}; }}
 QPushButton:hover, QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
  border-color: {t['accent']}; }}
 {foc} {{ border: 2px solid {t['accent']}; padding: 3px 7px; }}
@@ -158,7 +158,10 @@ QPushButton:disabled, QComboBox:disabled, QCheckBox:disabled, QLineEdit:disabled
  color: {t['muted']}; }}
 QPushButton:disabled:hover, QComboBox:disabled:hover {{ border-color: {t['border']}; }}
 QPushButton#primary {{ background: {t['accent']}; color: {t['accent_text']};
- border-color: {t['accent']}; font-weight: 650; min-height: 26px; }}
+ border-color: {t['accent']}; font-weight: 650; }}
+/* Metin bağlantısı, etiket ve kenar çubuğu düğmeleri kendi küçük ölçüsünü korur (22px içerik). */
+QPushButton#ghost, QPushButton#disclosure, QPushButton#chip, QPushButton#themeToggle {{
+ min-height: 22px; min-width: 0; padding: 4px 8px; }}
 QPushButton#voiceToggle:checked {{ border: 2px solid {t['accent']};
  color: {t['accent']}; padding: 3px 7px; }}
 QPushButton#danger {{ color: {t['error']}; border-color: {t['error']}; }}
@@ -186,7 +189,11 @@ QSpinBox::up-button {{ subcontrol-position: top right; }}
 QSpinBox::down-button {{ subcontrol-position: bottom right; }}
 QSpinBox::up-arrow {{ image: url({up}); width: 10px; height: 6px; }}
 QSpinBox::down-arrow {{ image: url({down}); width: 10px; height: 6px; }}
-QListWidget {{ outline: 0; }}
+"""
+
+
+def _qss_components(t: dict[str, str], down: str, radio: str) -> str:
+    return f"""QListWidget {{ outline: 0; }}
 QListWidget::item {{ padding: 8px 12px; border-left: 2px solid transparent; }}
 QListWidget::item:hover {{ background: {t['soft']}; }}
 QListWidget::item:selected {{ background: {t['soft']}; color: {t['text']};
@@ -195,11 +202,11 @@ QListWidget#sectionList {{ background: transparent; border: none; padding: 0; }}
 QListWidget#sectionList::item {{ min-height: 20px; padding: 8px 12px; }}
 QCheckBox {{ color: {t['text']}; spacing: 8px; }}
 QCheckBox::indicator {{ width: 16px; height: 16px; border-radius: 4px;
- border: 1px solid {t['border']}; background: {t['surface']}; }}
+ border: 1px solid {t['control_border']}; background: {t['surface']}; }}
 QCheckBox::indicator:checked {{ background: {t['accent']}; border-color: {t['accent']}; }}
 QRadioButton {{ color: {t['text']}; spacing: 8px; }}
 QRadioButton::indicator {{ width: 16px; height: 16px; border-radius: 8px;
- border: 1px solid {t['muted']}; background: {t['surface']}; }}
+ border: 1px solid {t['control_border']}; background: {t['surface']}; }}
 QRadioButton::indicator:checked {{ image: url({radio}); border: none; }}
 QCheckBox:focus, QRadioButton:focus {{ color: {t['accent']}; }}
 QTabWidget::pane {{ border: none; }}
@@ -220,6 +227,14 @@ QProgressBar::chunk {{ background: {t['accent']}; border-radius: 4px; }}
 QToolButton {{ border: 1px solid {t['border']}; padding: 4px 8px; border-radius: 8px; }}
 QMenu, QToolTip {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; padding: 8px; }}
+QToolButton#helpTip {{ border: 1px solid {t['border']}; border-radius: 9px; padding: 0;
+ background: {t['soft']}; color: {t['muted']}; font-size: 12px; font-weight: 600; }}
+QFrame#helpPopup {{ background: {t['surface']}; border: 1px solid {t['control_border']};
+ border-radius: 8px; }}
+QFrame#helpPopup QLabel {{ color: {t['text']}; background: transparent; }}
+QToolButton#helpTip:hover, QToolButton#helpTip:focus, QToolButton#helpTip:checked {{
+ color: {t['accent']};
+ border-color: {t['accent']}; }}
 QMenu::item:selected {{ background: {t['soft']}; }}
 QSplitter::handle {{ background: {t['bg']}; width: 8px; }}
 /* wave2-shell */
@@ -258,7 +273,7 @@ QFrame#themeCard QLabel, QFrame#themeCard QRadioButton {{ background: transparen
 QFrame#themeCard QRadioButton {{ spacing: 0; font-weight: 600; }}
 QFrame#themeCard QRadioButton::indicator {{ width: 0; height: 0; border: none; }}
 QWidget#settingsPanel QPushButton#primary:disabled {{ background: {t['soft']};
- color: {t['muted']}; border-color: {t['border']}; font-weight: 600; }}
+ color: {t['muted']}; border-color: {t['accent']}; font-weight: 650; }}
 /* wave2-pets */
 QFrame#petHero {{ background: {t['accent_soft']}; border: none; border-radius: 14px; }}
 QLabel#petStage {{ background: {t['surface']}; border-radius: 14px; }}
@@ -302,8 +317,38 @@ QLabel#warnNote {{ color: {t['warning']}; font-size: 12px; }}
 QFrame#dangerZone {{ background: transparent; border: 1px solid {t['error']};
  border-radius: 12px; }}
 QFrame#dangerZone QLabel#sectionTitle {{ color: {t['error']}; }}
+/* Devre dışı birincil düğme birincil kalır: accent çerçeve + kalın yazı, ama dolgu/metin sönük. */
 QPushButton#primary:disabled {{ background: {t['soft']}; color: {t['muted']};
- border-color: {t['border']}; }}
+ border-color: {t['accent']}; font-weight: 650; }}
 QSpinBox:disabled {{ background: {t['soft']}; color: {t['muted']}; }}
+/* Bağlama sihirbazı: seçilebilir kartlar ve sayfa yüzeyi. */
+QPushButton#choiceCard {{ background: {t['surface']}; border: 1px solid {t['border']};
+ border-radius: 12px; padding: 0; text-align: left; min-height: 80px; }}
+QPushButton#choiceCard:hover {{ border-color: {t['accent']}; }}
+QPushButton#choiceCard:checked {{ background: {t['accent_soft']};
+ border: 2px solid {t['accent']}; }}
+QLabel#choiceTitle {{ font-size: 15px; font-weight: 650; background: transparent; }}
+QLabel#choiceDetail {{ color: {t['muted']}; font-size: 12px; background: transparent; }}
+QLabel#choiceBadge {{ background: {t['accent']}; color: {t['accent_text']}; border-radius: 8px;
+ padding: 1px 8px; font-size: 12px; font-weight: 650; }}
+QFrame#wizardPage {{ background: {t['surface']}; border: 1px solid {t['border']};
+ border-radius: 12px; }}
+QFrame#localFound {{ background: {t['accent_soft']}; border-radius: 10px; }}
 /* /wave2-lists */
 """
+
+
+def stylesheet(name: str) -> str:
+    """Semantic Qt style shared by the window and its dialogs.
+
+    Dynamic-property selectors ([selected="true"], [state="current"]) only update
+    after the caller runs widget.style().unpolish(widget) and polish(widget).
+    Controls: 1px border + 4px 8px padding; focus swaps to 2px border + 3px 7px
+    (the only off-scale padding) so the box never shifts.
+    """
+    t = _tokens(name)
+    tone = "dark" if t["bg"] == THEMES["dark"]["bg"] else "light"
+    down = (_ASSETS / f"arrow-down-{tone}.svg").as_posix()
+    up = (_ASSETS / f"arrow-up-{tone}.svg").as_posix()
+    radio = (_ASSETS / f"radio-on-{tone}.svg").as_posix()
+    return _qss_controls(t, up, down) + _qss_components(t, down, radio)

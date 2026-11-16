@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from abc import ABC, abstractmethod
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -16,8 +16,10 @@ _P = ParamSpec("_P")
 _T = TypeVar("_T")
 
 if TYPE_CHECKING:
+    from artemis.brain.models import ToolCall
     from artemis.config.settings import Settings
     from artemis.safety.audit import AuditLog
+    from artemis.tools.registry import ToolRegistry
 
 
 class Risk(str, Enum):
@@ -94,6 +96,19 @@ class ToolDefinition(BaseModel):
         return normalize_risk(value)
 
 
+@dataclass(frozen=True)
+class GateHandle:
+    """Kapının, çağrıyı yürüten turun durumuyla bağlı dar yüzü (ADR 0058).
+
+    Birden çok aracı peş peşe çalıştıran araç (rutin) adımları doğrudan `execute` etmez:
+    `dispatch` aynı SafetyGate'i, aynı TurnState'i (leke, gözetimsiz bayrağı) ve aynı onay
+    geri çağrısını kullanır. Kapı her `dispatch`te yeniden verir; global durum yoktur.
+    """
+
+    registry: ToolRegistry
+    dispatch: Callable[[ToolCall], Awaitable[ToolResult]]
+
+
 @dataclass
 class ToolContext:
     """Ortak bağımlılıklar kalıtım ve global durum gerektirmeden enjekte edilir."""
@@ -116,6 +131,8 @@ class ToolContext:
     services: dict[str, Any] = field(default_factory=dict, repr=False)
     # Yalnız runner.dispatch_tool süresince True; paylaşılan servis sözlüğünde tutulmaz.
     control_request: bool = False
+    # Yalnız SafetyGate.dispatch içinde, çağıran tur için kurulur (ADR 0058).
+    gate_handle: GateHandle | None = field(default=None, repr=False)
 
 
 class BaseTool(ABC):
@@ -144,6 +161,10 @@ class BaseTool(ABC):
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
         """Doğrulanmış argümanlar için riski bildirir; onay kararını kapı verir."""
         return normalize_risk(self.risk)
+
+    def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
+        """Doluysa kapı onay SORMADAN çağrıyı bu gerekçeyle reddeder (ADR 0058)."""
+        return None
 
     @abstractmethod
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:

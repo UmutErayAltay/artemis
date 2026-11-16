@@ -28,18 +28,23 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop import pet_sprite
-from artemis.channels.desktop.pet_creator_panel import CreatorPanel
-from artemis.channels.desktop.pet_sprite import PetError, PetExistsError, PetInfo
-from artemis.channels.desktop.projects_panel import (
+from artemis.channels.desktop.page_kit import (
     AutoHideLabel,
     CurrentPageStack,
+    PageBody,
     make_page_header,
 )
+from artemis.channels.desktop.pet_creator_panel import CreatorPanel
+from artemis.channels.desktop.pet_sprite import PetError, PetExistsError, PetInfo
+from artemis.channels.desktop.widgets import HelpTip
 
 _SOURCE_LABEL = {"artemis": "Artemis", "codex": "Codex"}
+_HELP_NEW = (
+    "Pet üretici atölyesini açar. Çizimi bir model yapar; model buluttaysa yazdığın tarif ona "
+    "gider, ücretliyse bütçeden düşer."
+)
 _ORB_LABEL = "Küre · Artemis"
 _ORB_NAME = "Küre"
-_MAX_WIDTH = 960  # içerik okunur genişlikte kalır; fazlası kenar boşluğu olur
 _CARD_W, _CARD_H, _GAP = 140, 120, 8
 _ICON = Path(__file__).with_name("artemis.ico")
 
@@ -58,7 +63,7 @@ class _ElidedLabel(QLabel):
         width = max(self.width() - 4, 0) or 100
         self.setText(self.fontMetrics().elidedText(self._full, Qt.TextElideMode.ElideRight, width))
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._elide()
 
@@ -108,10 +113,18 @@ class _PetCard(QFrame):
         self.source = QLabel(source)
         self.source.setObjectName("meta")
         self.source.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(self.source)
-        self.chip = QLabel("Seçili", self)
+        # "Seçili" rozeti ikonun üstüne binmesin: kaynak yazısıyla aynı satırda durur (UX-05).
+        footer = QHBoxLayout()
+        footer.setContentsMargins(0, 0, 0, 0)
+        footer.setSpacing(4)
+        footer.addStretch(1)
+        footer.addWidget(self.source)
+        self.chip = QLabel("Seçili")
         self.chip.setObjectName("selectedChip")
         self.chip.hide()
+        footer.addWidget(self.chip)
+        footer.addStretch(1)
+        lay.addLayout(footer)
         self.set_state(selected=False, highlighted=False, focused=False)
 
     def set_state(self, *, selected: bool, highlighted: bool, focused: bool = False) -> None:
@@ -122,12 +135,6 @@ class _PetCard(QFrame):
         self.chip.setVisible(selected)
         self.style().unpolish(self)
         self.style().polish(self)
-        self.chip.adjustSize()
-        self.chip.move(max(0, self.width() - self.chip.width() - 6), 6)
-
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt)
-        super().resizeEvent(event)
-        self.chip.move(max(0, self.width() - self.chip.width() - 6), 6)
 
 
 class _GalleryList(QListWidget):
@@ -157,12 +164,12 @@ class _GalleryList(QListWidget):
     focus_changed = Signal()
     keyboard_focus = False
 
-    def focusInEvent(self, event: QFocusEvent) -> None:  # noqa: N802 (Qt)
+    def focusInEvent(self, event: QFocusEvent) -> None:
         super().focusInEvent(event)
         self.keyboard_focus = True
         self.focus_changed.emit()
 
-    def focusOutEvent(self, event: QFocusEvent) -> None:  # noqa: N802 (Qt)
+    def focusOutEvent(self, event: QFocusEvent) -> None:
         super().focusOutEvent(event)
         self.keyboard_focus = False
         self.focus_changed.emit()
@@ -172,12 +179,12 @@ class _GalleryList(QListWidget):
         rows = max(1, -(-self.count() // per_row))
         self.setFixedHeight(rows * (_CARD_H + _GAP) + 4)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:  # noqa: N802 (Qt)
+    def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self.fit_height()
 
 
-class PetSection(QWidget):
+class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.py kaydırıcıyı ortalar
     skin_selected = Signal(str)  # pet kimliği ya da "orb"
     model_settings_requested = Signal()  # boş durumdaki "Ayarlar'da model ekle"
 
@@ -229,16 +236,31 @@ class PetSection(QWidget):
             row.addStretch(1)
             workshop.addLayout(row)
         workshop.addStretch(1)  # kart ekranı doldurmaya zorlanmaz: ölü krem alan oluşmaz
-        self.new_button.setVisible(self.creator is not None)
+        self._show_button(self.new_button, self.creator is not None)
         if demo:
             self.import_button.setEnabled(False)
         self.refresh()
+
+    def _with_tip(self, button: QPushButton, text: str) -> QHBoxLayout:
+        """Düğme + "?"; düğme `_show_button` ile gizlenip gösterilince baloncuk da eşlenir."""
+        row = QHBoxLayout()
+        row.setSpacing(6)
+        row.addWidget(button)
+        if text:
+            tip = HelpTip(text)
+            self._tips[button] = tip
+            row.addWidget(tip, 0, Qt.AlignmentFlag.AlignVCenter)
+        return row
+
+    def _show_button(self, button: QPushButton, visible: bool) -> None:
+        button.setVisible(visible)
+        if button in self._tips:
+            self._tips[button].setVisible(visible)
 
     def _build_gallery_page(self) -> QWidget:
         # Kaydırıcı yok: Petler sayfasının tek kaydırma bölgesi app.py'deki pet_scroll'dur.
         content = QWidget()
         content.setObjectName("flat")
-        content.setMaximumWidth(_MAX_WIDTH)
         page = QVBoxLayout(content)
         page.setContentsMargins(0, 0, 0, 0)
         page.setSpacing(16)
@@ -276,9 +298,12 @@ class PetSection(QWidget):
         self.hero_select_button.clicked.connect(self.select_current)
         self.new_button = QPushButton("Yeni pet üret")
         self.new_button.clicked.connect(self.show_workshop)
-        for button in (self.hero_select_button, self.new_button):
+        self._tips: dict[QPushButton, HelpTip] = {}  # düğme gizlenince "?" de gizlenir
+        for button, tip in (
+            (self.hero_select_button, ""), (self.new_button, _HELP_NEW),
+        ):
             button.setMinimumWidth(128)
-            actions.addWidget(button)
+            actions.addLayout(self._with_tip(button, tip))
         actions.addStretch(1)
         row.addLayout(actions)
         page.addWidget(hero)
@@ -309,9 +334,11 @@ class PetSection(QWidget):
             "Topluluk pet'lerinin lisansı ve içeriği senin sorumluluğundadır; Artemis "
             "hiçbirini kendisi dağıtmaz."
         )
-        for button in (self.delete_button, self.import_button):
+        for button, tip in (
+            (self.delete_button, ""), (self.import_button, ""),
+        ):
             button.setMinimumWidth(88)
-            head.addWidget(button)
+            head.addLayout(self._with_tip(button, tip))
         card.addLayout(head)
         self.listing = _GalleryList()
         self.listing.setAccessibleName("Kullanılabilir pet'ler")
@@ -334,7 +361,7 @@ class PetSection(QWidget):
     def show_gallery(self) -> None:
         self.stack.setCurrentIndex(0)
 
-    def showEvent(self, event: QShowEvent) -> None:  # noqa: N802 (Qt)
+    def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         self.sync_model_hook()
 
@@ -446,11 +473,11 @@ class PetSection(QWidget):
         differs = pet_id is not None and pet_id != self._current
         own = info is not None and info.source == "artemis" and not self._demo
         # Bağlamsal eylemler: Masaüstüne al yalnız başka pet vurgulanınca, Sil yalnız silinebilirde.
-        self.hero_select_button.setVisible(differs)
+        self._show_button(self.hero_select_button, differs)
         self.hero_select_button.setEnabled(differs)
         if differs and pet_id is not None:
             self.hero_select_button.setAccessibleName(f"{self._name_of(pet_id)} masaüstüne al")
-        self.delete_button.setVisible(own)
+        self._show_button(self.delete_button, own)
         self.delete_button.setEnabled(own)
         self._sync_cards()
         self._update_hero()

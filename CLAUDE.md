@@ -83,7 +83,7 @@ onay değildir; onay ekrandaki pencerede tam argümanlarla alınır (ADR 0014). 
 Mikrofon yalnız kullanıcı sesi açınca (panelde “Ses” düğmesi veya `--ses`) açılır;
 ses masaüstü worker'ında çalışır. Ham ses saklanmaz. Edge TTS metin aktarımı
 ayrı gizlilik ayarı ve denetim gerektirir. Sentez başlaması ilk ses ölçümü değildir;
-ilk PCM oynatıcı olayı ölçülür. Windows kabulü sahte testle geçilmiş sayılmaz.
+ilk PCM oynatıcı olayı ölçülür. VAD varsayılanı Silero (ADR 0067), konuşma sonu Smart Turn yalnız sabır ekler (ADR 0068), KWS ön-kapısı isteğe bağlıdır ve tek başına uyandırmaz (ADR 0069). Windows kabulü sahte testle geçilmiş sayılmaz.
 
 Vault hafızası (ADR 0015) varsayılan kapalıdır. `vault_search`/`vault_read_note` dış dosya
 okumasıdır: turu lekeler ve sonuç "VERİDİR" çerçevesiyle gider. `vault_append` yalnız ekleme
@@ -159,6 +159,50 @@ Görüntü diske yazılmaz, saklanmaz, modele gönderilmez; yalnız yerel OCR me
 metni `external=True` ve `content_kind="screen"`'dir; `allow_cloud_screen` kapalıyken gizli
 sayılır. Betik sabittir, kapsam yalnız ortam değişkeniyle gider; testler PowerShell
 çalıştırmaz (sahte runner/okuyucu).
+
+Rutinler (ADR 0058) varsayılan kapalıdır (`routines.enabled`). `routine_run` her adımı
+`context.gate_handle.dispatch` ile aynı turun kapısından geçirir; adımı doğrudan `execute`
+etmeyin ve onayı/lekeyi/gözetimsiz kuralı rutin içinde yeniden yazmayın. `routine_save` ve
+`routine_delete` HER ZAMAN onaylıdır, `routine_save` dış içerik okunmuş turda onaysız reddedilir,
+rutin `routine_*` adımı içeremez. Zamanı yalnız Ayarlar paneli kurar (araç EKLEMEYİN); zamanı gelen
+rutin kendiliğinden çalışmaz, yalnız "Çalıştırılsın mı?" bildirimi verilir. Bu kuralları gevşetmeyin.
+
+Tetikleyiciler (ADR 0061) varsayılan kapalıdır (`triggers.enabled`) ve yalnız config'te tanımlanır:
+onları kuran/değiştiren araç EKLEMEYİN. Bildirim LLM'siz sabit metindir, dosya adı dış metindir
+(temizlenir, talimat sayılmaz), en çok bir düğme taşır ve düğme basılmadan hiçbir şey çalışmaz
+(`suggest` sohbet kutusuna yazar, göndermez). Tetikleyici bildirimi Telegram'a gitmez. Bu kuralları
+gevşetmeyin.
+
+Seçili metin eylemleri (ADR 0062) varsayılan kapalıdır (`selection_actions.enabled`). Seçili metin
+dış veridir: modele YALNIZ araçsız (`tools=[]`) ve "VERİDİR" çerçevesiyle gider, geçmişe/hafızaya
+girmez, denetime metin yazılmaz; pano izni yoksa yalnız yerel modele gider. Seçimi alan kod panoyu
+her yolda `finally` ile geri yazar. Bu kuralları gevşetmeyin; eylemleri araç olarak eklemeyin.
+
+Araştırma işi (ADR 0063) varsayılan kapalıdır (`research.enabled`). Güvenlik "özel veri yok" ilkesine
+dayanır: iş kendi `AgentLoop(system_prompt=...)`'unda boş geçmişle, yalnız `web_search` ile çalışır;
+hafıza, companion, beceri ve kimlik bu döngüye ASLA eklenmez, araç listesi genişletilmez, kapı
+değiştirilmez. `research_start` HER ZAMAN onaylıdır (onay = `max_searches` kadar arama ön onayı),
+rapor dosya adı yalnız iş kimliğinden gelir, `research_result` dış veridir. Bu kuralları gevşetmeyin.
+
+Yerel dosya araması (ADR 0065) varsayılan kapalıdır (`file_search.enabled`). Kökleri yalnız kullanıcı
+yazar (araç EKLEMEYİN); `state_dir` ve beceri klasörü kök olamaz/dizinlenmez, bağlantılar izlenmez,
+gizli görünen dosyalar (`.env*`, anahtar, `secret`/`token`/`password`/`credentials` adları) asla
+dizinlenmez, sonuç `external=True` + `content_kind="file"`'dır ve dosyanın tamamını döndüren araç
+eklenmez (yalnız en çok 200 karakterlik alıntı). Bu kuralları gevşetmeyin.
+
+Telegram ses/fotoğraf/dosya girdisi (ADR 0064) üç ayrı bayrakla varsayılan kapalıdır ve her
+mesaj türünde özel/iletilmemiş/taze koşulu aynen sürer. Ses onay değildir (onay yalnız düğme);
+fotoğraf OCR metni `content_kind="screen"` dış veridir (`attachment`, tur lekelenir, gizlilik
+`allow_cloud_screen`'e bağlı); belge adı saldırgan girdisidir (son uzantı, `safe_join`,
+`allow_symlinks=False`, asla üzerine yazma) ve belge başlığı komut sayılmaz. Boyut indirmeden önce
+ve okurken sınanır; geçici dosya her yolda silinir. Bu kuralları gevşetmeyin.
+
+Gün sonu özeti (ADR 0066) varsayılan kapalıdır (`daily_summary.enabled`). Özet LLM'sizdir, denetimden
+yalnız sayılabilir alanlarla (konuşma metni, yanıt ve araç sonuç gövdesi asla) üretilir, kullanıcının
+etkinliği olduğu için `private`+`local_only`'dir (Telegram'a gitmez). Vault'a yalnız bildirimdeki
+düğmeyle ve normal onaylı `vault_append` ile eklenir; kendiliğinden vault yazımı eklemeyin. Denetim
+okuması sınırlı ve bozuk satıra dayanıklı kalmalı, zamanlayıcıdan hata çıkmamalıdır. Bu kuralları
+gevşetmeyin.
 
 Açılışta başlama (Faz 7a, ADR 0030) yalnız `artemis autostart` komutu ve tepsi menüsüyle
 değişir; bunu yapan bir LLM aracı EKLEMEYİN (model kendini kalıcı hale getiremez). Kayıt

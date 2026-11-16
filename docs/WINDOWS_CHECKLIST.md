@@ -92,20 +92,21 @@ kapanınca içeriksiz rapor `state_dir/voice-telemetry/` altına yazılır (ADR 
   `false_wake` değerleri; sentetik sonuç kabul sayılmaz.
 - [x] "artmış" yanlış uyanma bulgusu (ADR 0045): eşleştirici değişsin mi? (karar)
 
-### A7. Gürültüde uyandırma deneyi (ADR 0045) — SIRADAKİ İŞ
+### A7. Gürültüde uyandırma deneyi (ADR 0045) — yapıldı 2026-10-26
 Bulutta sentetik ölçüm: temiz seste "Artemis" kaçırma %0, pembe gürültü 5 dB'de %29, telefon
-bandında %19. Dört yolu karşılaştır; feature branch gerekir (main'de değil):
-`git fetch origin claude/mt3ui55os-readme-gpugv7` → `git checkout claude/mt3ui55os-readme-gpugv7`.
+bandında %19. Windows GPU'da dört yol ölçüldü; sonuç ve karar ADR 0045 "Gürültüde uyandırma"
+bölümünde (`stt_vad_filter` varsayılanı 2026-11-03'te `false`). Aşağıdaki adımlar ölçümü yeniden
+koşmak içindir; araçlar main'de.
 - [ ] Corpus: bulut oturumunun gönderdiği `wake_noise_tr.zip`'i
   `%USERPROFILE%\.cache\artemis-eval\` altına aç (150 örnek: 15 wake + 15 wake-siz temiz
   örnek × pembe 10/5 dB, babble 10/5 dB, telefon). Zip yoksa yeniden kur:
   `python -m bench.corpus_noise --kaynak <sentetik corpus.yaml> --babble <common_voice corpus.yaml>`.
-- [ ] `$C = "$env:USERPROFILE\.cache\artemis-eval\wake_noise_tr\corpus.yaml"` ve:
+- [x] `$C = "$env:USERPROFILE\.cache\artemis-eval\wake_noise_tr\corpus.yaml"` ve:
   1. `python -m bench.speech_accuracy --canli --sentetik-metin --corpus $C > wn-base.json`
   2. `... --ek-hotword Artemis ... > wn-hot.json`
   3. `... --gurultu-engelle orta ... > wn-dfn.json` (16 kHz yol; gerçek 48 kHz zincirin alt sınırı)
   4. config'te geçici `stt_vad_filter: false` → `... > wn-novad.json`
-- [ ] Karşılaştır: `totals.missed_wake_rate`, `totals.false_wake`, `condition_breakdown`;
+- [x] Karşılaştır: `totals.missed_wake_rate`, `totals.false_wake`, `condition_breakdown`;
   kaçan örneklerin `hypothesis` alanında Whisper "Artemis" yerine ne yazdı? Yakın yazımsa
   eşleştirici, hiç yoksa ipucu/DFN/VAD yolu. Karar ADR 0045'e eklenecek.
 - [ ] İsteğe bağlı: 10 sesli sentetik set (XTTS-v2 8 stüdyo sesi + Piper + Emel, 1340 örnek)
@@ -126,7 +127,7 @@ bandında %19. Dört yolu karşılaştır; feature branch gerekir (main'de deği
   (`COMPUTERNAME` düzeltmesi sonrası 60 sn kapatma uyarısı + iptal), 20 (uyku ve uyanınca
   Artemis), 22 (ADR 0036 sonrası tarayıcı okumasında onay penceresi), 24 (çağrı sonrası
   `chrome` süreci kalmıyor).
-- [ ] Gürültü engelleme / NVIDIA Broadcast sanal mikrofonu (2026-10-19 thread'i) açık.
+- [x] Gürültü engelleme: entegrasyon yok (2026-11-15 kararı). İsteyen NVIDIA Broadcast sanal mikrofonunu `input_device` olarak seçer.
 
 ## C. Umut'un kararı bekleyenler
 
@@ -198,9 +199,15 @@ Yalnız zararsız hedef (boş Not Defteri, taslak) kullanın; gönderilen girdi 
 - [ ] **Uzun yazımda Esc:** ~300 karakterlik bir metni Not Defteri'ne yazdırırken 1-2 sn
   sonra Esc → yazım hemen duruyor; sonuç "Yazım yarıda kesildi … geri alınmadı"; audit'te
   `computer_input_partial` (sent < total).
+  *2026-11-11 arka uç geçti (betik, gerçek `SendInput`): durdurma bayrağı 1,5 sn'de → 302'nin 49'u
+  gönderildi, durdurmadan sonra karakter yok, 31 ms'de döndü; dosyadaki metin gönderilenle aynı.
+  Süre sınırı 1,0 sn → 32 karakter, aşım 0 ms. Kalan: arayüzde gerçek Esc tuşu ve audit satırı.*
 - [ ] **Yazım sırasında odak değişimi:** uzun yazım sürerken başka bir pencereye tıklayın →
   kalan metin o pencereye gitmiyor, oturum `blocked`.
-- [ ] **Emoji:** "deneme 😀 bitti" yazdırın → emoji tek karakter olarak doğru çıkıyor.
+  *2026-11-11 arka uç geçti (betik): yazım sürerken Karakter Eşlem öne alındı → 302'nin 48'inde
+  `target` ile durdu, araya giren pencereye hiç metin gitmedi. Kalan: oturumun `blocked` sonucu.*
+- [x] **Emoji:** "deneme 😀 bitti" yazdırın → emoji tek karakter olarak doğru çıkıyor.
+  *2026-11-11 geçti (betik, gerçek `SendInput`, Not Defteri; kaydedilen dosyada birebir).*
 - [ ] **Yerel model gizliliği (canlı model, Ollama):** bulut ana + Ollama `hard_model` ile
   izinsiz bir dosyayı okutup "derin düşün" isteyin, sonra sıradan bir istek → audit
   `cloud_transfer.masked_messages` > 0 ve bulut yanıtı dosya içeriğini bilmiyor.

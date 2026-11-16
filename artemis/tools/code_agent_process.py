@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib
+import logging
 import os
 import subprocess
 import threading
@@ -14,6 +15,7 @@ from artemis.tools.platform import child_environment
 
 OUTPUT_LIMIT = 256 * 1024
 CLEANUP_SECONDS = 2.0
+_logger = logging.getLogger(__name__)
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 NEW_CONSOLE = getattr(subprocess, "CREATE_NEW_CONSOLE", 0)
 
@@ -37,6 +39,31 @@ def visible_options() -> dict[str, Any]:
     if os.name == "nt":
         return {"creationflags": NEW_CONSOLE | 0x4}
     return {"start_new_session": True}  # yalnız testler: gerçek pencere Windows'a özgüdür
+
+
+def own_process_tree(proc: Any, *, kernel: Any = None) -> Any | None:
+    """Windows: zaten başlamış süreci KILL_ON_JOB_CLOSE job'una bağlar (MCP, claude_cli).
+
+    `proc` subprocess.Popen ya da asyncio sürecidir (altındaki Popen `_transport`'tan alınır).
+    Dönen nesnenin `kill()` metodu job'u sonlandırır; Artemis ölürse tutamak kapanır ve
+    torunlar da biter. Süreç askıya alınmadan başladığı için atama öncesi doğan çocuklar job
+    dışında kalabilir (kalan yarış, RELIABILITY_STATUS); askıda başlatma bu çağıranlarda
+    yoktur. Başarısızlık çağrıyı bozmaz: None döner, çağıran `kill_tree`'ye düşer.
+    """
+    if os.name != "nt":
+        return None
+    transport = getattr(proc, "_transport", None)
+    popen = transport.get_extra_info("subprocess") if transport is not None else proc
+    if popen is None or not hasattr(popen, "_handle"):
+        return None
+    try:
+        from artemis.tools.code_agent_windows import WindowsProcessTree
+
+        # resume_allowed=False: süreç askıda başlamadı, ResumeThread'e gerek yok.
+        return WindowsProcessTree(popen, kernel=kernel, resume_allowed=lambda: False)
+    except OSError as error:
+        _logger.warning("Süreç job'a bağlanamadı, kill_tree kullanılacak: %s", error)
+        return None
 
 
 def kill_tree(proc: Any) -> bool:

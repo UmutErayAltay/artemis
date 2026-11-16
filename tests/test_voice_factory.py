@@ -4,7 +4,7 @@ from types import SimpleNamespace
 import pytest
 
 from artemis.channels.voice import factory
-from artemis.config.settings import VoiceConfig
+from artemis.config.settings import EndpointConfig, VoiceConfig
 
 
 async def test_edge_without_fallback_does_not_load_local_male_voice(monkeypatch):
@@ -27,6 +27,42 @@ async def test_edge_without_fallback_does_not_load_local_male_voice(monkeypatch)
     monkeypatch.setattr(factory, "WebRTCVAD", lambda _config: object())
     controller = await factory.build_voice_controller(runtime, lambda _: None, lambda _: None)
     assert controller.synthesizer is primary
+
+
+async def test_cloud_without_fallback_builds_cloud_synthesizer(monkeypatch):
+    endpoint = EndpointConfig(base_url="https://api.example.com/v1")
+    config = VoiceConfig(
+        tts_backend="cloud",
+        tts_local_fallback=False,
+        allow_cloud_tts_text=True,
+        tts_cloud_endpoint="bulut",
+        tts_cloud_model="heygen/heygen-voice-1-turbo:free",
+    )
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(voice=config, endpoints={"bulut": endpoint}),
+        audit=object(),
+        runner=object(),
+    )
+    primary = object()
+    seen: list[tuple] = []
+
+    def make_cloud(*args):
+        seen.append(args)
+        return primary
+
+    def forbidden(*_args):
+        raise AssertionError("Yerel ses bu profilde yüklenmemeli")
+
+    monkeypatch.setattr(factory, "PiperSynthesizer", forbidden)
+    monkeypatch.setattr(factory, "FasterWhisperRecognizer",
+                        lambda _config: SimpleNamespace(prepare=lambda: None))
+    monkeypatch.setattr(factory, "CloudSpeechSynthesizer", make_cloud)
+    monkeypatch.setattr(factory, "SoundDeviceMicrophone", lambda *_args, **_kwargs: object())
+    monkeypatch.setattr(factory, "SoundDeviceSink", lambda: object())
+    monkeypatch.setattr(factory, "WebRTCVAD", lambda _config: object())
+    controller = await factory.build_voice_controller(runtime, lambda _: None, lambda _: None)
+    assert controller.synthesizer is primary
+    assert seen == [(config, "bulut", endpoint, runtime.audit)]
 
 
 async def test_edge_with_default_fallback_but_no_piper_model_still_builds(monkeypatch):

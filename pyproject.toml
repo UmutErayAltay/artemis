@@ -46,6 +46,7 @@ eval = ["pyarrow==25.0.1"]
 memory = ["fastembed==0.8.1", "numpy==2.5.3"]
 # ADR 0032: tarayıcı MCP sunucusu; ayrıca bir kez `python -m playwright install chromium`.
 browser = ["playwright==1.63.0"]
+package = ["pyinstaller==6.11.1"]
 
 [project.scripts]
 artemis = "artemis.channels.cli:main"
@@ -93,6 +94,10 @@ ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 module = ["livekit.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["av", "av.*"]  # PyAV: [voice] ekiyle gelir (faster-whisper), CI checks işinde yok
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

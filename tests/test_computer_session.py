@@ -46,6 +46,13 @@ class FakeBackend:
         self.point_window = 7
         # Yazımda her karakterden sonra çağrılır (karakter, o ana dek gönderilen sayı).
         self.on_char: Callable[[str, int], None] | None = None
+        # UIA yanıtı: True/False/None (okunamadı); sorulan metinler kaydedilir.
+        self.uia: bool | None = None
+        self.uia_asked: list[str] = []
+
+    def focused_value_contains(self, expected: str, timeout: float) -> bool | None:
+        self.uia_asked.append(expected)
+        return self.uia
 
     def monitors(self) -> list[tuple[int, int, int, int]]:
         return list(self.monitor_rects)
@@ -219,7 +226,8 @@ class Env:
 async def test_done_ends_without_input() -> None:
     env = Env(DONE, YES)
     result = await env.run()
-    assert result == SessionResult("done", "Bitti.", 0, True, "Hedef ekranda görünüyor.")
+    evidence = "Hedef ekranda görünüyor. | OS: doğrulanamadı"
+    assert result == SessionResult("done", "Bitti.", 0, True, evidence)
     assert env.backend.calls == []
     assert env.audit.named("computer_session_end") == [
         {"turn_id": "t1", "reason": "done", "steps": 0}
@@ -802,19 +810,39 @@ async def test_verified_true_and_audit() -> None:
     env = Env(click(), DONE, YES)
     result = await env.run()
     assert (result.reason, result.verified, result.evidence) == (
-        "done", True, "Hedef ekranda görünüyor."
+        "done", True, "Hedef ekranda görünüyor. | OS: doğrulanamadı"
     )
     assert env.audit.named("computer_verify") == [
-        {"turn_id": "t1", "verified": True, "evidence": "Hedef ekranda görünüyor."}
+        {
+            "turn_id": "t1", "verified": True, "os_check": "unknown",
+            "evidence": "Hedef ekranda görünüyor. | OS: doğrulanamadı",
+        }
     ]
     assert env.audit.named("computer_session_end")[0]["reason"] == "done"
+
+
+async def test_verify_evidence_masks_screen_secrets_in_result_and_audit() -> None:
+    fake_jwt = "eyJ" + "a" * 12 + "." + "b" * 12 + "." + "c" * 8
+    verdict = json.dumps(
+        {
+            "verified": True,
+            "evidence": "Ekranda parola: " + "Hunter2" + "Secret ve " + fake_jwt + " görünüyor.",
+        }
+    )
+    env = Env(DONE, verdict)
+    result = await env.run()
+    assert "Hunter2Secret" not in result.evidence
+    assert fake_jwt not in result.evidence
+    assert "Hunter2Secret" not in str(env.audit.named("computer_verify"))
+    assert fake_jwt not in str(env.audit.named("computer_verify"))
+    assert "[GİZLENDİ]" in result.evidence
 
 
 async def test_verification_uses_fresh_screenshot_and_verify_prompt() -> None:
     env = Env(DONE, NO)
     result = await env.run("hedef X")
     assert env.backend.captures == 2  # eylem için bir, done'dan SONRA doğrulama için bir taze
-    assert result.verified is False and result.evidence == "Hedef ekranda görünmüyor."
+    assert result.verified is False and result.evidence.startswith("Hedef ekranda görünmüyor.")
     action_call, verify_call = env.provider.seen
     assert verify_call[0].content != action_call[0].content
     assert "hedef X" in verify_call[1].content and "Bitti." in verify_call[1].content
@@ -1159,3 +1187,140 @@ async def test_focus_change_during_typing_keeps_rest_out_of_other_window() -> No
     result = await env.run()
     assert env.backend.calls == [("type", "ABC")]
     assert result.reason == "blocked" and "10 karakterin 3 tanesi" in result.summary
+
+
+# --- OS kanıtı (ADR 0070) ----------------------------------------------------------------
+
+
+def _typing_env(uia: bool | None, verdict: str = YES, backend: FakeBackend | None = None) -> Env:
+    backend = backend or FakeBackend()
+    backend.uia = uia
+    return Env(act(type="type", text=TYPED_TEXT), DONE, verdict, backend=backend)
+
+
+async def test_os_uia_true_and_model_yes_is_ok() -> None:
+    env = _typing_env(True)
+    result = await env.run()
+    assert result.verified is True and result.evidence.endswith("| OS: doğrulandı")
+    assert env.audit.named("computer_verify")[0]["os_check"] == "ok"
+    assert env.backend.uia_asked == [TYPED_TEXT]
+
+
+async def test_os_uia_false_overrides_model_yes() -> None:
+    env = _typing_env(False)
+    result = await env.run()
+    assert result.verified is False and "yazılan metin bulunamadı" in result.evidence
+    assert env.audit.named("computer_verify")[0]["os_check"] == "contradiction"
+
+
+async def test_os_uia_none_keeps_model_verdict() -> None:
+    env = _typing_env(None)
+    result = await env.run()
+    assert result.verified is True
+    assert env.audit.named("computer_verify")[0]["os_check"] == "unknown"
+
+
+async def test_os_uia_true_never_turns_model_no_into_yes() -> None:
+    env = _typing_env(True, verdict=NO)
+    assert (await env.run()).verified is False
+    assert env.backend.uia_asked == []  # model zaten hayır: PowerShell çalıştırılmaz
+
+
+async def test_os_issue_makes_verified_false_even_if_model_says_yes() -> None:
+    env = Env(click(), act(type="key", keys="enter"), DONE, YES)
+    calls = 0
+
+    def window_at(x: int, y: int) -> int:
+        nonlocal calls
+        calls += 1
+        return 8 if calls == 2 else 7  # ilk tıklamada gönderimden hemen önce hedef kayar
+
+    env.backend.window_at = window_at  # type: ignore[method-assign]
+    result = await env.run()
+    assert result.reason == "done" and len(env.backend.calls) == 1
+    assert result.verified is False
+    assert "OS: çelişki: click girdisi gönderilemedi" in result.evidence
+    assert env.audit.named("computer_verify")[0]["os_check"] == "contradiction"
+
+
+async def test_os_uia_skipped_after_enter_following_type() -> None:
+    backend = FakeBackend()
+    backend.uia = False  # alan Enter ile boşalmış gibi: sorulsaydı yanlış çelişki üretirdi
+    env = Env(act(type="type", text=TYPED_TEXT), act(type="key", keys="enter"), DONE, YES,
+              backend=backend)
+    result = await env.run()
+    assert backend.uia_asked == [] and result.verified is True
+    assert env.audit.named("computer_verify")[0]["os_check"] == "unknown"
+
+
+def _flaky_window_at(env: Env, fail_call: int) -> None:
+    calls = 0
+
+    def window_at(x: int, y: int) -> int:
+        nonlocal calls
+        calls += 1
+        return 8 if calls == fail_call else 7
+
+    env.backend.window_at = window_at  # type: ignore[method-assign]
+
+
+async def test_os_issue_cleared_by_successful_resend_of_same_action() -> None:
+    env = Env(click(), click(), DONE, YES)
+    _flaky_window_at(env, 2)  # ilk tıklama gönderimden hemen önce kayar, ikincisi gider
+    result = await env.run()
+    assert len(env.backend.calls) == 1
+    assert result.verified is True
+    assert env.audit.named("computer_verify")[0]["os_check"] == "unknown"
+
+
+async def test_os_typed_text_never_in_audit() -> None:
+    env = _typing_env(True)
+    await env.run()
+    assert TYPED_TEXT not in repr(env.audit.events)
+
+
+async def test_os_uia_skipped_when_foreground_not_target() -> None:
+    env = _typing_env(False)
+    # Yazımdan sonra ön plan başka pencereye geçer.
+    env.provider.on_call = (
+        lambda n: setattr(env.backend, "window", (9, (0, 0, 8, 4))) if n == 2 else None
+    )
+    result = await env.run()
+    assert env.backend.uia_asked == []
+    assert result.verified is True
+
+
+def test_windows_focused_value_off_platform_is_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    from artemis.computer import windows
+
+    monkeypatch.setattr(windows.sys, "platform", "linux")
+    assert windows.focused_value_contains("x", 1.0, runner=lambda *a, **k: 1 / 0) is None
+
+
+@pytest.mark.parametrize(
+    ("out", "code", "expected"),
+    [("1\n", 0, True), ("0", 0, False), ("?", 0, None), ("1", 1, None)],
+)
+def test_windows_focused_value_env_not_argv(
+    monkeypatch: pytest.MonkeyPatch, out: str, code: int, expected: bool | None
+) -> None:
+    import subprocess
+    from types import SimpleNamespace
+
+    from artemis.computer import windows
+
+    monkeypatch.setattr(windows.sys, "platform", "win32")
+    seen: dict[str, Any] = {}
+
+    def runner(command: list[str], **kwargs: Any) -> Any:
+        seen.update(command=command, **kwargs)
+        return SimpleNamespace(stdout=out, returncode=code)
+
+    assert windows.focused_value_contains(TYPED_TEXT, 2.0, runner=runner) is expected
+    assert seen["env"]["ARTEMIS_EXPECTED_TEXT"] == TYPED_TEXT
+    assert TYPED_TEXT not in " ".join(seen["command"]) and seen["timeout"] == 2.0
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise subprocess.TimeoutExpired("powershell.exe", 1)
+
+    assert windows.focused_value_contains(TYPED_TEXT, 1.0, runner=boom) is None
