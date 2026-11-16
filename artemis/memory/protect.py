@@ -94,6 +94,14 @@ def _load_dpapi() -> tuple[Any, Any, type[ctypes.Structure]]:
     return crypt32, kernel32, _DataBlob
 
 
+def _last_win_error() -> OSError:
+    """Son Windows API hatası. ctypes.WinError yalnız Windows'ta tanımlı; tip denetimi Linux'ta da
+    koşar, bu yüzden erişim platform dalına alınır (DPAPI yolu zaten yalnız Windows'ta çağrılır)."""
+    if sys.platform == "win32":
+        return ctypes.WinError(ctypes.get_last_error())
+    return OSError("DPAPI yalnız Windows'ta kullanılabilir.")
+
+
 def _make_blob(blob_cls: type[ctypes.Structure], data: bytes) -> tuple[Any, Any]:
     if not data:
         # CryptProtectData pbData=NULL iken ERROR_INVALID_PARAMETER (87) döner; 1 baytlık
@@ -130,7 +138,7 @@ class DpapiProtector:
                     ctypes.byref(out_blob),
                 )
                 if not ok:
-                    raise ctypes.WinError(ctypes.get_last_error())
+                    raise _last_win_error()
                 cipher = ctypes.string_at(out_blob.pbData, out_blob.cbData)
             finally:
                 if out_blob.pbData:
@@ -164,7 +172,7 @@ class DpapiProtector:
                     ctypes.byref(out_blob),
                 )
                 if not ok:
-                    raise ctypes.WinError(ctypes.get_last_error())
+                    raise _last_win_error()
                 plain = ctypes.string_at(out_blob.pbData, out_blob.cbData)
             finally:
                 if out_blob.pbData:
