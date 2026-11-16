@@ -340,6 +340,16 @@ def test_gemini_guided_flow_clipboard_detection_and_disconnect(
     clipboard._text = fake_key
     _settle(qt_app, wizard)
 
+    # Pano yetki değildir: algılama yalnız alanı doldurur, hiçbir şey doğrulanmaz/saklanmaz.
+    assert validated == []
+    assert stored == []
+    assert wizard.gemini_key_edit.text() == fake_key
+    assert "Bağla" in wizard.status.text()
+    assert clipboard.cleared == 0
+
+    wizard.gemini_bind_button.click()  # kullanıcının açık eylemi
+    _settle(qt_app, wizard)
+
     assert validated == [fake_key]
     assert stored == [("gemini", fake_key)]
     assert clipboard.text() == ""
@@ -383,6 +393,9 @@ def test_gemini_invalid_key_and_manual_paste(tmp_path: Path, qt_app) -> None:
 
     # 401 dönen doğrulama: hata mesajı gösterilir, anahtar saklanmaz, mesajda anahtar geçmez
     clipboard.set_text(fake_key)
+    _settle(qt_app, wizard)
+    assert validated == []  # pano yalnız alanı doldurur
+    wizard.gemini_bind_button.click()
     _settle(qt_app, wizard)
     assert validated == [fake_key]
     assert stored == []

@@ -642,7 +642,11 @@ class ConnectWizard(QDialog):
         candidate = (clip.text() or "").strip()
         if not GEMINI_KEY_RE.fullmatch(candidate):
             return
-        self._validate_and_bind_gemini(candidate)
+        # Pano yetki değildir: başka bir yerel süreç de panoya anahtar koyabilir. Algılama yalnız
+        # alanı doldurur; doğrulama, kayıt ve pano temizliği kullanıcının "Bağla"sıyla olur.
+        self.gemini_key_edit.setText(candidate)
+        self.gemini_bind_button.setFocus()
+        self.status.setText("Panoda bir anahtar algılandı; bağlamak için 'Bağla'ya bas.")
 
     def _bind_gemini_manual(self) -> None:
         candidate = self.gemini_key_edit.text().strip()
