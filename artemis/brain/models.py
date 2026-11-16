@@ -12,6 +12,9 @@ class ToolCall(BaseModel):
     id: str
     name: str
     arguments: dict[str, Any] = Field(default_factory=dict)
+    # Sağlayıcının araç çağrısına eklediği opak alan (Gemini 3: `extra_content.google.
+    # thought_signature`). Sonraki istekte aynen geri gönderilmezse Gemini isteği 400 ile reddeder.
+    extra_content: dict[str, Any] | None = None
 
 
 class Message(BaseModel):

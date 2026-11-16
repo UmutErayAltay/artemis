@@ -133,6 +133,7 @@ def _chat_messages(
                         if native_arguments
                         else json.dumps(call.arguments, ensure_ascii=False),
                     },
+                    **({"extra_content": call.extra_content} if call.extra_content else {}),
                 }
                 for call in message.tool_calls
             ]
@@ -225,6 +226,7 @@ def _chat_calls(value: Any) -> list[ToolCall]:
                 id=_string(item["id"]) if "id" in item else uuid4().hex,
                 name=_string(function.get("name")),
                 arguments=_arguments(function.get("arguments")),
+                extra_content=_object(item["extra_content"]) if item.get("extra_content") else None,
             )
         )
     return calls
@@ -357,6 +359,8 @@ class _ChatStreamAccumulator:
                     target["function"]["name"] += _string(function["name"])
                 if function.get("arguments"):
                     target["function"]["arguments"] += _string(function["arguments"])
+                if call.get("extra_content"):  # Gemini thought_signature; aynen geri gider
+                    target["extra_content"] = _object(call["extra_content"])
             text = delta.get("content")
             if text:
                 piece = _string(text)
