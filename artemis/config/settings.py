@@ -265,6 +265,9 @@ class MemoryConfig(BaseModel):
     # Kullanıcının açıkça seçtiği vault'a göreli dosyalar (örn. Threads.md); yalnız
     # memory_open_work aracından, safe_join ile okunur. exclude'u aşar (açık tercih).
     companion_vault_files: tuple[str, ...] = ()
+    # Konuşma hafızasını (memory.sqlite3) Windows DPAPI ile diskte şifreler (ADR 0076);
+    # mevcut kurulumları değiştirmemek için varsayılan kapalıdır.
+    encrypt_at_rest: bool = False
 
 
 class TelegramConfig(BaseModel):

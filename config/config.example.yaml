@@ -158,7 +158,7 @@ voice:
 # allow_cloud_file_content açıksa gider. Yazma yalnız ekleme kipindedir (mevcut not
 # yeniden yazılmaz) ve her seferinde onay ister. Gizli klasörler (.git, .obsidian)
 # ve exclude kalıpları aranmaz, okunmaz, yazılmaz.
-# memory:
+memory:
 #   vault_path: C:/Users/siz/Vault   # göreli yol bu dosyaya göre çözülür
 #   exclude: [daily/, receipts/, knowledge/index.md, knowledge/log.md, 850-Companion/]
 #   max_results: 5
@@ -170,6 +170,9 @@ voice:
 #   # "Açık/yarım işimiz var mı" sorusunda memory_open_work'ün okuyacağı vault dosyaları
 #   # (vault'a göreli; exclude'u aşar ama yalnız bu araçtan okunur, tura eklenmez).
 #   companion_vault_files: ["850-Companion/Threads.md", "850-Companion/Last-Session.md"]
+#   # Konuşma hafızasını (memory.sqlite3) diskte Windows DPAPI ile şifreler (ADR 0076).
+#   # Yeni kurulumlar şifrelidir; mevcut config dosyaları değişmez.
+  encrypt_at_rest: true
 
 # Telegram (ADR 0016). KAPALI gelir: chat_id verilmedikçe ne araç ne kanal çalışır.
 # Bot token'ı BURAYA YAZILMAZ ve YAML'da `token:` alanı yoktur (eklenirse doğrulama

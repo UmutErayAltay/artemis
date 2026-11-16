@@ -30,7 +30,7 @@ def _legacy_notes_db(path: Path) -> None:
 def test_memory_store_fresh_db_versioned_without_backup(tmp_path: Path) -> None:
     path = tmp_path / "memory.sqlite3"
     MemoryStore(path)
-    assert _version(path) == 1
+    assert _version(path) == 2
     assert _baks(path) == []
 
 
@@ -38,7 +38,7 @@ def test_memory_store_legacy_db_migrated_and_backup_removed(tmp_path: Path) -> N
     path = tmp_path / "memory.sqlite3"
     _legacy_notes_db(path)
     MemoryStore(path)
-    assert _version(path) == 1
+    assert _version(path) == 2
     assert _baks(path) == []  # başarılı geçiş: yedek kalmaz (silinen içeriği saklamasın)
     with sqlite3.connect(path) as db:
         assert db.execute("SELECT text, private FROM notes").fetchall() == [("eski not", 0)]
@@ -91,7 +91,7 @@ def test_reopen_is_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "memory.sqlite3"
     MemoryStore(path)
     MemoryStore(path)
-    assert _version(path) == 1 and _baks(path) == []
+    assert _version(path) == 2 and _baks(path) == []
 
 
 def test_newer_version_raises(tmp_path: Path) -> None:

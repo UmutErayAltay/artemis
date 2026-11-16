@@ -7,6 +7,7 @@ kullanır. Ağa çıkmaz, alt süreç başlatmaz.
 
 from __future__ import annotations
 
+import logging
 import math
 import sqlite3
 from collections import Counter
@@ -18,15 +19,19 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from artemis.brain.conversation import TurnRecord
+from artemis.memory.protect import PREFIX, PlainProtector, Protector, UnreadableMemory
 from artemis.memory.sqlite_schema import ensure_schema, purge_backups
 from artemis.memory.vault import tokenize
 from artemis.text import turkish_fold
 
+_logger = logging.getLogger(__name__)
+
 # ponytail: arama son N tur üzerinde bellekte yapılır; N'i aşan arşiv için FTS5 veya embedding.
 _SEARCH_SCAN_TURNS = 2000
 
-# 1: sürümsüz dönemin şeması (notes.private dahil). Yapı değişince artır ve _migrate'e ekle.
-_SCHEMA_VERSION = 1
+# 1: sürümsüz dönemin şeması (notes.private dahil).
+# 2: sütun düzeyinde şifreleme desteği (ADR 0076). Yapı değişince artır ve _migrate'e ekle.
+_SCHEMA_VERSION = 2
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS history_policy (
     id INTEGER PRIMARY KEY CHECK(id = 1),
@@ -60,7 +65,9 @@ CREATE TABLE IF NOT EXISTS notes (
 """
 
 
-def _migrate(db: sqlite3.Connection, _from_version: int) -> None:
+def _migrate(
+    db: sqlite3.Connection, from_version: int, protector: Protector | None = None
+) -> None:
     # executescript commit ederdi; geçiş tek işlemde kalsın diye deyimler tek tek koşar.
     for statement in _SCHEMA.split(";"):
         if statement.strip():
@@ -76,6 +83,42 @@ def _migrate(db: sqlite3.Connection, _from_version: int) -> None:
         # Bastırılan hata gerçek bir başarısızlığı gizleyebilir: sütun yoksa sürüm artmasın.
         if "private" not in {row[1] for row in db.execute("PRAGMA table_info(notes)")}:
             raise sqlite3.OperationalError("notes.private sütunu eklenemedi.")
+    if from_version < 2 and protector is not None and not isinstance(protector, PlainProtector):
+        _encrypt_existing_rows(db, protector)
+
+
+def _encrypt_existing_rows(db: sqlite3.Connection, protector: Protector) -> None:
+    """Açık geçişte (1 -> 2) düz metin satırları tek işlemde şifreler (ADR 0076)."""
+    turn_rows = db.execute(
+        "SELECT id, record_json, user_text, answer, search_text FROM turns"
+    ).fetchall()
+    for row_id, record_json, user_text, answer, search_text in turn_rows:
+        new_record = (
+            record_json if record_json.startswith(PREFIX) else protector.protect(record_json)
+        )
+        new_user = user_text if user_text.startswith(PREFIX) else protector.protect(user_text)
+        new_answer = answer if answer.startswith(PREFIX) else protector.protect(answer)
+        new_search = (
+            search_text if search_text.startswith(PREFIX) else protector.protect(search_text)
+        )
+        if (
+            new_record != record_json
+            or new_user != user_text
+            or new_answer != answer
+            or new_search != search_text
+        ):
+            db.execute(
+                "UPDATE turns SET record_json = ?, user_text = ?, answer = ?, search_text = ?"
+                " WHERE id = ?",
+                (new_record, new_user, new_answer, new_search, row_id),
+            )
+    note_rows = db.execute("SELECT id, text FROM notes").fetchall()
+    for row_id, text in note_rows:
+        if not text.startswith(PREFIX):
+            db.execute(
+                "UPDATE notes SET text = ? WHERE id = ?",
+                (protector.protect(text), row_id),
+            )
 
 
 @dataclass(frozen=True)
@@ -102,11 +145,26 @@ def _now() -> str:
 
 
 class MemoryStore:
-    def __init__(self, path: Path) -> None:
+    def __init__(self, path: Path, protector: Protector | None = None) -> None:
         self.path = path
+        self._protector: Protector = protector if protector is not None else PlainProtector()
         path.parent.mkdir(parents=True, exist_ok=True)
         with self._connect() as db:
-            ensure_schema(db, path, _SCHEMA_VERSION, _migrate)
+            ensure_schema(
+                db,
+                path,
+                _SCHEMA_VERSION,
+                lambda conn, from_version: _migrate(conn, from_version, self._protector),
+            )
+
+    @staticmethod
+    def _log_unreadable(table: str, row_id: int, error: UnreadableMemory) -> None:
+        _logger.warning(
+            "Okunamayan hafıza satırı atlandı: tablo=%s id=%s hata=%s",
+            table,
+            row_id,
+            type(error).__name__,
+        )
 
     def _connect(self) -> closing[sqlite3.Connection]:
         db = sqlite3.connect(self.path, timeout=5)
@@ -166,10 +224,19 @@ class MemoryStore:
     def history_page(self, limit: int = 50) -> list[dict[str, str]]:
         with self._connect() as db:
             rows = db.execute(
-                "SELECT created_at, user_text, answer FROM turns ORDER BY id DESC LIMIT ?",
+                "SELECT id, created_at, user_text, answer FROM turns ORDER BY id DESC LIMIT ?",
                 (min(max(limit, 1), 100),),
             ).fetchall()
-        return [{"created_at": r[0], "user": r[1], "answer": r[2]} for r in rows]
+        items: list[dict[str, str]] = []
+        for row_id, created_at, user_text, answer in rows:
+            try:
+                plain_user = self._protector.unprotect(user_text)
+                plain_answer = self._protector.unprotect(answer)
+            except UnreadableMemory as error:
+                self._log_unreadable("turns", int(row_id), error)
+                continue
+            items.append({"created_at": created_at, "user": plain_user, "answer": plain_answer})
+        return items
 
     # --- katman 1: konuşma geçmişi ---------------------------------------------------
 
@@ -184,10 +251,10 @@ class MemoryStore:
                     record.turn_id,
                     # Tur başı zamanı: modele giden [tarih saat] öneki geçmişte de aynı kalır.
                     record.created_at or _now(),
-                    record.model_dump_json(),
-                    record.user_text,
-                    record.answer,
-                    turkish_fold(text),
+                    self._protector.protect(record.model_dump_json()),
+                    self._protector.protect(record.user_text),
+                    self._protector.protect(record.answer),
+                    self._protector.protect(turkish_fold(text)),
                     int(record.answer_private),
                     int(record.tainted),
                 ),
@@ -207,15 +274,20 @@ class MemoryStore:
             return []
         with self._connect() as db:
             rows = db.execute(
-                "SELECT record_json, created_at FROM turns WHERE id > "
+                "SELECT id, record_json, created_at FROM turns WHERE id > "
                 "COALESCE((SELECT MAX(last_turn_id) FROM resets), 0) ORDER BY id DESC LIMIT ?",
                 (limit,),
             ).fetchall()
         records: list[TurnRecord] = []
-        for raw, created_at in reversed(rows):
+        for row_id, raw, created_at in reversed(rows):
+            try:
+                plain_raw = self._protector.unprotect(raw)
+            except UnreadableMemory as error:
+                self._log_unreadable("turns", int(row_id), error)
+                continue
             try:
                 # Sütun kaynaktır: eski kayıtların JSON'unda zaman yoktur.
-                record = TurnRecord.model_validate_json(raw)
+                record = TurnRecord.model_validate_json(plain_raw)
                 records.append(record.model_copy(update={"created_at": created_at}))
             except ValidationError:
                 continue  # şeması eskimiş tek bir satır geri kalanını düşürmesin
@@ -228,21 +300,40 @@ class MemoryStore:
             return []
         with self._connect() as db:
             rows = db.execute(
-                "SELECT created_at, user_text, answer, search_text, answer_private, tainted"
+                "SELECT id, created_at, user_text, answer, search_text, answer_private, tainted"
                 " FROM turns ORDER BY id DESC LIMIT ?",
                 (_SEARCH_SCAN_TURNS,),
             ).fetchall()
-        counts = [Counter(tokenize(row[3])) for row in rows]
+        decoded: list[tuple[str, str, str, str, bool, bool]] = []
+        for row_id, created_at, user_text, answer, search_text, answer_private, tainted in rows:
+            try:
+                plain_user = self._protector.unprotect(user_text)
+                plain_answer = self._protector.unprotect(answer)
+                plain_search = self._protector.unprotect(search_text)
+            except UnreadableMemory as error:
+                self._log_unreadable("turns", int(row_id), error)
+                continue
+            decoded.append(
+                (
+                    created_at,
+                    plain_user,
+                    plain_answer,
+                    plain_search,
+                    bool(answer_private),
+                    bool(tainted),
+                )
+            )
+        counts = [Counter(tokenize(row[3])) for row in decoded]
         frequency = {term: sum(1 for c in counts if c[term]) for term in terms}
-        total = len(rows)
+        total = len(decoded)
         weights = {
             term: math.log(1 + (total - df + 0.5) / (df + 0.5)) for term, df in frequency.items()
         }
         hits: list[TurnHit] = []
-        for row, count in zip(rows, counts, strict=True):
+        for row, count in zip(decoded, counts, strict=True):
             score = sum((1 + math.log(count[t])) * weights[t] for t in terms if count[t])
             if score > 0:
-                hits.append(TurnHit(row[0], row[1], row[2], bool(row[4]), bool(row[5]), score))
+                hits.append(TurnHit(row[0], row[1], row[2], row[4], row[5], score))
         hits.sort(key=lambda hit: -hit.score)  # kararlı sıralama: eşitlikte yeni tur önde
         return hits[:limit]
 
@@ -253,8 +344,16 @@ class MemoryStore:
         with self._connect() as db:
             rows = db.execute(
                 "SELECT id, text, created_at, private FROM notes ORDER BY id DESC"
-            )
-            return [Note(row[0], row[1], row[2], bool(row[3])) for row in rows.fetchall()]
+            ).fetchall()
+        notes: list[Note] = []
+        for row_id, text, created_at, private in rows:
+            try:
+                plain_text = self._protector.unprotect(text)
+            except UnreadableMemory as error:
+                self._log_unreadable("notes", int(row_id), error)
+                continue
+            notes.append(Note(row_id, plain_text, created_at, bool(private)))
+        return notes
 
     def add_note(
         self, text: str, turn_id: str, max_notes: int, private: bool = False
@@ -267,7 +366,12 @@ class MemoryStore:
         with self._connect() as db, db:
             rows = db.execute("SELECT id, text FROM notes").fetchall()
             for note_id, existing in rows:
-                if turkish_fold(existing) == folded:
+                try:
+                    plain_existing = self._protector.unprotect(existing)
+                except UnreadableMemory as error:
+                    self._log_unreadable("notes", int(note_id), error)
+                    continue
+                if turkish_fold(plain_existing) == folded:
                     if private:
                         db.execute("UPDATE notes SET private = 1 WHERE id = ?", (note_id,))
                     return "duplicate", note_id
@@ -275,7 +379,7 @@ class MemoryStore:
                 return "full", None
             cursor = db.execute(
                 "INSERT INTO notes (text, created_at, turn_id, private) VALUES (?,?,?,?)",
-                (text, _now(), turn_id, int(private)),
+                (self._protector.protect(text), _now(), turn_id, int(private)),
             )
             return "added", cursor.lastrowid
 
