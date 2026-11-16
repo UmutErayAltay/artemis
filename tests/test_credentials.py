@@ -43,23 +43,12 @@ def fake_store(monkeypatch):
     return store
 
 
-def test_legacy_only_secret_is_read(fake_store):
-    fake_store["Jarvis/x"] = "eski"
-    assert credentials.read_secret("Artemis/x") == "eski"
-
-
-def test_new_secret_wins_over_legacy(fake_store):
-    fake_store["Jarvis/x"] = "eski"
-    fake_store["Artemis/x"] = "yeni"
-    assert credentials.read_secret("Artemis/x") == "yeni"
-
-
 def test_write_goes_to_new_target_only(fake_store):
     credentials.write_secret("s", "Artemis/x")
     assert fake_store == {"Artemis/x": "s"}
 
 
-def test_delete_removes_new_and_legacy(fake_store):
-    fake_store.update({"Jarvis/x": "eski", "Artemis/x": "yeni", "Jarvis/y": "baska"})
+def test_delete_removes_only_target(fake_store):
+    fake_store.update({"Artemis/x": "yeni", "Artemis/y": "baska"})
     credentials.delete_secret("Artemis/x")
-    assert fake_store == {"Jarvis/y": "baska"}
+    assert fake_store == {"Artemis/y": "baska"}

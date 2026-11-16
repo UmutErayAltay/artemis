@@ -16,8 +16,6 @@ from typing import Literal, Protocol
 
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "Artemis"
-# Jarvis dönemindeki eski Run değeri: etkinleştirmede silinir, durumda bayat sayılır.
-LEGACY_VALUE_NAME = "Jarvis"
 
 AutostartState = Literal["on", "off", "stale"]
 
@@ -140,15 +138,6 @@ class Autostart:
             current = store.read()
         except OSError:
             return AutostartResult(False, "off", "Kayıt defteri okunamadı.")
-        try:
-            legacy = store.read(LEGACY_VALUE_NAME)
-        except OSError:
-            return AutostartResult(False, "off", "Kayıt defteri okunamadı.")
-        if legacy is not None:
-            # Ürün adı değişti: eski kayıt artık başlatılacak modülü (-m jarvis) bulamaz.
-            return AutostartResult(
-                True, "stale", "Eski (Jarvis) açılış kaydı var; Artemis için yeniden açın."
-            )
         if current is None:
             return AutostartResult(True, "off", "Açılışta başlama kapalı.")
         if current == self.expected and not Path(self.python).is_file():
@@ -168,7 +157,6 @@ class Autostart:
             return AutostartResult(False, "off", "Açılışta başlama yalnız Windows'ta var.")
         try:
             store.write(self.expected)
-            store.delete(LEGACY_VALUE_NAME)
             written = store.read()
         except OSError:
             return self._audit(
@@ -189,8 +177,7 @@ class Autostart:
             return AutostartResult(False, "off", "Açılışta başlama yalnız Windows'ta var.")
         try:
             store.delete()
-            store.delete(LEGACY_VALUE_NAME)
-            remaining = store.read() or store.read(LEGACY_VALUE_NAME)
+            remaining = store.read()
         except OSError:
             return self._audit(
                 "disable", AutostartResult(False, "on", "Kayıt defterinden silinemedi.")

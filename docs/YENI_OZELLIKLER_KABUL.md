@@ -90,7 +90,7 @@ Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sa
 
 Önkoşul: Gerçek Windows'ta elle. Ayarlar > Beceriler'de kutuyu aç, Uygula, Artemis'i yeniden başlat.
 
-- [ ] **Önce klasör:** `state_dir` vault'un ya da bir proje deposunun içindeyse (bu makinede `jarvis/.jarvis` vault içinde) beceriler yüklenmez ve panel nedenini söyler. `config.yaml`'a `skills.folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler` yazıp yeniden deneyin.
+- [ ] **Önce klasör:** `state_dir` vault'un ya da bir proje deposunun içindeyse (bu makinede `artemis/.artemis` vault içinde) beceriler yüklenmez ve panel nedenini söyler. `config.yaml`'a `skills.folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler` yazıp yeniden deneyin.
 - [ ] `state_dir\beceriler\` klasörü açıldı ve içinde `ornek-gunluk-ozet.md` var; "Klasörü aç" onu Gezgin'de açıyor.
 - [ ] Not Defteri ile `haftalik-rapor.md` yaz (UTF-8; başlıkta `name: haftalik-rapor`, `description: ...`, altında tarif). "Yenile": panelde geçerli listede görünüyor.
 - [ ] Eşleşen bir istek ver ("haftalık rapor hazırla"): Artemis `skill_read` çağırıyor ve tarifi izliyor. Mesajı `/haftalik-rapor` ile başlatınca da aynı.

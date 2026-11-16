@@ -7,9 +7,6 @@ import os
 import sys
 
 TARGET = "Artemis/OPENROUTER_API_KEY"
-# Eski ad (Jarvis dönemi): okurken yedek, silerken birlikte temizlenir; yazım yalnız yeni ada.
-_PREFIX = "Artemis/"
-_LEGACY_PREFIX = "Jarvis/"
 ENV_NAME = "OPENROUTER_API_KEY"
 _CRED_TYPE_GENERIC = 1
 _CRED_PERSIST_LOCAL_MACHINE = 2
@@ -66,20 +63,12 @@ if sys.platform == "win32":
         advapi.CredDeleteW(target, _CRED_TYPE_GENERIC, 0)  # yoksa zaten silinmiş sayılır
 
 
-def _legacy_target(target: str) -> str | None:
-    return _LEGACY_PREFIX + target[len(_PREFIX) :] if target.startswith(_PREFIX) else None
-
-
 def read_secret(target: str = TARGET) -> str | None:
-    """Önce `Artemis/<ad>`, yoksa eski `Jarvis/<ad>` kaydı (veri kaybı olmasın diye)."""
+    """`Artemis/<ad>` kaydını okur; yoksa None."""
     # Windows gövdesi platform bloğunda tanımlı. mypy yalnız `== "win32"` bloğunu platform dalı
     # sayar; `!= "win32": return` erken çıkışından sonrasını Linux'ta da analiz edip hata verir.
     if sys.platform == "win32":
-        value = _read_secret_windows(target)
-        legacy = _legacy_target(target)
-        if value is None and legacy is not None:
-            value = _read_secret_windows(legacy)
-        return value
+        return _read_secret_windows(target)
     return None
 
 
@@ -91,12 +80,8 @@ def write_secret(secret: str, target: str = TARGET) -> None:
 
 
 def delete_secret(target: str) -> None:
-    """Yeni ve eski adlı kaydı birlikte siler; eski kayıt kalırsa silinen anahtar geri okunurdu."""
     if sys.platform == "win32":
         _delete_secret_windows(target)
-        legacy = _legacy_target(target)
-        if legacy is not None:
-            _delete_secret_windows(legacy)
 
 
 def load_into_environment() -> None:
