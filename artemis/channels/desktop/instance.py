@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import sys
 import time
 from pathlib import Path
 
@@ -171,3 +172,15 @@ def claim_instance(name: str, *, show: bool) -> InstanceServer | None:
     server = InstanceServer(name)
     server.listen()
     return server
+
+
+def set_app_user_model_id() -> None:
+    """Görev çubuğu pythonw'ın simgesi yerine pencere simgesini göstersin diye (yalnız Windows)."""
+    if sys.platform != "win32":
+        return
+    import ctypes
+
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("UmutErayAltay.Artemis")
+    except (AttributeError, OSError):
+        return  # simge yalnız kozmetik; kimlik atanamazsa uygulama yine açılır

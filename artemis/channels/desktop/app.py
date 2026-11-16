@@ -58,9 +58,15 @@ from artemis.channels.desktop.chat_widgets import (
     _TurnSteps,
     welcome_suggestions,
 )
+from artemis.channels.desktop.connect_wizard import maybe_connect
 from artemis.channels.desktop.data_panel import DataPanel
 from artemis.channels.desktop.hotkey import GlobalHotkey
-from artemis.channels.desktop.instance import InstanceServer, claim_instance, instance_name
+from artemis.channels.desktop.instance import (
+    InstanceServer,
+    claim_instance,
+    instance_name,
+    set_app_user_model_id,
+)
 from artemis.channels.desktop.operations import (
     OperationLog,
 )
@@ -1258,22 +1264,10 @@ def app_icon() -> QIcon:
     return QIcon(str(Path(__file__).with_name("artemis.ico")))
 
 
-def _set_app_user_model_id() -> None:
-    """Görev çubuğu pythonw'ın simgesi yerine pencere simgesini göstersin diye (yalnız Windows)."""
-    if sys.platform != "win32":
-        return
-    import ctypes
-
-    try:
-        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("UmutErayAltay.Artemis")
-    except (AttributeError, OSError):
-        return  # simge yalnız kozmetik; kimlik atanamazsa uygulama yine açılır
-
-
 def run_desktop(
     config_path: Path, *, demo: bool = False, voice: bool = False, background: bool = False
 ) -> int:
-    _set_app_user_model_id()
+    set_app_user_model_id()
     current = QApplication.instance()
     app = current if isinstance(current, QApplication) else QApplication([])
     gui_gc.install(app)
@@ -1292,6 +1286,7 @@ def run_desktop(
     app.setWindowIcon(app_icon())
     app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(_STYLE)
+    maybe_connect(config_path)
     window = build_window(config_path, demo=demo, voice=voice, app=app)
     if server is not None:
         server.setParent(window)
