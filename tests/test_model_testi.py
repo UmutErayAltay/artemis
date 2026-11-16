@@ -231,3 +231,37 @@ def test_merge_retry_updates_counts_and_roles() -> None:
     assert merged["roles"] == ["ana", "zor"] and merged["cost_usd"] == "0.75"
     assert merged["scenarios"][1]["attempt"] == 2 and merged["retries"] == 1
     assert "attempt" not in merged["scenarios"][0] and base["temel"]["passed"] == 1
+
+
+def test_all_provider_errors_report_cannot_test_not_model_failure() -> None:
+    # 2026-11-16: anahtar alt sürece ulaşmayınca rapor "yeterince başarılı değil" diyordu;
+    # model hiç çağrılmadan düşen test modelin başarısızlığı gibi gösterilmemeli.
+    from bench.model_testi import build_report
+
+    scenarios = load_scenarios(SCENARIOS_PATH)
+    answer = "Model sağlayıcısı yanıt veremedi: 'gemini' ucunun anahtarı bulunamadı."
+    results = [_fake_result(item, stop="provider_error", answer=answer) for item in scenarios]
+    report = build_report("m", scenarios, results)
+    assert report["summary"].startswith("Test yapılamadı:")
+    assert "anahtarı bulunamadı" in report["summary"]
+    assert report["roles"] == []
+
+
+def test_partial_provider_error_keeps_normal_summary() -> None:
+    from bench.model_testi import build_report
+
+    scenarios = load_scenarios(SCENARIOS_PATH)
+    results = [_fake_result(scenarios[0], stop="provider_error", answer="x")] + [
+        _fake_result(item) for item in scenarios[1:]
+    ]
+    assert not build_report("m", scenarios, results)["summary"].startswith("Test yapılamadı")
+
+
+def test_child_environment_passes_credential_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    from artemis.tools.platform import child_environment
+
+    monkeypatch.setenv("ARTEMIS_CREDENTIAL_PREFIX", "Artemis-test")
+    monkeypatch.setenv("OPENROUTER_API_KEY", "gizli-test")
+    env = child_environment()
+    assert env["ARTEMIS_CREDENTIAL_PREFIX"] == "Artemis-test"
+    assert "OPENROUTER_API_KEY" not in env  # sırlar yine geçmez

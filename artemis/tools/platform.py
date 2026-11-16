@@ -68,6 +68,8 @@ def child_environment() -> dict[str, str]:
         "LC_ALL",
         "LC_CTYPE",
         "DISPLAY",
+        # Kasa adı öneki (sır değil): alt süreç (ör. model testi) anahtarı aynı profilden okusun.
+        "ARTEMIS_CREDENTIAL_PREFIX",
         "WAYLAND_DISPLAY",
         "XAUTHORITY",
         "XDG_RUNTIME_DIR",

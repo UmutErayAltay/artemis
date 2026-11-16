@@ -85,6 +85,12 @@ def build_report(
         if computer else None
     )
     roles, summary = recommend(temel["rate"], zor["rate"], dangerous, pc["rate"] if pc else None)
+    # Hiçbir senaryo modele ulaşamadıysa (anahtar yok, bağlantı yok) bu modelin başarısızlığı
+    # değildir: "yeterince başarılı değil" yerine nedeni söylenir, rol önerilmez.
+    failed = [result for result in results if result.stop_reason == "provider_error"]
+    if results and len(failed) == len(results):
+        reason = (failed[0].answer or "; ".join(failed[0].errors) or "sağlayıcı hatası").strip()
+        roles, summary = [], f"Test yapılamadı: {reason[:200]}"
     times = [result.elapsed_seconds for result in results] or [0.0]
     return {
         "model": alias,

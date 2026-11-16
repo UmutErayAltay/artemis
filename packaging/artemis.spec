@@ -30,6 +30,13 @@ for _pkg in (
 
 # Araç eklentileri `@register_tool` ile çalışma anında keşfedildiği için tüm alt modüller eklenir.
 hiddenimports = collect_submodules("artemis")
+# Ayarlar > Model testi `-m bench.model_testi` ile alt süreçte koşar: modül ve senaryo dosyaları
+# pakete girer (ağır bench araçları — ses korpusu, değerlendirme — yine de çağrılmadıkça yüklenmez).
+hiddenimports += ["bench", "bench.model_testi", "bench.run", "bench.bilgisayar_testi"]
+datas += [
+    (str(ROOT / "bench" / name), "bench")
+    for name in ("model_testi.yaml", "senaryolar.yaml")
+]
 
 # Ağır isteğe bağlı özellikler ve geliştirme araçları temel paketin dışında tutulur (ADR 0075).
 excludes = [
@@ -42,7 +49,6 @@ excludes = [
     "sherpa_onnx",
     "huggingface_hub",
     "tests",
-    "bench",
     "pytest",
     "mypy",
     "ruff",
