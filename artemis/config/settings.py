@@ -699,7 +699,7 @@ class ComputerUseConfig(BaseModel):
     mode: Literal["accept", "auto"] = "accept"
     # ADR 0073/0078: "uia" yalnız UI Automation öğe listesi (varsayılan; görsel olmayan
     # modeller de çalışır, yıkıcı öğe kapısı öğe adını görür), "screen" görüntü, "both" ikisi.
-    observation: Literal["screen", "uia", "both"] = "uia"
+    observation: Literal["screen", "uia", "both", "hybrid"] = "uia"
     # Kotaya takılan görsel model için sırayla denenecek diğer görüntü kabul eden modeller.
     fallback_models: tuple[str, ...] = ()
 

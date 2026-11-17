@@ -468,7 +468,9 @@ def click(x: int, y: int, button: str = "left", double: bool = False) -> None:
     if button not in _BUTTON_FLAGS:
         raise ValueError(f"Bilinmeyen fare düğmesi: {button!r}")
     down, up = _BUTTON_FLAGS[button]
-    events = [_move_event(x, y)]
+    _send([_move_event(x, y)])
+    time.sleep(0.01)
+    events: list[_INPUT] = []
     for _ in range(2 if double else 1):
         events += [_mouse(0, 0, 0, down), _mouse(0, 0, 0, up)]
     _send(events)
@@ -477,7 +479,9 @@ def click(x: int, y: int, button: str = "left", double: bool = False) -> None:
 def scroll(x: int, y: int, notches: int) -> None:
     """Pozitif = aşağı (tekerlek deltası negatif), WHEEL_DELTA = 120."""
     _require_windows()
-    _send([_move_event(x, y), _mouse(0, 0, -_WHEEL_DELTA * notches, _MOUSEEVENTF_WHEEL)])
+    _send([_move_event(x, y)])
+    time.sleep(0.01)
+    _send([_mouse(0, 0, -_WHEEL_DELTA * notches, _MOUSEEVENTF_WHEEL)])
 
 
 # Windows 11 Not Defteri (RichEditD2DPT) toplu/hızlı VK_PACKET girdisini bozuyor: 2026-11-05

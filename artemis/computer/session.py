@@ -323,6 +323,7 @@ class ComputerSession:
         self._goal = ""
         # ADR 0073: o adımın UI Automation öğeleri (id -> UiElement); her adım başında sıfırlanır.
         self._elements: dict[int, UiElement] = {}
+        self._step_has_image = False
         # ADR 0070: OS düzeyi kanıt. Yazılan metin yalnız bellekte tutulur, asla loglanmaz.
         self._os_issues: dict[tuple[Any, ...], str] = {}  # imza → sorun
         self._last_typed: tuple[str, int | None] | None = None
@@ -350,17 +351,19 @@ class ComputerSession:
         memory = self._memory
         blocks = 0
         observation = self._config.observation
-        with_images = observation != "uia"
-        with_uia = observation in ("uia", "both")
-        system_prompt = (
-            SYSTEM_PROMPT_UIA
-            if observation == "uia"
-            else f"{SYSTEM_PROMPT}\n\n{UIA_ADDENDUM}"
-            if observation == "both"
-            else SYSTEM_PROMPT
+        with_uia = observation in ("uia", "both", "hybrid")
+        fallback_image = False
+        base_uia_prompt = (
+            f"{SYSTEM_PROMPT_UIA}\n\n{STRICT_COMPUTER_RULES}" if self._strict else SYSTEM_PROMPT_UIA
         )
-        if self._strict:
-            system_prompt = f"{system_prompt}\n\n{STRICT_COMPUTER_RULES}"
+        base_both_prompt = (
+            f"{SYSTEM_PROMPT}\n\n{UIA_ADDENDUM}\n\n{STRICT_COMPUTER_RULES}"
+            if self._strict
+            else f"{SYSTEM_PROMPT}\n\n{UIA_ADDENDUM}"
+        )
+        base_screen_prompt = (
+            f"{SYSTEM_PROMPT}\n\n{STRICT_COMPUTER_RULES}" if self._strict else SYSTEM_PROMPT
+        )
         while True:
             self._elements = {}
             if self._stop.is_set():
@@ -371,7 +374,11 @@ class ComputerSession:
             if remaining <= 0:
                 return self._result("timeout", "Oturum süresi doldu.")
 
-            captured = await self._capture(limit, with_images=with_images)
+            step_images = observation in ("screen", "both") or (
+                observation == "hybrid" and fallback_image
+            )
+            fallback_image = False
+            captured = await self._capture(limit, with_images=step_images)
             if isinstance(captured, SessionResult):
                 return captured
             screens = captured
@@ -380,8 +387,23 @@ class ComputerSession:
             elements_block = ""
             if with_uia:
                 elements = await self._read_elements(layout.window[0] if layout else 0)
+                if observation == "hybrid" and not step_images and not elements:
+                    step_images = True
+                    captured = await self._capture(limit, with_images=True)
+                    if isinstance(captured, SessionResult):
+                        return captured
+                    screens = captured
+                    layout = self._layout
                 self._elements = {item.id: item for item in elements}
                 elements_block = "\n" + _render_elements(elements)
+            self._step_has_image = step_images
+            system_prompt = (
+                base_both_prompt
+                if (observation == "both" or (observation == "hybrid" and step_images))
+                else base_uia_prompt
+                if observation in ("uia", "hybrid")
+                else base_screen_prompt
+            )
 
             # Görüntüler ayrı kullanıcı iletilerinde, etiketleriyle: sağlayıcılar ardışık
             # kullanıcı iletilerini birleştirir ve "Ekran N" eşlemesi korunur.
@@ -407,7 +429,7 @@ class ComputerSession:
                         )
                         for number, item in enumerate(screens, start=1)
                     ]
-                    if with_images
+                    if step_images
                     else []
                 ),
             ]
@@ -449,6 +471,8 @@ class ComputerSession:
                     return self._result("blocked", outcome)
                 if repeat:
                     note = outcome
+                    if observation == "hybrid":
+                        fallback_image = True
                 elif isinstance(outcome, _Stale):
                     # Pencere yasak değil; yalnız görüntü eskidi. Model hedefi bırakmamalı.
                     note = (
@@ -460,6 +484,8 @@ class ComputerSession:
                         f"ENGELLENDİ ({action.type}): {outcome}. Bu pencereye girdi "
                         "gönderilemez; başka bir yol dene ya da ask_user kullan."
                     )
+                    if observation == "hybrid":
+                        fallback_image = True
                 memory.add(StepRecord(note=note))
                 await self._sleep(self._config.step_delay_seconds)
                 continue
@@ -620,7 +646,8 @@ class ComputerSession:
         zaten yapılmış olabilir, yalnız doğrulanamamıştır.
         """
         verdict: tuple[bool, str]
-        with_images = self._config.observation != "uia"
+        observation = self._config.observation
+        with_images = observation in ("screen", "both")
         if self._stop.is_set() or self._clock() >= limit:
             verdict = (False, "Doğrulama çalışamadı: süre doldu ya da durduruldu.")
         else:
@@ -628,11 +655,27 @@ class ComputerSession:
             if isinstance(captured, SessionResult):
                 verdict = (False, f"Doğrulama çalışamadı: {captured.summary}")
             else:
-                if with_images:
+                elements_list: list[UiElement] | None = None
+                re_captured: SessionResult | None = None
+                if observation == "hybrid":
+                    hwnd = self._layout.window[0] if self._layout else 0
+                    elements_list = await self._read_elements(hwnd)
+                    if not elements_list:
+                        with_images = True
+                        re_shot = await self._capture(limit, with_images=True)
+                        if isinstance(re_shot, SessionResult):
+                            re_captured = re_shot
+                        else:
+                            captured = re_shot
+                if re_captured is not None:
+                    verdict = (False, f"Doğrulama çalışamadı: {re_captured.summary}")
+                elif with_images:
                     elements_block = ""
-                    if self._config.observation == "both":
-                        hwnd = self._layout.window[0] if self._layout else 0
-                        elements_block = "\n" + _render_elements(await self._read_elements(hwnd))
+                    if observation in ("both", "hybrid"):
+                        if elements_list is None:
+                            hwnd = self._layout.window[0] if self._layout else 0
+                            elements_list = await self._read_elements(hwnd)
+                        elements_block = "\n" + _render_elements(elements_list)
                     messages = [
                         Message(role="system", content=VERIFY_PROMPT),
                         Message(
@@ -751,7 +794,10 @@ class ComputerSession:
         window: str | None = None
         # Girdinin düşeceği pencerenin kimliği (hwnd): onay ve gönderim buna bağlanır (ADR 0056).
         target_id: int | None = None
-        if self._config.observation == "uia" and action.type in _POINTER_ACTIONS:
+        if (
+            self._config.observation == "uia"
+            or (self._config.observation == "hybrid" and not self._step_has_image)
+        ) and action.type in _POINTER_ACTIONS:
             return _NO_COORDS_IN_UIA
         # Modelin koordinatı seçtiği ekranın görüntüsüne göredir; fare ise sanal masaüstü.
         # Yalnız işaretçi eyleminde anlamlı (type/key/wait/click_element ekran seçmez); geçersiz

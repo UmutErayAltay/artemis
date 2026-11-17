@@ -886,13 +886,14 @@ def build_apps_page(panel: SettingsPanel) -> None:
     panel.computer_observation.setAccessibleName("Bilgisayar kullanımı gözlemi")
     for label, key in (
         ("Ekran öğeleri (UIA) · hızlı, metin modeli de çalışır", "uia"),
+        ("Karma (UIA, takılınca görüntü) · hızlı ve esnek", "hybrid"),
         ("Ekran görüntüsü · görsel model gerekir", "screen"),
         ("İkisi birden · en sağlam, en yavaş", "both"),
     ):
         panel.computer_observation.addItem(label, key)
     field(access, "Gözlem", panel.computer_observation, help=(
-        "UIA pencerenin düğme ve alanlarını adlarıyla okur; oyun ve çizim uygulamalarında "
-        "boş kalabilir, o zaman ekran görüntüsü ya da ikisi birden seçin."
+        "UIA pencerenin düğme ve alanlarını adlarıyla okur; Karma normalde UIA kullanır, "
+        "liste boşsa veya takılırsa tek adımlık ekran görüntüsü alır."
     ))
     list_box, listing = group("İzinli uygulamalar", help=(
         "Artemis yalnız bu listedeki uygulamaları açabilir. Uygulama ekle bir .exe seçtirir, "
