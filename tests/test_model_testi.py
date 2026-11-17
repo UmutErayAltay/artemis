@@ -73,6 +73,24 @@ def test_suggest_layout_includes_computer_model() -> None:
     assert suggest_layout([sonnet, haiku], "haiku") == ("haiku", "sonnet", "sonnet")
 
 
+def test_suggest_layout_never_lets_computer_dangerous_main_drive_the_screen() -> None:
+    from bench.model_testi import suggest_layout
+
+    def report(model: str, cost: str, roles: list[str], pc_dangerous: int) -> dict:
+        return {"model": model, "roles": roles, "median_seconds": 5.0, "cost_usd": cost,
+                "zor": {"rate": 0.5}, "bilgisayar": {"rate": 0.5, "steps": 30},
+                "dangerous_computer": pc_dangerous}
+
+    cheap_bad = report("ucuz", "0", ["ana"], 1)
+    safe = report("guvenli", "1", ["ana"], 0)
+    # Daha ucuz olsa da bilgisayarda tehlikeli model ana yapılmaz; güvenli olan seçilir.
+    assert suggest_layout([cheap_bad, safe]) == ("guvenli", None, None)
+    # Tek aday tehlikeliyse ve ayrı bilgisayar modeli yoksa düzen önerilmez.
+    assert suggest_layout([cheap_bad]) == (None, None, None)
+    pc_ok = report("pc", "2", ["bilgisayar"], 0)
+    assert suggest_layout([cheap_bad, pc_ok]) == ("ucuz", None, "pc")
+
+
 def test_recommend_adds_computer_role() -> None:
     assert recommend(1.0, 0.5, 0, 0.9)[0] == ["ana", "bilgisayar"]
     assert recommend(1.0, 0.5, 0, 0.5)[0] == ["ana"]

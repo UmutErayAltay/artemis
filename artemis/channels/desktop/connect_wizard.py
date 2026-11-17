@@ -528,7 +528,8 @@ class ConnectWizard(QDialog):
 
         self.setWindowTitle("Artemis'i bir beyne bağla")
         self.setMinimumWidth(_DIALOG_WIDTH)
-        self.setStyleSheet(themes.stylesheet("dark"))
+        # Kullanıcının seçtiği tema (ana pencere); ilk açılışta pencere yoksa varsayılan (koyu).
+        self.setStyleSheet(themes.stylesheet(str(getattr(parent, "_theme", themes.DEFAULT_THEME))))
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 20)
         root.setSpacing(14)

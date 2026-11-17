@@ -269,13 +269,14 @@ def test_theme_cards_follow_combo_and_emit_once(tmp_path: Path, qt_app) -> None:
     seen: list[str] = []
     panel.theme_changed.connect(seen.append)
     assert set(panel.theme_cards) == set(THEME_LABELS)
-    panel.theme_cards["dark"].radio.click()
-    assert seen == ["dark"]
-    assert panel.theme_combo.currentData() == "dark"
-    panel.set_theme("light")  # sinyal yaymaz, kartı eşler
-    assert seen == ["dark"]
-    assert panel.theme_cards["light"].radio.isChecked()
-    assert panel.theme_cards["light"].property("selected") is True
+    # Varsayılan tema "dark": değişiklik görülsün diye önce "light" seçilir.
+    panel.theme_cards["light"].radio.click()
+    assert seen == ["light"]
+    assert panel.theme_combo.currentData() == "light"
+    panel.set_theme("dark")  # sinyal yaymaz, kartı eşler
+    assert seen == ["light"]
+    assert panel.theme_cards["dark"].radio.isChecked()
+    assert panel.theme_cards["dark"].property("selected") is True
     panel.theme_combo.setCurrentIndex(panel.theme_combo.findData("dark-mixed"))
     assert panel.theme_cards["dark-mixed"].radio.isChecked()
     assert seen[-1] == "dark-mixed"
@@ -508,7 +509,7 @@ def test_hybrid_stt_checkboxes_round_trip_and_hint(tmp_path: Path) -> None:
     assert panel.cloud_stt_hint.text() == ""
     panel.hybrid_stt.setChecked(True)
     assert "kesintisiz kipte her söz gider" in panel.cloud_stt_hint.text()
-    assert "Model sağlayıcıları" in panel.cloud_stt_hint.text()
+    assert "Ayarlar > Model > Bağlantılar" in panel.cloud_stt_hint.text()
     assert "Grok" not in panel.cloud_stt_hint.text()
     save_choices(path, None, values=panel.values())
     saved = load_settings(path).voice

@@ -152,6 +152,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("voice", "live_transcript"), "live_transcript"),
     _checkbox(("voice", "noise_suppression"), "noise_suppression"),
     _checkbox(("voice", "game_mode"), "game_mode"),
+    _combo(("voice", "game_mode_target"), "game_mode_target", fallback_first=True),
     _combo(("voice", "noise_suppression_level"), "noise_level", fallback_first=True),
     _checkbox(("voice", "noise_suppression_stt"), "noise_stt"),
     _checkbox(("voice", "echo_cancellation"), "echo_cancellation"),

@@ -118,6 +118,7 @@ class VoiceController:
         on_live_text: Callable[[str], None] | None = None,
         turn_detector: TurnDetector | None = None,
         wake_spotter: WakeSpotterLike | None = None,
+        should_use_cloud: Callable[[], bool] | None = None,
     ) -> None:
         self.runner = runner
         # ADR 0069: eşleşme tek başına uyandırmaz/çalıştırmaz; yalnız eşleşmesiz bölütler STT'ye
@@ -137,6 +138,7 @@ class VoiceController:
         self._live_stale = False
         # ADR 0046: yalnız komut olacak söz için; uyandırma/yankı kararları hep yerel metinle.
         self.cloud_recognizer = cloud_recognizer
+        self._should_use_cloud = should_use_cloud
         self.config = config
         self.microphone = microphone
         self.segmenter = AudioSegmenter(config, vad, turn_detector)
@@ -496,7 +498,11 @@ class VoiceController:
         if toggle is None and command is None:
             self._event(uid, "terminal", outcome="rejected", reason="no_wake")
             return
-        if command and self.cloud_recognizer is not None:
+        if (
+            command
+            and self.cloud_recognizer is not None
+            and (self._should_use_cloud is None or self._should_use_cloud())
+        ):
             # Karar yerel metinle bir kez verildi (_wake_command takip durumunu değiştirir);
             # burada yalnız komut metni bulut sürümüyle değişir.
             command = await self._cloud_command(uid, segment, command)

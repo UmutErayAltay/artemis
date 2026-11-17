@@ -57,24 +57,43 @@ _FAMILIES: dict[str, str] = {
     **dict.fromkeys(("sıfırla", "reset", "fabrika"), "sifirla"),
     **dict.fromkeys(("satın", "öde", "buy", "purchase", "pay", "checkout", "sipariş"), "odeme"),
     **dict.fromkeys(("biçimlendir", "format"), "format"),
+    **dict.fromkeys(("boşalt", "empty"), "bosalt"),
+    # Kaydetmeden kapatma işi kaybettirir: "Kaydetme", "Don't save", "Discard".
+    **dict.fromkeys(("kaydetme", "dontsave", "discard"), "kaydetme"),
 }
 _WORD = re.compile(r"\w+", re.UNICODE)
 # Hedef tarafında kapıyı açamayan zayıf kökler: "oturum", "çöp", "format" günlük işte de geçer.
 _WEAK_STEMS = frozenset({"oturumu", "çöp", "trash", "fabrika", "format"})
 
 
+_PHRASES = (
+    ("sign out", "signout"), ("log out", "logout"),
+    ("don't save", "dontsave"), ("don’t save", "dontsave"), ("dont save", "dontsave"),
+)
+
+
 def _words(text: str) -> list[str]:
     # Türkçe büyük İ/I küçültmesi: "SİL" -> "sil", "ÇIKIŞ" -> "çıkış".
     lowered = text.replace("İ", "i").replace("I", "ı").lower()
-    return _WORD.findall(lowered.replace("sign out", "signout").replace("log out", "logout"))
+    for phrase, word in _PHRASES:
+        lowered = lowered.replace(phrase, word)
+    return _WORD.findall(lowered)
+
+
+# Türkçe olumsuzluk eki: "silme", "silmeyin", "kaldırmadan" izin değil yasaktır. Hedef tarafında
+# bu biçimler aileyi açmaz (ponytail: "silme işlemi" adı da açmaz; yanlış negatif yalnız sorar).
+_NEGATION = re.compile(r"^m[ae](?!k)")
 
 
 def _families(text: str, *, strong_only: bool = False) -> set[str]:
     found = set()
     for word in _words(text):
         for stem, family in _FAMILIES.items():
-            if word.startswith(stem) and not (strong_only and stem in _WEAK_STEMS):
-                found.add(family)
+            if not word.startswith(stem) or (strong_only and stem in _WEAK_STEMS):
+                continue
+            if strong_only and _NEGATION.match(word[len(stem):]):
+                continue
+            found.add(family)
     return found
 
 
@@ -86,13 +105,15 @@ def _target_matches(element_name: str, goal: str) -> bool:
     """Öğenin yıkıcı olmayan içerik sözcükleri hedefte geçiyor mu (4 harflik kök eşleşmesi).
 
     "Hesabı sil" ancak hedef "hesabımı sil" gibi aynı nesneyi anıyorsa açılır; "duyuruyu sil"
-    hedefi başka bir şeyi silmeye izin vermez. Yalnız yıkıcı sözcükten oluşan ad ("Sil") için
+    hedefi başka bir şeyi silmeye izin vermez. Öğedeki her içerik sözcüğü hedefte geçmeli:
+    "veriyi sil" hedefi "Hesabı ve veriyi sil" düğmesini açmaz. Yalnız yıkıcı sözcükten oluşan ad
+    ("Sil") için
     ailenin hedefte geçmesi yeter."""
     content = [w for w in _words(element_name) if len(w) >= 4 and not _is_destructive_word(w)]
     if not content:
         return True
     goal_roots = {w[:4] for w in _words(goal) if len(w) >= 4}
-    return any(w[:4] in goal_roots for w in content)
+    return all(w[:4] in goal_roots for w in content)
 
 
 def destructive_unrequested(element_name: str, goal: str) -> str | None:

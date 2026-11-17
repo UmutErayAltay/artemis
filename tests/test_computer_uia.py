@@ -332,6 +332,41 @@ async def test_both_observation_sends_images_and_elements_and_allows_pixel_click
     assert any(m.image_png is not None for m in first_call)
 
 
+async def test_both_mode_scales_pixel_click_even_inside_a_window_sized_element() -> None:
+    # Pencereyi kaplayan Pane her koordinatı "öğe içinde" yapar; görüntü koordinatı yine
+    # ölçeklenmeli (1600 px ekran, 800 px görüntü: x2), ham sanal koordinat sayılmamalı.
+    backend = FakeBackend(
+        elements=[
+            UiElement(id=1, kind="Pane", name="Uygulama", rect=(0, 0, 1600, 1200),
+                      interactive=False, focused=False)
+        ]
+    )
+    backend.monitor_rects = [(0, 0, 1600, 1200)]
+    backend.window = (7, (0, 0, 1600, 1200))
+    env = Env(act(type="click", x=100, y=50), DONE, YES, backend=backend, observation="both")
+    env.config = env.config.model_copy(update={"screenshot_width": 800})
+    result = await env.run()
+
+    assert result.reason == "done"
+    assert env.backend.calls == [("click", 200, 100, "left", False)]
+
+
+async def test_pixel_click_inside_element_is_blocked_on_imageless_hybrid_step() -> None:
+    backend = FakeBackend(
+        elements=[
+            UiElement(id=i, kind="Button", name=f"Düğme {i}", rect=(10 * i, 10, 8, 8),
+                      interactive=True, focused=False)
+            for i in range(1, 7)
+        ]
+    )
+    env = Env(act(type="click", x=12, y=12), DONE, YES, backend=backend, observation="hybrid")
+    result = await env.run()
+
+    assert result.reason == "done"
+    assert env.backend.calls == []
+    assert any("koordinat yok" in str(m.content) for m in env.provider.seen[1])
+
+
 async def test_pixel_click_and_scroll_are_blocked_in_uia_mode() -> None:
     env = Env(
         act(type="click", x=2, y=1),

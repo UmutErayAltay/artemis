@@ -80,3 +80,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0075 — Ürünleştirme planı ve kullanıcı başına ayar klasörü](0075-urunlestirme-plani.md)
 - [0076 — Konuşma hafızasının diskte şifrelenmesi (DPAPI)](0076-hafiza-sifreleme.md)
 - [0077 — `open_url` lekeli turda sorulur, otomatik onayda sorulmaz](0077-open-url-lekeli-turda-sorulur.md)
+- [0078 — Yıkıcı öğe kapısı ve sıkı istem kuralları](0078-yikici-oge-kapisi-ve-siki-kurallar.md)

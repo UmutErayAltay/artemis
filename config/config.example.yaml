@@ -108,6 +108,7 @@ voice:
   stt_speculative_after_ms: 200 # Sessizliğin bu kadarında spekülatif tanıma başlar.
   game_mode: false # Tam ekran oyun öndeyken büyük STT modeli GPU'dan bırakılır, hafif model devralır (ADR 0072).
   game_mode_stt_model: null # Oyun modundaki hafif model; boşsa yerelde kurulu faster-whisper small.
+  game_mode_target: local_light # local_light: hafif model dinler; cloud: Small CPU'da uyandırır, komut buluta gider (Small + bulut tanıma gerekir).
   stt_hotwords: [] # İsteğe bağlı yerel ipuçları; prompt veya transcript düzeltmesi değildir.
   stt_alias_hotwords: false # Öğretilmiş uygulama takma adlarının hedefleri STT ipucuna eklenir (ADR 0044).
   # Karma tanıma (ADR 0046): uyandırma, yankı ve söz kesme yerel metinle karar verilir; yalnız
@@ -383,7 +384,7 @@ memory:
 #   screenshot_width: 1280   # 640-2560
 #   step_delay_seconds: 0.3  # 0-3
 #   mode: accept             # accept: adımlar sorulur | auto: sormaz (Esc durdurur)
-#   observation: uia         # uia: yalnız UI Automation öğe listesi (varsayılan; görsel olmayan model de çalışır) | screen: görüntü | both: ikisi birden (ADR 0073, 0078)
+#   observation: uia         # uia: yalnız UI Automation öğe listesi (varsayılan; görsel olmayan model de çalışır) | screen: görüntü | both: ikisi birden | hybrid: öğe listesi, gerektiğinde (boş liste, OCR yedeği, engel) görüntü (ADR 0073, 0078)
 
 # Dikte kipi (ADR 0057): kısayola bas, konuş, tekrar bas; tanınan metin odaktaki uygulamaya
 # yazılır. Komut DEĞİLDİR: metin modele, geçmişe ya da hafızaya gitmez. Mikrofon yalnız iki

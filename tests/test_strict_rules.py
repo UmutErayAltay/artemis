@@ -236,6 +236,43 @@ async def test_session_strict_prompt_toggle() -> None:
     assert "STRICT RULES" not in str(normal_provider.seen[0][0].content)
 
 
+def test_gate_negated_goal_does_not_open_and_new_families() -> None:
+    assert destructive_unrequested("Sil", "hiçbir şeyi silme, sadece listele") is not None
+    assert destructive_unrequested("Sil", "dosyaları silmeden önce göster") is not None
+    assert destructive_unrequested("Sil", "dosyayı silmek istiyorum") is None
+    assert destructive_unrequested("Çöp kutusunu boşalt", "notu aç") is not None
+    assert destructive_unrequested("Discard changes", "save the file") is not None
+    assert destructive_unrequested("Don’t Save", "Not Defteri'ni kapat") is not None
+    assert destructive_unrequested("Kaydetme", "kaydetmeden kapat") is None
+    # Her içerik sözcüğü hedefte geçmeli: "veriyi sil" hesabı silmeye izin vermez.
+    assert destructive_unrequested("Hesabı ve veriyi sil", "veriyi sil") is not None
+    assert destructive_unrequested("Hesabı ve veriyi sil", "hesabımı ve verimi sil") is None
+
+
+def test_space_and_delete_cannot_repeat() -> None:
+    import pytest
+    from pydantic import ValidationError
+
+    from artemis.computer.actions import Action
+
+    for keys in ("space", "delete"):
+        with pytest.raises(ValidationError):
+            Action.model_validate({"type": "key", "keys": keys, "repeat": 3, "reason": "x"})
+
+
+async def test_session_gate_blocks_ctrl_d_without_delete_goal() -> None:
+    elements = [_UiElement(id=1, kind="ListItem", name="rapor.docx", rect=(10, 10, 80, 30))]
+    press = _act(type="key", keys="ctrl+d", reason="Kısayol", sensitive=False)
+    result, backend, _provider, audit = await _run_uia_session(
+        "Raporu aç", press, _DONE, _YES, elements=elements
+    )
+    assert result.reason == "done"
+    assert backend.calls == []
+    assert audit.named("computer_destructive_blocked") == [
+        {"turn_id": "t1", "element_kind": "Key"}
+    ]
+
+
 def test_gate_needs_matching_target_and_strong_stem() -> None:
     # Aynı aile yetmez: "duyuruyu sil" hedefi "Hesabı sil" düğmesini açmaz.
     assert destructive_unrequested("Hesabı sil", "duyuruyu sil") is not None
@@ -243,6 +280,25 @@ def test_gate_needs_matching_target_and_strong_stem() -> None:
     # Zayıf kök ("oturum") çıkış ailesini açmaz.
     assert destructive_unrequested("Çıkış", "oturumu kaydet") is not None
     assert destructive_unrequested("Çıkış", "çıkış yap") is None
+
+
+async def test_session_gate_blocks_unrequested_delete_key() -> None:
+    elements = [_UiElement(id=1, kind="ListItem", name="rapor.docx", rect=(10, 10, 80, 30))]
+    for keys in ("delete", "shift+delete"):
+        press = _act(type="key", keys=keys, reason="Temizle", sensitive=False)
+        result, backend, _provider, audit = await _run_uia_session(
+            "Raporu aç", press, _DONE, _YES, elements=elements
+        )
+        assert result.reason == "done"
+        assert backend.calls == []
+        assert audit.named("computer_destructive_blocked") == [
+            {"turn_id": "t1", "element_kind": "Key"}
+        ]
+    press = _act(type="key", keys="delete", reason="Sil", sensitive=True)
+    _result, backend, _provider, _audit = await _run_uia_session(
+        "Dosyayı sil", press, _DONE, _YES, elements=elements
+    )
+    assert backend.calls != []
 
 
 async def test_session_gate_blocks_enter_on_focused_destructive_element() -> None:

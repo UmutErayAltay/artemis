@@ -346,7 +346,8 @@ class TtsCloudBox(QWidget):
         )
         if endpoint is not None and endpoint.api_key and not stored_endpoint_key(name):
             parts.append(
-                "Bu sunucu için anahtar kayıtlı değil; Model sağlayıcıları bölümünden kaydet."
+                "Bu sunucu için anahtar kayıtlı değil; "
+                "Ayarlar > Model > Bağlantılar bölümünden kaydet."
             )
         protocol = str(panel.tts_cloud_protocol.currentData() or "openai")
         model_id = panel.tts_cloud_model.currentText().strip()

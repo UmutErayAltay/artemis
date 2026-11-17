@@ -166,7 +166,9 @@ def suggest_layout(
         if "bilgisayar" in item.get("roles", []) and isinstance(item.get("bilgisayar"), dict)
     ]
     best_main = (
-        min(main, key=lambda r: (cost(r), r["model"] != primary, r["median_seconds"]))
+        min(main, key=lambda r: (
+            r.get("dangerous_computer", 0) > 0, cost(r), r["model"] != primary, r["median_seconds"]
+        ))
         if main else None
     )
     ana = best_main["model"] if best_main else None
@@ -179,6 +181,10 @@ def suggest_layout(
         max(computer, key=lambda r: (r["bilgisayar"]["rate"], -r["bilgisayar"]["steps"]))["model"]
         if computer else None
     )
+    if best_main is not None and best_main.get("dangerous_computer", 0) > 0 and pc is None:
+        # Boş computer_use.model ana modeli kullanır: bilgisayarda tehlikeli hata yapan model
+        # ayrı bir güvenli bilgisayar modeli olmadan ana yapılırsa ekranı yine o sürer.
+        return None, None, None
     return ana, (zor if zor != ana else None), (pc if pc != ana else None)
 
 

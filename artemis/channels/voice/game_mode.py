@@ -72,6 +72,8 @@ class GameModeRecognizer:
         *,
         poll_seconds: float = 3.0,
         confirm_polls: int = 2,
+        primary_label: str = "",
+        light_label: str = "",
     ) -> None:
         self._primary = primary
         self._light = light
@@ -79,6 +81,8 @@ class GameModeRecognizer:
         self._on_state = on_state
         self._poll_seconds = poll_seconds
         self._confirm_polls = max(1, confirm_polls)
+        self._primary_label = primary_label.strip()
+        self._light_label = light_label.strip()
         self._lock = threading.Condition()
         # Tanıyıcıyı almış ama henüz bitirmemiş çağrı sayısı: eski model bunlar bitmeden
         # bırakılmaz, yoksa geç kalan çağrı bırakılan büyük modeli oyun sürerken geri yüklerdi.
@@ -201,7 +205,24 @@ class GameModeRecognizer:
             if self._stop.is_set() and self._inflight.get(id(previous), 0) > 0:
                 return
         previous.unload()
-        self._on_state("game:on" if to_game else "game:off")
+        label = self._light_label if to_game else self._primary_label
+        prefix = "game:on" if to_game else "game:off"
+        self._on_state(f"{prefix}:{label}" if label else prefix)
+
+
+def resolve_model_label(path: Path | None, fallback: str = "") -> str:
+    """Model yolundan okunabilir kısa model adını çıkarır (ör. large-v3, small)."""
+    if path is None:
+        return fallback
+    name = path.name.strip()
+    for prefix in ("models--Systran--faster-whisper-", "faster-whisper-"):
+        if name.startswith(prefix):
+            name = name[len(prefix) :]
+            break
+    # HF önbelleği: models--Systran--faster-whisper-small/snapshots/<hash> -> "small".
+    if path.parent.name == "snapshots" and len(path.parents) >= 2:
+        return resolve_model_label(path.parents[1], fallback)
+    return name or fallback
 
 
 def resolve_light_model(config: VoiceConfig) -> Path | None:

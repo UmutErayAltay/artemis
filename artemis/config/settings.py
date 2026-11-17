@@ -132,8 +132,9 @@ class VoiceConfig(BaseModel):
     queue_frames: int = Field(default=32, ge=2, le=256)
     stt_model: Path | None = None
     # Oyun modu: tam ekran uygulama öndeyken büyük STT modeli GPU'dan bırakılır, hafif model
-    # devralır; boşsa yerelde kurulu faster-whisper `small` aranır.
+    # veya bulut tanıma devralır; boşsa yerelde kurulu faster-whisper `small` aranır.
     game_mode: bool = False
+    game_mode_target: Literal["local_light", "cloud"] = "local_light"
     game_mode_stt_model: Path | None = None
     stt_device: Literal["cuda", "cpu"] = "cuda"
     stt_compute_type: str = "float16"

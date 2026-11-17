@@ -4,6 +4,32 @@ Bu dosya güncel durumun kanonik kaynağıdır. Her satır üç durumu ayırır:
 **Otomatik test** (sahte arka uçla; gerçek cihaz değildir) ve **Gerçek cihaz** (Windows,
 tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.md).
 
+## Çok modelli inceleme turu — 2026-11-17 (dal `feat/uia-varsayilan-yikici-kapi`, base `bcebf41`)
+
+Dal (ADR 0078, Karma gözlem, OCR yedeği, oran ile sarma, oyun modu bulut hedefi) altı modele
+(Claude Opus 5.5, Gemini 4 Hydrogen, Gemini 4 Argon, Gemini 3.8 Flash, GPT-OSS 120B, Inkling 2
+Small) aynı diff ile karne yazdırıldı; bulgular kodda yeniden doğrulandı, doğrulanmayanlar
+(xAI protokolü, `uia` varsayılanı "hata") reddedildi.
+
+| Bulgu (sınıf) | Kodlandı | Otomatik test | Gerçek cihaz |
+|---|---|---|---|
+| Görüntülü adımda koordinat bir öğenin (pencereyi kaplayan Pane) içindeyse ölçeklenmiyordu; `both`/`hybrid`'de yanlış yere tıklama (doğrulanmış hata, 3 model) | bu tur | geçti (`test_both_mode_scales_pixel_click_even_inside_a_window_sized_element`) | bekliyor |
+| Görüntüsüz `hybrid` adımında öğe içine koordinatlı tıklama "koordinat yok" kuralını deliyordu (doğrulanmış hata) | bu tur | geçti | — |
+| Delete/Shift+Delete/Ctrl+D yıkıcı kapıdan geçmiyordu; seçili dosya onaysız silinebiliyordu (doğrulanmış hata) | bu tur | geçti (`test_strict_rules.py`) | bekliyor |
+| `space`/`delete` `repeat` ile 20 kez basılabiliyordu; kapı yalnız ilk basışı görüyordu (doğrulanmış hata) | bu tur | geçti | — |
+| Hedefte "silme"/"silmeden" kapıyı açıyordu; "veriyi sil" hedefi "Hesabı ve veriyi sil"i açıyordu (doğrulanmış hata) | bu tur | geçti | — |
+| Oyun modu bulut hedefi, Small yokken "Artemis"ten önceki her sesi buluta yolluyordu (doğrulanmış gizlilik hatası) | bu tur | geçti (`test_game_mode_cloud_without_small_keeps_audio_local`) | canlı mikrofon bekliyor |
+| Bilgisayarda tehlikeli hata yapan model "Düzeni uygula" ile beyin yapılınca boş `computer_use.model` yüzünden ekranı yine o sürüyordu (doğrulanmış hata) | bu tur | geçti (`test_model_testi.py`) | — |
+| OCR yedeğinin ilk (soğuk) çağrısı 6,0 sn, zaman aşımı 5 sn: her oturumun ilk OCR'ı boş dönüyordu (ölçüldü 2026-11-17: soğuk 6,03 sn, sıcak 1,07 sn) | bu tur (12 sn) | — | geçti 2026-11-17 (ölçüm betiği, gerçek pencere, 128 öğe) |
+| OCR çıktısında `null` koordinat oturumu `TypeError` ile çökertebiliyordu | bu tur | geçti | — |
+| Oyun modu bildiriminde model adı yerine HF önbellek hash'i görünüyordu (`536b0662…`) | bu tur | geçti | geçti 2026-11-17 (`installed_path("small")` → `small`) |
+| Bağlama sihirbazı kullanıcının temasından bağımsız koyu açılıyordu | bu tur | — (mevcut sihirbaz testleri geçti, tema ayrıca sınanmadı) | — |
+
+Bilinen tavanlar ve izlenen işler: OCR her adımda yeni PowerShell süreci başlatır (sıcak ~1 sn);
+kalıcı işçi ya da süreç içi WinRT ile değiştirilmeli. `CopyFromScreen` üstteki pencereyi de okur
+(tıklama yine hedef pencere denetiminden geçer). Yıkıcı kapının izni modelin yazdığı hedefe bağlıdır
+(ADR 0078 "Bilinen tavanlar"). Sarma toleransı (±10 sn) istemde, kodda değil.
+
 ## Gizlilik ve hedef pencere turu — 2026-11-07 (dal `fix/gizlilik-ve-hedef-pencere`, base `cb5389b`)
 
 Dış inceleme bulguları güncel kodda yan etkisiz yeniden üretilerek doğrulandı; her biri için
