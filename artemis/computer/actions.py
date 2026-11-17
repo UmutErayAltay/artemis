@@ -501,8 +501,9 @@ Memory fields (short Turkish strings):
 
 Working rules:
 - Prefer keyboard shortcuts (e.g. "ctrl+l" then "type" URL then "enter") and "click_element" on
-  named controls. If the element list is empty or does not expose the needed control, try a
-  keyboard shortcut or use "ask_user".
+  named controls. To scroll a list or page in this mode, use "key" with "pagedown", "pageup",
+  "down", "up", "home", or "end". If the element list is empty or does not expose the needed
+  control, try a keyboard shortcut or use "ask_user".
 - Do not emit "done" until the element list shows the goal state; the done text must state what
   is present. Never redo a part listed as COMPLETED in the progress note.
 - Repeating the same action is blocked by the system; change your method if nothing changed.
