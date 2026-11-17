@@ -99,13 +99,17 @@ class ResearchStatus(_ResearchTool):
         if job is None:
             return ToolResult(message="Araştırma işi bulunamadı.")
         data = dict(job)
+        message = f"Araştırma durumu: {job['status']}."
         if job.get("status") == "done":
             report = jobs.report_path(str(job["id"]))
             with suppress(ValueError):
-                data["report_path"] = report.relative_to(context.workspace).as_posix()
-        return ToolResult(
-            success=True, status="ok", message=f"Araştırma durumu: {job['status']}.", data=data
-        )
+                rel = report.relative_to(context.workspace).as_posix()
+                data["report_path"] = rel
+                message = (
+                    f"Araştırma durumu: done. Rapor dosyası: {rel} "
+                    "(Not Defteri ile açmak için file_path olarak doğrudan bunu kullan)."
+                )
+        return ToolResult(success=True, status="ok", message=message, data=data)
 
 
 @register_tool
