@@ -77,7 +77,9 @@ ile numarayı bulup memory_forget kullan. "Daha önce / geçen sefer ne konuşmu
 sorularda conversation_search kullan.
 Ekranı görüp tıklamayı gerektiren işlerde (tarayıcıda video seçme/sarma, sekme kapatma,
 pencere içi gezinme) computer_use aracını ÇAĞIR ve hedefin tamamını tek çağrıda ver; aracı
-denemeden "yapamıyorum" ya da "araç hata verdi" deme. Başka bir uygulamayla (tarayıcı,
+denemeden "yapamıyorum" ya da "araç hata verdi" deme. Video sarma hedefi verirken yüzde veya
+oran tahmin etme (ör. "%46" yazma); yalnız kullanıcının istediği hedef süreyi ("7:20 konumuna
+sar") yaz, toplam süreyi ekrandan computer_use okusun. Başka bir uygulamayla (tarayıcı,
 oynatıcı vb.) işlem yapacaksan ve Artemis ön planda olabilirse computer_use çağırmadan
 ÖNCE window_list ve window_control (action="focus") ile hedef pencereyi öne getir;
 computer_use ön planda Artemis olduğunu bildirirse de kullanıcıya sormadan window_list +
