@@ -63,7 +63,7 @@ def env(
     settings = Settings(
         workspace=tmp_path,
         models={"vision": model(provider)},
-        computer_use=ComputerUseConfig(
+        computer_use=ComputerUseConfig(observation="screen",
             enabled=enabled, model="vision" if enabled else "", step_delay_seconds=0, mode=mode
         ),
         perception=PerceptionConfig(allow_cloud_screen=allow_cloud),
@@ -284,10 +284,12 @@ async def test_host_session_works_inside_event_loop(fake_hotkey: type[FakeHotkey
 
 def test_settings_enabled_requires_known_model() -> None:
     with pytest.raises(ValidationError):
-        Settings(computer_use=ComputerUseConfig(enabled=True))
+        Settings(computer_use=ComputerUseConfig(observation="screen", enabled=True))
     with pytest.raises(ValidationError):
-        Settings(models={"a": model()}, computer_use=ComputerUseConfig(enabled=True, model="b"))
-    Settings(models={"a": model()}, computer_use=ComputerUseConfig(enabled=True, model="a"))
+        Settings(models={"a": model()}, computer_use=ComputerUseConfig(
+            observation="screen", enabled=True, model="b"))
+    Settings(models={"a": model()}, computer_use=ComputerUseConfig(
+        observation="screen", enabled=True, model="a"))
     Settings()  # kapalıyken model gerekmez
 
 
@@ -331,7 +333,7 @@ async def test_runtime_mode_switch_reaches_the_tool_context(tmp_path: Path) -> N
     settings = Settings(
         workspace=tmp_path,
         models={"vision": model("ollama")},
-        computer_use=ComputerUseConfig(
+        computer_use=ComputerUseConfig(observation="screen",
             enabled=True, model="vision", step_delay_seconds=0, mode="accept"
         ),
     )
@@ -401,13 +403,13 @@ def test_empty_computer_model_uses_the_main_brain(tmp_path: Path) -> None:
         primary_model="main",
     )
     follow = base.model_copy(
-        update={"computer_use": ComputerUseConfig(enabled=True, model="")}
+        update={"computer_use": ComputerUseConfig(observation="screen", enabled=True, model="")}
     )
     assert vision_models(follow) == ("main",)
 
     pinned = base.model_copy(
         update={
-            "computer_use": ComputerUseConfig(
+            "computer_use": ComputerUseConfig(observation="screen",
                 enabled=True, model="other", fallback_models=("main", "other")
             )
         }
@@ -496,7 +498,7 @@ def _chain_env(
         workspace=tmp_path,
         models={name: model(kind) for name, kind in providers.items()},
         primary_model=names[0],
-        computer_use=ComputerUseConfig(
+        computer_use=ComputerUseConfig(observation="screen",
             enabled=True, model=names[0], fallback_models=names[1:], step_delay_seconds=0
         ),
         perception=PerceptionConfig(allow_cloud_screen=allow_cloud),

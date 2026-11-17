@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol
 from artemis.brain.errors import ProviderError
 from artemis.brain.models import Message
 from artemis.brain.providers import Provider
+from artemis.brain.strict_rules import STRICT_COMPUTER_RULES, destructive_unrequested
 from artemis.computer.actions import (
     SYSTEM_PROMPT,
     SYSTEM_PROMPT_UIA,
@@ -294,6 +295,7 @@ class ComputerSession:
         sleep: Callable[[float], Awaitable[None]] = asyncio.sleep,
         memory: SessionMemory | None = None,
         on_frame: Callable[[tuple[bytes, ...]], None] | None = None,
+        strict: bool = False,
     ) -> None:
         # Verilen bellek aynı mesajdaki önceki çağrıdan gelir: kayıtları "önceki çağrı" olur.
         self._memory = memory if memory is not None else SessionMemory()
@@ -316,6 +318,8 @@ class ComputerSession:
         # Son taze kare (yalnız RAM); sahibi karar verir, burada diske/denetime yazılmaz.
         self._on_frame = on_frame
         self._layout: _Layout | None = None
+        self._strict = strict
+        self._goal = ""
         # ADR 0073: o adımın UI Automation öğeleri (id -> UiElement); her adım başında sıfırlanır.
         self._elements: dict[int, UiElement] = {}
         # ADR 0070: OS düzeyi kanıt. Yazılan metin yalnız bellekte tutulur, asla loglanmaz.
@@ -341,6 +345,7 @@ class ComputerSession:
         return SessionResult(reason, summary, self._steps)
 
     async def _loop(self, goal: str, turn_id: str, limit: float) -> SessionResult:
+        self._goal = goal
         memory = self._memory
         blocks = 0
         observation = self._config.observation
@@ -353,6 +358,8 @@ class ComputerSession:
             if observation == "both"
             else SYSTEM_PROMPT
         )
+        if self._strict:
+            system_prompt = f"{system_prompt}\n\n{STRICT_COMPUTER_RULES}"
         while True:
             self._elements = {}
             if self._stop.is_set():
@@ -427,7 +434,7 @@ class ComputerSession:
             signature = _signature(action, resolved if isinstance(resolved, tuple) else None)
             repeat = signature is not None and memory.is_repeat(signature)
             # Tekrar, mevcut engel sayacından geçer; hiçbir güvenlik denetimi atlanmaz/gevşetilmez.
-            outcome = _REPEAT_BLOCK if repeat else await self._act(
+            outcome = self._repeat_hint(action) if repeat else await self._act(
                 action, turn_id, screens, layout, limit
             )
             if isinstance(outcome, SessionResult):
@@ -479,6 +486,28 @@ class ComputerSession:
         ):
             return f"Öğe {action.element} hiçbir ekranda değil; tıklanmadı"
         return point
+
+    def _repeat_hint(self, action: Action) -> str:
+        """Tekrar engeli notu; click_element için alternatif etkileşimli öğeler ve klavye önerir."""
+        if action.type != "click_element":
+            return _REPEAT_BLOCK
+        repeated = self._elements.get(action.element or 0)
+        repeated_name = repeated.name if repeated is not None else None
+        alternatives: list[str] = []
+        for item in self._elements.values():
+            if not item.interactive or item.name == repeated_name:
+                continue
+            name = mask_screen_secrets(_LIST_SYNTAX.sub(" ", item.name))
+            kind = " ".join(_LIST_SYNTAX.sub(" ", item.kind).split())[:40]
+            alternatives.append(f'[{item.id}] {kind} "{name}"')
+            if len(alternatives) >= 5:
+                break
+        if alternatives:
+            return (
+                f"{_REPEAT_BLOCK} Diğer öğeler: {', '.join(alternatives)}. "
+                "Klavye dene: tab, enter, ctrl+s, alt+f."
+            )
+        return f"{_REPEAT_BLOCK} Klavye dene: tab, enter, ctrl+s, alt+f."
 
     def _element_label(self, action: Action) -> str | None:
         """Onay penceresi için öğe türü ve (maskeli) adı; kullanıcı neye tıklanacağını görür."""
@@ -714,6 +743,17 @@ class ComputerSession:
                 resolved = self._element_point(action)
                 if isinstance(resolved, str):
                     return resolved
+                element = self._elements.get(action.element or 0)
+                if element is not None:
+                    safe_name = mask_screen_secrets(_LIST_SYNTAX.sub(" ", element.name))
+                    destructive = destructive_unrequested(safe_name, self._goal)
+                    if destructive is not None:
+                        self._audit.emit(
+                            "computer_destructive_blocked",
+                            turn_id=turn_id,
+                            element_kind=element.kind,
+                        )
+                        return destructive
                 point = resolved
             elif action.x is not None and action.y is not None:
                 try:

@@ -187,7 +187,7 @@ class Env:
         self.approvals: list[tuple[str, dict[str, Any]]] = []
         self.approve_result = approve_result
         self.deadline = deadline
-        self.config = config or ComputerUseConfig(
+        self.config = config or ComputerUseConfig(observation="screen",
             enabled=True, model="m", step_delay_seconds=0.6
         )
 
@@ -263,7 +263,7 @@ async def test_click_then_done_sends_only_latest_image_on_user_message() -> None
 
 async def test_click_uses_selected_monitor_and_provider_receives_each_screen() -> None:
     backend = FakeBackend(monitor_rects=[(0, 0, 8, 4), (8, 0, 8, 4)])
-    config = ComputerUseConfig(
+    config = ComputerUseConfig(observation="screen",
         # En küçük izinli genişlik; 8x4 görüntü küçültülmez → ölçek 1:1.
         enabled=True, model="m", screenshot_width=640, step_delay_seconds=0
     )
@@ -337,7 +337,7 @@ async def test_mode_is_read_live_each_sensitive_step() -> None:
 
 
 async def test_auto_mode_executes_sensitive_action_without_approval() -> None:
-    config = ComputerUseConfig(enabled=True, model="m", mode="auto")
+    config = ComputerUseConfig(observation="screen", enabled=True, model="m", mode="auto")
     env = Env(click(sensitive=True), DONE, config=config)
 
     result = await env.run()
@@ -366,7 +366,7 @@ async def test_esc_during_approval_prevents_the_action() -> None:
 
 
 async def test_auto_mode_still_blocks_key_without_approval() -> None:
-    config = ComputerUseConfig(enabled=True, model="m", mode="auto")
+    config = ComputerUseConfig(observation="screen", enabled=True, model="m", mode="auto")
     env = Env(act(type="key", keys="win+r"), config=config)
 
     result = await env.run()
@@ -380,7 +380,7 @@ async def test_auto_mode_still_blocks_process_without_approval() -> None:
     blocked = (r"C:\Windows\System32\cmd.exe", 7)
     backend = FakeBackend(foreground=blocked)
     backend.at = blocked  # tıklama cmd.exe penceresine düşer
-    config = ComputerUseConfig(enabled=True, model="m", mode="auto")
+    config = ComputerUseConfig(observation="screen", enabled=True, model="m", mode="auto")
     # Engel modele söylenir; model inatla tekrarlarsa üçüncü engelde oturum biter.
     env = Env(click(sensitive=True), click(sensitive=True), click(sensitive=True),
               DONE, backend=backend, config=config)
@@ -605,7 +605,8 @@ async def test_stop_already_set_does_nothing() -> None:
 
 
 async def test_max_steps_limit() -> None:
-    env = Env(click(), config=ComputerUseConfig(enabled=True, model="m", max_steps=2))
+    env = Env(click(), config=ComputerUseConfig(
+        observation="screen", enabled=True, model="m", max_steps=2))
     result = await env.run()
     assert result.reason == "limit" and result.steps == 2
     assert len(env.backend.calls) == 2
@@ -619,7 +620,8 @@ async def test_deadline_timeout_uses_two_second_margin() -> None:
 
 
 async def test_max_minutes_timeout() -> None:
-    config = ComputerUseConfig(enabled=True, model="m", max_minutes=0.5, step_delay_seconds=3)
+    config = ComputerUseConfig(
+        observation="screen", enabled=True, model="m", max_minutes=0.5, step_delay_seconds=3)
     # Scroll döngü korumasından muaftır; click() aynı imzayla 3. adımda engellenirdi.
     env = Env(act(type="scroll", x=2, y=1, dy=1), config=config)
     result = await env.run()
@@ -629,7 +631,7 @@ async def test_max_minutes_timeout() -> None:
 async def test_coordinates_are_scaled_to_screen() -> None:
     # 1280x8 ekran 640 piksel genişliğe küçülür (640x4); (320, 2) gerçek (640, 4)'e düşer.
     backend = FakeBackend(size=(1280, 8))
-    config = ComputerUseConfig(
+    config = ComputerUseConfig(observation="screen",
         enabled=True, model="m", screenshot_width=640, step_delay_seconds=0
     )
     env = Env(click(320, 2), act(type="scroll", x=320, y=2, dy=3), DONE, backend=backend,
@@ -917,7 +919,7 @@ async def test_deadline_before_verification_is_unverified_done() -> None:
 
 def _big_env(*contents: str) -> Env:
     # Izgara testleri için geniş ekran; 640 genişlikte görüntü küçültülmez (ölçek 1:1).
-    config = ComputerUseConfig(
+    config = ComputerUseConfig(observation="screen",
         enabled=True, model="m", screenshot_width=640, step_delay_seconds=0
     )
     return Env(*contents, backend=FakeBackend(size=(400, 200)), config=config)

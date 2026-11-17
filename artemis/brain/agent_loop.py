@@ -27,6 +27,7 @@ from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.providers import Provider
 from artemis.brain.router import ProviderRouter
 from artemis.brain.streaming import ResponseStream
+from artemis.brain.strict_rules import STRICT_CHAT_RULES, strict_rules_on
 from artemis.brain.tiering import choose_model
 from artemis.config.settings import Settings
 from artemis.memory.companion import content_private, content_tainted, read_companion
@@ -524,6 +525,11 @@ class AgentLoop:
                 content=self.system_prompt
                 if self.system_prompt is not None
                 else SYSTEM_PROMPT
+                + (
+                    "\n" + STRICT_CHAT_RULES
+                    if strict_rules_on(settings.models.get(settings.primary_model))
+                    else ""
+                )
                 + "\nKullanıcı mesajlarının başındaki [tarih saat] o mesajın yerel zamanıdır; "
                 "son mesajınki şu anki zamandır. Eski bir işi şimdi sürüyor sanma."
                 + "\nİzinli uygulama takma adları (name argümanı): "

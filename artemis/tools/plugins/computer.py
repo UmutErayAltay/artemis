@@ -25,6 +25,7 @@ from artemis.brain.errors import ProviderError, RateLimitedError, RetryableProvi
 from artemis.brain.models import Completion, Message
 from artemis.brain.providers import Provider
 from artemis.brain.router import ProviderRouter
+from artemis.brain.strict_rules import strict_rules_on
 from artemis.computer.session import (
     ComputerSession,
     ScreenBusyError,
@@ -164,6 +165,7 @@ class ComputerUse(BaseTool):
                 memory=memory,
                 # Telegram kanalı son kareyi (yalnız RAM) isteğe bağlı iletmek için kaydeder.
                 on_frame=frame_sink,
+                strict=strict_rules_on(settings.models.get(names[0])),
             )
             # İptal asyncio.Event'tir, durdurma threading.Event: küçük bir görev köprüler.
             watcher = asyncio.create_task(_relay_cancel(context.cancelled, stop))
