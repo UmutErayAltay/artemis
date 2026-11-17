@@ -65,8 +65,9 @@ class ComputerUse(BaseTool):
     done_label = "Bilgisayar oturumu bitti"
     description = (
         "Ekranı görüp fareyle ve klavyeyle verilen hedefi yapar (yalnız masaüstü uygulaması). "
-        "Her adımda ekran görüntüsü bir görsel modele gider; hassas adımlar ayrıca sorulur, "
-        "Esc durdurur."
+        "Ön planda Artemis varken başka bir uygulamayla (ör. tarayıcı, oynatıcı) etkileşecekse "
+        "önce window_list ve window_control ile hedef pencereyi öne getir. "
+        "Hassas adımlar ayrıca sorulur, Esc durdurur."
     )
     args_model = ComputerUseArguments
     risk = Risk.CONFIRM_REQUIRED

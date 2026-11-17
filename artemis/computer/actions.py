@@ -32,6 +32,13 @@ NAMED_KEYS: frozenset[str] = frozenset(
         "pageup",
         "pagedown",
         "insert",
+        "media_play_pause",
+        "media_stop",
+        "media_next",
+        "media_prev",
+        "volume_mute",
+        "volume_up",
+        "volume_down",
     }
     | {f"f{number}" for number in range(1, 25)}
 )
@@ -47,6 +54,14 @@ _ALIASES: dict[str, str] = {
     "meta": "win",
     "pgup": "pageup",
     "pgdn": "pagedown",
+    "play_pause": "media_play_pause",
+    "mediaplaypause": "media_play_pause",
+    "media_play": "media_play_pause",
+    "media_pause": "media_play_pause",
+    "next_track": "media_next",
+    "prev_track": "media_prev",
+    "previous_track": "media_prev",
+    "mute": "volume_mute",
 }
 
 
@@ -502,8 +517,9 @@ Memory fields (short Turkish strings):
 Working rules:
 - Prefer keyboard shortcuts (e.g. "ctrl+l" then "type" URL then "enter") and "click_element" on
   named controls. To scroll a list or page in this mode, use "key" with "pagedown", "pageup",
-  "down", "up", "home", or "end". If the element list is empty or does not expose the needed
-  control, try a keyboard shortcut or use "ask_user".
+  "down", "up", "home", or "end". For media playback, "key" supports "media_play_pause",
+  "media_next", "media_prev", "media_stop", and "volume_mute". If the element list is empty or
+  does not expose the needed control, try a keyboard shortcut or use "ask_user".
 - Do not emit "done" until the element list shows the goal state; the done text must state what
   is present. Never redo a part listed as COMPLETED in the progress note.
 - Repeating the same action is blocked by the system; change your method if nothing changed.

@@ -63,6 +63,8 @@ _VK: dict[str, int] = {
     "delete": 0x2E, "space": 0x20, "up": 0x26, "down": 0x28, "left": 0x25,
     "right": 0x27, "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22,
     "insert": 0x2D,
+    "media_play_pause": 0xB3, "media_stop": 0xB2, "media_next": 0xB0, "media_prev": 0xB1,
+    "volume_mute": 0xAD, "volume_down": 0xAE, "volume_up": 0xAF,
 }  # fmt: skip
 _VK.update({f"f{n}": 0x70 + n - 1 for n in range(1, 25)})
 _VK.update({chr(c): c - 32 for c in range(ord("a"), ord("z") + 1)})  # 'a' -> 0x41
