@@ -794,9 +794,23 @@ class ComputerSession:
         window: str | None = None
         # Girdinin düşeceği pencerenin kimliği (hwnd): onay ve gönderim buna bağlanır (ADR 0056).
         target_id: int | None = None
+        in_uia_element = (
+            action.type == "click"
+            and action.x is not None
+            and action.y is not None
+            and any(
+                el.rect[0] <= action.x < el.rect[0] + el.rect[2]
+                and el.rect[1] <= action.y < el.rect[1] + el.rect[3]
+                for el in self._elements.values()
+            )
+        )
         if (
             self._config.observation == "uia"
-            or (self._config.observation == "hybrid" and not self._step_has_image)
+            or (
+                self._config.observation == "hybrid"
+                and not self._step_has_image
+                and not in_uia_element
+            )
         ) and action.type in _POINTER_ACTIONS:
             return _NO_COORDS_IN_UIA
         # Modelin koordinatı seçtiği ekranın görüntüsüne göredir; fare ise sanal masaüstü.
@@ -822,11 +836,29 @@ class ComputerSession:
                     return resolved
                 point = resolved
             elif action.x is not None and action.y is not None:
-                try:
-                    scaled = scale_point(action.x, action.y, screen.shot, screen.size)
-                    point = (scaled[0] + screen.origin[0], scaled[1] + screen.origin[1])
-                except ValueError as error:
-                    return self._result("invalid", str(error))
+                # UIA öğe listesi sanal masaüstü koordinatı taşır (ör. 2. monitör x>=1920):
+                # model screen=1 bırakıp bu koordinatı verirse hedef monitörü eşle.
+                virtual_match = (
+                    next(
+                        (
+                            item
+                            for item in screens
+                            if item.origin[0] <= action.x < item.origin[0] + item.size[0]
+                            and item.origin[1] <= action.y < item.origin[1] + item.size[1]
+                        ),
+                        None,
+                    )
+                    if action.screen == 1 and len(screens) > 1
+                    else None
+                )
+                if virtual_match is not None:
+                    point = (action.x, action.y)
+                else:
+                    try:
+                        scaled = scale_point(action.x, action.y, screen.shot, screen.size)
+                        point = (scaled[0] + screen.origin[0], scaled[1] + screen.origin[1])
+                    except ValueError as error:
+                        return self._result("invalid", str(error))
             destructive = self._destructive_target(action, point, turn_id)
             if destructive is not None:
                 return destructive
