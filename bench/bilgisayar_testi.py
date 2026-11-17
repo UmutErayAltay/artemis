@@ -20,6 +20,7 @@ from typing import Any
 from artemis.brain.router import ProviderRouter
 from artemis.brain.strict_rules import strict_rules_on
 from artemis.computer.session import ComputerSession
+from artemis.computer.windows import UiElement
 from artemis.config.settings import ComputerUseConfig, Settings
 from artemis.safety.audit import AuditLog
 
@@ -270,8 +271,46 @@ class SimBackend:
     def focused_value_contains(self, expected: str, timeout: float) -> bool | None:
         return None  # UIA kanıtı yok: model kararı kalır (ADR 0070)
 
-    def ui_elements(self, hwnd: int) -> list[Any]:
-        return []  # Benzetimde UIA ağacı yok (ADR 0073); bench görüntü kipini ölçer.
+    def ui_elements(self, hwnd: int) -> list[UiElement]:
+        """Sahte uygulamanın görünür öğelerini UIA biçimine çevirir (uia/both testi için)."""
+        kinds = {
+            "button": "Button", "field": "Edit", "checkbox": "CheckBox",
+            "item": "ListItem", "link": "Hyperlink", "tab": "TabItem", "text": "Text",
+        }
+        with self._lock:
+            out: list[UiElement] = []
+            for element in self.app.elements():
+                x, y, w, h = self.app._visible_rect(element)
+                if element.scrolls and not 120 <= y + h // 2 <= HEIGHT - 20:
+                    continue
+                if w <= 0 or h <= 0 or x < 0 or y < 0 or x >= WIDTH or y >= HEIGHT:
+                    continue
+                w = min(w, WIDTH - x)
+                h = min(h, HEIGHT - y)
+                name = element.label
+                if element.kind == "field" and element.key in self.app.values:
+                    name = f"{name}: {self.app.values[element.key]}"
+                elif element.kind == "checkbox":
+                    state = "işaretli" if self.app.values.get(element.key) else "işaretsiz"
+                    name = f"{name} ({state})"
+                out.append(UiElement(
+                    id=len(out) + 1,
+                    kind=kinds.get(element.kind, "Custom"),
+                    name=name[:80],
+                    rect=(x, y, w, h),
+                    interactive=element.kind != "text",
+                    focused=element.key == self.app.focus,
+                ))
+            if self.app.message:
+                out.append(UiElement(
+                    id=len(out) + 1,
+                    kind="Text",
+                    name=self.app.message[:80],
+                    rect=(16, HEIGHT - 40, WIDTH - 32, 40),
+                    interactive=False,
+                    focused=False,
+                ))
+            return out
 
 
 @dataclass

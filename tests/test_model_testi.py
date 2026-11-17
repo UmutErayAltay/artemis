@@ -267,3 +267,43 @@ def test_child_environment_passes_credential_prefix(monkeypatch: pytest.MonkeyPa
     env = child_environment()
     assert env["ARTEMIS_CREDENTIAL_PREFIX"] == "Artemis-test"
     assert "OPENROUTER_API_KEY" not in env  # sırlar yine geçmez
+
+
+def test_sim_backend_exposes_uia_elements_and_works_in_uia_mode(tmp_path: Path) -> None:
+    pytest.importorskip("PySide6")
+    import asyncio
+    import json as _json
+    import threading
+
+    from artemis.brain.fake import ScriptedProvider
+    from artemis.brain.models import Completion
+    from artemis.computer.session import ComputerSession
+    from artemis.config.settings import ComputerUseConfig
+    from artemis.safety.audit import AuditLog
+    from bench import bilgisayar_testi as sim
+
+    app = sim._save_dialog()
+    backend = sim.SimBackend(app)
+    elements = backend.ui_elements(1)
+    assert [e.name for e in elements[:4]] == [
+        "Belge1.txt dosyasındaki değişiklikleri kaydetmek istiyor musunuz?",
+        "Kaydet", "Kaydetme", "İptal",
+    ]
+    assert elements[1].kind == "Button" and elements[1].interactive is True
+    assert elements[0].interactive is False
+
+    click_el = {"type": "click_element", "element": 2, "reason": "Kaydet düğmesi"}
+    done = {"type": "done", "text": "Belge1.txt kaydedildi.", "reason": "bitti"}
+    verdict = {"verified": True, "evidence": "Belge1.txt kaydedildi yazıyor"}
+    provider = ScriptedProvider([Completion(content=_json.dumps(item))
+                                 for item in (click_el, done, verdict)])
+    session = ComputerSession(
+        provider=provider, backend=backend, approve=lambda *_: True,
+        audit=AuditLog(tmp_path / "audit.jsonl"),
+        config=ComputerUseConfig(
+            enabled=True, mode="auto", step_delay_seconds=0, observation="uia"
+        ),
+        own_pid=1, stop=threading.Event(), on_step=lambda _l: None, provider_timeout=5,
+    )
+    result = asyncio.run(session.run("kaydet", "t", None))
+    assert result.reason == "done" and sim.SCENARIOS[0].success(app, result.summary)
