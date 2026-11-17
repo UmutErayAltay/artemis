@@ -76,6 +76,7 @@ class Action(BaseModel):
     x: int | None = None
     y: int | None = None
     element: int | None = Field(default=None, ge=1, le=1000)
+    ratio: float | None = Field(default=None, ge=0.0, le=1.0)
     screen: int = Field(default=1, ge=1, le=8)
     button: Literal["left", "right", "middle"] = "left"
     double: bool = False
@@ -160,6 +161,8 @@ class Action(BaseModel):
 
         if self.repeat > 1 and self.type != "key":
             raise ValueError("Repeat yalnız key eyleminde kullanılabilir.")
+        if self.ratio is not None and self.type != "click_element":
+            raise ValueError("Ratio yalnız click_element eyleminde kullanılabilir.")
 
         return self
 
@@ -513,8 +516,10 @@ there are no screenshot coordinates). Examples:
 
 Required fields by action type:
 - "click_element": element is the required 1-based id from the current "Pencere öğeleri" list
-  (clicks the element's centre). Optional "button" is "left", "right", or "middle", and optional
-  "double" is a boolean.
+  (clicks the element's centre by default). Optional "ratio" (0.0 to 1.0) clicks at that
+  horizontal fraction across the element (0.0 = left edge, 0.5 = centre, 1.0 = right edge) —
+  use "ratio" for sliders and video seek bars (e.g. target_seconds / total_seconds). Optional
+  "button" is "left", "right", or "middle", and optional "double" is a boolean.
 - "type": text is required, 1-500 characters, and must not contain a newline.
 - "key": keys is required and must be a valid combination such as "ctrl+l". Optional "repeat"
   (1-20, default 1) presses a single navigation/media key multiple times in one step. Never
@@ -539,12 +544,12 @@ Working rules:
   named controls. To scroll a list or page in this mode, use "key" with "pagedown", "pageup",
   "down", "up", "home", or "end". For media playback, "key" supports "media_play_pause",
   "media_next", "media_prev", "media_stop", and "volume_mute". To seek a video to a target
-  time (e.g. 1:40 out of 31:19), use "click" directly on the progress/seek bar at the
-  proportional x position (bar_x + bar_w * target_seconds / total_seconds, bar_y + bar_h / 2)
-  instead of pressing "right" repeatedly or using "click_element" (which clicks the 50%
-  midpoint); a 5-10 second difference is acceptable. Never send "escape" — it stops the session;
-  use "f" or click "Exit Fullscreen" to exit fullscreen. If the element list is empty or does
-  not expose the needed control, try a keyboard shortcut or use "ask_user".
+  time (e.g. 7:39 out of 31:19), use "click_element" on the slider/seek bar WITH "ratio":
+  target_seconds / total_seconds (e.g. {"type": "click_element", "element": 10, "ratio": 0.244});
+  NEVER omit "ratio" on a seek bar (omitting it clicks 50% midpoint), and do not press "right"
+  repeatedly. A 5-10 second difference is acceptable. Never send "escape" — it stops the session;
+  use "f" or click "Exit Fullscreen" to exit fullscreen. If the element list is empty or does not
+  expose the needed control, try a keyboard shortcut or use "ask_user".
 - Do not emit "done" until the element list shows the goal state; the done text must state what
   is present. Never redo a part listed as COMPLETED in the progress note.
 - Repeating the same action is blocked by the system; change your method if nothing changed.

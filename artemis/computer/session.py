@@ -506,7 +506,10 @@ class ComputerSession:
         left, top, right, bottom = layout.window[1]
         if ew <= 0 or eh <= 0 or ex < left or ey < top or ex + ew > right or ey + eh > bottom:
             return f"Öğe {action.element} ön plan penceresinin dışında; tıklanmadı"
-        point = (ex + ew // 2, ey + eh // 2)
+        tx = ex + (
+            round((ew - 1) * action.ratio) if action.ratio is not None else ew // 2
+        )
+        point = (tx, ey + eh // 2)
         if not any(
             mx <= point[0] < mx + mw and my <= point[1] < my + mh
             for mx, my, mw, mh in layout.monitors
