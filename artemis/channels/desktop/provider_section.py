@@ -375,7 +375,7 @@ class ProviderSection(QWidget):
             text, color = self._problem, self._colors["error"]
         elif model is not None:
             text = f"Beyin: {settings.primary_model} ({self._connection_label(model)})"
-            if settings.hard_model and settings.hard_model != settings.primary_model:
+            if settings.hard_model:
                 text += f" · Zor işler: {settings.hard_model}"
             if settings.fallback_model and settings.fallback_model != settings.primary_model:
                 text += f" · Yedek: {settings.fallback_model}"
@@ -409,7 +409,7 @@ class ProviderSection(QWidget):
                 self._connection_label(model),
                 model.model,
                 model.kind == "image",
-                alias == settings.hard_model and alias != settings.primary_model,
+                alias == settings.hard_model,
                 report_summary(reports[alias]) if alias in reports else "",
             )
             for alias, model in settings.models.items()
@@ -854,12 +854,8 @@ class ProviderSection(QWidget):
             return
         # Takma ada göre yazılır: aynı model kimliğini paylaşan modeller karışmaz.
         raw["primary_model"] = alias
-        for role in ("hard_model", "fallback_model"):
-            if raw.get(role) == alias:
-                raw.pop(role)  # beyin olan model ayrıca zor işler/yedek sayılmaz
-        computer = raw.get("computer_use")
-        if isinstance(computer, dict) and computer.get("model") == alias:
-            computer["model"] = ""
+        if raw.get("fallback_model") == alias:
+            raw.pop("fallback_model")  # beyin olan model kendi arıza yedeği olamaz
         if not self._write(raw):
             return
         self.reload()
@@ -1000,9 +996,9 @@ class ProviderSection(QWidget):
         computer_tip = "Ekranı görüp tıklama bu modelle çalışır; seçilmezse beyin kullanılır."
         for button, name, on, tip, free in (
             (self.primary_button, "Beyin", brain, None, not image),
-            (self.hard_button, "Zor işler", hard, hard_tip, not image and not brain),
+            (self.hard_button, "Zor işler", hard, hard_tip, not image),
             (self.fallback_button, "Yedek", fallback, fallback_tip, not image and not brain),
-            (self.computer_button, "Bilgisayar", computer, computer_tip, not image and not brain),
+            (self.computer_button, "Bilgisayar", computer, computer_tip, not image),
         ):
             button.setChecked(on)
             button.setText(("✓ " if on else "") + name)
@@ -1034,7 +1030,7 @@ class ProviderSection(QWidget):
         if model is None or model.kind == "image":
             self.status.setText(f"Resim modeli {name.lower()} modeli olamaz; sohbet modeli seçin.")
             return
-        if alias == settings.primary_model:
+        if key == "fallback_model" and alias == settings.primary_model:
             self.status.setText(f"Bu model zaten beyin; {name.lower()} için başka bir model seçin.")
             return
         # computer_use.model iç içe alandır; diğer roller kök anahtardır.
