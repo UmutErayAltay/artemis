@@ -202,8 +202,11 @@ class SessionMemory:
             self.progress = mask_screen_secrets(action.progress)
 
     def is_repeat(self, signature: tuple[Any, ...]) -> bool:
-        """Önerilen eylem dahil aynı imza son 6 uygulanmış adımda >=3 olur mu?"""
-        recent = [record for record in self.steps if not record.note][-(_REPEAT_WINDOW - 1) :]
+        """Son 6 uygulanmış adımda >=3 (ardışık aynı `type` için >=2) olur mu?"""
+        applied = [record for record in self.steps if not record.note]
+        if applied and signature[0] == "type" and applied[-1].signature == signature:
+            return True
+        recent = applied[-(_REPEAT_WINDOW - 1) :]
         return 1 + sum(1 for record in recent if record.signature == signature) >= _REPEAT_LIMIT
 
     def render(self) -> str:
@@ -549,6 +552,11 @@ class ComputerSession:
 
     def _repeat_hint(self, action: Action) -> str:
         """Tekrar engeli notu; click_element için alternatif etkileşimli öğeler ve klavye önerir."""
+        if action.type == "type":
+            return (
+                "AYNI METİN TEKRARLANMADI (type): Bu metni az önce yazdın; tekrar yazma. "
+                "Aramayı/formu tetiklemek için enter bas veya listeden bir öğeye tıkla."
+            )
         if action.type != "click_element":
             return _REPEAT_BLOCK
         repeated = self._elements.get(action.element or 0)

@@ -92,6 +92,11 @@ metnini aynen aktar. Araç success=false veya status=sent döndürdüyse işi "y
 başlatıldı / getirildi" diye bildirme; doğrulanamadığını ve neyin eksik kaldığını söyle.
 Sonucundaki doğrulama durumunu (ekranda doğrulandı / doğrulanamadı) olduğu gibi yansıt,
 "doğrulayamadım" kalıbına kendin ekleme yapma.
+Araştırma işinde: kullanıcı "raporu aç" derse önce research_status ile `report_path` bilgisini
+al ve doğrudan `open_application` (Not Defteri, `file_path=report_path`) ile aç; raporu
+research_result + create_file ile yeniden kopyalama. Kullanıcı raporu sohbette görmek veya
+okumak isterse ("araştırma sonucu nerede", "raporu göster") research_result ile okuyup ana
+bulguları ve kaynakları doğrudan sun, yalnız 1-2 cümlelik özetle geçiştirme.
 Yanıtların kısa ve doğrudan olsun: çoğu yanıt bir iki cümle, başlık ve liste yok. Sorulmadıkça
 kaynağı, doğrulama sürecini, önceki denemeleri ya da araç ayrıntısını anlatma. Sonuç
 doğrulanmadıysa bunu tek kısa ifadeyle söyle (ör. "görünüşe göre"); ayrı paragraf açma."""
@@ -456,6 +461,7 @@ class _Turn:
     seen: set[str] = field(default_factory=set)
     denied: set[str] = field(default_factory=set)
     memory_saved: bool = False
+    empty_retries: int = 0
 
     def remaining(self) -> float:
         return self.settings.max_seconds - (time.monotonic() - self.start)
@@ -822,6 +828,18 @@ class AgentLoop:
         if usage.cost_usd > settings.daily_budget_usd:
             return "budget", "Günlük maliyet tavanı aşıldı; yeni işlem yapılmadı."
         if not completion.tool_calls:
+            if not completion.content.strip() and turn.empty_retries == 0:
+                turn.empty_retries += 1
+                turn.messages.append(
+                    Message(
+                        role="user",
+                        content=(
+                            "Boş yanıt döndün. İstenen işlemi tamamlamak için uygun aracı "
+                            "çağır ya da kullanıcıya kısa Türkçe yanıt ver."
+                        ),
+                    )
+                )
+                return None
             answer = completion.content or "Model boş yanıt döndürdü."
             return "completed", honest_memory_claim(answer, turn.memory_saved, turn.text)
         assistant_message = Message(

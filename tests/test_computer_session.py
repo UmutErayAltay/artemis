@@ -1007,7 +1007,7 @@ async def test_typed_text_only_as_length_in_prompt_history_and_audit() -> None:
     typed = act(type="type", text=TYPED_TEXT, reason="yaz")
     env = _big_env(typed, typed, typed, DONE, YES)
     await env.run()
-    assert len(env.backend.calls) == 2 and env.audit.named("computer_blocked")
+    assert len(env.backend.calls) == 1 and env.audit.named("computer_blocked")
     prompts = " ".join(_prompt(env, index) for index in range(1, 4))
     assert f"{len(TYPED_TEXT)} karakter" in prompts
     assert TYPED_TEXT not in prompts and TYPED_TEXT not in str(env.audit.events)
@@ -1326,3 +1326,20 @@ def test_windows_focused_value_env_not_argv(
         raise subprocess.TimeoutExpired("powershell.exe", 1)
 
     assert windows.focused_value_contains(TYPED_TEXT, 1.0, runner=boom) is None
+
+
+def test_action_memory_blocks_consecutive_identical_type() -> None:
+    from artemis.computer.actions import Action
+    from artemis.computer.session import StepRecord, _signature
+
+    mem = SessionMemory()
+    first = Action(type="type", text="Cahit Berkay", reason="arama", sensitive=False)
+    sig = _signature(first)
+    assert sig is not None
+    assert not mem.is_repeat(sig)
+    mem.add(StepRecord(action="type", signature=sig))
+    # Hemen ardışık aynı metin engellenir; araya başka adım girerse tek sefer daha izin verilir.
+    assert mem.is_repeat(sig)
+    other = _signature(Action(type="key", keys="enter", reason="onayla", sensitive=False))
+    mem.add(StepRecord(action="key", signature=other))
+    assert not mem.is_repeat(sig)

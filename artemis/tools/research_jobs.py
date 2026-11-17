@@ -275,7 +275,11 @@ class ResearchJobs:
         """Önce geçici dosya, sonra `os.replace`: yarım rapor asla görünmez."""
         listing = "\n".join(f"- {url}" for url in sources) or "- (kaynak adresi toplanmadı)"
         title = " ".join(topic.split())
-        body = f"# Araştırma: {title}\n\n{text.strip()}\n\n## Kaynaklar\n{listing}\n"
+        stripped = text.strip()
+        if stripped.startswith("# "):
+            body = f"{stripped}\n\n## Kaynaklar\n{listing}\n"
+        else:
+            body = f"# Araştırma: {title}\n\n{stripped}\n\n## Kaynaklar\n{listing}\n"
         self.report_dir.mkdir(parents=True, exist_ok=True)
         target = self.report_path(job_id)
         temporary = target.with_suffix(".tmp")

@@ -315,3 +315,24 @@ async def test_disabled_flag_hides_tools_and_refuses(tmp_path: Path) -> None:
     off.context.settings = off.settings
     result = await off.call("research_start", topic="konu")
     assert not result.success and "kapalı" in result.message and off.asked == []
+
+
+async def test_write_report_avoids_duplicate_heading_and_status_exposes_report_path(
+    tmp_path: Path,
+) -> None:
+    provider = scripted(
+        search_call("penguen", 1),
+        Completion(content="# Araştırma Raporu: Penguenler\n\nMetin."),
+    )
+    env = Env(tmp_path, provider)
+    started = await env.call("research_start", topic="Penguenler", max_searches=3)
+    assert started.success
+    job = env.wait()
+    job_id = str(job["id"])
+    written = env.jobs.report_path(job_id).read_text(encoding="utf-8")
+    assert written.startswith("# Araştırma Raporu: Penguenler\n")
+    assert "# Araştırma: Penguenler" not in written
+
+    status = await env.call("research_status", job_id=job_id)
+    assert status.success
+    assert status.data["report_path"] == f"state/arastirma/{job_id}.md"
