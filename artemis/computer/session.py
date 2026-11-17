@@ -487,6 +487,36 @@ class ComputerSession:
             return f"Öğe {action.element} hiçbir ekranda değil; tıklanmadı"
         return point
 
+    def _destructive_target(
+        self, action: Action, point: tuple[int, int] | None, turn_id: str
+    ) -> str | None:
+        """ADR 0078 kapısı; öğeye, koordinata ya da odaktaki öğeye giden her girdide çalışır.
+
+        Öğe: click_element'te seçilen öğe; koordinatlı tıklamada noktayı içeren en küçük öğe
+        (both kipinde UIA listesi vardır); onaylayan tuşta (enter/space) odaktaki öğe. Yalnız
+        ekran görüntüsü kipinde öğe adı yoktur, kapı çalışmaz (ADR 0078 bilinen tavan)."""
+        element: UiElement | None = None
+        if action.type == "click_element":
+            element = self._elements.get(action.element or 0)
+        elif action.type in _POINTER_ACTIONS and point is not None:
+            hits = [
+                item for item in self._elements.values()
+                if item.rect[0] <= point[0] < item.rect[0] + item.rect[2]
+                and item.rect[1] <= point[1] < item.rect[1] + item.rect[3]
+            ]
+            element = min(hits, key=lambda item: item.rect[2] * item.rect[3], default=None)
+        elif action.type == "key" and set(parse_keys(action.keys or "")) & {"enter", "space"}:
+            element = next((item for item in self._elements.values() if item.focused), None)
+        if element is None:
+            return None
+        safe_name = mask_screen_secrets(_LIST_SYNTAX.sub(" ", element.name))
+        reason = destructive_unrequested(safe_name, self._goal)
+        if reason is not None:
+            self._audit.emit(
+                "computer_destructive_blocked", turn_id=turn_id, element_kind=element.kind
+            )
+        return reason
+
     def _repeat_hint(self, action: Action) -> str:
         """Tekrar engeli notu; click_element için alternatif etkileşimli öğeler ve klavye önerir."""
         if action.type != "click_element":
@@ -743,17 +773,6 @@ class ComputerSession:
                 resolved = self._element_point(action)
                 if isinstance(resolved, str):
                     return resolved
-                element = self._elements.get(action.element or 0)
-                if element is not None:
-                    safe_name = mask_screen_secrets(_LIST_SYNTAX.sub(" ", element.name))
-                    destructive = destructive_unrequested(safe_name, self._goal)
-                    if destructive is not None:
-                        self._audit.emit(
-                            "computer_destructive_blocked",
-                            turn_id=turn_id,
-                            element_kind=element.kind,
-                        )
-                        return destructive
                 point = resolved
             elif action.x is not None and action.y is not None:
                 try:
@@ -761,6 +780,9 @@ class ComputerSession:
                     point = (scaled[0] + screen.origin[0], scaled[1] + screen.origin[1])
                 except ValueError as error:
                     return self._result("invalid", str(error))
+            destructive = self._destructive_target(action, point, turn_id)
+            if destructive is not None:
+                return destructive
             blocked, window, target_id = await self._target(target_kind, point)
             if blocked:
                 return blocked

@@ -48,7 +48,13 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.errors import ProviderError
-from artemis.brain.model_report import SCENARIO_IDS, merge_retry, pass_rate, suggest_layout
+from artemis.brain.model_report import (
+    SCENARIO_IDS,
+    merge_retry,
+    pass_rate,
+    report_summary,
+    suggest_layout,
+)
 from artemis.brain.models import Message
 from artemis.brain.providers import (
     ClaudeCliProvider,
@@ -82,7 +88,6 @@ from artemis.tools.platform import child_environment
 # ücretli modelde tahmini maliyet ve bütçe tavanı bundan hesaplanır.
 TEST_INPUT_TOKENS = 520_000  # + bilgisayar senaryoları (ekran görüntüleri)
 TEST_OUTPUT_TOKENS = 20_000
-_ROLE_TEXT = {"ana": "ana model", "zor": "zor işler", "bilgisayar": "bilgisayar kullanımı"}
 
 CLI_MODELS = ("haiku", "sonnet", "opus")
 CLI_KEY = ""  # bağlantı seçicide Claude aboneliğinin verisi (uç kimlikleri boş olamaz)
@@ -403,7 +408,7 @@ class ProviderSection(QWidget):
                 model.model,
                 model.kind == "image",
                 alias == settings.hard_model and alias != settings.primary_model,
-                _test_summary(reports[alias]) if alias in reports else "",
+                report_summary(reports[alias]) if alias in reports else "",
             )
             for alias, model in settings.models.items()
         ]
@@ -991,7 +996,7 @@ class ProviderSection(QWidget):
             if tip:
                 button.setToolTip(tip if free else reason)
         summary = (
-            _test_summary(self._reports_seen[selected]) if selected in self._reports_seen else ""
+            report_summary(self._reports_seen[selected]) if selected in self._reports_seen else ""
         )
         self.test_result.setText(
             summary.replace("Test:", "Son test:", 1) if summary else "Bu model henüz test edilmedi."
@@ -1232,7 +1237,7 @@ class ProviderSection(QWidget):
         )
         self._render_test_list()
         self.reload()
-        self.status.setText(f"{alias}: {_test_summary(report)}. {report.get('summary', '')}")
+        self.status.setText(f"{alias}: {report_summary(report)}. {report.get('summary', '')}")
 
     def _apply_layout(self) -> None:
         ana, zor, pc = self._suggested
@@ -1277,22 +1282,3 @@ def _score(report: dict[str, object]) -> str:
     return f"%{round(100 * rate)}" + (
         " · tehlikeli hata" if report.get("dangerous_errors") else ""
     )
-
-
-def _test_summary(report: dict[str, object]) -> str:
-    """'Test: temel 7/7 · zor 5/8 · ~5 sn → ana model' biçiminde tek satır."""
-    temel, zor, roles = report.get("temel"), report.get("zor"), report.get("roles")
-    if not isinstance(temel, dict) or not isinstance(zor, dict) or not isinstance(roles, list):
-        return ""
-    text = (
-        f"Test: temel {temel.get('passed')}/{temel.get('total')} · "
-        f"zor {zor.get('passed')}/{zor.get('total')}"
-    )
-    computer = report.get("bilgisayar")
-    if isinstance(computer, dict):
-        text += f" · bilgisayar {computer.get('passed')}/{computer.get('total')}"
-    text += f" · ~{report.get('median_seconds')} sn"
-    if report.get("dangerous_errors"):
-        return text + " · tehlikeli hata var → önerilmez"
-    named = [_ROLE_TEXT[role] for role in roles if role in _ROLE_TEXT]
-    return text + (" → " + " + ".join(named) if named else " → önerilmez")

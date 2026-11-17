@@ -102,7 +102,9 @@ def test_sim_apps_self_check_and_session_with_scripted_model(tmp_path: Path) -> 
     session = ComputerSession(
         provider=provider, backend=sim.SimBackend(app), approve=lambda *_: True,
         audit=AuditLog(tmp_path / "audit.jsonl"),
-        config=ComputerUseConfig(enabled=True, mode="auto", step_delay_seconds=0),
+        config=ComputerUseConfig(
+            enabled=True, mode="auto", step_delay_seconds=0, observation="screen"
+        ),
         own_pid=1, stop=threading.Event(), on_step=lambda _l: None, provider_timeout=5,
     )
     result = asyncio.run(session.run("kaydet", "t", None))
@@ -227,7 +229,7 @@ def test_merge_retry_updates_counts_and_roles() -> None:
     retry = {"dangerous_errors": 0, "retries": 1, "cost_usd": "0.25",
              "scenarios": [item("temel_b", True)]}
     merged = merge_retry(base, retry)
-    assert merged["temel"] == {"passed": 2, "total": 2, "rate": 1.0}
+    assert merged["temel"] == {"passed": 2, "total": 2, "rate": 1.0, "provider_errors": 0}
     assert merged["roles"] == ["ana", "zor"] and merged["cost_usd"] == "0.75"
     assert merged["scenarios"][1]["attempt"] == 2 and merged["retries"] == 1
     assert "attempt" not in merged["scenarios"][0] and base["temel"]["passed"] == 1

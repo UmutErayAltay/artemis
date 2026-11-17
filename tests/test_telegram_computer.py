@@ -72,7 +72,7 @@ def make(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[Callable[.
                     provider="ollama", model="vision-1", input_per_million=0, output_per_million=0
                 )
             },
-            computer_use=ComputerUseConfig(
+            computer_use=ComputerUseConfig(observation="screen",
                 enabled=True, model="vision", step_delay_seconds=0, mode=mode
             ),
             perception=PerceptionConfig(allow_cloud_screen=allow_cloud),

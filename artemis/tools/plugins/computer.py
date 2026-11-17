@@ -165,7 +165,7 @@ class ComputerUse(BaseTool):
                 memory=memory,
                 # Telegram kanalı son kareyi (yalnız RAM) isteğe bağlı iletmek için kaydeder.
                 on_frame=frame_sink,
-                strict=strict_rules_on(settings.models.get(names[0])),
+                strict=any(strict_rules_on(settings.models.get(name)) for name in names),
             )
             # İptal asyncio.Event'tir, durdurma threading.Event: küçük bir görev köprüler.
             watcher = asyncio.create_task(_relay_cancel(context.cancelled, stop))

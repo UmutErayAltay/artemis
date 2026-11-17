@@ -59,6 +59,8 @@ _FAMILIES: dict[str, str] = {
     **dict.fromkeys(("biçimlendir", "format"), "format"),
 }
 _WORD = re.compile(r"\w+", re.UNICODE)
+# Hedef tarafında kapıyı açamayan zayıf kökler: "oturum", "çöp", "format" günlük işte de geçer.
+_WEAK_STEMS = frozenset({"oturumu", "çöp", "trash", "fabrika", "format"})
 
 
 def _words(text: str) -> list[str]:
@@ -67,19 +69,38 @@ def _words(text: str) -> list[str]:
     return _WORD.findall(lowered.replace("sign out", "signout").replace("log out", "logout"))
 
 
-def _families(text: str) -> set[str]:
+def _families(text: str, *, strong_only: bool = False) -> set[str]:
     found = set()
     for word in _words(text):
         for stem, family in _FAMILIES.items():
-            if word.startswith(stem):
+            if word.startswith(stem) and not (strong_only and stem in _WEAK_STEMS):
                 found.add(family)
     return found
 
 
+def _is_destructive_word(word: str) -> bool:
+    return any(word.startswith(stem) for stem in _FAMILIES)
+
+
+def _target_matches(element_name: str, goal: str) -> bool:
+    """Öğenin yıkıcı olmayan içerik sözcükleri hedefte geçiyor mu (4 harflik kök eşleşmesi).
+
+    "Hesabı sil" ancak hedef "hesabımı sil" gibi aynı nesneyi anıyorsa açılır; "duyuruyu sil"
+    hedefi başka bir şeyi silmeye izin vermez. Yalnız yıkıcı sözcükten oluşan ad ("Sil") için
+    ailenin hedefte geçmesi yeter."""
+    content = [w for w in _words(element_name) if len(w) >= 4 and not _is_destructive_word(w)]
+    if not content:
+        return True
+    goal_roots = {w[:4] for w in _words(goal) if len(w) >= 4}
+    return any(w[:4] in goal_roots for w in content)
+
+
 def destructive_unrequested(element_name: str, goal: str) -> str | None:
     """Öğe yıkıcıysa ve hedef o eylemi istemiyorsa engel nedeni; değilse None."""
-    unrequested = _families(element_name) - _families(goal)
-    if not unrequested:
+    families = _families(element_name)
+    if not families:
+        return None
+    if families <= _families(goal, strong_only=True) and _target_matches(element_name, goal):
         return None
     return (
         f'"{element_name[:60]}" yıkıcı bir öğe ve hedefte istenmedi; tıklanmadı. '

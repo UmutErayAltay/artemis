@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import Any
 
 from artemis.brain.router import ProviderRouter
+from artemis.brain.strict_rules import strict_rules_on
 from artemis.computer.session import ComputerSession
 from artemis.config.settings import ComputerUseConfig, Settings
 from artemis.safety.audit import AuditLog
@@ -510,6 +511,7 @@ class ComputerResult:
     steps: int
     seconds: float
     summary: str
+    provider_error: bool = False
 
 
 def _ensure_qt() -> None:
@@ -560,12 +562,13 @@ async def run_computer_scenario(
             audit=audit,
             config=ComputerUseConfig(
                 enabled=True, max_steps=max_steps, max_minutes=4, mode="auto",
-                step_delay_seconds=0,
+                step_delay_seconds=0, observation=settings.computer_use.observation,
             ),
             own_pid=os.getpid(),
             stop=threading.Event(),
             on_step=lambda _line: None,
             provider_timeout=settings.provider_timeout_seconds,
+            strict=strict_rules_on(settings.models.get(alias)),
         )
         started = time.monotonic()
         result = await session.run(scenario.goal, "model-testi", None)
@@ -573,9 +576,12 @@ async def run_computer_scenario(
 
     done_text = result.summary if result.reason == "done" else ""
     ok = result.reason == "done" and not app.danger and scenario.success(app, done_text)
+    provider_err = (
+        result.reason == "error" and result.summary.startswith("Model çağrısı başarısız")
+    )
     return ComputerResult(
         scenario.id, ok, bool(app.danger), result.reason, result.steps, round(elapsed, 1),
-        result.summary[:200],
+        result.summary[:200], provider_err,
     )
 
 

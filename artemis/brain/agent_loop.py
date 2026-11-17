@@ -527,7 +527,13 @@ class AgentLoop:
                 else SYSTEM_PROMPT
                 + (
                     "\n" + STRICT_CHAT_RULES
-                    if strict_rules_on(settings.models.get(settings.primary_model))
+                    if any(
+                        strict_rules_on(settings.models.get(name))
+                        for name in (
+                            settings.primary_model, settings.hard_model, settings.fallback_model
+                        )
+                        if name
+                    )
                     else ""
                 )
                 + "\nKullanıcı mesajlarının başındaki [tarih saat] o mesajın yerel zamanıdır; "

@@ -234,3 +234,27 @@ async def test_session_strict_prompt_toggle() -> None:
         "Tamam'a bas", _DONE, _YES, elements=elements, strict=False
     )
     assert "STRICT RULES" not in str(normal_provider.seen[0][0].content)
+
+
+def test_gate_needs_matching_target_and_strong_stem() -> None:
+    # Aynı aile yetmez: "duyuruyu sil" hedefi "Hesabı sil" düğmesini açmaz.
+    assert destructive_unrequested("Hesabı sil", "duyuruyu sil") is not None
+    assert destructive_unrequested("Sil", "duyuruyu sil") is None
+    # Zayıf kök ("oturum") çıkış ailesini açmaz.
+    assert destructive_unrequested("Çıkış", "oturumu kaydet") is not None
+    assert destructive_unrequested("Çıkış", "çıkış yap") is None
+
+
+async def test_session_gate_blocks_enter_on_focused_destructive_element() -> None:
+    elements = [
+        _UiElement(id=1, kind="Button", name="Hesabı sil", rect=(10, 10, 80, 30), focused=True)
+    ]
+    enter = _act(type="key", keys="enter", reason="Onayla", sensitive=True)
+    result, backend, _provider, audit = await _run_uia_session(
+        "Duyuruyu oku", enter, _DONE, _YES, elements=elements
+    )
+    assert result.reason == "done"
+    assert backend.calls == []
+    assert audit.named("computer_destructive_blocked") == [
+        {"turn_id": "t1", "element_kind": "Button"}
+    ]

@@ -26,6 +26,7 @@ from artemis.brain.model_report import (
     CHAT_SCENARIO_IDS,
     COMPUTER_SCENARIO_IDS,
     GROUP_PREFIXES,
+    group_stats,
     recommend,
 )
 from artemis.brain.model_report import (
@@ -60,31 +61,33 @@ MAX_PARALLEL = 8
 _sleep = asyncio.sleep
 
 
-def _level(
-    results: Sequence[ScenarioResult], scenarios: Sequence[Scenario], level: str
-) -> dict[str, Any]:
-    ids = {item.id for item in scenarios if item.level == level}
-    picked = [result for result in results if result.id in ids]
-    passed = sum(result.success for result in picked)
-    return {"passed": passed, "total": len(picked),
-            "rate": round(passed / len(picked), 3) if picked else 0.0}
-
-
 def build_report(
     alias: str, scenarios: Sequence[Scenario], results: Sequence[ScenarioResult],
-    computer: Sequence[ComputerResult] = (), retries: int = 0,
+    computer: Sequence[ComputerResult] = (), retries: int = 0, *, observation: str = "uia",
 ) -> dict[str, Any]:
-    temel, zor = _level(results, scenarios, "temel"), _level(results, scenarios, "zor")
-    dangerous = sum(result.dangerous_errors for result in results) + sum(
-        result.dangerous for result in computer
+    scenario_items = [
+        {"id": result.id, "success": result.success,
+         "dangerous": bool(result.dangerous_errors),
+         "provider_error": result.stop_reason == "provider_error",
+         "errors": result.errors + result.dangerous_reasons,
+         "seconds": round(result.elapsed_seconds, 1), "answer": result.answer[:300]}
+        for result in results
+    ] + [
+        {"id": item.id, "success": item.success, "dangerous": item.dangerous,
+         "provider_error": item.provider_error,
+         "errors": [] if item.success else [f"{item.reason}: {item.summary}"],
+         "seconds": item.seconds, "answer": item.summary, "steps": item.steps}
+        for item in computer
+    ]
+    empty = {"passed": 0, "total": 0, "provider_errors": 0, "rate": 0.0}
+    temel = group_stats(scenario_items, "temel") or dict(empty)
+    zor = group_stats(scenario_items, "zor") or dict(empty)
+    pc = group_stats(scenario_items, "bilgisayar")
+    dangerous_computer = sum(item.dangerous for item in computer)
+    dangerous = sum(result.dangerous_errors for result in results) + dangerous_computer
+    roles, summary = recommend(
+        temel["rate"], zor["rate"], dangerous, pc["rate"] if pc else None, dangerous_computer
     )
-    pc = (
-        {"passed": sum(item.success for item in computer), "total": len(computer),
-         "rate": round(sum(item.success for item in computer) / len(computer), 3),
-         "steps": sum(item.steps for item in computer)}
-        if computer else None
-    )
-    roles, summary = recommend(temel["rate"], zor["rate"], dangerous, pc["rate"] if pc else None)
     # Hiçbir senaryo modele ulaşamadıysa (anahtar yok, bağlantı yok) bu modelin başarısızlığı
     # değildir: "yeterince başarılı değil" yerine nedeni söylenir, rol önerilmez.
     failed = [result for result in results if result.stop_reason == "provider_error"]
@@ -94,28 +97,19 @@ def build_report(
     times = [result.elapsed_seconds for result in results] or [0.0]
     return {
         "model": alias,
+        "observation": observation,
         "temel": temel,
         "zor": zor,
         **({"bilgisayar": pc} if pc else {}),
         "dangerous_errors": dangerous,
+        "dangerous_computer": dangerous_computer,
         "retries": retries,
         "median_seconds": round(statistics.median(times), 1),
         "input_tokens": sum(result.input_tokens for result in results),
         "cost_usd": str(sum((result.cost_usd for result in results), Decimal("0"))),
         "roles": roles,
         "summary": summary,
-        "scenarios": [
-            {"id": result.id, "success": result.success,
-             "dangerous": bool(result.dangerous_errors),
-             "errors": result.errors + result.dangerous_reasons,
-             "seconds": round(result.elapsed_seconds, 1), "answer": result.answer[:300]}
-            for result in results
-        ] + [
-            {"id": item.id, "success": item.success, "dangerous": item.dangerous,
-             "errors": [] if item.success else [f"{item.reason}: {item.summary}"],
-             "seconds": item.seconds, "answer": item.summary, "steps": item.steps}
-            for item in computer
-        ],
+        "scenarios": scenario_items,
     }
 
 
@@ -207,13 +201,16 @@ async def run_model_test(
         try:
             pc_result = await run_computer_scenario(item, settings, alias)
         except ProviderError as error:
-            pc_result = ComputerResult(item.id, False, False, "error", 0, 0.0,
-                                       f"Sağlayıcı hatası: {type(error).__name__}")
+            pc_result = ComputerResult(
+                item.id, False, False, "error", 0, 0.0,
+                f"Sağlayıcı hatası: {type(error).__name__}", provider_error=True,
+            )
         pc_results.append(pc_result)
         mark = "tehlikeli" if pc_result.dangerous else "geçti" if pc_result.success else "kaldı"
         print(f"ilerleme {index}/{total} {item.id} {mark}", flush=True)
     return build_report(
-        f"{alias} + {hard_alias}" if hard_alias else alias, chosen, results, pc_results, retries
+        f"{alias} + {hard_alias}" if hard_alias else alias, chosen, results, pc_results, retries,
+        observation=settings.computer_use.observation,
     )
 
 
