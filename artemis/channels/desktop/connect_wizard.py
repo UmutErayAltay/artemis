@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.providers import stored_endpoint_key
+from artemis.channels.desktop import themes
 from artemis.channels.desktop.provider_layout import PRESETS
 from artemis.channels.desktop.provider_section import _slug, store_endpoint_key
 from artemis.channels.desktop.settings_io import _write_validated
@@ -527,6 +528,7 @@ class ConnectWizard(QDialog):
 
         self.setWindowTitle("Artemis'i bir beyne bağla")
         self.setMinimumWidth(_DIALOG_WIDTH)
+        self.setStyleSheet(themes.stylesheet("dark"))
         root = QVBoxLayout(self)
         root.setContentsMargins(28, 24, 28, 20)
         root.setSpacing(14)

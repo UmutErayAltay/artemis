@@ -65,6 +65,7 @@ from artemis.brain.providers import (
 )
 from artemis.channels.desktop import themes
 from artemis.channels.desktop.provider_layout import (
+    PARALLEL_CHOICES,
     PARALLEL_TEST,
     PRESETS,
     ROLE_TEXTS,
@@ -238,6 +239,7 @@ class ProviderSection(QWidget):
     remove_button: QPushButton
     model_test_button: QPushButton
     parallel_test: QCheckBox
+    parallel_count: QComboBox
     retry_button: QPushButton
     test_list: QListWidget
     test_result: QLabel
@@ -933,12 +935,23 @@ class ProviderSection(QWidget):
     def _saved_parallel(self) -> bool:
         return bool(self._test_settings.value("parallel", False, type=bool))
 
+    def _saved_parallel_count(self) -> int:
+        val = str(self._test_settings.value("parallel_count", PARALLEL_TEST))
+        return int(val) if val.isdigit() and int(val) in PARALLEL_CHOICES else PARALLEL_TEST
+
     def _remember_parallel(self, on: bool) -> None:
         self._test_settings.setValue("parallel", on)
+        self.parallel_count.setEnabled(on)
+
+    def _remember_parallel_count(self, *_args: object) -> None:
+        count = int(self.parallel_count.currentData() or PARALLEL_TEST)
+        self._test_settings.setValue("parallel_count", count)
+        self._parallel_tip()
 
     def _parallel_tip(self) -> None:
         """Paralel her modelde seçilebilir; yerel sunucuda yavaşlayabileceği ipucunda yazar."""
         alias = self._current_alias()
+        count = int(self.parallel_count.currentData() or PARALLEL_TEST)
         try:
             settings = load_settings(self.config_path)
             local = alias in settings.models and _is_local_model(
@@ -946,12 +959,13 @@ class ProviderSection(QWidget):
             )
         except (OSError, ValueError):
             local = False
-        self.parallel_test.setToolTip(
-            f"Aynı anda {PARALLEL_TEST} senaryo. Bu bağlantı bu bilgisayarda çalışıyor: "
-            "sunucu aynı anda tek istek kaldırıyorsa sırayla çalıştırmak daha hızlı olabilir."
-            if local
-            else f"Aynı anda {PARALLEL_TEST} senaryo; API modellerinde testi kısaltır."
+        tip = (
+            f"Aynı anda {count} senaryo. Bu bağlantı bu bilgisayarda çalışıyor: "
+            "sunucu tek istek kaldırıyorsa sırayla çalıştırmak daha hızlı olabilir."
+            if local else f"Aynı anda {count} senaryo; API modellerinde testi kısaltır."
         )
+        self.parallel_test.setToolTip(tip)
+        self.parallel_count.setToolTip(tip)
 
     def _model_test_finished(self, *_args: object) -> None:
         if self._stopping:
@@ -1092,7 +1106,8 @@ class ProviderSection(QWidget):
             # Bütçe tavanı tahminin iki katı: test bunu aşamaz (rezervasyon korur).
             arguments += ["--ucretli-onay", "--butce", str(cost * 2)]
         if self.parallel_test.isChecked():
-            arguments += ["--paralel", str(PARALLEL_TEST)]
+            count = int(self.parallel_count.currentData() or PARALLEL_TEST)
+            arguments += ["--paralel", str(count)]
         for scenario_id in only or []:
             arguments += ["--senaryo", scenario_id]
         # Yeniden deneme ayrı dosyaya yazar: tam rapor kısmi raporla ezilmez, sonra birleştirilir.

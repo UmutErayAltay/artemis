@@ -707,12 +707,17 @@ def test_parallel_checkbox_flag_also_for_local(
     section._test_model()
     assert started[-1][started[-1].index("--paralel") + 1] == "4"
     section._model_test = None
+    section.parallel_count.setCurrentIndex(section.parallel_count.findData(6))
+    section._test_model()
+    assert started[-1][started[-1].index("--paralel") + 1] == "6"
+    section._model_test = None
     section.select_model("yerel")
     # Yerel (ör. proxy) modelde de seçilebilir; ipucu yavaşlayabileceğini söyler.
     assert section.parallel_test.isEnabled() and section.parallel_test.isChecked()
+    assert section.parallel_count.isEnabled() and section.parallel_count.currentData() == 6
     assert "bu bilgisayarda" in section.parallel_test.toolTip()
     section._test_model()
-    assert started[-1][started[-1].index("--paralel") + 1] == "4"
+    assert started[-1][started[-1].index("--paralel") + 1] == "6"
 
 
 class _FakeProcess:
