@@ -7,6 +7,7 @@ Rapor kasaya kendiliğinden yazılmaz; kullanıcı isterse normal `vault_append`
 
 from __future__ import annotations
 
+from contextlib import suppress
 from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -97,9 +98,18 @@ class ResearchStatus(_ResearchTool):
         job = jobs.get(args.job_id)
         if job is None:
             return ToolResult(message="Araştırma işi bulunamadı.")
-        return ToolResult(
-            success=True, status="ok", message=f"Araştırma durumu: {job['status']}.", data=job
-        )
+        data = dict(job)
+        message = f"Araştırma durumu: {job['status']}."
+        if job.get("status") == "done":
+            report = jobs.report_path(str(job["id"]))
+            with suppress(ValueError):
+                rel = report.relative_to(context.workspace).as_posix()
+                data["report_path"] = rel
+                message = (
+                    f"Araştırma durumu: done. Rapor dosyası: {rel} "
+                    "(Not Defteri ile açmak için file_path olarak doğrudan bunu kullan)."
+                )
+        return ToolResult(success=True, status="ok", message=message, data=data)
 
 
 @register_tool

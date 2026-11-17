@@ -5,7 +5,7 @@ from pathlib import Path
 # Mixed themes share their workspace colors with light/dark, so two tones suffice.
 _ASSETS = Path(__file__).resolve().parent
 
-DEFAULT_THEME = "light-mixed"
+DEFAULT_THEME = "dark"
 
 # Sıcak yoldaş paleti (DESIGN.md "Warm companion direction"): krem/kemik ve sıcak mürekkep;
 # kurumsal slate-mavi bırakıldı. Düz tonlar, gradyan/parıltı yok.

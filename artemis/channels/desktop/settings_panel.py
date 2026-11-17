@@ -250,6 +250,7 @@ class SettingsPanel(QWidget):
     live_transcript: QCheckBox
     noise_suppression: QCheckBox
     game_mode: QCheckBox
+    game_mode_target: QComboBox
     echo_cancellation: QCheckBox
     advanced_toggle: QToolButton
     noise_level: QComboBox
@@ -743,7 +744,13 @@ class SettingsPanel(QWidget):
 
     def _update_cloud_hint(self, *_args: object) -> None:
         """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0046)."""
-        on = self.hybrid_stt.isChecked()
+        gm = getattr(self, "game_mode", None)
+        gt = getattr(self, "game_mode_target", None)
+        if gm is not None and gt is not None:
+            gt.setEnabled(gm.isChecked() and not self._demo)
+        game_cloud = bool(gm and gm.isChecked() and gt and gt.currentData() == "cloud")
+        hybrid = self.hybrid_stt.isChecked()
+        on = hybrid or game_cloud
         xai = self.cloud_protocol.currentData() == "xai"
         self.cloud_box.setVisible(on)
         live = on and not self._demo
@@ -763,10 +770,16 @@ class SettingsPanel(QWidget):
         if not on:
             self.cloud_stt_hint.setText("")
             return
-        text = (
-            "Komut sesi seçtiğin bulut sunucusuna gönderilir; kesintisiz kipte her söz gider. "
-            "Sunucu eklemek için Model sağlayıcıları bölümünü kullan."
-        )
+        if hybrid:
+            text = (
+                "Komut sesi seçtiğin bulut sunucusuna gönderilir; kesintisiz kipte her söz gider. "
+                "Sunucu eklemek için Ayarlar > Model > Bağlantılar bölümünü kullan."
+            )
+        else:
+            text = (
+                "Oyun modunda bulut hedefi seçili: tam ekran oyun açıldığında büyük yerel model "
+                "VRAM'den bırakılır ve tanıma seçtiğin bulut sunucusuna geçer."
+            )
         if xai:
             text += (
                 " Grok tanıma Türkçeyi resmi olarak doğrulamıyor; hata olursa yerel metne düşer."

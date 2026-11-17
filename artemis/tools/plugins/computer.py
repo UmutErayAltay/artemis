@@ -25,6 +25,7 @@ from artemis.brain.errors import ProviderError, RateLimitedError, RetryableProvi
 from artemis.brain.models import Completion, Message
 from artemis.brain.providers import Provider
 from artemis.brain.router import ProviderRouter
+from artemis.brain.strict_rules import strict_rules_on
 from artemis.computer.session import (
     ComputerSession,
     ScreenBusyError,
@@ -64,8 +65,9 @@ class ComputerUse(BaseTool):
     done_label = "Bilgisayar oturumu bitti"
     description = (
         "Ekranı görüp fareyle ve klavyeyle verilen hedefi yapar (yalnız masaüstü uygulaması). "
-        "Her adımda ekran görüntüsü bir görsel modele gider; hassas adımlar ayrıca sorulur, "
-        "Esc durdurur."
+        "Ön planda Artemis varken başka bir uygulamayla (ör. tarayıcı, oynatıcı) etkileşecekse "
+        "önce window_list ve window_control ile hedef pencereyi öne getir. "
+        "Hassas adımlar ayrıca sorulur, Esc durdurur."
     )
     args_model = ComputerUseArguments
     risk = Risk.CONFIRM_REQUIRED
@@ -164,6 +166,7 @@ class ComputerUse(BaseTool):
                 memory=memory,
                 # Telegram kanalı son kareyi (yalnız RAM) isteğe bağlı iletmek için kaydeder.
                 on_frame=frame_sink,
+                strict=any(strict_rules_on(settings.models.get(name)) for name in names),
             )
             # İptal asyncio.Event'tir, durdurma threading.Event: küçük bir görev köprüler.
             watcher = asyncio.create_task(_relay_cancel(context.cancelled, stop))

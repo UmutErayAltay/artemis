@@ -47,8 +47,10 @@ from artemis.channels.voice.echo import (
 )
 from artemis.channels.voice.game_mode import (
     GameModeRecognizer,
+    SwappableRecognizer,
     fullscreen_app_active,
     resolve_light_model,
+    resolve_model_label,
 )
 from artemis.channels.voice.kws import WakeSpotter
 from artemis.channels.voice.live_text import SherpaLiveTranscriber
@@ -155,6 +157,82 @@ RunCommand = Callable[[str], Awaitable[RunResult]]
 StateCallback = Callable[[str], None]
 
 
+def _cloud_stt_ready(runtime: Runtime) -> bool:
+    settings = runtime.settings
+    endpoint_id = settings.voice.stt_cloud_endpoint
+    return bool(
+        endpoint_id
+        and endpoint_id in settings.endpoints
+        and (
+            settings.voice.stt_cloud_protocol == "xai"
+            or bool(settings.voice.stt_cloud_model.strip())
+        )
+    )
+
+
+def _setup_game_mode(
+    runtime: Runtime,
+    whisper: FasterWhisperRecognizer,
+    local_voice: VoiceConfig,
+    cloud_recognizer: OpenAICompatibleTranscriber | None,
+    on_state: StateCallback,
+    cleanup: AsyncExitStack,
+) -> tuple[SpeechRecognizer, OpenAICompatibleTranscriber | None, Callable[[], bool] | None]:
+    """Oyun modu açıkken tam ekran algılandığında ana modeli hafif veya bulut hedefe geçirir."""
+    settings = runtime.settings
+    if not settings.voice.game_mode:
+        return whisper, cloud_recognizer, None
+    primary_label = resolve_model_label(settings.voice.stt_model, "ana yerel model")
+    light_path = resolve_light_model(settings.voice)
+    if settings.voice.game_mode_target == "cloud":
+        if not _cloud_stt_ready(runtime):
+            on_state("game:cloud_unavailable")
+            return whisper, cloud_recognizer, None
+        if light_path is None:
+            # Uyandırma yerelde verilmeli: hafif model yokken bulut hedefi her sesi buluta
+            # yollardı ("Artemis"ten öncesi dahil). Büyük model GPU'da kalır.
+            on_state("game:unavailable")
+            return whisper, cloud_recognizer, None
+        endpoint_id = settings.voice.stt_cloud_endpoint
+        active_cloud = cloud_recognizer or OpenAICompatibleTranscriber(
+            local_voice, endpoint_id, settings.endpoints[endpoint_id], runtime.audit,
+        )
+        cloud_name = settings.voice.stt_cloud_model.strip() or endpoint_id
+        should_use_cloud: Callable[[], bool] | None = None
+        wake_cfg = VoiceConfig.model_validate({
+            **local_voice.model_dump(),
+            "stt_model": light_path,
+            "stt_device": "cpu",
+            "stt_compute_type": "int8",
+            "stt_hotwords": (local_voice.wake_word,),
+        })
+        light_rec: SwappableRecognizer = FasterWhisperRecognizer(wake_cfg)
+        wake_name = resolve_model_label(light_path, "small")
+        light_label = f"{wake_name} (CPU) + Bulut ({cloud_name})"
+        game = GameModeRecognizer(
+            whisper, light_rec, fullscreen_app_active, on_state,
+            primary_label=primary_label, light_label=light_label,
+        )
+        if settings.voice.stt_mode != "hybrid":
+            should_use_cloud = lambda: game.in_game  # noqa: E731
+        game.start()
+        cleanup.callback(game.close)
+        return game, active_cloud, should_use_cloud
+    if light_path is None:
+        # Hafif model yoksa büyük model GPU'da kalır; durum görünür olur.
+        on_state("game:unavailable")
+        return whisper, cloud_recognizer, None
+    light = FasterWhisperRecognizer(local_voice.model_copy(update={"stt_model": light_path}))
+    game = GameModeRecognizer(
+        whisper, light, fullscreen_app_active, on_state,
+        primary_label=primary_label, light_label=resolve_model_label(light_path, "small"),
+    )
+    game.start()
+    # Kurulum yarıda kalırsa izleyici iş parçacığı da durur.
+    cleanup.callback(game.close)
+    return game, cloud_recognizer, None
+
+
 async def build_voice_controller(
     runtime: Runtime, run_command: RunCommand, on_state: StateCallback,
     *, on_timing: Callable[[str, float], None] | None = None,
@@ -249,21 +327,9 @@ async def build_voice_controller(
             )
         whisper = FasterWhisperRecognizer(local_voice)
         await _prepare(whisper)
-        recognizer: SpeechRecognizer = whisper
-        if settings.voice.game_mode:
-            light_path = resolve_light_model(settings.voice)
-            if light_path is None:
-                # Hafif model yoksa büyük model GPU'da kalır; durum görünür olur.
-                on_state("game:unavailable")
-            else:
-                light = FasterWhisperRecognizer(
-                    local_voice.model_copy(update={"stt_model": light_path})
-                )
-                game = GameModeRecognizer(whisper, light, fullscreen_app_active, on_state)
-                game.start()
-                # Kurulum yarıda kalırsa izleyici iş parçacığı da durur.
-                cleanup.callback(game.close)
-                recognizer = game
+        recognizer, cloud_recognizer, should_use_cloud = _setup_game_mode(
+            runtime, whisper, local_voice, cloud_recognizer, on_state, cleanup,
+        )
         synthesizer: SpeechSynthesizer
         if settings.voice.tts_backend == "edge":
             edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
@@ -351,6 +417,7 @@ async def build_voice_controller(
             on_live_text=lambda text: on_state("live:" + text[:200]),
             turn_detector=build_turn_detector(settings.voice, on_state),
             wake_spotter=wake_spotter,
+            should_use_cloud=should_use_cloud,
         )
         cleanup.pop_all()
         return controller

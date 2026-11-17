@@ -48,6 +48,7 @@ PRESETS: tuple[tuple[str, str, str, bool], ...] = (
 
 FORM_MAX_WIDTH = 640  # Model ekle / Bağlantılar formu
 PARALLEL_TEST = 4
+PARALLEL_CHOICES: tuple[int, ...] = (2, 3, 4, 6, 8)
 
 _SORTS = (
     ("Eklenme sırası", "added"),
@@ -136,7 +137,15 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     section.model_test_button.clicked.connect(section._test_or_stop)
     section.parallel_test = QCheckBox("Paralel çalıştır")
     section.parallel_test.setChecked(section._saved_parallel())
+    section.parallel_count = QComboBox()
+    section.parallel_count.setAccessibleName("Paralel test sayısı")
+    for count in PARALLEL_CHOICES:
+        section.parallel_count.addItem(f"{count} test", count)
+    idx = section.parallel_count.findData(section._saved_parallel_count())
+    section.parallel_count.setCurrentIndex(max(idx, section.parallel_count.findData(PARALLEL_TEST)))
+    section.parallel_count.setEnabled(section.parallel_test.isChecked())
     section.parallel_test.toggled.connect(section._remember_parallel)
+    section.parallel_count.currentIndexChanged.connect(section._remember_parallel_count)
     section._parallel_tip()
     section.retry_button = QPushButton("Kalanları yeniden dene")
     section.retry_button.setToolTip("Kalan senaryoları aynı modelle bir kez daha çalıştırır.")
@@ -169,8 +178,9 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     test_row = QHBoxLayout()
     test_row.setSpacing(12)
     test_row.addWidget(section.model_test_button)
-    test_row.addLayout(with_help(section.parallel_test, (
-        f"Senaryolardan {PARALLEL_TEST}'ü aynı anda çalışır; API modellerinde testi kısaltır. "
+    test_row.addWidget(section.parallel_test)
+    test_row.addLayout(with_help(section.parallel_count, (
+        "Seçilen sayıda senaryo aynı anda çalışır; API modellerinde testi kısaltır. "
         "Yerel sunucu aynı anda tek istek kaldırıyorsa yavaşlatabilir."
     )))
     test_row.addStretch(1)

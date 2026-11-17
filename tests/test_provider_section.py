@@ -578,7 +578,9 @@ def test_hard_role_toggles_and_shows_in_rows_and_banner(app: QApplication, tmp_p
     path = _three_models(tmp_path)
     section = ProviderSection(path)
     section.select_model("haiku 5-5")
-    section._toggle_role("hard_model")  # beyin aynı zamanda zor işler olamaz
+    section._toggle_role("hard_model")  # beyin aynı zamanda zor işler seçilebilir
+    assert load_settings(path).hard_model == "haiku 5-5"
+    section._toggle_role("hard_model")
     assert load_settings(path).hard_model is None
     section.select_model("sonnet 5-5")
     section._toggle_role("hard_model")
@@ -707,12 +709,17 @@ def test_parallel_checkbox_flag_also_for_local(
     section._test_model()
     assert started[-1][started[-1].index("--paralel") + 1] == "4"
     section._model_test = None
+    section.parallel_count.setCurrentIndex(section.parallel_count.findData(6))
+    section._test_model()
+    assert started[-1][started[-1].index("--paralel") + 1] == "6"
+    section._model_test = None
     section.select_model("yerel")
     # Yerel (ör. proxy) modelde de seçilebilir; ipucu yavaşlayabileceğini söyler.
     assert section.parallel_test.isEnabled() and section.parallel_test.isChecked()
+    assert section.parallel_count.isEnabled() and section.parallel_count.currentData() == 6
     assert "bu bilgisayarda" in section.parallel_test.toolTip()
     section._test_model()
-    assert started[-1][started[-1].index("--paralel") + 1] == "4"
+    assert started[-1][started[-1].index("--paralel") + 1] == "6"
 
 
 class _FakeProcess:
@@ -803,7 +810,16 @@ def test_role_buttons_use_existing_actions_and_reflect_state(
     path = _three_models(tmp_path)
     section = ProviderSection(path)
     assert section.primary_button.isChecked() and section.primary_button.text() == "✓ Beyin"
-    assert not section.hard_button.isEnabled() and not section.fallback_button.isEnabled()
+    assert section.hard_button.isEnabled() and section.computer_button.isEnabled()
+    assert not section.fallback_button.isEnabled()
+    section.hard_button.click()
+    section.computer_button.click()
+    s_same = load_settings(path)
+    assert (s_same.primary_model, s_same.hard_model, s_same.computer_use.model) == (
+        "haiku 5-5", "haiku 5-5", "haiku 5-5"
+    )
+    section.hard_button.click()
+    section.computer_button.click()
     section.select_model("sonnet 5-5")
     section.hard_button.click()
     assert load_settings(path).hard_model == "sonnet 5-5" and section.hard_button.isChecked()
@@ -824,7 +840,7 @@ def test_computer_role_sets_alias_and_is_cleared_on_second_click(
     path = _three_models(tmp_path)
     section = ProviderSection(path)
     section.select_model("haiku 5-5")
-    assert not section.computer_button.isEnabled()
+    assert section.computer_button.isEnabled()
     section.select_model("sonnet 5-5")
     section.computer_button.click()
     assert load_settings(path).computer_use.model == "sonnet 5-5"

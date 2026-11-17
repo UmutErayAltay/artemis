@@ -93,3 +93,58 @@ def test_game_mode_settings_round_trip(tmp_path, qapp):
         assert panel.game_mode.isChecked() is True
     finally:
         panel.finish_inventory()
+
+
+def test_window_events_game_mode_model_labels_and_cloud() -> None:
+    from types import SimpleNamespace
+
+    seen: list[tuple[str, str]] = []
+    window = SimpleNamespace(_append_chat=lambda who, msg: seen.append((who, msg)))
+
+    handle_state(window, State("voice_game", "on:small"))
+    handle_state(window, State("voice_game", "on:Bulut (whisper-large-v3)"))
+    handle_state(window, State("voice_game", "off:large-v3"))
+    handle_state(window, State("voice_game", "cloud_unavailable"))
+
+    assert [who for who, _ in seen] == ["Artemis"] * 4
+    assert "small" in seen[0][1]
+    assert "Bulut (whisper-large-v3)" in seen[1][1]
+    assert "large-v3" in seen[2][1]
+    assert "bulut" in seen[3][1].lower()
+
+
+def test_game_mode_cloud_target_round_trip_and_cloud_box(tmp_path, qapp) -> None:
+    config_path = tmp_path / "config.yaml"
+    initial_settings = Settings()
+    config_path.write_text(
+        yaml.safe_dump(initial_settings.model_dump(mode="json")), encoding="utf-8"
+    )
+
+    panel = SettingsPanel(config_path)
+    try:
+        panel.show()
+        assert hasattr(panel, "game_mode_target")
+        assert panel.game_mode_target.currentData() == "local_light"
+        assert not panel.game_mode_target.isEnabled()
+        assert not panel.cloud_box.isVisible()
+
+        panel.game_mode.setChecked(True)
+        assert panel.game_mode_target.isEnabled()
+        cloud_idx = panel.game_mode_target.findData("cloud")
+        assert cloud_idx >= 0
+        panel.game_mode_target.setCurrentIndex(cloud_idx)
+        assert panel.cloud_box.isVisible()
+
+        saved = save_choices(config_path, None, values=panel.values())
+        assert saved is True
+
+        reloaded = load_settings(config_path)
+        assert reloaded.voice.game_mode is True
+        assert reloaded.voice.game_mode_target == "cloud"
+
+        panel.refresh()
+        assert panel.game_mode_target.currentData() == "cloud"
+        assert panel.cloud_box.isVisible()
+    finally:
+        panel.close()
+        panel.finish_inventory()

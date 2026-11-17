@@ -468,3 +468,91 @@ async def test_factory_cancelled_prepare_waits_to_dispose_model(monkeypatch):
     finally:
         release.set()
     await asyncio.wait_for(disposed.wait(), 5)
+
+
+async def test_game_mode_cloud_unavailable_emits_state(monkeypatch):
+    from artemis.channels.voice import stt_catalog
+
+    _patch_voice_deps(monkeypatch, object())
+    monkeypatch.setattr(stt_catalog, "installed_path", lambda _name: None)
+    states: list[str] = []
+    config = VoiceConfig(game_mode=True, game_mode_target="cloud")
+    controller = await factory.build_voice_controller(
+        _runtime(config), lambda _: None, states.append
+    )
+    assert "game:cloud_unavailable" in states
+    assert controller.cloud_recognizer is None
+
+
+async def test_game_mode_cloud_with_small_wake_gates_cloud_on_in_game(monkeypatch, tmp_path):
+    _patch_voice_deps(monkeypatch, object())
+    seen_cfgs: list[VoiceConfig] = []
+
+    def make_whisper(cfg):
+        seen_cfgs.append(cfg)
+        return SimpleNamespace(prepare=lambda: None, unload=lambda: None)
+
+    monkeypatch.setattr(factory, "FasterWhisperRecognizer", make_whisper)
+    monkeypatch.setattr(factory, "fullscreen_app_active", lambda: False)
+    fake_cloud = SimpleNamespace()
+    monkeypatch.setattr(factory, "OpenAICompatibleTranscriber", lambda *_a, **_kw: fake_cloud)
+
+    small_dir = tmp_path / "models--Systran--faster-whisper-small"
+    small_dir.mkdir()
+    config = VoiceConfig(
+        game_mode=True,
+        game_mode_target="cloud",
+        game_mode_stt_model=small_dir,
+        stt_cloud_endpoint="bulut",
+        stt_cloud_model="whisper-1",
+    )
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(
+            voice=config,
+            endpoints={"bulut": EndpointConfig(base_url="https://api.example.com/v1")},
+        ),
+        audit=object(),
+        runner=object(),
+    )
+    controller = await factory.build_voice_controller(runtime, lambda _: None, lambda _: None)
+    try:
+        assert controller.cloud_recognizer is fake_cloud
+        assert len(seen_cfgs) == 2  # primary + CPU small wake
+        assert seen_cfgs[1].stt_device == "cpu"
+        assert controller._should_use_cloud is not None
+        assert controller._should_use_cloud() is False
+        controller.recognizer._switch(to_game=True)
+        assert controller._should_use_cloud() is True
+    finally:
+        controller.recognizer.close()
+
+
+async def test_game_mode_cloud_without_small_keeps_audio_local(monkeypatch):
+    # Uyandırma yerelde verilmeden ses buluta gitmez: hafif model yoksa bulut hedefi kapalı.
+    from artemis.channels.voice import stt_catalog
+
+    _patch_voice_deps(monkeypatch, object())
+    monkeypatch.setattr(stt_catalog, "installed_path", lambda _name: None)
+    monkeypatch.setattr(factory, "fullscreen_app_active", lambda: False)
+    fake_cloud = SimpleNamespace()
+    monkeypatch.setattr(factory, "OpenAICompatibleTranscriber", lambda *_a, **_kw: fake_cloud)
+
+    config = VoiceConfig(
+        game_mode=True,
+        game_mode_target="cloud",
+        stt_cloud_endpoint="bulut",
+        stt_cloud_model="whisper-1",
+    )
+    runtime = SimpleNamespace(
+        settings=SimpleNamespace(
+            voice=config,
+            endpoints={"bulut": EndpointConfig(base_url="https://api.example.com/v1")},
+        ),
+        audit=object(),
+        runner=object(),
+    )
+    states: list[str] = []
+    controller = await factory.build_voice_controller(runtime, lambda _: None, states.append)
+    assert "game:unavailable" in states
+    assert controller.cloud_recognizer is None
+    assert controller._should_use_cloud is None

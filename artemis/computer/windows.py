@@ -63,6 +63,8 @@ _VK: dict[str, int] = {
     "delete": 0x2E, "space": 0x20, "up": 0x26, "down": 0x28, "left": 0x25,
     "right": 0x27, "home": 0x24, "end": 0x23, "pageup": 0x21, "pagedown": 0x22,
     "insert": 0x2D,
+    "media_play_pause": 0xB3, "media_stop": 0xB2, "media_next": 0xB0, "media_prev": 0xB1,
+    "volume_mute": 0xAD, "volume_down": 0xAE, "volume_up": 0xAF,
 }  # fmt: skip
 _VK.update({f"f{n}": 0x70 + n - 1 for n in range(1, 25)})
 _VK.update({chr(c): c - 32 for c in range(ord("a"), ord("z") + 1)})  # 'a' -> 0x41
@@ -466,7 +468,9 @@ def click(x: int, y: int, button: str = "left", double: bool = False) -> None:
     if button not in _BUTTON_FLAGS:
         raise ValueError(f"Bilinmeyen fare düğmesi: {button!r}")
     down, up = _BUTTON_FLAGS[button]
-    events = [_move_event(x, y)]
+    _send([_move_event(x, y)])
+    time.sleep(0.01)
+    events: list[_INPUT] = []
     for _ in range(2 if double else 1):
         events += [_mouse(0, 0, 0, down), _mouse(0, 0, 0, up)]
     _send(events)
@@ -475,7 +479,9 @@ def click(x: int, y: int, button: str = "left", double: bool = False) -> None:
 def scroll(x: int, y: int, notches: int) -> None:
     """Pozitif = aşağı (tekerlek deltası negatif), WHEEL_DELTA = 120."""
     _require_windows()
-    _send([_move_event(x, y), _mouse(0, 0, -_WHEEL_DELTA * notches, _MOUSEEVENTF_WHEEL)])
+    _send([_move_event(x, y)])
+    time.sleep(0.01)
+    _send([_mouse(0, 0, -_WHEEL_DELTA * notches, _MOUSEEVENTF_WHEEL)])
 
 
 # Windows 11 Not Defteri (RichEditD2DPT) toplu/hızlı VK_PACKET girdisini bozuyor: 2026-11-05

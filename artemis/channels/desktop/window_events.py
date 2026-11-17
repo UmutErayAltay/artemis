@@ -239,19 +239,35 @@ def handle_state(window: DesktopWindow, event: State) -> None:
                 "ses yankı gidermeden sürüyor.",
             )
     elif event.state == "voice_game":
-        game_messages = {
-            "on": (
+        raw = event.message
+        msg: str | None
+        if raw.startswith("on:") and len(raw) > 3:
+            model = raw[3:]
+            msg = (
                 "Oyun modu: tam ekran uygulama algılandı; büyük tanıma modeli bırakıldı, "
-                "hafif model dinliyor."
-            ),
-            "off": "Oyun modu bitti; büyük tanıma modeli geri yüklendi.",
-            "error": "Oyun modu model geçişi başarısız oldu; mevcut tanıma modeli sürüyor.",
-            "unavailable": (
-                "Oyun modu açık ama hafif model (small) bulunamadı; "
-                "Ayarlar > Ses'ten Small modelini indirin."
-            ),
-        }
-        msg = game_messages.get(event.message)
+                f"aktif model: {model}."
+            )
+        elif raw.startswith("off:") and len(raw) > 4:
+            model = raw[4:]
+            msg = f"Oyun modu bitti; geri yüklenen model: {model}."
+        else:
+            game_messages = {
+                "on": (
+                    "Oyun modu: tam ekran uygulama algılandı; büyük tanıma modeli bırakıldı, "
+                    "hafif model dinliyor."
+                ),
+                "off": "Oyun modu bitti; büyük tanıma modeli geri yüklendi.",
+                "error": "Oyun modu model geçişi başarısız oldu; mevcut tanıma modeli sürüyor.",
+                "unavailable": (
+                    "Oyun modu açık ama hafif model (small) bulunamadı; "
+                    "Ayarlar > Ses'ten Small modelini indirin."
+                ),
+                "cloud_unavailable": (
+                    "Oyun modu bulut hedefi seçili ama bulut tanıma sunucusu veya modeli "
+                    "ayarlanmamış; Ayarlar > Ses'ten Karma / Bulut tanımayı yapılandırın."
+                ),
+            }
+            msg = game_messages.get(raw)
         if msg:
             window._append_chat("Artemis", msg)
     elif event.state == "voice_error":

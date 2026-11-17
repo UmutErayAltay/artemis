@@ -35,8 +35,8 @@ def test_demo_never_autosaves_and_has_no_revert(tmp_path: Path, qt_app) -> None:
 
 def test_theme_change_does_not_dirty_the_form(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path)
-    panel.theme_cards["dark"].radio.click()
-    panel.set_theme("light")
+    panel.theme_cards["light"].radio.click()  # varsayılan "dark"; gerçek değişiklik
+    panel.set_theme("dark")
     assert not panel._dirty
     # anında kaydedilen sayfa açıklamayla değil kısa "Kaydedildi" ile bildirir
     assert panel.saved_notes["Görünüm"].text() == "Kaydedildi"

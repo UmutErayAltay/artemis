@@ -57,6 +57,9 @@ class ModelConfig(BaseModel):
     kind: Literal["chat", "image"] = "chat"
     # Resim çağrısı başına bütçeden ayrılan sabit üst tutar (USD); token fiyatı resimde anlamsız.
     image_cost_usd: Decimal = Field(default=Decimal(0), ge=0)
+    # ADR 0078: sıkı istem kuralları. None = otomatik (Claude dışı modellerde açık); model testi
+    # zayıf modelin istemi atlayabildiğini gösterdi, açık değer bu tahmini ezer.
+    strict_rules: bool | None = None
 
     @model_validator(mode="after")
     def validate_endpoint_use(self) -> Self:
@@ -129,8 +132,9 @@ class VoiceConfig(BaseModel):
     queue_frames: int = Field(default=32, ge=2, le=256)
     stt_model: Path | None = None
     # Oyun modu: tam ekran uygulama öndeyken büyük STT modeli GPU'dan bırakılır, hafif model
-    # devralır; boşsa yerelde kurulu faster-whisper `small` aranır.
+    # veya bulut tanıma devralır; boşsa yerelde kurulu faster-whisper `small` aranır.
     game_mode: bool = False
+    game_mode_target: Literal["local_light", "cloud"] = "local_light"
     game_mode_stt_model: Path | None = None
     stt_device: Literal["cuda", "cpu"] = "cuda"
     stt_compute_type: str = "float16"
@@ -694,9 +698,9 @@ class ComputerUseConfig(BaseModel):
     # atlama `approval_skipped` olarak denetime yazılır); kodla zorlanan engeller,
     # sınırlar ve Esc iki kipte de aynıdır.
     mode: Literal["accept", "auto"] = "accept"
-    # ADR 0073: "screen" görüntü (varsayılan), "uia" yalnız UI Automation öğe listesi (görsel
-    # olmayan modeller de çalışır), "both" ikisi birden.
-    observation: Literal["screen", "uia", "both"] = "screen"
+    # ADR 0073/0078: "uia" yalnız UI Automation öğe listesi (varsayılan; görsel olmayan
+    # modeller de çalışır, yıkıcı öğe kapısı öğe adını görür), "screen" görüntü, "both" ikisi.
+    observation: Literal["screen", "uia", "both", "hybrid"] = "uia"
     # Kotaya takılan görsel model için sırayla denenecek diğer görüntü kabul eden modeller.
     fallback_models: tuple[str, ...] = ()
 

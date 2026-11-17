@@ -202,7 +202,7 @@ def main() -> None:
         if args.config is None and ensure_config(config):
             print(
                 f"İlk açılış: ayarlar {config} konumunda oluşturuldu; "
-                "modeli Ayarlar > Model sağlayıcıları'ndan ekleyin.",
+                "modeli Ayarlar > Model > Bağlantılar'dan ekleyin.",
                 file=sys.stderr,
             )
         if args.command in {"voice", "desktop"}:

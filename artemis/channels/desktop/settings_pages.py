@@ -444,10 +444,24 @@ def _cleanup_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     panel.game_mode = QCheckBox("Oyun modu")
     panel.game_mode.setToolTip(
         "Tam ekran oyun öndeyken büyük tanıma modeli ekran kartı belleğinden bırakılır, "
-        "hafif model (Small) devralır; oyundan çıkınca büyük model geri yüklenir. "
-        "Değişiklik ses yeniden başlayınca uygulanır."
+        "hafif yerel model (Small) devralır; bulut hedefinde Small CPU'da yalnız uyandırmayı "
+        "dinler, komut buluta gider (Small gerekir). Oyundan çıkınca "
+        "büyük model geri yüklenir. Değişiklik ses yeniden başlayınca uygulanır."
     )
     clean.addWidget(panel.game_mode)
+    panel.game_mode_target = QComboBox()
+    panel.game_mode_target.addItem("Hafif yerel model (Small)", "local_light")
+    panel.game_mode_target.addItem("Bulut komut + yerel uyandırma (VRAM boşalır)", "cloud")
+    field(
+        clean,
+        "Oyun modu hedefi",
+        panel.game_mode_target,
+        "Bulut seçilirse tam ekran oyunda büyük model bırakılır; "
+        "Ses tanıma bölümündeki bulut sunucusu ayarları kullanılır.",
+    )
+    panel.game_mode.toggled.connect(panel._update_cloud_hint)
+    panel.game_mode_target.currentIndexChanged.connect(panel._update_cloud_hint)
+    panel._update_cloud_hint()
     panel.echo_cancellation = QCheckBox("Yankı engelleme")
     panel.echo_cancellation.setToolTip(
         "WebRTC yankı giderici; Artemis'in hoparlörden çıkan kendi sesini mikrofondan "
@@ -886,13 +900,14 @@ def build_apps_page(panel: SettingsPanel) -> None:
     panel.computer_observation.setAccessibleName("Bilgisayar kullanımı gözlemi")
     for label, key in (
         ("Ekran öğeleri (UIA) · hızlı, metin modeli de çalışır", "uia"),
+        ("Karma (UIA, takılınca görüntü) · hızlı ve esnek", "hybrid"),
         ("Ekran görüntüsü · görsel model gerekir", "screen"),
         ("İkisi birden · en sağlam, en yavaş", "both"),
     ):
         panel.computer_observation.addItem(label, key)
     field(access, "Gözlem", panel.computer_observation, help=(
-        "UIA pencerenin düğme ve alanlarını adlarıyla okur; oyun ve çizim uygulamalarında "
-        "boş kalabilir, o zaman ekran görüntüsü ya da ikisi birden seçin."
+        "UIA pencerenin düğme ve alanlarını adlarıyla okur; Karma normalde UIA kullanır, "
+        "liste boşsa veya takılırsa tek adımlık ekran görüntüsü alır."
     ))
     list_box, listing = group("İzinli uygulamalar", help=(
         "Artemis yalnız bu listedeki uygulamaları açabilir. Uygulama ekle bir .exe seçtirir, "

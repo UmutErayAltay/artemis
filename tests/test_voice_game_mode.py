@@ -272,3 +272,33 @@ def test_stop_during_inflight_wait_does_not_unload_previous() -> None:
     assert primary.unload_calls == 0
     assert "game:on" not in states
     game._release(rec)
+
+
+def test_game_mode_emits_model_labels_on_switch() -> None:
+    log: list[str] = []
+    states: list[str] = []
+    primary = FakeRecognizer("primary", log)
+    light = FakeRecognizer("light", log)
+    game = GameModeRecognizer(
+        primary,
+        light,
+        ScriptedDetector([True, False]),
+        states.append,
+        poll_seconds=0.01,
+        primary_label="large-v3",
+        light_label="small (CPU)",
+    )
+    game._switch(to_game=True)
+    game._switch(to_game=False)
+    assert states == ["game:on:small (CPU)", "game:off:large-v3"]
+
+
+def test_resolve_model_label() -> None:
+    from pathlib import Path
+
+    from artemis.channels.voice.game_mode import resolve_model_label
+
+    assert resolve_model_label(None, fallback="varsayilan") == "varsayilan"
+    assert resolve_model_label(Path("C:/models/small")) == "small"
+    hf = Path("C:/hub/models--Systran--faster-whisper-small/snapshots/536b0662")
+    assert resolve_model_label(hf) == "small"

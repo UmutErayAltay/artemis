@@ -182,6 +182,13 @@ def test_key_vocabulary_is_exact() -> None:
         "pageup",
         "pagedown",
         "insert",
+        "media_play_pause",
+        "media_stop",
+        "media_next",
+        "media_prev",
+        "volume_mute",
+        "volume_up",
+        "volume_down",
     } | {f"f{number}" for number in range(1, 25)}
 
     assert MODIFIERS == ("ctrl", "alt", "shift", "win")
@@ -442,3 +449,18 @@ def test_verdict_masks_quoted_screen_secrets() -> None:
     ):
         raw_ok = json.dumps({"verified": True, "evidence": ordinary})
         assert parse_verdict(raw_ok).evidence == ordinary
+
+
+def test_media_keys_and_aliases_resolve_to_vk_codes() -> None:
+    from artemis.computer.windows import _VK
+
+    assert parse_keys("play_pause") == ("media_play_pause",)
+    assert parse_keys("next_track") == ("media_next",)
+    assert parse_keys("prev_track") == ("media_prev",)
+    assert parse_keys("mute") == ("volume_mute",)
+    for name in (
+        "media_play_pause", "media_stop", "media_next", "media_prev",
+        "volume_mute", "volume_up", "volume_down",
+    ):
+        assert parse_keys(name) == (name,)
+        assert name in _VK

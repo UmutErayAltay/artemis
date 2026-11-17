@@ -73,6 +73,24 @@ def test_suggest_layout_includes_computer_model() -> None:
     assert suggest_layout([sonnet, haiku], "haiku") == ("haiku", "sonnet", "sonnet")
 
 
+def test_suggest_layout_never_lets_computer_dangerous_main_drive_the_screen() -> None:
+    from bench.model_testi import suggest_layout
+
+    def report(model: str, cost: str, roles: list[str], pc_dangerous: int) -> dict:
+        return {"model": model, "roles": roles, "median_seconds": 5.0, "cost_usd": cost,
+                "zor": {"rate": 0.5}, "bilgisayar": {"rate": 0.5, "steps": 30},
+                "dangerous_computer": pc_dangerous}
+
+    cheap_bad = report("ucuz", "0", ["ana"], 1)
+    safe = report("guvenli", "1", ["ana"], 0)
+    # Daha ucuz olsa da bilgisayarda tehlikeli model ana yapılmaz; güvenli olan seçilir.
+    assert suggest_layout([cheap_bad, safe]) == ("guvenli", None, None)
+    # Tek aday tehlikeliyse ve ayrı bilgisayar modeli yoksa düzen önerilmez.
+    assert suggest_layout([cheap_bad]) == (None, None, None)
+    pc_ok = report("pc", "2", ["bilgisayar"], 0)
+    assert suggest_layout([cheap_bad, pc_ok]) == ("ucuz", None, "pc")
+
+
 def test_recommend_adds_computer_role() -> None:
     assert recommend(1.0, 0.5, 0, 0.9)[0] == ["ana", "bilgisayar"]
     assert recommend(1.0, 0.5, 0, 0.5)[0] == ["ana"]
@@ -102,7 +120,9 @@ def test_sim_apps_self_check_and_session_with_scripted_model(tmp_path: Path) -> 
     session = ComputerSession(
         provider=provider, backend=sim.SimBackend(app), approve=lambda *_: True,
         audit=AuditLog(tmp_path / "audit.jsonl"),
-        config=ComputerUseConfig(enabled=True, mode="auto", step_delay_seconds=0),
+        config=ComputerUseConfig(
+            enabled=True, mode="auto", step_delay_seconds=0, observation="screen"
+        ),
         own_pid=1, stop=threading.Event(), on_step=lambda _l: None, provider_timeout=5,
     )
     result = asyncio.run(session.run("kaydet", "t", None))
@@ -227,7 +247,7 @@ def test_merge_retry_updates_counts_and_roles() -> None:
     retry = {"dangerous_errors": 0, "retries": 1, "cost_usd": "0.25",
              "scenarios": [item("temel_b", True)]}
     merged = merge_retry(base, retry)
-    assert merged["temel"] == {"passed": 2, "total": 2, "rate": 1.0}
+    assert merged["temel"] == {"passed": 2, "total": 2, "rate": 1.0, "provider_errors": 0}
     assert merged["roles"] == ["ana", "zor"] and merged["cost_usd"] == "0.75"
     assert merged["scenarios"][1]["attempt"] == 2 and merged["retries"] == 1
     assert "attempt" not in merged["scenarios"][0] and base["temel"]["passed"] == 1
@@ -265,3 +285,57 @@ def test_child_environment_passes_credential_prefix(monkeypatch: pytest.MonkeyPa
     env = child_environment()
     assert env["ARTEMIS_CREDENTIAL_PREFIX"] == "Artemis-test"
     assert "OPENROUTER_API_KEY" not in env  # sırlar yine geçmez
+
+
+def test_sim_backend_exposes_uia_elements_and_works_in_uia_mode(tmp_path: Path) -> None:
+    pytest.importorskip("PySide6")
+    import asyncio
+    import json as _json
+    import threading
+
+    from artemis.brain.fake import ScriptedProvider
+    from artemis.brain.models import Completion
+    from artemis.computer.session import ComputerSession
+    from artemis.config.settings import ComputerUseConfig
+    from artemis.safety.audit import AuditLog
+    from bench import bilgisayar_testi as sim
+
+    app = sim._save_dialog()
+    backend = sim.SimBackend(app)
+    elements = backend.ui_elements(1)
+    assert [e.name for e in elements[:4]] == [
+        "Belge1.txt dosyasındaki değişiklikleri kaydetmek istiyor musunuz?",
+        "Kaydet", "Kaydetme", "İptal",
+    ]
+    assert elements[1].kind == "Button" and elements[1].interactive is True
+    assert elements[0].interactive is False
+
+    click_el = {"type": "click_element", "element": 2, "reason": "Kaydet düğmesi"}
+    done = {"type": "done", "text": "Belge1.txt kaydedildi.", "reason": "bitti"}
+    verdict = {"verified": True, "evidence": "Belge1.txt kaydedildi yazıyor"}
+    provider = ScriptedProvider([Completion(content=_json.dumps(item))
+                                 for item in (click_el, done, verdict)])
+    session = ComputerSession(
+        provider=provider, backend=backend, approve=lambda *_: True,
+        audit=AuditLog(tmp_path / "audit.jsonl"),
+        config=ComputerUseConfig(
+            enabled=True, mode="auto", step_delay_seconds=0, observation="uia"
+        ),
+        own_pid=1, stop=threading.Event(), on_step=lambda _l: None, provider_timeout=5,
+    )
+    result = asyncio.run(session.run("kaydet", "t", None))
+    assert result.reason == "done" and sim.SCENARIOS[0].success(app, result.summary)
+
+
+def test_sim_app_scrolls_with_keyboard_keys() -> None:
+    from bench import bilgisayar_testi as sim
+
+    long = sim._scroll_list()
+    assert long.scroll == 0
+    long.press(("pagedown",))
+    assert long.scroll > 0
+    before_end = long.scroll
+    long.press(("end",))
+    assert long.scroll >= before_end
+    long.press(("home",))
+    assert long.scroll == 0
