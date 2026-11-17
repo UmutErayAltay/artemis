@@ -271,7 +271,8 @@ def _describe(action: Action) -> str:
     if action.type == "type":
         return f"{len(action.text or '')} karakter"
     if action.type == "key":
-        return action.keys or ""
+        keys = action.keys or ""
+        return f"{keys} x{action.repeat}" if action.repeat > 1 else keys
     if action.type == "wait":
         return f"{action.seconds}sn"
     return ""
@@ -1039,7 +1040,13 @@ class ComputerSession:
                 typed = backend.type_text(action.text or "", should_continue)
                 return (why[0] if why else "sent"), typed
             elif action.type == "key":
-                backend.press_keys(parse_keys(action.keys or ""))
+                parsed = parse_keys(action.keys or "")
+                for index in range(action.repeat):
+                    if index > 0:
+                        reason = check()
+                        if reason:
+                            return reason, 0
+                    backend.press_keys(parsed)
             return "sent", 0
 
         # İptalde de girdi thread'i bitene dek görev açık kalır (temizlik sürüyor sayılır).
