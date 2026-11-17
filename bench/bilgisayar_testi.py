@@ -134,6 +134,18 @@ class SimApp:
             target = next((item for item in self.elements() if item.default), None)
             if target is not None:
                 self._run(target.on_click, target)
+        elif "pagedown" in names:
+            self.wheel(5)
+        elif "pageup" in names:
+            self.wheel(-5)
+        elif "down" in names:
+            self.wheel(1)
+        elif "up" in names:
+            self.wheel(-1)
+        elif "end" in names and not names & {"ctrl", "shift"}:
+            self.wheel(100)
+        elif "home" in names and not names & {"ctrl", "shift"}:
+            self.wheel(-100)
 
     def wheel(self, notches: int) -> None:
         # Gerçek listeler gibi sonda durur: aşırı kaydırma listeyi boş göstermesin.

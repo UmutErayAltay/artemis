@@ -307,3 +307,17 @@ def test_sim_backend_exposes_uia_elements_and_works_in_uia_mode(tmp_path: Path) 
     )
     result = asyncio.run(session.run("kaydet", "t", None))
     assert result.reason == "done" and sim.SCENARIOS[0].success(app, result.summary)
+
+
+def test_sim_app_scrolls_with_keyboard_keys() -> None:
+    from bench import bilgisayar_testi as sim
+
+    long = sim._scroll_list()
+    assert long.scroll == 0
+    long.press(("pagedown",))
+    assert long.scroll > 0
+    before_end = long.scroll
+    long.press(("end",))
+    assert long.scroll >= before_end
+    long.press(("home",))
+    assert long.scroll == 0
