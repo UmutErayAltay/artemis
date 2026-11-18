@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from artemis.brain.model_report import SCENARIO_IDS, pass_rate, report_summary
 from artemis.config.settings import EndpointConfig, ModelConfig, Settings
+from artemis.i18n import t
 
 CLI_NAME = "Claude aboneliği"
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
@@ -23,7 +24,7 @@ ModelRow = tuple[str, bool, bool, str, str, str, bool, str]
 def connection_label(model: ModelConfig) -> str:
     if model.provider == "openai_compatible":
         return str(model.endpoint)
-    return CLI_NAME if model.provider == "claude_cli" else model.provider
+    return t(CLI_NAME) if model.provider == "claude_cli" else model.provider
 
 
 def _is_local_model(model: ModelConfig, endpoints: Mapping[str, EndpointConfig]) -> bool:
@@ -67,8 +68,8 @@ def _score(report: dict[str, object]) -> str:
     rate = pass_rate(report)
     if rate is None:
         return ""
-    return f"%{round(100 * rate)}" + (
-        " · tehlikeli hata" if report.get("dangerous_errors") else ""
+    return t("%{pct}").format(pct=round(100 * rate)) + (
+        f" · {t('tehlikeli hata')}" if report.get("dangerous_errors") else ""
     )
 
 
@@ -154,10 +155,10 @@ def layout_suggestion_text(
     if not ana:
         return ""
     return (
-        f"Önerilen düzen (test sonuçlarına göre): Ana: {ana}"
-        + (f" · Zor işler: {zor}" if zor else "")
-        + (f" · Bilgisayar kullanımı: {pc}" if pc else "")
-        + (" — şu anki düzen bu." if suggested == current else "")
+        t("Önerilen düzen (test sonuçlarına göre): Ana: {ana}").format(ana=ana)
+        + (f" · {t('Zor işler: {zor}').format(zor=zor)}" if zor else "")
+        + (f" · {t('Bilgisayar kullanımı: {pc}').format(pc=pc)}" if pc else "")
+        + (f" — {t('şu anki düzen bu.')}" if suggested == current else "")
     )
 
 
@@ -171,24 +172,24 @@ def model_row_html(
     alias, is_brain, legacy, connection, model_id, model_kind, hard, _tested = row
     roles = [
         f"<span style='color:{colors['accent']}'>{name}</span>"
-        for name, on in (("Beyin", is_brain), ("Zor işler", hard)) if on
+        for name, on in ((t("Beyin"), is_brain), (t("Zor işler"), hard)) if on
     ]
     if alias == fallback and not is_brain:
-        roles.append(f"<span style='color:{colors['muted']}'>Yedek</span>")
+        roles.append(f"<span style='color:{colors['muted']}'>{t('Yedek')}</span>")
     muted = colors["muted"]
-    role_text = " · ".join(roles) or f"<span style='color:{muted}'>Rol yok</span>"
+    role_text = " · ".join(roles) or f"<span style='color:{muted}'>{t('Rol yok')}</span>"
     score = (
-        "Test sürüyor…" if alias == testing
+        t("Test sürüyor…") if alias == testing
         else _score(reports[alias]) if alias in reports
-        else "test yok"
+        else t("test yok")
     )
     tag = (
-        f"&nbsp;&nbsp;<span style='color:{colors['warning']}'>eski ayar</span>"
+        f"&nbsp;&nbsp;<span style='color:{colors['warning']}'>{t('eski ayar')}</span>"
         if legacy else ""
     )
     kind = (
-        " · resim" if model_kind == "image"
-        else " · ses" if model_kind == "speech"
+        f" · {t('resim')}" if model_kind == "image"
+        else f" · {t('ses')}" if model_kind == "speech"
         else ""
     )
     return (
@@ -229,7 +230,9 @@ def speech_cost_text(input_per_million: Decimal, output_per_million: Decimal) ->
     cost = speech_reply_cost(input_per_million, output_per_million)
     one = _format_usd(cost, 4)
     hundred = _format_usd(cost * 100, 2)
-    return f"Tahmin: bir sesli yanıt (~15 sn) ≈ {one} USD; 100 yanıt ≈ {hundred} USD."
+    return t("Tahmin: bir sesli yanıt (~15 sn) ≈ {one} USD; 100 yanıt ≈ {hundred} USD.").format(
+        one=one, hundred=hundred
+    )
 
 
 def speech_cost_text_from_fields(input_text: str, output_text: str) -> str:
@@ -251,7 +254,7 @@ def speech_cost_text_from_fields(input_text: str, output_text: str) -> str:
 def speech_cost_map(settings: Settings) -> dict[str, str]:
     return {
         alias: speech_cost_text(model.input_per_million, model.output_per_million)
-        or "Ücretsiz olarak eklendi."
+        or t("Ücretsiz olarak eklendi.")
         for alias, model in settings.models.items()
         if model.kind == "speech"
     }

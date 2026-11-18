@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 from artemis.channels.desktop.form_kit import button_row, divider, field, group, meta_label
 from artemis.channels.desktop.widgets import with_help
+from artemis.i18n import t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.provider_section import ProviderSection
@@ -79,7 +80,8 @@ ROLE_TEXTS = {
 
 def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     model_box, models = group(
-        "Modeller", "Eklediğin modeller. Beyin olan model sohbetlere cevap verir.",
+        t("Modeller"),
+        t("Eklediğin modeller. Beyin olan model sohbetlere cevap verir."),
         divided=False,
     )
     layout.addWidget(model_box)
@@ -91,41 +93,41 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     )
     # Süzme ve sıralama yalnız görünüm: config'teki model sırası değişmez.
     section.model_filter = QComboBox()
-    section.model_filter.setAccessibleName("Modelleri süz")
+    section.model_filter.setAccessibleName(t("Modelleri süz"))
     for label, key in (
-        ("Tümü", "all"),
-        ("Yazı", "chat"),
-        ("Görsel", "image"),
-        ("Ses", "speech"),
+        (t("Tümü"), "all"),
+        (t("Yazı"), "chat"),
+        (t("Görsel"), "image"),
+        (t("Ses"), "speech"),
     ):
         section.model_filter.addItem(label, key)
     saved_filter = section.model_filter.findData(section._test_settings.value("filter", "all"))
     section.model_filter.setCurrentIndex(max(saved_filter, 0))
     section.model_filter.currentIndexChanged.connect(section._filter_changed)
-    section.filter_label = meta_label("Göster")
+    section.filter_label = meta_label(t("Göster"))
     section.model_sort = QComboBox()
-    section.model_sort.setAccessibleName("Modelleri sırala")
+    section.model_sort.setAccessibleName(t("Modelleri sırala"))
     for label, key in _SORTS:
-        section.model_sort.addItem(label, key)
+        section.model_sort.addItem(t(label), key)
     saved = section.model_sort.findData(section._test_settings.value("sort", "added"))
     section.model_sort.setCurrentIndex(max(saved, 0))
     section.model_sort.currentIndexChanged.connect(section._sort_changed)
-    section.sort_label = meta_label("Sırala")
+    section.sort_label = meta_label(t("Sırala"))
     models.addWidget(section.banner)
     section.model_list = QListWidget()
-    section.model_list.setAccessibleName("Eklenen modeller")
+    section.model_list.setAccessibleName(t("Eklenen modeller"))
     section.model_list.setVisible(False)  # reload() dolu olunca gösterir
-    section.model_empty = meta_label("Henüz model eklenmedi. Aşağıdan bir model ekle.")
+    section.model_empty = meta_label(t("Henüz model eklenmedi. Aşağıdan bir model ekle."))
     # Roller: seçili modelin rolleri; işlemler mevcut _make_primary/_toggle_role yollarıdır.
-    section.primary_button = QPushButton("Beyin")
+    section.primary_button = QPushButton(t("Beyin"))
     section.primary_button.clicked.connect(section._make_primary)
     # Model kademesi: seçili model zor işler (çok adımlı, planlama) turlarını üstlenir.
-    section.hard_button = QPushButton("Zor işler")
+    section.hard_button = QPushButton(t("Zor işler"))
     section.hard_button.clicked.connect(section._toggle_hard_role)
     # Arıza yedeği: beyin modeli kota/bağlantı/sunucu hatası verince tur bununla sürer.
-    section.fallback_button = QPushButton("Yedek")
+    section.fallback_button = QPushButton(t("Yedek"))
     section.fallback_button.clicked.connect(section._toggle_fallback_role)
-    section.computer_button = QPushButton("Bilgisayar")
+    section.computer_button = QPushButton(t("Bilgisayar"))
     section.computer_button.clicked.connect(section._toggle_computer_role)
     section.role_buttons = (
         section.primary_button, section.hard_button, section.fallback_button,
@@ -135,25 +137,25 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
         button.setCheckable(True)
         # Eylem reddedilirse (yazılamadı, resim modeli) işaret gerçek duruma döner.
         button.clicked.connect(section._sync_detail)
-    section.primary_button.setToolTip("Sohbetlere bu model cevap verir.")
-    section.primary_button.setAccessibleName("Beyin modeli yap")
-    section.hard_button.setAccessibleName("Zor işler modeli yap")
-    section.fallback_button.setAccessibleName("Arıza yedeği yap")
-    section.computer_button.setAccessibleName("Bilgisayar kullanımı modeli yap")
+    section.primary_button.setToolTip(t("Sohbetlere bu model cevap verir."))
+    section.primary_button.setAccessibleName(t("Beyin modeli yap"))
+    section.hard_button.setAccessibleName(t("Zor işler modeli yap"))
+    section.fallback_button.setAccessibleName(t("Arıza yedeği yap"))
+    section.computer_button.setAccessibleName(t("Bilgisayar kullanımı modeli yap"))
     section._style_roles()
-    section.remove_button = QPushButton("Modeli kaldır")
+    section.remove_button = QPushButton(t("Modeli kaldır"))
     section.remove_button.setObjectName("danger")
     section.remove_button.setStyleSheet("border: none; background: transparent;")
     section.remove_button.clicked.connect(section._remove_model)
     # Test: tek düğme; çalışırken metni ve eylemi "Durdur"a döner.
-    section.model_test_button = QPushButton("Test et")
+    section.model_test_button = QPushButton(t("Test et"))
     section.model_test_button.clicked.connect(section._test_or_stop)
-    section.parallel_test = QCheckBox("Paralel çalıştır")
+    section.parallel_test = QCheckBox(t("Paralel çalıştır"))
     section.parallel_test.setChecked(section._saved_parallel())
     section.parallel_count = QComboBox()
-    section.parallel_count.setAccessibleName("Paralel test sayısı")
+    section.parallel_count.setAccessibleName(t("Paralel test sayısı"))
     for count in PARALLEL_CHOICES:
-        section.parallel_count.addItem(f"{count} test", count)
+        section.parallel_count.addItem(t("{count} test").format(count=count), count)
     idx = section.parallel_count.findData(section._saved_parallel_count())
     if idx < 0:
         idx = max(0, section.parallel_count.findData(PARALLEL_TEST))
@@ -162,12 +164,12 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     section.parallel_test.toggled.connect(section._remember_parallel)
     section.parallel_count.currentIndexChanged.connect(section._remember_parallel_count)
     section._parallel_tip()
-    section.retry_button = QPushButton("Kalanları yeniden dene")
-    section.retry_button.setToolTip("Kalan senaryoları aynı modelle bir kez daha çalıştırır.")
+    section.retry_button = QPushButton(t("Kalanları yeniden dene"))
+    section.retry_button.setToolTip(t("Kalan senaryoları aynı modelle bir kez daha çalıştırır."))
     section.retry_button.clicked.connect(section._retry_failed)
     section.retry_button.setVisible(False)
     section.test_list = QListWidget()
-    section.test_list.setAccessibleName("Test senaryoları")
+    section.test_list.setAccessibleName(t("Test senaryoları"))
     section.test_list.setMaximumHeight(160)
     section.test_list.setVisible(False)
     section.test_result = meta_label("")
@@ -189,7 +191,7 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     for button in section.role_buttons:
         role_row.addWidget(button)
     role_row.addStretch(1)
-    field(chat_layout, "Rol", role_row, help=(
+    field(chat_layout, t("Rol"), role_row, help=t(
         "Beyin: sohbetlere bu model cevap verir. Zor işler: çok adımlı ve planlama isteyen "
         "turları bu model alır. Yedek: beyin kota, bağlantı ya da sunucu hatası verince tur "
         "bununla sürer. Bilgisayar: ekranı görüp tıklama bu modelle çalışır."
@@ -198,7 +200,7 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     test_row.setSpacing(12)
     test_row.addWidget(section.model_test_button)
     test_row.addWidget(section.parallel_test)
-    test_row.addLayout(with_help(section.parallel_count, (
+    test_row.addLayout(with_help(section.parallel_count, t(
         "Seçilen sayıda senaryo aynı anda çalışır; API modellerinde testi kısaltır. "
         "Yerel sunucu aynı anda tek istek kaldırıyorsa yavaşlatabilir."
     )))
@@ -212,7 +214,7 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     retry_row.addWidget(section.retry_button)
     retry_row.addStretch(1)
     test_box.addLayout(retry_row)
-    field(chat_layout, "Test", test_box, help=(
+    field(chat_layout, t("Test"), test_box, help=t(
         "Seçili modeli senaryolarla dener. Ücretli modelde önce tahmini tutarı sorar; test "
         "bütçesi bu tahminin iki katıyla sınırlanır; yeniden denemede yalnız kalanların payı "
         "sorulur. Yalnız yazı modelleri denenir."
@@ -220,7 +222,7 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     detail.addWidget(section.chat_box)
     section.kind_info = meta_label("")
     section.kind_info.setWordWrap(True)
-    section.kind_info.setAccessibleName("Model bilgisi")
+    section.kind_info.setAccessibleName(t("Model bilgisi"))
     section.kind_info.setVisible(False)
     detail.addWidget(section.kind_info)
     detail.addLayout(button_row(section.remove_button))
@@ -229,7 +231,7 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     # Test edilmiş modellerden çıkan önerilen düzen (ana + zor işler) ve tek tık uygulama.
     section.layout_label = meta_label("")
     section.layout_label.setVisible(False)
-    section.apply_layout_button = QPushButton("Bu düzeni uygula")
+    section.apply_layout_button = QPushButton(t("Bu düzeni uygula"))
     section.apply_layout_button.clicked.connect(section._apply_layout)
     section.apply_layout_button.setVisible(False)
     # Geniş alanda liste solda, ayrıntı sağda; dar alanda ayrıntı listenin altına iner.
@@ -260,7 +262,7 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     left.addWidget(section.model_empty)
     left.addWidget(section.layout_label)
     section.apply_layout_button.setMinimumWidth(88)
-    left.addLayout(section._tip_after(section.apply_layout_button, (
+    left.addLayout(section._tip_after(section.apply_layout_button, t(
         "Test sonuçlarına göre önerilen Beyin, Zor işler ve bilgisayar kullanımı "
         "modellerini tek tıkla ayara yazar. Ayarlardan çıkınca geçerli olur."
     )))
@@ -271,78 +273,78 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
 
 
 def build_add_box(section: ProviderSection, layout: QVBoxLayout) -> None:
-    add_box, add = group("Model ekle")
+    add_box, add = group(t("Model ekle"))
     # Form tam genişliğe yayılmasın: okunur bir sütun genişliğinde, solda.
     add_box.setMaximumWidth(FORM_MAX_WIDTH)
     layout.addWidget(add_box)
     section.add_connection = QComboBox()
-    section.add_connection.setAccessibleName("Modelin bağlantısı")
+    section.add_connection.setAccessibleName(t("Modelin bağlantısı"))
     section.add_connection.currentIndexChanged.connect(section._connection_changed)
     section.model_name = QComboBox()
     section.model_name.setEditable(True)
-    section.model_name.setAccessibleName("Model")
+    section.model_name.setAccessibleName(t("Model"))
     section.model_hint = section.model_name.lineEdit()
     section.model_name.editTextChanged.connect(section._model_text_changed)
-    section.fetch_button = QPushButton("Listeyi getir")
+    section.fetch_button = QPushButton(t("Listeyi getir"))
     section.fetch_button.clicked.connect(section._fetch_models)
     model_row = QHBoxLayout()
     model_row.setSpacing(8)
     model_row.addWidget(section.model_name, 1)
     model_row.addWidget(section.fetch_button)
     section.alias = QLineEdit()
-    section.alias.setAccessibleName("Model takma adı")
-    section.paid = QCheckBox("Ücretli model")
+    section.alias.setAccessibleName(t("Model takma adı"))
+    section.paid = QCheckBox(t("Ücretli model"))
     section.input_price = QLineEdit("0")
-    section.input_price.setAccessibleName("Girdi USD/milyon")
+    section.input_price.setAccessibleName(t("Girdi USD/milyon"))
     section.output_price = QLineEdit("0")
-    section.output_price.setAccessibleName("Çıktı USD/milyon")
+    section.output_price.setAccessibleName(t("Çıktı USD/milyon"))
     section.price_box = QWidget()
     section.price_box.setObjectName("cardRow")
     prices = QVBoxLayout(section.price_box)
     prices.setContentsMargins(0, 0, 0, 0)
     prices.setSpacing(12)
-    field(prices, "Girdi fiyatı (USD / milyon jeton)", section.input_price)
-    field(prices, "Çıktı fiyatı (USD / milyon jeton)", section.output_price)
+    field(prices, t("Girdi fiyatı (USD / milyon jeton)"), section.input_price)
+    field(prices, t("Çıktı fiyatı (USD / milyon jeton)"), section.output_price)
     section.price_box.setVisible(False)
     section.kind = QComboBox()
-    section.kind.setAccessibleName("Model türü")
-    section.kind.addItem("Sohbet", "chat")
-    section.kind.addItem("Resim", "image")
-    section.kind.addItem("Ses", "speech")
+    section.kind.setAccessibleName(t("Model türü"))
+    section.kind.addItem(t("Sohbet"), "chat")
+    section.kind.addItem(t("Resim"), "image")
+    section.kind.addItem(t("Ses"), "speech")
     section.image_price = QLineEdit("0")
-    section.image_price.setAccessibleName("Resim başına USD")
+    section.image_price.setAccessibleName(t("Resim başına USD"))
     section.image_box = QWidget()
     section.image_box.setObjectName("cardRow")
     image_layout = QVBoxLayout(section.image_box)
     image_layout.setContentsMargins(0, 0, 0, 0)
     field(
-        image_layout, "Resim başına fiyat (USD)", section.image_price,
-        "Her çağrıda bütçeden bu tutar ayrılır (rezervasyon).",
+        image_layout, t("Resim başına fiyat (USD)"), section.image_price,
+        t("Her çağrıda bütçeden bu tutar ayrılır (rezervasyon)."),
     )
     section.image_box.setVisible(False)
     section.speech_protocol = QComboBox()
-    section.speech_protocol.setAccessibleName("Ses protokolü")
-    section.speech_protocol.addItem("OpenAI uyumlu · OpenRouter vb.", "openai")
+    section.speech_protocol.setAccessibleName(t("Ses protokolü"))
+    section.speech_protocol.addItem(t("OpenAI uyumlu · OpenRouter vb."), "openai")
     section.speech_protocol.addItem("Gemini API", "gemini")
     section.speech_box = QWidget()
     section.speech_box.setObjectName("cardRow")
     speech_layout = QVBoxLayout(section.speech_box)
     speech_layout.setContentsMargins(0, 0, 0, 0)
-    field(speech_layout, "Protokol", section.speech_protocol)
+    field(speech_layout, t("Protokol"), section.speech_protocol)
     section.speech_cost = meta_label("")
     section.speech_cost.setWordWrap(True)
     speech_layout.addWidget(section.speech_cost)
     section.speech_box.setVisible(False)
-    section.make_primary = QCheckBox("Beyin modeli yap")
+    section.make_primary = QCheckBox(t("Beyin modeli yap"))
     section.kind.currentIndexChanged.connect(section._sync_kind)
     section.paid.toggled.connect(section._sync_kind)
     section.input_price.textChanged.connect(section._sync_kind)
     section.output_price.textChanged.connect(section._sync_kind)
-    field(add, "Bağlantı", section.add_connection)
-    field(add, "Tür", section.kind)
-    field(add, "Model", model_row)
-    field(add, "Takma ad", section.alias)
-    add.addLayout(with_help(section.paid, (
+    field(add, t("Bağlantı"), section.add_connection)
+    field(add, t("Tür"), section.kind)
+    field(add, t("Model"), model_row)
+    field(add, t("Takma ad"), section.alias)
+    add.addLayout(with_help(section.paid, t(
         "Modelin kullanım başına ücret aldığını işaretler ve fiyat alanlarını açar. "
         "Ücretli model bütçe korumasına takılır; ücretli kullanım izni ayar dosyasından "
         "verilir."
@@ -351,24 +353,24 @@ def build_add_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     add.addWidget(section.image_box)
     add.addWidget(section.speech_box)
     add.addWidget(section.make_primary)
-    section.add_button = QPushButton("Ekle")
+    section.add_button = QPushButton(t("Ekle"))
     section.add_button.setObjectName("primary")
     section.add_button.clicked.connect(section._add_model)
-    section.cli_test_button = QPushButton("Aboneliği test et")
-    section.cli_test_button.setToolTip("Küçük bir gerçek istek atar; kotadan az harcar.")
+    section.cli_test_button = QPushButton(t("Aboneliği test et"))
+    section.cli_test_button.setToolTip(t("Küçük bir gerçek istek atar; kotadan az harcar."))
     section.cli_test_button.clicked.connect(section._test_cli)
     add.addLayout(button_row(section.cli_test_button, section.add_button))
 
 
 def build_connections_box(section: ProviderSection, layout: QVBoxLayout) -> None:
-    section.connection_toggle = QPushButton("Bağlantı ekle veya düzenle")
+    section.connection_toggle = QPushButton(t("Bağlantı ekle veya düzenle"))
     section.connection_toggle.setObjectName("ghost")
     section.connection_toggle.setCheckable(True)
     layout.addWidget(divider())
     layout.addWidget(section.connection_toggle, 0, Qt.AlignmentFlag.AlignLeft)
     section.connection_box, conn = group(
-        "Bağlantılar",
-        "Modellerin çalıştığı sunucular. Listeden seçip düzenle ya da yenisini yaz.",
+        t("Bağlantılar"),
+        t("Modellerin çalıştığı sunucular. Listeden seçip düzenle ya da yenisini yaz."),
         divided=False,
     )
     section.connection_box.setVisible(False)
@@ -376,38 +378,38 @@ def build_connections_box(section: ProviderSection, layout: QVBoxLayout) -> None
     section.connection_toggle.toggled.connect(section.connection_box.setVisible)
     layout.addWidget(section.connection_box)
     section.endpoint_list = QListWidget()
-    section.endpoint_list.setAccessibleName("Tanımlı bağlantılar")
+    section.endpoint_list.setAccessibleName(t("Tanımlı bağlantılar"))
     section.endpoint_list.currentItemChanged.connect(section._select)
     conn.addWidget(section.endpoint_list)
     section.preset = QComboBox()
-    section.preset.setAccessibleName("Bağlantı şablonu")
+    section.preset.setAccessibleName(t("Bağlantı şablonu"))
     for index, (label, *_rest) in enumerate(PRESETS):
-        section.preset.addItem(label, index)
+        section.preset.addItem(t(label), index)
     section.preset.activated.connect(section._apply_preset)
     section.endpoint_id = QLineEdit()
-    section.endpoint_id.setAccessibleName("Bağlantı kimliği")
+    section.endpoint_id.setAccessibleName(t("Bağlantı kimliği"))
     section.endpoint_id.setMaxLength(40)
     section.base_url = QLineEdit()
-    section.base_url.setAccessibleName("Bağlantı adresi")
-    section.needs_key = QCheckBox("API anahtarı gerekli")
+    section.base_url.setAccessibleName(t("Bağlantı adresi"))
+    section.needs_key = QCheckBox(t("API anahtarı gerekli"))
     section.needs_key.setChecked(True)
     section.key = QLineEdit()
-    section.key.setAccessibleName("API anahtarı")
+    section.key.setAccessibleName(t("API anahtarı"))
     section.key.setEchoMode(QLineEdit.EchoMode.Password)
-    field(conn, "Şablon", section.preset)
-    field(conn, "Kimlik (kısa ad)", section.endpoint_id)
-    field(conn, "Adres", section.base_url)
+    field(conn, t("Şablon"), section.preset)
+    field(conn, t("Kimlik (kısa ad)"), section.endpoint_id)
+    field(conn, t("Adres"), section.base_url)
     conn.addWidget(section.needs_key)
-    field(conn, "API anahtarı", section.key, help=(
+    field(conn, t("API anahtarı"), section.key, help=t(
         "Anahtar Windows kimlik kasasına yazılır, ayar dosyasına (YAML) asla girmez. "
         "Kaydedince alan temizlenir; boş bırakırsan kayıtlı anahtar korunur."
     ))
-    section.test_button = QPushButton("Bağlantıyı test et")
+    section.test_button = QPushButton(t("Bağlantıyı test et"))
     section.test_button.clicked.connect(section._test_connection)
-    section.save_button = QPushButton("Kaydet")
+    section.save_button = QPushButton(t("Kaydet"))
     section.save_button.setObjectName("primary")
     section.save_button.clicked.connect(section._save)
-    section.delete_button = QPushButton("Sil")
+    section.delete_button = QPushButton(t("Sil"))
     section.delete_button.setObjectName("danger")
     section.delete_button.clicked.connect(section._delete)
     conn.addLayout(button_row(

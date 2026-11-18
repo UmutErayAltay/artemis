@@ -43,6 +43,7 @@ from artemis.channels.desktop.shell_assets import greeting_for_hour
 from artemis.channels.desktop.steps import StepLine
 from artemis.channels.desktop.widgets import PetFace
 from artemis.config.settings import Settings
+from artemis.i18n import t
 
 # Köprü ses durumunu makine okunur taşır; Türkçe metne ekran çevirir.
 _VOICE_LABELS = {
@@ -72,7 +73,11 @@ def _is_user_speaker(speaker: str) -> bool:
 def _detail_text(activity: Activity) -> str:
     """Ham araç adı ve alanlar; yalnız ayrıntı ipucunda görünür, görünür satıra girmez."""
     raw_tool = activity.fields.get("tool")
-    head = f"Ham araç adı: {raw_tool}" if isinstance(raw_tool, str) else f"Olay: {activity.event}"
+    head = (
+        t("Ham araç adı: {raw_tool}").format(raw_tool=raw_tool)
+        if isinstance(raw_tool, str)
+        else t("Olay: {event}").format(event=activity.event)
+    )
     payload = json.dumps(activity.fields, ensure_ascii=False, indent=2, sort_keys=True, default=str)
     if len(payload) > _DETAIL_LIMIT:
         payload = payload[:_DETAIL_LIMIT] + "\n…"
@@ -92,12 +97,12 @@ class PromptEdit(QPlainTextEdit):
         super().__init__(parent)
         self._on_send = on_send
         self._min_height = min_height
-        self.setPlaceholderText("Artemis'e yaz…")
+        self.setPlaceholderText(t("Artemis'e yaz…"))
         # Sakin tek satır başlar (44px), en çok ~4 satıra kadar büyür.
         self.setFixedHeight(min_height)
         self.document().documentLayout().documentSizeChanged.connect(self._fit_height)
         self.setTabChangesFocus(True)
-        self.setAccessibleName("Komut metni")
+        self.setAccessibleName(t("Komut metni"))
 
     def _line_height(self, lines: int) -> int:
         document = self.document()
@@ -144,10 +149,10 @@ class StepBlock(QFrame):
         layout.addLayout(self._rows_layout)
         self._rows: list[tuple[QLabel, StepLine, Activity]] = []
         self._details = False
-        self._toggle = QPushButton("Ayrıntılar")
+        self._toggle = QPushButton(t("Ayrıntılar"))
         self._toggle.setObjectName("ghost")
         self._toggle.setCheckable(True)
-        self._toggle.setAccessibleName("Adım ayrıntılarını göster")
+        self._toggle.setAccessibleName(t("Adım ayrıntılarını göster"))
         self._toggle.toggled.connect(self._set_details)
         layout.addWidget(self._toggle, 0, Qt.AlignmentFlag.AlignLeft)
         self._refresh()
@@ -222,7 +227,7 @@ class OperationCard(QFrame):
         layout.setContentsMargins(8, 8, 8, 8)
         layout.setSpacing(4)
 
-        title = self._label(card.title or "İstek", palette["text"], 13)
+        title = self._label(card.title or t("İstek"), palette["text"], 13)
         title.setObjectName("opTitle")
         layout.addWidget(title)
         head = QHBoxLayout()
@@ -230,7 +235,7 @@ class OperationCard(QFrame):
         stamp = QLabel(card.started)
         stamp.setObjectName("meta")
         color = palette[CHIP_TONES[card.chip]]
-        chip = QLabel(card.chip)
+        chip = QLabel(t(card.chip))
         chip.setObjectName("opChip")
         # Rozet rengi durum jetonundan gelir; hex değer gömülmez.
         chip.setStyleSheet(
@@ -258,11 +263,11 @@ class OperationCard(QFrame):
                 row.addWidget(self._label("› " + sub.text, palette[sub_tone], 12, indent=8))
             layout.addLayout(row)
 
-        toggle = QPushButton("Ayrıntılar")
+        toggle = QPushButton(t("Ayrıntılar"))
         toggle.setObjectName("ghost")
         toggle.setCheckable(True)
         toggle.setChecked(card.expanded)
-        toggle.setAccessibleName("Mesaj işlem ayrıntılarını göster")
+        toggle.setAccessibleName(t("Mesaj işlem ayrıntılarını göster"))
         layout.addWidget(toggle, 0, Qt.AlignmentFlag.AlignLeft)
         lines = [
             f"{op.label}: " + " · ".join(part for part in (op.summary, op.duration) if part)
@@ -308,8 +313,8 @@ class _TurnSteps:
 def _speaker_caption(speaker: str) -> str:
     """Kullanıcı balonundaki 12px etiket; "Siz" yerine kısa "Sen"."""
     if speaker.startswith("Siz"):
-        return "Sen" + speaker.removeprefix("Siz")
-    return speaker
+        return t("Sen" + speaker.removeprefix("Siz"))
+    return t(speaker)
 
 
 def _hour_now() -> int:
@@ -335,14 +340,14 @@ def welcome_suggestions(settings: Settings | None) -> tuple[str, ...]:
     chips: list[str] = []
     if settings is not None:
         if settings.calendar.enabled:
-            chips.append("Bugün ne var?")
+            chips.append(t("Bugün ne var?"))
         if settings.routines.enabled:
-            chips.append("Bir rutin çalıştır")
+            chips.append(t("Bir rutin çalıştır"))
         if settings.research.enabled:
-            chips.append("Şunu araştır: …")
+            chips.append(t("Şunu araştır: …"))
         if settings.file_search.enabled:
-            chips.append("Dosyalarımda ara: …")
-    chips += ["Hatırlatma kur", "Saat kaç?"]
+            chips.append(t("Dosyalarımda ara: …"))
+    chips += [t("Hatırlatma kur"), t("Saat kaç?")]
     return tuple(chips[:_MAX_CHIPS])
 
 
@@ -381,7 +386,7 @@ class ChatTranscript(QWidget):
         self.greeting.setTextFormat(Qt.TextFormat.PlainText)
         self.greeting.setAlignment(Qt.AlignmentFlag.AlignHCenter)
         self._demo = demo
-        description = QLabel(_WELCOME_BODY)
+        description = QLabel(t(_WELCOME_BODY))
         self.description = description
         description.setObjectName("emptyBody")
         description.setWordWrap(True)
@@ -422,9 +427,11 @@ class ChatTranscript(QWidget):
         """Öneri satırını ve (dikte açıksa) kısayol cümlesini yeniden kurar. Demo sabit kalır."""
         if self._demo:
             chips, dictation_hotkey = _DEMO_EXAMPLES, ""
-        body = _WELCOME_BODY
+        body = t(_WELCOME_BODY)
         if dictation_hotkey:
-            body += f" Dikte için {dictation_hotkey.strip().title()} tuşlarına bas."
+            body += " " + t("Dikte için {hotkey} tuşlarına bas.").format(
+                hotkey=dictation_hotkey.strip().title()
+            )
         self.description.setText(body)
         while self._suggestions.count():
             item = self._suggestions.takeAt(0)
@@ -434,11 +441,14 @@ class ChatTranscript(QWidget):
         self.suggestion_buttons = []
         self._suggestions.addStretch(1)
         for text in chips:
-            button = QPushButton(text)
+            label = t(text)
+            button = QPushButton(label)
             button.setObjectName("chip")
-            button.setAccessibleName(f"Örnek komut: {text}")
+            button.setAccessibleName(t("Örnek komut: {text}").format(text=label))
             fills = self._demo or text.endswith("…")
-            button.setToolTip("Komut kutusuna yazar, göndermez" if fills else "Hemen gönderir")
+            button.setToolTip(
+                t("Komut kutusuna yazar, göndermez") if fills else t("Hemen gönderir")
+            )
             button.setProperty("chip", text)
             button.clicked.connect(self._chip_clicked)
             self._suggestions.addWidget(button)
@@ -514,7 +524,7 @@ class ChatTranscript(QWidget):
         body.setTextFormat(Qt.TextFormat.PlainText)
         body.setWordWrap(True)
         body.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-        body.setAccessibleName(f"{speaker} mesajı")
+        body.setAccessibleName(t("{speaker} mesajı").format(speaker=t(speaker)))
         bubble_layout.addWidget(body)
         self._bubbles.append((bubble, speaker, text))
         self._resize_bubble(bubble, speaker, text)
@@ -583,16 +593,16 @@ class QuickOverlay(QWidget):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent, Qt.WindowType.Tool | Qt.WindowType.WindowStaysOnTopHint)
-        self.setWindowTitle("Artemis · Hızlı komut")
+        self.setWindowTitle(t("Artemis · Hızlı komut"))
         self.setMinimumSize(480, 240)
         self.resize(520, 260)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(24, 24, 24, 24)
         layout.setSpacing(16)
         top = QHBoxLayout()
-        title = QLabel("Artemis · Hızlı komut")
+        title = QLabel(t("Artemis · Hızlı komut"))
         title.setObjectName("sectionTitle")
-        panel_button = QPushButton("Paneli aç")
+        panel_button = QPushButton(t("Paneli aç"))
         panel_button.setObjectName("ghost")
         panel_button.clicked.connect(on_show_panel)
         top.addWidget(title)
@@ -601,11 +611,11 @@ class QuickOverlay(QWidget):
         layout.addLayout(top)
         self.input = PromptEdit(on_send, self, min_height=72)
         layout.addWidget(self.input, 1)
-        self.status = QLabel("Ana panelle aynı oturum")
+        self.status = QLabel(t("Ana panelle aynı oturum"))
         self.status.setObjectName("meta")
-        self.voice_state = QLabel(_VOICE_LABELS["off"])
+        self.voice_state = QLabel(t(_VOICE_LABELS["off"]))
         self.voice_state.setObjectName("meta")
-        self.voice_state.setAccessibleName("Ses durumu")
+        self.voice_state.setAccessibleName(t("Ses durumu"))
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         # İki durum etiketi ayraçsız yan yana "Ses kapalı  Hazır" diye tek cümle gibi okunuyordu.
@@ -616,9 +626,9 @@ class QuickOverlay(QWidget):
         buttons.addWidget(divider)
         buttons.addWidget(self.status)
         buttons.addStretch(1)
-        self.cancel_button = QPushButton("İptal")
+        self.cancel_button = QPushButton(t("İptal"))
         self.cancel_button.setMinimumWidth(88)
-        self.send_button = QPushButton("Gönder")
+        self.send_button = QPushButton(t("Gönder"))
         self.send_button.setObjectName("primary")
         self.send_button.setMinimumWidth(88)
         self.cancel_button.clicked.connect(on_cancel)
@@ -631,7 +641,7 @@ class QuickOverlay(QWidget):
         self.input.setEnabled(not busy)
         self.send_button.setEnabled(not busy)
         self.cancel_button.setEnabled(busy)
-        self.status.setText(status or ("Çalışıyor…" if busy else "Ana panelle aynı oturum"))
+        self.status.setText(status or (t("Çalışıyor…") if busy else t("Ana panelle aynı oturum")))
 
 
 class _Drawer(QWidget):

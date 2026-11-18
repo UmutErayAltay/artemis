@@ -42,6 +42,7 @@ from artemis.channels.desktop.page_kit import (
 from artemis.channels.desktop.text_viewer import open_text_file
 from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import load_settings
+from artemis.i18n import t
 from artemis.proactive.daily_summary import parse_day, summary_path
 from artemis.proactive.routines import RoutinesError, RoutineStore
 from artemis.proactive.schedule import format_local
@@ -71,21 +72,21 @@ _JOB_ID_CHARS = frozenset("0123456789abcdef")
 
 
 def _schedule_text(at: str, days: tuple[int, ...]) -> str:
-    when = "her gün" if len(days) == 7 else " ".join(_DAYS[day] for day in days)
+    when = t("her gün") if len(days) == 7 else " ".join(t(_DAYS[day]) for day in days)
     return f"{at} · {when}"
 
 
 def _human_day(day: date) -> str:
     """'14 Ocak Çarşamba'; ay ve gün adları sabit tabloda, yerel ayara bağlı değil."""
-    return f"{day.day} {_MONTHS[day.month - 1]} {_WEEKDAYS[day.weekday()]}"
+    return f"{day.day} {t(_MONTHS[day.month - 1])} {t(_WEEKDAYS[day.weekday()])}"
 
 
 def _human_when(moment: datetime, now: datetime) -> str:
     """'Bugün 10:42' ya da '15 Oca 10:42'."""
     clock = moment.strftime("%H:%M")
     if moment.date() == now.date():
-        return f"Bugün {clock}"
-    return f"{moment.day} {_MONTHS[moment.month - 1][:3]} {clock}"
+        return t("Bugün {clock}").format(clock=clock)
+    return f"{moment.day} {t(_MONTHS[moment.month - 1])[:3]} {clock}"
 
 
 def _summary_subtitle(line: str, day: date) -> str:
@@ -104,12 +105,12 @@ def _first_line(path: Path) -> str:
         with path.open(encoding="utf-8", errors="replace") as handle:
             head = handle.read(2000)
     except OSError:
-        return "Dosya okunamadı"
+        return t("Dosya okunamadı")
     for line in head.splitlines():
         text = line.strip().lstrip("#").strip()
         if text:
             return text[:120]
-    return "Boş özet"
+    return t("Boş özet")
 
 
 def _jobs(db_path: Path) -> list[dict[str, Any]]:
@@ -138,7 +139,7 @@ def load_snapshot(config_path: Path) -> dict[str, Any]:
     try:
         settings = load_settings(config_path)
     except (OSError, ValueError):
-        return {"error": "Ayar dosyası okunamadı."}
+        return {"error": t("Ayar dosyası okunamadı.")}
     state = settings.state_dir
     snap: dict[str, Any] = {"error": ""}
 
@@ -212,21 +213,21 @@ def demo_snapshot() -> dict[str, Any]:
     return {
         "error": "",
         "routines": {"enabled": True, "error": "", "items": [
-            {"name": "İşe başla", "steps": 3, "schedule": "08:30 · Pzt Sal Çar Per Cum"},
-            {"name": "Günü kapat", "steps": 2, "schedule": ""},
+            {"name": t("İşe başla"), "steps": 3, "schedule": t("08:30 · Pzt Sal Çar Per Cum")},
+            {"name": t("Günü kapat"), "steps": 2, "schedule": ""},
         ]},
         "research": {"enabled": True, "items": [
-            {"id": "a" * 12, "topic": "Yerel dil modelleri karşılaştırması", "status": "running",
-             "searches": 4, "max_searches": 12, "when": "15 Oca 10:42", "report": ""},
-            {"id": "b" * 12, "topic": "Windows bildirim API'leri", "status": "done",
-             "searches": 9, "max_searches": 12, "when": "14 Oca 18:05", "report": "demo"},
+            {"id": "a" * 12, "topic": t("Yerel dil modelleri karşılaştırması"), "status": "running",
+             "searches": 4, "max_searches": 12, "when": t("15 Oca 10:42"), "report": ""},
+            {"id": "b" * 12, "topic": t("Windows bildirim API'leri"), "status": "done",
+             "searches": 9, "max_searches": 12, "when": t("14 Oca 18:05"), "report": "demo"},
         ]},
         "summaries": {"enabled": True, "items": [
-            {"day": "2026-01-14", "line": "14 Ocak: 23 araç çağrısı, 2 onay", "path": ""},
-            {"day": "2026-01-13", "line": "13 Ocak: 11 araç çağrısı, 1 onay", "path": ""},
+            {"day": "2026-01-14", "line": t("14 Ocak: 23 araç çağrısı, 2 onay"), "path": ""},
+            {"day": "2026-01-13", "line": t("13 Ocak: 11 araç çağrısı, 1 onay"), "path": ""},
         ]},
         "notices": {"enabled": True, "proactive_off": False, "items": [
-            {"name": "İndirilenler", "when": "2026-01-14 17:20"},
+            {"name": t("İndirilenler"), "when": "2026-01-14 17:20"},
         ]},
     }
 
@@ -261,8 +262,8 @@ class _Card:
         off.setSpacing(8)
         self.disabled_label = make_label("", "meta")
         off.addWidget(self.disabled_label, 1)
-        self.link = QPushButton("Ayarlarda aç")
-        self.link.setAccessibleName(f"{title} ayarlarını aç")
+        self.link = QPushButton(t("Ayarlarda aç"))
+        self.link.setAccessibleName(t("{title} ayarlarını aç").format(title=title))
         self.link.setProperty("section", settings_section)  # panelin tek yuvası okur
         off.addWidget(self.link)
         self.stack = CurrentPageStack()
@@ -353,34 +354,34 @@ class AutomationPanel(QWidget):
         outer = make_scroll_page(self)
         layout = outer  # genişlik sınırı ve ortalama ortak kabuktan (make_scroll_page) gelir
         layout.setSpacing(16)
-        self.refresh_button = QPushButton("Yenile")
-        self.refresh_button.setAccessibleName("Otomasyon sayfasını yenile")
+        self.refresh_button = QPushButton(t("Yenile"))
+        self.refresh_button.setAccessibleName(t("Otomasyon sayfasını yenile"))
         self.refresh_button.clicked.connect(self.refresh)
         layout.addWidget(make_page_header(
-            "Otomasyon",
-            "Rutinlerini, araştırmalarını ve gün özetlerini buradan takip et.",
+            t("Otomasyon"),
+            t("Rutinlerini, araştırmalarını ve gün özetlerini buradan takip et."),
             (self.refresh_button,),
         ))
         self.routines = _Card(
-            "Rutinler",
-            ("Henüz rutin yok", "Sohbette “işe başla adında bir rutin kaydet” de."),
+            t("Rutinler"),
+            (t("Henüz rutin yok"), t("Sohbette “işe başla adında bir rutin kaydet” de.")),
             "Rutinler",
         )
         self.research = _Card(
-            "Araştırmalar",
-            ("Henüz araştırma yok", "Sohbette bir konu söyle ve araştırmasını iste."),
+            t("Araştırmalar"),
+            (t("Henüz araştırma yok"), t("Sohbette bir konu söyle ve araştırmasını iste.")),
             "Araştırma",
-            _HELP_RESEARCH,
+            t(_HELP_RESEARCH),
         )
         self.summaries = _Card(
-            "Gün özetleri",
-            ("Henüz özet yok", "Gün sonu özeti her akşam bir kez yazılır."),
+            t("Gün özetleri"),
+            (t("Henüz özet yok"), t("Gün sonu özeti her akşam bir kez yazılır.")),
             "Gün özeti",
-            _HELP_SUMMARIES,
+            t(_HELP_SUMMARIES),
         )
         self.notices = _Card(
-            "Son bildirimler",
-            ("Henüz bildirim yok", "Bir tetikleyici çalışınca burada görünür."),
+            t("Son bildirimler"),
+            (t("Henüz bildirim yok"), t("Bir tetikleyici çalışınca burada görünür.")),
             "Tetikleyiciler",
         )
         self.notice = make_label("", "meta")
@@ -389,12 +390,13 @@ class AutomationPanel(QWidget):
         # kapalıyken çıkar.
         links = QHBoxLayout()
         links.setSpacing(4)
-        links.addWidget(make_label("Ayarlar:", "meta"))
+        links.addWidget(make_label(t("Ayarlar:"), "meta"))
         self.settings_links: dict[str, QPushButton] = {}
         for section in ("Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma"):
-            link = QPushButton(section)
+            label = t(section)
+            link = QPushButton(label)
             link.setObjectName("ghost")
-            link.setAccessibleName(f"{section} ayarlarını aç")
+            link.setAccessibleName(t("{title} ayarlarını aç").format(title=label))
             link.setProperty("section", section)
             link.clicked.connect(self._open_settings)
             self.settings_links[section] = link
@@ -414,7 +416,7 @@ class AutomationPanel(QWidget):
 
     def _set_loading(self) -> None:
         for card in (self.routines, self.research, self.summaries, self.notices):
-            card.show_disabled("Yükleniyor…", link=False)
+            card.show_disabled(t("Yükleniyor…"), link=False)
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
@@ -424,7 +426,7 @@ class AutomationPanel(QWidget):
         self._generation += 1
         generation = self._generation
         if self._demo or self._config_path is None:
-            self._apply(generation, demo_snapshot() if self._demo else {"error": "Ayar yok."})
+            self._apply(generation, demo_snapshot() if self._demo else {"error": t("Ayar yok.")})
             return
 
         def work(path: Path, relay: _Relay) -> None:
@@ -435,7 +437,7 @@ class AutomationPanel(QWidget):
             ):
                 # Bozuk saat dilimi, beklenmedik veri tipi (ör. SQLite None/metin zamanı) ya da
                 # zaman değeri: kartlar "Yükleniyor…" durumunda kalmasın.
-                snap = {"error": "Otomasyon verisi okunamadı."}
+                snap = {"error": t("Otomasyon verisi okunamadı.")}
             with suppress(RuntimeError):  # pencere okuma bitmeden kapandı
                 relay.loaded.emit(generation, snap)
 
@@ -493,41 +495,42 @@ class AutomationPanel(QWidget):
 
     def _render_routines(self, data: dict[str, Any]) -> None:
         if not data["enabled"]:
-            self.routines.show_disabled("Rutinler kapalı.")
+            self.routines.show_disabled(t("Rutinler kapalı."))
             return
         if data["error"]:
             self.routines.show_disabled(data["error"])
             return
         if not data["items"]:
-            self.routines.show_empty("Henüz rutin yok", "Sohbette “işe başla adında bir rutin "
-                                     "kaydet” de.")
+            self.routines.show_empty(t("Henüz rutin yok"), t("Sohbette “işe başla adında bir rutin "
+                                     "kaydet” de."))
             return
         rows = []
         for item in data["items"]:
             name = item["name"]
             run = self._button(
-                "Çalıştır", f"Rutini çalıştır: {name}",
+                t("Çalıştır"), t("Rutini çalıştır: {name}").format(name=name),
                 "run", name, primary=True,
             )
             self.run_buttons[name] = run
-            meta = f"{item['steps']} adım" + (f" · {item['schedule']}" if item["schedule"] else "")
+            steps = t("{steps} adım").format(steps=item["steps"])
+            meta = steps + (f" · {item['schedule']}" if item["schedule"] else "")
             rows.append(_row(name, meta, buttons=(run,)))
         self.routines.show_rows(rows)
 
     def _render_research(self, data: dict[str, Any]) -> None:
         if not data["enabled"]:
-            self.research.show_disabled("Araştırma kapalı.")
+            self.research.show_disabled(t("Araştırma kapalı."))
             return
         if not data["items"]:
-            self.research.show_empty("Henüz araştırma yok", "Sohbette bir konu söyle ve "
-                                     "araştırmasını iste.")
+            self.research.show_empty(t("Henüz araştırma yok"), t("Sohbette bir konu söyle ve "
+                                     "araştırmasını iste."))
             return
         rows = []
         for job in data["items"]:
             buttons: list[QPushButton] = []
             if job["status"] == "running":
                 stop = self._button(
-                    "Durdur", f"Araştırmayı durdur: {job['topic']}",
+                    t("Durdur"), t("Araştırmayı durdur: {topic}").format(topic=job["topic"]),
                     "cancel", job["id"],
                 )
                 self.cancel_buttons[job["id"]] = stop
@@ -535,13 +538,18 @@ class AutomationPanel(QWidget):
             if job["report"]:
                 path = job["report"]
                 opener = self._button(
-                    "Raporu aç", f"Raporu aç: {job['topic']}",
+                    t("Raporu aç"), t("Raporu aç: {topic}").format(topic=job["topic"]),
                     "open", path,
                 )
                 self.report_buttons[job["id"]] = opener
                 buttons.append(opener)
             label, token = _JOB_STATES.get(job["status"], ("Bilinmiyor", "muted"))
-            meta = f"{label} · {job['searches']}/{job['max_searches']} arama · {job['when']}"
+            meta = t("{label} · {searches}/{max_searches} arama · {when}").format(
+                label=t(label),
+                searches=job["searches"],
+                max_searches=job["max_searches"],
+                when=job["when"],
+            )
             rows.append(_row(
                 job["topic"], meta, dot_color=self._palette[token], buttons=tuple(buttons),
             ))
@@ -549,15 +557,17 @@ class AutomationPanel(QWidget):
 
     def _render_summaries(self, data: dict[str, Any]) -> None:
         if not data["enabled"]:
-            self.summaries.show_disabled("Gün özeti kapalı.")
+            self.summaries.show_disabled(t("Gün özeti kapalı."))
             return
         if not data["items"]:
-            self.summaries.show_empty("Henüz özet yok", "Gün sonu özeti her akşam bir kez yazılır.")
+            self.summaries.show_empty(
+                t("Henüz özet yok"), t("Gün sonu özeti her akşam bir kez yazılır."),
+            )
             return
         rows = []
         for item in data["items"]:
             opener = self._button(
-                "Aç", f"Özeti aç: {item['day']}",
+                t("Aç"), t("Özeti aç: {day}").format(day=item["day"]),
                 "open", item["path"],
             )
             self.summary_buttons[item["day"]] = opener
@@ -569,13 +579,13 @@ class AutomationPanel(QWidget):
 
     def _render_notices(self, data: dict[str, Any]) -> None:
         if not data["enabled"]:
-            text = ("Bildirimler için proaktif olaylar da açık olmalı."
-                    if data["proactive_off"] else "Tetikleyiciler kapalı.")
+            text = (t("Bildirimler için proaktif olaylar da açık olmalı.")
+                    if data["proactive_off"] else t("Tetikleyiciler kapalı."))
             self.notices.show_disabled(text)
             return
         if not data["items"]:
-            self.notices.show_empty("Henüz bildirim yok", "Bir tetikleyici çalışınca burada "
-                                    "görünür.")
+            self.notices.show_empty(t("Henüz bildirim yok"), t("Bir tetikleyici çalışınca burada "
+                                    "görünür."))
             return
         self.notices.show_rows([_row(i["name"], i["when"]) for i in data["items"]])
 
@@ -595,7 +605,7 @@ class AutomationPanel(QWidget):
     def set_busy(self, busy: bool) -> None:
         """Köprü meşgulken ya da demoda eylem düğmeleri kapanır; salt okuma sürer."""
         self._busy = busy
-        tip = "Demo modunda kapalı." if self._demo else ""
+        tip = t("Demo modunda kapalı.") if self._demo else ""
         for button in (*self.run_buttons.values(), *self.cancel_buttons.values()):
             button.setEnabled(not busy and not self._demo)
         for button in (*self.report_buttons.values(), *self.summary_buttons.values()):

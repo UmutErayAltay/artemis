@@ -50,6 +50,7 @@ from artemis.channels.desktop.page_kit import EmptyState
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError
 from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import ModelConfig, load_settings
+from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 
 CALL_TIMEOUT = 120.0
@@ -79,13 +80,17 @@ class ModelCall(QThread):
             )
             completion = asyncio.run(router.complete(self._messages, [], timeout=CALL_TIMEOUT))
         except BudgetExceeded as error:
-            self.done.emit("", f"Ücretli model ya da bütçe sınırı: {error}")
+            self.done.emit(
+                "", t("Ücretli model ya da bütçe sınırı: {error}").format(error=error)
+            )
         except RateLimitedError:
-            self.done.emit("", "Model kota sınırında; biraz sonra yeniden dene.")
+            self.done.emit("", t("Model kota sınırında; biraz sonra yeniden dene."))
         except ProviderError as error:
-            self.done.emit("", f"Model yanıt veremedi: {error}")
+            self.done.emit("", t("Model yanıt veremedi: {error}").format(error=error))
         except (OSError, ValueError, yaml.YAMLError) as error:
-            self.done.emit("", f"Ayarlar ya da denetim kaydı kullanılamadı: {error}")
+            self.done.emit(
+                "", t("Ayarlar ya da denetim kaydı kullanılamadı: {error}").format(error=error)
+            )
         else:
             self.done.emit(completion.content, "")
 
@@ -124,15 +129,19 @@ class ImageCall(QThread):
 
             result = self._work(self, generate)
         except pipe.Cancelled:
-            self.done.emit(None, "İptal edildi.")
+            self.done.emit(None, t("İptal edildi."))
         except BudgetExceeded as error:
-            self.done.emit(None, f"Ücretli model ya da bütçe sınırı: {error}")
+            self.done.emit(
+                None, t("Ücretli model ya da bütçe sınırı: {error}").format(error=error)
+            )
         except RateLimitedError:
-            self.done.emit(None, "Model kota sınırında; biraz sonra yeniden dene.")
+            self.done.emit(None, t("Model kota sınırında; biraz sonra yeniden dene."))
         except (ProviderError, pipe.PetImageError) as error:
-            self.done.emit(None, f"Resim modeli yanıt veremedi: {error}")
+            self.done.emit(None, t("Resim modeli yanıt veremedi: {error}").format(error=error))
         except (OSError, ValueError, yaml.YAMLError) as error:
-            self.done.emit(None, f"Ayarlar ya da denetim kaydı kullanılamadı: {error}")
+            self.done.emit(
+                None, t("Ayarlar ya da denetim kaydı kullanılamadı: {error}").format(error=error)
+            )
         else:
             self.done.emit(result, "")
 
@@ -145,21 +154,21 @@ def image_calls_note(model: ModelConfig, calls: int) -> str:
     """Resim çağrılarının maliyet notu; ücretsiz abonelik proxy'sinde kota uyarısı."""
     if _is_priced(model):
         total = model.image_cost_usd * calls
-        return (
-            f"Ücretli resim modeli: çağrı başına {model.image_cost_usd} USD ayrılır; "
-            f"{calls} çağrı = {total} USD (satır yeniden denemesiyle en çok {total * 2} USD). "
+        return t(
+            "Ücretli resim modeli: çağrı başına {cost} USD ayrılır; "
+            "{calls} çağrı = {total} USD (satır yeniden denemesiyle en çok {max_total} USD). "
             "allow_paid kapalıysa reddedilir."
-        )
-    return "Çağrılar abonelik kotasından düşer (ayrı ücret yok)."
+        ).format(cost=model.image_cost_usd, calls=calls, total=total, max_total=total * 2)
+    return t("Çağrılar abonelik kotasından düşer (ayrı ücret yok).")
 
 
 def price_warning(model: ModelConfig) -> str:
     if not (model.input_per_million or model.output_per_million):
         return ""
-    return (
-        f"Bu model ücretli (girdi {model.input_per_million}, çıktı {model.output_per_million} "
+    return t(
+        "Bu model ücretli (girdi {inp}, çıktı {out} "
         "USD / 1M token). Çağrı bütçeden düşer; allow_paid kapalıysa reddedilir."
-    )
+    ).format(inp=model.input_per_million, out=model.output_per_million)
 
 
 _STAGES = ("Tarif", "Görsel", "Animasyon", "Kaydet")
@@ -192,7 +201,7 @@ class _Silhouette(QFrame):
         super().__init__()
         self.setObjectName("petSilhouette")
         self.setFixedSize(112, 96)
-        self.setAccessibleName("Boş önizleme")
+        self.setAccessibleName(t("Boş önizleme"))
 
     def paintEvent(self, event: QPaintEvent) -> None:
         super().paintEvent(event)
@@ -270,14 +279,13 @@ class CreatorPanel(QFrame):
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(12)
         header = QHBoxLayout()
-        self.title_label = _label("Yeni pet üret", "sectionTitle")
+        self.title_label = _label(t("Yeni pet üret"), "sectionTitle")
         header.addWidget(self.title_label)
         header.addStretch(1)
-        self.reset_button = QPushButton("Yeni pet")
-        self.reset_button.setAccessibleName("Yeni pet")
-        self.reset_button.setToolTip(
-            "Sohbeti ve kaydedilmemiş çizimi temizleyerek yeni pet başlatır."
-        )
+        self.reset_button = QPushButton(t("Yeni pet"))
+        self.reset_button.setAccessibleName(t("Yeni pet"))
+        self.reset_button.setToolTip(t(
+            "Sohbeti ve kaydedilmemiş çizimi temizleyerek yeni pet başlatır."))
         self.reset_button.clicked.connect(self.reset_conversation)
         header.addWidget(self.reset_button)
         layout.addLayout(header)
@@ -290,7 +298,7 @@ class CreatorPanel(QFrame):
         stage_row.setSpacing(8)
         self._stage_labels: list[QLabel] = []
         for i, name in enumerate(_STAGES):
-            label = _label(name, "stage")
+            label = _label(t(name), "stage")
             self._stage_labels.append(label)
             stage_row.addWidget(label)
             if i < len(_STAGES) - 1:
@@ -300,12 +308,12 @@ class CreatorPanel(QFrame):
 
         left, left_lay = _column()
         self.method = QComboBox()
-        self.method.setAccessibleName("Üretim yöntemi")
-        self.method.addItem("SVG (metin modeli)")
-        self.method.addItem("Resim modeli (animasyonlu)")
+        self.method.setAccessibleName(t("Üretim yöntemi"))
+        self.method.addItem(t("SVG (metin modeli)"))
+        self.method.addItem(t("Resim modeli (animasyonlu)"))
         self.method.currentIndexChanged.connect(self._fill_models)
         self.model_combo = QComboBox()
-        self.model_combo.setAccessibleName("Model")
+        self.model_combo.setAccessibleName(t("Model"))
         self.model_combo.currentIndexChanged.connect(self._update_warning)
         # Model yokken boş combo yerine açıklayıcı boş durum gösterilir (combolar ağaçta kalır).
         self.fields = _flat(QWidget())
@@ -314,8 +322,8 @@ class CreatorPanel(QFrame):
         fields_lay.setSpacing(12)
         pair = QHBoxLayout()
         pair.setSpacing(12)
-        pair.addWidget(_field("Yöntem", self.method, _HELP_METHOD), 1)
-        pair.addWidget(_field("Model", self.model_combo, _HELP_MODEL), 2)
+        pair.addWidget(_field(t("Yöntem"), self.method, t(_HELP_METHOD)), 1)
+        pair.addWidget(_field(t("Model"), self.model_combo, t(_HELP_MODEL)), 2)
         fields_lay.addLayout(pair)
         self.warning = _label("", "meta")
         self.warning.setWordWrap(True)
@@ -323,19 +331,19 @@ class CreatorPanel(QFrame):
         fields_lay.addWidget(self.warning)
         left_lay.addWidget(self.fields)
         self.name_edit = QLineEdit()
-        self.name_edit.setPlaceholderText("Örn. Şirin Maskot")
+        self.name_edit.setPlaceholderText(t("Örn. Şirin Maskot"))
         self.name_edit.setMaxLength(80)
-        self.name_edit.setAccessibleName("Pet adı")
+        self.name_edit.setAccessibleName(t("Pet adı"))
         self.name_edit.setMinimumHeight(32)
-        left_lay.addWidget(_field("Pet adı", self.name_edit))
+        left_lay.addWidget(_field(t("Pet adı"), self.name_edit))
         self.chat_log = QPlainTextEdit()
         self.chat_log.setReadOnly(True)
         self.chat_log.setMinimumHeight(140)
-        self.chat_log.setAccessibleName("Pet üretici sohbeti")
+        self.chat_log.setAccessibleName(t("Pet üretici sohbeti"))
         # Boş günlükte büyük boş dikdörtgen yerine ortada soluk örnek istem (QPlainTextEdit
         # yer tutucusu sola yaslı çizilir, ortalanamaz; bu yüzden görüntü alanına etiket konur).
         log_lay = QVBoxLayout(self.chat_log.viewport())
-        self.chat_hint = _label("Örn. ‘turuncu, yuvarlak, uykulu bir tilki’", "emptyBody")
+        self.chat_hint = _label(t("Örn. ‘turuncu, yuvarlak, uykulu bir tilki’"), "emptyBody")
         self.chat_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.chat_hint.setWordWrap(True)
         self.chat_hint.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -345,18 +353,18 @@ class CreatorPanel(QFrame):
         send_row = QHBoxLayout()
         send_row.setSpacing(8)
         self.input = QLineEdit()
-        self.input.setPlaceholderText("Nasıl bir pet? (sonra: 'daha mavi yap', 'şapka ekle')")
-        self.input.setAccessibleName("Pet isteği")
+        self.input.setPlaceholderText(t("Nasıl bir pet? (sonra: 'daha mavi yap', 'şapka ekle')"))
+        self.input.setAccessibleName(t("Pet isteği"))
         self.input.setFixedHeight(36)
         self.input.returnPressed.connect(self.send)
-        self.send_button = QPushButton("Gönder")
+        self.send_button = QPushButton(t("Gönder"))
         self.send_button.setObjectName("primary")
         self.send_button.setFixedHeight(36)
         self.send_button.setMinimumWidth(88)
         self.send_button.clicked.connect(self.send)
         send_row.addWidget(self.input, 1)
         send_row.addWidget(self.send_button)
-        send_row.addWidget(HelpTip(_HELP_SEND), 0, Qt.AlignmentFlag.AlignVCenter)
+        send_row.addWidget(HelpTip(t(_HELP_SEND)), 0, Qt.AlignmentFlag.AlignVCenter)
         left_lay.addLayout(send_row)
 
         right, right_lay = _column()
@@ -366,12 +374,11 @@ class CreatorPanel(QFrame):
         well_lay = QVBoxLayout(well)
         well_lay.setContentsMargins(16, 16, 16, 16)
         well_lay.setSpacing(4)
-        self.preview = _label("Önizleme yok", "emptyTitle")
+        self.preview = _label(t("Önizleme yok"), "emptyTitle")
         self.preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.preview.setAccessibleName("Pet önizlemesi")
-        self.preview_hint = _label(
-            "Soldan nasıl bir pet istediğini yaz; çizim burada belirir.", "emptyBody"
-        )
+        self.preview.setAccessibleName(t("Pet önizlemesi"))
+        self.preview_hint = _label(t(
+            "Soldan nasıl bir pet istediğini yaz; çizim burada belirir."), "emptyBody")
         self.preview_hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.preview_hint.setWordWrap(True)
         well_lay.addStretch(1)
@@ -383,7 +390,7 @@ class CreatorPanel(QFrame):
         well_lay.addStretch(1)
         right_lay.addWidget(well, 1)
         self.state_combo = QComboBox()
-        self.state_combo.setAccessibleName("Önizleme durumu")
+        self.state_combo.setAccessibleName(t("Önizleme durumu"))
         for name in pet_animator.STATE_NAMES:
             self.state_combo.addItem(name)
         self.state_combo.currentIndexChanged.connect(self._load_frames)
@@ -391,18 +398,17 @@ class CreatorPanel(QFrame):
         for combo in (self.method, self.model_combo, self.state_combo):
             combo.setMinimumHeight(32)
             combo.setSizeAdjustPolicy(
-                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-            )
+                QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumContentsLength(8)
-        right_lay.addWidget(_field("Önizleme durumu", self.state_combo))
+        right_lay.addWidget(_field(t("Önizleme durumu"), self.state_combo))
         job_row = QHBoxLayout()
         job_row.setSpacing(8)
         job_row.addStretch(1)
-        self.animate_button = QPushButton("Animasyonları üret")
+        self.animate_button = QPushButton(t("Animasyonları üret"))
         self.animate_button.clicked.connect(self.animate)
-        self.cancel_button = QPushButton("İptal")
+        self.cancel_button = QPushButton(t("İptal"))
         self.cancel_button.clicked.connect(self.cancel)
-        self.save_button = QPushButton("Kaydet ve seç")
+        self.save_button = QPushButton(t("Kaydet ve seç"))
         self.save_button.setObjectName("primary")
         self.save_button.clicked.connect(self.save)
         for button in (self.animate_button, self.cancel_button, self.save_button):
@@ -429,7 +435,8 @@ class CreatorPanel(QFrame):
         layout.addWidget(self.workshop)
         # Model yokken kapalı form yerine tek eylemli boş durum (DESIGN.md boş durum kalıbı).
         self.empty_state = EmptyState(
-            "Pet üretmek için bir model gerekli", "Ayarlar > Model bölümünden bir bağlantı ekle."
+            t("Pet üretmek için bir model gerekli"),
+            t("Ayarlar > Model bölümünden bir bağlantı ekle."),
         )
         self.empty_body = self.empty_state.body_label
         # EmptyState dar gövde etiketini sütunun soluna yaslar; kompakt kartta ikisi de ortalanır.
@@ -438,7 +445,7 @@ class CreatorPanel(QFrame):
         for label in (self.empty_state.title_label, self.empty_state.body_label):
             empty_lay.setAlignment(label, Qt.AlignmentFlag.AlignHCenter)
         layout.addWidget(self.empty_state)
-        self.model_button = QPushButton("Ayarlar'da model ekle")
+        self.model_button = QPushButton(t("Ayarlar'da model ekle"))
         self.model_button.setObjectName("primary")
         self.model_button.clicked.connect(self.model_settings_requested)
         self.model_button.hide()
@@ -470,7 +477,7 @@ class CreatorPanel(QFrame):
         try:
             self._models = dict(load_settings(self._config_path).models)
         except (OSError, ValueError) as error:
-            self.status.setText(f"Model listesi okunamadı: {error}")
+            self.status.setText(t("Model listesi okunamadı: {error}").format(error=error))
             return
         self._fill_models()
 
@@ -499,7 +506,9 @@ class CreatorPanel(QFrame):
             if model.kind == want:
                 self.model_combo.addItem(f"{alias} · {model.provider}/{model.model}", alias)
         if self._models and self.model_combo.count() == 0:
-            self.status.setText(f"Bu yöntem için config'te '{want}' türünde model yok.")
+            self.status.setText(
+                t("Bu yöntem için config'te '{kind}' türünde model yok.").format(kind=want)
+            )
         self._update_warning()
         self._update_buttons()
 
@@ -508,7 +517,7 @@ class CreatorPanel(QFrame):
         if model is None:
             text = ""
         elif self._image_mode:
-            text = image_calls_note(model, len(pipe.ROWS)) + " Toplam süre yaklaşık 4-6 dk."
+            text = image_calls_note(model, len(pipe.ROWS)) + " " + t("Toplam süre yaklaşık 4-6 dk.")
         else:
             text = price_warning(model)
         self.warning.setText(text)
@@ -533,7 +542,7 @@ class CreatorPanel(QFrame):
         self.animate_button.setEnabled(ready and idle and self._base is not None)
         self.cancel_button.setEnabled(not idle)  # SVG çağrısı da iptal edilebilir (yok sayılır)
         if self._call is not None:
-            self.busy.setText("Model düşünüyor…")
+            self.busy.setText(t("Model düşünüyor…"))
         elif self._image_call is None:
             self.busy.setText("")
         has_models = bool(self._models)
@@ -543,10 +552,13 @@ class CreatorPanel(QFrame):
         self.reset_button.setVisible(has_models)
         self.fields.setVisible(has_models)
         self.empty_state.set_text(
-            "Pet üretmek için bir model gerekli",
-            "Demo modunda pet üretilmez." if self._demo
-            else "Çizimi bir model yapar; Ayarlar > Model bölümünden bir bağlantı ekleyince "
-            "burası açılır.",
+            t("Pet üretmek için bir model gerekli"),
+            t("Demo modunda pet üretilmez.")
+            if self._demo
+            else t(
+                "Çizimi bir model yapar; Ayarlar > Model bölümünden bir bağlantı ekleyince "
+                "burası açılır."
+            ),
         )
         self.model_button.setVisible(not has_models and not self._demo and self._model_hook)
         # Model yokken kart içeriğe göre küçük ve ortada durur (üst katman iki yandan boşluk
@@ -582,7 +594,7 @@ class CreatorPanel(QFrame):
             current = 0
         for i, label in enumerate(self._stage_labels):
             state = "current" if i == current else "done" if i < current else "todo"
-            label.setText(("✓ " if state == "done" else "") + _STAGES[i])
+            label.setText(("✓ " if state == "done" else "") + t(_STAGES[i]))
             if label.property("state") != state:
                 label.setProperty("state", state)
                 label.style().unpolish(label)
@@ -603,7 +615,7 @@ class CreatorPanel(QFrame):
         self._frame = 0
         self.state_combo.setCurrentIndex(0)
         self.preview.clear()
-        self.preview.setText("Önizleme yok")
+        self.preview.setText(t("Önizleme yok"))
         self._sync_placeholder()
         self.chat_log.clear()
         self.input.clear()
@@ -625,7 +637,7 @@ class CreatorPanel(QFrame):
             self._send_image(text, str(alias))
             return
         self.input.clear()
-        self._log("Sen", text)
+        self._log(t("Sen"), text)
         content = f"Mevcut SVG:\n{self._svg}\n\nİstek: {text}" if self._svg else text
         messages = [
             Message(role="system", content=pet_creator.SYSTEM_PROMPT),
@@ -644,11 +656,11 @@ class CreatorPanel(QFrame):
         self._call = None
         try:
             if error:
-                self._log("Hata", error)
+                self._log(t("Hata"), error)
                 return
             raw = pet_creator.extract_svg(reply)
             if raw is None:
-                self._log("Hata", "Yanıtta SVG yok; isteği biraz değiştirip yeniden dene.")
+                self._log(t("Hata"), t("Yanıtta SVG yok; isteği biraz değiştirip yeniden dene."))
                 return
             try:
                 svg = pet_creator.sanitize_svg(raw)
@@ -656,11 +668,11 @@ class CreatorPanel(QFrame):
                 eyeless = pet_creator.without_eyes(svg)
                 blink = pet_animator.render_svg(eyeless) if eyeless != svg else None
             except pet_creator.SvgError as problem:
-                self._log("Hata", f"SVG kullanılamadı: {problem}")
+                self._log(t("Hata"), t("SVG kullanılamadı: {problem}").format(problem=problem))
                 return
             self._svg = svg
             self._sheet = pet_animator.build_sheet(base, blink)
-            self._log("Model", "Hazır; önizlemeye bak. Düzeltmek için yaz.")
+            self._log(t("Model"), t("Hazır; önizlemeye bak. Düzeltmek için yaz."))
             self._load_frames()
         finally:
             self._update_buttons()
@@ -674,7 +686,7 @@ class CreatorPanel(QFrame):
         """Ücretli modelde tutar×çağrıyı onaylatır; sonra işi başlatır."""
         model = self._models[alias]
         if _is_priced(model) and not self._confirm(
-            image_calls_note(model, calls) + " Devam edilsin mi?"
+            image_calls_note(model, calls) + " " + t("Devam edilsin mi?")
         ):
             return False
         call = ImageCall(self._config_path, alias, work)
@@ -701,8 +713,8 @@ class CreatorPanel(QFrame):
 
         if self._start_image(alias, 1, work, self._on_base):
             self.input.clear()
-            self._log("Sen", text)
-            self.busy.setText("Temel görsel üretiliyor (~1 dk)…")
+            self._log(t("Sen"), text)
+            self.busy.setText(t("Temel görsel üretiliyor (~1 dk)…"))
 
     def _on_base(self, result: object, error: str) -> None:
         sender = self.sender()
@@ -710,15 +722,17 @@ class CreatorPanel(QFrame):
         self._image_call = None
         try:
             if call is not None and call.cancel_requested:
-                self._log("Hata", error or "İptal edildi.")
+                self._log(t("Hata"), error or t("İptal edildi."))
                 return
             if error or not isinstance(result, tuple):
-                self._log("Hata", error or "Beklenmeyen sonuç.")
+                self._log(t("Hata"), error or t("Beklenmeyen sonuç."))
                 return
             self._base, self._base_png = result
             self._sheet = None  # temel değişti: eski animasyonlar geçersiz
             self._show_still(self._base)
-            self._log("Model", "Temel görsel hazır. Düzeltmek için yaz ya da animasyonları üret.")
+            self._log(
+                t("Model"), t("Temel görsel hazır. Düzeltmek için yaz ya da animasyonları üret.")
+            )
         finally:
             self._update_buttons()
 
@@ -743,7 +757,9 @@ class CreatorPanel(QFrame):
             )
 
         if self._start_image(str(alias), len(pipe.ROWS), work, self._on_animated):
-            self._log("Model", "Animasyonlar üretiliyor (yaklaşık 4-6 dk); iptal edebilirsin.")
+            self._log(
+                t("Model"), t("Animasyonlar üretiliyor (yaklaşık 4-6 dk); iptal edebilirsin.")
+            )
 
     def _on_progress(self, done: int, total: int, row: int) -> None:
         self.busy.setText(f"{done + 1}/{total}: {pet_animator.STATE_NAMES[row].lower()}…")
@@ -772,18 +788,23 @@ class CreatorPanel(QFrame):
                     self._timer.stop()
                     self._frames = []
                     self.preview.clear()
-                    self.preview.setText("Önizleme yok")
+                    self.preview.setText(t("Önizleme yok"))
                     self._sync_placeholder()
                 self._log(
-                    "Hata",
-                    error or ("İptal edildi." if cancelled else "Beklenmeyen sonuç."),
+                    t("Hata"),
+                    error or (t("İptal edildi.") if cancelled else t("Beklenmeyen sonuç.")),
                 )
                 return
             self._sheet, fallback = result
             if fallback:
                 names = ", ".join(pet_animator.STATE_NAMES[r] for r in fallback)
-                self._log("Uyarı", f"Model çıktısı alınamayan (prosedürel) satırlar: {names}.")
-            self._log("Model", "Animasyonlar hazır; durumları önizle, sonra kaydet.")
+                self._log(
+                    t("Uyarı"),
+                    t("Model çıktısı alınamayan (prosedürel) satırlar: {names}.").format(
+                        names=names
+                    ),
+                )
+            self._log(t("Model"), t("Animasyonlar hazır; durumları önizle, sonra kaydet."))
             self._load_frames()
         finally:
             self._update_buttons()
@@ -795,11 +816,11 @@ class CreatorPanel(QFrame):
             self._abandoned.add(self._call)
             self._call = None
             self._update_buttons()
-            self.status.setText("İptal edildi; model yanıtı yok sayılacak.")
+            self.status.setText(t("İptal edildi; model yanıtı yok sayılacak."))
             return
         if self._image_call is not None:
             self._image_call.cancel_requested = True
-            self.busy.setText("İptal ediliyor (süren çağrı bitince)…")
+            self.busy.setText(t("İptal ediliyor (süren çağrı bitince)…"))
 
     # -------------------------------------------------------------- önizleme
 
@@ -820,31 +841,32 @@ class CreatorPanel(QFrame):
     # ----------------------------------------------------------------- kayıt
 
     def _confirm(self, text: str) -> bool:
-        return QMessageBox.question(self, "Pet", text) == QMessageBox.StandardButton.Yes
+        return QMessageBox.question(self, t("Pet"), text) == QMessageBox.StandardButton.Yes
 
     def save(self) -> None:
         if self._sheet is None or self._demo:
             return
-        name = self.name_edit.text().strip() or "Yeni pet"
+        name = self.name_edit.text().strip() or t("Yeni pet")
         pet_id = pet_creator.slugify(name)
         overwrite = False
         while True:
             try:
                 info = pet_animator.install(
-                    self._sheet, pet_id, name, "Artemis pet üreticisiyle üretildi.",
+                    self._sheet, pet_id, name, t("Artemis pet üreticisiyle üretildi."),
                     self._pets_dir, overwrite=overwrite,
                 )
             except PetExistsError as error:
-                if overwrite or not self._confirm(f"{error} Üzerine yazılsın mı?"):
+                msg = t("{error} Üzerine yazılsın mı?").format(error=error)
+                if overwrite or not self._confirm(msg):
                     self.status.setText(str(error))
                     return
                 overwrite = True
                 continue
             except PetError as error:
-                self.status.setText(f"Pet kurulamadı: {error}")
+                self.status.setText(t("Pet kurulamadı: {error}").format(error=error))
                 return
             break
-        self.status.setText(f"'{info.display_name}' kuruldu ve seçildi.")
+        self.status.setText(t("'{name}' kuruldu ve seçildi.").format(name=info.display_name))
         self.installed.emit(info.id)
 
     def shutdown(self) -> None:

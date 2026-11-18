@@ -35,6 +35,7 @@ from artemis.channels.telegram.channel import (
     STATUS_STOPPED,
 )
 from artemis.config.settings import TelegramConfig, load_settings
+from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 from artemis.tools.credentials import delete_secret, write_secret
 
@@ -163,55 +164,57 @@ class TelegramSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        box, body = group("Bot ve sohbet", divided=False)
+        box, body = group(t("Bot ve sohbet"), divided=False)
         layout.addWidget(box)
         self.status = QLabel()
         self.status.setWordWrap(True)
-        self.status.setAccessibleName("Telegram durumu")
+        self.status.setAccessibleName(t("Telegram durumu"))
         body.addWidget(self.status)
         self.token = QLineEdit()
         self.token.setEchoMode(QLineEdit.EchoMode.Password)
-        self.token.setAccessibleName("Telegram bot token'ı")
-        self.save_button = QPushButton("Kaydet ve doğrula")
+        self.token.setAccessibleName(t("Telegram bot token'ı"))
+        self.save_button = QPushButton(t("Kaydet ve doğrula"))
         self.save_button.clicked.connect(self._save_token)
         field(
-            body, "Bot token'ı", self.token,
-            "@BotFather'dan alınan token yalnız kimlik kasasına yazılır.",
-            help=(
+            body, t("Bot token'ı"), self.token,
+            t("@BotFather'dan alınan token yalnız kimlik kasasına yazılır."),
+            help=t(
                 "Botun kimliği. Windows kimlik kasasına yazılır, ayar dosyasına ve loga girmez. "
                 "Kaydet ve doğrula önce Telegram'a sorup doğrular, geçerliyse kaydeder."
             ),
         )
         body.addLayout(button_row(self.save_button))
-        pair_box, pair = group("Sohbet")
+        pair_box, pair = group(t("Sohbet"))
         layout.addWidget(pair_box)
         self.message = meta_label("")
-        self.message.setAccessibleName("Telegram işlem sonucu")
+        self.message.setAccessibleName(t("Telegram işlem sonucu"))
         pair.addWidget(self.message)
-        self.pair_button = QPushButton("Eşleştir")
+        self.pair_button = QPushButton(t("Eşleştir"))
         self.pair_button.clicked.connect(self._pair)
-        self.cancel_button = QPushButton("Eşleştirmeyi iptal et")
+        self.cancel_button = QPushButton(t("Eşleştirmeyi iptal et"))
         self.cancel_button.clicked.connect(self._cancel_pair)
-        self.test_button = QPushButton("Test mesajı gönder")
+        self.test_button = QPushButton(t("Test mesajı gönder"))
         self.test_button.clicked.connect(self._send_test)
-        self.disconnect_button = QPushButton("Bağlantıyı kes")
+        self.disconnect_button = QPushButton(t("Bağlantıyı kes"))
         self.disconnect_button.clicked.connect(self._disconnect)
         pair.addLayout(button_row(
             self.disconnect_button, self.test_button, self.cancel_button, self.pair_button,
         ))
-        channel_box, channel = group("Telegram'dan komut")
+        channel_box, channel = group(t("Telegram'dan komut"))
         layout.addWidget(channel_box)
-        self.channel_check = QCheckBox("Artemis açıkken Telegram'dan komut al")
-        self.channel_check.setAccessibleName("Telegram kanalı masaüstünde çalışsın")
+        self.channel_check = QCheckBox(t("Artemis açıkken Telegram'dan komut al"))
+        self.channel_check.setAccessibleName(t("Telegram kanalı masaüstünde çalışsın"))
         self.channel_check.toggled.connect(self._toggle_channel)
         channel.addWidget(self.channel_check)
         self.channel_label = meta_label("")
-        self.channel_label.setAccessibleName("Telegram kanalı durumu")
+        self.channel_label.setAccessibleName(t("Telegram kanalı durumu"))
         channel.addWidget(self.channel_label)
         self.hint = meta_label(
-            "Komutlar bu sohbetin kendi geçmişinde çalışır; onaylar yalnız Telegram "
-            "düğmeleriyle sorulur. Terminalde Telegram botu da açıksa bot tek dinleyiciye izin "
-            "verdiğinden çakışma olur."
+            t(
+                "Komutlar bu sohbetin kendi geçmişinde çalışır; onaylar yalnız Telegram "
+                "düğmeleriyle sorulur. Terminalde Telegram botu da açıksa bot tek dinleyiciye izin "
+                "verdiğinden çakışma olur."
+            )
         )
         channel.addWidget(self.hint)
         self.channel_status.connect(self.set_channel_status)
@@ -229,17 +232,17 @@ class TelegramSection(QWidget):
 
     def _channel_summary(self, blocker: str | None, enabled: bool) -> str:
         if self._demo:
-            return "Demo kipinde Telegram kanalı çalışmaz."
+            return t("Demo kipinde Telegram kanalı çalışmaz.")
         if blocker is not None:
-            return blocker
+            return t(blocker)
         if not enabled:
-            return "Kapalı."
+            return t("Kapalı.")
         return {
-            STATUS_RUNNING: "Çalışıyor",
-            STATUS_STARTING: "Başlıyor…",
-            STATUS_STOPPED: "Durdu",
-            STATUS_CONFLICT: STATUS_CONFLICT,
-        }.get(self._channel_text, self._channel_text)
+            STATUS_RUNNING: t("Çalışıyor"),
+            STATUS_STARTING: t("Başlıyor…"),
+            STATUS_STOPPED: t("Durdu"),
+            STATUS_CONFLICT: t(STATUS_CONFLICT),
+        }.get(self._channel_text, t(self._channel_text))
 
     def _toggle_channel(self, checked: bool) -> None:
         if not self._write_telegram_key("run_in_desktop", checked):
@@ -265,19 +268,21 @@ class TelegramSection(QWidget):
     def refresh(self) -> None:
         loaded = self._config()
         enabled = loaded is not None and loaded[0].run_in_desktop
-        blocker = channel_blocker(loaded[0]) if loaded is not None else "Ayarlar okunamadı."
+        blocker = channel_blocker(loaded[0]) if loaded is not None else t("Ayarlar okunamadı.")
         if loaded is None:
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             token, chat_id = None, None
         else:
             token, chat_id = resolve_telegram_token(loaded[0]), loaded[0].chat_id
             if token is None:
-                self.status.setText("Token yok")
+                self.status.setText(t("Token yok"))
             elif chat_id is None:
-                self.status.setText("Token kayıtlı, sohbet bağlı değil")
+                self.status.setText(t("Token kayıtlı, sohbet bağlı değil"))
             else:
                 bot = f"@{self._username}, " if self._username else ""
-                self.status.setText(f"Bağlı: {bot}sohbet {chat_id}")
+                self.status.setText(
+                    t("Bağlı: {bot}sohbet {chat_id}").format(bot=bot, chat_id=chat_id)
+                )
         live = not self._demo and loaded is not None
         busy = self._busy()
         active = self.channel_active()
@@ -288,8 +293,8 @@ class TelegramSection(QWidget):
         summary = self._channel_summary(blocker, enabled)
         if active:
             # getUpdates tek tüketiciye izin verir: eşleştirme kanalla aynı anda yoklayamaz.
-            summary += " Eşleştirmek için önce kanalı kapat."
-        self.channel_label.setText(f"Kanal: {summary}")
+            summary += " " + t("Eşleştirmek için önce kanalı kapat.")
+        self.channel_label.setText(t("Kanal: {summary}").format(summary=summary))
         self.token.setEnabled(live and not busy)
         self.save_button.setEnabled(live and not busy)
         self.pair_button.setEnabled(live and not busy and not active and token is not None)
@@ -342,7 +347,7 @@ class TelegramSection(QWidget):
                 raw.pop("telegram", None)
             _write_validated(self.config_path, raw)
         except (OSError, ValueError, yaml.YAMLError, AttributeError):
-            self.message.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
+            self.message.setText(t("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor."))
             return False
         return True
 
@@ -353,10 +358,10 @@ class TelegramSection(QWidget):
         self.token.clear()
         loaded = self._config()
         if not typed or loaded is None:
-            self.message.setText("Önce BotFather'dan aldığın token'ı yaz.")
+            self.message.setText(t("Önce BotFather'dan aldığın token'ı yaz."))
             return
         config, audit_path = loaded
-        self.message.setText("Token doğrulanıyor…")
+        self.message.setText(t("Token doğrulanıyor…"))
 
         def job(_thread: TelegramJob) -> object:
             client = self._client(typed, config, audit_path)
@@ -371,20 +376,29 @@ class TelegramSection(QWidget):
         if isinstance(result, TelegramError):
             # Doğrulanmayan token kasaya yazılmaz (geçersizse mevcut kayıt da korunur).
             self.message.setText(
-                "Token geçersiz; kaydedilmedi." if result.error_type in {"HTTP 401", "HTTP 404"}
-                else f"Doğrulanamadı ({result.error_type}); token kaydedilmedi."
+                t("Token geçersiz; kaydedilmedi.")
+                if result.error_type in {"HTTP 401", "HTTP 404"}
+                else t("Doğrulanamadı ({error_type}); token kaydedilmedi.").format(
+                    error_type=result.error_type
+                )
             )
             return
         if not isinstance(result, str) or not result:
-            self.message.setText("Doğrulanamadı; token kaydedilmedi.")
+            self.message.setText(t("Doğrulanamadı; token kaydedilmedi."))
             return
         try:
             write_secret(typed, TOKEN_TARGET)
         except OSError:
-            self.message.setText(f"Token saklanamadı; ortamda {config.token_env} tanımlayın.")
+            self.message.setText(
+                t("Token saklanamadı; ortamda {token_env} tanımlayın.").format(
+                    token_env=config.token_env
+                )
+            )
             return
         self._username = result
-        self.message.setText(f"Doğrulandı: @{self._username}. Şimdi sohbeti eşleştir.")
+        self.message.setText(
+            t("Doğrulandı: @{username}. Şimdi sohbeti eşleştir.").format(username=self._username)
+        )
         self.changed.emit()
 
     # Eşleştirme -----------------------------------------------------------------------------
@@ -393,17 +407,21 @@ class TelegramSection(QWidget):
         loaded = self._config()
         token = resolve_telegram_token(loaded[0]) if loaded else None
         if loaded is None or token is None:
-            self.message.setText("Önce token kaydet.")
+            self.message.setText(t("Önce token kaydet."))
             return
         config, audit_path = loaded
         code = f"{secrets.randbelow(10**6):06d}"
-        self.message.setText("Bot doğrulanıyor…")
+        self.message.setText(t("Bot doğrulanıyor…"))
 
         def job(thread: TelegramJob) -> object:
             client = self._client(token, config, audit_path)
             try:
                 username = client.get_me()
-                thread.note.emit(f"Telegram'da @{username} botuna şu kodu yaz: {code}")
+                thread.note.emit(
+                    t("Telegram'da @{username} botuna şu kodu yaz: {code}").format(
+                        username=username, code=code
+                    )
+                )
                 found = pair_chat(client, code, stop=thread.isInterruptionRequested)
                 return (username, found)
             finally:
@@ -415,21 +433,24 @@ class TelegramSection(QWidget):
         self, token: str, config: TelegramConfig, audit_path: Path, result: object
     ) -> None:
         if isinstance(result, TelegramError):
-            texts = {"HTTP 409": CONFLICT_TEXT, "PairingLocked": LOCKED_TEXT}
+            texts = {"HTTP 409": t(CONFLICT_TEXT), "PairingLocked": t(LOCKED_TEXT)}
             self.message.setText(
-                texts.get(result.error_type, f"Eşleştirme başarısız ({result.error_type}).")
+                texts.get(
+                    result.error_type,
+                    t("Eşleştirme başarısız ({error_type}).").format(error_type=result.error_type),
+                )
             )
             return
         if not isinstance(result, tuple) or len(result) != 2 or not isinstance(result[0], str):
-            self.message.setText("Eşleştirme başarısız (beklenmeyen sonuç).")
+            self.message.setText(t("Eşleştirme başarısız (beklenmeyen sonuç)."))
             return
         username, found = result
         if found is not None and (not isinstance(found, tuple) or len(found) != 2):
-            self.message.setText("Eşleştirme başarısız (beklenmeyen sonuç).")
+            self.message.setText(t("Eşleştirme başarısız (beklenmeyen sonuç)."))
             return
         self._username = username
         if found is None:
-            self.message.setText("Eşleştirme sona erdi: kod gelmedi ya da iptal edildi.")
+            self.message.setText(t("Eşleştirme sona erdi: kod gelmedi ya da iptal edildi."))
             return
         chat_id, confirmed = found
         if not self._write_chat_id(chat_id):
@@ -437,15 +458,19 @@ class TelegramSection(QWidget):
         self.changed.emit()
         suffix = (
             "" if confirmed
-            else " Kod mesajı onaylanamadı; terminalde Telegram botu açıksa dikkat."
+            else " " + t("Kod mesajı onaylanamadı; terminalde Telegram botu açıksa dikkat.")
         )
-        self.message.setText(f"Sohbet {chat_id} bağlandı.{suffix}")
-        self._send(token, config, audit_path, chat_id, NOTICE_TEXT, "Artemis bağlandı bildirimi")
+        self.message.setText(
+            t("Sohbet {chat_id} bağlandı.{suffix}").format(chat_id=chat_id, suffix=suffix)
+        )
+        self._send(
+            token, config, audit_path, chat_id, t(NOTICE_TEXT), t("Artemis bağlandı bildirimi")
+        )
 
     def _cancel_pair(self) -> None:
         if self._busy() and self._job is not None:
             self._job.requestInterruption()
-            self.message.setText("İptal ediliyor…")
+            self.message.setText(t("İptal ediliyor…"))
 
     # Mesaj ----------------------------------------------------------------------------------
 
@@ -463,11 +488,17 @@ class TelegramSection(QWidget):
 
         def done(result: object) -> None:
             if isinstance(result, TelegramError):
-                self.message.setText(f"{label} gönderilemedi ({result.error_type}).")
+                self.message.setText(
+                    t("{label} gönderilemedi ({error_type}).").format(
+                        label=label, error_type=result.error_type
+                    )
+                )
             elif result is not None:
-                self.message.setText(f"{label} gönderilemedi (beklenmeyen sonuç).")
+                self.message.setText(
+                    t("{label} gönderilemedi (beklenmeyen sonuç).").format(label=label)
+                )
             else:
-                self.message.setText(f"{label} gönderildi.")
+                self.message.setText(t("{label} gönderildi.").format(label=label))
 
         self._start(job, done)
 
@@ -475,9 +506,11 @@ class TelegramSection(QWidget):
         loaded = self._config()
         token = resolve_telegram_token(loaded[0]) if loaded else None
         if loaded is None or token is None or loaded[0].chat_id is None:
-            self.message.setText("Önce token kaydet ve sohbeti eşleştir.")
+            self.message.setText(t("Önce token kaydet ve sohbeti eşleştir."))
             return
-        self._send(token, loaded[0], loaded[1], loaded[0].chat_id, TEST_TEXT, "Test mesajı")
+        self._send(
+            token, loaded[0], loaded[1], loaded[0].chat_id, t(TEST_TEXT), t("Test mesajı")
+        )
 
     def _disconnect(self) -> None:
         if self._busy():
@@ -489,8 +522,8 @@ class TelegramSection(QWidget):
         loaded = self._config()
         still = loaded is not None and resolve_telegram_token(loaded[0]) is not None
         self.message.setText(
-            "Bağlantı kesildi."
-            + (" Token ortam değişkeninden geliyor; ona dokunulmadı." if still else "")
+            t("Bağlantı kesildi.")
+            + (" " + t("Token ortam değişkeninden geliyor; ona dokunulmadı.") if still else "")
         )
         self.refresh()
         self.changed.emit()

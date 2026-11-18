@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from artemis.brain.tiering import REASONS
+from artemis.i18n import t
 
 StepKind = Literal["ok", "sent", "fail", "denied", "info"]
 
@@ -70,58 +71,75 @@ def step_line(
     raw_tool = fields.get("tool")
     tool = raw_tool if isinstance(raw_tool, str) else ""
     label, done_label = labels.get(tool, ("", ""))
-    display = label or tool or "Araç"
-    done = done_label or f"{display} tamamlandı"
+    display = label or tool or t("Araç")
+    done = done_label or t("{display} tamamlandı").format(display=display)
 
     if event == "tool_result":
         return _tool_result_line(fields, display, done)
     if event == "tool_interrupted":
         # Alt işlem kesildiğinde tamamlanıp tamamlanmadığı bilinmez; "başarısız" da
         # "yapılmadı" da denmez.
-        return StepLine(f"{display}: kesildi, sonucu doğrulanamadı", "fail", False)
+        return StepLine(
+            t("{display}: kesildi, sonucu doğrulanamadı").format(display=display),
+            "fail",
+            False,
+        )
     if event == "turn_end":
         return _turn_end_line(fields)
     if event == "approval":
         approved = fields.get("approved")
-        verdict = "verildi" if approved is True else "verilmedi"
-        return StepLine(f"Onay {verdict}: {display}", "info", True)
+        verdict = t("verildi") if approved is True else t("verilmedi")
+        return StepLine(
+            t("Onay {verdict}: {display}").format(verdict=verdict, display=display),
+            "info",
+            True,
+        )
     if event == "tool_requested":
-        return StepLine(f"{display} istendi", "info", True)
+        return StepLine(t("{display} istendi").format(display=display), "info", True)
     if event == "tool_dispatch":
-        return StepLine(f"{display} başlatıldı", "info", True)
+        return StepLine(t("{display} başlatıldı").format(display=display), "info", True)
     if event == "model_choice":
         # Görünür ama sessiz etiket: kullanıcıya soru sorulmaz, yalnız neyin seçildiği yazılır.
         reason = REASONS.get(str(fields.get("reason", "")), "")
         suffix = f" ({reason})" if reason else ""
-        return StepLine(f"Zor işler modeli: {fields.get('model', '')}{suffix}", "info", False)
+        model = fields.get("model", "")
+        return StepLine(
+            t("Zor işler modeli: {model}{suffix}").format(model=model, suffix=suffix),
+            "info",
+            False,
+        )
     if event == "model_tier_fallback":
-        return StepLine("Zor işler modeli kullanılamadı; ana modelle sürdü", "info", False)
+        return StepLine(t("Zor işler modeli kullanılamadı; ana modelle sürdü"), "info", False)
     text = _INTERNAL_TEXT.get(event, event.replace("_", " "))
-    return StepLine(text, "info", True)
+    return StepLine(t(text), "info", True)
 
 
 def _tool_result_line(fields: Mapping[str, Any], display: str, done: str) -> StepLine:
     result = fields.get("result")
     if not isinstance(result, Mapping):
-        return StepLine(f"{display} başarısız ✗", "fail", False)
+        return StepLine(t("{display} başarısız ✗").format(display=display), "fail", False)
     status = result.get("status")
     # Yalnız iki koşul birlikte sağlanırsa ✓: doğrulanmış sonuç. Aksi halde, ör.
     # status "ok" ama success False gibi tutarsız bir kayıt, başarı diye sunulmaz.
     if status == "ok" and result.get("success") is True:
-        return StepLine(f"{done} ✓", "ok", False)
+        return StepLine(t("{done} ✓").format(done=done), "ok", False)
     if status == "sent":
         # Komut gönderildi ama sonucu doğrulanamadı; tamamlandı denmez.
-        return StepLine(f"{display}: komut gönderildi, sonucu doğrulanamadı", "sent", False)
+        return StepLine(
+            t("{display}: komut gönderildi, sonucu doğrulanamadı").format(display=display),
+            "sent",
+            False,
+        )
     if status == "denied":
-        return StepLine(f"{display}: onay verilmedi", "denied", False)
-    return StepLine(f"{display} başarısız ✗", "fail", False)
+        return StepLine(t("{display}: onay verilmedi").format(display=display), "denied", False)
+    return StepLine(t("{display} başarısız ✗").format(display=display), "fail", False)
 
 
 def _turn_end_line(fields: Mapping[str, Any]) -> StepLine:
     reason = fields.get("stop_reason")
     if reason == "completed":
-        return StepLine("Yanıt hazır", "info", True)
+        return StepLine(t("Yanıt hazır"), "info", True)
     text = _TURN_END_UNKNOWN
     if isinstance(reason, str):
         text = _TURN_END_TEXT.get(reason, _TURN_END_UNKNOWN)
-    return StepLine(text, "fail", False)
+    return StepLine(t(text), "fail", False)

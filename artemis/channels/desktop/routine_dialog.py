@@ -33,6 +33,7 @@ from PySide6.QtWidgets import (
 from artemis.channels.desktop.dialog_shell import FormDialog
 from artemis.channels.desktop.tool_titles import arg_label, tool_display, tool_summary
 from artemis.channels.desktop.widgets import with_help
+from artemis.i18n import t
 from artemis.proactive.routines import (
     FORBIDDEN_PREFIX,
     MAX_ROUTINES,
@@ -90,7 +91,7 @@ class _ArgField(QWidget):
             self._choices = list(schema.get("enum", [schema.get("const")]))
             combo = QComboBox()
             if not required:
-                combo.addItem(_EMPTY_CAPTION)
+                combo.addItem(t(_EMPTY_CAPTION))
             combo.addItems([str(choice) for choice in self._choices])
             if start is not _MISSING and start in self._choices:
                 combo.setCurrentIndex(self._choices.index(start) + (0 if required else 1))
@@ -117,7 +118,7 @@ class _ArgField(QWidget):
             edit = QPlainTextEdit()
             edit.setMinimumHeight(72)
             edit.setMaximumHeight(140)
-            edit.setPlaceholderText("JSON (örn. [\"a\", \"b\"] ya da {\"anahtar\": 1})")
+            edit.setPlaceholderText(t("JSON (örn. [\"a\", \"b\"] ya da {\"anahtar\": 1})"))
             if start is not _MISSING and start is not None:
                 edit.setPlainText(json.dumps(start, ensure_ascii=False, indent=2))
             edit.textChanged.connect(self._changed)
@@ -150,7 +151,7 @@ class _ArgField(QWidget):
             spin.setDecimals(4)
             spin.setRange(float(low) - (0 if self._required else 1), float(high))
         if not self._required:
-            spin.setSpecialValueText(_EMPTY_CAPTION)  # en küçük değer = "gönderme"
+            spin.setSpecialValueText(t(_EMPTY_CAPTION))  # en küçük değer = "gönderme"
         given = isinstance(start, (int, float)) and not isinstance(start, bool)
         if isinstance(spin, QSpinBox):
             spin.setValue(int(start) if given else spin.minimum())
@@ -184,7 +185,8 @@ class _ArgField(QWidget):
         try:
             return json.loads(text)
         except ValueError as error:
-            raise ValueError(f"{arg_label(self.name)} alanı geçerli JSON değil.") from error
+            msg = t("{field} alanı geçerli JSON değil.").format(field=arg_label(self.name))
+            raise ValueError(msg) from error
 
 
 class _StepEditor(QFrame):
@@ -208,14 +210,14 @@ class _StepEditor(QFrame):
         head.addWidget(self.title, 1)
         self.up_button = QPushButton("↑")
         self.down_button = QPushButton("↓")
-        self.remove_button = QPushButton("Kaldır")
-        self.up_button.setAccessibleName("Adımı yukarı taşı")
-        self.down_button.setAccessibleName("Adımı aşağı taşı")
+        self.remove_button = QPushButton(t("Kaldır"))
+        self.up_button.setAccessibleName(t("Adımı yukarı taşı"))
+        self.down_button.setAccessibleName(t("Adımı aşağı taşı"))
         for button in (self.up_button, self.down_button, self.remove_button):
             head.addWidget(button)
         layout.addLayout(head)
         self.tool = QComboBox()
-        self.tool.setAccessibleName("Araç")
+        self.tool.setAccessibleName(t("Araç"))
         names = list(tools)
         if step is not None and step.tool not in names:
             names.append(step.tool)  # kalkmış/yasak araç sessizce düşmesin; doğrulama bildirir
@@ -244,7 +246,7 @@ class _StepEditor(QFrame):
         return data if isinstance(data, str) else self.tool.currentText()
 
     def set_position(self, number: int, count: int) -> None:
-        self.title.setText(f"Adım {number}")
+        self.title.setText(t("Adım {number}").format(number=number))
         self.up_button.setEnabled(number > 1)
         self.down_button.setEnabled(number < count)
 
@@ -273,13 +275,15 @@ class _StepEditor(QFrame):
         self._fields, self._raw = [], None
         tool = self._registry.get(self.tool_id())
         if tool is None:
-            self.about.setText("Bu araç kayıtlı değil.")
+            self.about.setText(t("Bu araç kayıtlı değil."))
         else:
-            self.about.setText(tool_summary(tool.name) or f"Araç kimliği: {tool.name}.")
+            self.about.setText(
+                tool_summary(tool.name) or t("Araç kimliği: {name}.").format(name=tool.name)
+            )
         if tool is None:
             # Şema yok: ham argümanlar korunur, doğrulama hatayı söyler.
             self._raw = QPlainTextEdit(json.dumps(initial, ensure_ascii=False, indent=2))
-            self._raw.setAccessibleName("Argümanlar (JSON)")
+            self._raw.setAccessibleName(t("Argümanlar (JSON)"))
             self._raw.textChanged.connect(self._touched)
             self.args_layout.addWidget(self._raw)
             return
@@ -293,7 +297,7 @@ class _StepEditor(QFrame):
             self._fields.append(field)
             self.args_layout.addWidget(field)
         if not self._fields:
-            note = QLabel("Bu aracın argümanı yok.")
+            note = QLabel(t("Bu aracın argümanı yok."))
             note.setObjectName("meta")
             self.args_layout.addWidget(note)
 
@@ -303,9 +307,9 @@ class _StepEditor(QFrame):
             try:
                 arguments = json.loads(self._raw.toPlainText() or "{}")
             except ValueError as error:
-                raise ValueError("Argümanlar geçerli JSON değil.") from error
+                raise ValueError(t("Argümanlar geçerli JSON değil.")) from error
             if not isinstance(arguments, dict):
-                raise ValueError("Argümanlar bir JSON nesnesi olmalı.")
+                raise ValueError(t("Argümanlar bir JSON nesnesi olmalı."))
             return RoutineStep(tool=self.tool_id(), arguments=arguments)
         arguments = {}
         for field in self._fields:
@@ -323,7 +327,7 @@ class RoutineDialog(FormDialog):
         registry: ToolRegistry,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__("Rutini düzenle" if existing else "Rutin ekle", 520, parent)
+        super().__init__(t("Rutini düzenle") if existing else t("Rutin ekle"), 520, parent)
         self._existing = existing
         self._others = others
         self._registry = registry
@@ -333,28 +337,31 @@ class RoutineDialog(FormDialog):
             (d.name for d in registry.definitions() if not d.name.startswith(FORBIDDEN_PREFIX)),
             key=lambda n: (tool_display(n).casefold(), n),
         )
-        self.setWindowTitle("Rutini düzenle" if existing else "Rutin ekle")
+        self.setWindowTitle(t("Rutini düzenle") if existing else t("Rutin ekle"))
         self.body_layout = self.form  # gövde FormDialog'un kaydırılan düzeni
 
-        label = QLabel("Ad")
+        label = QLabel(t("Ad"))
         label.setObjectName("fieldLabel")
         self.name = QLineEdit(existing.name if existing else "")
         self.name.setMaxLength(40)
-        self.name.setAccessibleName("Ad")
+        self.name.setAccessibleName(t("Ad"))
         self.name.setMinimumWidth(280)
         self.body_layout.addWidget(label)
         self.body_layout.addWidget(self.name)
-        steps_label = QLabel("Adımlar")
+        steps_label = QLabel(t("Adımlar"))
         steps_label.setObjectName("fieldLabel")
         self.body_layout.addLayout(with_help(
             steps_label,
-            f"En çok {MAX_STEPS} adım. Adımlar sırayla, her biri normal onay kurallarıyla "
-            "çalışır; onay isteyen adım yine sorar. Bir adım başarısız olursa rutin orada durur.",
+            t(
+                "En çok {max_steps} adım. Adımlar sırayla, her biri normal onay kurallarıyla "
+                "çalışır; onay isteyen adım yine sorar. Bir adım başarısız olursa rutin orada "
+                "durur."
+            ).format(max_steps=MAX_STEPS),
         ))
         self.steps_layout = QVBoxLayout()
         self.steps_layout.setSpacing(12)
         self.body_layout.addLayout(self.steps_layout)
-        self.add_step_button = QPushButton("Adım ekle")
+        self.add_step_button = QPushButton(t("Adım ekle"))
         add_row = QHBoxLayout()
         add_row.addWidget(self.add_step_button)
         add_row.addStretch(1)
@@ -365,7 +372,7 @@ class RoutineDialog(FormDialog):
         self.error.setObjectName("warnNote")
         self.error.setWordWrap(True)
         self._outer.addWidget(self.error)
-        self.add_buttons("Kaydet")
+        self.add_buttons(t("Kaydet"))
         self.save_button = self.ok_button
 
         initials: list[RoutineStep | None] = list(existing.steps) if existing else [None]
@@ -420,19 +427,19 @@ class RoutineDialog(FormDialog):
         try:
             Routine(name=name, steps=[RoutineStep(tool="x")])
         except ValidationError:
-            return _NAME_PROBLEM, []
+            return t(_NAME_PROBLEM), []
         if name_key(name) in {name_key(item.name) for item in self._others}:
-            return "Bu ad zaten kullanılıyor.", []
+            return t("Bu ad zaten kullanılıyor."), []
         if self._existing is None and len(self._others) >= MAX_ROUTINES:
-            return f"En çok {MAX_ROUTINES} rutin olabilir.", []
+            return t("En çok {max_routines} rutin olabilir.").format(max_routines=MAX_ROUTINES), []
         if not self.editors:
-            return "En az bir adım ekle.", []
+            return t("En az bir adım ekle."), []
         steps: list[RoutineStep] = []
         for number, editor in enumerate(self.editors, start=1):
             try:
                 steps.append(editor.step())
             except ValueError as error:
-                return f"Adım {number}: {error}", []
+                return t("Adım {number}: {error}").format(number=number, error=error), []
         try:
             return "", validate_steps(steps, self._registry)
         except ValueError as error:
@@ -462,18 +469,22 @@ def validate_raw(text: str, registry: ToolRegistry) -> tuple[list[Routine] | Non
     except ValueError as error:
         line = getattr(error, "lineno", 0)
         column = getattr(error, "colno", 0)
-        return None, f"JSON geçersiz (satır {line}, sütun {column}). Dosya yazılmadı."
+        return None, t(
+            "JSON geçersiz (satır {line}, sütun {column}). Dosya yazılmadı."
+        ).format(line=line, column=column)
     try:
         parsed = RoutineFile.model_validate(data)
     except ValidationError as error:
-        place = ".".join(str(part) for part in error.errors()[0]["loc"]) or "dosya"
-        return None, f"Şemaya uymuyor: {place}. Dosya yazılmadı."
+        place = ".".join(str(part) for part in error.errors()[0]["loc"]) or t("dosya")
+        return None, t("Şemaya uymuyor: {place}. Dosya yazılmadı.").format(place=place)
     fixed: list[Routine] = []
     for routine in parsed.routines:
         try:
             steps = validate_steps(routine.steps, registry)
         except ValueError as error:
-            return None, f"«{routine.name}»: {error} Dosya yazılmadı."
+            return None, t("«{name}»: {error} Dosya yazılmadı.").format(
+                name=routine.name, error=error
+            )
         fixed.append(routine.model_copy(update={"steps": steps}))
     return fixed, ""
 
@@ -486,16 +497,16 @@ class RoutineFileDialog(FormDialog):
 
     def __init__(self, store: RoutineStore, registry: ToolRegistry,
                  parent: QWidget | None = None) -> None:
-        super().__init__("Rutin dosyasını düzelt", 560, parent)
+        super().__init__(t("Rutin dosyasını düzelt"), 560, parent)
         self._store = store
         self._registry = registry
         self.saved = False
-        self.setWindowTitle("Rutin dosyasını düzelt")
+        self.setWindowTitle(t("Rutin dosyasını düzelt"))
         layout = self.form
-        note = QLabel(
+        note = QLabel(t(
             "Dosya okunamadığı için rutinler kapalı. Aşağıdaki JSON'u düzeltip Kaydet'e bas; "
             "yalnız geçerliyse yazılır, aksi halde dosya olduğu gibi kalır."
-        )
+        ))
         note.setObjectName("meta")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -508,10 +519,12 @@ class RoutineFileDialog(FormDialog):
             text = raw.decode("utf-8")
         except UnicodeDecodeError:
             text = raw.decode("utf-8", errors="replace")
-            note.setText(note.text() + " Dosya UTF-8 değildi; okunamayan karakterler değişti.")
+            note.setText(
+                note.text() + " " + t("Dosya UTF-8 değildi; okunamayan karakterler değişti.")
+            )
         self.editor = QPlainTextEdit(text)
         self.editor.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-        self.editor.setAccessibleName("Rutin dosyası (JSON)")
+        self.editor.setAccessibleName(t("Rutin dosyası (JSON)"))
         self.editor.setMinimumHeight(260)
         layout.addWidget(self.editor, 1)
         self.error = QLabel("")
@@ -519,7 +532,7 @@ class RoutineFileDialog(FormDialog):
         self.error.setWordWrap(True)
         self.error.hide()
         self._outer.addWidget(self.error)
-        self.add_buttons("Kaydet")
+        self.add_buttons(t("Kaydet"))
 
     def submit(self) -> None:
         routines, problem = validate_raw(self.editor.toPlainText(), self._registry)
