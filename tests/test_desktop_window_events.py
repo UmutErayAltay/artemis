@@ -10,6 +10,7 @@ from typing import Any
 import pytest
 import yaml
 
+pytest.importorskip("PySide6")
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from artemis.channels.desktop import window_events, window_restart
