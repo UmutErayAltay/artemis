@@ -32,3 +32,10 @@ gizlidir ve ücret kapısı Ses panelindeki ücretli izindir.
 
 **Tavan:** Sesten yazıya (STT) bulut modeli bu türe taşınmadı (`voice.stt_cloud_*` ayrı
 kalır); ihtiyaç olursa `kind: "transcription"` aynı kalıpla eklenir.
+
+## Ek karar (2026-11-18)
+
+- Ücretli/ücretsiz bilgisi model eklenirken kullanıcıdan gelir;
+- ücretli ses modeli yine Ses panelindeki açık izinle ("Ücretli modele izin ver") çalışır;
+- kayıtlı model yoksa eski sezgi (Gemini ve :free olmayan anahtarlı uç ücretli) geçerlidir;
+- tahmin sabitleri kaba ortalamadır.

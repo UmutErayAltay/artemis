@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 
 from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.desktop.form_kit import field, meta_label
+from artemis.channels.desktop.provider_helpers import speech_cost_text
 from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.channels.voice.cloud_tts import gemini_native_target
 from artemis.config.settings import EndpointConfig, ModelConfig, load_settings
@@ -454,13 +455,30 @@ class TtsCloudBox(QWidget):
                 "Bu sunucu için anahtar kayıtlı değil; "
                 "Ayarlar > Model > Bağlantılar bölümünden kaydet."
             )
-        protocol = str(panel.tts_cloud_protocol.currentData() or "openai")
-        model_id = panel.tts_cloud_model.currentText().strip()
-        paid = protocol == "gemini" or not model_id.endswith(":free")
-        if paid and not panel.tts_cloud_paid.isChecked():
-            parts.append(
-                "Bu model ücretli olabilir; kullanmak için 'Ücretli modele izin ver'i işaretle."
-            )
+        saved_alias = str(panel.tts_cloud_saved.currentData() or "")
+        saved_model = self._speech_models.get(saved_alias)
+        if saved_model is not None:
+            paid = saved_model.input_per_million > 0 or saved_model.output_per_million > 0
+            panel.tts_cloud_paid.setVisible(paid)
+            if paid:
+                cost = speech_cost_text(
+                    saved_model.input_per_million, saved_model.output_per_million
+                )
+                if cost:
+                    parts.append(cost)
+                if not panel.tts_cloud_paid.isChecked():
+                    parts.append(
+                        "Bu model ücretli; kullanmak için 'Ücretli modele izin ver'i işaretle."
+                    )
+        else:
+            panel.tts_cloud_paid.setVisible(True)
+            protocol = str(panel.tts_cloud_protocol.currentData() or "openai")
+            model_id = panel.tts_cloud_model.currentText().strip()
+            paid = protocol == "gemini" or not model_id.endswith(":free")
+            if paid and not panel.tts_cloud_paid.isChecked():
+                parts.append(
+                    "Bu model ücretli olabilir; kullanmak için 'Ücretli modele izin ver'i işaretle."
+                )
         if not panel.tts_cloud_consent.isChecked():
             parts.append("Metin gönderme izni kapalıyken bulut sesi başlamaz.")
         if panel.tts_cloud_saved.count() <= 1:

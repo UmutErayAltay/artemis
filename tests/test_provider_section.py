@@ -519,8 +519,6 @@ def test_speech_model_writes_kind_protocol_zero_prices_and_never_primary(
     assert section.price_box.isHidden() and section.image_box.isHidden()
     assert not section.make_primary.isEnabled() and not section.make_primary.isChecked()
     section.speech_protocol.setCurrentIndex(section.speech_protocol.findData("gemini"))
-    section.paid.setChecked(True)
-    assert section.price_box.isHidden() and section.image_box.isHidden()
     section.input_price.setText("9")
     section.make_primary.setChecked(True)
     section.model_name.setEditText("gemini-tts")
@@ -1274,3 +1272,25 @@ def test_detail_card_shows_kind_info_for_image_and_speech(
     assert section.chat_box.isHidden()
     assert not section.kind_info.isHidden()
     assert "Bulut konuşma modeli" in section.kind_info.text()
+    assert "Ücretsiz olarak eklendi." in section.kind_info.text()
+
+
+def test_paid_speech_model_shows_price_box_saves_prices_and_shows_note(
+    app: QApplication, tmp_path: Path
+) -> None:
+    section = _speech_section(tmp_path)
+    section.paid.setChecked(True)
+    assert not section.price_box.isHidden() and section.image_box.isHidden()
+    section.speech_protocol.setCurrentIndex(section.speech_protocol.findData("gemini"))
+    section.model_name.setEditText("gemini-2.5-flash-preview-tts")
+    section.input_price.setText("0.5")
+    section.output_price.setText("10")
+    assert "Tahmin:" in section.speech_cost.text()
+    section._add_model()
+    model = load_settings(section.config_path).models["gemini-2-5-flash-preview-tts"]
+    assert (model.kind, model.speech_protocol) == ("speech", "gemini")
+    assert (model.input_per_million, model.output_per_million) == (Decimal("0.5"), Decimal("10"))
+    assert "Ücretli modele izin ver" in section.status.text()
+    assert "bütçe korumasınca" not in section.status.text()
+    section.select_model("gemini-2-5-flash-preview-tts")
+    assert "Tahmin:" in section.kind_info.text()

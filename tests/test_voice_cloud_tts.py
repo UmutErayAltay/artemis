@@ -333,6 +333,28 @@ def test_constructor_refusals_and_paid_guard() -> None:
             "bulut", paid_ep, audit,  # type: ignore[arg-type]
         )
 
+    # Açık paid=False sezgisel Gemini kontrolünü geçersiz kılar.
+    CloudSpeechSynthesizer(
+        VoiceConfig(
+            tts_cloud_protocol="gemini",
+            tts_cloud_model="gemini-2.5-flash-preview-tts",
+            allow_cloud_tts_text=True,
+            tts_cloud_allow_paid=False,
+        ),
+        "bulut", paid_ep, audit, paid=False,  # type: ignore[arg-type]
+    )
+
+    # Açık paid=True ücretsiz/yerel sezgiye rağmen tts_cloud_allow_paid ister.
+    with pytest.raises(ValueError, match="tts_cloud_allow_paid"):
+        CloudSpeechSynthesizer(
+            VoiceConfig(
+                tts_cloud_model="heygen/heygen-voice-1-turbo:free",
+                allow_cloud_tts_text=True,
+                tts_cloud_allow_paid=False,
+            ),
+            "yerel", local_ep, audit, paid=True,  # type: ignore[arg-type]
+        )
+
 
 def _sse_event(pcm: bytes, mime_type: str = "audio/l16; rate=24000; channels=1") -> bytes:
     payload = {

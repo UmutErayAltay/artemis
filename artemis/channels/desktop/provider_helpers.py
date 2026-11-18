@@ -7,6 +7,7 @@ import json
 import os
 import re
 from collections.abc import Mapping
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -199,3 +200,58 @@ def model_row_html(
         f"<span style='color:{muted}'>{html.escape(score)}</span></td>"
         "</tr></table>"
     )
+
+
+# ponytail: kaba ortalama yanıt; gerçek tutar metne ve modelin ses token hızına göre değişir.
+SPEECH_REPLY_INPUT_TOKENS = 60    # ~240 karakterlik yanıt metni
+SPEECH_REPLY_OUTPUT_TOKENS = 375  # ~15 sn ses (Gemini 25 ses token/sn)
+
+
+def speech_reply_cost(input_per_million: Decimal, output_per_million: Decimal) -> Decimal:
+    return (
+        SPEECH_REPLY_INPUT_TOKENS * input_per_million
+        + SPEECH_REPLY_OUTPUT_TOKENS * output_per_million
+    ) / Decimal(1_000_000)
+
+
+def _format_usd(amount: Decimal, places: int) -> str:
+    quantized = amount.quantize(Decimal(10) ** -places, rounding=ROUND_HALF_UP)
+    whole, _, frac = f"{quantized:f}".partition(".")
+    trimmed = frac.rstrip("0")
+    if len(trimmed) < 2:
+        trimmed = trimmed.ljust(2, "0")
+    return f"{whole}.{trimmed}"
+
+
+def speech_cost_text(input_per_million: Decimal, output_per_million: Decimal) -> str:
+    if input_per_million == 0 and output_per_million == 0:
+        return ""
+    cost = speech_reply_cost(input_per_million, output_per_million)
+    one = _format_usd(cost, 4)
+    hundred = _format_usd(cost * 100, 2)
+    return f"Tahmin: bir sesli yanıt (~15 sn) ≈ {one} USD; 100 yanıt ≈ {hundred} USD."
+
+
+def speech_cost_text_from_fields(input_text: str, output_text: str) -> str:
+    try:
+        input_price = Decimal(input_text.strip() or "0")
+        output_price = Decimal(output_text.strip() or "0")
+        if (
+            not input_price.is_finite()
+            or not output_price.is_finite()
+            or input_price < 0
+            or output_price < 0
+        ):
+            return ""
+        return speech_cost_text(input_price, output_price)
+    except InvalidOperation:
+        return ""
+
+
+def speech_cost_map(settings: Settings) -> dict[str, str]:
+    return {
+        alias: speech_cost_text(model.input_per_million, model.output_per_million)
+        or "Ücretsiz olarak eklendi."
+        for alias, model in settings.models.items()
+        if model.kind == "speech"
+    }

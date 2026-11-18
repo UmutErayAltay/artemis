@@ -73,6 +73,8 @@ from artemis.channels.desktop.provider_helpers import (
     load_reports,
     model_row_html,
     sort_model_rows,
+    speech_cost_map,
+    speech_cost_text_from_fields,
 )
 from artemis.channels.desktop.provider_layout import (
     PARALLEL_CHOICES,
@@ -198,6 +200,7 @@ class ProviderSection(QWidget):
     image_price: QLineEdit
     image_box: QWidget
     speech_protocol: QComboBox
+    speech_cost: QLabel
     speech_box: QWidget
     chat_box: QWidget
     kind_info: QLabel
@@ -230,6 +233,7 @@ class ProviderSection(QWidget):
         # (takma ad, beyin mi, eski ayar mı, bağlantı, model kimliği, tür, zor işler mi,
         # son test özeti)
         self._model_data: list[ModelRow] = []
+        self._speech_cost: dict[str, str] = {}
         self._reports_seen: dict[str, dict[str, object]] = {}  # takma ad -> son rapor
         self._model_test: QProcess | None = None
         self._testing = ""
@@ -336,6 +340,7 @@ class ProviderSection(QWidget):
         self._fallback = settings.fallback_model or ""
         self._computer = settings.computer_use.model or ""
         self._model_data = build_model_rows(settings, reports)
+        self._speech_cost = speech_cost_map(settings)
         self._render_models()
         self._suggested = suggest_layout(list(reports.values()), settings.primary_model)
         ana, zor, pc = self._suggested
@@ -579,9 +584,13 @@ class ProviderSection(QWidget):
         image = kind == "image"
         speech = kind == "speech"
         paid = self.paid.isChecked()
-        self.price_box.setVisible(paid and kind == "chat")
+        self.price_box.setVisible(paid and kind in ("chat", "speech"))
         self.image_box.setVisible(paid and image)
         self.speech_box.setVisible(speech)
+        self.speech_cost.setText(
+            speech_cost_text_from_fields(self.input_price.text(), self.output_price.text())
+            if speech and paid else ""
+        )
         # Resim ve ses modelleri beyin olamaz (settings doğrular); seçenek kapalı ve işaretsiz.
         self.make_primary.setEnabled(kind == "chat")
         if kind != "chat":
@@ -703,7 +712,7 @@ class ProviderSection(QWidget):
         try:
             prices = (
                 [Decimal(self.input_price.text() or "0"), Decimal(self.output_price.text() or "0")]
-                if self.paid.isChecked() and connection != CLI_KEY and kind == "chat"
+                if self.paid.isChecked() and connection != CLI_KEY and kind in ("chat", "speech")
                 else [Decimal(0), Decimal(0)]
             )
             image_cost = (
@@ -749,13 +758,21 @@ class ProviderSection(QWidget):
         if not self._write(raw):
             return
         self.reload()
-        paid = (any(price > 0 for price in prices) or image_cost > 0) and not settings.allow_paid
+        paid_speech = speech and any(price > 0 for price in prices)
+        paid = not speech and not settings.allow_paid and (
+            any(price > 0 for price in prices) or image_cost > 0
+        )
         self.status.setText(
             "Model eklendi."
             + (
                 " Ücretli model bütçe korumasınca engellenir; "
                 "ücretli kullanım izni ayar dosyasından verilir."
                 if paid
+                else ""
+            )
+            + (
+                " Ses panelinde 'Ücretli modele izin ver' işaretlenmeden kullanılmaz."
+                if paid_speech
                 else ""
             )
             + (
@@ -962,11 +979,13 @@ class ProviderSection(QWidget):
                 "bilgisayar rolleri ile sohbet testi yalnız yazı modelleri içindir."
             )
         elif row and kind == "speech":
+            note = self._speech_cost.get(row[0], "")
             self.kind_info.setText(
                 f"Ses modeli · Bağlantı: {row[3]} · Model: {row[4]}\n"
                 "Kullanmak için Ayarlar > Ses > Konuşma sesi'nde Bulut'u seçip bu "
                 "modeli 'Bulut konuşma modeli' listesinden seç. Roller ve sohbet testi "
                 "yalnız yazı modelleri içindir."
+                + (f"\n{note}" if note else "")
             )
         else:
             self.kind_info.setText("")

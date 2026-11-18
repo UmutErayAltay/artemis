@@ -192,17 +192,18 @@ class CloudSpeechSynthesizer:
         endpoint_id: str,
         endpoint: EndpointConfig,
         audit: AuditLog,
+        *,
+        paid: bool | None = None,
     ) -> None:
         if not config.allow_cloud_tts_text:
             raise ValueError("Bulut konuşma sesi için allow_cloud_tts_text açık olmalı.")
         if not config.tts_cloud_model.strip():
             raise ValueError("Bulut konuşma sesi için tts_cloud_model açıkça ayarlanmalı.")
         gemini = config.tts_cloud_protocol == "gemini"
-        if (
-            endpoint.api_key
-            and (gemini or not config.tts_cloud_model.endswith(":free"))
-            and not config.tts_cloud_allow_paid
-        ):
+        is_paid = paid if paid is not None else (
+            endpoint.api_key and (gemini or not config.tts_cloud_model.endswith(":free"))
+        )
+        if is_paid and not config.tts_cloud_allow_paid:
             note = " (Google bu anahtarı ücretlendirebilir)" if gemini else ""
             raise ValueError(
                 f"Ücretli ses modeli için tts_cloud_allow_paid açık olmalı{note}."

@@ -311,3 +311,46 @@ def test_tts_cloud_saved_openai_triggers_fetch_and_fills_voices(
 
     panel.deleteLater()
     qt_app.processEvents()
+
+
+def test_tts_cloud_saved_free_hides_paid_and_paid_shows_estimate(
+    tmp_path: Path, qt_app: QApplication
+) -> None:
+    import yaml
+
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["models"]["ses-ucretsiz"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-flash-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    raw["models"]["ses-ucretli"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-pro-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0.5",
+        "output_per_million": "10",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    panel = SettingsPanel(path)
+    panel.tts_combo.setCurrentIndex(panel.tts_combo.findData("cloud"))
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-ucretsiz"))
+    assert panel.tts_cloud_paid.isHidden() is True
+    assert "ücretli olabilir" not in panel.tts_cloud_hint.text()
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-ucretli"))
+    assert panel.tts_cloud_paid.isHidden() is False
+    assert "Tahmin" in panel.tts_cloud_hint.text()
+    assert "Ücretli modele izin ver" in panel.tts_cloud_hint.text()
+
+    panel.deleteLater()
+    qt_app.processEvents()

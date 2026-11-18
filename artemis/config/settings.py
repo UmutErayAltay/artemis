@@ -1082,3 +1082,20 @@ def load_settings(path: Path) -> Settings:
         )
         updates["mcp"] = settings.mcp.model_copy(update={"servers": servers})
     return settings.model_copy(update=updates)
+
+
+def cloud_tts_model(settings: Settings) -> ModelConfig | None:
+    """Ses panelinde seçili bulut konuşma ayarına karşılık gelen kayıtlı ses modeli."""
+    voice = settings.voice
+    target = voice.tts_cloud_model.strip().removeprefix("models/")
+    if not target:
+        return None
+    for model in settings.models.values():
+        if (
+            model.kind == "speech"
+            and model.endpoint == voice.tts_cloud_endpoint
+            and model.speech_protocol == voice.tts_cloud_protocol
+            and model.model.removeprefix("models/") == target
+        ):
+            return model
+    return None
