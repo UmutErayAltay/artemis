@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ctypes
 import sys
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -113,3 +115,16 @@ def test_type_text_keeps_surrogate_pair_in_one_send_and_stops_between_chars(
         [(0x61, False), (0x61, True)],
         [(0xD83D, False), (0xD83D, True), (0xDE00, False), (0xDE00, True)],
     ]
+
+
+def test_focused_value_contains_returns_none_on_nul_without_calling_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def runner(_command: Any, **kwargs: Any) -> SimpleNamespace:
+        if any("\x00" in value for value in kwargs["env"].values()):
+            raise ValueError("embedded null character")
+        return SimpleNamespace(stdout="1", returncode=0)
+
+    monkeypatch.setattr(w.sys, "platform", "win32")
+    assert w.focused_value_contains("Ay\x00ar", 1.0, runner=runner) is None
+    assert w.focused_value_contains("Ayar", 1.0, runner=runner) is True

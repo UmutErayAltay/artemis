@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import email
+import http.client
 import imaplib
 import json
-from datetime import datetime
+from datetime import datetime, timedelta
+from email import policy
 from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -475,3 +478,211 @@ def test_section_missing_result_never_saves(
     assert saved == []
     assert "Kaydedilmedi" in section.message.text()
     section.deleteLater()
+
+
+def test_invalid_until_keeps_first_occurrence_with_warning() -> None:
+    data = _ics(
+        _event("bozuk-until", "DTSTART:20261110T090000Z", "RRULE:FREQ=DAILY;UNTIL=2026XX01")
+    )
+    begin = datetime(2026, 11, 10, tzinfo=TZ)
+    events, warnings = core.parse_events(data, TZ, begin, datetime(2026, 11, 13, tzinfo=TZ))
+    assert [e.title for e in events] == ["bozuk-until"]
+    assert any("UNTIL" in w for w in warnings)
+
+
+def test_broken_exdate_item_warns_and_keeps_other_occurrences() -> None:
+    data = _ics(
+        _event(
+            "ex",
+            "DTSTART:20260105T090000Z",
+            "RRULE:FREQ=DAILY;COUNT=3",
+            "EXDATE:20260106T000000Z,bozuk",
+        )
+    )
+    begin = datetime(2026, 1, 5, tzinfo=TZ)
+    events, warnings = core.parse_events(data, TZ, begin, datetime(2026, 1, 8, tzinfo=TZ))
+    assert len(events) == 2
+    assert any("hariç tutma" in w for w in warnings)
+
+
+def test_negative_length_clamped_to_zero_with_warning() -> None:
+    data = _ics(_event("ters", "DTSTART:20261110T100000Z", "DTEND:20261110T080000Z"))
+    begin = datetime(2026, 11, 10, tzinfo=TZ)
+    events, warnings = core.parse_events(data, TZ, begin, datetime(2026, 11, 11, tzinfo=TZ))
+    assert len(events) == 1
+    assert events[0].end == events[0].start
+    assert any("önce" in w for w in warnings)
+
+
+def test_duration_sets_end_when_dtend_absent() -> None:
+    data = _ics(
+        _event("sureli", "DTSTART:20261110T100000Z", "DURATION:PT2H"),
+        _event("bozuk-sure", "DTSTART:20261110T130000Z", "DURATION:BOZUK"),
+    )
+    begin = datetime(2026, 11, 10, tzinfo=TZ)
+    events, warnings = core.parse_events(data, TZ, begin, datetime(2026, 11, 11, tzinfo=TZ))
+    by_title = {e.title: e for e in events}
+    assert by_title["sureli"].end == by_title["sureli"].start + timedelta(hours=2)
+    assert by_title["bozuk-sure"].end == by_title["bozuk-sure"].start
+    assert any("süresi" in w for w in warnings)
+
+
+def test_recurrence_id_overflow_does_not_raise() -> None:
+    data = _ics(
+        _event("tasma", "RECURRENCE-ID:99991231T235959Z", "DTSTART:20261110T090000Z"),
+        _event("normal", "DTSTART:20261110T100000Z"),
+    )
+    begin = datetime(2026, 11, 10, tzinfo=TZ)
+    events, warnings = core.parse_events(data, TZ, begin, datetime(2026, 11, 11, tzinfo=TZ))
+    assert "normal" in [e.title for e in events]
+    assert warnings
+
+
+def test_fetch_ics_http_exception_raises_source_error_without_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class Opener:
+        def open(self, url: str, timeout: float) -> Any:
+            raise http.client.IncompleteRead(b"")
+
+    monkeypatch.setattr(core.urllib.request, "build_opener", lambda *h: Opener())
+    with pytest.raises(core.SourceError) as exc_info:
+        core.fetch_ics(SECRET_URL)
+    assert "abc123" not in str(exc_info.value)
+    assert "calendar.example" not in str(exc_info.value)
+
+
+def test_fetch_ics_slow_drip_hits_total_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    ticks = iter([0.0, core.TOTAL_TIMEOUT + 1.0])
+    monkeypatch.setattr(core, "monotonic", lambda: next(ticks))
+
+    class Resp:
+        def __enter__(self) -> Resp:
+            return self
+
+        def __exit__(self, *a: object) -> None:
+            return None
+
+        def read(self, n: int) -> bytes:
+            return b"BEGIN:VCALENDAR\n"
+
+    class Opener:
+        def open(self, url: str, timeout: float) -> Resp:
+            return Resp()
+
+    monkeypatch.setattr(core.urllib.request, "build_opener", lambda *h: Opener())
+    with pytest.raises(core.SourceError, match="yavaş"):
+        core.fetch_ics(SECRET_URL)
+
+
+def test_snippet_malformed_html_does_not_raise() -> None:
+    raw = (
+        "Content-Type: text/html; charset=utf-8\r\n\r\n"
+        "a<]&-script&ascript><![CDATA[ <=<?<![&<<![CDATA[=-/"
+    )
+    message = email.message_from_string(raw, policy=policy.default)
+    result = core._snippet(message)
+    assert isinstance(result, str)
+
+
+def test_snippet_html_closes_parser_and_keeps_trailing_text() -> None:
+    raw = "Content-Type: text/html; charset=utf-8\r\n\r\n<p>x</p>tail &amp"
+    message = email.message_from_string(raw, policy=policy.default)
+    assert "tail &" in core._snippet(message)
+
+
+def test_read_unread_limit_zero_returns_empty_without_fetch() -> None:
+    fake = FakeImap([PLAIN, HTML, PLAIN])
+    items, total = core.read_unread(
+        lambda host, port: fake,
+        host="imap.example",
+        port=993,
+        username="u@example",
+        password=SECRET_PASSWORD,
+        folder="INBOX",
+        limit=0,
+    )
+    assert items == []
+    assert total == 3
+    assert not any(kind == "fetch" for kind, _ in fake.calls)
+
+
+def test_read_unread_login_timeout_raises_source_error_without_secret() -> None:
+    class TimeoutLoginImap(FakeImap):
+        def login(self, user: str, password: str) -> tuple[str, list[bytes]]:
+            raise TimeoutError("boom")
+
+    with pytest.raises(core.SourceError, match="yanıt vermedi") as exc_info:
+        core.read_unread(
+            lambda host, port: TimeoutLoginImap([]),
+            host="imap.example",
+            port=993,
+            username="u@example",
+            password=SECRET_PASSWORD,
+            folder="INBOX",
+            limit=5,
+        )
+    assert SECRET_PASSWORD not in str(exc_info.value)
+
+
+class _SelectImap(FakeImap):
+    def __init__(self, messages: list[bytes]) -> None:
+        super().__init__(messages)
+        self.selected_folders: list[str] = []
+
+    def select(self, folder: str, readonly: bool = False) -> tuple[str, list[bytes]]:
+        self.selected_folders.append(folder)
+        return super().select(folder, readonly=readonly)
+
+
+def test_read_unread_quotes_folder_with_spaces() -> None:
+    fake = _SelectImap([PLAIN])
+    items, total = core.read_unread(
+        lambda host, port: fake,
+        host="imap.example",
+        port=993,
+        username="u@example",
+        password=SECRET_PASSWORD,
+        folder="Gelen Kutusu/Alt",
+        limit=5,
+    )
+    assert total == 1 and len(items) == 1
+    assert fake.selected_folders == ['"Gelen Kutusu/Alt"']
+
+
+@pytest.mark.parametrize("bad_folder", ["INBOX\r\nNOOP", "Gönderilmiş"])
+def test_read_unread_rejects_invalid_folder_before_connect(bad_folder: str) -> None:
+    called = False
+
+    def connect(host: str, port: int) -> Any:
+        nonlocal called
+        called = True
+        return FakeImap([])
+
+    with pytest.raises(core.SourceError):
+        core.read_unread(
+            connect,
+            host="imap.example",
+            port=993,
+            username="u@example",
+            password=SECRET_PASSWORD,
+            folder=bad_folder,
+            limit=5,
+        )
+    assert not called
+
+
+def test_read_unread_hits_total_timeout(monkeypatch: pytest.MonkeyPatch) -> None:
+    ticks = iter([0.0, core.TOTAL_TIMEOUT + 1.0])
+    monkeypatch.setattr(core, "monotonic", lambda: next(ticks))
+    fake = FakeImap([PLAIN, HTML, PLAIN])
+    with pytest.raises(core.SourceError, match="zaman aşımı"):
+        core.read_unread(
+            lambda host, port: fake,
+            host="imap.example",
+            port=993,
+            username="u@example",
+            password=SECRET_PASSWORD,
+            folder="INBOX",
+            limit=5,
+        )

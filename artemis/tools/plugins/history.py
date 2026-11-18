@@ -50,8 +50,10 @@ class HistoryTool(BaseTool):
                 removed = store.delete_history()
             elif args.action == "retention":
                 removed = store.set_retention(args.retention_days)
-            refresh = cast(Callable[[], None], context.services["memory_refresh"])
-            refresh()
+            refresh = context.services.get("memory_refresh")
+            if callable(refresh):
+                # Yenileme geri çağrısı her ortamda sağlanmayabilir; varsa çağrılır.
+                cast(Callable[[], None], refresh)()
             # `action` masaüstünün silme sonrası sohbet ekranını temizlemesi içindir.
             data: dict[str, object] = {
                 **store.history_status(),

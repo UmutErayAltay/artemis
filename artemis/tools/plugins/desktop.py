@@ -121,6 +121,11 @@ def process_result(
         content_kind=content_kind,
     )
 
+# open_application file_path için izinli metin türleri (betik/çalıştırılabilir değil).
+_TEXT_DOCUMENT_SUFFIXES = frozenset(
+    {".txt", ".md", ".log", ".csv", ".json", ".yaml", ".yml", ".ini", ".xml"}
+)
+
 
 @register_tool
 class OpenApplication(BaseTool):
@@ -178,6 +183,10 @@ class OpenApplication(BaseTool):
             document: str | None = None
             if args.file_path is not None:
                 target = safe_join(context.workspace, args.file_path)
+                # Yalnız metin dosyası: aksi hâlde model çalışma klasörüne yazdığı .py/.vbs/.ps1'i
+                # python/wscript/powershell'e "açtırıp" onaysız kod çalıştırabilirdi (2026-11-18).
+                if target.suffix.lower() not in _TEXT_DOCUMENT_SUFFIXES:
+                    return ToolResult(message="Yalnız metin dosyaları (.txt, .md …) açılabilir.")
                 if not target.is_file():
                     return ToolResult(message="Açılacak metin dosyası bulunamadı.")
                 document = str(target)

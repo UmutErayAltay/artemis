@@ -201,9 +201,14 @@ class ApprovalDialog(QDialog):
         if self._decided:
             return
         self._decided = True
-        accepted = self._on_decision(self.item, approved, remember_site)
-        decision = approved and accepted
-        self.done(QDialog.DialogCode.Accepted if decision else QDialog.DialogCode.Rejected)
+        decision = False
+        try:
+            accepted = self._on_decision(self.item, approved, remember_site)
+            decision = bool(approved and accepted)
+        finally:
+            # Karar geri çağrısı hata verse bile pencere açık ve kilitli kalmamalı;
+            # hata durumunda sonuç asla Accepted olmaz (kural 2).
+            self.done(QDialog.DialogCode.Accepted if decision else QDialog.DialogCode.Rejected)
 
     def reject(self) -> None:
         self._choose(False)

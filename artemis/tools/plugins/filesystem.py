@@ -78,23 +78,30 @@ class ListFiles(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(ListArguments, arguments)
         try:
+            workspace_root = context.workspace.resolve()
             directory = (
-                context.workspace.resolve()
+                workspace_root
                 if args.path is None
                 else safe_join(context.workspace, args.path)
             )
             entries = []
             for item in sorted(directory.iterdir(), key=lambda path: path.name.casefold()):
-                relative = item.relative_to(context.workspace.resolve()).as_posix()
-                # Bağlantı hedefini de denetlemek kök dışı metadata sızıntısını önler.
-                checked = safe_join(context.workspace, relative)
-                info = checked.stat()
+                try:
+                    relative = item.relative_to(workspace_root).as_posix()
+                    # Bağlantı hedefini de denetlemek kök dışı metadata sızıntısını önler.
+                    checked = safe_join(context.workspace, relative)
+                    info = checked.stat()
+                    is_dir = checked.is_dir()
+                except (OSError, ValueError):
+                    # Kök dışına çıkan veya kırık olan tekil girdi dışarı sızdırılmadan
+                    # atlanır; klasördeki diğer öğeler listelenmeye devam eder.
+                    continue
                 entries.append(
                     {
                         "name": item.name,
                         "path": relative,
                         "size": info.st_size,
-                        "is_dir": checked.is_dir(),
+                        "is_dir": is_dir,
                     }
                 )
             return ToolResult(

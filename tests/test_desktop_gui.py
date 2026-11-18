@@ -1760,3 +1760,43 @@ def test_leaving_settings_restarts_for_direct_section_write_but_not_after_revert
     finally:
         blocker.release.set()
         _close_cleanly(app, window)
+
+
+def test_open_model_settings_selects_model_section_by_name(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        # Bölüm sırası değişse bile "Model" indekse değil adına göre seçilmeli.
+        selected: list[int] = []
+        monkeypatch.setattr(
+            window.settings_panel, "section_names", lambda: ["Ses", "Görünüm", "Model"]
+        )
+        monkeypatch.setattr(window.settings_panel, "show_section", selected.append)
+        window._open_model_settings()
+        assert window.tabs.currentWidget() is window.settings_scroll
+        assert selected == [2]
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_approval_decision_error_propagates_and_still_rejects_dialog(
+    app: QApplication,
+) -> None:
+    calls: list[bool] = []
+
+    def failing_decision(_item: Any, approved: bool, _remember: bool) -> bool:
+        calls.append(approved)
+        raise RuntimeError("karar hatası")
+
+    parent = QWidget()
+    dialog = ApprovalDialog(_approval({"key": "a"}), failing_decision, parent)
+    dialog.show()
+    with pytest.raises(RuntimeError, match="karar hatası"):
+        dialog._choose(True)
+    assert calls == [True]
+    assert not dialog.isVisible()
+    assert dialog.result() == int(dialog.DialogCode.Rejected)
+    dialog.reject()
+    assert calls == [True]
+    assert dialog.result() == int(dialog.DialogCode.Rejected)

@@ -25,6 +25,10 @@ _HOTKEY_ID = 1
 def parse_hotkey(text: str) -> tuple[int, int]:
     """"ctrl+space" → (RegisterHotKey bayrakları, sanal tuş kodu); geçersizse ValueError."""
     *modifiers, key = [part.strip().lower() for part in text.split("+")]
+    # Tek başına harf/rakam/boşluk yazmayı ele geçirir; yazı üretmeyen tuşlar (F1-F24, Pause,
+    # Esc) tek başına kalabilir: Esc, computer_use'un durdurma kısayoludur (ADR 0039).
+    if not modifiers and (key == "space" or (len(key) == 1 and key.isalnum())):
+        raise ValueError(f"Kısayolda en az bir değiştirici olmalı: {text!r}")
     if len(set(modifiers)) != len(modifiers) or any(m not in _MODIFIERS for m in modifiers):
         raise ValueError(f"Kısayolda bilinmeyen ya da yinelenen değiştirici: {text!r}")
     if len(key) == 1 and key.isascii() and key.isalnum():
@@ -78,10 +82,13 @@ class GlobalHotkey:
         self._registered = bool(
             user32.RegisterHotKey(None, _HOTKEY_ID, self._flags, self._virtual_key)
         )
+        message = wintypes.MSG()
+        if self._registered:
+            # PostThreadMessageW kuyruk yoksa başarısız olur; _ready öncesi kuyruğu oluştur.
+            user32.PeekMessageW(ctypes.byref(message), None, 0, 0, 0)
         self._ready.set()
         if not self._registered:
             return
-        message = wintypes.MSG()
         try:
             while user32.GetMessageW(ctypes.byref(message), None, 0, 0) > 0:
                 if message.message == _WM_HOTKEY:

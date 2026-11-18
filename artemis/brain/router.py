@@ -265,7 +265,10 @@ class ProviderRouter:
                     reason="stream_started",
                 )
                 raise
-            self._fallback_until = self._clock() + self.settings.fallback_seconds
+            # Yalnızca hız sınırı (429) birincil modeli bir süre atlamayı haklı kılar;
+            # bağlantı/5xx hataları sadece bu tur için yedeğe düşer (errors.py).
+            if isinstance(error, RateLimitedError):
+                self._fallback_until = self._clock() + self.settings.fallback_seconds
             self._emit_audit(
                 "provider_fallback",
                 primary=self.settings.primary_model,

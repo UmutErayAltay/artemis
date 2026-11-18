@@ -57,17 +57,27 @@ class SearchParser(HTMLParser):
 
 async def search_web(query: str) -> list[dict[str, str]]:
     """HTML değişirse sessiz boş başarı yerine açık hata verir; fixture ağsız çalışır."""
-    async with httpx.AsyncClient(timeout=10, follow_redirects=False) as client:
-        response = await client.get(
+    body = bytearray()
+    async with (
+        httpx.AsyncClient(timeout=10, follow_redirects=False) as client,
+        client.stream(
+            "GET",
             "https://html.duckduckgo.com/html/",
             params={"q": query},
             headers={"User-Agent": "Artemis/0.1 personal-assistant"},
-        )
+        ) as response,
+    ):
         response.raise_for_status()
-    if response.status_code != 200 or len(response.content) > 2_000_000:
-        raise ValueError("Arama servisi geçerli boyutta sonuç sayfası döndürmedi.")
+        if response.status_code != 200:
+            raise ValueError("Arama servisi geçerli boyutta sonuç sayfası döndürmedi.")
+        # Büyük yanıtları belleğe tamamen almadan erken kesmek için akışla okunur.
+        async for chunk in response.aiter_bytes():
+            body.extend(chunk)
+            if len(body) > 2_000_000:
+                raise ValueError("Arama servisi geçerli boyutta sonuç sayfası döndürmedi.")
+        encoding = response.encoding or "utf-8"
     parser = SearchParser()
-    parser.feed(response.text)
+    parser.feed(body.decode(encoding, errors="replace"))
     if not parser.results and not parser.no_results:
         raise ValueError("Arama sonuçları okunamadı; servis şeması veya erişimi değişmiş olabilir.")
     return parser.results[:8]

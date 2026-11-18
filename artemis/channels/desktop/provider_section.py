@@ -219,6 +219,8 @@ def store_endpoint_key(name: str, typed: str) -> str | None:
 
 
 def _slug(text: str) -> str:
+    # ponytail: "a/b" ile "a-b" aynı rapor dosyasına düşer; takma adlar okunur kalsın diye
+    # bilinçli (2026-11-18). Çakışma ölçülürse rapor adına ayrı özet ekle.
     return re.sub(r"[^A-Za-z0-9_-]", "-", text).strip("-")[:40]
 
 
@@ -780,7 +782,7 @@ class ProviderSection(QWidget):
                 if image and self.paid.isChecked()
                 else Decimal(0)
             )
-            if image_cost < 0 or not image_cost.is_finite():
+            if any(not value.is_finite() or value < 0 for value in (*prices, image_cost)):
                 raise InvalidOperation
             settings = load_settings(self.config_path)
         except InvalidOperation:

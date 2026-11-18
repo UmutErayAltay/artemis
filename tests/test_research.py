@@ -11,6 +11,8 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from artemis.brain.agent_loop import AgentLoop
 from artemis.brain.errors import BudgetExceeded
 from artemis.brain.fake import ScriptedProvider
@@ -19,6 +21,7 @@ from artemis.config.settings import ResearchConfig, Settings
 from artemis.memory.companion import companion_dir, ensure_skeleton
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate, TurnState
+from artemis.tools import research_jobs
 from artemis.tools.base import ToolContext
 from artemis.tools.plugins.information import WebSearch
 from artemis.tools.plugins.research import (
@@ -336,3 +339,24 @@ async def test_write_report_avoids_duplicate_heading_and_status_exposes_report_p
     status = await env.call("research_status", job_id=job_id)
     assert status.success
     assert status.data["report_path"] == f"state/arastirma/{job_id}.md"
+
+
+async def test_outer_timeout_sets_context_cancelled(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    env = Env(tmp_path, scripted(Completion(content="rapor")))
+    real_wait_for = asyncio.wait_for
+
+    async def fake_wait_for(coro: Any, *args: Any, **kwargs: Any) -> Any:
+        # Yalnız araştırma işinin dış wait_for sarmalayıcısını zaman aşımına uğrat.
+        if "AgentLoop" in getattr(coro, "__qualname__", ""):
+            coro.close()
+            raise TimeoutError
+        return await real_wait_for(coro, *args, **kwargs)
+
+    monkeypatch.setattr(research_jobs.asyncio, "wait_for", fake_wait_for)
+    await env.call("research_start", topic="konu")
+    job = env.wait()
+    assert job["status"] == "timeout"
+    assert env.jobs._context is not None
+    assert env.jobs._context.cancelled.is_set()

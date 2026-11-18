@@ -882,12 +882,21 @@ class EdgeTTSynthesizer:
                     logger.warning("ffmpeg girdisi kapatılamadı (%s).", type(error).__name__)
 
         feeder = asyncio.create_task(feed())
+        remainder = b""
         try:
             while not cancelled.is_set():
                 pcm = await process.stdout.read(4096)
                 if not pcm:
                     break
-                yield PCMChunk(pcm, 24000, 1, 2)
+                pcm = remainder + pcm
+                # 16-bit mono PCM 2 bayt/örnek ister; kalan tek baytı sonraki okumaya taşı.
+                odd = len(pcm) & 1
+                remainder = pcm[-1:] if odd else b""
+                aligned = pcm[:-1] if odd else pcm
+                if aligned:
+                    yield PCMChunk(aligned, 24000, 1, 2)
+            if remainder and not cancelled.is_set():
+                logger.debug("Edge TTS akışında sonda 1 eksik PCM baytı atlandı.")
             await feeder
             if await process.wait() != 0 and not cancelled.is_set():
                 raise RuntimeError("ffmpeg MP3 çözümleyemedi.")

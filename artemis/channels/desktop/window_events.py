@@ -5,6 +5,7 @@ Pencere durumu `window` üzerindedir; burası yalnız köprü olaylarını ona u
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -325,7 +326,9 @@ def notify_job(window: DesktopWindow, fields: dict[str, Any]) -> None:
         # iş parçacığı; sonuç sinyalle ana iş parçacığına döner.
         outcome = toast("Artemis", text[:240])
         if outcome.status != "ok":
-            window._toast_failed.emit(outcome.message)
+            # Toast sürerken pencere yok edilmiş olabilir; başarısızlık notuna gerek kalmaz.
+            with contextlib.suppress(RuntimeError):
+                window._toast_failed.emit(outcome.message)
 
     threading.Thread(target=deliver, name="job-toast", daemon=True).start()
 

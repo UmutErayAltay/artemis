@@ -14,6 +14,7 @@ from collections.abc import Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from threading import Event, Thread
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -21,6 +22,7 @@ from pydantic import ValidationError
 
 from artemis.channels.voice import cloud_tts
 from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
+from artemis.channels.voice.core import PCMChunk, VoiceController
 from artemis.config.settings import EndpointConfig, Settings, VoiceConfig
 
 
@@ -425,3 +427,133 @@ async def test_gemini_malformed_data_line_raises_turkish_error(server: Server) -
         voice=VoiceConfig(tts_backend="cloud", tts_cloud_endpoint="bulut"),
     )
     assert saved.voice.tts_backend == "cloud"
+
+
+class _DummyMic:
+    async def frames(self):
+        if False:
+            yield None
+
+    def discard_pending(self) -> None:
+        pass
+
+    def pause(self) -> None:
+        pass
+
+    def resume(self) -> None:
+        pass
+
+    async def close(self) -> None:
+        pass
+
+
+class _DummyVAD:
+    def is_speech(self, _pcm: bytes) -> bool:
+        return False
+
+
+class _DummyRecognizer:
+    async def transcribe(self, _pcm: bytes) -> str:
+        return ""
+
+
+class _DummySink:
+    def __init__(self) -> None:
+        self.chunks: list[bytes] = []
+
+    async def play(self, chunks, cancelled, on_first_pcm) -> None:
+        async for chunk in chunks:
+            if cancelled.is_set():
+                return
+            self.chunks.append(chunk.pcm)
+            on_first_pcm()
+
+    async def close(self) -> None:
+        pass
+
+
+class _DummyRunner:
+    def cancel_current(self) -> bool:
+        return False
+
+    async def run(self, _text: str):
+        return SimpleNamespace(text="", stop_reason="completed", turn_id="t")
+
+
+class _LocalStub:
+    def __init__(self) -> None:
+        self.calls: list[str] = []
+
+    async def stream(self, text: str, _cancelled: asyncio.Event):
+        self.calls.append(text)
+        yield PCMChunk(b"\x09\x00")
+
+    async def close(self) -> None:
+        pass
+
+
+async def test_voice_controller_cloud_tts_blocks_private_and_allows_non_private(
+    server: Server,
+) -> None:
+    synth, audit = _synthesizer(server)
+    sink = _DummySink()
+    local = _LocalStub()
+    notices: list[str] = []
+    answer_state = {"text": "Açık yanıt", "private": False}
+
+    async def run_command(_text: str):
+        return SimpleNamespace(
+            text=answer_state["text"],
+            stop_reason="completed",
+            turn_id="t",
+            phases=(),
+            tool_calls=[],
+            record=SimpleNamespace(answer_private=answer_state["private"]),
+        )
+
+    controller = VoiceController(
+        _DummyRunner(),  # type: ignore[arg-type]
+        synth.config,
+        _DummyMic(),  # type: ignore[arg-type]
+        _DummyVAD(),
+        _DummyRecognizer(),
+        synth,
+        sink,
+        run_command=run_command,
+        on_transcript=notices.append,
+        local_synthesizer=local,
+        audit=audit,  # type: ignore[arg-type]
+    )
+    try:
+        # Gizli olmayan yanıt bulut sunucusuna gider ve allowed=True yazar.
+        await controller._run_and_speak("merhaba")
+        assert len(server.requests) == 1
+        assert sink.chunks == [b"\x01\x00\x02\x00"]
+        assert audit.records[-1][1]["allowed"] is True
+
+        # Yerel TTS varken gizli yanıt sunucuya hiç gitmez, yerel senteze yönlenir.
+        audit.records.clear()
+        server.requests.clear()
+        sink.chunks.clear()
+        answer_state = {"text": "Gizli yanıt", "private": True}
+        await controller._run_and_speak("gizli")
+        assert server.requests == []
+        assert local.calls == ["Gizli yanıt"]
+        assert sink.chunks == [b"\x09\x00"]
+        assert len(audit.records) == 1
+        assert audit.records[0][1]["allowed"] is False
+        assert audit.records[0][1]["reason"] == "private"
+
+        # Yerel TTS yokken gizli yanıt ne sunucuya gider ne ses çalar; Türkçe bildirim çıkar.
+        audit.records.clear()
+        sink.chunks.clear()
+        controller._local_synthesizer = None
+        await controller._run_and_speak("gizli2")
+        assert server.requests == []
+        assert sink.chunks == []
+        assert notices == ["Bu yanıt gizli içerik taşıdığı için bulut sesine gönderilmedi."]
+        assert "Gizli yanıt" not in notices[0]
+        assert audit.records[0][1]["allowed"] is False
+        assert audit.records[0][1]["reason"] == "private"
+    finally:
+        await controller.close()

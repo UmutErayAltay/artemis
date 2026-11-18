@@ -14,6 +14,7 @@ from functools import partial
 from time import monotonic
 
 from artemis.brain.agent_loop import RunResult
+from artemis.brain.emotion import emotion_tags_active, strip_emotion_tags
 from artemis.channels.runner import CommandRunner
 
 # Sözleşmeler contracts.py'de; eski içe aktarma yolları için buradan yeniden dışa aktarılır.
@@ -65,6 +66,7 @@ from artemis.channels.voice.wake import _edit_distance, _fold
 from artemis.channels.voice.wake import find_wake_word as find_wake_word
 from artemis.channels.voice.wake import is_ghost_transcript as is_ghost_transcript
 from artemis.config.settings import VoiceConfig
+from artemis.safety.audit import AuditLog
 from artemis.text import turkish_fold
 
 logger = logging.getLogger(__name__)
@@ -89,6 +91,7 @@ WAKE_HIT_SLACK = 0.5
 # ~100 ms'lik STT PCM'i birikince bir iş gönderilir; metin güncellemesi en çok ~150 ms'de bir.
 LIVE_BATCH_MS = 100
 LIVE_EMIT_INTERVAL = 0.15
+_PRIVATE_REMOTE_TTS_NOTICE = "Bu yanıt gizli içerik taşıdığı için bulut sesine gönderilmedi."
 
 
 class VoiceController:
@@ -119,6 +122,8 @@ class VoiceController:
         turn_detector: TurnDetector | None = None,
         wake_spotter: WakeSpotterLike | None = None,
         should_use_cloud: Callable[[], bool] | None = None,
+        local_synthesizer: SpeechSynthesizer | None = None,
+        audit: AuditLog | None = None,
     ) -> None:
         self.runner = runner
         # ADR 0069: eşleşme tek başına uyandırmaz/çalıştırmaz; yalnız eşleşmesiz bölütler STT'ye
@@ -144,6 +149,8 @@ class VoiceController:
         self.segmenter = AudioSegmenter(config, vad, turn_detector)
         self.recognizer = recognizer
         self.synthesizer = synthesizer
+        self._local_synthesizer = local_synthesizer
+        self._audit = audit
         self.sink = sink
         self.clock = clock
         self.on_first_pcm = on_first_pcm or (lambda: None)
@@ -850,6 +857,79 @@ class VoiceController:
             except (asyncio.CancelledError, OSError, RuntimeError, ValueError):
                 logger.debug("Ara STT penceresi kullanılamadı.")
 
+    @staticmethod
+    def _is_private_result(result: RunResult) -> bool:
+        return bool(result.record is not None and result.record.answer_private)
+
+    def _is_remote_synthesizer(self) -> bool:
+        # Çevrimsel içe aktarmayı önlemek için adaptörler burada geç yüklenir; politika tek yerde.
+        from artemis.channels.voice.adapters import (
+            EdgeTTSynthesizer,
+            EmaSynthesizer,
+            FallbackSynthesizer,
+            PiperSynthesizer,
+        )
+        from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
+
+        target: object = self.synthesizer
+        if isinstance(target, FallbackSynthesizer):
+            target = target.primary
+        if isinstance(target, (PiperSynthesizer, EmaSynthesizer)):
+            return False
+        if isinstance(target, (CloudSpeechSynthesizer, EdgeTTSynthesizer)):
+            return True
+        return self.config.tts_backend in ("edge", "cloud")
+
+    def _emit_private_tts_blocked(self) -> None:
+        if self._audit is None:
+            return
+        from artemis.channels.voice.adapters import EdgeTTSynthesizer, FallbackSynthesizer
+        from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
+
+        target: object = self.synthesizer
+        if isinstance(target, FallbackSynthesizer):
+            target = target.primary
+        if isinstance(target, CloudSpeechSynthesizer):
+            self._audit.emit(
+                "cloud_tts_transfer", service=target.endpoint_id,
+                model=target.config.tts_cloud_model,
+                content_kind="assistant_response_text", allowed=False, reason="private",
+            )
+            return
+        service = (
+            "edge_tts"
+            if isinstance(target, EdgeTTSynthesizer) or self.config.tts_backend == "edge"
+            else (self.config.tts_cloud_endpoint or self.config.tts_backend)
+        )
+        self._audit.emit(
+            "cloud_tts_transfer", service=service,
+            content_kind="assistant_response_text", allowed=False, reason="private",
+        )
+
+    async def _synth_stream(
+        self, text: str, cancelled: asyncio.Event, *, private: bool = False,
+        record_block: bool = True,
+    ) -> AsyncGenerator[PCMChunk]:
+        """Gizli yanıtları bulut/Edge TTS'ten kesen tek ses kapısı."""
+        synth = self.synthesizer
+        if private and self._is_remote_synthesizer():
+            if record_block:
+                self._emit_private_tts_blocked()
+            if self._local_synthesizer is None:
+                if record_block:
+                    self.on_transcript(_PRIVATE_REMOTE_TTS_NOTICE)
+                return
+            synth = self._local_synthesizer
+            text = strip_emotion_tags(text, emotion_tags_active(self.config))
+        stream = synth.stream(text, cancelled)
+        try:
+            async for chunk in stream:
+                yield chunk
+        finally:
+            closer = getattr(stream, "aclose", None)
+            if closer is not None:
+                await closer()
+
     async def _timed_chunks(
         self,
         text: str,
@@ -858,9 +938,10 @@ class VoiceController:
         gid: int | None,
         *,
         ack: bool = False,
+        private: bool = False,
     ) -> AsyncGenerator[PCMChunk]:
         first = True
-        cached = self._ack_cache.get(text) if ack else None
+        cached = self._ack_cache.get(text) if ack and not private else None
         if cached is not None:
             for chunk in cached:
                 if first and chunk.pcm:
@@ -870,7 +951,7 @@ class VoiceController:
             return
         recorded: list[PCMChunk] = []
         # Adaptörün süreç/ağ finally bloğu, sink erken dönse de kapanabilmeli.
-        chunks = self.synthesizer.stream(text, cancelled)
+        chunks = self._synth_stream(text, cancelled, private=private)
         try:
             async for chunk in chunks:
                 if first and chunk.pcm:
@@ -879,7 +960,7 @@ class VoiceController:
                 recorded.append(chunk)
                 yield chunk
             # Yalnız sonuna dek üretilen ses saklanır; kesilen akış yarım kalıp önbelleğe girmez.
-            if ack and recorded and not cancelled.is_set():
+            if ack and not private and recorded and not cancelled.is_set():
                 self._ack_cache[text] = recorded
         finally:
             closer = getattr(chunks, "aclose", None)
@@ -887,14 +968,11 @@ class VoiceController:
                 await closer()
 
     async def _play_response(
-        self,
-        text: str,
-        cancelled: asyncio.Event,
-        uid: int,
-        gid: int | None,
-        first_pcm: Callable[[], None],
+        self, text: str, cancelled: asyncio.Event, uid: int, gid: int | None,
+        first_pcm: Callable[[], None], *, private: bool = False,
     ) -> None:
-        async with aclosing(self._timed_chunks(text, cancelled, uid, gid)) as chunks:
+        stream = self._timed_chunks(text, cancelled, uid, gid, private=private)
+        async with aclosing(stream) as chunks:
             await self.sink.play(chunks, cancelled, first_pcm)
 
     def _record_result(self, uid: int, gid: int | None, result: RunResult) -> None:
@@ -915,18 +993,38 @@ class VoiceController:
         uid: int,
         gid: int | None,
         first_pcm: Callable[[], None],
+        *,
+        privacy_ready: asyncio.Event | None = None,
+        is_private: Callable[[], bool] | None = None,
     ) -> None:
         """Cümleleri sırayla sentezler; hepsi tek sink akışında çalınır (cihaz bir kez açılır)."""
 
         async def chunks() -> AsyncGenerator[PCMChunk]:
             first = True
-            async for sentence in speech.sentences():
+
+            async def next_sentences() -> AsyncGenerator[str]:
+                if privacy_ready is not None and not privacy_ready.is_set():
+                    # Uzak TTS gizliliği yalnız tur bitince bilinir; cümleler önce tutulur.
+                    held = [s async for s in speech.sentences() if not cancelled.is_set()]
+                    await privacy_ready.wait()
+                    for sentence in held:
+                        yield sentence
+                    return
+                async for sentence in speech.sentences():
+                    yield sentence
+
+            index = 0
+            async for sentence in next_sentences():
                 if cancelled.is_set():
                     return
                 if self._output_active:
                     # Yankı süzgeci şimdiye dek söylenen/söylenecek tüm cümleleri bilsin.
                     self._spoken_text = " ".join(speech.spoken)
-                stream = self.synthesizer.stream(sentence, cancelled)
+                private = is_private() if is_private is not None else False
+                stream = self._synth_stream(
+                    sentence, cancelled, private=private, record_block=(index == 0)
+                )
+                index += 1
                 try:
                     async for chunk in stream:
                         if first and chunk.pcm:
@@ -937,6 +1035,8 @@ class VoiceController:
                     closer = getattr(stream, "aclose", None)
                     if closer is not None:
                         await closer()
+                if private and self._is_remote_synthesizer() and self._local_synthesizer is None:
+                    return
 
         async with aclosing(chunks()) as generator:
             await self.sink.play(generator, cancelled, first_pcm)
@@ -965,14 +1065,28 @@ class VoiceController:
             self._emit_state("thinking")
             self._task_turns += 1
             self._event(uid, "command_start", generation_id=gid, warm=self._task_turns > 1)
+            privacy_ready = asyncio.Event()
+            turn_private = False
+            if not self._is_remote_synthesizer():
+                privacy_ready.set()
             self._playback_cancelled = generation
             playback = asyncio.create_task(
-                self._play_stream(speech, generation, uid, gid, first_pcm)
+                self._play_stream(
+                    speech,
+                    generation,
+                    uid,
+                    gid,
+                    first_pcm,
+                    privacy_ready=privacy_ready,
+                    is_private=lambda: turn_private,
+                )
             )
             self._playback = playback
             result = await self.run_command(command, stream=speech)
             self._record_result(uid, gid, result)
+            turn_private = self._is_private_result(result)
             speech.finish(result.text)
+            privacy_ready.set()
             try:
                 await playback
             except asyncio.CancelledError:
@@ -1026,6 +1140,7 @@ class VoiceController:
             self._event(uid, "command_start", generation_id=gid, warm=self._task_turns > 1)
             result = await self.run_command(command)
             self._record_result(uid, gid, result)
+            private = self._is_private_result(result)
             if result.text.strip() and not generation.is_set():
 
                 def first_pcm() -> None:
@@ -1037,16 +1152,16 @@ class VoiceController:
                         self.on_first_pcm()
                     played = True
 
-                self._emit_state("speaking")
+                blocked_silent = (
+                    private and self._is_remote_synthesizer() and self._local_synthesizer is None
+                )
+                if not blocked_silent:
+                    self._emit_state("speaking")
                 self._playback_cancelled = generation
-                self._output_active = True
+                self._output_active = not blocked_silent
                 self._playback = asyncio.create_task(
                     self._play_response(
-                        result.text,
-                        generation,
-                        uid,
-                        gid,
-                        first_pcm,
+                        result.text, generation, uid, gid, first_pcm, private=private
                     )
                 )
                 try:
@@ -1139,11 +1254,18 @@ class VoiceController:
         closer = getattr(self.recognizer, "close", None)
         if callable(closer):
             closer()  # oyun modu izleyici iş parçacığı; düz tanıyıcıda yok
-        for label, closer in (
+        closers: list[tuple[str, Callable[[], Awaitable[None]]]] = [
             ("mikrofon", self.microphone.close),
             ("ses çıkışı", self.sink.close),
             ("ses üretici", self.synthesizer.close),
+        ]
+        if (
+            self._local_synthesizer is not None
+            and self._local_synthesizer is not self.synthesizer
+            and self._local_synthesizer is not getattr(self.synthesizer, "local", None)
         ):
+            closers.append(("yerel ses üretici", self._local_synthesizer.close))
+        for label, closer in closers:
             try:
                 await closer()
             except (OSError, RuntimeError, ValueError) as error:

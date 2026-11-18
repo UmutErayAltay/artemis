@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import binascii
 import ctypes
+import functools
 import logging
 import sys
 from typing import TYPE_CHECKING, Any, Protocol
@@ -51,6 +52,8 @@ class PlainProtector:
         return text
 
 
+# Her çağrıda yeni ctypes.Structure/POINTER tanımlamak kalıcı önbellek sızıntısına yol açar.
+@functools.lru_cache(maxsize=1)
 def _load_dpapi() -> tuple[Any, Any, type[ctypes.Structure]]:
     if sys.platform != "win32":
         raise UnreadableMemory("DPAPI yalnız Windows üzerinde kullanılabilir.")

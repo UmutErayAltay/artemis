@@ -3,7 +3,12 @@
 
 from pathlib import Path
 
-from PyInstaller.utils.hooks import collect_data_files, collect_submodules
+from PyInstaller.utils.hooks import (
+    collect_all,
+    collect_data_files,
+    collect_submodules,
+    copy_metadata,
+)
 
 # SPECPATH `packaging/` klasörünü gösterir; depo kökü bir üst dizindir.
 ROOT = Path(SPECPATH).resolve().parent
@@ -26,6 +31,7 @@ for _pkg in (
     try:
         datas += collect_data_files(_pkg)
     except ImportError:
+        # Eksik paketin veri dosyası kurucuya girmez; derleme bunu uyarmaz.
         pass
 
 # Araç eklentileri `@register_tool` ile çalışma anında keşfedildiği için tüm alt modüller eklenir.
@@ -40,6 +46,21 @@ datas += [
     (str(ROOT / "bench" / name), "bench")
     for name in ("model_testi.yaml", "senaryolar.yaml")
 ]
+# Yerel STT: faster_whisper açılışta huggingface_hub'ı içe aktarır ve ctranslate2'nin DLL'lerine
+# ihtiyaç duyar; analiz bunları tembel içe aktarımdan bulamadığı için v0.2.0 paketinde yerel tanıma
+# kırıktı (2026-11-18 derin tarama). Kuruluysa ikili dosyaları ve verileriyle birlikte toplanır.
+binaries = []
+for _pkg in ("ctranslate2", "tokenizers", "huggingface_hub", "faster_whisper"):
+    try:
+        _datas, _binaries, _hidden = collect_all(_pkg)
+    except ImportError:
+        continue
+    datas += _datas
+    binaries += _binaries
+    hiddenimports += _hidden
+
+# Dondurulmuş pakette importlib.metadata.version("artemis-tr") çalışsın diye dist-info eklenir.
+datas += copy_metadata("artemis-tr")
 
 # Ağır isteğe bağlı özellikler ve geliştirme araçları temel paketin dışında tutulur (ADR 0075).
 excludes = [
@@ -50,7 +71,6 @@ excludes = [
     "pyarrow",
     "fastembed",
     "sherpa_onnx",
-    "huggingface_hub",
     "tests",
     "pytest",
     "mypy",
@@ -60,7 +80,7 @@ excludes = [
 a = Analysis(
     [str(ROOT / "packaging" / "entry.py")],
     pathex=[str(ROOT)],
-    binaries=[],
+    binaries=binaries,
     datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],

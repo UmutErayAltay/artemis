@@ -430,8 +430,11 @@ class AutomationPanel(QWidget):
         def work(path: Path, relay: _Relay) -> None:
             try:
                 snap = load_snapshot(path)
-            except (ZoneInfoNotFoundError, KeyError, OverflowError, OSError, ValueError):
-                # Bozuk saat dilimi ya da zaman değeri: kartlar yüklenmiş kalmasın.
+            except (
+                ZoneInfoNotFoundError, KeyError, OverflowError, OSError, TypeError, ValueError,
+            ):
+                # Bozuk saat dilimi, beklenmedik veri tipi (ör. SQLite None/metin zamanı) ya da
+                # zaman değeri: kartlar "Yükleniyor…" durumunda kalmasın.
                 snap = {"error": "Otomasyon verisi okunamadı."}
             with suppress(RuntimeError):  # pencere okuma bitmeden kapandı
                 relay.loaded.emit(generation, snap)

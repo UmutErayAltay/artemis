@@ -166,7 +166,8 @@ class AliasStore:
             raw = self.path.read_text(encoding="utf-8")
         except FileNotFoundError:
             return {}
-        except OSError as error:
+        except (OSError, UnicodeDecodeError) as error:
+            # UnicodeDecodeError OSError değildir; bozuk UTF-8 dosyası da okuma hatası sayılır.
             raise AliasStoreError("Takma ad dosyası okunamadı") from error
         try:
             data = json.loads(raw)

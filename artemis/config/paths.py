@@ -1,8 +1,10 @@
 """Kullanıcı başına config ve paketlenmiş örnek dosya yolları (ADR 0075)."""
 
+import contextlib
 import os
 import shutil
 import sys
+import tempfile
 from collections.abc import Mapping
 from pathlib import Path
 
@@ -40,14 +42,19 @@ def default_config_path(
     env: Mapping[str, str] | None = None,
     home: Path | None = None,
     windows: bool | None = None,
+    frozen: bool | None = None,
 ) -> Path:
-    """Depo içinden çalışırken `./config/config.yaml`, değilse kullanıcı config yolu."""
+    """Depo içinden çalışırken `./config/config.yaml`, değilse kullanıcı config yolu.
+
+    Paketli uygulamada çalışma dizini hiç denenmez: kötü niyetli bir klasörden açılan Artemis
+    oradaki config'i (ör. MCP sunucu komutu) yükleyip çalıştırabilirdi (2026-11-18)."""
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
     local = (
         Path("config") / "config.yaml"
         if cwd is None
         else Path(cwd) / "config" / "config.yaml"
     )
-    if local.exists():
+    if not is_frozen and local.exists():
         return local
     return user_config_dir(env=env, home=home, windows=windows) / "config.yaml"
 
@@ -62,13 +69,30 @@ def ensure_config(path: Path) -> bool:
     path.parent.mkdir(parents=True, exist_ok=True)
     # Önce geçici dosyaya tam kopya, sonra üzerine yazmayan bağla yerine koyma: kopya yarıda
     # kesilirse 0 baytlık config kalıp sonraki açılışta "var" sayılmaz.
-    temp = path.with_name(f".{path.name}.{os.getpid()}.tmp")
+    fd, temp_name = tempfile.mkstemp(
+        dir=path.parent, prefix=f".{path.name}.", suffix=".tmp"
+    )
+    os.close(fd)
+    temp = Path(temp_name)
     try:
         shutil.copyfile(example, temp)
         try:
             os.link(temp, path)
         except FileExistsError:
             return False
+        except OSError:
+            # FAT32/exFAT gibi sabit bağ desteklemeyen dosya sistemlerinde 'xb' ile
+            # atomik oluşturmaya düş; yarım kalan dosyayı bırakmamak için hatada sil.
+            data = temp.read_bytes()
+            try:
+                with path.open("xb") as out:
+                    out.write(data)
+            except FileExistsError:
+                return False
+            except OSError:
+                with contextlib.suppress(OSError):
+                    path.unlink()
+                raise
     finally:
         temp.unlink(missing_ok=True)
     return True

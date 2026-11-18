@@ -183,7 +183,10 @@ def split_text(text: str, limit: int = TELEGRAM_TEXT_LIMIT) -> list[str]:
             cut = limit
         chunks.append(rest[:cut])
         rest = rest[cut:].lstrip("\n") if cut != limit else rest[cut:]
-    chunks.append(rest)
+    # Sadece satır sonlarından oluşan kuyruk lstrip sonrası boşalırsa Telegram HTTP 400
+    # vermesin diye boş parça eklenmez.
+    if rest or not chunks:
+        chunks.append(rest)
     return chunks
 
 

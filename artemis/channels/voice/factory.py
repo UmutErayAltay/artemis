@@ -331,15 +331,18 @@ async def build_voice_controller(
             runtime, whisper, local_voice, cloud_recognizer, on_state, cleanup,
         )
         synthesizer: SpeechSynthesizer
+        local_tts: PiperSynthesizer | None = None
         if settings.voice.tts_backend == "edge":
             edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
             cleanup.push_async_callback(_close_optional, edge_tts)
-            # Yedek yalnız Piper modeli varken kurulur: `tts_local_fallback` varsayılan açıktır ve
-            # model yokken Piper kurucusu çalışabilecek Edge sesini de kapatırdı.
-            if settings.voice.tts_local_fallback and settings.voice.piper_model:
+            # Gizli yanıtların buluta gitmemesi için piper_model varken yerel sentez hazırlanır.
+            if settings.voice.piper_model:
                 local_tts = PiperSynthesizer(settings.voice)
                 await _prepare(local_tts)
                 cleanup.push_async_callback(_close_optional, local_tts)
+            # Yedek yalnız Piper modeli varken kurulur: `tts_local_fallback` varsayılan açıktır ve
+            # model yokken Piper kurucusu çalışabilecek Edge sesini de kapatırdı.
+            if settings.voice.tts_local_fallback and local_tts is not None:
                 synthesizer = FallbackSynthesizer(edge_tts, local_tts)
             else:
                 synthesizer = edge_tts
@@ -363,11 +366,13 @@ async def build_voice_controller(
                 runtime.audit,
             )
             cleanup.push_async_callback(_close_optional, cloud_tts)
-            # Ücretsiz model süresi dolduğunda veya kota sınırında yerel Piper'a düşülür.
-            if settings.voice.tts_local_fallback and settings.voice.piper_model:
+            # Gizli yanıtların buluta gitmemesi için piper_model varken yerel sentez hazırlanır.
+            if settings.voice.piper_model:
                 local_tts = PiperSynthesizer(settings.voice)
                 await _prepare(local_tts)
                 cleanup.push_async_callback(_close_optional, local_tts)
+            # Ücretsiz model süresi dolduğunda veya kota sınırında yerel Piper'a düşülür.
+            if settings.voice.tts_local_fallback and local_tts is not None:
                 synthesizer = FallbackSynthesizer(
                     cloud_tts, local_tts, strip_tags=emotion_tags_active(settings.voice)
                 )
@@ -418,6 +423,8 @@ async def build_voice_controller(
             turn_detector=build_turn_detector(settings.voice, on_state),
             wake_spotter=wake_spotter,
             should_use_cloud=should_use_cloud,
+            local_synthesizer=local_tts,
+            audit=runtime.audit,
         )
         cleanup.pop_all()
         return controller

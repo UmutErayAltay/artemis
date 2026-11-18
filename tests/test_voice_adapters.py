@@ -668,7 +668,7 @@ async def test_edge_stream_yields_pcm_before_remote_stream_finishes(monkeypatch,
 
     class Stdin:
         def write(self, _data):
-            output.put_nowait(b"pcm-from-ffmpeg")
+            output.put_nowait(b"pcm-from-ffmpeg!")
 
         async def drain(self):
             pass
@@ -736,7 +736,7 @@ async def test_edge_stream_yields_pcm_before_remote_stream_finishes(monkeypatch,
     cancelled = asyncio.Event()
     chunks = synth.stream("yanıt", cancelled)
     first = await asyncio.wait_for(anext(chunks), 1)
-    assert first.pcm == b"pcm-from-ffmpeg"
+    assert first.pcm == b"pcm-from-ffmpeg!"
     assert not allow_finish.is_set()
     cancelled.set()
     await chunks.aclose()
@@ -830,7 +830,7 @@ async def test_edge_cancel_does_not_cancel_windows_pipe_closed_future(monkeypatc
     class Stdout:
         async def read(self, _size):
             await closing.wait()
-            return b"pcm"
+            return b"pcm!"
 
     class Process:
         stdin = Stdin()
@@ -870,7 +870,7 @@ async def test_edge_cancel_does_not_cancel_windows_pipe_closed_future(monkeypatc
         AuditLog(tmp_path / "audit.jsonl"),
     )
     stream = synth.stream("synthetic", asyncio.Event())
-    assert (await anext(stream)).pcm == b"pcm"
+    assert (await anext(stream)).pcm == b"pcm!"
     await asyncio.wait_for(stream.aclose(), 1)
     assert closed.done() and not closed.cancelled()
     assert synth._process is None
@@ -995,3 +995,70 @@ async def test_sink_records_reported_output_latency_without_inventing_values(
 
     await sink.play(chunks(), asyncio.Event(), lambda: None)
     assert sink.output_info == {"latency_seconds": expected, "sample_rate": 24000.0, "device": 3}
+
+
+async def test_edge_stream_aligns_odd_byte_stdout_reads(monkeypatch, tmp_path):
+    parts = [b"123", b"45678", b"90", b"A", b""]
+    reads = iter(parts)
+
+    class Stdin:
+        def write(self, _data):
+            pass
+
+        async def drain(self):
+            pass
+
+        def close(self):
+            pass
+
+        async def wait_closed(self):
+            pass
+
+    class Stdout:
+        async def read(self, _size):
+            return next(reads, b"")
+
+    class Process:
+        stdin = Stdin()
+        stdout = Stdout()
+        returncode = 0
+
+        async def wait(self):
+            return 0
+
+        async def communicate(self):
+            return b"", b""
+
+        def terminate(self):
+            pass
+
+        def kill(self):
+            pass
+
+    async def create_process(*_args, **_kwargs):
+        return Process()
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", create_process)
+
+    class Communicate:
+        def __init__(self, _text, _voice):
+            pass
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"mp3"}
+
+    edge_module = ModuleType("edge_tts")
+    edge_module.Communicate = Communicate
+    monkeypatch.setitem(sys.modules, "edge_tts", edge_module)
+
+    synth = EdgeTTSynthesizer(
+        VoiceConfig(tts_backend="edge", allow_cloud_tts_text=True, edge_voice="tr-TR-Voice"),
+        AuditLog(tmp_path / "audit.jsonl"),
+    )
+    chunks = [chunk async for chunk in synth.stream("merhaba", asyncio.Event())]
+    raw = b"".join(parts)
+    expected = raw[: len(raw) - (len(raw) % 2)]
+
+    assert chunks
+    assert all(chunk.pcm and len(chunk.pcm) % 2 == 0 for chunk in chunks)
+    assert b"".join(chunk.pcm for chunk in chunks) == expected

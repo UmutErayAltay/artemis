@@ -9,6 +9,7 @@ değişiklikleri görüp geri alabilir (Faz B).
 import os
 import sqlite3
 import tempfile
+import threading
 from contextlib import closing, suppress
 from datetime import UTC, datetime
 from pathlib import Path
@@ -41,13 +42,13 @@ def ensure_skeleton(state_dir: Path) -> list[str]:
     state_dir.mkdir(parents=True, exist_ok=True)
     folder = companion_dir(state_dir)
     # mkdir'den ÖNCE: bağlantı hedefinde klasör oluşturmak state_dir dışına yazmaktır.
-    if folder.is_symlink():
+    if folder.is_symlink() or os.path.isjunction(folder):
         raise OSError("Hafıza klasörü sembolik bağlantı olamaz.")
     folder.mkdir(exist_ok=True)
     created: list[str] = []
     for key, name in COMPANION_FILES.items():
         target = folder / name
-        if target.is_symlink():
+        if target.is_symlink() or os.path.isjunction(target):
             raise OSError(f"{name} sembolik bağlantı olamaz.")
         try:
             with target.open("x", encoding="utf-8", newline="") as stream:
@@ -62,7 +63,12 @@ def read_companion(state_dir: Path, key: str, limit: int) -> str:
     """Dosyanın başını `limit` karaktere kadar okur; yok/bağlantı/okunamaz ise boş döner."""
     folder = companion_dir(state_dir)
     path = folder / COMPANION_FILES[key]
-    if folder.is_symlink() or path.is_symlink():
+    if (
+        folder.is_symlink()
+        or os.path.isjunction(folder)
+        or path.is_symlink()
+        or os.path.isjunction(path)
+    ):
         return ""
     try:
         with path.open("r", encoding="utf-8") as stream:
@@ -123,13 +129,17 @@ class CompanionConflictError(Exception):
 
 def _connect(state_dir: Path) -> closing[sqlite3.Connection]:
     folder = companion_dir(state_dir)
-    if folder.is_symlink():
+    if folder.is_symlink() or os.path.isjunction(folder):
         raise OSError("Hafıza klasörü sembolik bağlantı olamaz.")
     folder.mkdir(parents=True, exist_ok=True)
-    db = sqlite3.connect(folder / "degisiklikler.sqlite3", timeout=5)
-    db.execute("PRAGMA journal_mode=WAL")
+    db_path = folder / "degisiklikler.sqlite3"
+    if db_path.is_symlink() or os.path.isjunction(db_path):
+        raise OSError("Değişiklik günlüğü sembolik bağlantı olamaz.")
+    db = sqlite3.connect(db_path, timeout=5)
     try:
-        ensure_schema(db, folder / "degisiklikler.sqlite3", _SCHEMA_VERSION, _migrate_all)
+        # WAL kilidi veya şema hatasında bağlantı açık kalmasın.
+        db.execute("PRAGMA journal_mode=WAL")
+        ensure_schema(db, db_path, _SCHEMA_VERSION, _migrate_all)
     except sqlite3.Error:
         db.close()
         raise
@@ -141,7 +151,12 @@ def _target(state_dir: Path, key: str) -> Path:
         raise ValueError(f"Bilinmeyen hafıza dosyası: {key}")
     folder = companion_dir(state_dir)
     path = folder / COMPANION_FILES[key]
-    if folder.is_symlink() or path.is_symlink():
+    if (
+        folder.is_symlink()
+        or os.path.isjunction(folder)
+        or path.is_symlink()
+        or os.path.isjunction(path)
+    ):
         raise OSError("Hafıza dosyası veya klasörü sembolik bağlantı olamaz.")
     return path
 
@@ -154,53 +169,63 @@ def _read_exact(path: Path) -> str:
         return ""
 
 
+# Aynı iş parçacığından undo_change -> write_companion çağrısı için yeniden girilebilir kilit.
+_WRITE_LOCK = threading.RLock()
+
+
 def write_companion(
     state_dir: Path, key: str, text: str, *, source: str, turn_id: str, tainted: bool,
     private: bool = False,
 ) -> int:
-    """Dosyayı tamamen değiştirir; günlük `prepared` → `completed`/`failed`. Kimlik döner."""
+    """Dosyayı tamamen değiştirir; günlük `prepared` → `completed`/`failed`/`uncertain`."""
     path = _target(state_dir, key)
     if source != "undo" and len(text) > MAX_CHARS[key]:
         raise ValueError(f"{COMPANION_FILES[key]} en çok {MAX_CHARS[key]} karakter olabilir.")
-    before = _read_exact(path)
-    if source != "undo" and content_tainted(state_dir, key):
-        # Makbuz/oturum güncellemesi eski bölümleri korur; lekeli metin temiz bir yazımla
-        # "aklanmasın". Leke yalnız kullanıcının geri alma işlemiyle (kendi geçmişinden) düşer.
-        tainted = True
-    if source != "undo" and content_private(state_dir, key):
-        # Gizlilik de leke gibi yapışkandır (ADR 0056): yazımların çoğu eski bölümleri korur;
-        # temiz bir turdaki yazım, dosyada kalan gizli metni buluta açık hâle getirmesin.
-        private = True
-    with _connect(state_dir) as db:
-        with db:
-            cursor = db.execute(
-                "INSERT INTO changes"
-                " (at, file, before, after, source, turn_id, tainted, private, state)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prepared')",
-                (
-                    datetime.now(UTC).isoformat(timespec="seconds"),
-                    key, before, text, source, turn_id, int(tainted), int(private),
-                ),
-            )
-        change_id = int(cursor.lastrowid or 0)
-        temp_name = ""
-        try:
-            fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=".yaz-", suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
-                stream.write(text)
-            os.replace(temp_name, path)
-            if _read_exact(path) != text:
-                raise OSError("Yazılan hafıza dosyası geri okunduğunda eşleşmedi.")
-        except (OSError, UnicodeError):
-            if temp_name:
-                with suppress(OSError):
-                    os.unlink(temp_name)
+    with _WRITE_LOCK:
+        before = _read_exact(path)
+        if source != "undo" and content_tainted(state_dir, key):
+            # Makbuz/oturum güncellemesi eski bölümleri korur; lekeli metin temiz bir yazımla
+            # "aklanmasın". Leke yalnız kullanıcının geri alma işlemiyle (kendi geçmişinden) düşer.
+            tainted = True
+        if source != "undo" and content_private(state_dir, key):
+            # Gizlilik de leke gibi yapışkandır (ADR 0056): yazımların çoğu eski bölümleri korur;
+            # temiz bir turdaki yazım, dosyada kalan gizli metni buluta açık hâle getirmesin.
+            private = True
+        with _connect(state_dir) as db:
             with db:
-                db.execute("UPDATE changes SET state = 'failed' WHERE id = ?", (change_id,))
-            raise
-        with db:
-            db.execute("UPDATE changes SET state = 'completed' WHERE id = ?", (change_id,))
-    return change_id
+                cursor = db.execute(
+                    "INSERT INTO changes"
+                    " (at, file, before, after, source, turn_id, tainted, private, state)"
+                    " VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'prepared')",
+                    (
+                        datetime.now(UTC).isoformat(timespec="seconds"),
+                        key, before, text, source, turn_id, int(tainted), int(private),
+                    ),
+                )
+            change_id = int(cursor.lastrowid or 0)
+            temp_name = ""
+            replaced = False
+            try:
+                fd, temp_name = tempfile.mkstemp(dir=path.parent, prefix=".yaz-", suffix=".tmp")
+                with os.fdopen(fd, "w", encoding="utf-8", newline="") as stream:
+                    stream.write(text)
+                os.replace(temp_name, path)
+                replaced = True
+                if _read_exact(path) != text:
+                    raise OSError("Yazılan hafıza dosyası geri okunduğunda eşleşmedi.")
+            except (OSError, UnicodeError):
+                if temp_name and not replaced:
+                    with suppress(OSError):
+                        os.unlink(temp_name)
+                # os.replace sonrası hata dosya içeriğini belirsiz kılar;
+                # failed değil uncertain yazılır.
+                outcome = "uncertain" if replaced else "failed"
+                with db:
+                    db.execute("UPDATE changes SET state = ? WHERE id = ?", (outcome, change_id))
+                raise
+            with db:
+                db.execute("UPDATE changes SET state = 'completed' WHERE id = ?", (change_id,))
+        return change_id
 
 
 _PRIOR = (
@@ -240,73 +265,86 @@ def undo_change(
     state_dir: Path, change_id: int, *, turn_id: str, tainted: bool, private: bool = False
 ) -> int:
     """`before` içeriğini yalnız dosya hâlâ o değişikliğin `after` hâlindeyse geri yazar."""
-    with _connect(state_dir) as db:
-        row = db.execute(
-            "SELECT file, before, after FROM changes WHERE id = ? AND state = 'completed'",
-            (change_id,),
-        ).fetchone()
-    if row is None:
-        raise LookupError(f"{change_id} numaralı tamamlanmış değişiklik yok.")
-    key, before, after = row
-    if _read_exact(_target(state_dir, key)) != after:
-        raise CompanionConflictError(
-            "Dosya bu değişiklikten sonra yeniden değişti; üzerine yazmamak için geri alınmadı."
+    with _WRITE_LOCK:
+        with _connect(state_dir) as db:
+            row = db.execute(
+                "SELECT file, before, after FROM changes WHERE id = ? AND state = 'completed'",
+                (change_id,),
+            ).fetchone()
+        if row is None:
+            raise LookupError(f"{change_id} numaralı tamamlanmış değişiklik yok.")
+        key, before, after = row
+        if _read_exact(_target(state_dir, key)) != after:
+            raise CompanionConflictError(
+                "Dosya bu değişiklikten sonra yeniden değişti; üzerine yazmamak için geri alınmadı."
+            )
+        # Geri yüklenen metin daha önce lekeli bir turda yazıldıysa leke işareti de geri gelir;
+        # yoksa temiz turdaki bir "geri al", dış içerikten gelen metni temiz gibi gösterirdi.
+        with _connect(state_dir) as db:
+            restored_tainted = db.execute(
+                "SELECT 1 FROM changes WHERE file = ? AND state = 'completed' AND tainted = 1"
+                " AND after = ? LIMIT 1",
+                (key, before),
+            ).fetchone()
+            # Gizlilik kökeni de aynı biçimde geri gelir (ADR 0056).
+            restored_private = db.execute(
+                "SELECT 1 FROM changes WHERE file = ? AND state = 'completed' AND private = 1"
+                " AND after = ? LIMIT 1",
+                (key, before),
+            ).fetchone()
+        return write_companion(
+            state_dir, key, before, source="undo", turn_id=turn_id,
+            tainted=tainted or restored_tainted is not None,
+            private=private or restored_private is not None,
         )
-    # Geri yüklenen metin daha önce lekeli bir turda yazıldıysa leke işareti de geri gelir;
-    # yoksa temiz turdaki bir "geri al", dış içerikten gelen metni temiz gibi gösterirdi.
-    with _connect(state_dir) as db:
-        restored_tainted = db.execute(
-            "SELECT 1 FROM changes WHERE file = ? AND state = 'completed' AND tainted = 1"
-            " AND after = ? LIMIT 1",
-            (key, before),
-        ).fetchone()
-        # Gizlilik kökeni de aynı biçimde geri gelir (ADR 0056).
-        restored_private = db.execute(
-            "SELECT 1 FROM changes WHERE file = ? AND state = 'completed' AND private = 1"
-            " AND after = ? LIMIT 1",
-            (key, before),
-        ).fetchone()
-    return write_companion(
-        state_dir, key, before, source="undo", turn_id=turn_id,
-        tainted=tainted or restored_tainted is not None,
-        private=private or restored_private is not None,
-    )
 
 
 def content_tainted(state_dir: Path, key: str) -> bool:
     """Dosyanın şu anki içeriği dış içerik okunan bir turda mı yazıldı (son tamamlanan yazım).
 
     Günlük hiç oluşmadıysa yazım da olmamıştır: iskelet şablonu temizdir (yeni kurulumda her tur
-    lekeli sayılmasın). Var olan günlük okunamazsa güvenli taraf lekeli kabul etmektir.
+    lekeli sayılmasın). Var olan günlük okunamazsa veya son yazım belirsizse güvenli taraf
+    lekeli kabul etmektir.
     """
-    if not (companion_dir(state_dir) / "degisiklikler.sqlite3").is_file():
+    if not os.path.lexists(companion_dir(state_dir) / "degisiklikler.sqlite3"):
         return False
     try:
         with _connect(state_dir) as db:
             row = db.execute(
-                "SELECT tainted FROM changes WHERE file = ? AND state = 'completed'"
+                "SELECT tainted, state FROM changes"
+                " WHERE file = ? AND state IN ('completed', 'uncertain')"
                 " ORDER BY id DESC LIMIT 1",
                 (key,),
             ).fetchone()
     except (OSError, sqlite3.Error):
         # Günlük okunamıyorsa içerik temiz sayılmaz: güvenli taraf lekeli kabul etmektir.
         return True
-    return bool(row and row[0])
+    if row is None:
+        return False
+    if row[1] == "uncertain":
+        return True
+    return bool(row[0])
 
 
 def content_private(state_dir: Path, key: str) -> bool:
     """Dosyanın şu anki içeriği gizli (izinsiz dosya/pano/ekran) içerik görülen bir turda mı
     yazıldı (ADR 0056). Gizli içerik buluta yalnız maskeli gider. Günlük yoksa iskelet
-    temizdir; var olan günlük okunamazsa güvenli taraf gizli kabul etmektir."""
-    if not (companion_dir(state_dir) / "degisiklikler.sqlite3").is_file():
+    temizdir; var olan günlük okunamazsa veya son yazım belirsizse güvenli taraf gizli kabul
+    etmektir."""
+    if not os.path.lexists(companion_dir(state_dir) / "degisiklikler.sqlite3"):
         return False
     try:
         with _connect(state_dir) as db:
             row = db.execute(
-                "SELECT private FROM changes WHERE file = ? AND state = 'completed'"
+                "SELECT private, state FROM changes"
+                " WHERE file = ? AND state IN ('completed', 'uncertain')"
                 " ORDER BY id DESC LIMIT 1",
                 (key,),
             ).fetchone()
     except (OSError, sqlite3.Error):
         return True
-    return bool(row and row[0])
+    if row is None:
+        return False
+    if row[1] == "uncertain":
+        return True
+    return bool(row[0])

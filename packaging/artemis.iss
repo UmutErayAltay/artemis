@@ -42,5 +42,6 @@ Name: "{autodesktop}\Artemis"; Filename: "{app}\Artemis.exe"; Tasks: desktopicon
 Filename: "{app}\Artemis.exe"; Description: "{cm:LaunchProgram,Artemis}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Yalnızca kurulum klasörü temizlenir; kullanıcı verileri (%APPDATA%\Artemis) korunur.
-Type: filesandordirs; Name: "{app}"
+; Kurulan dosyaları Inno kendisi kaldırır; burada yalnız boş kalan klasör silinir. filesandordirs
+; /DIR= ile seçilmiş bir klasörü (ör. Belgeler) tümüyle silebilirdi. Kullanıcı verisi %APPDATA%\Artemis.
+Type: dirifempty; Name: "{app}"

@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 import pytest
@@ -93,3 +94,22 @@ def test_symlinks_are_rejected_for_mutation_paths(tmp_path: Path) -> None:
         with pytest.raises(ValueError, match="sembolik bağlantı"):
             safe_join(root, target, allow_symlinks=False)
     assert real_file.read_text(encoding="utf-8") == "koru"
+
+
+def test_junction_rejected_for_mutation_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "j").mkdir()
+    # Gerçek junction oluşturmadan isjunction davranışını taklit etmek için monkeypatch kullanılır.
+    monkeypatch.setattr(
+        os.path,
+        "isjunction",
+        lambda p: str(p).endswith("j"),
+        raising=False,
+    )
+    with pytest.raises(ValueError, match="sembolik bağlantı"):
+        safe_join(tmp_path, "j/x.txt", allow_symlinks=False)
+
+    resolved = safe_join(tmp_path, "j/x.txt")
+    assert resolved == (tmp_path / "j" / "x.txt").resolve()
+    assert resolved.is_relative_to(tmp_path.resolve())

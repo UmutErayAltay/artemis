@@ -257,6 +257,8 @@ class ResearchJobs:
                 timeout=context.settings.max_seconds + OUTER_GRACE_SECONDS,
             )
         except TimeoutError:
+            # Dış zaman aşımında iş parçacığındaki araç çağrıları da durdurulsun.
+            context.cancelled.set()
             return "timeout", "Süre sınırı doldu; rapor yazılmadı."
         if result.stop_reason == "cancelled":
             return "cancelled", "Araştırma iptal edildi; rapor yazılmadı."

@@ -120,6 +120,45 @@ def _schema_depth(value: Any, depth: int = 0) -> int:
     return depth
 
 
+_FORBIDDEN_SCHEMA_KEYS = frozenset({"$ref", "$defs", "definitions"})
+
+
+def _has_bad_key(value: Any) -> bool:
+    """Kontrol/bidi karakterli ya da sınırı aşan şema anahtarını reddeder.
+
+    Özellik adını değiştirmek argüman gidiş-dönüşünü bozar (kural 9); bu yüzden araç
+    hiç kaydedilmez.
+    """
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if not isinstance(key, str) or _clean(key, SCHEMA_STRING_LIMIT) != key:
+                return True
+            if _has_bad_key(item):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_has_bad_key(item) for item in value)
+    return False
+
+
+def _uses_keyword(value: Any) -> bool:
+    """$ref/$defs/definitions anahtarlarını yalnız JSON Schema konumlarında arar."""
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key in _FORBIDDEN_SCHEMA_KEYS:
+                return True
+            if key == "properties" and isinstance(item, dict):
+                # Özellik adları araç argümanıdır; şema anahtar sözcüğü sayılmaz.
+                if any(_uses_keyword(prop) for prop in item.values()):
+                    return True
+            elif _uses_keyword(item):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(_uses_keyword(item) for item in value)
+    return False
+
+
 def _clean_schema(value: Any) -> Any:
     """Şemadaki tüm metinler (description, title, enum, default) kırpılır ve temizlenir."""
     if isinstance(value, dict):
@@ -135,13 +174,15 @@ def checked_schema(schema: dict[str, Any]) -> dict[str, Any] | None:
     """Kabul edilebilir şemanın temizlenmiş kopyası; değilse None (araç kaydedilmez)."""
     if _schema_depth(schema) > SCHEMA_DEPTH_LIMIT:
         return None
-    cleaned = _clean_schema(schema)
-    try:
-        encoded = json.dumps(cleaned, ensure_ascii=False)
-    except (TypeError, ValueError):
+    if _has_bad_key(schema):
         return None
+    cleaned = _clean_schema(schema)
     # $ref/$defs çözümlemesi yapılmaz; dolaylı şema boyut ve içerik sınırını aşabilir.
-    if '"$ref"' in encoded or '"$defs"' in encoded or '"definitions"' in encoded:
+    if _uses_keyword(cleaned):
+        return None
+    try:
+        encoded = json.dumps(cleaned, ensure_ascii=False, allow_nan=False)
+    except (TypeError, ValueError):
         return None
     if len(encoded.encode("utf-8")) > SCHEMA_BYTES_LIMIT:
         return None
@@ -177,6 +218,22 @@ class MCPArguments(BaseModel):
         return data
 
 
+def _clean_structured(value: Any) -> Any:
+    """Yapılandırılmış sonuçtaki metin ve anahtarları kontrol/bidi karakterlerinden arındırır."""
+    if isinstance(value, dict):
+        return {
+            (_clean(key, TEXT_LIMIT, single_line=False) if isinstance(key, str) else key): (
+                _clean_structured(item)
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_clean_structured(item) for item in value]
+    if isinstance(value, str):
+        return _clean(value, TEXT_LIMIT, single_line=False)
+    return value
+
+
 def _result(server: MCPServerConfig, result: MCPCallResult) -> ToolResult:
     private_kind: ContentKind = "file" if server.content == "file" else "text"
     text = _clean(result.text, TEXT_LIMIT, single_line=False)
@@ -189,10 +246,13 @@ def _result(server: MCPServerConfig, result: MCPCallResult) -> ToolResult:
         )
     data: dict[str, Any] = {"text": text}
     if result.structured is not None:
+        # Yapılandırılmış metinler de modele ve denetim/hafıza yollarına temizlenerek gider;
+        # boyut sınırı temizlenmiş çıktıya uygulanır.
+        structured = _clean_structured(result.structured)
         # Denetim ve kalıcı hafıza modele giden 4000 karakter çerçevesinden bağımsızdır.
-        encoded = json.dumps(result.structured, ensure_ascii=False)
+        encoded = json.dumps(structured, ensure_ascii=False)
         if len(encoded.encode("utf-8")) <= STRUCTURED_BYTES_LIMIT:
-            data["structured"] = result.structured
+            data["structured"] = structured
         else:
             data["structured_omitted"] = "Yapılandırılmış sonuç sınırı aştığı için atlandı."
     if result.unsupported_blocks:
@@ -261,6 +321,16 @@ def build_tool_class(
                 cancel.set()
                 raise
             except MCPError as error:
+                if error.error_type in {"timeout", "cancelled"}:
+                    # İstek gönderildikten sonra koptuysa yan etki olmuş olabilir (kural 5).
+                    return ToolResult(
+                        status="sent",
+                        message=(
+                            f"MCP «{server.name}» yanıt vermedi; "
+                            "sonuç belirsiz, işlem yapılmış olabilir."
+                        ),
+                        external=True,
+                    )
                 return ToolResult(
                     message=f"MCP «{server.name}» çağrısı başarısız ({error.error_type}).",
                     external=True,
@@ -301,24 +371,25 @@ def discover_mcp_tools(
             continue
         registered: list[str] = []
         for index, spec in enumerate(found):
+            safe_tool = _clean(spec.name, NAME_LIMIT)
             if index >= TOOLS_PER_SERVER:
                 audit.emit(
-                    "mcp_tool_skipped", server=server.name, tool=spec.name, reason="limit"
+                    "mcp_tool_skipped", server=server.name, tool=safe_tool, reason="limit"
                 )
                 continue
             if tool_name(server.name, spec.name) is None:
-                audit.emit("mcp_tool_skipped", server=server.name, tool=spec.name, reason="name")
+                audit.emit("mcp_tool_skipped", server=server.name, tool=safe_tool, reason="name")
                 continue
             cls = build_tool_class(server, spec, factory)
             if cls is None:
                 audit.emit(
-                    "mcp_tool_skipped", server=server.name, tool=spec.name, reason="schema"
+                    "mcp_tool_skipped", server=server.name, tool=safe_tool, reason="schema"
                 )
                 continue
             if cls.name in extended:
                 # Üzerine yazılmaz: yerel araç ya da başka MCP aracı korunur.
                 audit.emit(
-                    "mcp_tool_skipped", server=server.name, tool=spec.name, reason="collision"
+                    "mcp_tool_skipped", server=server.name, tool=safe_tool, reason="collision"
                 )
                 continue
             extended.register(cls)

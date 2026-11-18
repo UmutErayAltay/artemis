@@ -218,3 +218,9 @@ def test_vision_elements_survives_null_coordinates() -> None:
         5, runner=lambda *_a, **_k: SimpleNamespace(returncode=0, stdout=bad)
     )
     assert out == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ctypes windll yalnız Windows'ta")
+def test_vision_elements_handles_large_hwnd_without_overflow() -> None:
+    # 0x80000001 boyutundaki tanıtıcı IsWindow çağrısında taşma fırlatmadan [] dönmeli.
+    assert ve.vision_elements(0x80000001) == []

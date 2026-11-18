@@ -18,7 +18,7 @@ from artemis.brain.fake import ScriptedProvider
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import DailySummaryConfig, ProactiveConfig, Settings, TelegramConfig
 from artemis.proactive import daily_summary
-from artemis.proactive.daily_summary import build_summary, parse_day, write_summary
+from artemis.proactive.daily_summary import _tail_lines, build_summary, parse_day, write_summary
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.scheduler import ProactiveScheduler
 from artemis.tools.plugins.daily_summary import DailySummaryRead, ReadArguments
@@ -346,3 +346,37 @@ def test_unterminated_oversized_last_line_at_eof_does_not_hang(tmp_path: Path) -
     assert result and result[0] is not None
     assert "sohbet 1" in result[0]
     assert "eksik olabilir" in result[0]
+
+
+def test_tail_lines_discards_oversized_cut_first_line(tmp_path: Path) -> None:
+    """Ofset dev satırın ortasına düşerse ilk satırın kalanı da tamamen atılmalı."""
+    json_line = json.dumps(
+        {"event": "turn_start", "timestamp": "2026-10-15T10:00:00+00:00"}
+    ).encode()
+    data = b"A" * (600 * 1024) + b" " + json_line + b"\n"
+    path = tmp_path / "cut.jsonl"
+    path.write_bytes(data)
+
+    truncated: list[bool] = []
+    lines = list(_tail_lines(path, len(data) - 88 * 1024, truncated))
+    assert lines == []
+    assert truncated == [True]
+
+
+def test_tail_lines_unterminated_oversized_eof_returns(tmp_path: Path) -> None:
+    """Son satır dev olup satır sonu taşımıyorsa EOF'ta takılmadan tek tam satırı döner."""
+    first = b'{"event": "turn_start"}\n'
+    path = tmp_path / "eof_tail.jsonl"
+    path.write_bytes(first + b"x" * (600 * 1024))
+
+    truncated: list[bool] = []
+    lines: list[bytes] = []
+    worker = threading.Thread(
+        target=lambda: lines.extend(_tail_lines(path, 2 * 1024 * 1024, truncated)),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=2.0)
+    assert not worker.is_alive(), "_tail_lines EOF'ta takılı kaldı"
+    assert lines == [first]
+    assert truncated == [True]

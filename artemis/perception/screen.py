@@ -47,6 +47,9 @@ _NATIVE_TYPE = "\n".join(
         '  [DllImport("dwmapi.dll")]',
         "  public static extern int DwmGetWindowAttribute(",
         "    IntPtr h, int attr, out RECT r, int size);",
+        '  [DllImport("dwmapi.dll")]',
+        "  public static extern int DwmGetWindowAttribute(",
+        "    IntPtr h, int attr, out int v, int size);",
         '  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);',
         '  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);',
         '  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);',
@@ -60,8 +63,12 @@ _NATIVE_TYPE = "\n".join(
         "      uint pid;",
         "      GetWindowThreadProcessId(h, out pid);",
         "      StringBuilder b = new StringBuilder(2);",
+        "      int cloaked = 0;",
+        "      // DWMWA_CLOAKED (14): gizli UWP/sanal masaüstü pencerelerini atla.",
         "      if (pid != ownPid && IsWindowVisible(h) && !IsIconic(h)",
-        "          && GetWindowText(h, b, 2) > 0) return h;",
+        "          && GetWindowText(h, b, 2) > 0",
+        "          && (DwmGetWindowAttribute(h, 14, out cloaked, 4) != 0",
+        "              || cloaked == 0)) return h;",
         "      h = GetWindow(h, 2);",
         "    }",
         "    return IntPtr.Zero;",
@@ -277,6 +284,12 @@ def _parse_payload(stdout: str) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _powershell_path() -> str:
+    # CWD veya PATH üzerinden sahte powershell.exe yürütülmesini önlemek için mutlak yol.
+    root = os.environ.get("SYSTEMROOT") or r"C:\Windows"
+    return os.path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+
 def read_screen(
     scope: Literal["active_window", "screen"],
     *,
@@ -293,7 +306,7 @@ def read_screen(
     # `-EncodedCommand`: betik UTF-16-LE + base64; kapsam argv'de değil ortamda gider.
     encoded = base64.b64encode(SCREEN_SCRIPT.encode("utf-16-le")).decode("ascii")
     command = [
-        "powershell.exe",
+        _powershell_path(),
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy",
@@ -376,7 +389,7 @@ def read_image(
         return ScreenOutcome("unavailable", "Fotoğraf okuma yalnız Windows'ta çalışır.")
     encoded = base64.b64encode(IMAGE_SCRIPT.encode("utf-16-le")).decode("ascii")
     command = [
-        "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        _powershell_path(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-EncodedCommand", encoded,
     ]
     env = {**child_environment(), "ARTEMIS_OCR_IMAGE": path}

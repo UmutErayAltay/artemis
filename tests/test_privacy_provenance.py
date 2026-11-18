@@ -16,7 +16,7 @@ import pytest
 
 from artemis.brain.agent_loop import AgentLoop
 from artemis.brain.conversation import ConversationContext, TurnRecord
-from artemis.brain.errors import ProviderError, RetryableProviderError
+from artemis.brain.errors import ProviderError, RateLimitedError
 from artemis.brain.models import Completion, Message, ToolCall
 from artemis.brain.providers import _cloud_messages
 from artemis.brain.router import ProviderRouter
@@ -223,7 +223,7 @@ async def test_private_file_saved_to_companion_is_masked_in_next_cloud_turn(
     )
     # Bulut dosyayı ister (sonuç ona maskeli gider), sonra kota hatası: yerel yedek tam içeriği
     # görür ve onu hafızaya yazmak ister; tur lekeli olduğu için kapı onay sorar.
-    cloud = Scripted(Completion(tool_calls=[read]), RetryableProviderError("kota"))
+    cloud = Scripted(Completion(tool_calls=[read]), RateLimitedError("kota"))
     local = Scripted(Completion(tool_calls=[save]), Completion(content="Kaydettim."))
     approvals: list[str] = []
 

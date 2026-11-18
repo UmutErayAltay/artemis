@@ -12,8 +12,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from statistics import median
 
-from PySide6.QtCore import QBuffer, QIODevice, QRect, Qt
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRect, Qt
+from PySide6.QtGui import QImage, QImageReader, QPainter
 
 from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.channels.desktop import pet_animator
@@ -84,7 +84,19 @@ def decode(data: bytes, size: str) -> QImage:
     1536x1024 isteğine ~3:1 şerit döndü). Kırpma ve dilimleme zaten alfa sınırına göre çalışır.
     """
     del size  # istek boyutu modele ipucudur, doğrulama ölçütü değil
-    image = QImage.fromData(data)
+    buf = QBuffer()
+    buf.setData(QByteArray(data))
+    buf.open(QIODevice.OpenModeFlag.ReadOnly)
+    reader = QImageReader(buf)
+    header_size = reader.size()
+    if (
+        not header_size.isValid()
+        or header_size.width() <= 0
+        or header_size.height() <= 0
+        or max(header_size.width(), header_size.height()) > MAX_SIDE
+    ):
+        raise PetImageError("Model görseli çözülemedi ya da çok büyük.")
+    image = reader.read()
     if image.isNull() or max(image.width(), image.height()) > MAX_SIDE:
         raise PetImageError("Model görseli çözülemedi ya da çok büyük.")
     return image.convertToFormat(QImage.Format.Format_ARGB32)

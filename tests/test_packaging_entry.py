@@ -175,3 +175,8 @@ def test_entry_rejects_unlisted_bench_module_before_running_it(
             entry.main(["-m", name])
     entry.main(["-m", "bench.model_testi"])
     assert calls == ["bench.model_testi"]
+
+
+def test_spec_copies_artemis_metadata() -> None:
+    spec_text = (ROOT / "packaging" / "artemis.spec").read_text(encoding="utf-8")
+    assert 'copy_metadata("artemis-tr")' in spec_text

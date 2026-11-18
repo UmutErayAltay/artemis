@@ -459,3 +459,10 @@ async def test_forget_alias_never_skips_approval_even_in_auto_mode(tmp_path: Pat
     assert asked == [{"tool": "app_alias_forget", "spoken": "brev"}]
     assert denied.status == "denied"
     assert alias_store(context.settings.state_dir).load() == {"brev": "Brave"}
+
+
+def test_alias_store_invalid_utf8_raises_alias_store_error(tmp_path: Path) -> None:
+    path = tmp_path / "app_aliases.json"
+    path.write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(AliasStoreError):
+        AliasStore(path).load()

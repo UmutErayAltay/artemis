@@ -755,9 +755,7 @@ class DesktopWindow(QMainWindow):
 
     def _open_model_settings(self) -> None:
         """Pet atölyesinin boş durumundaki "Ayarlar'da model ekle" düğmesi: Ayarlar > Model."""
-        self.tabs.setCurrentWidget(self.settings_scroll)
-        # Model, bölüm listesinin ikinci satırıdır (Ses, Model, Uygulamalar, GitHub, Görünüm).
-        self.settings_panel.sections.setCurrentRow(1)
+        self._open_settings_section("Model")
 
     def _show_panel(self) -> None:
         self.showNormal()

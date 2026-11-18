@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import base64
+import ctypes
 import sqlite3
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +18,7 @@ from artemis.memory.protect import (
     DpapiProtector,
     PlainProtector,
     UnreadableMemory,
+    _load_dpapi,
     protector_for,
 )
 from artemis.memory.store import MemoryStore
@@ -408,3 +411,27 @@ def test_stored_plain_prefix_encrypted_as_unescaped_text_by_sweep(tmp_path: Path
 
     notes = enc_store.list_notes()
     assert notes[0].text == "plain1:x"
+
+
+def test_load_dpapi_caches_dll_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[str] = []
+
+    class FakeDll:
+        def __init__(self, name: str, **kwargs: object) -> None:
+            calls.append(name)
+            self._procs: dict[str, SimpleNamespace] = {}
+
+        def __getattr__(self, item: str) -> SimpleNamespace:
+            return self._procs.setdefault(item, SimpleNamespace(argtypes=None, restype=None))
+
+    monkeypatch.setattr(sys, "platform", "win32")
+    monkeypatch.setattr(ctypes, "WinDLL", FakeDll, raising=False)
+    _load_dpapi.cache_clear()
+    try:
+        first = _load_dpapi()
+        second = _load_dpapi()
+    finally:
+        _load_dpapi.cache_clear()
+
+    assert first is second
+    assert calls == ["kernel32", "crypt32"]

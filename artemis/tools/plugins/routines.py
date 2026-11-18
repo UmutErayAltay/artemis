@@ -29,6 +29,13 @@ from artemis.tools.registry import register_tool
 
 _NAME = r"^\w[\w -]{0,39}$"
 _DISABLED = "Rutinler kapalı: config içinde routines.enabled: true gerekir."
+_CONTENT_KIND_RANK: dict[ContentKind, int] = {
+    "text": 0,
+    "web": 1,
+    "file": 2,
+    "clipboard": 3,
+    "screen": 4,
+}
 
 
 class RoutineNameArguments(BaseModel):
@@ -155,11 +162,17 @@ class RoutineRun(BaseTool):
             "steps_total": len(steps),
             "steps_completed": done,
         }
-        # Adım sonuçları dış ya da gizli içerik taşıyabilir (ör. dosya okuma); işaret yukarı çıkar.
+        # Adım sonuçları dış ya da gizli içerik taşıyabilir (ör. dosya okuma);
+        # en kısıtlayıcı tür kazanır.
         external = any(item.external for item in results)
         private = any(item.private for item in results)
-        kind: ContentKind = next(
-            (item.content_kind for item in results if item.content_kind != "text"), "text"
+        kind: ContentKind = (
+            max(
+                (item.content_kind for item in results),
+                key=lambda item_kind: _CONTENT_KIND_RANK.get(item_kind, 0),
+            )
+            if results
+            else "text"
         )
         if complete:
             # Doğrulanmamış adım varsa başarı denmez (kural 5): rutin de "sent" döner.

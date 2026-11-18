@@ -504,7 +504,7 @@ class ProactiveStore:
                     (kind, _to_utc_iso(start), _to_utc_iso(end)),
                 ).fetchall()
         except sqlite3.Error as error:
-            raise ProactiveStoreError(f"Depo okunamadı: {type(error).__name__}") from None
+            raise ProactiveStoreError(f"Depo okunamadı: {type(error).__name__}") from error
         return {state: count for state, count in rows}
 
     def trigger_files(self, trigger: str) -> dict[str, tuple[int, bool]] | None:

@@ -27,6 +27,7 @@ from artemis.tools.plugins.code_agent import (
     CodeAgentAnswer,
     CodeAgentCancel,
     CodeAgentPrepare,
+    CodeAgentStart,
     CodeAgentStatus,
     PrepareArguments,
     StartArguments,
@@ -563,3 +564,27 @@ def test_start_schema_rejects_id_only_or_hidden_authority() -> None:
         StartArguments.model_validate({"spec_id": str(uuid.uuid4())})
     with pytest.raises(ValidationError):
         StartArguments(project="proj", task="task", authority_boundary="safe")
+
+
+async def test_code_agent_start_runs_blocking_start_off_event_loop(
+    tmp_path: Path, repo: Path
+) -> None:
+    class FakeJobs(CodeAgentJobs):
+        def __init__(self) -> None:
+            self._audit = AuditLog(tmp_path / "audit.jsonl")
+            self.start_thread_id: int | None = None
+
+        def start(self, *args: Any, **kwargs: Any) -> str:
+            self.start_thread_id = threading.get_ident()
+            return "fakejob00001"
+
+        def status(self) -> list[dict[str, Any]]:
+            return [{"job_id": "fakejob00001", "base": "deadbeef"}]
+
+    fake_jobs = FakeJobs()
+    loop_thread_id = threading.get_ident()
+    args = StartArguments(project="proj", task="Görev")
+    result = await CodeAgentStart().execute(args, context(tmp_path, repo, fake_jobs))
+    assert result.status == "sent"
+    assert fake_jobs.start_thread_id is not None
+    assert fake_jobs.start_thread_id != loop_thread_id

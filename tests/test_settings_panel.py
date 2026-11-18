@@ -1369,3 +1369,32 @@ def test_refresh_devices_handles_none_default_device(
     assert panel.current_device.text() == "Seçilmedi"
     panel.deleteLater()
     qt_app.processEvents()
+
+
+def test_mail_port_binding_ignores_non_decimal_unicode_digits(qt_app) -> None:
+    from PySide6.QtWidgets import QLineEdit
+
+    from artemis.channels.desktop.settings_io import PANEL_BINDINGS
+
+    binding = next(item for item in PANEL_BINDINGS if item.path == ("mail", "port"))
+    edit = QLineEdit("²")
+    try:
+        assert binding.read(edit) == 993
+    finally:
+        edit.deleteLater()
+
+
+def test_stt_download_done_marks_current_page_dirty(tmp_path: Path, qt_app) -> None:
+    from artemis.channels.desktop.settings_panel import _DIRTY_ROLE
+
+    panel = _panel(config(tmp_path))
+    assert not panel._dirty
+    row = panel.stack.currentIndex()
+    panel._stt_download_done(tmp_path / "whisper-small")
+    assert panel._dirty
+    assert row in panel._dirty_rows
+    assert panel._save_timer.isActive()
+    assert panel.sections.item(row).data(_DIRTY_ROLE)
+    panel._save_timer.stop()
+    panel.deleteLater()
+    qt_app.processEvents()

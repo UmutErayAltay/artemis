@@ -987,6 +987,7 @@ class SettingsPanel(QWidget):
         choice = self._selected_stt_choice()
         self._populate_stt_choices(choice.name if choice is not None else None)
         self.stt_status.setText("İndirildi; kendiliğinden kaydedilir.")
+        self._mark_dirty()
 
     def _stt_download_failed(self, error_type: str) -> None:
         self.stt_status.setText(f"İndirilemedi: {error_type}")

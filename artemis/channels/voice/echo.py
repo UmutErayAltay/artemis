@@ -413,6 +413,10 @@ class EchoCancelledMicrophone:
             if self._passthrough:
                 return
             self._passthrough = True
+            # Geçiş kalıcı olduğu için yerel iptalciyi bırak; aksi halde oturum boyu
+            # bellekte kalır ve discard_pending() üzerinde hâlâ reset() çağrılır.
+            self._canceller = None
+            self._canceller_rate = None
 
         logger.warning(
             "Yankı iptali çalışma anında başarısız oldu (%s); bu oturumda kapatıldı, "

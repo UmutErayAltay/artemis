@@ -587,7 +587,13 @@ def focused_value_contains(
     expected: str, timeout: float, runner: Callable[..., Any] | None = None
 ) -> bool | None:
     """Odaktaki alanın değeri `expected`i içeriyor mu; her başarısızlıkta None (ADR 0070)."""
-    if sys.platform != "win32" or not expected or len(expected) > _FOCUS_TEXT_LIMIT:
+    # Ortam değişkeninde NUL subprocess'te ValueError fırlatır; sözleşme gereği None döner.
+    if (
+        sys.platform != "win32"
+        or not expected
+        or len(expected) > _FOCUS_TEXT_LIMIT
+        or "\x00" in expected
+    ):
         return None
     import base64
     import subprocess
@@ -610,6 +616,57 @@ def focused_value_contains(
         return None
     answer = (completed.stdout or "").strip()
     return {"1": True, "0": False}.get(answer) if completed.returncode == 0 else None
+
+
+# Odaktaki UI Automation öğesinin yalnız adını (Name) okur; değer/içerik okunmaz, betik
+# sabittir ve kullanıcı girdisi taşımaz (ADR 0078 screen kipi tavanını kapatmak için).
+_FOCUS_NAME_SCRIPT = "\n".join(
+    [
+        "$ErrorActionPreference = 'Stop'",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
+        "try {",
+        "  Add-Type -AssemblyName UIAutomationClient",
+        "  Add-Type -AssemblyName UIAutomationTypes",
+        "  $e = [System.Windows.Automation.AutomationElement]::FocusedElement",
+        "  if ($null -eq $e) { exit 0 }",
+        "  $n = [string]$e.Current.Name",
+        "  if ([string]::IsNullOrWhiteSpace($n)) { exit 0 }",
+        "  $n = ($n -replace \"[\\r\\n]+\", \" \").Trim()",
+        "  if ($n.Length -gt 200) { $n = $n.Substring(0, 200) }",
+        "  $n",
+        "} catch { exit 4 }",
+    ]
+)
+
+
+def focused_name(
+    timeout: float, runner: Callable[..., Any] | None = None
+) -> str | None:
+    """Odaktaki denetimin UI Automation adını döndürür; okunamazsa veya boşsa None (ADR 0078)."""
+    if sys.platform != "win32":
+        return None
+    import base64
+    import subprocess
+
+    from artemis.tools.platform import child_environment
+
+    encoded = base64.b64encode(_FOCUS_NAME_SCRIPT.encode("utf-16-le")).decode("ascii")
+    command = [
+        "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        "-EncodedCommand", encoded,
+    ]
+    try:
+        completed = (runner or subprocess.run)(
+            command, env=child_environment(), capture_output=True, text=True,
+            encoding="utf-8", errors="replace", timeout=timeout, check=False,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if completed.returncode != 0:
+        return None
+    name = (completed.stdout or "").replace("\r", " ").replace("\n", " ").strip()[:200].strip()
+    return name or None
 
 
 @dataclass(frozen=True)

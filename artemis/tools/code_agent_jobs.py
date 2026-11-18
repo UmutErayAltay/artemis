@@ -623,7 +623,7 @@ class CodeAgentJobs:
         # Süre aşımı kararı kontrol süresinden ÖNCE alınır: kontroller ajanın süre bütçesinden
         # yemez, yoksa uzun bir test paketi biten işi "timeout"a çevirirdi.
         late = self._clock() >= self._deadlines[job_id]
-        if status == "done":
+        if status == "done" and not late:
             verification, check_results = self._verify(job_id, repo)
             summary += {
                 "accepted": " Bağımsız kontroller geçti.",

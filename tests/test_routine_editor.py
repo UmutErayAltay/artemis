@@ -380,3 +380,15 @@ def test_text_viewer_is_read_only_and_links_do_not_open(
     assert plain.browser.toPlainText() == "<b>ham</b>"
     viewer.deleteLater()
     plain.deleteLater()
+
+
+def test_json_field_treats_null_default_as_missing(qt_app: QApplication) -> None:
+    from artemis.channels.desktop.routine_dialog import _MISSING, _ArgField
+
+    field = _ArgField("payload", {"type": "object", "default": None}, False, {})
+    try:
+        assert isinstance(field._widget, QPlainTextEdit)
+        assert field._widget.toPlainText() == ""
+        assert field.value() is _MISSING
+    finally:
+        field.deleteLater()

@@ -232,7 +232,8 @@ class AgentRun:
 
     def cleanup(self) -> None:
         for path in self.temp_files:
-            path.unlink(missing_ok=True)
+            with suppress(OSError):  # kilitli dosya işi düşürmesin
+                path.unlink(missing_ok=True)
         for directory in self.cleanup_dirs:
             with suppress(OSError):  # boş değilse (başka dosya varsa) dokunulmaz
                 directory.rmdir()

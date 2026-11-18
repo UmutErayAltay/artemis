@@ -75,6 +75,9 @@ class FakeBackend:
     def focused_value_contains(self, expected: str, timeout: float) -> bool | None:
         return None
 
+    def focused_name(self, timeout: float) -> str | None:
+        return None
+
     def monitors(self) -> list[tuple[int, int, int, int]]:
         return list(self.monitor_rects)
 

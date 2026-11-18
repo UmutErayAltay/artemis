@@ -87,6 +87,17 @@ def _ignore_reset_on_close(loop: asyncio.AbstractEventLoop, context: dict[str, A
     loop.default_exception_handler(context)
 
 
+async def _complete_selection(
+    provider: Any, messages: list[Message], model: str | None, timeout: float
+) -> Completion:
+    """Seçili metin için yerel model istendiyse yönlendirici olmadan buluta düşmez."""
+    if model is None:
+        return await provider.complete(messages, [], timeout=timeout)
+    if isinstance(provider, ProviderRouter):
+        return await provider.complete(messages, [], timeout=timeout, model=model)
+    raise RuntimeError("Seçili yerel model yönlendirilemiyor.")
+
+
 @dataclass(frozen=True)
 class State:
     state: str
@@ -210,6 +221,9 @@ class _ApprovalBroker:
             runtime = bridge._runtime
             if request_id is None or runtime is None or self.cancel_requested.is_set():
                 return False
+            # Aynı anda tek onay beklenebilir; ikinci istek ilkinin yerine geçmeden reddedilir.
+            if self.pending is not None:
+                return False
             approval_id = str(uuid4())
             item = _PendingApproval(request_id, runtime.context.turn_id, approval_id)
             self.pending = item
@@ -246,7 +260,14 @@ class _ApprovalBroker:
                     # event loop'a sıraya koymadan önce iptal işaretlenmelidir.
                     runtime.runner.cancel_current()
             if decision == "site" and site and not cancelled:
-                remember_site(trusted_sites_path(runtime.context.settings.state_dir), site)
+                try:
+                    remember_site(trusted_sites_path(runtime.context.settings.state_dir), site)
+                except OSError as error:
+                    # Site dosyası yazılamasa da kullanıcının verdiği onay turu bozmasın.
+                    with suppress(OSError):
+                        runtime.context.audit.emit(
+                            "trusted_site_not_saved", error_type=type(error).__name__
+                        )
             return approved and not cancelled
         except TimeoutError:
             return False
@@ -313,9 +334,11 @@ class DesktopBridge:
         self._labels: dict[str, tuple[str, str]] = {}
         self._active_request: str | None = None
         self._active_task: asyncio.Task[Any] | None = None
+        self._cleanup_task: asyncio.Task[None] | None = None
         self._cleanup_pending = False
         self._shutdown = False
         self._shutdown_deadline: float | None = None
+        self._loop_stopping = False
         # Ses durumu _lock altında okunur/yazılır; mikrofon yalnız start_voice ile açılır.
         self._voice_starting = False
         self._voice_stop_requested = False
@@ -471,10 +494,7 @@ class DesktopBridge:
                 messages: list[Message], model: str | None, timeout: float
             ) -> Completion:
                 # ARAÇSIZ: seçili metin dış veridir, hiçbir araç çağrısı açılmaz (ADR 0062).
-                provider = runtime.provider
-                if model is not None and isinstance(provider, ProviderRouter):
-                    return await provider.complete(messages, [], timeout=timeout, model=model)
-                return await provider.complete(messages, [], timeout=timeout)
+                return await _complete_selection(runtime.provider, messages, model, timeout)
 
             self._selection = SelectionActions(
                 audit=runtime.audit,
@@ -488,6 +508,16 @@ class DesktopBridge:
                 timeout=min(settings.provider_timeout_seconds * 2, settings.max_seconds),
             )
         call(self._selection)
+
+    def _post(self, callback: Callable[..., None], *args: Any) -> bool:
+        loop = self._loop
+        if loop is None:
+            return False
+        try:
+            loop.call_soon_threadsafe(callback, *args)
+        except RuntimeError:
+            return False
+        return True
 
     def submit(self, text: str) -> str | None:
         request_id = str(uuid4())
@@ -503,13 +533,11 @@ class DesktopBridge:
                 return None
             self._active_request = request_id
             self._broker.begin_request(request_id)
-        loop = self._loop
-        if loop is None:
+        if not self._post(self._start_turn, request_id, text):
             with self._lock:
-                self._active_request = None
+                if self._active_request == request_id:
+                    self._active_request = None
             return None
-        self._events.put(State("running", "İstek çalışıyor.", request_id))
-        loop.call_soon_threadsafe(self._start_turn, request_id, text)
         return request_id
 
     def submit_tool(self, name: str, arguments: BaseModel, quiet: bool = False) -> str | None:
@@ -531,44 +559,49 @@ class DesktopBridge:
                 return None
             self._active_request = request_id
             self._broker.begin_request(request_id)
-        loop = self._loop
-        if loop is None:
+        if not self._post(
+            self._start_tool, request_id, name, arguments.model_copy(deep=True), quiet
+        ):
             with self._lock:
-                self._active_request = None
+                if self._active_request == request_id:
+                    self._active_request = None
             return None
-        if not quiet:
-            self._events.put(State("running", "Araç isteği çalışıyor.", request_id))
-        loop.call_soon_threadsafe(
-            self._start_tool, request_id, name, arguments.model_copy(deep=True)
-        )
         return request_id
 
-    def _start_tool(self, request_id: str, name: str, arguments: BaseModel) -> None:
+    def _start_tool(
+        self, request_id: str, name: str, arguments: BaseModel, quiet: bool = False
+    ) -> None:
+        if not quiet:
+            self._events.put(State("running", "Araç isteği çalışıyor.", request_id))
         self._active_task = asyncio.create_task(self._run_tool(request_id, name, arguments))
 
     async def _run_tool(self, request_id: str, name: str, arguments: BaseModel) -> None:
         runtime = self._runtime
+        delivered = False
         try:
             if runtime is None or self._shutdown or self._broker.is_cancelled():
                 self._events.put(Failed(request_id, "Cancelled", "Araç başlamadan iptal edildi."))
+                delivered = True
                 return
             result = await runtime.runner.dispatch_tool(name, arguments)
             self._events.put(ToolFinished(request_id, name, result))
+            delivered = True
         except (OSError, ValueError, RuntimeError, TypeError) as error:
             self._events.put(Failed(request_id, type(error).__name__, "Araç tamamlanamadı."))
+            delivered = True
         finally:
+            # Beklenmeyen hata yukarı çıkarken GUI'nin takılı kalmaması için olay üretilir.
+            if not delivered:
+                self._events.put(Failed(request_id, "Interrupted", "Araç tamamlanamadı."))
             self._finish_request(request_id)
 
     def cancel(self, request_id: str) -> bool:
         with self._lock:
             if self._active_request != request_id or self._shutdown:
                 return False
-        self._broker.invalidate()
-        loop = self._loop
-        if loop is None:
-            return False
-        loop.call_soon_threadsafe(self._cancel_on_worker, request_id)
-        return True
+            # İptal kilidi kilit içinde alınır; aksi halde araya giren yeni isteği iptal ederdi.
+            self._broker.invalidate()
+        return self._post(self._cancel_on_worker, request_id)
 
     def cancel_active(self) -> bool:
         """Kimliği bilmeyen çağıran (Esc kısayolu) için o an yürüyen isteği iptal eder."""
@@ -587,11 +620,7 @@ class DesktopBridge:
                 or self._cleanup_pending
             ):
                 return False
-        loop = self._loop
-        if loop is None:
-            return False
-        loop.call_soon_threadsafe(self._reset_on_worker)
-        return True
+        return self._post(self._reset_on_worker)
 
     def decide(
         self,
@@ -611,9 +640,7 @@ class DesktopBridge:
             request_id = self._active_request
         self._events.put(State("stopping", "Temizleniyor."))
         self._broker.invalidate()
-        loop = self._loop
-        if loop is not None:
-            loop.call_soon_threadsafe(self._shutdown_on_worker, request_id)
+        self._post(self._shutdown_on_worker, request_id)
 
     def poll_events(self, limit: int = 64) -> list[BridgeEvent]:
         result: list[BridgeEvent] = []
@@ -726,6 +753,8 @@ class DesktopBridge:
         try:
             loop.run_forever()
         finally:
+            # Kalan _stop_loop_when_clean çağrıları run_until_complete'i kesmesin.
+            self._loop_stopping = True
             loop.run_until_complete(loop.shutdown_asyncgens())
             # Takılmış bir thread işçinin "durdu" demesini sonsuza dek engellemesin. Araç
             # thread'leri kendi zaman aşımlarıyla biter; süre aşılırsa join edilmeden geçilir.
@@ -794,6 +823,7 @@ class DesktopBridge:
             self._events.put(State("cancelled", "İstek başlamadan iptal edildi.", request_id))
             self._finish_request(request_id)
             return
+        self._events.put(State("running", "İstek çalışıyor.", request_id))
         self._active_task = asyncio.create_task(self._run_turn(request_id, text))
 
     async def _run_turn(self, request_id: str, text: str) -> None:
@@ -831,7 +861,7 @@ class DesktopBridge:
                 with self._lock:
                     self._cleanup_pending = True
                 self._events.put(State("cleanup_pending", "Önceki işlem temizleniyor.", request_id))
-                asyncio.create_task(self._finish_cleanup(request_id))
+                self._cleanup_task = asyncio.create_task(self._finish_cleanup(request_id))
             else:
                 self._finish_request(request_id)
         return result
@@ -957,35 +987,38 @@ class DesktopBridge:
             with self._lock:
                 self._voice_starting = False
             return
+        handed_over = False
         self._emit_voice_state("preparing")
         try:
-            controller = await self._voice_factory(
-                runtime, self._run_voice_command, self._on_voice_state
-            )
-        except (OSError, RuntimeError, ValueError, ImportError):
+            try:
+                controller = await self._voice_factory(
+                    runtime, self._run_voice_command, self._on_voice_state
+                )
+            except (OSError, RuntimeError, ValueError, ImportError):
+                self._voice_failed()
+                return
+            # Ölçüm isteğe bağlıdır; factory imzası değişmesin diye toplayıcı sonradan bağlanır.
+            collector = EventCollector() if runtime.settings.voice.telemetry_report else None
+            if collector is not None:
+                controller.on_event = collector
+            with self._lock:
+                abandoned = self._voice_stop_requested or self._shutdown
+                if not abandoned:
+                    self._voice_controller = controller
+                    # Model `voice_continuous` aracıyla kipi değiştirebilsin;
+                    # yalnız ses çalışırken var.
+                    runtime.context.services["voice_controller"] = controller
+                    self._voice_task = asyncio.create_task(self._run_voice(controller, collector))
+                    handed_over = True
+            if abandoned:
+                # Hazırlık sürerken kapatıldı: mikrofon hiç açılmadan kaynaklar bırakılır.
+                await controller.close()
+        finally:
+            # Beklenmeyen hata veya close() arızasında başlangıç bayrağı takılı kalmasın.
             with self._lock:
                 self._voice_starting = False
-            self._voice_failed()
-            self._emit_voice_state("off")
-            return
-        # Ölçüm isteğe bağlıdır; factory imzası değişmesin diye toplayıcı sonradan bağlanır.
-        collector = EventCollector() if runtime.settings.voice.telemetry_report else None
-        if collector is not None:
-            controller.on_event = collector
-        with self._lock:
-            abandoned = self._voice_stop_requested or self._shutdown
-            if not abandoned:
-                self._voice_controller = controller
-                # Model `voice_continuous` aracıyla kipi değiştirebilsin; yalnız ses çalışırken var.
-                runtime.context.services["voice_controller"] = controller
-                self._voice_task = asyncio.create_task(self._run_voice(controller, collector))
-                self._voice_starting = False
-        if abandoned:
-            # Hazırlık sürerken kapatıldı: mikrofon hiç açılmadan kaynaklar bırakılır.
-            await controller.close()
-            with self._lock:
-                self._voice_starting = False
-            self._emit_voice_state("off")
+            if not handed_over:
+                self._emit_voice_state("off")
 
     async def _run_voice(
         self, controller: VoiceController, collector: EventCollector | None = None,
@@ -1086,10 +1119,12 @@ class DesktopBridge:
             self._runtime.shutdown()
         if request_id is not None:
             self._cancel_on_worker(request_id)
-        else:
-            self._stop_loop_when_clean()
+        # İptal yoksayılsa da kapanış üst süresi her durumda işlemelidir.
+        asyncio.get_running_loop().call_soon(self._stop_loop_when_clean)
 
     def _stop_loop_when_clean(self) -> None:
+        if self._loop_stopping:
+            return
         runtime = self._runtime
         with self._lock:
             active_request = self._active_request
@@ -1118,5 +1153,6 @@ class DesktopBridge:
                     seconds=SHUTDOWN_CLEANUP_SECONDS,
                     pending=sorted(name for name, value in busy.items() if value),
                 )
+        self._loop_stopping = True
         self._close_proactive_client()
         asyncio.get_running_loop().stop()

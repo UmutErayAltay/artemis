@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from artemis.config.settings import OWN_REPO_ALIAS, CodeAgentConfig, ConfigChoiceError
 from artemis.safety.paths import safe_join
-from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.code_agent_backends import resolve_executable, visible_supported
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
 from artemis.tools.github_repos import discover_projects
@@ -279,7 +279,8 @@ class CodeAgentStart(BaseTool):
             )
         entry = config.project_entries.get(alias)
         try:
-            job_id = jobs.start(
+            job_id = await run_blocking(
+                jobs.start,
                 alias,
                 path,
                 task,

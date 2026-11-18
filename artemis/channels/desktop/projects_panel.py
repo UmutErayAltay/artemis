@@ -232,6 +232,7 @@ class ProjectsPanel(QWidget):
         self._config_path = config_path
         self._settings: Settings | None = None
         self._items: list[tuple[str, dict[str, Any]]] = []
+        self._selected_identity: tuple[str, str, str] | None = None
         self._busy = True
         # Her durum sonucunda artar; pencere "liste taze mi" diye buna bakar.
         self.status_serial = 0
@@ -903,9 +904,19 @@ class ProjectsPanel(QWidget):
     def _select(self, row: int) -> None:
         selected = self._selected()
         if selected:
+            kind, record = selected
+            identity: tuple[str, str, str] | None = (
+                kind,
+                str(record.get("job_id", record.get("spec_id", ""))),
+                str(record.get("question_id", "")),
+            )
             self.preview.setHtml(spec_to_html(*selected))
         else:
+            identity = None
             self.preview.clear()
+        if identity != self._selected_identity:
+            self._selected_identity = identity
+            self.answer.clear()
         self.set_busy(self._busy)
 
     def accept_result(self, tool_name: str, result: ToolResult) -> None:
@@ -969,6 +980,8 @@ class ProjectsPanel(QWidget):
             self.items.addItem(spec["project"] + " · Taslak")
             self.items.setCurrentRow(len(self._items) - 1)
             self._sync_list()
+        elif tool_name == "code_agent_answer" and result.success:
+            self.answer.clear()
 
     def _render_items(self, identity: str | None, fallback: int = 0) -> None:
         """Listeyi `_items`ten kurar; `identity` varsa o öğeyi, yoksa `fallback` sırasını seçer."""

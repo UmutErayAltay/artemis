@@ -19,9 +19,9 @@ _SENTENCE_END = re.compile(r"[.!?…:;]+[\"'”’)\]]*\s+|\n+")
 # Uzun ve noktalamasız ilk cümle ilk sesi geciktirmesin: bu uzunlukta virgülde bölünür.
 _SOFT_LIMIT = 160
 _SOFT_BREAK = re.compile(r",\s+")
-# Türkçe geçmiş zaman: 1. tekil/çoğul (kapattım, yaptık) ve edilgen/oldu (silindi,
-# gönderildi, tamamlandı, oldu); ayrıca sık İngilizce karşılıklar.
-_CLAIM_WORD = re.compile(r"(?:[dt][ıiuü][mk]|[lnt][dt][ıiuü])$")
+# Türkçe geçmiş zaman: 1. tekil/çoğul (-dım/-dık) ve 3. tekil (-dı/-di/-du/-dü/-tı/-ti/-tu/-tü);
+# yanlış pozitif yalnız cümleyi adım sonuna dek bekletir, kayıp oluşturmaz.
+_CLAIM_WORD = re.compile(r"[dt][ıiuü][mk]?$")
 _CLAIM_EN = re.compile(
     r"\b(?:done|completed|finished|closed|opened|deleted|sent|saved|turned (?:on|off))\b"
 )

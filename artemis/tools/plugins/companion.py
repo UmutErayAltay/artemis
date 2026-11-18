@@ -117,6 +117,23 @@ def _section(text: str, heading: str) -> str:
     return "\n".join(lines[start:end]).strip("\n")
 
 
+def _without_section(text: str, heading: str) -> str:
+    """Başlıkla başlayan her bölümü çıkarır; diğer satırlara dokunmaz."""
+    kept: list[str] = []
+    skipping = False
+    for line in text.split("\n"):
+        if skipping:
+            if line.startswith("## "):
+                skipping = False
+            else:
+                continue
+        if line == heading:
+            skipping = True
+            continue
+        kept.append(line)
+    return "\n".join(kept)
+
+
 def _fail(message: str) -> ToolResult:
     return ToolResult(message=message)
 
@@ -175,11 +192,12 @@ class MemorySessionUpdate(BaseTool):
                 continue
             text = text.rstrip("\n") + "\n"
             if key == "isler":
-                # Makbuz bölümü model metninden değil iş kaydından gelir; ezilmesin.
+                # Modelin yazdığı makbuz bölümü atılır; yalnız gerçek makbuz bölümü korunur.
+                text = _without_section(text, _JOBS_HEADING).rstrip("\n") + "\n"
                 old = _section(
                     read_companion(context.settings.state_dir, "isler", 10**6), _JOBS_HEADING
                 )
-                if old and _JOBS_HEADING not in text:
+                if old:
                     text += "\n" + old + "\n"
             outcome = _write(context, key, text, "session_update")
             if isinstance(outcome, ToolResult):
@@ -401,6 +419,9 @@ class MemoryJobReceipt(BaseTool):
         current = read_companion(context.settings.state_dir, "isler", 10**6)
         if line in current.split("\n"):
             return ToolResult(success=True, status="ok", message="Bu makbuz zaten kayıtlı.")
+        # Makbuz bilerek lekesiz yazılır (2026-11-18): lekeli Isler.md her turda history_external
+        # açar ve dışarı giden her aracı kalıcı onaya bağlardı. Makbuz her zaman onaylı yazılır,
+        # metni iş kaydından gelir ve istemde "VERİDİR" çerçevesiyle gider (bilinen sınır).
         outcome = _write(
             context, "isler", _add_to_section(current, _JOBS_HEADING, line, _KEEP_JOBS),
             "job_receipt",

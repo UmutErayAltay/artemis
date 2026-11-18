@@ -937,3 +937,271 @@ def test_quiet_tool_submit_still_blocks_while_another_request_is_active(tmp_path
     finally:
         bridge.shutdown()
         assert bridge._stopped.wait(2)
+
+
+def test_overlapping_approval_is_denied_without_replacing_first(tmp_path):
+    bridge = _fixture(tmp_path, [])
+    request_id = "req-overlap"
+    first_result: list[bool] = []
+    bridge._broker.begin_request(request_id)
+    thread_a = threading.Thread(
+        target=lambda: first_result.append(bridge._broker.approve("tool_a", {"x": 1}))
+    )
+    try:
+        thread_a.start()
+        prompt = _wait_for(bridge, Approval, timeout=2.0)
+        assert prompt.tool_name == "tool_a"
+        assert bridge._broker.approve("tool_b", {"y": 2}) is False
+        queued = bridge.poll_events()
+        assert not any(
+            isinstance(event, Approval) and event.tool_name == "tool_b" for event in queued
+        )
+        assert bridge.decide(request_id, prompt.turn_id, prompt.approval_id, True) is True
+        thread_a.join(timeout=2.0)
+        assert first_result == [True]
+    finally:
+        bridge._broker.invalidate()
+        thread_a.join(timeout=1.0)
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_cancel_holds_lock_around_invalidate(tmp_path, monkeypatch):
+    bridge = _fixture(tmp_path, [])
+    orig_invalidate = bridge._broker.invalidate
+    helpers: list[threading.Thread] = []
+
+    def wrapped_invalidate() -> None:
+        def helper_fn() -> None:
+            with bridge._lock:
+                bridge._active_request = "new"
+                bridge._broker.begin_request("new")
+
+        helper = threading.Thread(target=helper_fn)
+        helpers.append(helper)
+        helper.start()
+        helper.join(timeout=0.5)
+        orig_invalidate()
+
+    monkeypatch.setattr(bridge._broker, "invalidate", wrapped_invalidate)
+    try:
+        with bridge._lock:
+            bridge._active_request = "old"
+            bridge._broker.begin_request("old")
+        assert bridge.cancel("old") is True
+        assert len(helpers) == 1
+        helpers[0].join(timeout=2.0)
+        assert bridge._broker.is_cancelled() is False
+        assert bridge._active_request == "new"
+    finally:
+        monkeypatch.undo()
+        with bridge._lock:
+            bridge._active_request = None
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_closed_loop_submit_and_cancel_return_safely(tmp_path):
+    bridge = _fixture(tmp_path, [])
+    original_loop = bridge._loop
+    closed_loop = asyncio.new_event_loop()
+    closed_loop.close()
+    try:
+        bridge._loop = closed_loop
+        assert bridge.submit("x") is None
+        assert bridge._active_request is None
+        assert bridge.cancel("anything") is False
+    finally:
+        bridge._loop = original_loop
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_run_tool_unexpected_exception_emits_interrupted_failed(tmp_path, monkeypatch):
+    bridge = _fixture(tmp_path, [])
+    try:
+        assert bridge._runtime is not None
+
+        async def boom(*_args: Any, **_kwargs: Any) -> ToolResult:
+            raise KeyError("boom")
+
+        monkeypatch.setattr(bridge._runtime.runner, "dispatch_tool", boom)
+        request_id = bridge.submit_tool("external_read", EmptyArgs())
+        assert request_id is not None
+        failure = _wait_for(bridge, Failed, timeout=2.0)
+        assert failure.request_id == request_id
+        assert failure.error_type == "Interrupted"
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_voice_start_recovers_after_unexpected_factory_error(tmp_path):
+    attempts = 0
+    created: list[FakeVoice] = []
+
+    async def flaky_factory(runtime: Any, run_command: Any, on_state: Any) -> FakeVoice:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            raise KeyError("unexpected")
+        fake = FakeVoice(run_command, on_state, None)
+        created.append(fake)
+        return fake
+
+    bridge = _fixture(tmp_path, [], voice_factory=flaky_factory)
+    try:
+        assert bridge.start_voice() is True
+        _collect_until(bridge, lambda items: _has_state_message(items, "voice", "off"))
+        assert bridge.voice_active is False
+        assert bridge.start_voice() is True
+        _collect_until(bridge, lambda items: _has_state_message(items, "voice", "listening"))
+        assert bridge.stop_voice() is True
+        _collect_until(bridge, lambda items: _has_state_message(items, "voice", "off"))
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_voice_abandoned_close_error_still_clears_voice_active(tmp_path):
+    entered = threading.Event()
+    release = threading.Event()
+
+    class BrokenCloseVoice(FakeVoice):
+        async def close(self) -> None:
+            raise RuntimeError("close failed")
+
+    async def slow_factory(_runtime: Any, run_command: Any, on_state: Any) -> FakeVoice:
+        entered.set()
+        await asyncio.to_thread(release.wait, 2)
+        return BrokenCloseVoice(run_command, on_state, None)
+
+    bridge = _fixture(tmp_path, [], voice_factory=slow_factory)
+    try:
+        assert bridge.start_voice() is True
+        assert entered.wait(2)
+        assert bridge.stop_voice() is True
+        release.set()
+        _collect_until(bridge, lambda items: _has_state_message(items, "voice", "off"))
+        assert bridge.voice_active is False
+    finally:
+        release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_remember_site_oserror_does_not_break_approval(tmp_path, monkeypatch):
+    from artemis.channels.desktop import bridge as bridge_module
+
+    def fail_remember(*_args: Any, **_kwargs: Any) -> None:
+        raise OSError("disk full")
+
+    monkeypatch.setattr(bridge_module, "remember_site", fail_remember)
+    bridge = _fixture(tmp_path, [])
+    approved_result: list[bool] = []
+    thread: threading.Thread | None = None
+    try:
+        assert bridge._runtime is not None
+        bridge._runtime.gate.pending_site = "example.com"
+        bridge._broker.begin_request("req-site")
+        thread = threading.Thread(
+            target=lambda: approved_result.append(
+                bridge._broker.approve("site_read", {"url": "https://example.com"})
+            )
+        )
+        thread.start()
+        prompt = _wait_for(bridge, Approval, timeout=2.0)
+        assert prompt.site == "example.com"
+        assert (
+            bridge.decide(prompt.request_id, prompt.turn_id, prompt.approval_id, True, True)
+            is True
+        )
+        thread.join(timeout=2.0)
+        assert approved_result == [True]
+    finally:
+        bridge._broker.invalidate()
+        if thread is not None:
+            thread.join(timeout=1.0)
+        if bridge._runtime is not None:
+            bridge._runtime.gate.pending_site = ""
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_shutdown_enforces_bound_when_active_request_ignores_cancel(tmp_path, monkeypatch):
+    from artemis.channels.desktop import bridge as bridge_module
+
+    monkeypatch.setattr(bridge_module, "SHUTDOWN_CLEANUP_SECONDS", 0.3)
+    monkeypatch.setattr(bridge_module, "SHUTDOWN_EXECUTOR_SECONDS", 0.3)
+    bridge = _fixture(tmp_path, [])
+    entered = threading.Event()
+    try:
+        assert bridge._runtime is not None
+
+        async def stuck_run(_text: str, **_kwargs: Any) -> Any:
+            entered.set()
+            await asyncio.Event().wait()
+
+        monkeypatch.setattr(bridge._runtime.runner, "run", stuck_run)
+        monkeypatch.setattr(bridge._runtime.runner, "cancel_current", lambda: None)
+        request_id = bridge.submit("x")
+        assert request_id is not None
+        _collect_until(bridge, lambda items: _has_state(items, "running", request_id))
+        assert entered.wait(2)
+        bridge.shutdown()
+        _collect_until(bridge, lambda items: _has_state(items, "stopped"), timeout=3.0)
+        assert bridge._stopped.wait(1)
+    finally:
+        bridge.shutdown()
+
+
+def test_cleanup_task_reference_is_stored_when_cleanup_pending(tmp_path):
+    started = threading.Event()
+    release = threading.Event()
+
+    class CleanupProvider:
+        async def complete(self, *_args: Any, **_kwargs: Any) -> Completion:
+            started.set()
+            try:
+                await asyncio.to_thread(release.wait, 2)
+            except asyncio.CancelledError:
+                await asyncio.to_thread(release.wait, 2)
+            return Completion(content="bitti")
+
+    bridge = _fixture(tmp_path, [], provider_override=CleanupProvider())
+    try:
+        request_id = bridge.submit("bekle")
+        assert request_id is not None
+        assert started.wait(2)
+        assert bridge.cancel(request_id)
+        _collect_until(bridge, lambda items: _has_state(items, "cleanup_pending", request_id))
+        release.set()
+        _collect_until(bridge, lambda items: _has_state(items, "ready", request_id))
+        assert bridge._cleanup_task is not None
+    finally:
+        release.set()
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+async def test_complete_selection_refuses_non_router_for_local_model() -> None:
+    from artemis.brain.models import Message
+    from artemis.channels.desktop.bridge import _complete_selection
+
+    class RecordingProvider:
+        def __init__(self) -> None:
+            self.calls: list[Any] = []
+
+        async def complete(
+            self, messages: list[Message], tools: list[Any], *, timeout: float
+        ) -> Completion:
+            self.calls.append((messages, tools, timeout))
+            return Completion(content="ok")
+
+    fake = RecordingProvider()
+    messages = [Message(role="user", content="merhaba")]
+    with pytest.raises(RuntimeError):
+        await _complete_selection(fake, messages, "yerel", 1.0)
+    assert fake.calls == []
+    result = await _complete_selection(fake, messages, None, 1.0)
+    assert result.content == "ok" and len(fake.calls) == 1

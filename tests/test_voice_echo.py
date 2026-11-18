@@ -677,3 +677,21 @@ def test_canceller_smooths_small_timestamp_jitter_and_resyncs_on_gaps() -> None:
     references = factory.instances[0].references
     assert references[1] == _pack_i16(list(range(161, 321)))
     assert references[2] == _pack_i16(list(range(8321, 8481)))
+
+
+def test_microphone_releases_canceller_after_passthrough_enabled() -> None:
+    inner = FakeMicrophone(
+        [AudioFrame(pcm=_pack_i16([1] * 160), timestamp=1.0)]
+    )
+    canceller = FakeCanceller(OSError("Sahte yankı iptali hatası."))
+    microphone = EchoCancelledMicrophone(inner, lambda _rate: canceller)
+
+    asyncio.run(_collect_frames(microphone))
+
+    assert microphone.passthrough
+    assert microphone._canceller is None
+
+    microphone.discard_pending()
+
+    assert inner.discard_pending_calls == 1
+    assert canceller.reset_calls == 0

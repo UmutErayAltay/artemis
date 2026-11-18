@@ -283,6 +283,9 @@ class SimBackend:
     def focused_value_contains(self, expected: str, timeout: float) -> bool | None:
         return None  # UIA kanıtı yok: model kararı kalır (ADR 0070)
 
+    def focused_name(self, timeout: float) -> str | None:
+        return None  # Sahte uygulamada odak adı yok; screen kipi kapısı denetime yazar.
+
     def ui_elements(self, hwnd: int) -> list[UiElement]:
         """Sahte uygulamanın görünür öğelerini UIA biçimine çevirir (uia/both testi için)."""
         kinds = {

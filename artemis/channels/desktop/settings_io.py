@@ -204,7 +204,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     ),
     PanelBinding(
         ("mail", "port"), "mail_port",
-        lambda edit: int(edit.text()) if edit.text().strip().isdigit() else 993,
+        lambda edit: int(edit.text()) if edit.text().strip().isdecimal() else 993,
         lambda edit, value: edit.setText(str(value)),
     ),
     PanelBinding(

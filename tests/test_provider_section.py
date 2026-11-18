@@ -1011,3 +1011,18 @@ def test_wheel_over_combo_scrolls_page_not_value(app: QApplication) -> None:
     assert combo.currentIndex() == 0
     assert area.verticalScrollBar().value() > 0
     area.close()
+
+
+def test_add_model_rejects_negative_and_nan_text_prices(app: QApplication, tmp_path: Path) -> None:
+    path = config(tmp_path)
+    section = ProviderSection(path)
+    _fill(section, "yerel", "https://x.example/v1")
+    section._save()
+    section.paid.setChecked(True)
+    section.model_name.setEditText("m-gecersiz")
+    before = path.read_bytes()
+    for bad in ("-1", "NaN"):
+        section.input_price.setText(bad)
+        section._add_model()
+        assert section.status.text() == "Fiyat sayı olmalı (ücretsiz için 0)."
+        assert path.read_bytes() == before

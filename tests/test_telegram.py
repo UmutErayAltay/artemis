@@ -44,7 +44,7 @@ from artemis.channels.telegram.api import (
     TelegramError,
     build_telegram_client,
 )
-from artemis.channels.telegram.channel import TelegramChannel, check_message
+from artemis.channels.telegram.channel import TelegramChannel, check_message, split_text
 from artemis.config.settings import Settings, TelegramConfig, load_settings
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import TAINT_NOTICE
@@ -1026,4 +1026,12 @@ def test_telegram_command_names_missing_token_variable_only(
     output = captured.out + captured.err
     assert "ARTEMIS_TELEGRAM_BOT_TOKEN" in output
     assert FAKE_TOKEN not in output and TOKEN_FRAGMENT not in output
+
+
+def test_split_text_never_returns_empty_chunk_for_trailing_newlines() -> None:
+    text = "x" * 100 + "\n" + "\n" * 5000
+    chunks = split_text(text)
+    assert chunks
+    assert all(chunks)
+    assert all(len(chunk) <= TELEGRAM_TEXT_LIMIT for chunk in chunks)
 

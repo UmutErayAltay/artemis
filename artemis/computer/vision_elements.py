@@ -210,8 +210,15 @@ def vision_elements(
     """Pencere görüntüsünden Windows OCR ile tıklanabilir öğe listesi çıkarır."""
     if sys.platform != "win32" or hwnd <= 0 or max_items <= 0:
         return []
-    if runner is None and not ctypes.windll.user32.IsWindow(hwnd):
-        return []
+    if runner is None:
+        from ctypes import wintypes
+
+        # 64-bit tanıtıcılar işaretçi boyutunda aktarılmalı; aksi halde C int taşar.
+        user32 = ctypes.windll.user32
+        user32.IsWindow.argtypes = [wintypes.HWND]
+        user32.IsWindow.restype = wintypes.BOOL
+        if not user32.IsWindow(hwnd):
+            return []
     env = child_environment()
     env["ARTEMIS_VISION_HWND"] = str(hwnd)
     run = runner or subprocess.run

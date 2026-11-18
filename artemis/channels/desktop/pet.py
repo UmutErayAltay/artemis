@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, cast
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRect, QRectF, QSettings, Qt, QTimer
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -116,7 +116,8 @@ def clamp_anchor(pos: QPoint, area: QRect) -> QPoint:
 
 
 def _ease(current: float, target: float, dt: float, rate: float) -> float:
-    return current + (target - current) * (1 - math.exp(-rate * dt))
+    nxt = current + (target - current) * (1 - math.exp(-rate * dt))
+    return target if abs(target - nxt) < 1e-4 else nxt
 
 
 def _mix(a: QColor, b: QColor, k: float) -> QColor:
@@ -212,20 +213,20 @@ class PetWidget(QWidget):
         self._t = 0.0
         self._last = 0.0
         self._level = 0.0
-        self._eye_open = 0.4
-        self._smile = 0.3
+        self._eye_open = 0.42
+        self._smile = 0.1
         self._mouth_open = 0.0
-        self._mouth_w = 10.0
+        self._mouth_w = 8.0
         self._wave = 0.0
-        self._gaze = QPointF(0, 0)
+        self._gaze = QPointF(0, 0.5)
         self._gaze_goal = QPointF(0, 0)
         # Pet ayrı bir üst pencere: ana pencerenin stil sayfasını devralmaz, bu yüzden aktif
         # temanın jetonlarını kendisi tutar. Başlangıçta kayıtlı temayı okur (app.py'den bağımsız).
         self._theme = themes.DEFAULT_THEME
         self._pal = themes.THEMES[self._theme]
         self._tint = self._col("accent")
-        self._glow = 0.1
-        self._dim = 0.8
+        self._glow = 0.04
+        self._dim = 0.78
         self._happy = 0.0
         self._droop = 0.0
         self._ring = 0.0
@@ -258,7 +259,10 @@ class PetWidget(QWidget):
         self._click_timer.setSingleShot(True)
         self._click_timer.timeout.connect(self._dispatch_clicks)
         self._clicks = 0
+        self._quick_deactivated_at = 0.0
+        self._dismissed_quick = False
         self._quick = QuickBox(self, on_submit)
+        self._quick.installEventFilter(self)
         self.setMouseTracking(True)  # dişli rozetin üstüne gelme iş listesini açar
         self._timer = QTimer(self)
         self._timer.setInterval(16)
@@ -508,8 +512,20 @@ class PetWidget(QWidget):
 
     def hideEvent(self, event: Any) -> None:
         self._timer.stop()
+        self._click_timer.stop()
+        self._clicks = 0
+        self._dismissed_quick = False
         self._quick.hide()
         super().hideEvent(event)
+
+    def eventFilter(self, watched: QObject, event: QEvent) -> bool:
+        if (
+            watched is self._quick
+            and event.type() == QEvent.Type.WindowDeactivate
+            and self._quick.isVisible()
+        ):
+            self._quick_deactivated_at = time.monotonic()
+        return super().eventFilter(watched, event)
 
     # --------------------------------------------------------------- etkileşim
 
@@ -547,6 +563,11 @@ class PetWidget(QWidget):
         if not self._body_rect().contains(event.position().toPoint()):
             self._bubble_left = 0.0  # balona tık onu kapatır
             return
+        if self._clicks == 0 and not self._click_timer.isActive():
+            # Odak kaybı kutuyu press öncesinde/sırasında kapatmış olabilir; yeniden açılmasın.
+            recent_hide = (time.monotonic() - self._quick_deactivated_at) < 0.1
+            self._dismissed_quick = self._quick.isVisible() or recent_hide
+            self._quick_deactivated_at = 0.0
         self._press_global = event.globalPosition().toPoint()
         self._press_anchor = QPoint(self._anchor)
         self._dragging = False
@@ -582,6 +603,7 @@ class PetWidget(QWidget):
         if dragged:
             # Sürükleme tık dizisini böler: tık-sürükle-tık çift tık (ses) sayılmaz.
             self._clicks = 0
+            self._dismissed_quick = False
             self._click_timer.stop()
             self._save_position()
         else:
@@ -596,6 +618,7 @@ class PetWidget(QWidget):
         """Tık sayacı (ADR 0048): 1 hızlı kutu, 2 ses, 3 menü; onayda tık hemen onaya gider."""
         if self._approval:
             self._clicks = 0
+            self._dismissed_quick = False
             self._click_timer.stop()
             self._on_approval()
             return
@@ -608,10 +631,11 @@ class PetWidget(QWidget):
     def _dispatch_clicks(self) -> None:
         self._click_timer.stop()
         count, self._clicks = self._clicks, 0
+        dismissed, self._dismissed_quick = self._dismissed_quick, False
         if count == 1:
             if self._quick.isVisible():
                 self._quick.hide()
-            else:
+            elif not dismissed:
                 self._quick.open()
                 self._place_quick()
         elif count == 2:
@@ -620,15 +644,51 @@ class PetWidget(QWidget):
             self._open_menu(QCursor.pos())
 
     def _open_menu(self, pos: QPoint) -> None:
-        self.build_menu().exec(pos)
+        menu = self.build_menu()
+        try:
+            menu.exec(pos)
+        finally:
+            menu.setParent(None)
+            menu.deleteLater()
 
     # --------------------------------------------------------------- animasyon
 
+    def _visual_state(self) -> tuple[Any, ...]:
+        return (
+            self.state,
+            self._shown_state,
+            self._reaction,
+            len(self._jobs),
+            self._bubble_text,
+            round(self._bubble_alpha, 3),
+            self._sprite_row,
+            self._sprite is not None,
+            round(self._dim, 3),
+            round(self._eye_open, 3),
+            round(self._smile, 3),
+            round(self._mouth_open, 3),
+            round(self._mouth_w, 3),
+            round(self._wave, 3),
+            round(self._gaze.x(), 3),
+            round(self._gaze.y(), 3),
+            self._tint.rgba(),
+            round(self._glow, 3),
+            round(self._happy, 3),
+            round(self._droop, 3),
+            round(self._ring, 3),
+            round(self._level, 3),
+            round(self._hover, 3),
+            round(self._antenna, 3),
+            len(self._particles),
+        )
+
     def _on_timer(self) -> None:
         now = time.monotonic()
+        before = self._visual_state() if self._reduced else None
         self.tick(now - self._last)
         self._last = now
-        self.update()
+        if not self._reduced or self._visual_state() != before:
+            self.update()
 
     def tick(self, dt: float) -> None:
         dt = max(0.0, min(dt, 0.1))

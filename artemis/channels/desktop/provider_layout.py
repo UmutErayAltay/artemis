@@ -142,7 +142,9 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     for count in PARALLEL_CHOICES:
         section.parallel_count.addItem(f"{count} test", count)
     idx = section.parallel_count.findData(section._saved_parallel_count())
-    section.parallel_count.setCurrentIndex(max(idx, section.parallel_count.findData(PARALLEL_TEST)))
+    if idx < 0:
+        idx = max(0, section.parallel_count.findData(PARALLEL_TEST))
+    section.parallel_count.setCurrentIndex(idx)
     section.parallel_count.setEnabled(section.parallel_test.isChecked())
     section.parallel_test.toggled.connect(section._remember_parallel)
     section.parallel_count.currentIndexChanged.connect(section._remember_parallel_count)

@@ -23,7 +23,7 @@ from artemis.config.settings import (
 )
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import ToolContext
-from artemis.tools.code_agent_backends import RULES, locate_codex, role_profile
+from artemis.tools.code_agent_backends import RULES, AgentRun, locate_codex, role_profile
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
 from artemis.tools.plugins.code_agent import (
     CodeAgentPrepare,
@@ -618,3 +618,24 @@ def test_background_coordinator_can_call_structured_output() -> None:
     visible = role_profile(None, None)["coordinator"]
     assert "StructuredOutput" in background["tools"]  # type: ignore[index,operator]
     assert "StructuredOutput" not in visible["tools"]  # type: ignore[index,operator]
+
+
+def test_agent_run_cleanup_continues_when_first_file_is_locked(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = tmp_path / "first.tmp"
+    second = tmp_path / "second.tmp"
+    first.write_text("1", encoding="utf-8")
+    second.write_text("2", encoding="utf-8")
+    original_unlink = Path.unlink
+
+    def fake_unlink(self: Path, missing_ok: bool = False) -> None:
+        if self == first:
+            raise PermissionError("kilitli")
+        original_unlink(self, missing_ok=missing_ok)
+
+    monkeypatch.setattr(Path, "unlink", fake_unlink)
+    run = AgentRun(argv=["agent"], stdin_prompt="", kind="codex", temp_files=[first, second])
+    run.cleanup()
+    assert first.exists()
+    assert not second.exists()
