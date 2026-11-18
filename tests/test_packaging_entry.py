@@ -180,3 +180,19 @@ def test_entry_rejects_unlisted_bench_module_before_running_it(
 def test_spec_copies_artemis_metadata() -> None:
     spec_text = (ROOT / "packaging" / "artemis.spec").read_text(encoding="utf-8")
     assert 'copy_metadata("artemis-tr")' in spec_text
+
+
+def test_frozen_entry_does_not_crash_on_unencodable_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import io
+
+    entry = _load_entry_module()
+    buffer = io.BytesIO()
+    stream = io.TextIOWrapper(buffer, encoding="cp1254")
+    monkeypatch.setattr(sys, "frozen", True, raising=False)
+    monkeypatch.setattr(sys, "stdout", stream)
+    entry._tolerate_unencodable_output()
+    print("Ayarlar → Modeller", file=stream)
+    stream.flush()
+    assert buffer.getvalue().startswith(b"Ayarlar ? Modeller")

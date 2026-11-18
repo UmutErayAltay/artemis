@@ -1,5 +1,6 @@
 """Dondurulmuş Windows paketi (Artemis.exe) için giriş noktası."""
 
+import io
 import multiprocessing
 import runpy
 import sys
@@ -21,8 +22,20 @@ def _use_console_sibling() -> None:
         sys.executable = str(sibling)
 
 
+def _tolerate_unencodable_output() -> None:
+    """Paketli exe'de stdout/stderr sistem kod sayfasıdır (ör. cp1254): `→` gibi bir karakter
+    yazmak UnicodeEncodeError ile süreci düşürürdü. Basılamayan karakter `?` olur.
+    """
+    if not getattr(sys, "frozen", False):
+        return
+    for stream in (sys.stdout, sys.stderr):
+        if isinstance(stream, io.TextIOWrapper):
+            stream.reconfigure(errors="replace")
+
+
 def main(argv: list[str] | None = None) -> None:
     """Alt süreç `-m` öykünmesini veya masaüstü/CLI girişini çalıştırır."""
+    _tolerate_unencodable_output()
     _use_console_sibling()
     args = sys.argv[1:] if argv is None else list(argv)
     if args[:1] == ["-m"] and len(args) >= 2:
