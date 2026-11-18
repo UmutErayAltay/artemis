@@ -354,8 +354,9 @@ def test_projects_buttons_approve_gate_and_qt_heartbeat(tmp_path: Path, repo: Pa
         approval = wait_event(bridge, Approval)
         assert approval.arguments["spec"]["task"] == "<img src='fake'> görevi"
         # Worker onayı beklerken Qt event loop'u canlı kalır.
-        end = time.monotonic() + 0.06
-        while time.monotonic() < end:
+        # Yavaş CI'da 60 ms sabit pencere 1 tıka düşebiliyordu: 3 tıka kadar bekle (üst sınır 2 sn).
+        end = time.monotonic() + 2.0
+        while len(ticks) < 3 and time.monotonic() < end:
             application.processEvents()
             time.sleep(0.005)
         assert len(ticks) >= 3 and cli.calls == []

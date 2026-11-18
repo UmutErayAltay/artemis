@@ -421,6 +421,7 @@ def _calendar_mail_section(tmp_path: Path) -> Any:
 
 
 def test_section_invalid_timezone_reports_error_without_crash(tmp_path: Path) -> None:
+    pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QWidget
 
     from artemis.channels.desktop.calendar_mail_section import _Job, check_calendar
@@ -439,6 +440,7 @@ def test_section_invalid_timezone_reports_error_without_crash(tmp_path: Path) ->
 def test_section_source_error_in_job_sets_error_and_never_saves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    pytest.importorskip("PySide6")
     from artemis.channels.desktop import calendar_mail_section as mod
 
     app, section = _calendar_mail_section(tmp_path)
@@ -462,6 +464,7 @@ def test_section_source_error_in_job_sets_error_and_never_saves(
 def test_section_missing_result_never_saves(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    pytest.importorskip("PySide6")
     from artemis.channels.desktop import calendar_mail_section as mod
 
     app, section = _calendar_mail_section(tmp_path)

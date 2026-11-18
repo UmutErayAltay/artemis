@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import ntpath
 import os
 import re
 import subprocess
@@ -67,7 +68,7 @@ def test_argv_has_encoded_command_and_no_scope_or_text() -> None:
     runner = FakeRunner(stdout=ok_stdout())
     read_screen("active_window", runner=runner, platform="win32")
     args, kwargs = runner.calls[0]
-    assert os.path.isabs(args[0]) and args[0].endswith("powershell.exe")
+    assert ntpath.isabs(args[0]) and args[0].endswith("powershell.exe")
     assert args[1:5] == [
         "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
     ]
@@ -219,13 +220,13 @@ def test_powershell_command_uses_absolute_system_path() -> None:
     screen_runner = FakeRunner(stdout=ok_stdout())
     read_screen("screen", runner=screen_runner, platform="win32")
     screen_cmd = screen_runner.calls[0][0]
-    assert os.path.isabs(screen_cmd[0])
+    assert ntpath.isabs(screen_cmd[0])
     assert screen_cmd[0].endswith("powershell.exe")
 
     image_runner = FakeRunner(stdout=ok_stdout())
     read_image("fake.png", runner=image_runner, platform="win32")
     image_cmd = image_runner.calls[0][0]
-    assert os.path.isabs(image_cmd[0])
+    assert ntpath.isabs(image_cmd[0])
     assert image_cmd[0].endswith("powershell.exe")
 
 
