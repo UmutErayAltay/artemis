@@ -121,3 +121,57 @@ def test_console_exe_keeps_its_own_executable(
     monkeypatch.setattr(sys, "executable", str(cli))
     entry._use_console_sibling()  # stdout var (konsol exe): değişmez
     assert sys.executable == str(cli)
+
+
+def test_entry_allows_bench_model_testi(monkeypatch: pytest.MonkeyPatch) -> None:
+    entry = _load_entry_module()
+    calls: list[tuple[str, str, bool, list[str]]] = []
+
+    def fake_run_module(
+        mod_name: str, run_name: str | None = None, alter_sys: bool = False
+    ) -> dict[str, object]:
+        calls.append((mod_name, str(run_name), alter_sys, list(sys.argv)))
+        return {}
+
+    monkeypatch.setattr(runpy, "run_module", fake_run_module)
+    monkeypatch.setattr(sys, "argv", ["Artemis.exe"])
+
+    entry.main(["-m", "bench.model_testi", "--config", "x.yaml", "--model", "a"])
+
+    assert calls == [
+        (
+            "bench.model_testi",
+            "__main__",
+            True,
+            ["bench.model_testi", "--config", "x.yaml", "--model", "a"],
+        )
+    ]
+
+
+@pytest.mark.parametrize("module_name", ["bench.run", "bench", "os"])
+def test_entry_rejects_disallowed_modules(module_name: str) -> None:
+    entry = _load_entry_module()
+
+    with pytest.raises(SystemExit):
+        entry.main(["-m", module_name])
+
+
+def test_iss_disables_directory_page() -> None:
+    iss_text = (ROOT / "packaging" / "artemis.iss").read_text(encoding="utf-8")
+    _, _, after_setup = iss_text.partition("[Setup]")
+    setup_section, _, _ = after_setup.partition("[Languages]")
+    assert "DisableDirPage=yes" in setup_section
+
+
+def test_entry_rejects_unlisted_bench_module_before_running_it(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Red, modülün var olup olmamasından değil izin listesinden gelmeli: run_module hiç çağrılmaz.
+    entry = _load_entry_module()
+    calls: list[str] = []
+    monkeypatch.setattr(runpy, "run_module", lambda name, **kw: calls.append(name))
+    for name in ("bench.run", "bench", "bench.model_testi_x"):
+        with pytest.raises(SystemExit):
+            entry.main(["-m", name])
+    entry.main(["-m", "bench.model_testi"])
+    assert calls == ["bench.model_testi"]

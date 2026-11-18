@@ -46,6 +46,7 @@ from artemis.channels.desktop.bridge import (
     Approval,
     BridgeEvent,
     DesktopBridge,
+    RuntimeFactory,
 )
 from artemis.channels.desktop.chat_widgets import (
     _VOICE_LABELS,
@@ -211,6 +212,7 @@ class DesktopWindow(QMainWindow):
         # Demo hiçbir koşulda mikrofon açmaz; --ses bayrağı da demoda yok sayılır.
         self._voice_on_ready = voice and not demo
         self._temporary: tempfile.TemporaryDirectory[str] | None = None
+        self._runtime_factory: RuntimeFactory | None = None
         if demo:
             self._temporary = tempfile.TemporaryDirectory(prefix="artemis-demo-")
             temp_root = Path(self._temporary.name)
@@ -230,9 +232,8 @@ class DesktopWindow(QMainWindow):
                 runtime.context.services["demo_records"] = {"sample": "Demo kitaplığı: örnek metin"}
                 return runtime
 
-            self.bridge = DesktopBridge(config_path, factory)
-        else:
-            self.bridge = DesktopBridge(config_path)
+            self._runtime_factory = factory
+        self.bridge = DesktopBridge(config_path, self._runtime_factory)
         self.setWindowTitle("Artemis")
         self.resize(1180, 780)
         self.setMinimumSize(720, 560)
@@ -1134,7 +1135,8 @@ class DesktopWindow(QMainWindow):
                 self._append_chat("Sistem", "Ayarlar uygulandı; yeni sohbet başladı.")
                 self._show_voice_state("off")
                 self.pet.set_busy(False)
-                self.bridge = DesktopBridge(self._config_path)
+                # Demo kipi yeniden kurulumda da demo fabrikasını korur; gerçek runtime açılmaz.
+                self.bridge = DesktopBridge(self._config_path, self._runtime_factory)
                 if not self._demo:
                     self._refresh_welcome()
                     self._start_dictation_hotkey()

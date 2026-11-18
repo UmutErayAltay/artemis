@@ -90,8 +90,10 @@ def _tail_lines(path: Path, budget: int, truncated: list[bool]) -> Iterator[byte
                     return
                 if not line.endswith(b"\n") and len(line) >= MAX_LINE_BYTES:
                     truncated.append(True)
-                    while stream.readline(MAX_LINE_BYTES).endswith(b"\n") is False:
-                        pass  # bitmeyen dev satırın kalanı atılır
+                    while True:
+                        chunk = stream.readline(MAX_LINE_BYTES)
+                        if not chunk or chunk.endswith(b"\n"):
+                            break  # bitmeyen dev satırın kalanı ya da dosya sonu
                     continue
                 yield line
     except OSError:

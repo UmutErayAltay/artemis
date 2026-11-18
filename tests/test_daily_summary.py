@@ -7,6 +7,7 @@ toast kapalıdır, Telegram sahtedir.
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -319,3 +320,29 @@ def test_truncated_scan_is_stated(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(daily_summary, "MAX_SCAN_LINES", 400_000)
     monkeypatch.setattr(daily_summary, "MAX_SCAN_BYTES", audit.stat().st_size // 2)
     assert "eksik olabilir" in (build_summary(audit, DAY, START, END) or "")
+
+
+def test_unterminated_oversized_last_line_at_eof_does_not_hang(tmp_path: Path) -> None:
+    """Son satır MAX_LINE_BYTES ve üstünde olup satır sonu taşımıyorsa EOF'ta takılmaz."""
+    audit = tmp_path / "eof.jsonl"
+    valid = (line("turn_start", hour=12) + "\n").encode("utf-8")
+    unterminated = b"x" * daily_summary.MAX_LINE_BYTES
+    audit.write_bytes(valid + unterminated)
+
+    result: list[str | None] = []
+    errors: list[BaseException] = []
+
+    def target() -> None:
+        try:
+            result.append(build_summary(audit, DAY, START, END))
+        except BaseException as exc:  # pragma: no cover
+            errors.append(exc)
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout=2.0)
+    assert not worker.is_alive(), "_tail_lines EOF'ta takılı kaldı"
+    assert not errors
+    assert result and result[0] is not None
+    assert "sohbet 1" in result[0]
+    assert "eksik olabilir" in result[0]

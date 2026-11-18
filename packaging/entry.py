@@ -5,6 +5,9 @@ import runpy
 import sys
 from pathlib import Path
 
+# Güvenlik nedeniyle yalnızca tekil olarak izin verilen artemis dışı `-m` modülleri.
+_IZINLI_MODULLER = frozenset({"bench.model_testi"})
+
 
 def _use_console_sibling() -> None:
     """Pencereli Artemis.exe'de stdout/stdin yoktur: `sys.executable -m ...` ile başlayan ve stdio
@@ -25,7 +28,10 @@ def main(argv: list[str] | None = None) -> None:
     if args[:1] == ["-m"] and len(args) >= 2:
         module_name = args[1]
         # Güvenlik sınırı: yürütülebilir dosya genel bir Python başlatıcısına dönüşemez.
-        if not module_name.startswith("artemis.") or len(module_name) <= len("artemis."):
+        is_artemis_submodule = module_name.startswith("artemis.") and len(module_name) > len(
+            "artemis."
+        )
+        if not is_artemis_submodule and module_name not in _IZINLI_MODULLER:
             raise SystemExit("Bilinmeyen modül")
         sys.argv = [module_name, *args[2:]]
         runpy.run_module(module_name, run_name="__main__", alter_sys=True)

@@ -145,10 +145,17 @@ class OpenApplication(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(OpenApplicationArguments, arguments)
         match = application_match(context, args.name, fuzzy=True)
-        # Yakın eşleşme yalnız temiz turda kendiliğinden açılır. Lekeli turda kullanıcı onayda
-        # söylenen adı gördü, yakın eşleşmenin seçtiği uygulamayı değil: tam adla yeniden
-        # istenir ki onay penceresi gerçek hedefi göstersin.
-        if match.executable is None or (match.kind == "fuzzy" and context.turn_tainted):
+        # Yakın eşleşme yalnız temiz turda ve kaldırıcı olmayan uygulamada açılır. Lekeli
+        # turda kullanıcı onayda söylenen adı gördü, yakın eşleşmenin seçtiği uygulamayı değil;
+        # kaldırıcıya yakın eşleşmede de onay sorulmadığı için tam adla yeniden istenir.
+        if match.executable is None or (
+            match.kind == "fuzzy"
+            and (
+                context.turn_tainted
+                or _uninstaller(match.name)
+                or _uninstaller(match.executable)
+            )
+        ):
             return _unresolved(args.name, match, action="açma")
         executable = match.executable
         if match.kind == "fuzzy":

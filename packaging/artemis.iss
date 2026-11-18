@@ -13,6 +13,9 @@ DefaultDirName={localappdata}\Programs\Artemis
 DefaultGroupName=Artemis
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
+; Kullanıcı başına kurulum {localappdata}\Programs\Artemis altına yapılır; klasör seçimine gerek yoktur.
+; [UninstallDelete] {app} dizinini tamamen sildiği için Belgeler gibi seçilen bir klasör silinebilirdi.
+DisableDirPage=yes
 SetupIconFile=..\artemis\channels\desktop\artemis.ico
 UninstallDisplayIcon={app}\Artemis.exe
 OutputDir=..\dist\installer

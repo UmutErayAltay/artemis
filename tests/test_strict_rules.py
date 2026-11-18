@@ -324,3 +324,17 @@ def test_gate_english_and_passive_negation_does_not_open() -> None:
     assert destructive_unrequested("Delete", "delete the old file") is None
     assert destructive_unrequested("Sil", "dosyayı sil, klasörü değil") is None
     assert destructive_unrequested("Don't save", "close without saving, choose don't save") is None
+
+
+def test_destructive_caps_english_labels_blocked() -> None:
+    for name in ("UNINSTALL", "DISCARD", "SIGN OUT", "WIPE", "SIL"):
+        assert destructive_unrequested(name, "open settings") is not None, name
+
+
+def test_uninstall_allowed_when_goal_requests_it() -> None:
+    assert destructive_unrequested("UNINSTALL", "uninstall spotify") is None
+    assert destructive_unrequested("Uninstall Spotify", "uninstall spotify") is None
+
+
+def test_caps_english_negated_goal_still_blocked() -> None:
+    assert destructive_unrequested("UNINSTALL", "don't uninstall spotify") is not None

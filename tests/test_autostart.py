@@ -178,3 +178,47 @@ def test_model_has_no_tool_that_touches_autostart_or_registry() -> None:
         assert "winreg" not in text, source
 
 
+def test_frozen_command_launches_exe_directly_without_dash_m(tmp_path: Path) -> None:
+    config = tmp_path / "boşluklu klasör" / "config.yaml"
+    exe = r"C:\Program Files\Artemis\Artemis.exe"
+    command = autostart_command(config, python=exe, frozen=True)
+    assert command.startswith(f'"{exe}" ')
+    assert "desktop --arka-plan" in command
+    assert " -m " not in command
+    assert "artemis desktop" not in command
+    assert f'--config "{config.resolve()}"' in command
+    assert "--ses" not in command
+
+
+def test_non_frozen_explicit_command_keeps_dash_m_artemis(tmp_path: Path) -> None:
+    config = tmp_path / "config.yaml"
+    command = autostart_command(config, python=r"C:\Py\pythonw.exe", frozen=False)
+    assert "-m artemis desktop" in command
+
+
+def test_frozen_command_uses_sys_executable_by_default(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    exe = tmp_path / "Artemis Kurulum" / "Artemis.exe"
+    config = tmp_path / "config.yaml"
+    monkeypatch.setattr("artemis.channels.autostart.sys.frozen", True, raising=False)
+    monkeypatch.setattr("artemis.channels.autostart.sys.executable", str(exe))
+
+    command = autostart_command(config)
+
+    assert command.startswith(f'"{exe}" ')
+    assert " -m " not in command
+    assert "desktop --arka-plan" in command
+
+
+
+
+def test_frozen_command_prefers_windowed_sibling_over_console_exe(tmp_path: Path) -> None:
+    # entry.py pencereli uygulamada sys.executable'ı artemis-cli.exe yapar; kayıt pencereliyi yazar.
+    console = tmp_path / "artemis-cli.exe"
+    windowed = tmp_path / "Artemis.exe"
+    console.write_bytes(b"")
+    windowed.write_bytes(b"")
+    command = autostart_command(tmp_path / "config.yaml", python=str(console), frozen=True)
+    assert str(windowed) in command
+    assert "artemis-cli" not in command
