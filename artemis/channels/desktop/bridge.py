@@ -978,8 +978,11 @@ class DesktopBridge:
         if state != "off":
             self._emit_voice_state(state)
 
-    def _voice_failed(self) -> None:
-        self._events.put(State("voice_error", _VOICE_ERROR_TEXT))
+    def _voice_failed(self, detail: str = "") -> None:
+        # Ayar hatası (ValueError) kendi Türkçe nedenini taşır ve kullanıcının düzeltebileceği
+        # şeyi söyler (ör. ücretli ses izni); aygıt/dosya hatasının ayrıntısı gösterilmez.
+        text = f"Ses açılamadı: {detail[:300]}" if detail else _VOICE_ERROR_TEXT
+        self._events.put(State("voice_error", text))
 
     async def _start_voice_on_worker(self) -> None:
         runtime = self._runtime
@@ -994,7 +997,10 @@ class DesktopBridge:
                 controller = await self._voice_factory(
                     runtime, self._run_voice_command, self._on_voice_state
                 )
-            except (OSError, RuntimeError, ValueError, ImportError):
+            except ValueError as error:
+                self._voice_failed(str(error))
+                return
+            except (OSError, RuntimeError, ImportError):
                 self._voice_failed()
                 return
             # Ölçüm isteğe bağlıdır; factory imzası değişmesin diye toplayıcı sonradan bağlanır.
