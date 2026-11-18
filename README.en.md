@@ -2,7 +2,7 @@
 
 Artemis is a Turkish, single-user personal desktop assistant for Windows 11. The core is Python 3.12 and also runs on Linux. The UI is a PySide6 desktop app, with voice and a Telegram channel. Every tool and channel goes through one SafetyGate, with approvals (default answer: no) and taint tracking. The primary documentation language is Turkish.
 
-**Status: technical preview.** The core (safety gate, tools, agent loop, UI, voice pipeline) is tested. 3300+ tests on Windows and Ubuntu CI. Real Windows device acceptance is partial; see docs/RELIABILITY_STATUS.md. A Windows installer is available on the [Releases](https://github.com/UmutErayAltay/artemis/releases) page or can be built from source (see [Windows package](#windows-package-and-first-run)); there is no license yet.
+**Status: technical preview.** The core (safety gate, tools, agent loop, UI, voice pipeline) is tested. 3300+ tests on Windows and Ubuntu CI. Real Windows device acceptance is partial; see docs/RELIABILITY_STATUS.md. A Windows installer is available on the [Releases](https://github.com/UmutErayAltay/artemis/releases) page or can be built from source (see [Windows package](#windows-package-and-first-run)). License: [Apache-2.0](LICENSE); for bundled third-party components (including GPL-3.0 Piper) see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Features
 
@@ -98,4 +98,4 @@ The primary documentation language is Turkish.
 
 ## License
 
-License: not yet chosen (pending). Until a license is added, all rights are reserved by the author.
+Copyright 2026 Umut Eray Altay. Licensed under the [Apache License, Version 2.0](LICENSE). The Windows installer also bundles third-party components under their own licenses (Piper TTS: GPL-3.0-or-later; PySide6 and edge-tts: LGPL-3.0; certifi: MPL-2.0), so the binary package as a whole is distributed under GPL-3.0 terms; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

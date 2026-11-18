@@ -9,7 +9,8 @@ yan etki ekranda tam argümanlarla onay ister; varsayılan cevap hayırdır.
 > testlidir (3300+ test, Windows ve Ubuntu CI). Windows'ta gerçek cihaz kabulü kısmendir; neyin
 > doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Windows kurucusu
 > [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasından indirilir ya da kaynaktan
-> derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)); henüz lisans yoktur.
+> derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)). Lisans: [Apache-2.0](LICENSE); kurucudaki üçüncü
+> taraf bileşenler (GPL-3.0 Piper dahil) için [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Neler var:
 
@@ -920,3 +921,11 @@ kabulü; temiz bir Windows'ta ilk kurulum deneyimi.
 Ses tanıma beklerken yakalama devam eder; iki bekleyen segment sınırı aşılırsa uyarı verilir.
 Ses raporu STT kuyruk/çözüm sürelerini ve mikrofon düşmelerini gösterir; sınırsız yükte
 kayıpsız ses veya çalışan native STT'yi anında kesme garantisi yoktur.
+
+## Lisans
+
+Telif hakkı 2026 Umut Eray Altay. Artemis'in kaynak kodu [Apache License 2.0](LICENSE) ile
+lisanslıdır. Windows kurucusu kendi lisanslarıyla gelen üçüncü taraf bileşenler de içerir (Piper
+TTS: GPL-3.0-or-later; PySide6 ve edge-tts: LGPL-3.0; certifi: MPL-2.0); bu yüzden ikili paketin
+bütünü GPL-3.0 şartlarıyla dağıtılır. Ayrıntı ve kaynak bağlantıları:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

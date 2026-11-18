@@ -1,7 +1,31 @@
 # Üçüncü taraf bildirimleri
 
-Bu dosya, Artemis'in isteğe bağlı olarak kullanabildiği üçüncü taraf bileşenleri ve lisans
-şartlarını belirtir. Artemis'in kendi lisansı bu bileşenleri **kapsamaz**.
+Artemis'in kendi kaynak kodu Apache License 2.0 ile lisanslıdır ([LICENSE](LICENSE)). Bu dosya,
+Artemis'in kullandığı ya da Windows kurucusuna dahil edilen üçüncü taraf bileşenleri ve lisans
+şartlarını belirtir. Artemis'in lisansı bu bileşenleri **kapsamaz**; her biri kendi lisansıyla
+dağıtılır. Lisans metinleri [`LICENSES/`](LICENSES) klasöründedir ve kurucuya da girer.
+
+## Windows kurucusuna dahil copyleft bileşenler
+
+Kurucu (`Artemis-Setup-*.exe`) ve taşınabilir zip aşağıdaki bileşenleri değiştirilmemiş hâlleriyle,
+`_internal\` altında ayrı dosyalar olarak içerir. Kaynak kodlarına bağlantılar aşağıdadır; Artemis'in
+kendi kaynağı <https://github.com/UmutErayAltay/artemis> adresindedir.
+
+- **Piper TTS 1.8.0** (`piper-tts`) — **GPL-3.0-or-later**
+  ([LICENSES/GPL-3.0.txt](LICENSES/GPL-3.0.txt)) — kaynak: <https://github.com/OHF-Voice/piper1-gpl>.
+  Kurucu bu bileşeni içerdiği için **ikili paketin bütünü GPL-3.0 şartlarıyla dağıtılır**;
+  Apache-2.0 GPL-3.0 ile uyumludur. Kaynaktan kurulumda Piper `[voice]` ekstrasıyla gelir.
+  Piper ses modelleri pakette yoktur; indirilen her sesin kendi model kartındaki lisansı geçerlidir.
+- **PySide6 / shiboken6 6.12.0** (Qt for Python) — **LGPL-3.0**
+  ([LICENSES/LGPL-3.0.txt](LICENSES/LGPL-3.0.txt), [GPL-3.0](LICENSES/GPL-3.0.txt)) —
+  kaynak: <https://code.qt.io/cgit/pyside/pyside-setup.git/>. Kütüphaneler `_internal\PySide6\`
+  altında ayrı DLL'lerdir; kullanıcı bunları uyumlu bir sürümle değiştirebilir.
+- **edge-tts 7.3.0** — **LGPL-3.0** (`srt_composer.py` MIT) — kaynak: <https://github.com/rany2/edge-tts>.
+- **certifi** — **MPL-2.0** ([LICENSES/MPL-2.0.txt](LICENSES/MPL-2.0.txt)) — kaynak:
+  <https://github.com/certifi/python-certifi>.
+
+Kurucudaki diğer Python paketleri (ör. numpy, pydantic, httpx, faster-whisper, onnxruntime, PyYAML)
+MIT, BSD veya Apache-2.0 gibi serbest lisanslıdır.
 
 ## mihu turkish-stt-66m-v2 (isteğe bağlı canlı yazı) — Powered by mihu
 

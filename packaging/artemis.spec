@@ -33,6 +33,9 @@ hiddenimports = collect_submodules("artemis")
 # Ayarlar > Model testi `-m bench.model_testi` ile alt süreçte koşar: modül ve senaryo dosyaları
 # pakete girer (ağır bench araçları — ses korpusu, değerlendirme — yine de çağrılmadıkça yüklenmez).
 hiddenimports += ["bench", "bench.model_testi", "bench.run", "bench.bilgisayar_testi"]
+# Lisans ve üçüncü taraf bildirimleri kurucuya girer (GPL/LGPL/MPL şartı).
+datas += [(str(ROOT / name), ".") for name in ("LICENSE", "THIRD_PARTY_NOTICES.md")]
+datas += [(str(ROOT / "LICENSES"), "LICENSES")]
 datas += [
     (str(ROOT / "bench" / name), "bench")
     for name in ("model_testi.yaml", "senaryolar.yaml")
