@@ -325,3 +325,24 @@ async def test_streaming_disabled_keeps_old_path(tmp_path):
     finally:
         await controller.close()
     assert sink.pcm == ["Bir. İki."]
+
+
+@pytest.mark.parametrize("sentence", [
+    "Dosyayı sildim.",
+    "Dosya tamamlandı.",
+    "Pencereyi açtı.",
+    "Mesajı gönderdi.",
+    "Kapıyı kapadı.",
+    "Sohbet yaptı.",
+])
+def test_third_person_past_claims_are_detected(sentence):
+    assert claims_success(sentence)
+
+
+@pytest.mark.parametrize("sentence", [
+    "Hava güzel.",
+    "Yarın görüşürüz.",
+    "Sonuç net.",
+])
+def test_non_claim_sentences_are_not_held(sentence):
+    assert not claims_success(sentence)

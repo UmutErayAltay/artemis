@@ -568,6 +568,46 @@ def test_settings_apply_restarts_runtime_with_selected_device_and_keeps_model(
         _close_cleanly(app, window)
 
 
+def test_demo_settings_apply_restarts_bridge_with_demo_factory(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real_bridge = bridge_module.DesktopBridge
+    bridges: list[tuple[Path, Any]] = []
+
+    def spy_bridge(
+        config_path: Path, runtime_factory: Any = None, *args: Any, **kwargs: Any
+    ) -> Any:
+        bridges.append((config_path, runtime_factory))
+        return real_bridge(config_path, runtime_factory, *args, **kwargs)
+
+    def forbidden(*_args: Any, **_kwargs: Any) -> Runtime:
+        raise AssertionError("Demo yeniden başlatmada gerçek runtime kurulmamalı")
+
+    monkeypatch.setattr(app_module, "DesktopBridge", spy_bridge)
+    monkeypatch.setattr(bridge_module, "create_runtime", forbidden)
+    window = build_window(tmp_path / "ignored.yaml", demo=True, app=app)
+    try:
+        _wait(app, lambda: window._worker_ready)
+        old_bridge = window.bridge
+        window._restart_settings = True
+        window.bridge.shutdown()
+        _wait(
+            app,
+            lambda: window.bridge is not old_bridge
+            and (window.bridge._ready.is_set() or window.bridge.stopped),
+        )
+        app.processEvents()
+        assert len(bridges) == 2
+        assert bridges[0][1] is not None
+        assert bridges[1][1] is bridges[0][1]
+        assert window.bridge._runtime_factory is bridges[0][1]
+        assert window.bridge._ready.is_set()
+        assert window.bridge._runtime is not None
+        assert "demo_records" in window.bridge._runtime.context.services
+    finally:
+        _close_cleanly(app, window)
+
+
 class _BlockingProvider:
     """Tur, test bırakana dek sağlayıcıda bekler; iptal edilirse CancelledError alır."""
 
@@ -1720,3 +1760,43 @@ def test_leaving_settings_restarts_for_direct_section_write_but_not_after_revert
     finally:
         blocker.release.set()
         _close_cleanly(app, window)
+
+
+def test_open_model_settings_selects_model_section_by_name(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    window = _window(app, tmp_path)
+    try:
+        # Bölüm sırası değişse bile "Model" indekse değil adına göre seçilmeli.
+        selected: list[int] = []
+        monkeypatch.setattr(
+            window.settings_panel, "section_names", lambda: ["Ses", "Görünüm", "Model"]
+        )
+        monkeypatch.setattr(window.settings_panel, "show_section", selected.append)
+        window._open_model_settings()
+        assert window.tabs.currentWidget() is window.settings_scroll
+        assert selected == [2]
+    finally:
+        _close_cleanly(app, window)
+
+
+def test_approval_decision_error_propagates_and_still_rejects_dialog(
+    app: QApplication,
+) -> None:
+    calls: list[bool] = []
+
+    def failing_decision(_item: Any, approved: bool, _remember: bool) -> bool:
+        calls.append(approved)
+        raise RuntimeError("karar hatası")
+
+    parent = QWidget()
+    dialog = ApprovalDialog(_approval({"key": "a"}), failing_decision, parent)
+    dialog.show()
+    with pytest.raises(RuntimeError, match="karar hatası"):
+        dialog._choose(True)
+    assert calls == [True]
+    assert not dialog.isVisible()
+    assert dialog.result() == int(dialog.DialogCode.Rejected)
+    dialog.reject()
+    assert calls == [True]
+    assert dialog.result() == int(dialog.DialogCode.Rejected)

@@ -79,3 +79,5 @@ okuması, hedefte yakın eşleşme ve geri okuma doğrulaması kaldırılınca t
   ([WINDOWS_CHECKLIST.md](../WINDOWS_CHECKLIST.md) A5).
 - Mutasyon: yanlış hedef sayımı, sahte masaüstü bağlantısı, `sent` sayımı, ipucunun opt-in,
   kalıcı hafıza, izin listesi ve sınır kontrolleri kaldırılınca testler kırıldı.
+
+Otomatik kip istisnası ve kaldırıcı sınırı: ADR 0039 "Ek karar (2026-11-18)".

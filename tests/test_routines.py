@@ -20,7 +20,13 @@ from artemis.brain.models import ToolCall
 from artemis.channels.runtime import create_runtime
 from artemis.config.settings import ProactiveConfig, RoutinesConfig, Settings
 from artemis.proactive.delivery import Deliverer
-from artemis.proactive.routines import Routine, RoutineSchedule, RoutineStep, RoutineStore
+from artemis.proactive.routines import (
+    Routine,
+    RoutineSchedule,
+    RoutinesError,
+    RoutineStep,
+    RoutineStore,
+)
 from artemis.proactive.scheduler import ProactiveScheduler
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate, TurnState
@@ -596,3 +602,11 @@ def test_routines_section_is_inert_when_disabled_or_corrupt(tmp_path: Path) -> N
     assert "bozuk" in section.notice.text() and section.routine_list.count() == 0
     assert (state / "routines.json").read_text(encoding="utf-8") == "{"
     assert section.action_row.isVisibleTo(section)
+
+
+def test_save_wraps_os_error_when_parent_is_a_file(tmp_path: Path) -> None:
+    blocker = tmp_path / "blocker"
+    blocker.write_text("dosya", encoding="utf-8")
+    store = RoutineStore(blocker / "routines.json")
+    with pytest.raises(RoutinesError):
+        store.save([])

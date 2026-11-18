@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import importlib
 import os
 import tempfile
 from collections.abc import Callable, Mapping
@@ -203,7 +204,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     ),
     PanelBinding(
         ("mail", "port"), "mail_port",
-        lambda edit: int(edit.text()) if edit.text().strip().isdigit() else 993,
+        lambda edit: int(edit.text()) if edit.text().strip().isdecimal() else 993,
         lambda edit, value: edit.setText(str(value)),
     ),
     PanelBinding(
@@ -372,3 +373,45 @@ def microphone_choices(
             seen.add(name.casefold())
             result.append((name, index, [index]))
     return result
+
+
+def refresh_device_combo(panel: Any, settings: Settings) -> None:
+    """Mikrofon açılır listesini doldurur (SettingsPanel'den taşındı: dosya boyutu sınırı)."""
+    panel.device_combo.clear()
+    panel.device_combo.setEnabled(not panel._demo)
+    panel.device_combo.addItem("Sistem varsayılanı", None)
+    audio_errors: tuple[type[Exception], ...] = (ImportError, OSError, RuntimeError, ValueError)
+    try:
+        sd = importlib.import_module("sounddevice")
+        audio_errors = (*audio_errors, sd.PortAudioError)
+        devices = sd.query_devices()
+        hosts = sd.query_hostapis()
+        active: Any = settings.voice.input_device
+        if active is None:
+            # Sistem varsayılan girişi yokken sounddevice (None, None) dönebilir.
+            default_device = getattr(sd.default, "device", None)
+            default_in = default_device[0] if default_device else None
+            if default_in is not None:
+                active = int(default_in)
+        active_name = "" if active is None else str(active)
+        choices = microphone_choices(
+            list(devices), list(hosts), active,
+            advanced=panel.advanced_devices.isChecked(),
+        )
+        if not choices:
+            panel._no_device()
+            panel._set_current_device("")
+            return
+        for label, index, indices in choices:
+            panel.device_combo.addItem(label, index)
+            if active in indices or (isinstance(active, str) and active in label):
+                active_name = label
+            if settings.voice.input_device in indices:
+                panel.device_combo.setCurrentIndex(panel.device_combo.count() - 1)
+        if active is not None and active_name == str(active):
+            panel.device_combo.addItem(f"Mevcut giriş ({active})", settings.voice.input_device)
+            panel.device_combo.setCurrentIndex(panel.device_combo.count() - 1)
+        panel._set_current_device(active_name)
+    except audio_errors:
+        panel._no_device()
+        panel.current_device.setText("Seçilmedi (mikrofon aygıtları okunamadı)")

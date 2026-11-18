@@ -102,3 +102,34 @@ def test_audit_rotation_failure_keeps_appending(
     for index in range(5):
         log.emit("tick", index=index)
     assert len(path.read_text(encoding="utf-8").splitlines()) == 5
+
+
+def test_short_env_secret_values_do_not_corrupt_unrelated_text(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("TEST_SHORT_TOKEN", "false")
+    audit = AuditLog(tmp_path / "audit.jsonl")
+    audit.emit("short_secret", flag="false", note="ok false")
+    raw = audit.path.read_text(encoding="utf-8")
+    record = json.loads(raw)
+    assert record["flag"] == "false"
+    assert record["note"] == "ok false"
+    assert '"ok false"' in raw
+
+
+def test_event_and_timestamp_are_never_redacted(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    marker = "synthetic-event-marker"
+    monkeypatch.setenv("TEST_EVENT_SECRET", marker)
+    audit = AuditLog(tmp_path / "audit.jsonl")
+    audit.emit(f"event-{marker}", payload=marker)
+    audit.emit("false", payload="false")
+    lines = audit.path.read_text(encoding="utf-8").splitlines()
+    first = json.loads(lines[0])
+    second = json.loads(lines[1])
+    assert first["event"] == f"event-{marker}"
+    assert first["payload"] == "[GİZLENDİ]"
+    assert first["timestamp"].endswith("+00:00")
+    assert second["event"] == "false"
+    assert second["timestamp"].endswith("+00:00")

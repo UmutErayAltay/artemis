@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import email
+import http.client
 import imaplib
 import os
 import re
@@ -24,6 +25,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta, tzinfo
 from email import policy
 from html.parser import HTMLParser
+from time import monotonic
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -37,6 +39,8 @@ MAIL_TARGET = "Artemis/mail_password"
 
 MAX_ICS_BYTES = 2_000_000
 TIMEOUT = 10.0
+TOTAL_TIMEOUT = 30.0
+_CHUNK_BYTES = 65_536
 SNIPPET_CHARS = 300
 MAX_EVENTS = 50
 _MAX_STEPS = 20_000  # tek olay için oluşum üretme sınırı (çok eski DAILY kural şişmesin)
@@ -65,22 +69,38 @@ class _HttpsOnly(urllib.request.HTTPRedirectHandler):
 
 
 def fetch_ics(url: str) -> bytes:
-    """HTTPS, 10 sn, 2 MB sınırı, yönlendirme yalnız https. Hata iletisinde adres yoktur."""
+    """HTTPS, 10 sn istek / 30 sn toplam süre, 2 MB sınırı, yönlendirme yalnız https."""
     if not url.lower().startswith("https://"):
         raise SourceError("Takvim adresi https:// ile başlamalı.")
     opener = urllib.request.build_opener(_HttpsOnly)
+    deadline = monotonic() + TOTAL_TIMEOUT
+    chunks: list[bytes] = []
+    total = 0
     try:
         with opener.open(url, timeout=TIMEOUT) as response:  # noqa: S310 - şema yukarıda denetlendi
-            data: bytes = response.read(MAX_ICS_BYTES + 1)
+            while True:
+                chunk: bytes = response.read(_CHUNK_BYTES)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+                if total > MAX_ICS_BYTES:
+                    raise SourceError("Takvim dosyası 2 MB sınırını aşıyor; okunmadı.")
+                # Yavaş damlatan sunucuya karşı soket zaman aşımı yetmez; toplam bütçe gerekir.
+                if monotonic() > deadline:
+                    raise SourceError("Takvim çok yavaş yanıt verdi; okunmadı.")
     except SourceError:
         raise
     except urllib.error.HTTPError as error:
         raise SourceError(f"Takvim sunucusu HTTP {error.code} döndürdü.") from None
-    except (urllib.error.URLError, OSError, ValueError) as error:
+    except (
+        urllib.error.URLError,
+        http.client.HTTPException,
+        OSError,
+        ValueError,
+    ) as error:
         raise SourceError(f"Takvime ulaşılamadı ({type(error).__name__}).") from None
-    if len(data) > MAX_ICS_BYTES:
-        raise SourceError("Takvim dosyası 2 MB sınırını aşıyor; okunmadı.")
-    return data
+    return b"".join(chunks)
 
 
 @dataclass
@@ -178,13 +198,16 @@ def _expand(
     until_moment: datetime | None = None
     if "UNTIL" in rule:
         raw = rule["UNTIL"].strip()
-        until = datetime.strptime(raw[:8], "%Y%m%d").date()
-        if raw.endswith("Z") and "T" in raw and isinstance(base, datetime):
-            # UTC UNTIL an olarak karşılaştırılır; yalnız tarihe bakmak doğu dilimlerinde
-            # gece yarısından sonraki son oluşumu düşürürdü.
-            until_moment = datetime.strptime(raw[:15], "%Y%m%dT%H%M%S").replace(
-                tzinfo=ZoneInfo("UTC")
-            )
+        try:
+            until = datetime.strptime(raw[:8], "%Y%m%d").date()
+            if raw.endswith("Z") and "T" in raw and isinstance(base, datetime):
+                # UTC UNTIL an olarak karşılaştırılır; yalnız tarihe bakmak doğu dilimlerinde
+                # gece yarısından sonraki son oluşumu düşürürdü.
+                until_moment = datetime.strptime(raw[:15], "%Y%m%dT%H%M%S").replace(
+                    tzinfo=ZoneInfo("UTC")
+                )
+        except ValueError:
+            return [], "geçersiz UNTIL"
     start = base.date() if isinstance(base, datetime) else base
     first_monday = start - timedelta(days=start.weekday())
     out: list[datetime | date] = []
@@ -244,11 +267,12 @@ def parse_events(
             params, value = block["RECURRENCE-ID"][0]
             try:
                 moment = _when(value, params, local, warnings)
-            except ValueError:
+                occ_day = _to_local(moment, local).date()
+            except (ValueError, OverflowError):
                 # Tek bozuk olay bütün takvimi okunmaz yapmamalı.
                 warnings.add("Okunamayan bir olay atlandı.")
                 continue
-            overridden.add((block["UID"][0][1], _to_local(moment, local).date()))
+            overridden.add((block["UID"][0][1], occ_day))
     for block in blocks:
         if block.get("STATUS", [({}, "")])[0][1].upper() == "CANCELLED" or "DTSTART" not in block:
             continue
@@ -256,7 +280,7 @@ def parse_events(
             events.extend(_event(block, local, window_start, window_end, overridden, warnings))
         except (ValueError, KeyError, OverflowError):
             warnings.add("Okunamayan bir olay atlandı.")
-    events.sort(key=lambda e: _to_local(e.start, local, as_start=True))
+    events.sort(key=lambda e: _to_local(e.start, local))
     for event in events:
         if event.unsupported_rule:
             warnings.add(
@@ -266,10 +290,27 @@ def parse_events(
     return events, sorted(warnings)
 
 
-def _to_local(value: datetime | date, local: tzinfo, as_start: bool = True) -> datetime:
+def _to_local(value: datetime | date, local: tzinfo) -> datetime:
     if isinstance(value, datetime):
         return value.astimezone(local)
     return datetime.combine(value, time(0), tzinfo=local)
+
+
+_DURATION_RE = re.compile(
+    r"^P(?:(\d+)W)?(?:(\d+)D)?(?:T(?=\d)(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$"
+)
+
+
+def _duration(text: str) -> timedelta | None:
+    """RFC 5545 süre metnini (ör. PT2H, P1DT30M, P2W) çözer; geçersizse None."""
+    match = _DURATION_RE.match(text.strip())
+    if not match or not any(match.groups()):
+        return None
+    weeks, days, hours, minutes, seconds = (int(g or 0) for g in match.groups())
+    try:
+        return timedelta(weeks=weeks, days=days, hours=hours, minutes=minutes, seconds=seconds)
+    except OverflowError:
+        return None
 
 
 def _event(
@@ -282,15 +323,27 @@ def _event(
 ) -> list[Event]:
     params, value = block["DTSTART"][0]
     start = _when(value, params, local, warnings)
+    fallback_length = timedelta(days=1) if not isinstance(start, datetime) else timedelta(0)
     if "DTEND" in block:
         end = _when(block["DTEND"][0][1], block["DTEND"][0][0], local, warnings)
+        length = (
+            end - start
+            if isinstance(start, datetime) == isinstance(end, datetime)
+            else timedelta(0)
+        )
+    elif "DURATION" in block:
+        parsed = _duration(block["DURATION"][0][1])
+        if parsed is None:
+            warnings.add("Okunamayan etkinlik süresi yok sayıldı.")
+            length = fallback_length
+        else:
+            length = parsed
     else:
-        end = start + timedelta(days=1) if not isinstance(start, datetime) else start
-    length = (
-        end - start
-        if isinstance(start, datetime) == isinstance(end, datetime)
-        else timedelta(0)
-    )
+        length = fallback_length
+    if length < timedelta(0):
+        # Bitişi başlangıçtan önce gelen bozuk etkinlik olumsuz süre üretmemeli.
+        warnings.add("Bitiş saati başlangıçtan önce olan bir etkinlik sıfır süreyle gösterildi.")
+        length = timedelta(0)
     title = _text(block.get("SUMMARY", [({}, "")])[0][1]).strip()[:200] or "(başlıksız)"
     where = _text(block.get("LOCATION", [({}, "")])[0][1]).strip()[:200]
     rule_text = block.get("RRULE", [({}, "")])[0][1]
@@ -305,8 +358,12 @@ def _event(
         excluded: set[date] = set()
         for ex_params, ex_value in block.get("EXDATE", []):
             for item in ex_value.split(","):
-                moment = _when(item, ex_params, local, warnings)
-                excluded.add(_to_local(moment, local).date())
+                try:
+                    moment = _when(item, ex_params, local, warnings)
+                    excluded.add(_to_local(moment, local).date())
+                except (ValueError, OverflowError):
+                    # Tek bozuk EXDATE bütün yinelenen olayı düşürmemeli.
+                    warnings.add("Okunamayan bir hariç tutma tarihi atlandı.")
         uid = block.get("UID", [({}, "")])[0][1]
         starts = [
             s for s in starts
@@ -392,7 +449,12 @@ def _snippet(message: email.message.EmailMessage) -> str:
         return ""
     if part.get_content_subtype() == "html":
         stripper = _Text()
-        stripper.feed(text)
+        # Standart HTMLParser bozuk işaretlemede iç AssertionError fırlatabilir;
+        # o ana dek toplanan metin korunur.
+        with contextlib.suppress(AssertionError):
+            stripper.feed(text)
+        with contextlib.suppress(AssertionError):
+            stripper.close()
         text = " ".join(stripper.parts)
     return " ".join(text.split())[:SNIPPET_CHARS]
 
@@ -413,6 +475,12 @@ def read_unread(
 ) -> tuple[list[dict[str, str]], int]:
     """(en yeni `limit` okunmamış ileti, toplam okunmamış). Yalnız `readonly` select + PEEK:
     sunucuda \\Seen bayrağı değişmez, hiçbir şey silinmez/taşınmaz."""
+    # Komut enjeksiyonu ve ASCII dışı kodlama hatalarını önlemek için ağdan önce doğrula.
+    if not folder.isascii() or any(ord(ch) < 32 or ord(ch) == 127 for ch in folder):
+        raise SourceError(
+            "Posta klasör adı desteklenmiyor (yalnız ASCII, denetim karakteri yok)."
+        )
+    quoted = '"' + folder.replace("\\", "\\\\").replace('"', '\\"') + '"'
     try:
         imap = connect(host, port)
     except (OSError, imaplib.IMAP4.error) as error:
@@ -424,14 +492,24 @@ def read_unread(
             raise SourceError(
                 "Posta girişi reddedildi; kullanıcı adı ve uygulama parolasını kontrol edin."
             ) from None
+        except OSError as error:
+            raise SourceError(
+                f"Posta girişi yanıt vermedi ({type(error).__name__})."
+            ) from None
         try:
-            status, _ = imap.select(folder, readonly=True)
+            status, _ = imap.select(quoted, readonly=True)
             if status != "OK":
                 raise SourceError("Posta klasörü açılamadı.")
             status, found = imap.search(None, "UNSEEN")
             ids = found[0].split() if status == "OK" and found and found[0] else []
             items: list[dict[str, str]] = []
-            for number in reversed(ids[-limit:]):
+            deadline = monotonic() + TOTAL_TIMEOUT
+            for number in reversed(ids[-limit:] if limit > 0 else []):
+                # Her ileti soket zaman aşımını tetikleyebilir; toplam okuma bütçesini aşma.
+                if monotonic() > deadline:
+                    raise SourceError(
+                        "Posta okuma zaman aşımına uğradı; sonuç gösterilmedi."
+                    )
                 status, data = imap.fetch(number, f"(BODY.PEEK[]<0.{_BODY_BYTES}>)")
                 raw = next((p[1] for p in data or [] if isinstance(p, tuple)), None)
                 if status != "OK" or not isinstance(raw, bytes):

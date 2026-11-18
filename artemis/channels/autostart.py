@@ -81,17 +81,38 @@ def gui_python(executable: str | None = None) -> str:
     return str(windowed) if windowed.is_file() else str(current)
 
 
-def autostart_command(config_path: Path, *, python: str | None = None) -> str:
+def autostart_command(
+    config_path: Path,
+    *,
+    python: str | None = None,
+    frozen: bool | None = None,
+) -> str:
     """Kayda yazılacak sabit komut. `--ses` bilerek yoktur: mikrofon kendiliğinden açılmaz."""
-    arguments = [
-        python if python is not None else gui_python(),
-        "-m",
-        "artemis",
-        "desktop",
-        "--arka-plan",
-        "--config",
-        str(config_path.resolve()),
-    ]
+    is_frozen = bool(getattr(sys, "frozen", False)) if frozen is None else frozen
+    if is_frozen:
+        # Dondurulmuş pakette `-m artemis` çalışmaz; pencereli yürütülebilir doğrudan başlatılır.
+        # Pencereli Artemis.exe açılırken entry.py sys.executable'ı artemis-cli.exe yapar; açılışta
+        # konsol penceresi çıkmasın diye kayda pencereli kardeş yazılır.
+        current = Path(python if python is not None else sys.executable)
+        windowed = current.with_name("Artemis.exe")
+        executable = str(windowed) if windowed.is_file() else str(current)
+        arguments = [
+            executable,
+            "desktop",
+            "--arka-plan",
+            "--config",
+            str(config_path.resolve()),
+        ]
+    else:
+        arguments = [
+            python if python is not None else gui_python(),
+            "-m",
+            "artemis",
+            "desktop",
+            "--arka-plan",
+            "--config",
+            str(config_path.resolve()),
+        ]
     return subprocess.list2cmdline(arguments)
 
 

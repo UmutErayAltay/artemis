@@ -7,6 +7,7 @@ Renkler yalnız temadan gelir (themes.py `wave2-pets`); bu dosyada sabit renk yo
 
 from __future__ import annotations
 
+import html
 from pathlib import Path
 
 from PySide6.QtCore import QMetaMethod, QSize, Qt, Signal
@@ -49,13 +50,19 @@ _CARD_W, _CARD_H, _GAP = 140, 120, 8
 _ICON = Path(__file__).with_name("artemis.ico")
 
 
+def _plain_tip(text: str) -> str:
+    """Qt ipucu kutularının kullanıcı metnini HTML olarak yorumlamasını engeller."""
+    return f"<span>{html.escape(text)}</span>" if "<" in text else text
+
+
 class _ElidedLabel(QLabel):
     """Uzun ad kartı taşırmasın; kısaltma stil uygulandıktan sonraki yazıyla yapılır."""
 
     def __init__(self, text: str) -> None:
         super().__init__()
         self._full = text
-        self.setToolTip(text)
+        self.setTextFormat(Qt.TextFormat.PlainText)
+        self.setToolTip(_plain_tip(text))
         self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._elide()
 
@@ -112,6 +119,7 @@ class _PetCard(QFrame):
         lay.addWidget(self.name)
         self.source = QLabel(source)
         self.source.setObjectName("meta")
+        self.source.setTextFormat(Qt.TextFormat.PlainText)
         self.source.setAlignment(Qt.AlignmentFlag.AlignCenter)
         # "Seçili" rozeti ikonun üstüne binmesin: kaynak yazısıyla aynı satırda durur (UX-05).
         footer = QHBoxLayout()
@@ -198,6 +206,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         self._current = pet_sprite.ORB
         self._pets: dict[str, PetInfo] = {}
         self._demo = demo
+        self._problem_shown = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 24)  # sayfa altında tutarlı 24px nefes payı
         layout.setSpacing(16)
@@ -281,10 +290,13 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         text.addStretch(1)
         self.hero_name = QLabel()
         self.hero_name.setObjectName("greeting")
+        self.hero_name.setTextFormat(Qt.TextFormat.PlainText)
         self.hero_source = QLabel()
         self.hero_source.setObjectName("meta")
+        self.hero_source.setTextFormat(Qt.TextFormat.PlainText)
         self.hero_caption = QLabel()
         self.hero_caption.setObjectName("fieldLabel")
+        self.hero_caption.setTextFormat(Qt.TextFormat.PlainText)
         self.hero_caption.setWordWrap(True)
         for label in (self.hero_name, self.hero_source, self.hero_caption):
             text.addWidget(label)
@@ -347,6 +359,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         self.listing.itemDoubleClicked.connect(lambda _item: self.select_current())
         card.addWidget(self.listing)
         self.status = AutoHideLabel()
+        self.status.setTextFormat(Qt.TextFormat.PlainText)
         card.addWidget(self.status)
         page.addWidget(gallery)
         page.addStretch(1)
@@ -376,7 +389,6 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
     # ------------------------------------------------------------------ liste
 
     def _creator_installed(self, pet_id: str) -> None:
-        self.refresh()
         self._current = pet_id
         self.skin_selected.emit(pet_id)
         self.refresh()
@@ -402,6 +414,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
             self.listing.setCurrentRow(0)
         self.listing.fit_height()
         self._update_buttons()
+        self._update_hero()
 
     def _add_item(
         self, label: str, pet_id: str, name: str, source: str, info: PetInfo | None, tip: str
@@ -413,7 +426,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         item.setData(Qt.ItemDataRole.UserRole, pet_id)
         item.setForeground(QBrush(Qt.GlobalColor.transparent))
         item.setSizeHint(QSize(_CARD_W, _CARD_H))
-        item.setToolTip(tip or name)
+        item.setToolTip(_plain_tip(tip or name))
         if pixmap.isNull():
             item.setText(label + "\nönizleme yok")
         else:
@@ -465,7 +478,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
             if info is None
             else "Masaüstünde seninle duruyor."
         )
-        self.hero_image.setToolTip("" if info is None else info.description)
+        self.hero_image.setToolTip("" if info is None else _plain_tip(info.description))
 
     def _update_buttons(self) -> None:
         pet_id = self._selected_id()
@@ -480,7 +493,6 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         self._show_button(self.delete_button, own)
         self.delete_button.setEnabled(own)
         self._sync_cards()
-        self._update_hero()
 
     # ------------------------------------------------------------- eylemler
 
@@ -489,12 +501,16 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         if pet_id is None:
             return
         self._current = pet_id
+        self._problem_shown = False
         self.skin_selected.emit(pet_id)
         self.refresh()
-        self.status.setText("Pet seçildi.")
+        # Sinyal dinleyicisi show_problem çağırdıysa hata iletisini ezme.
+        if not self._problem_shown:
+            self.status.setText("Pet seçildi.")
 
     def show_problem(self, message: str) -> None:
         """Pencere, pet yüklenemeyip küreye dönünce nedenini burada gösterir."""
+        self._problem_shown = True
         self._current = pet_sprite.ORB
         self.refresh()
         self.status.setText(message)

@@ -8,7 +8,12 @@ from uuid import uuid4
 
 import pytest
 
-from artemis.brain.errors import BudgetExceeded, ProviderError, RetryableProviderError
+from artemis.brain.errors import (
+    BudgetExceeded,
+    ProviderError,
+    RateLimitedError,
+    RetryableProviderError,
+)
 from artemis.brain.models import Completion, Message, Usage
 from artemis.brain.providers import build_provider
 from artemis.brain.router import ProviderRouter
@@ -68,7 +73,7 @@ def settings_for(tmp_path: Path, *, paid: bool = False, budget: str = "1") -> Se
 
 async def test_fallback_cooldown_then_cloud_retry(tmp_path: Path) -> None:
     settings = settings_for(tmp_path)
-    cloud = Responses(RetryableProviderError("Bağlantı yok."), Completion(content="Bulut"))
+    cloud = Responses(RateLimitedError("Hız sınırı."), Completion(content="Bulut"))
     local = Responses(Completion(content="Yerel 1"), Completion(content="Yerel 2"))
     now = [100.0]
     router = ProviderRouter(
@@ -206,7 +211,7 @@ async def test_provider_timeout_uses_remaining_time_for_fallback(tmp_path: Path)
 
     assert result.local_fallback and result.content == "Yedek"
     assert local.timeouts == [pytest.approx(0.02)]
-    assert router._fallback_until > 0
+    assert router._fallback_until == 0
 
 
 async def test_external_cancellation_does_not_start_fallback(tmp_path: Path) -> None:
@@ -289,3 +294,43 @@ def test_build_provider_requires_explicit_model(tmp_path: Path) -> None:
         build_provider(Settings(), AuditLog(tmp_path / "audit.jsonl"))
     settings = settings_for(tmp_path)
     assert isinstance(build_provider(settings, AuditLog(settings.audit_path)), ProviderRouter)
+
+
+async def test_connection_error_does_not_pin_fallback(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    cloud = Responses(RetryableProviderError("Bağlantı yok."), Completion(content="Bulut"))
+    local = Responses(Completion(content="Yerel"), Completion(content="Yerel 2"))
+    now = [100.0]
+    router = ProviderRouter(
+        settings,
+        AuditLog(settings.audit_path),
+        providers={"cloud": cloud, "local": local},
+        clock=lambda: now[0],
+    )
+    first = await router.complete([], [], timeout=10)
+    assert first.local_fallback and first.content == "Yerel"
+    now[0] = 110.0  # fallback_seconds içinde kalsa da bağlantı hatası birincili kilitlemez
+    second = await router.complete([], [], timeout=10)
+    assert not second.local_fallback and second.content == "Bulut"
+    assert len(cloud.timeouts) == 2
+    assert len(local.timeouts) == 1
+
+
+async def test_rate_limit_pins_fallback(tmp_path: Path) -> None:
+    settings = settings_for(tmp_path)
+    cloud = Responses(RateLimitedError("429 hız sınırı"), Completion(content="Bulut"))
+    local = Responses(Completion(content="Yerel 1"), Completion(content="Yerel 2"))
+    now = [100.0]
+    router = ProviderRouter(
+        settings,
+        AuditLog(settings.audit_path),
+        providers={"cloud": cloud, "local": local},
+        clock=lambda: now[0],
+    )
+    first = await router.complete([], [], timeout=10)
+    assert first.local_fallback and first.content == "Yerel 1"
+    now[0] = 110.0
+    second = await router.complete([], [], timeout=10)
+    assert second.local_fallback and second.content == "Yerel 2"
+    assert len(cloud.timeouts) == 1
+    assert len(local.timeouts) == 2

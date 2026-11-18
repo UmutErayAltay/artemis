@@ -178,7 +178,8 @@ class ResearchJobs:
         try:
             self._work(job_id, topic, limit, context)
         except Exception as error:  # noqa: BLE001 - iş parçacığı sınırı
-            with suppress(sqlite3.Error, OSError):
+            # Kilit: `cancel()` ile aynı kilitte sıralanır; durum `cancelling`de kalmaz.
+            with suppress(sqlite3.Error, OSError), self._lock:
                 self._update(
                     job_id,
                     status="error",
@@ -256,6 +257,8 @@ class ResearchJobs:
                 timeout=context.settings.max_seconds + OUTER_GRACE_SECONDS,
             )
         except TimeoutError:
+            # Dış zaman aşımında iş parçacığındaki araç çağrıları da durdurulsun.
+            context.cancelled.set()
             return "timeout", "Süre sınırı doldu; rapor yazılmadı."
         if result.stop_reason == "cancelled":
             return "cancelled", "Araştırma iptal edildi; rapor yazılmadı."

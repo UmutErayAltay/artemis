@@ -100,6 +100,7 @@ class ComputerBackend(Protocol):
     def capture(self, left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]: ...
     def foreground_process(self) -> tuple[str, int]: ...
     def foreground_window(self) -> tuple[int, tuple[int, int, int, int]]: ...
+    def window_rect(self, hwnd: int) -> tuple[int, int, int, int]: ...
     def process_at(self, x: int, y: int) -> tuple[str, int]: ...
     def window_at(self, x: int, y: int) -> int: ...
     def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None: ...
@@ -109,6 +110,8 @@ class ComputerBackend(Protocol):
     def press_keys(self, keys: tuple[str, ...]) -> None: ...
     # Odaktaki denetimin değeri `expected` metnini içeriyor mu; okunamazsa None (ADR 0070).
     def focused_value_contains(self, expected: str, timeout: float) -> bool | None: ...
+    # Odaktaki denetimin UI Automation adı; okunamazsa veya boşsa None (ADR 0078).
+    def focused_name(self, timeout: float) -> str | None: ...
     # Ön plan penceresinin UI Automation öğeleri; okunamazsa boş liste (ADR 0073).
     def ui_elements(self, hwnd: int) -> list[UiElement]: ...
 
@@ -371,6 +374,7 @@ class ComputerSession:
         )
         while True:
             self._elements = {}
+            self._last_used_vision = False
             if self._stop.is_set():
                 return self._result("stopped", "Kullanıcı oturumu durdurdu.")
             if self._steps >= self._config.max_steps:
@@ -391,7 +395,9 @@ class ComputerSession:
             layout = self._layout
             elements_block = ""
             if with_uia:
-                elements = await self._read_elements(layout.window[0] if layout else 0)
+                elements = await self._read_elements(
+                    layout.window[0] if layout else 0, limit=limit
+                )
                 if observation == "hybrid" and not step_images and (
                     not elements or self._last_used_vision
                 ):
@@ -458,7 +464,8 @@ class ComputerSession:
             if action.type == "done":
                 return await self._verify(goal, turn_id, action.text or "", limit)
             if action.type == "ask_user":
-                return self._result("ask_user", action.text or "")
+                # Modelin sorusu ekrandan okunan sırları yankılayabilir; kullanıcıya maskeli gider.
+                return self._result("ask_user", mask_screen_secrets(action.text or ""))
 
             resolved = self._element_point(action) if action.type == "click_element" else None
             signature = _signature(action, resolved if isinstance(resolved, tuple) else None)
@@ -524,15 +531,29 @@ class ComputerSession:
             return f"Öğe {action.element} hiçbir ekranda değil; tıklanmadı"
         return point
 
-    def _destructive_target(
+    async def _destructive_target(
         self, action: Action, point: tuple[int, int] | None, turn_id: str
     ) -> str | None:
         """ADR 0078 kapısı; öğeye, koordinata ya da odaktaki öğeye giden her girdide çalışır.
 
         Öğe: click_element'te seçilen öğe; koordinatlı tıklamada noktayı içeren en küçük öğe
-        (both kipinde UIA listesi vardır); onaylayan tuşta (enter/space) odaktaki öğe. Yalnız
-        ekran görüntüsü kipinde öğe adı yoktur, kapı çalışmaz (ADR 0078 bilinen tavan)."""
+        (both kipinde UIA listesi vardır); onaylayan tuşta (enter/space) ya da odağı tetikleyen
+        yazımda (satır sonu veya yalnız boşluk) odaktaki öğe. Öğe listesi boşsa (screen kipi
+        veya boş UIA sonucu) odaktaki öğenin adı `focused_name` ile okunur; okunamazsa adım
+        engellenmez ancak `computer_focus_unreadable` denetime yazılır."""
         element: UiElement | None = None
+        typed_text = action.text or ""
+        activates_focused = (
+            action.type == "key"
+            and bool(set(parse_keys(action.keys or "")) & {"enter", "space"})
+        ) or (
+            action.type == "type"
+            and (
+                "\r" in typed_text
+                or "\n" in typed_text
+                or (bool(typed_text) and typed_text.isspace())
+            )
+        )
         if action.type == "click_element":
             element = self._elements.get(action.element or 0)
         elif action.type in _POINTER_ACTIONS and point is not None:
@@ -550,8 +571,31 @@ class ComputerSession:
             from artemis.computer.windows import UiElement as _Key
 
             element = _Key(0, "Key", "Sil", (0, 0, 0, 0), interactive=True, focused=False)
-        elif action.type == "key" and set(parse_keys(action.keys or "")) & {"enter", "space"}:
-            element = next((item for item in self._elements.values() if item.focused), None)
+        elif activates_focused:
+            if not self._elements:
+                # screen kipinde veya boş UIA sonucunda öğe listesi yoktur: yine de odak
+                # adı UIA'dan okunup yıkıcı öğeye basılmasını engeller (ADR 0078).
+                try:
+                    focus_name = await asyncio.to_thread(self._backend.focused_name, 3.0)
+                except (OSError, RuntimeError):
+                    focus_name = None
+                if not focus_name:
+                    self._audit.emit("computer_focus_unreadable", turn_id=turn_id)
+                    return None
+                from artemis.computer.windows import UiElement as _Focus
+
+                element = _Focus(
+                    0, "Focus", focus_name, (0, 0, 0, 0), interactive=True, focused=True
+                )
+            else:
+                element = next((item for item in self._elements.values() if item.focused), None)
+                if element is None and self._last_used_vision:
+                    # OCR öğelerinde odak bilgisi yoktur (focused=False): enter/boşluk veya satır
+                    # sonu yazımı farkında olmadan yıkıcı bir denetimi etkinleştirebilir.
+                    return (
+                        "Odaktaki öğe bilinmiyor (görsel öğe listesi); "
+                        "enter/boşluk yerine hedef öğeye click_element ile tıkla."
+                    )
         if element is None:
             return None
         safe_name = mask_screen_secrets(_LIST_SYNTAX.sub(" ", element.name))
@@ -600,8 +644,13 @@ class ComputerSession:
         kind = " ".join(_LIST_SYNTAX.sub(" ", element.kind).split())[:40]
         return f'{kind} "{name}"'
 
-    async def _read_vision_elements(self, hwnd: int, start_id: int) -> list[UiElement]:
+    async def _read_vision_elements(
+        self, hwnd: int, start_id: int, *, limit: float
+    ) -> list[UiElement]:
         """UIA yetersiz kaldığında Windows OCR ile görsel öğe listesi çıkarır."""
+        # Süre dolduysa veya Esc basıldıysa engelleyici thread işi başlatılmaz.
+        if self._stop.is_set() or self._clock() >= limit:
+            return []
         reader = getattr(self._backend, "vision_elements", None)
         try:
             if reader is not None:
@@ -612,9 +661,12 @@ class ComputerSession:
         except (OSError, RuntimeError, ValueError):
             return []
 
-    async def _read_elements(self, hwnd: int) -> list[UiElement]:
+    async def _read_elements(self, hwnd: int, *, limit: float) -> list[UiElement]:
         """Ön plan penceresinin UIA öğelerini okur; azsa görsel OCR öğeleriyle tamamlar."""
         if hwnd <= 0:
+            return []
+        # Süre dolduysa veya Esc basıldıysa UIA/OCR okuma iş parçacığı başlatılmaz.
+        if self._stop.is_set() or self._clock() >= limit:
             return []
         reader = getattr(self._backend, "ui_elements", None)
         elements: list[UiElement] = []
@@ -626,7 +678,9 @@ class ComputerSession:
         self._last_used_vision = False
         interactive_count = sum(1 for item in elements if item.interactive)
         if interactive_count < _MIN_INTERACTIVE_UIA:
-            visual = await self._read_vision_elements(hwnd, start_id=len(elements) + 1)
+            visual = await self._read_vision_elements(
+                hwnd, start_id=len(elements) + 1, limit=limit
+            )
             if visual:
                 self._last_used_vision = True
                 self._audit.emit(
@@ -708,8 +762,10 @@ class ComputerSession:
                 re_captured: SessionResult | None = None
                 if observation == "hybrid":
                     hwnd = self._layout.window[0] if self._layout else 0
-                    elements_list = await self._read_elements(hwnd)
-                    if not elements_list:
+                    elements_list = await self._read_elements(hwnd, limit=limit)
+                    # OCR fallback kullanıldıysa (_last_used_vision) UIA yetersizdi; doğrulama
+                    # _loop gibi taze ekran görüntüsünü de eklemelidir.
+                    if not elements_list or self._last_used_vision:
                         with_images = True
                         re_shot = await self._capture(limit, with_images=True)
                         if isinstance(re_shot, SessionResult):
@@ -723,7 +779,7 @@ class ComputerSession:
                     if observation in ("both", "hybrid"):
                         if elements_list is None:
                             hwnd = self._layout.window[0] if self._layout else 0
-                            elements_list = await self._read_elements(hwnd)
+                            elements_list = await self._read_elements(hwnd, limit=limit)
                         elements_block = "\n" + _render_elements(elements_list)
                     messages = [
                         Message(role="system", content=VERIFY_PROMPT),
@@ -744,8 +800,11 @@ class ComputerSession:
                         ),
                     ]
                 else:
-                    hwnd = self._layout.window[0] if self._layout else 0
-                    elements = await self._read_elements(hwnd)
+                    if elements_list is None:
+                        hwnd = self._layout.window[0] if self._layout else 0
+                        elements = await self._read_elements(hwnd, limit=limit)
+                    else:
+                        elements = elements_list
                     messages = [
                         Message(role="system", content=VERIFY_PROMPT_UIA),
                         Message(
@@ -890,7 +949,7 @@ class ComputerSession:
                 key_blocked = key_block_reason(parse_keys(action.keys or ""))
                 if key_blocked:
                     return key_blocked
-            destructive = self._destructive_target(action, point, turn_id)
+            destructive = await self._destructive_target(action, point, turn_id)
             if destructive is not None:
                 return destructive
             blocked, window, target_id = await self._target(target_kind, point)
@@ -928,7 +987,8 @@ class ComputerSession:
                     ),
                     "metin": action.text,
                     "tuslar": action.keys,
-                    "gerekce": action.reason,
+                    # Model gerekçesi ekrandaki sırları yankılayabilir; onayda maskelenir.
+                    "gerekce": mask_screen_secrets(action.reason),
                     "pencere": window,
                 },
             )
@@ -947,8 +1007,8 @@ class ComputerSession:
             return self._result("timeout", "Oturum süresi doldu.")
         if action.type != "wait":
             # Onay penceresi odağı kendisi değiştirir; onaylı adımda yakalama anındaki ön plan
-            # karşılaştırması atlanır. Bunun yerine hedef, onaylanan pencere kimliğine bağlıdır
-            # (yukarıda ve gönderimden hemen önce denetlenir); monitör düzeni yine denetlenir.
+            # karşılaştırması atlanır. Bunun yerine hedef, onaylanan pencere kimliğine ve
+            # dikdörtgenine bağlıdır; monitör düzeni yine denetlenir.
             stale = await self._stale_reason(layout, check_window=approved is not True)
             if stale:
                 return stale
@@ -985,12 +1045,14 @@ class ComputerSession:
         elif action.type != "wait":
             self._last_typed = None  # UIA yalnız yazımın hemen ardından anlamlı
         self._steps += 1
+        # Model gerekçesi ekrandan gelen sır içerebilir; bellek ve denetimde maskelenir.
+        masked_reason = mask_screen_secrets(action.reason)
         self._memory.add(
             StepRecord(
                 n=self._steps,
                 action=action.type,
                 target=_describe(action),
-                reason=action.reason,
+                reason=masked_reason,
                 window=window,
                 signature=_signature(action, point),
             )
@@ -1007,7 +1069,7 @@ class ComputerSession:
             keys=action.keys,
             # Yazılan metin parola olabilir: yalnız uzunluk loglanır.
             text_length=len(action.text or "") if action.type == "type" else None,
-            reason=action.reason,
+            reason=masked_reason,
             sensitive=sensitive,
             approved=approved,
             auto_approved=auto_approved,
@@ -1032,13 +1094,26 @@ class ComputerSession:
             return _Stale("Ekran düzeni doğrulanamadı")
         try:
             monitors = await asyncio.to_thread(self._backend.monitors)
-            window = await asyncio.to_thread(self._backend.foreground_window)
+            window = (
+                await asyncio.to_thread(self._backend.foreground_window)
+                if check_window
+                else None
+            )
+            # Onay diyalogu odağı çaldığı için kimlik değişimi atlanır; ancak aynı pencere
+            # onay sırasında taşınmış/boyutlanmışsa koordinatlar eskimiş demektir.
+            current_rect = (
+                None
+                if check_window
+                else await asyncio.to_thread(self._backend.window_rect, layout.window[0])
+            )
         except (OSError, RuntimeError) as error:
             return _Stale(f"Ekran düzeni okunamadı ({error})")
         if monitors != layout.monitors:
             return _Stale("Ekran düzeni değişti")
         if check_window and window != layout.window:
             return _Stale("Ön plandaki pencere değişti veya taşındı")
+        if not check_window and current_rect != layout.window[1]:
+            return _Stale("Hedef pencere onay sırasında taşındı veya boyutu değişti")
         return None
 
     def _holder(self, action_type: str, point: tuple[int, int] | None) -> tuple[str, int]:

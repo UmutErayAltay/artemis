@@ -29,6 +29,7 @@ from PySide6.QtWidgets import QApplication
 from artemis.channels.desktop import telegram_section as section_module
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.telegram_section import (
+    TelegramJob,
     TelegramSection,
     match_pairing,
     pair_chat,
@@ -173,6 +174,13 @@ def test_match_ignores_everything_else(update: dict) -> None:
     assert match_pairing(update, CODE) is None
 
 
+def test_match_ignores_non_ascii_text_without_raising() -> None:
+    non_ascii = make_message(1, "merhaba ş", from_id=OTHER_ID, chat_id=OTHER_ID)
+    assert match_pairing(non_ascii, CODE) is None
+    valid = make_message(2, CODE, from_id=OTHER_ID, chat_id=OTHER_ID)
+    assert match_pairing(valid, CODE) == OTHER_ID
+
+
 def test_pair_chat_skips_noise_confirms_offset_and_returns_chat(
     fake: FakeTelegram, tmp_path: Path
 ) -> None:
@@ -283,6 +291,34 @@ def test_vault_failure_points_to_env_var(
     settle(panel)
     assert "ARTEMIS_TELEGRAM_BOT_TOKEN" in panel.message.text()
     assert FAKE_TOKEN not in panel.message.text() and store == {}
+    panel.deleteLater()
+
+
+def test_unexpected_job_exception_yields_telegram_error_and_does_not_save_token(
+    store: dict[str, str],
+    fake: FakeTelegram,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    writes: list[tuple[str, str]] = []
+    monkeypatch.setattr(section_module, "write_secret", lambda s, t: writes.append((s, t)))
+    panel = section(make_config(tmp_path, fake))
+    secret = "999:unexpected-secret-token"
+
+    def failing_job(_thread: TelegramJob) -> object:
+        raise ValueError(secret)
+
+    job = TelegramJob(failing_job, panel)
+    job.run()
+    assert isinstance(job.result, TelegramError)
+    assert job.result.error_type == "ValueError"
+    assert secret not in str(job.result)
+    loaded = panel._config()
+    assert loaded is not None
+    panel._token_checked(secret, loaded[0], job.result)
+    assert writes == [] and store == {}
+    assert secret not in panel.message.text()
+    assert "ValueError" in panel.message.text()
     panel.deleteLater()
 
 
@@ -446,4 +482,20 @@ def test_panel_no_longer_says_two_way_channel_needs_separate_process(
     panel = section(make_config(tmp_path, fake))
     assert "bu panel onu başlatmaz" not in panel.hint.text()
     assert "çakışma" in panel.hint.text()
+    panel.deleteLater()
+
+
+@pytest.mark.parametrize("result", [None, 42, ""])
+def test_token_checked_never_saves_token_for_non_string_result(
+    store: dict[str, str], fake: FakeTelegram, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    result: object,
+) -> None:
+    # İş parçacığı beklenmedik biçimde bitse de doğrulanmamış token kasaya yazılmaz.
+    writes: list[tuple[str, str]] = []
+    monkeypatch.setattr(section_module, "write_secret", lambda s, t: writes.append((s, t)))
+    panel = section(make_config(tmp_path, fake))
+    loaded = panel._config()
+    assert loaded is not None
+    panel._token_checked("999:token", loaded[0], result)
+    assert writes == [] and store == {}
     panel.deleteLater()

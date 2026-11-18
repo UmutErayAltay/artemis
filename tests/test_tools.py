@@ -558,6 +558,19 @@ async def test_open_notepad_file_rejects_workspace_escape(tool_context: ToolCont
     assert desktop.opened == []
 
 
+@pytest.mark.parametrize("name", ["run.py", "x.vbs", "y.ps1", "z.bat", "a.exe"])
+async def test_open_application_refuses_non_text_document(
+    tool_context: ToolContext, name: str
+) -> None:
+    # file_path yalnız metin dosyası içindir: betik bir yorumlayıcıya "açtırılıp" çalıştırılamaz.
+    desktop = FakeDesktop()
+    tool_context.services["desktop"] = desktop
+    (tool_context.workspace / name).write_text("print(1)", encoding="utf-8")
+    result = await invoke(tool_context, "open_application", name="notepad", file_path=name)
+    assert not result.success
+    assert desktop.opened == []
+
+
 def test_worker_document_arguments_are_explicit_and_extra_fields_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

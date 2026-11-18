@@ -27,6 +27,7 @@ from artemis.tools.plugins.code_agent import (
     CodeAgentAnswer,
     CodeAgentCancel,
     CodeAgentPrepare,
+    CodeAgentStart,
     CodeAgentStatus,
     PrepareArguments,
     StartArguments,
@@ -563,3 +564,70 @@ def test_start_schema_rejects_id_only_or_hidden_authority() -> None:
         StartArguments.model_validate({"spec_id": str(uuid.uuid4())})
     with pytest.raises(ValidationError):
         StartArguments(project="proj", task="task", authority_boundary="safe")
+
+
+async def test_code_agent_start_runs_blocking_start_off_event_loop(
+    tmp_path: Path, repo: Path
+) -> None:
+    class FakeJobs(CodeAgentJobs):
+        def __init__(self) -> None:
+            self._audit = AuditLog(tmp_path / "audit.jsonl")
+            self.start_thread_id: int | None = None
+
+        def start(self, *args: Any, **kwargs: Any) -> str:
+            self.start_thread_id = threading.get_ident()
+            return "fakejob00001"
+
+        def status(self) -> list[dict[str, Any]]:
+            return [{"job_id": "fakejob00001", "base": "deadbeef"}]
+
+    fake_jobs = FakeJobs()
+    loop_thread_id = threading.get_ident()
+    args = StartArguments(project="proj", task="Görev")
+    result = await CodeAgentStart().execute(args, context(tmp_path, repo, fake_jobs))
+    assert result.status == "sent"
+    assert fake_jobs.start_thread_id is not None
+    assert fake_jobs.start_thread_id != loop_thread_id
+
+
+async def test_prepare_finds_auto_discovered_project_without_status_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repos_dir = tmp_path / "repos"
+    auto_proj = repos_dir / "auto-proj"
+    auto_proj.mkdir(parents=True)
+    discovered_calls: list[tuple[str, Path]] = []
+
+    def fake_discover(owner: str, root: Path) -> dict[str, Path]:
+        discovered_calls.append((owner, root))
+        return {"auto-proj": auto_proj}
+
+    monkeypatch.setattr("artemis.tools.plugins.code_agent.discover_projects", fake_discover)
+    jobs, factory = make_jobs(tmp_path, reply())
+    tool_context = ToolContext(
+        workspace=tmp_path,
+        settings=Settings(
+            code_agent=CodeAgentConfig(
+                github_owner="owner",
+                repos_dir=repos_dir,
+                command=sys.executable,
+            )
+        ),
+        audit=jobs._audit,
+        services={"code_agent_jobs": jobs},
+    )
+    args = PrepareArguments(
+        project="auto-proj",
+        task="Görev",
+        scope=("Dosya ekle",),
+        acceptance=("Test geçer",),
+    )
+    result = await CodeAgentPrepare().execute(args, tool_context)
+    jobs.shutdown()
+    assert result.success is True
+    assert "İzinli proje bulunamadı" not in result.message
+    spec = ProjectSpec.model_validate(result.data["spec"])
+    assert spec.project == "auto-proj"
+    assert spec.repo_path == str(auto_proj.resolve())
+    assert discovered_calls == [("owner", repos_dir)]
+    assert factory.calls == []

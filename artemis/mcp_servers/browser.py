@@ -27,7 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Protocol
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -277,10 +277,22 @@ class PlaywrightBackend:
         context = browser.new_context(accept_downloads=False, service_workers="block")
         try:
             def guard(route: Any) -> None:
-                if allow(route.request.url):
-                    route.continue_()
-                else:
+                if not allow(route.request.url):
                     route.abort()
+                    return
+                try:
+                    # `route.continue_()` yönlendirme zincirinin devamını yakalamaz; her adımı
+                    # ayrı denetlemek için istek yönlendirme izlemeden elle getirilir.
+                    response = route.fetch(max_redirects=0)
+                except playwright_error:
+                    route.abort()
+                    return
+                if 300 <= response.status < 400:
+                    location = response.headers.get("location")
+                    if location and not allow(urljoin(route.request.url, location)):
+                        route.abort()
+                        return
+                route.fulfill(response=response)
 
             def guard_socket(socket: Any) -> None:
                 # `route` WebSocket'leri yakalamaz: ws://127.0.0.1 ayrıca denetlenmeli.

@@ -144,9 +144,15 @@ class EchoReference:
                     # Çalma arasında boşluk olduysa (cevaplar arası) zaman çizelgesi
                     # sessizlikle doldurulur; ardışık bloklar ise bitişik kalır.
                     end = self._start + len(self._buffer) // 2 / self._target_rate
-                    gap = int((now - end) * self._target_rate)
+                    gap = round((now - end) * self._target_rate)
                     if gap > self._target_rate * _RESYNC_MS // 1000:
-                        self._buffer.extend(bytes(min(gap, self._max_samples) * 2))
+                        padded = min(gap, self._max_samples)
+                        self._buffer.extend(bytes(padded * 2))
+                        # Tampona sığmayan sessizlik atlanır; başlangıç saati ilerletilmezse
+                        # yeni ses gerçek yakalama zamanından erken konumlanır.
+                        skipped = gap - padded
+                        if skipped:
+                            self._start += skipped / self._target_rate
                 self._buffer.extend(converted)
                 max_bytes = self._max_samples * 2
                 overflow = len(self._buffer) - max_bytes
@@ -407,6 +413,10 @@ class EchoCancelledMicrophone:
             if self._passthrough:
                 return
             self._passthrough = True
+            # Geçiş kalıcı olduğu için yerel iptalciyi bırak; aksi halde oturum boyu
+            # bellekte kalır ve discard_pending() üzerinde hâlâ reset() çağrılır.
+            self._canceller = None
+            self._canceller_rate = None
 
         logger.warning(
             "Yankı iptali çalışma anında başarısız oldu (%s); bu oturumda kapatıldı, "

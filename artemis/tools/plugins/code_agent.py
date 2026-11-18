@@ -8,7 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from artemis.config.settings import OWN_REPO_ALIAS, CodeAgentConfig, ConfigChoiceError
 from artemis.safety.paths import safe_join
-from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.code_agent_backends import resolve_executable, visible_supported
 from artemis.tools.code_agent_jobs import CodeAgentError, CodeAgentJobs
 from artemis.tools.github_repos import discover_projects
@@ -133,10 +133,11 @@ class CodeAgentPrepare(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(PrepareArguments, arguments)
         jobs = _jobs(context)
-        # Hazırlama subprocess çalıştırmaz; keşif status turunun yerel snapshot'ıdır.
+        # Hazırlama subprocess çalıştırmaz; status çağrısı beklenmeden keşfedilen projeler de
+        # bulunsun (salt yerel klasör taraması).
         known = {
             **context.services.get("code_agent_project_paths", {}),
-            **context.settings.code_agent.projects,
+            **available_projects(context.settings.code_agent),
         }
         if jobs is None or args.project not in known:
             return ToolResult(message="İzinli proje bulunamadı; taslak hazırlanmadı.")
@@ -279,7 +280,8 @@ class CodeAgentStart(BaseTool):
             )
         entry = config.project_entries.get(alias)
         try:
-            job_id = jobs.start(
+            job_id = await run_blocking(
+                jobs.start,
                 alias,
                 path,
                 task,

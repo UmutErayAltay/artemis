@@ -18,7 +18,7 @@ Small) aynı diff ile karne yazdırıldı; bulgular kodda yeniden doğrulandı, 
 | Delete/Shift+Delete/Ctrl+D yıkıcı kapıdan geçmiyordu; seçili dosya onaysız silinebiliyordu (doğrulanmış hata) | bu tur | geçti (`test_strict_rules.py`) | bekliyor |
 | `space`/`delete` `repeat` ile 20 kez basılabiliyordu; kapı yalnız ilk basışı görüyordu (doğrulanmış hata) | bu tur | geçti | — |
 | Hedefte "silme"/"silmeden" kapıyı açıyordu; "veriyi sil" hedefi "Hesabı ve veriyi sil"i açıyordu (doğrulanmış hata) | bu tur | geçti | — |
-| Oyun modu bulut hedefi, Small yokken "Artemis"ten önceki her sesi buluta yolluyordu (doğrulanmış gizlilik hatası) | bu tur | geçti (`test_game_mode_cloud_without_small_keeps_audio_local`) | canlı mikrofon bekliyor |
+| Oyun modu bulut hedefi, Small yokken "Artemis"ten önceki her sesi buluta yolluyordu (doğrulanmış gizlilik hatası) | bu tur | geçti (`test_game_mode_cloud_without_small_keeps_audio_local`) | geçti 2026-11-18 (Umut, gerçek oyun: tam ekran algılandı, large-v3 bırakıldı → small CPU + bulut large-v3, Görev Yöneticisi'nde GPU kullanımı düştü, çıkışta large-v3 geri yüklendi). Bildirimdeki hash, düzeltmeden önce açılmış süreçten |
 | Bilgisayarda tehlikeli hata yapan model "Düzeni uygula" ile beyin yapılınca boş `computer_use.model` yüzünden ekranı yine o sürüyordu (doğrulanmış hata) | bu tur | geçti (`test_model_testi.py`) | — |
 | OCR yedeğinin ilk (soğuk) çağrısı 6,0 sn, zaman aşımı 5 sn: her oturumun ilk OCR'ı boş dönüyordu (ölçüldü 2026-11-17: soğuk 6,03 sn, sıcak 1,07 sn) | bu tur (12 sn) | — | geçti 2026-11-17 (ölçüm betiği, gerçek pencere, 128 öğe) |
 | OCR çıktısında `null` koordinat oturumu `TypeError` ile çökertebiliyordu | bu tur | geçti | — |

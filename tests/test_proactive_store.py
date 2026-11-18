@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import concurrent.futures
+import sqlite3
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -359,3 +360,19 @@ def test_delivery_history_and_retry_keep_original_and_privacy(tmp_path):
     with pytest.raises(ProactiveStoreError, match='zaten'):
         store.retry_reminder(old.id, now)
     assert len(store.list_reminders()) == 2
+
+
+def test_finished_counts_between_preserves_sqlite_cause(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = ProactiveStore(tmp_path / "proactive.sqlite3")
+
+    def fail_connect() -> object:
+        raise sqlite3.OperationalError("boom")
+
+    monkeypatch.setattr(store, "_connect", fail_connect)
+    start = _aware_now() - timedelta(hours=1)
+    end = _aware_now()
+    with pytest.raises(ProactiveStoreError) as excinfo:
+        store.finished_counts_between(start, end, "trigger")
+    assert isinstance(excinfo.value.__cause__, sqlite3.OperationalError)

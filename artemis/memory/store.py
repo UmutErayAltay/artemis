@@ -163,6 +163,16 @@ def _now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
+def _scrub_residue(path: Path) -> None:
+    # DELETE yalnız satırı işaretler: metin WAL'da ve boş sayfalarda kalır. Kullanıcı
+    # "sil" dediğinde dosyada okunabilir iz bırakmamak için WAL ana dosyaya işlenip
+    # kesilir, dosya VACUUM ile yeniden yazılır. (SSD/yedek kopyalarını kapsamaz.)
+    with closing(sqlite3.connect(path, timeout=5)) as db:
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        db.execute("VACUUM")
+        db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+
+
 class MemoryStore:
     def __init__(self, path: Path, protector: Protector | None = None) -> None:
         self.path = path
@@ -207,6 +217,7 @@ class MemoryStore:
             db.execute("UPDATE history_policy SET retention_days = ? WHERE id = 1", (days,))
             pruned = self._prune(db, days)
         if pruned:
+            _scrub_residue(self.path)
             purge_backups(self.path)
         return pruned
 
@@ -224,21 +235,16 @@ class MemoryStore:
             ]
             pruned = self._prune(db, days)
         if pruned:
+            _scrub_residue(self.path)
             purge_backups(self.path)
         return pruned
 
     def delete_history(self) -> int:
         # Tek transaction: notlara dokunma; sıfırlama işaretleri artık gereksizdir.
-        with self._connect() as db:
-            with db:
-                count = db.execute("DELETE FROM turns").rowcount
-                db.execute("DELETE FROM resets")
-            # DELETE yalnız satırı işaretler: metin WAL'da ve boş sayfalarda kalır. Kullanıcı
-            # "sil" dediğinde dosyada okunabilir iz bırakmamak için WAL ana dosyaya işlenip
-            # kesilir, dosya VACUUM ile yeniden yazılır. (SSD/yedek kopyalarını kapsamaz.)
-            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-            db.execute("VACUUM")
-            db.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        with self._connect() as db, db:
+            count = db.execute("DELETE FROM turns").rowcount
+            db.execute("DELETE FROM resets")
+        _scrub_residue(self.path)
         purge_backups(self.path)  # başarısız geçişten kalan yedek silineni saklamasın
         return count
 
@@ -325,36 +331,53 @@ class MemoryStore:
                 " FROM turns ORDER BY id DESC LIMIT ?",
                 (_SEARCH_SCAN_TURNS,),
             ).fetchall()
-        decoded: list[tuple[str, str, str, str, bool, bool]] = []
+        # Önce yalnız arama metni çözülür; eşleşmeyen satırlar için DPAPI çağrısı yapılmaz.
+        candidates: list[tuple[int, str, str, str, str, bool, bool]] = []
         for row_id, created_at, user_text, answer, search_text, answer_private, tainted in rows:
             try:
-                plain_user = self._protector.unprotect(user_text)
-                plain_answer = self._protector.unprotect(answer)
                 plain_search = self._protector.unprotect(search_text)
             except UnreadableMemory as error:
                 self._log_unreadable("turns", int(row_id), error)
                 continue
-            decoded.append(
+            candidates.append(
                 (
+                    int(row_id),
                     created_at,
-                    plain_user,
-                    plain_answer,
+                    user_text,
+                    answer,
                     plain_search,
                     bool(answer_private),
                     bool(tainted),
                 )
             )
-        counts = [Counter(tokenize(row[3])) for row in decoded]
+        counts = [Counter(tokenize(row[4])) for row in candidates]
         frequency = {term: sum(1 for c in counts if c[term]) for term in terms}
-        total = len(decoded)
+        total = len(candidates)
         weights = {
             term: math.log(1 + (total - df + 0.5) / (df + 0.5)) for term, df in frequency.items()
         }
         hits: list[TurnHit] = []
-        for row, count in zip(decoded, counts, strict=True):
+        for row, count in zip(candidates, counts, strict=True):
             score = sum((1 + math.log(count[t])) * weights[t] for t in terms if count[t])
-            if score > 0:
-                hits.append(TurnHit(row[0], row[1], row[2], row[4], row[5], score))
+            if score <= 0:
+                continue
+            row_id, created_at, user_text, answer, _plain_search, answer_private, tainted = row
+            try:
+                plain_user = self._protector.unprotect(user_text)
+                plain_answer = self._protector.unprotect(answer)
+            except UnreadableMemory as error:
+                self._log_unreadable("turns", row_id, error)
+                continue
+            hits.append(
+                TurnHit(
+                    created_at,
+                    plain_user,
+                    plain_answer,
+                    answer_private,
+                    tainted,
+                    score,
+                )
+            )
         hits.sort(key=lambda hit: -hit.score)  # kararlı sıralama: eşitlikte yeni tur önde
         return hits[:limit]
 
@@ -385,18 +408,22 @@ class MemoryStore:
         yalnız artar, temiz bir tekrar onu düşürmez (ADR 0056)."""
         folded = turkish_fold(text)
         with self._connect() as db, db:
+            # SELECT ve INSERT tek yazma kilidinde kalsın: eşzamanlı çağrılar sınırı aşmasın.
+            db.execute("BEGIN IMMEDIATE")
             rows = db.execute("SELECT id, text FROM notes").fetchall()
+            readable_count = 0
             for note_id, existing in rows:
                 try:
                     plain_existing = self._protector.unprotect(existing)
                 except UnreadableMemory as error:
                     self._log_unreadable("notes", int(note_id), error)
                     continue
+                readable_count += 1
                 if turkish_fold(plain_existing) == folded:
                     if private:
                         db.execute("UPDATE notes SET private = 1 WHERE id = ?", (note_id,))
                     return "duplicate", note_id
-            if len(rows) >= max_notes:
+            if readable_count >= max_notes:
                 return "full", None
             cursor = db.execute(
                 "INSERT INTO notes (text, created_at, turn_id, private) VALUES (?,?,?,?)",
@@ -408,5 +435,6 @@ class MemoryStore:
         with self._connect() as db, db:
             deleted = db.execute("DELETE FROM notes WHERE id = ?", (note_id,)).rowcount > 0
         if deleted:
+            _scrub_residue(self.path)
             purge_backups(self.path)
         return deleted

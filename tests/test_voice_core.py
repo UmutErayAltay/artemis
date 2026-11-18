@@ -3,6 +3,7 @@
 import asyncio
 import math
 from time import monotonic
+from types import SimpleNamespace
 
 import pytest
 
@@ -818,9 +819,14 @@ async def test_continuous_wake_alone_still_acknowledges():
 
 
 @pytest.mark.parametrize("phrase", [
-    "kesintisiz moda geç", "Kesintisiz modu aç", "Artemis, kesintisiz mod aç",
-    "SÜREKLİ DİNLE", "artemis sürekli dinle", "Artemis, kesintisiz sohbete geç.",
-    "kesintisiz sohbet modunu başlat", "Gezintisiz sohbet moduna geç bakayım.",
+    "Artemis, kesintisiz moda geç",
+    "Artemis, Kesintisiz modu aç",
+    "Artemis, kesintisiz mod aç",
+    "Artemis, SÜREKLİ DİNLE",
+    "artemis sürekli dinle",
+    "Artemis, kesintisiz sohbete geç.",
+    "Artemis, kesintisiz sohbet modunu başlat",
+    "Artemis, Gezintisiz sohbet moduna geç bakayım.",
 ])
 async def test_voice_toggle_enables_locally_with_spoken_confirmation(phrase):
     controller, runner, _, states = _continuous([phrase], continuous=False)
@@ -848,6 +854,95 @@ async def test_voice_toggle_disables_locally_with_spoken_confirmation(phrase):
         assert "mode:off" in states
     finally:
         await controller.close()
+
+
+async def test_voice_toggle_on_requires_wake_or_open_followup():
+    bare, runner_bare, _, states_bare = _continuous(["kesintisiz moda geç"], continuous=False)
+    awaiting, runner_awaiting, _, _ = _continuous(["kesintisiz moda geç"], continuous=False)
+    window, runner_window, _, _ = _continuous(["kesintisiz moda geç"], continuous=False)
+    off, runner_off, _, states_off = _continuous(["kesintisiz modu kapat"], continuous=True)
+    try:
+        await _say(bare)
+        assert bare.continuous is False
+        assert bare._spoken_text == ""
+        assert runner_bare.commands == []
+        assert "mode:on" not in states_bare
+
+        awaiting._awaiting_followup = True
+        await _say(awaiting)
+        assert awaiting.continuous is True
+        assert awaiting._spoken_text == "Kesintisiz mod açık."
+        assert runner_awaiting.commands == []
+
+        window._followup_until = 105.0
+        await _say(window)
+        assert window.continuous is True
+        assert window._spoken_text == "Kesintisiz mod açık."
+        assert runner_window.commands == []
+
+        await _say(off)
+        assert off.continuous is False
+        assert off._spoken_text == "Kesintisiz mod kapalı."
+        assert runner_off.commands == []
+        assert "mode:off" in states_off
+    finally:
+        await bare.close()
+        await awaiting.close()
+        await window.close()
+        await off.close()
+
+
+async def test_wake_command_clears_awaiting_followup_so_run_does_not_emit_listening_while_busy():
+    now = [10.0]
+    states: list[str] = []
+    thinking_started = asyncio.Event()
+    allow_reply = asyncio.Event()
+    checked = asyncio.Event()
+
+    class SlowRunner(FakeRunner):
+        async def run(self, text):
+            thinking_started.set()
+            await allow_reply.wait()
+            return await super().run(text)
+
+    class SlowRecognizer(FakeRecognizer):
+        async def transcribe(self, pcm):
+            # STT sürerken takip penceresi kapanmış olsun.
+            now[0] = 11.0
+            return await super().transcribe(pcm)
+
+    class Mic(FakeMic):
+        async def frames(self):
+            for _ in range(7):
+                yield AudioFrame(b"\x00\x00", now[0])
+            await thinking_started.wait()
+            yield AudioFrame(b"\x00\x00", now[0])
+            yield AudioFrame(b"\x00\x00", now[0])
+            checked.set()
+            await asyncio.Future()
+
+    controller = VoiceController(
+        SlowRunner(),
+        VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100),
+        Mic(),
+        FakeVAD([True, True, False, False, False, False, False]),
+        SlowRecognizer(["Artemis saat kaç"]),
+        FakeTTS(),
+        FakeSink(),
+        clock=lambda: now[0],
+        on_state=states.append,
+    )
+    controller._awaiting_followup = True
+    controller._followup_until = 10.5
+    listening = asyncio.create_task(controller.run())
+    try:
+        await asyncio.wait_for(checked.wait(), 1)
+        assert states == ["listening", "thinking"]
+        assert not controller._awaiting_followup
+    finally:
+        allow_reply.set()
+        controller.request_stop()
+        await asyncio.wait_for(listening, 1)
 
 
 async def test_toggle_phrase_inside_longer_sentence_is_a_normal_command():
@@ -1067,3 +1162,347 @@ def test_custom_name_is_independent_from_artemis_brand(wake: str) -> None:
     assert find_wake_word(f"{wake} tarayıcı aç", wake) == (0, len(wake))
     assert find_wake_word("Artemis tarayıcı aç", wake) is None
     assert find_wake_word("Alim tarayıcı aç", "Ali") is None
+
+
+class _RecordingAudit:
+    def __init__(self) -> None:
+        self.records: list[tuple[str, dict[str, object]]] = []
+
+    def emit(self, event: str, **fields: object) -> None:
+        self.records.append((event, fields))
+
+
+class _RecordingTTS:
+    def __init__(self, chunk: bytes = b"\x01\x00", *, emit_allowed: bool = False,
+                 audit: _RecordingAudit | None = None) -> None:
+        self.calls: list[str] = []
+        self.chunk = chunk
+        self.emit_allowed = emit_allowed
+        self.audit = audit
+        self.closed = False
+
+    async def stream(self, text: str, _cancelled: asyncio.Event):
+        self.calls.append(text)
+        if self.emit_allowed and self.audit is not None:
+            self.audit.emit("cloud_tts_transfer", service="cloud", allowed=True)
+        yield PCMChunk(self.chunk)
+
+    async def close(self) -> None:
+        self.closed = True
+
+
+async def test_private_answer_with_remote_and_local_tts_uses_local_only() -> None:
+    audit = _RecordingAudit()
+    remote = _RecordingTTS(b"\x01\x00", emit_allowed=True, audit=audit)
+    local = _RecordingTTS(b"\x02\x00")
+    sink = FakeSink()
+
+    async def run_command(_text: str):
+        return SimpleNamespace(
+            text="Gizli cevap",
+            stop_reason="completed",
+            turn_id="t1",
+            phases=(),
+            tool_calls=[],
+            record=SimpleNamespace(answer_private=True),
+        )
+
+    controller = VoiceController(
+        FakeRunner(),
+        VoiceConfig(tts_backend="cloud"),
+        FakeMic(),
+        FakeVAD([]),
+        FakeRecognizer([]),
+        remote,
+        sink,
+        run_command=run_command,
+        local_synthesizer=local,
+        audit=audit,  # type: ignore[arg-type]
+    )
+    try:
+        await controller._run_and_speak("oku")
+        assert remote.calls == []
+        assert local.calls == ["Gizli cevap"]
+        assert sink.chunks == [b"\x02\x00"]
+        assert len(audit.records) == 1
+        event, fields = audit.records[0]
+        assert event == "cloud_tts_transfer"
+        assert fields["allowed"] is False and fields["reason"] == "private"
+        assert not any(f.get("allowed") is True for _, f in audit.records)
+    finally:
+        await controller.close()
+
+
+async def test_private_answer_with_remote_and_no_local_tts_blocks_and_notices() -> None:
+    audit = _RecordingAudit()
+    remote = _RecordingTTS(b"\x01\x00", emit_allowed=True, audit=audit)
+    sink = FakeSink()
+    notices: list[str] = []
+    states: list[str] = []
+    secret = "Çok gizli şifre 9876"
+
+    async def run_command(_text: str):
+        return SimpleNamespace(
+            text=secret,
+            stop_reason="completed",
+            turn_id="t1",
+            phases=(),
+            tool_calls=[],
+            record=SimpleNamespace(answer_private=True),
+        )
+
+    controller = VoiceController(
+        FakeRunner(),
+        VoiceConfig(tts_backend="edge"),
+        FakeMic(),
+        FakeVAD([]),
+        FakeRecognizer([]),
+        remote,
+        sink,
+        run_command=run_command,
+        on_transcript=notices.append,
+        on_state=states.append,
+        local_synthesizer=None,
+        audit=audit,  # type: ignore[arg-type]
+    )
+    try:
+        await controller._run_and_speak("oku")
+        assert remote.calls == []
+        assert sink.chunks == []
+        assert "speaking" not in states
+        assert notices == ["Bu yanıt gizli içerik taşıdığı için bulut sesine gönderilmedi."]
+        assert secret not in notices[0] and "9876" not in notices[0]
+        assert len(audit.records) == 1
+        assert audit.records[0][1]["allowed"] is False
+        assert audit.records[0][1]["reason"] == "private"
+        assert not any(f.get("allowed") is True for _, f in audit.records)
+    finally:
+        await controller.close()
+
+
+async def test_non_private_answer_with_piper_is_unchanged() -> None:
+    audit = _RecordingAudit()
+    sink = FakeSink()
+
+    async def run_command(_text: str):
+        return SimpleNamespace(
+            text="Saat 12",
+            stop_reason="completed",
+            turn_id="t1",
+            phases=(),
+            tool_calls=[],
+            record=SimpleNamespace(answer_private=False),
+        )
+
+    controller = VoiceController(
+        FakeRunner(),
+        VoiceConfig(tts_backend="piper"),
+        FakeMic(),
+        FakeVAD([]),
+        FakeRecognizer([]),
+        FakeTTS(),
+        sink,
+        run_command=run_command,
+        audit=audit,  # type: ignore[arg-type]
+    )
+    try:
+        await controller._run_and_speak("saat kaç")
+        assert sink.chunks == [b"\x01\x00"]
+        assert audit.records == []
+    finally:
+        await controller.close()
+
+
+def _stream_push(stream: object, delta: str) -> None:
+    for name in ("push", "append", "add", "write", "put", "send", "on_text", "on_delta"):
+        method = getattr(stream, name, None)
+        if callable(method):
+            method(delta)
+            return
+    if callable(stream):
+        stream(delta)
+        return
+    known = {"sentences", "finish", "close", "reset", "flush", "clear"}
+    for name in dir(stream):
+        if name.startswith("_") or name in known:
+            continue
+        method = getattr(stream, name, None)
+        if callable(method):
+            method(delta)
+            return
+    raise AssertionError("SpeechStream metin besleme metodu bulunamadı.")
+
+
+async def test_streamed_remote_private_holds_sentences_and_never_calls_remote() -> None:
+    audit = _RecordingAudit()
+    remote = _RecordingTTS(b"\x01\x00", emit_allowed=True, audit=audit)
+    local = _RecordingTTS(b"\x02\x00")
+    sink = FakeSink()
+    checked_during_stream: list[tuple[list[str], list[str]]] = []
+    first = "Bu oldukça uzun ve akış sırasında hemen hazır olması gereken birinci cümledir."
+    second = "İkinci cümle."
+    full_text = f"{first} {second}"
+
+    async def run_command(_text: str, stream=None):
+        assert stream is not None
+        _stream_push(stream, f"{first} ")
+        await asyncio.sleep(0)
+        checked_during_stream.append((list(remote.calls), list(local.calls)))
+        _stream_push(stream, second)
+        await asyncio.sleep(0)
+        checked_during_stream.append((list(remote.calls), list(local.calls)))
+        return SimpleNamespace(
+            text=full_text,
+            stop_reason="completed",
+            turn_id="t1",
+            phases=(),
+            tool_calls=[],
+            record=SimpleNamespace(answer_private=True),
+        )
+
+    controller = VoiceController(
+        FakeRunner(),
+        VoiceConfig(tts_backend="cloud"),
+        FakeMic(),
+        FakeVAD([]),
+        FakeRecognizer([]),
+        remote,
+        sink,
+        run_command=run_command,
+        stream_responses=True,
+        local_synthesizer=local,
+        audit=audit,  # type: ignore[arg-type]
+    )
+    try:
+        await controller._run_and_speak("oku")
+        assert checked_during_stream == [([], []), ([], [])]
+        assert remote.calls == []
+        assert local.calls
+        assert " ".join(local.calls) == full_text
+        assert sink.chunks == [b"\x02\x00"] * len(local.calls)
+        assert len(audit.records) == 1
+        assert audit.records[0][1]["allowed"] is False
+        assert audit.records[0][1]["reason"] == "private"
+    finally:
+        await controller.close()
+
+
+async def test_streamed_remote_non_private_holds_until_end_then_speaks_via_remote() -> None:
+    audit = _RecordingAudit()
+    remote = _RecordingTTS(b"\x01\x00", emit_allowed=True, audit=audit)
+    local = _RecordingTTS(b"\x02\x00")
+    sink = FakeSink()
+    checked_during_stream: list[list[str]] = []
+
+    async def run_command(_text: str, stream=None):
+        assert stream is not None
+        _stream_push(stream, "Açık cümle. ")
+        await asyncio.sleep(0)
+        checked_during_stream.append(list(remote.calls))
+        return SimpleNamespace(
+            text="Açık cümle.",
+            stop_reason="completed",
+            turn_id="t1",
+            phases=(),
+            tool_calls=[],
+            record=SimpleNamespace(answer_private=False),
+        )
+
+    controller = VoiceController(
+        FakeRunner(),
+        VoiceConfig(tts_backend="cloud"),
+        FakeMic(),
+        FakeVAD([]),
+        FakeRecognizer([]),
+        remote,
+        sink,
+        run_command=run_command,
+        stream_responses=True,
+        local_synthesizer=local,
+        audit=audit,  # type: ignore[arg-type]
+    )
+    try:
+        await controller._run_and_speak("anlat")
+        assert checked_during_stream == [[]]
+        assert remote.calls == ["Açık cümle."]
+        assert local.calls == []
+        assert sink.chunks == [b"\x01\x00"]
+        assert audit.records == [("cloud_tts_transfer", {"service": "cloud", "allowed": True})]
+    finally:
+        await controller.close()
+
+
+async def test_factory_remote_backend_builds_local_synthesizer_regardless_of_fallback(
+    tmp_path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.channels.voice import factory
+    from artemis.channels.voice.adapters import FallbackSynthesizer
+    from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
+    from artemis.config.settings import EndpointConfig, Settings
+
+    model_file = tmp_path / "tr_TR.onnx"
+    model_file.write_bytes(b"fake")
+
+    class FakeWhisper:
+        def __init__(self, _cfg) -> None:
+            pass
+
+        def prepare(self) -> None:
+            return None
+
+    class FakePiper:
+        def __init__(self, _cfg) -> None:
+            self.closed = False
+
+        def prepare(self) -> None:
+            return None
+
+        async def stream(self, _text: str, _cancelled: asyncio.Event):
+            yield PCMChunk(b"\x02\x00")
+
+        async def close(self) -> None:
+            self.closed = True
+
+    monkeypatch.setattr(factory, "FasterWhisperRecognizer", FakeWhisper)
+    monkeypatch.setattr(factory, "PiperSynthesizer", FakePiper)
+    monkeypatch.setattr(factory, "build_vad", lambda _v, _cb: FakeVAD([]))
+    monkeypatch.setattr(factory, "build_turn_detector", lambda _v, _cb: None)
+
+    for fallback in (False, True):
+        settings = Settings(
+            persist_memory=False,
+            endpoints={"bulut": EndpointConfig(base_url="http://127.0.0.1:1/v1", api_key=False)},
+            voice=VoiceConfig(
+                tts_backend="cloud",
+                tts_cloud_endpoint="bulut",
+                tts_cloud_model="kokoro:free",
+                allow_cloud_tts_text=True,
+                tts_local_fallback=fallback,
+                piper_model=model_file,
+                stt_model=model_file,
+                echo_cancellation=False,
+                noise_suppression=False,
+                live_transcript=False,
+                turn_detection=False,
+                game_mode=False,
+                stt_alias_hotwords=False,
+            ),
+        )
+        audit = _RecordingAudit()
+        runtime = SimpleNamespace(settings=settings, audit=audit, runner=FakeRunner())
+        controller = await factory.build_voice_controller(
+            runtime,  # type: ignore[arg-type]
+            lambda t: FakeRunner().run(t),
+            lambda _s: None,
+            microphone=FakeMic(),
+            sink=FakeSink(),
+        )
+        try:
+            assert isinstance(controller._local_synthesizer, FakePiper)
+            assert controller._audit is audit
+            if fallback:
+                assert isinstance(controller.synthesizer, FallbackSynthesizer)
+            else:
+                assert isinstance(controller.synthesizer, CloudSpeechSynthesizer)
+        finally:
+            await controller.close()

@@ -12,10 +12,13 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 
 Betik sürümü `pyproject.toml` dosyasından okur, `.venv` içine `pyinstaller==6.11.1` kurar, `dist\Artemis\` çıktısını üretir ve `ISCC.exe` kuruluysa `dist\installer\Artemis-Setup-<sürüm>.exe` kurucusunu oluşturur.
 
+Ön koşullar: `uv` (betik PyInstaller'ı `uv pip install` ile kurar) ve depo kökünde proje bağımlılıklarıyla hazırlanmış bir `.venv`; betik sanal ortam oluşturmaz.
+
 ## Paket içeriği ve hariç tutulanlar
 
-- **Dahil edilenler:** `artemis` alt modülleri ve veri dosyaları (ikon, SVG'ler, gömülü ses modelleri), `config\config.example.yaml` ve kurulu olan ses/runtime paketlerinin (`faster_whisper`, `piper`, `onnxruntime`, `sounddevice`, `webrtcvad`, `livekit`, `edge_tts`) veri dosyaları.
-- **Hariç tutulanlar:** Ağır isteğe bağlı bileşenler (`torch`, `torchaudio`, `ema_lightning`, `playwright`, `pyarrow`, `fastembed`, `sherpa_onnx`, `huggingface_hub`) ile test/geliştirme araçları (`tests`, `bench`, `pytest`, `mypy`, `ruff`).
+- **Dahil edilenler:** `artemis` alt modülleri ve veri dosyaları (ikon, SVG'ler, gömülü ses modelleri), `config\config.example.yaml` ve kurulu olan ses/runtime paketlerinin (`faster_whisper`, `piper`, `onnxruntime`, `_sounddevice_data`, `webrtcvad`, `livekit`, `edge_tts`) veri dosyaları. `bench` paketinden yalnız `bench.model_testi`, `bench.run` ve `bench.bilgisayar_testi` modülleri ile `model_testi.yaml` ve `senaryolar.yaml` girer (Ayarlar > Model testi).
+- **Hariç tutulanlar:** Ağır isteğe bağlı bileşenler (`torch`, `torchaudio`, `ema_lightning`, `playwright`, `pyarrow`, `fastembed`, `sherpa_onnx`, `huggingface_hub`) ile test/geliştirme araçları (`tests`, `pytest`, `mypy`, `ruff`).
+- **Bilinen sorun:** `huggingface_hub` dışlanmışken `faster_whisper` paketi (`utils.py` en üstte `import huggingface_hub` yapar) paketli sürümde içe aktarılamaz; yerel STT çalışmayabilir. Bu beklenen davranıştır, derleyip doğrulanmadı; düzeltme `packaging/artemis.spec` içindeki `excludes` listesinde bekliyor.
 
 ## Kullanıcı verileri ve kaldırma
 
@@ -28,4 +31,4 @@ Kurucu şu aşamada kod imzalama sertifikasıyla imzalanmamıştır. Windows Sma
 
 ## `-m` öykünmesi neden var?
 
-Uygulama içindeki alt süreçler (`artemis\tools\processes.py`, `artemis\channels\desktop\provider_section.py` ve MCP `{python}` köprüsü) çocuk süreçleri `sys.executable -m <modül>` ile başlatır. Dondurulmuş pakette `sys.executable` doğrudan `Artemis.exe` olduğu ve `-m` bayrağını bilmediği için `packaging\entry.py` yalnızca `artemis.*` önekli modüller için `-m` davranışını öykünür; diğer modül adlarını reddeder.
+Uygulama içindeki alt süreçler (`artemis\tools\processes.py`, `artemis\channels\desktop\provider_section.py` ve MCP `{python}` köprüsü) çocuk süreçleri `sys.executable -m <modül>` ile başlatır. Dondurulmuş pakette `sys.executable` doğrudan `Artemis.exe` olduğu ve `-m` bayrağını bilmediği için `packaging\entry.py` yalnızca `artemis.*` önekli modüller ile `_IZINLI_MODULLER` listesindeki `bench.model_testi` için `-m` davranışını öykünür; diğer modül adlarını reddeder.

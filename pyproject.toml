@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "artemis-tr"
-version = "0.2.0"
+version = "0.2.1"
 description = "Türkçe, güvenlik kapılı kişisel masaüstü asistanı"
 requires-python = ">=3.12"
 license = "Apache-2.0"
@@ -103,7 +103,7 @@ module = ["av", "av.*"]  # PyAV: [voice] ekiyle gelir (faster-whisper), CI check
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["PySide6.*"]
+module = ["PySide6.*", "shiboken6", "shiboken6.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

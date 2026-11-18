@@ -178,7 +178,7 @@ QFrame#sidebar QPushButton#themeToggle:hover {{ background: {t['nav_selected']};
 QComboBox {{ padding-right: 24px; }}
 QComboBox::drop-down {{ border: none; background: transparent; width: 24px;
  subcontrol-origin: padding; subcontrol-position: right center; }}
-QComboBox::down-arrow {{ image: url({down}); width: 10px; height: 6px; }}
+QComboBox::down-arrow {{ image: url("{down}"); width: 10px; height: 6px; }}
 QComboBox QAbstractItemView {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; outline: 0;
  selection-background-color: {t['soft']}; selection-color: {t['text']}; }}
@@ -187,8 +187,8 @@ QSpinBox::up-button, QSpinBox::down-button {{ background: transparent; border: n
  width: 24px; subcontrol-origin: border; }}
 QSpinBox::up-button {{ subcontrol-position: top right; }}
 QSpinBox::down-button {{ subcontrol-position: bottom right; }}
-QSpinBox::up-arrow {{ image: url({up}); width: 10px; height: 6px; }}
-QSpinBox::down-arrow {{ image: url({down}); width: 10px; height: 6px; }}
+QSpinBox::up-arrow {{ image: url("{up}"); width: 10px; height: 6px; }}
+QSpinBox::down-arrow {{ image: url("{down}"); width: 10px; height: 6px; }}
 """
 
 
@@ -207,7 +207,7 @@ QCheckBox::indicator:checked {{ background: {t['accent']}; border-color: {t['acc
 QRadioButton {{ color: {t['text']}; spacing: 8px; }}
 QRadioButton::indicator {{ width: 16px; height: 16px; border-radius: 8px;
  border: 1px solid {t['control_border']}; background: {t['surface']}; }}
-QRadioButton::indicator:checked {{ image: url({radio}); border: none; }}
+QRadioButton::indicator:checked {{ image: url("{radio}"); border: none; }}
 QCheckBox:focus, QRadioButton:focus {{ color: {t['accent']}; }}
 QTabWidget::pane {{ border: none; }}
 QTabBar::tab {{ background: {t['soft']}; padding: 8px 12px; margin-right: 4px;
@@ -293,7 +293,7 @@ QFrame#galleryCard[highlighted="true"][selected="true"] {{ border: 2px solid {t[
 QFrame#galleryCard[focused="true"] {{ background: {t['accent_soft']};
  border: 2px solid {t['accent']}; padding: 0; }}
 QPushButton#importButton {{ padding-right: 28px; }}
-QPushButton#importButton::menu-indicator {{ image: url({down}); width: 10px; height: 6px;
+QPushButton#importButton::menu-indicator {{ image: url("{down}"); width: 10px; height: 6px;
  subcontrol-origin: padding; subcontrol-position: right center; right: 10px; }}
 QFrame#petWell {{ background: {t['soft']}; border: 2px dashed {t['border']};
  border-radius: 12px; }}

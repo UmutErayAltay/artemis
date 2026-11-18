@@ -72,9 +72,12 @@ _PHRASES = (
 )
 
 
-def _words(text: str) -> list[str]:
+def _words(text: str, *, turkish: bool = True) -> list[str]:
     # Türkçe büyük İ/I küçültmesi: "SİL" -> "sil", "ÇIKIŞ" -> "çıkış".
-    lowered = text.replace("İ", "i").replace("I", "ı").lower()
+    if turkish:
+        lowered = text.replace("İ", "i").replace("I", "ı").lower()
+    else:
+        lowered = text.replace("İ", "i").lower()
     for phrase, word in _PHRASES:
         lowered = lowered.replace(phrase, word)
     # "don't" / "can’t" -> "dont" / "cant": olumsuzluk tek sözcük kalsın (_NEGATORS).
@@ -92,9 +95,8 @@ _NEGATORS = frozenset({"not", "no", "never", "without", "dont", "doesnt", "didnt
                        "cannot", "wont", "shouldnt", "mustnt", "asla", "sakın", "sakin"})
 
 
-def _families(text: str, *, strong_only: bool = False) -> set[str]:
+def _families_from_words(words: list[str], *, strong_only: bool) -> set[str]:
     found = set()
-    words = _words(text)
     for i, word in enumerate(words):
         negated = strong_only and not _NEGATORS.isdisjoint(words[max(0, i - 2):i])
         for stem, family in _FAMILIES.items():
@@ -104,6 +106,13 @@ def _families(text: str, *, strong_only: bool = False) -> set[str]:
                 continue
             found.add(family)
     return found
+
+
+def _families(text: str, *, strong_only: bool = False) -> set[str]:
+    return (
+        _families_from_words(_words(text, turkish=True), strong_only=strong_only)
+        | _families_from_words(_words(text, turkish=False), strong_only=strong_only)
+    )
 
 
 def _is_destructive_word(word: str) -> bool:
@@ -118,11 +127,25 @@ def _target_matches(element_name: str, goal: str) -> bool:
     "veriyi sil" hedefi "Hesabı ve veriyi sil" düğmesini açmaz. Yalnız yıkıcı sözcükten oluşan ad
     ("Sil") için
     ailenin hedefte geçmesi yeter."""
-    content = [w for w in _words(element_name) if len(w) >= 4 and not _is_destructive_word(w)]
-    if not content:
+    tr_words = _words(element_name, turkish=True)
+    en_words = _words(element_name, turkish=False)
+    goal_roots = {
+        w[:4]
+        for w in _words(goal, turkish=True) + _words(goal, turkish=False)
+        if len(w) >= 4
+    }
+    if len(tr_words) == len(en_words):
+        for tw, ew in zip(tr_words, en_words, strict=True):
+            if _is_destructive_word(tw) or _is_destructive_word(ew):
+                continue
+            if len(tw) >= 4 and tw[:4] not in goal_roots and ew[:4] not in goal_roots:
+                return False
         return True
-    goal_roots = {w[:4] for w in _words(goal) if len(w) >= 4}
-    return all(w[:4] in goal_roots for w in content)
+    for words in (tr_words, en_words):
+        content = [w for w in words if len(w) >= 4 and not _is_destructive_word(w)]
+        if not content or all(w[:4] in goal_roots for w in content):
+            return True
+    return False
 
 
 def destructive_unrequested(element_name: str, goal: str) -> str | None:

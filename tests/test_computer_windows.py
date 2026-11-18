@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import ctypes
 import sys
+from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -113,3 +115,66 @@ def test_type_text_keeps_surrogate_pair_in_one_send_and_stops_between_chars(
         [(0x61, False), (0x61, True)],
         [(0xD83D, False), (0xD83D, True), (0xDE00, False), (0xDE00, True)],
     ]
+
+
+def test_focused_value_contains_returns_none_on_nul_without_calling_subprocess(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def runner(_command: Any, **kwargs: Any) -> SimpleNamespace:
+        if any("\x00" in value for value in kwargs["env"].values()):
+            raise ValueError("embedded null character")
+        return SimpleNamespace(stdout="1", returncode=0)
+
+    monkeypatch.setattr(w.sys, "platform", "win32")
+    assert w.focused_value_contains("Ay\x00ar", 1.0, runner=runner) is None
+    assert w.focused_value_contains("Ayar", 1.0, runner=runner) is True
+
+
+def test_window_rect_reads_rect_and_rejects_invalid(monkeypatch: pytest.MonkeyPatch) -> None:
+    from ctypes import wintypes
+
+    class _FakeUser32:
+        def __init__(self, ok: bool) -> None:
+            self.ok = ok
+
+        def GetWindowRect(self, hwnd: int, rect_ptr: Any) -> int:
+            if not self.ok:
+                return 0
+            rect = ctypes.cast(rect_ptr, ctypes.POINTER(wintypes.RECT)).contents
+            rect.left, rect.top, rect.right, rect.bottom = 10, 20, 310, 220
+            return 1
+
+    monkeypatch.setattr(w.sys, "platform", "win32")
+    monkeypatch.setattr(w, "_libs", lambda: (_FakeUser32(True), None, None))
+    assert w.window_rect(7) == (10, 20, 310, 220)
+    with pytest.raises(OSError):
+        w.window_rect(0)
+    monkeypatch.setattr(w, "_libs", lambda: (_FakeUser32(False), None, None))
+    with pytest.raises(OSError):
+        w.window_rect(7)
+
+
+def test_uia_script_uses_per_monitor_v2_dpi_with_fallback_before_uia() -> None:
+    assert "SetProcessDpiAwarenessContext" in w._UIA_SCRIPT
+    assert "-4" in w._UIA_SCRIPT
+    assert "SetProcessDPIAware" in w._UIA_SCRIPT
+    call_idx = w._UIA_SCRIPT.index("SetProcessDpiAwarenessContext([IntPtr](-4))")
+    fallback_idx = w._UIA_SCRIPT.index("SetProcessDPIAware()", call_idx)
+    uia_idx = w._UIA_SCRIPT.index("UIAutomationClient")
+    assert call_idx < fallback_idx < uia_idx
+
+
+def test_focus_script_checks_is_password_before_patterns() -> None:
+    assert "IsPassword" in w._FOCUS_SCRIPT
+    pw_idx = w._FOCUS_SCRIPT.index("IsPassword")
+    assert pw_idx < w._FOCUS_SCRIPT.index("ValuePattern")
+    assert pw_idx < w._FOCUS_SCRIPT.index("TextPattern")
+    assert "'?'; exit 0" in w._FOCUS_SCRIPT[pw_idx : w._FOCUS_SCRIPT.index("ValuePattern")]
+
+
+def test_focused_value_contains_returns_none_for_password_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(w.sys, "platform", "win32")
+    runner = lambda *_a, **_k: SimpleNamespace(stdout="?\n", returncode=0)  # noqa: E731
+    assert w.focused_value_contains("secret", 1.0, runner=runner) is None

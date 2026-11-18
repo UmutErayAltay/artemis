@@ -16,7 +16,6 @@ import secrets
 import shutil
 import threading
 from collections.abc import Callable, Mapping
-from functools import partial
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, quote, urlsplit
@@ -43,9 +42,11 @@ from PySide6.QtWidgets import (
 
 from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.desktop import themes
+from artemis.channels.desktop.provider_helpers import _slug
 from artemis.channels.desktop.provider_layout import PRESETS
-from artemis.channels.desktop.provider_section import _slug, store_endpoint_key
+from artemis.channels.desktop.provider_section import store_endpoint_key
 from artemis.channels.desktop.settings_io import _write_validated
+from artemis.channels.desktop.thread_shutdown import shutdown_thread
 from artemis.config.settings import Settings, load_settings
 
 KEY_PAGES: dict[str, str] = {
@@ -422,20 +423,20 @@ class _OpenRouterLoginThread(QThread):
         self.finished_with.emit(key, models, "")
 
 
-_RUNNING: set[QThread] = set()
-
-
-def _release(
+def _retire_thread(
     thread: _LocalProbeThread | _OpenRouterLoginThread | _GeminiValidateThread | None,
+    slot: Any,
 ) -> None:
-    """Pencere kapanırken süren iş parçacığını sahipsiz bırakır, bitene dek canlı tutar."""
-    if thread is None or not thread.isRunning():
+    """İş parçacığı bitmeden deleteLater çağırmamak için önce güvenli durdurur."""
+    if thread is None:
         return
-    with contextlib.suppress(RuntimeError, TypeError):
-        thread.finished_with.disconnect()
-    thread.setParent(None)
-    _RUNNING.add(thread)
-    thread.finished.connect(partial(_RUNNING.discard, thread))
+    if shutdown_thread(thread, ("finished_with", slot), wait_ms=2000):
+        # Süre dolduysa thread DETACHED içinde kalır; bitince silinir.
+        finished = getattr(thread, "finished", None)
+        if finished is not None:
+            finished.connect(thread.deleteLater)
+    else:
+        thread.deleteLater()
 
 
 def _load_raw(config_path: Path) -> dict[str, Any]:
@@ -782,9 +783,7 @@ class ConnectWizard(QDialog):
 
     def _on_local_found(self, found: list[Any]) -> None:
         thread, self._probe_thread = self._probe_thread, None
-        if thread is not None:
-            thread.wait()
-            thread.deleteLater()
+        _retire_thread(thread, self._on_local_found)
         self._found = {base: (name, needs_key, models) for name, base, needs_key, models in found}
         for base_url, (name, needs_key, models) in self._found.items():
             note = "anahtar ister" if needs_key else f"{len(models)} model"
@@ -847,9 +846,7 @@ class ConnectWizard(QDialog):
 
     def _on_openrouter_done(self, key: str, models: list[str], error: str) -> None:
         thread, self._login_thread = self._login_thread, None
-        if thread is not None:
-            thread.wait()
-            thread.deleteLater()
+        _retire_thread(thread, self._on_openrouter_done)
         self.openrouter_login_button.setEnabled(True)
         if key:
             failure = self._store_key("openrouter", key)
@@ -909,8 +906,12 @@ class ConnectWizard(QDialog):
     def _on_dialog_finished(self, _result: int) -> None:
         self._stop_clipboard_watch()
         self._oauth.close()  # bekleyen tarayıcı girişi hemen biter
-        for thread in (self._login_thread, self._probe_thread, self._gemini_thread):
-            _release(thread)
+        for thread, slot in (
+            (self._login_thread, self._on_openrouter_done),
+            (self._probe_thread, self._on_local_found),
+            (self._gemini_thread, self._on_gemini_validated),
+        ):
+            shutdown_thread(thread, ("finished_with", slot), wait_ms=500)
         self._login_thread = self._probe_thread = self._gemini_thread = None
 
     def closeEvent(self, event: Any) -> None:
@@ -970,8 +971,7 @@ class ConnectWizard(QDialog):
 
     def _on_gemini_validated(self, key: str, status_code: int) -> None:
         thread, self._gemini_thread = self._gemini_thread, None
-        if thread is not None:
-            thread.deleteLater()
+        _retire_thread(thread, self._on_gemini_validated)
         if status_code == 200:
             self._stop_clipboard_watch()
             failure = self._store_key("gemini", key)

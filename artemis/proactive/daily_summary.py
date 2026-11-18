@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 
 from artemis.proactive.triggers import sanitize_name
 
@@ -71,6 +71,14 @@ def _candidate_files(audit_path: Path, start: datetime) -> list[Path]:
     return [path for _, path in sorted(found, reverse=True)]
 
 
+def _discard_rest_of_line(stream: BinaryIO) -> None:
+    """Satır sonu ya da dosya sonu gelene dek dev/kesik satır parçalarını atar."""
+    while True:
+        chunk = stream.readline(MAX_LINE_BYTES)
+        if not chunk or chunk.endswith(b"\n"):
+            break
+
+
 def _tail_lines(path: Path, budget: int, truncated: list[bool]) -> Iterator[bytes]:
     """Dosyanın son `budget` baytından tam satırlar (ilk yarım satır atılır).
 
@@ -83,15 +91,14 @@ def _tail_lines(path: Path, budget: int, truncated: list[bool]) -> Iterator[byte
             stream.seek(offset)
             if offset:
                 truncated.append(True)
-                stream.readline(MAX_LINE_BYTES)  # kesilmiş ilk satır
+                _discard_rest_of_line(stream)  # kesilmiş ilk satır MAX_LINE_BYTES'tan uzun olabilir
             while True:
                 line = stream.readline(MAX_LINE_BYTES)
                 if not line:
                     return
                 if not line.endswith(b"\n") and len(line) >= MAX_LINE_BYTES:
                     truncated.append(True)
-                    while stream.readline(MAX_LINE_BYTES).endswith(b"\n") is False:
-                        pass  # bitmeyen dev satırın kalanı atılır
+                    _discard_rest_of_line(stream)  # bitmeyen dev satırın kalanı ya da dosya sonu
                     continue
                 yield line
     except OSError:

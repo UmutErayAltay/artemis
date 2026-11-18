@@ -139,10 +139,13 @@ class Card:
         if self.failed or self.stop_reason not in ("completed", ""):
             return "Hata"
         states = {op.state for op in self.ops}
-        if "sent" in states:
+        if "sent" in states or "interrupted" in states:
             return "Doğrulanamadı"
         if "fail" in states:
             return "Hata"
+        # Reddedilen araç varsa tur tam başarı sayılmaz (kural 5).
+        if "denied" in states:
+            return "İptal"
         return "Tamam"
 
 

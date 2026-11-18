@@ -260,11 +260,11 @@ async def test_schema_violations_are_rejected_before_the_server(
 
 
 async def test_errors_are_honest_failures(tmp_path: Path) -> None:
-    gate, context, name = gate_env(tmp_path, FakeClient(error=MCPError("x", error_type="timeout")))
+    gate, context, name = gate_env(tmp_path, FakeClient(error=MCPError("x", error_type="process")))
     result = await gate.dispatch(
         ToolCall(id="c", name=name, arguments={"text": "x"}), context, TurnState(), never
     )
-    assert result.success is False and "timeout" in result.message
+    assert result.success is False and "process" in result.message
 
     failing = FakeClient(result=MCPCallResult(True, "dosya: gizli satır", None, 0))
     gate, context, name = gate_env(tmp_path, failing, content="file")
@@ -544,3 +544,91 @@ async def test_destructive_mcp_with_trusted_url_still_requires_approval(tmp_path
     assert cls.risk is Risk.CONFIRM_REQUIRED
     assert len(approvals) == 1 and result.status == 'denied'
     assert client.calls == []
+
+
+async def test_structured_result_cleans_bidi_and_format_characters(tmp_path: Path) -> None:
+    payload = {"baslik": "ab\u202ecd", "liste": ["x\u200by"]}
+    gate, context, name = gate_env(
+        tmp_path, FakeClient(result=MCPCallResult(False, "ok", payload, 0))
+    )
+    result = await gate.dispatch(
+        ToolCall(id="c", name=name, arguments={"text": "x"}), context, TurnState(), never
+    )
+    structured = result.data["structured"]
+    assert "\u202e" not in structured["baslik"]
+    assert "\u200b" not in structured["liste"][0]
+    assert structured == {"baslik": "abcd", "liste": ["xy"]}
+
+
+async def test_structured_result_cleans_string_dict_keys(tmp_path: Path) -> None:
+    payload = {"ana\u202ehtar": "de\u200bger", "sayi": 42}
+    gate, context, name = gate_env(
+        tmp_path, FakeClient(result=MCPCallResult(False, "ok", payload, 0))
+    )
+    result = await gate.dispatch(
+        ToolCall(id="c", name=name, arguments={"text": "x"}), context, TurnState(), never
+    )
+    assert result.data["structured"] == {"anahtar": "deger", "sayi": 42}
+
+
+def test_checked_schema_allows_keyword_names_in_properties_and_values() -> None:
+    allowed = {
+        "type": "object",
+        "properties": {
+            "definitions": {"type": "string", "enum": ["definitions", "$ref"], "default": "$ref"}
+        },
+    }
+    cleaned = checked_schema(allowed)
+    assert cleaned is not None
+    assert cleaned["properties"]["definitions"]["default"] == "$ref"
+    assert checked_schema({"$defs": {"x": {"type": "string"}}}) is None
+
+
+@pytest.mark.parametrize(
+    "bad_key",
+    ["a\u202eb", "a\nb", "a\tb", "a  b", "x" * 201, 1],
+)
+def test_checked_schema_rejects_dirty_long_or_non_string_keys(bad_key: Any) -> None:
+    schema = {"type": "object", "properties": {bad_key: {"type": "string"}}}
+    assert checked_schema(schema) is None
+
+
+def test_checked_schema_allows_single_space_in_property_name() -> None:
+    schema = {"type": "object", "properties": {"first name": {"type": "string"}}}
+    assert checked_schema(schema) is not None
+
+
+@pytest.mark.parametrize("bad_number", [float("nan"), float("inf")])
+def test_checked_schema_rejects_nan_and_infinity(bad_number: float) -> None:
+    schema = {"type": "object", "properties": {"x": {"type": "number", "default": bad_number}}}
+    assert checked_schema(schema) is None
+
+
+def test_discover_mcp_tools_sanitizes_skipped_tool_name_in_audit(tmp_path: Path) -> None:
+    audit = AuditLog(tmp_path / "audit.jsonl")
+    dirty = "a\u202eb" + "x" * 300
+    clients = {"demo": FakeClient([spec(dirty)])}
+    discover_mcp_tools(
+        Settings(mcp={"servers": [server()]}), audit, ToolRegistry(), factory_for(clients)
+    )
+    [skipped] = [
+        e for e in read_audit(tmp_path / "audit.jsonl") if e["event"] == "mcp_tool_skipped"
+    ]
+    assert "\u202e" not in skipped["tool"]
+    assert len(skipped["tool"]) <= 64
+
+
+@pytest.mark.parametrize("error_type", ["timeout", "cancelled"])
+async def test_mcp_timeout_or_cancel_reports_uncertain_sent_status(
+    tmp_path: Path, error_type: str
+) -> None:
+    gate, context, name = gate_env(
+        tmp_path, FakeClient(error=MCPError("süre", error_type=error_type))
+    )
+    result = await gate.dispatch(
+        ToolCall(id="c", name=name, arguments={"text": "x"}), context, TurnState(), never
+    )
+    assert result.status == "sent"
+    assert result.success is False
+    assert "belirsiz" in result.message
+    assert result.external is True

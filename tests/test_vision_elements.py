@@ -218,3 +218,21 @@ def test_vision_elements_survives_null_coordinates() -> None:
         5, runner=lambda *_a, **_k: SimpleNamespace(returncode=0, stdout=bad)
     )
     assert out == []
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="ctypes windll yalnız Windows'ta")
+def test_vision_elements_handles_large_hwnd_without_overflow() -> None:
+    # 0x80000001 boyutundaki tanıtıcı IsWindow çağrısında taşma fırlatmadan [] dönmeli.
+    assert ve.vision_elements(0x80000001) == []
+
+
+def test_vision_script_uses_per_monitor_v2_dpi_with_fallback_before_window_calls() -> None:
+    script = ve._VISION_OCR_SCRIPT
+    assert "SetProcessDpiAwarenessContext" in script
+    assert "-4" in script
+    assert "SetProcessDPIAware" in script
+    call_idx = script.index("SetProcessDpiAwarenessContext([IntPtr](-4))")
+    fallback_idx = script.index("SetProcessDPIAware()", call_idx)
+    assert call_idx < fallback_idx < script.index("[ArtemisVisionNative]::DwmGetWindowAttribute")
+    assert call_idx < script.index("[ArtemisVisionNative]::GetWindowRect")
+    assert call_idx < script.index("OcrEngine")

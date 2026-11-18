@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import yaml
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import (
     QCloseEvent,
@@ -83,7 +84,7 @@ class ModelCall(QThread):
             self.done.emit("", "Model kota sınırında; biraz sonra yeniden dene.")
         except ProviderError as error:
             self.done.emit("", f"Model yanıt veremedi: {error}")
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, yaml.YAMLError) as error:
             self.done.emit("", f"Ayarlar ya da denetim kaydı kullanılamadı: {error}")
         else:
             self.done.emit(completion.content, "")
@@ -130,7 +131,7 @@ class ImageCall(QThread):
             self.done.emit(None, "Model kota sınırında; biraz sonra yeniden dene.")
         except (ProviderError, pipe.PetImageError) as error:
             self.done.emit(None, f"Resim modeli yanıt veremedi: {error}")
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, yaml.YAMLError) as error:
             self.done.emit(None, f"Ayarlar ya da denetim kaydı kullanılamadı: {error}")
         else:
             self.done.emit(result, "")
@@ -689,9 +690,14 @@ class CreatorPanel(QFrame):
         base_png = self._base_png if self._base is not None else None
 
         def work(call: ImageCall, generate: Any) -> object:
-            if base_png is None:
-                return pipe.make_base(text, generate)
-            return pipe.edit_base(text, base_png, generate)
+            res = (
+                pipe.make_base(text, generate)
+                if base_png is None
+                else pipe.edit_base(text, base_png, generate)
+            )
+            if call.cancel_requested:
+                raise pipe.Cancelled
+            return res
 
         if self._start_image(alias, 1, work, self._on_base):
             self.input.clear()
@@ -699,8 +705,13 @@ class CreatorPanel(QFrame):
             self.busy.setText("Temel görsel üretiliyor (~1 dk)…")
 
     def _on_base(self, result: object, error: str) -> None:
+        sender = self.sender()
+        call = sender if isinstance(sender, ImageCall) else self._image_call
         self._image_call = None
         try:
+            if call is not None and call.cancel_requested:
+                self._log("Hata", error or "İptal edildi.")
+                return
             if error or not isinstance(result, tuple):
                 self._log("Hata", error or "Beklenmeyen sonuç.")
                 return
@@ -749,10 +760,24 @@ class CreatorPanel(QFrame):
         self._timer.start()
 
     def _on_animated(self, result: object, error: str) -> None:
+        sender = self.sender()
+        call = sender if isinstance(sender, ImageCall) else self._image_call
         self._image_call = None
         try:
-            if error or not isinstance(result, tuple):
-                self._log("Hata", error or "Beklenmeyen sonuç.")
+            cancelled = call is not None and call.cancel_requested
+            if cancelled or error or not isinstance(result, tuple):
+                if self._base is not None:
+                    self._show_still(self._base)
+                else:
+                    self._timer.stop()
+                    self._frames = []
+                    self.preview.clear()
+                    self.preview.setText("Önizleme yok")
+                    self._sync_placeholder()
+                self._log(
+                    "Hata",
+                    error or ("İptal edildi." if cancelled else "Beklenmeyen sonuç."),
+                )
                 return
             self._sheet, fallback = result
             if fallback:

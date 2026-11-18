@@ -37,6 +37,8 @@ _VISION_OCR_SCRIPT = "\n".join(
         "  [StructLayout(LayoutKind.Sequential)]",
         "  public struct RECT { public int Left; public int Top; "
         "public int Right; public int Bottom; }",
+        '  [DllImport("user32.dll")] public static extern bool '
+        "SetProcessDpiAwarenessContext(IntPtr value);",
         '  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();',
         '  [DllImport("user32.dll")] public static extern bool GetWindowRect('
         "IntPtr h, out RECT r);",
@@ -44,7 +46,9 @@ _VISION_OCR_SCRIPT = "\n".join(
         "IntPtr h, int attr, out RECT r, int size);",
         "}",
         "'@",
-        "[void][ArtemisVisionNative]::SetProcessDPIAware()",
+        "try { if (-not [ArtemisVisionNative]::SetProcessDpiAwarenessContext([IntPtr](-4))) "
+        "{ [void][ArtemisVisionNative]::SetProcessDPIAware() } } "
+        "catch { [void][ArtemisVisionNative]::SetProcessDPIAware() }",
         "$rect = New-Object ArtemisVisionNative+RECT",
         "$sz = [System.Runtime.InteropServices.Marshal]::SizeOf([type][ArtemisVisionNative+RECT])",
         "if ([ArtemisVisionNative]::DwmGetWindowAttribute($hwnd, 9, [ref]$rect, $sz) -ne 0) {",
@@ -210,8 +214,15 @@ def vision_elements(
     """Pencere görüntüsünden Windows OCR ile tıklanabilir öğe listesi çıkarır."""
     if sys.platform != "win32" or hwnd <= 0 or max_items <= 0:
         return []
-    if runner is None and not ctypes.windll.user32.IsWindow(hwnd):
-        return []
+    if runner is None:
+        from ctypes import wintypes
+
+        # 64-bit tanıtıcılar işaretçi boyutunda aktarılmalı; aksi halde C int taşar.
+        user32 = ctypes.windll.user32
+        user32.IsWindow.argtypes = [wintypes.HWND]
+        user32.IsWindow.restype = wintypes.BOOL
+        if not user32.IsWindow(hwnd):
+            return []
     env = child_environment()
     env["ARTEMIS_VISION_HWND"] = str(hwnd)
     run = runner or subprocess.run

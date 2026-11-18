@@ -621,6 +621,17 @@ def test_reference_fills_playback_gaps_with_silence() -> None:
     assert reference.pull(2, at=100.202) == _pack_i16([3, 4])
 
 
+def test_reference_keeps_alignment_after_gap_exceeding_buffer() -> None:
+    clock = FakeClock()
+    reference = EchoReference(1000, max_ms=50, clock=clock)
+    reference.feed(_pack_i16([1, 2, 3]), 1000, 1, 2)  # 100.000-100.003
+
+    clock.now = 101.003  # max_ms (50 ms) değerinden büyük 1000 ms boşluk
+    reference.feed(_pack_i16([4, 5, 6]), 1000, 1, 2)
+
+    assert reference.pull(3, at=101.003) == _pack_i16([4, 5, 6])
+
+
 def test_microphone_passes_frame_start_time_to_canceller() -> None:
     frame = AudioFrame(pcm=_pack_i16([1] * 480), timestamp=10.0, sample_rate=48000)
     canceller = FakeCanceller()
@@ -666,3 +677,21 @@ def test_canceller_smooths_small_timestamp_jitter_and_resyncs_on_gaps() -> None:
     references = factory.instances[0].references
     assert references[1] == _pack_i16(list(range(161, 321)))
     assert references[2] == _pack_i16(list(range(8321, 8481)))
+
+
+def test_microphone_releases_canceller_after_passthrough_enabled() -> None:
+    inner = FakeMicrophone(
+        [AudioFrame(pcm=_pack_i16([1] * 160), timestamp=1.0)]
+    )
+    canceller = FakeCanceller(OSError("Sahte yankı iptali hatası."))
+    microphone = EchoCancelledMicrophone(inner, lambda _rate: canceller)
+
+    asyncio.run(_collect_frames(microphone))
+
+    assert microphone.passthrough
+    assert microphone._canceller is None
+
+    microphone.discard_pending()
+
+    assert inner.discard_pending_calls == 1
+    assert canceller.reset_calls == 0

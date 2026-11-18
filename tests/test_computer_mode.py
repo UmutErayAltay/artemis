@@ -147,3 +147,42 @@ def test_auto_mode_warning_decline_keeps_mode_off(
     assert window.auto_button.isChecked() is False
     assert window.settings_panel.computer_auto.isChecked() is False
     assert window.auto_button.accessibleDescription() == "Oto onay kapalı"
+
+
+def test_turning_off_auto_mode_sets_runtime_accept_even_if_save_fails(
+    window: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import artemis.channels.desktop.app as app_module
+
+    def broken(path: Path, mode: str) -> None:
+        raise OSError("disk dolu")
+
+    window._sync_auto_controls(True)
+    monkeypatch.setattr(app_module, "save_computer_mode", broken)
+
+    window.auto_button.setChecked(False)
+
+    assert window.calls == ["accept"]
+    assert window.auto_button.isChecked() is False
+    assert window.settings_panel.computer_auto.isChecked() is False
+    assert "kaydedilemedi" in window.status_label.text()
+
+
+def test_runtime_failure_keeps_ui_consistent_and_reports_error(
+    window: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import artemis.channels.desktop.app as app_module
+
+    saved: list[str] = []
+    monkeypatch.setattr(app_module, "save_computer_mode", lambda path, mode: saved.append(mode))
+    window.bridge = SimpleNamespace(set_computer_mode=lambda mode: False)
+
+    window.auto_button.setChecked(True)
+    assert saved == ["auto", "accept"]  # çalışma zamanı başarısız olunca config geri alınır
+    assert window.auto_button.isChecked() is False
+    assert "uygulanamadı" in window.status_label.text()
+
+    window._sync_auto_controls(True)
+    window.auto_button.setChecked(False)
+    assert window.auto_button.isChecked() is True
+    assert "uygulanamadı" in window.status_label.text()

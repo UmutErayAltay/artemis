@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from test_code_agent import make_jobs, reply, wait_job
+from test_code_agent import FakeClock, make_jobs, reply, wait_job
 from test_code_agent import repo as _repo_fixture
 from test_code_agent_backends import CODEX, plain_script
 
@@ -203,3 +203,27 @@ def test_config_checks_validated_and_reach_job(tmp_path: Path, repo: Path) -> No
     assert config.project_entries["proj"].checks == (("pytest", "-q"),)
     assert config.check_timeout_seconds == 600.0
     assert os.name  # CodeAgentConfig dış girdiyi dizi-dizi olarak kabul eder
+
+
+def test_done_after_deadline_skips_verification_and_marks_timeout(
+    tmp_path: Path, repo: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import artemis.tools.code_agent_jobs as module
+
+    clock = FakeClock()
+    jobs, factory = make_jobs(tmp_path, reply(), clock=clock)
+    original_git = module._git
+
+    def advance_after_exit(path: Path, *args: str) -> Any:
+        # Ajan çıktıktan sonraki git doğrulamasında saati ilerlet: süreç "done" döner ama geç kalır.
+        if factory.calls and args[0] == "log":
+            clock.now += 61
+        return original_git(path, *args)
+
+    monkeypatch.setattr(module, "_git", advance_after_exit)
+    job = run(jobs, repo, [PASS], max_minutes=1)
+    assert job["status"] == "timeout"
+    assert job["verification"] == "unverified"
+    assert job["checks"] == []
+    assert "Bağımsız kontroller geçti" not in job["summary"]
+    jobs.shutdown()

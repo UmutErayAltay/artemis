@@ -118,7 +118,7 @@ class _ArgField(QWidget):
             edit.setMinimumHeight(72)
             edit.setMaximumHeight(140)
             edit.setPlaceholderText("JSON (örn. [\"a\", \"b\"] ya da {\"anahtar\": 1})")
-            if start is not _MISSING:
+            if start is not _MISSING and start is not None:
                 edit.setPlainText(json.dumps(start, ensure_ascii=False, indent=2))
             edit.textChanged.connect(self._changed)
             self._widget = edit

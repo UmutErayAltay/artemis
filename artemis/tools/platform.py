@@ -8,6 +8,7 @@ import platform
 import subprocess
 import time
 from typing import Any, Protocol, cast
+from urllib.parse import urlsplit
 
 
 class UnsupportedPlatformError(RuntimeError):
@@ -124,6 +125,16 @@ class WindowsDesktop:
 
     def open_browser(self, url: str) -> None:
         """Tarayıcı isteğini gizli ortam değişkenlerini aktarmadan gönderir."""
+        # Doğrudan çağrılarda da FileProtocolHandler/xdg-open'a yerel yol veya file: sızmasın.
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme.lower() not in {"http", "https"}
+            or not parsed.hostname
+            or parsed.username is not None
+            or parsed.password is not None
+            or any(ord(ch) < 32 or ord(ch) == 127 for ch in url)
+        ):
+            raise ValueError("Yalnız http/https adresi açılabilir.")
         system = platform.system()
         if system == "Windows":
             system_root = os.environ.get("SYSTEMROOT", r"C:\Windows")

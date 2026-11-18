@@ -129,3 +129,19 @@ def test_cli_explicit_missing_config_does_not_call_ensure(
         cli.main()
     assert exc.value.code == 1
     assert ensured == []
+
+
+def test_frozen_app_never_loads_config_from_working_directory(tmp_path: Path) -> None:
+    # Paketli uygulama bulunduğu klasördeki config/config.yaml'ı yüklememeli (MCP komutu vb.).
+    planted = tmp_path / "config" / "config.yaml"
+    planted.parent.mkdir(parents=True)
+    planted.write_text("primary_model: ''\n", encoding="utf-8")
+    chosen = paths.default_config_path(
+        cwd=tmp_path,
+        env={"APPDATA": str(tmp_path / "appdata")},
+        home=tmp_path,
+        windows=True,
+        frozen=True,
+    )
+    assert chosen != planted
+    assert chosen.parent.parent == tmp_path / "appdata"

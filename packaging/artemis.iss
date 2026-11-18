@@ -1,7 +1,7 @@
 ; Artemis Windows kurucu betiği (Inno Setup 6).
 ; Derleme betiği /DMyAppVersion=... parametresiyle sürümü geçer.
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.0"
+  #define MyAppVersion "0.2.1"
 #endif
 
 [Setup]
@@ -13,6 +13,9 @@ DefaultDirName={localappdata}\Programs\Artemis
 DefaultGroupName=Artemis
 PrivilegesRequired=lowest
 DisableProgramGroupPage=yes
+; Kullanıcı başına kurulum {localappdata}\Programs\Artemis altına yapılır; klasör seçimine gerek yoktur.
+; [UninstallDelete] {app} dizinini tamamen sildiği için Belgeler gibi seçilen bir klasör silinebilirdi.
+DisableDirPage=yes
 SetupIconFile=..\artemis\channels\desktop\artemis.ico
 UninstallDisplayIcon={app}\Artemis.exe
 OutputDir=..\dist\installer
@@ -39,5 +42,6 @@ Name: "{autodesktop}\Artemis"; Filename: "{app}\Artemis.exe"; Tasks: desktopicon
 Filename: "{app}\Artemis.exe"; Description: "{cm:LaunchProgram,Artemis}"; Flags: nowait postinstall skipifsilent
 
 [UninstallDelete]
-; Yalnızca kurulum klasörü temizlenir; kullanıcı verileri (%APPDATA%\Artemis) korunur.
-Type: filesandordirs; Name: "{app}"
+; Kurulan dosyaları Inno kendisi kaldırır; burada yalnız boş kalan klasör silinir. filesandordirs
+; /DIR= ile seçilmiş bir klasörü (ör. Belgeler) tümüyle silebilirdi. Kullanıcı verisi %APPDATA%\Artemis.
+Type: dirifempty; Name: "{app}"

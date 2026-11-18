@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import json
+import ntpath
 import os
 import re
 import subprocess
@@ -16,6 +17,7 @@ from artemis.perception.screen import (
     SCREEN_SCRIPT,
     SCREEN_TEXT_LIMIT,
     ScreenOutcome,
+    read_image,
     read_screen,
 )
 from artemis.tools.platform import child_environment
@@ -66,8 +68,9 @@ def test_argv_has_encoded_command_and_no_scope_or_text() -> None:
     runner = FakeRunner(stdout=ok_stdout())
     read_screen("active_window", runner=runner, platform="win32")
     args, kwargs = runner.calls[0]
-    assert args[:5] == [
-        "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+    assert ntpath.isabs(args[0]) and args[0].endswith("powershell.exe")
+    assert args[1:5] == [
+        "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
     ]
     assert args[5] == "-EncodedCommand"
     assert base64.b64decode(args[6]).decode("utf-16-le") == SCREEN_SCRIPT
@@ -211,3 +214,52 @@ def test_outcome_is_frozen() -> None:
 def test_real_windows_screen_read() -> None:
     outcome = read_screen("screen")
     assert outcome.status in {"ok", "empty", "unavailable"}
+
+
+def test_powershell_command_uses_absolute_system_path() -> None:
+    screen_runner = FakeRunner(stdout=ok_stdout())
+    read_screen("screen", runner=screen_runner, platform="win32")
+    screen_cmd = screen_runner.calls[0][0]
+    assert ntpath.isabs(screen_cmd[0])
+    assert screen_cmd[0].endswith("powershell.exe")
+
+    image_runner = FakeRunner(stdout=ok_stdout())
+    read_image("fake.png", runner=image_runner, platform="win32")
+    image_cmd = image_runner.calls[0][0]
+    assert ntpath.isabs(image_cmd[0])
+    assert image_cmd[0].endswith("powershell.exe")
+
+
+def test_target_script_skips_cloaked_windows() -> None:
+    """Metin düzeyinde denetim: PowerShell çalıştırılmadan Target() DWMWA_CLOAKED kontrolü."""
+    assert "DwmGetWindowAttribute(" in SCREEN_SCRIPT
+    assert "out int" in SCREEN_SCRIPT
+    target_start = SCREEN_SCRIPT.index("public static IntPtr Target(")
+    target_end = SCREEN_SCRIPT.index("return IntPtr.Zero;", target_start)
+    target_body = SCREEN_SCRIPT[target_start:target_end]
+    assert "DwmGetWindowAttribute(" in target_body
+    assert "14" in target_body
+    assert "out cloaked, 4" in target_body
+
+
+def test_screen_script_uses_per_monitor_v2_dpi_with_fallback_before_capture() -> None:
+    assert "SetProcessDpiAwarenessContext" in SCREEN_SCRIPT
+    assert "-4" in SCREEN_SCRIPT
+    assert "SetProcessDPIAware" in SCREEN_SCRIPT
+    call_idx = SCREEN_SCRIPT.index("SetProcessDpiAwarenessContext([IntPtr](-4))")
+    fallback_idx = SCREEN_SCRIPT.index("SetProcessDPIAware()", call_idx)
+    assert call_idx < fallback_idx < SCREEN_SCRIPT.index("[ArtemisNative]::Target")
+    assert call_idx < SCREEN_SCRIPT.index("[ArtemisNative]::GetWindowRect")
+    assert call_idx < SCREEN_SCRIPT.index("OcrEngine")
+
+
+def test_image_script_downscales_oversized_images_instead_of_exiting_4() -> None:
+    from artemis.perception.screen import IMAGE_SCRIPT
+
+    # Büyük görsel WinRT BitmapTransform ile küçültülür; çözme WinRT'de kalır (HEIC vb. GDI+
+    # olmadan okunur). Canlı doğrulama 2026-11-18: 14000x3000 PNG okundu.
+    assert "MaxImageDimension" in IMAGE_SCRIPT
+    assert "BitmapTransform" in IMAGE_SCRIPT and "ScaledWidth" in IMAGE_SCRIPT
+    assert "System.Drawing" not in IMAGE_SCRIPT
+    assert re.search(r"-gt \$maxDim\)\s*\{\s*exit 4", IMAGE_SCRIPT) is None
+    assert "$width -le 0 -or $height -le 0" in IMAGE_SCRIPT

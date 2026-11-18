@@ -49,6 +49,17 @@ def test_hero_follows_selection_and_actions_are_contextual(
     sec.deleteLater()
 
 
+def test_select_current_preserves_problem_shown_by_slot(
+    tmp_path: Path, qapp: QApplication  # noqa: F811
+) -> None:
+    sec = build(tmp_path, qapp)
+    pick(sec, "mine")
+    sec.skin_selected.connect(lambda _pet_id: sec.show_problem("boom"))
+    sec.select_current()
+    assert sec.status.text() == "boom"
+    sec.deleteLater()
+
+
 def test_gallery_items_have_accessible_names(tmp_path: Path, qapp: QApplication) -> None:  # noqa: F811
     sec = build(tmp_path, qapp)
     pick(sec, "mine")

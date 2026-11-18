@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import shiboken6
 from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QEnterEvent, QHideEvent, QKeyEvent, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
@@ -162,7 +163,7 @@ class HelpTip(QToolButton):
         app = QApplication.instance()
         if pinned:
             previous = HelpTip._pinned
-            if previous is not None and previous is not self:
+            if previous is not None and previous is not self and shiboken6.isValid(previous):
                 previous.setChecked(False)
             HelpTip._pinned = self
             if app is not None:

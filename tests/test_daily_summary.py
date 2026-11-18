@@ -7,6 +7,7 @@ toast kapalıdır, Telegram sahtedir.
 from __future__ import annotations
 
 import json
+import threading
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -17,7 +18,7 @@ from artemis.brain.fake import ScriptedProvider
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import DailySummaryConfig, ProactiveConfig, Settings, TelegramConfig
 from artemis.proactive import daily_summary
-from artemis.proactive.daily_summary import build_summary, parse_day, write_summary
+from artemis.proactive.daily_summary import _tail_lines, build_summary, parse_day, write_summary
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.scheduler import ProactiveScheduler
 from artemis.tools.plugins.daily_summary import DailySummaryRead, ReadArguments
@@ -319,3 +320,63 @@ def test_truncated_scan_is_stated(tmp_path: Path, monkeypatch: pytest.MonkeyPatc
     monkeypatch.setattr(daily_summary, "MAX_SCAN_LINES", 400_000)
     monkeypatch.setattr(daily_summary, "MAX_SCAN_BYTES", audit.stat().st_size // 2)
     assert "eksik olabilir" in (build_summary(audit, DAY, START, END) or "")
+
+
+def test_unterminated_oversized_last_line_at_eof_does_not_hang(tmp_path: Path) -> None:
+    """Son satır MAX_LINE_BYTES ve üstünde olup satır sonu taşımıyorsa EOF'ta takılmaz."""
+    audit = tmp_path / "eof.jsonl"
+    valid = (line("turn_start", hour=12) + "\n").encode("utf-8")
+    unterminated = b"x" * daily_summary.MAX_LINE_BYTES
+    audit.write_bytes(valid + unterminated)
+
+    result: list[str | None] = []
+    errors: list[BaseException] = []
+
+    def target() -> None:
+        try:
+            result.append(build_summary(audit, DAY, START, END))
+        except BaseException as exc:  # pragma: no cover
+            errors.append(exc)
+
+    worker = threading.Thread(target=target, daemon=True)
+    worker.start()
+    worker.join(timeout=2.0)
+    assert not worker.is_alive(), "_tail_lines EOF'ta takılı kaldı"
+    assert not errors
+    assert result and result[0] is not None
+    assert "sohbet 1" in result[0]
+    assert "eksik olabilir" in result[0]
+
+
+def test_tail_lines_discards_oversized_cut_first_line(tmp_path: Path) -> None:
+    """Ofset dev satırın ortasına düşerse ilk satırın kalanı da tamamen atılmalı."""
+    json_line = json.dumps(
+        {"event": "turn_start", "timestamp": "2026-10-15T10:00:00+00:00"}
+    ).encode()
+    data = b"A" * (600 * 1024) + b" " + json_line + b"\n"
+    path = tmp_path / "cut.jsonl"
+    path.write_bytes(data)
+
+    truncated: list[bool] = []
+    lines = list(_tail_lines(path, len(data) - 88 * 1024, truncated))
+    assert lines == []
+    assert truncated == [True]
+
+
+def test_tail_lines_unterminated_oversized_eof_returns(tmp_path: Path) -> None:
+    """Son satır dev olup satır sonu taşımıyorsa EOF'ta takılmadan tek tam satırı döner."""
+    first = b'{"event": "turn_start"}\n'
+    path = tmp_path / "eof_tail.jsonl"
+    path.write_bytes(first + b"x" * (600 * 1024))
+
+    truncated: list[bool] = []
+    lines: list[bytes] = []
+    worker = threading.Thread(
+        target=lambda: lines.extend(_tail_lines(path, 2 * 1024 * 1024, truncated)),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=2.0)
+    assert not worker.is_alive(), "_tail_lines EOF'ta takılı kaldı"
+    assert lines == [first]
+    assert truncated == [True]

@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import importlib
-import importlib.util
 import os
 import tempfile
 from collections.abc import Callable
@@ -22,6 +20,7 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
+    QCloseEvent,
     QColor,
     QFont,
 )
@@ -44,22 +43,23 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.providers import stored_endpoint_key
+from artemis.channels.desktop import provider_section
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.file_search_section import FileSearchSection
 from artemis.channels.desktop.page_kit import PAGE_MAX_WIDTH, CurrentPageStack
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.provider_section import (
-    ConnectionTest,
     ProviderSection,
     store_endpoint_key,
 )
+from artemis.channels.desktop.provider_workers import ConnectionTest
 from artemis.channels.desktop.routines_section import RoutinesSection
 from artemis.channels.desktop.settings_io import (
     PANEL_BINDINGS,
     SettingPath,
     _same,
-    microphone_choices,
+    refresh_device_combo,
     save_code_agent,
     setting_value,
 )
@@ -108,7 +108,9 @@ from artemis.channels.desktop.settings_widgets import (
 from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEMES
+from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.channels.desktop.triggers_section import TriggersSection
+from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
 from artemis.channels.desktop.update_section import UpdateSection
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import (
@@ -179,6 +181,14 @@ class SttDownload(QThread):
 
 
 _LAST_SECTION_KEY = "settings/section"
+_SHUTDOWN_WAIT_MS = 6000
+# Süresi dolunca ayrılan iş parçacıkları bitene dek GC tarafından toplanmasın diye tutulur.
+_DETACHED = DETACHED
+
+
+def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
+    # Bekleme süresi modülde kalır (testler kısaltır); gövde ortak modülde.
+    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 
@@ -825,7 +835,9 @@ class SettingsPanel(QWidget):
             key = self.cloud_key.text().strip() or stored_endpoint_key(name)
         self.cloud_stt_hint.setText("Model listesi alınıyor…")
         self._cloud_fetch_for = name
-        self._cloud_fetch = ConnectionTest(endpoint.base_url, key, self)
+        self._cloud_fetch = ConnectionTest(
+            endpoint.base_url, key, self, provider_section.probe_models
+        )
         self._cloud_fetch.done.connect(self._cloud_models_done)
         self._cloud_fetch.start()
 
@@ -978,6 +990,7 @@ class SettingsPanel(QWidget):
         choice = self._selected_stt_choice()
         self._populate_stt_choices(choice.name if choice is not None else None)
         self.stt_status.setText("İndirildi; kendiliğinden kaydedilir.")
+        self._mark_dirty()
 
     def _stt_download_failed(self, error_type: str) -> None:
         self.stt_status.setText(f"İndirilemedi: {error_type}")
@@ -1044,40 +1057,7 @@ class SettingsPanel(QWidget):
         self.current_device.setText(text.strip() or "Seçilmedi")
 
     def _refresh_devices(self, settings: Settings) -> None:
-        self.device_combo.clear()
-        self.device_combo.setEnabled(not self._demo)
-        self.device_combo.addItem("Sistem varsayılanı", None)
-        audio_errors: tuple[type[Exception], ...] = (ImportError, OSError, RuntimeError, ValueError)
-        try:
-            sd = importlib.import_module("sounddevice")
-            audio_errors = (*audio_errors, sd.PortAudioError)
-            devices = sd.query_devices()
-            hosts = sd.query_hostapis()
-            active: Any = settings.voice.input_device
-            if active is None:
-                active = int(sd.default.device[0])
-            active_name = str(active)
-            choices = microphone_choices(
-                list(devices), list(hosts), active,
-                advanced=self.advanced_devices.isChecked(),
-            )
-            if not choices:
-                self._no_device()
-                self._set_current_device("")
-                return
-            for label, index, indices in choices:
-                self.device_combo.addItem(label, index)
-                if active in indices or (isinstance(active, str) and active in label):
-                    active_name = label
-                if settings.voice.input_device in indices:
-                    self.device_combo.setCurrentIndex(self.device_combo.count() - 1)
-            if active_name == str(active):
-                self.device_combo.addItem(f"Mevcut giriş ({active})", settings.voice.input_device)
-                self.device_combo.setCurrentIndex(self.device_combo.count() - 1)
-            self._set_current_device(active_name)
-        except audio_errors:
-            self._no_device()
-            self.current_device.setText("Seçilmedi (mikrofon aygıtları okunamadı)")
+        refresh_device_combo(self, settings)
 
     def _toggle_device_detail(self) -> None:
         if self._demo:
@@ -1249,12 +1229,15 @@ class SettingsPanel(QWidget):
         thread = GitHubSync(owner, Path(folder), self._github_sync, self)
         thread.done.connect(self._github_done)
         thread.failed.connect(self._github_failed)
-        thread.finished.connect(lambda: self.github_button.setEnabled(not self._demo))
+        thread.finished.connect(self._github_finished)
         self.github = thread
         self.github_button.setEnabled(False)
         self.github_list.clear()
         self.github_status.setText(f"{owner} repoları eşitleniyor…")
         thread.start()
+
+    def _github_finished(self) -> None:
+        self.github_button.setEnabled(not self._demo)
 
     def _github_failed(self, message: str) -> None:
         self.github_status.setText(f"Eşitleme başarısız: {message}")
@@ -1275,10 +1258,29 @@ class SettingsPanel(QWidget):
         self.github_synced.emit(report, self._github_auto)
 
     def finish_inventory(self) -> None:
-        if self.github is not None and self.github.isRunning():
-            self.github.requestInterruption()
-            self.github.wait(6000)
+        if _shutdown_thread(
+            self.github,
+            ("done", self._github_done),
+            ("failed", self._github_failed),
+            ("finished", self._github_finished),
+        ):
+            self.github = None
         # Model listesi isteği (en çok 5 sn zaman aşımı) çalışırken panel yıkılmasın.
-        if self._cloud_fetch is not None and self._cloud_fetch.isRunning():
-            self._cloud_fetch.wait(6000)
+        if _shutdown_thread(self._cloud_fetch, ("done", self._cloud_models_done)):
+            self._cloud_fetch = None
+        if _shutdown_thread(
+            self.stt_download_thread,
+            ("done", self._stt_download_done),
+            ("failed", self._stt_download_failed),
+            ("finished", self._stt_download_finished),
+        ):
+            self.stt_download_thread = None
         self.telegram.finish()
+        self.update_section.finish()
+        if isinstance(self.tts_cloud_box, TtsCloudBox):
+            self.tts_cloud_box.finish()
+        self.file_search.finish()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.finish_inventory()
+        super().closeEvent(event)

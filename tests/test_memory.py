@@ -20,7 +20,7 @@ from artemis.brain.fake import ScriptedProvider
 from artemis.brain.models import Completion, ToolCall
 from artemis.config.settings import MemoryConfig, Settings
 from artemis.memory.embedding import EmbeddingIndex, EmbeddingUnavailable
-from artemis.memory.vault import is_excluded, iter_notes, turkish_fold
+from artemis.memory.vault import _folder_entry_matches, is_excluded, iter_notes, turkish_fold
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import TAINT_NOTICE, SafetyGate, TurnState
 from artemis.tools.base import Risk, ToolContext, ToolResult
@@ -732,3 +732,40 @@ async def test_iter_notes_skips_excluded_hidden_and_escaping_links(
     ]
     assert found == sorted(found)
     assert set(found) == {"Projeler/artemis.md", "Kişisel/tercihler.md", "İstanbul.md"}
+
+
+def test_folder_entry_matches_uses_turkish_fold() -> None:
+    assert _folder_entry_matches("İş/x", ["iş/"]) is True
+    assert is_excluded("İş/x.md", ["iş/"]) is True
+
+
+def test_slash_and_empty_exclude_entries_exclude_nothing() -> None:
+    assert is_excluded("daily/x.md", ["/"]) is False
+    assert _folder_entry_matches("notes", ["/"]) is False
+    assert is_excluded("daily/x.md", [""]) is False
+    assert _folder_entry_matches("notes", [""]) is False
+
+
+def test_isci_exclude_remains_fail_closed_for_ascii_folder() -> None:
+    assert is_excluded("isci/not.md", ["ISCI/"]) is True
+    assert _folder_entry_matches("isci", ["ISCI/"]) is True
+
+
+def test_iter_notes_normal_and_turkish_folder_excludes(tmp_path: Path) -> None:
+    assert is_excluded("daily/x.md", ["daily/"]) is True
+    assert _folder_entry_matches("daily/alt", ["daily/"]) is True
+    vault = tmp_path / "vault"
+    write_note(vault, "daily/2026-10-13.md", "Günlük\n")
+    write_note(vault, "İş/plan.md", "İş planı\n")
+    write_note(vault, "Notlar/fikir.md", "Fikir\n")
+    root = vault.resolve()
+    found = [
+        path.resolve().relative_to(root).as_posix()
+        for path in iter_notes(vault, ["daily/", "iş/"])
+    ]
+    assert found == ["Notlar/fikir.md"]
+    all_notes = [
+        path.resolve().relative_to(root).as_posix()
+        for path in iter_notes(vault, ["/", ""])
+    ]
+    assert all_notes == ["Notlar/fikir.md", "daily/2026-10-13.md", "İş/plan.md"]

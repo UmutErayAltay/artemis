@@ -151,7 +151,7 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         selection_clash = same_hotkey(selection_key, voice_key) or same_hotkey(
             selection_key, dictation_key
         )
-    except (OSError, ValueError, ValidationError, yaml.YAMLError):
+    except (OSError, ValueError, KeyError, ValidationError, yaml.YAMLError):
         clash = selection_clash = False  # okunamayan config aşağıdaki kayıtta yakalanır
     if clash:
         panel.save_failed("Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seç.")

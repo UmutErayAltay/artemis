@@ -94,7 +94,7 @@ voice:
   max_utterance_seconds: 15
   queue_frames: 32
   stt_model: ../models/whisper-small
-  stt_device: cuda
+  stt_device: cuda # cuda | cpu. CUDA yoksa otomatik CPU'ya dönülmez; CPU makinede cpu yazın.
   stt_compute_type: float16 # Panelden seçilir: int8_float16 (az bellek, aynı doğruluk) | float16; CPU'da yok sayılır.
   stt_language: tr_en # Türkçe öncelikli; güçlü İngilizce kanıtında en. auto tüm dilleri seçer.
   cuda_library_dirs: [] # Windows: gerektiğinde yerel cublas/cudnn DLL dizinleri.
@@ -173,7 +173,7 @@ memory:
 #   companion_vault_files: ["850-Companion/Threads.md", "850-Companion/Last-Session.md"]
 #   # Konuşma hafızasını (memory.sqlite3) diskte Windows DPAPI ile şifreler (ADR 0076).
 #   # Yeni kurulumlar şifrelidir; mevcut config dosyaları değişmez.
-  encrypt_at_rest: true
+  encrypt_at_rest: true # Windows DPAPI. Windows dışında şifresiz devam eder ve uyarı loglanır.
 
 # Telegram (ADR 0016). KAPALI gelir: chat_id verilmedikçe ne araç ne kanal çalışır.
 # Bot token'ı BURAYA YAZILMAZ ve YAML'da `token:` alanı yoktur (eklenirse doğrulama

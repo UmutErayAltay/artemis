@@ -9,15 +9,27 @@ QThread'de çalışır (arayüz donmaz).
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import QFileDialog, QListWidget, QPushButton, QVBoxLayout, QWidget
 
 from artemis.channels.desktop.form_kit import button_row, group, meta_label
 from artemis.channels.desktop.settings_lists import ListWithEmpty
+from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.config.settings import Settings, load_settings
 from artemis.safety.audit import AuditLog
 from artemis.tools.file_index import FileIndex, usable_roots
+
+_SHUTDOWN_WAIT_MS = 6000
+# Süresi dolunca ayrılan iş parçacığı bitene dek GC tarafından toplanmasın diye tutulur.
+_DETACHED = DETACHED
+
+
+def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
+    # Bekleme süresi modülde kalır (testler kısaltır); gövde ortak modülde.
+    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 class _ClearJob(QThread):
@@ -168,3 +180,12 @@ class FileSearchSection(QWidget):
             self._clearing = None
         self.clear_button.setEnabled(not self._demo)
         self._show_status()
+
+    def finish(self) -> None:
+        self._timer.stop()
+        if _shutdown_thread(self._clearing, ("done", self._cleared)):
+            self._clearing = None
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.finish()
+        super().closeEvent(event)

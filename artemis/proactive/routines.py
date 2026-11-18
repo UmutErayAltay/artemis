@@ -8,6 +8,7 @@ ve dosya kullanıcı elle düzeltene dek olduğu gibi kalır.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import re
@@ -110,7 +111,8 @@ def validate_steps(steps: list[RoutineStep], registry: ToolRegistry) -> list[Rou
     checked: list[RoutineStep] = []
     for number, step in enumerate(steps, start=1):
         resolved = resolve_tool_name(step.tool, registry)
-        # Yasak önek ÇÖZÜLMÜŞ adda denetlenir: "x_routine_run" yasağı aşamasın.
+        # Yasak önek ÇÖZÜLMÜŞ adda denetlenir: yabancı önekli `mcp__x__routine_run` adını
+        # `resolve_tool_name` `routine_run`'a eşlediğinde bu kontrol yakalayıp reddeder.
         if resolved is not None and resolved.startswith(FORBIDDEN_PREFIX) or (
             step.tool.startswith(FORBIDDEN_PREFIX)
         ):
@@ -155,18 +157,21 @@ class RoutineStore:
 
     def save(self, routines: list[Routine]) -> None:
         data = RoutineFile(routines=routines).model_dump(mode="json")
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        descriptor, temporary = tempfile.mkstemp(
-            prefix=".routines-", suffix=".json", dir=self.path.parent
-        )
+        temporary: str | None = None
         try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            descriptor, temporary = tempfile.mkstemp(
+                prefix=".routines-", suffix=".json", dir=self.path.parent
+            )
             with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
                 json.dump(data, stream, ensure_ascii=False, indent=2)
             os.replace(temporary, self.path)
         except OSError as error:
             raise RoutinesError(f"Rutin dosyası yazılamadı ({type(error).__name__}).") from error
         finally:
-            Path(temporary).unlink(missing_ok=True)
+            if temporary is not None:
+                with contextlib.suppress(OSError):
+                    Path(temporary).unlink(missing_ok=True)
 
     def find(self, name: str) -> Routine | None:
         key = name_key(name)

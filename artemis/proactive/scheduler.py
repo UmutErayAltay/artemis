@@ -192,13 +192,15 @@ class ProactiveScheduler:
         triggers = self.runtime.settings.triggers
         for trigger in triggers.items if triggers.enabled else ():
             try:
-                ready = await self._poll_trigger(trigger, now, can_fire=left > 0)
+                ready = await self._poll_trigger(trigger, now)
                 if not ready:
                     continue
                 if left <= 0:
                     capped = True
                     continue
                 delivered = await self._fire_trigger(trigger, ready, start, now)
+                if delivered:
+                    self._mark_trigger_seen(trigger.name, ready)
             except (OSError, ValueError, RuntimeError) as error:
                 # Bozuk ya da erişilemeyen klasör yalnız o tetikleyiciyi etkiler; hata her taramada
                 # değil, bir kez denetime yazılır. Diğer tetikleyiciler çalışmaya devam eder.
@@ -283,11 +285,12 @@ class ProactiveScheduler:
         return int(outcome.delivered)
 
     async def _poll_trigger(
-        self, trigger: TriggerConfig, now: datetime, *, can_fire: bool
+        self, trigger: TriggerConfig, now: datetime
     ) -> list[str]:
         """Klasörü tarar, durumu yazar; bildirilmeye hazır (boyutu iki yoklamada aynı) dosyaları
-        döndürür. İlk tarama yalnız taban çizgisidir. Hazır dosyalar `can_fire` iken "bildirildi"
-        yazılır (önce talep edilir, en çok bir kez); sınır doluysa bekler, ertesi gün çıkar."""
+        döndürür. İlk tarama yalnız taban çizgisidir. Hazır dosyalar teslim başarılı olana dek
+        beklemede kalır; teslim başarısız olursa veya günlük sınır doluysa sonraki taramada
+        yeniden bildirilir."""
         found, truncated = await asyncio.to_thread(scan_folder, trigger.folder, trigger.pattern)
         known = self.store.trigger_files(trigger.name)
         if known is None:  # ilk tarama: var olanlar bildirilmez
@@ -304,18 +307,33 @@ class ProactiveScheduler:
                 rows[name] = before
             else:
                 ready.append(name)
-                rows[name] = (size, can_fire)
+                # Teslim başarısız olursa kaybolmasın diye görüldü işareti teslim sonrası yazılır.
+                rows[name] = (size, False)
         self.store.save_trigger_files(trigger.name, rows, keep_missing=truncated)
         return ready
+
+    def _mark_trigger_seen(self, trigger_name: str, ready: list[str]) -> None:
+        # Yalnız başarılı teslimden sonra tetikleyici dosyaları görüldü işaretlenir.
+        known = self.store.trigger_files(trigger_name) or {}
+        updates = {name: (known[name][0], True) for name in ready if name in known}
+        if updates:
+            self.store.save_trigger_files(trigger_name, updates, keep_missing=True)
 
     async def _fire_trigger(
         self, trigger: TriggerConfig, ready: list[str], day_start: datetime, now: datetime
     ) -> int:
         digest = hashlib.sha1("|".join(sorted(ready)).encode("utf-8")).hexdigest()[:12]
         # Aynı dosya kümesi aynı yerel günde bir kez talep edilir: iki süreç çift bildirmez.
-        event_id = f"trigger:{trigger.name}:{digest}"
-        if not self.store.claim(event_id, day_start, "trigger", self.owner, now):
-            return 0
+        # Önceki deneme `failed` bittiyse yeniden denenebilsin diye sıradaki deneme kimliği
+        # açılır; `delivered`/`claimed`/`uncertain` durumunda talep yine reddedilir.
+        base_id = f"trigger:{trigger.name}:{digest}"
+        event_id = base_id
+        attempt = 1
+        while not self.store.claim(event_id, day_start, "trigger", self.owner, now):
+            if self.store.occurrence_state(event_id, day_start) != "failed":
+                return 0
+            attempt += 1
+            event_id = f"{base_id}:{attempt}"
         routine = trigger.routine if self.runtime.settings.routines.enabled else None
         title, body, suggest = build_notice(
             trigger.name, trigger.folder, trigger.message, trigger.suggest, ready

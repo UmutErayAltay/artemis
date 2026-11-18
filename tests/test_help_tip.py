@@ -99,3 +99,22 @@ def test_second_click_closes_even_while_hovered(parts) -> None:
     tip.click()
     assert not tip.is_open() and not tip.isChecked()
     window.close()
+
+
+def test_pinning_after_deleted_previous_tip_does_not_raise(parts) -> None:
+    import shiboken6
+
+    _app, window, tip_a, _other = parts
+    tip_b = HelpTip("B")
+    window.layout().addWidget(tip_b)
+    try:
+        tip_a.setChecked(True)
+        assert HelpTip._pinned is tip_a
+        shiboken6.delete(tip_a)
+        tip_b.setChecked(True)
+        assert HelpTip._pinned is tip_b
+    finally:
+        if shiboken6.isValid(tip_b):
+            tip_b.setChecked(False)
+        HelpTip._pinned = None
+        window.close()

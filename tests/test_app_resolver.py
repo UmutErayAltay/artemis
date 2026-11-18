@@ -22,6 +22,7 @@ from artemis.tools.app_resolver import (
     skeleton,
 )
 from artemis.tools.base import Risk, ToolContext, ToolResult
+from artemis.tools.plugins.app_alias import ForgetApplicationAlias
 from artemis.tools.registry import discover_tools
 
 APPS = {
@@ -303,6 +304,21 @@ async def test_alias_to_uninstaller_still_requires_confirmation(tmp_path: Path) 
     assert asked and denied.status == "denied" and desktop.opened == []
 
 
+async def test_open_application_fuzzy_uninstaller_is_not_opened(tmp_path: Path) -> None:
+    # Adı temiz olsa bile yürütülebilir yolu kaldırıcı olan uygulama yakın eşleşmeyle
+    # açılmaz; tam ad istenir.
+    apps = {
+        "Brave": "startapp:Brave|C:/Apps/brave-uninstall.exe",
+        "Notepad": "startapp:Notepad|notepad.exe",
+    }
+    context, desktop = _context(tmp_path, applications=apps)
+    result, _ = await _dispatch(
+        context, "open_application", {"name": "braev"}, tainted=False, approve=True
+    )
+    assert desktop.opened == []
+    assert result.status == "error"
+
+
 async def test_without_persistent_memory_aliases_are_neither_written_nor_read(
     tmp_path: Path,
 ) -> None:
@@ -369,3 +385,84 @@ def test_alias_hotwords_are_opt_in_bounded_and_only_user_taught(tmp_path: Path) 
     assert len(alias_hotword_config(full).stt_hotwords) == 100
     alias_store(tmp_path / "state").path.write_text("{bozuk", encoding="utf-8")
     assert alias_hotword_config(settings(stt_alias_hotwords=True)).stt_hotwords == ("Artemis",)
+
+
+async def test_open_application_fuzzy_match_named_uninstaller_is_not_opened(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Çözücü bugün kaldırıcı adlarını yakın adaylardan zaten çıkarıyor; bu dal ikinci savunma.
+    from artemis.tools import app_resolver
+    from artemis.tools.plugins import desktop as desktop_plugin
+
+    context, desktop = _context(tmp_path)
+    named = app_resolver.AppMatch("fuzzy", "Uninstall Brave", "startapp:Brave|C:/Apps/brave.exe")
+    real = desktop_plugin.application_match
+
+    def fake_match(ctx: ToolContext, name: str, *, fuzzy: bool) -> app_resolver.AppMatch:
+        return named if fuzzy else real(ctx, name, fuzzy=False)
+
+    monkeypatch.setattr(desktop_plugin, "application_match", fake_match)
+    result, _ = await _dispatch(
+        context, "open_application", {"name": "braev"}, tainted=False, approve=True
+    )
+    assert desktop.opened == []
+    assert result.status == "error"
+
+
+async def test_auto_mode_remembers_alias_without_approval_and_audits_skip(
+    tmp_path: Path,
+) -> None:
+    context, _ = _context(tmp_path, computer_use={"mode": "auto"})
+    result, asked = await _dispatch(
+        context,
+        "app_alias_remember",
+        {"spoken": "breyv", "application": "Brave"},
+        tainted=True,
+    )
+    assert result.success
+    assert asked == []
+    assert alias_store(context.settings.state_dir).load() == {"breyv": "Brave"}
+    assert any(
+        record.get("event") == "approval_skipped"
+        and record.get("tool") == "app_alias_remember"
+        for record in _audit(context)
+    )
+
+
+@pytest.mark.parametrize("tainted", [False, True])
+async def test_auto_mode_refuses_alias_to_uninstaller_without_asking(
+    tmp_path: Path, tainted: bool
+) -> None:
+    context, _ = _context(tmp_path, computer_use={"mode": "auto"})
+    result, asked = await _dispatch(
+        context,
+        "app_alias_remember",
+        {"spoken": "temizle", "application": "Uninstall Brave"},
+        tainted=tainted,
+    )
+    assert not result.success and result.status == "error"
+    assert asked == []
+    assert not alias_store(context.settings.state_dir).path.exists()
+
+
+async def test_forget_alias_never_skips_approval_even_in_auto_mode(tmp_path: Path) -> None:
+    assert ForgetApplicationAlias.auto_mode_ok is False
+    context, _ = _context(tmp_path, computer_use={"mode": "auto"})
+    alias_store(context.settings.state_dir).save({"brev": "Brave"})
+    denied, asked = await _dispatch(
+        context,
+        "app_alias_forget",
+        {"spoken": "brev"},
+        tainted=True,
+        approve=False,
+    )
+    assert asked == [{"tool": "app_alias_forget", "spoken": "brev"}]
+    assert denied.status == "denied"
+    assert alias_store(context.settings.state_dir).load() == {"brev": "Brave"}
+
+
+def test_alias_store_invalid_utf8_raises_alias_store_error(tmp_path: Path) -> None:
+    path = tmp_path / "app_aliases.json"
+    path.write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(AliasStoreError):
+        AliasStore(path).load()

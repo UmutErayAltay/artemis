@@ -277,9 +277,18 @@ class EmbeddingIndex:
             offset += len(passages)
 
         matrix = np.concatenate(blocks, axis=0) if blocks else np.zeros((0, 0), dtype=np.float32)
-        if (changed or cached is None) and blocks:
-            meta = {"version": _CACHE_VERSION, "model": self._model_name, "notes": notes_meta}
-            self._save_cache(np, meta, matrix)
+        if blocks:
+            if changed or cached is None:
+                meta = {"version": _CACHE_VERSION, "model": self._model_name, "notes": notes_meta}
+                self._save_cache(np, meta, matrix)
+        else:
+            # Kasa boşaldığında eski notların pasajları disk önbelleğinde kalmamalı (gizlilik).
+            try:
+                self._cache_file.unlink(missing_ok=True)
+            except OSError as exc:
+                logger.warning(
+                    "Boş kasa için embedding önbelleği silinemedi: %s", type(exc).__name__
+                )
         return entries, matrix
 
     # ------------------------------------------------------------------ #

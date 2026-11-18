@@ -22,7 +22,7 @@ from artemis.channels.desktop import pet_creator as pc
 from artemis.channels.desktop import pet_creator_panel as panel_mod
 from artemis.channels.desktop import pet_sprite as ps
 from artemis.channels.desktop.pet_section import PetSection
-from artemis.config.settings import ModelConfig, Settings
+from artemis.config.settings import EndpointConfig, ModelConfig, Settings
 
 GOOD = (
     '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 208">'
@@ -381,3 +381,78 @@ def test_empty_model_state_shown_without_models(tmp_path: Path, qapp: QApplicati
     assert "Demo modunda" in demo.creator.empty_body.text()
     demo.creator.shutdown()
     demo.deleteLater()
+
+
+def test_model_call_yaml_error_emits_done_and_clears_busy(
+    section: PetSection, qapp: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    creator = section.creator
+    assert creator is not None
+
+    def broken_load(_path: Path) -> Settings:
+        raise yaml.YAMLError("bozuk yaml")
+
+    monkeypatch.setattr(panel_mod, "load_settings", broken_load)
+    creator.input.setText("kedi")
+    creator.send()
+    assert creator._busy()
+    wait_reply(creator, qapp)
+    assert not creator._busy()
+    assert creator.send_button.isEnabled()
+    assert "Hata:" in creator.chat_log.toPlainText()
+
+
+def test_image_call_yaml_error_emits_done_and_clears_busy(
+    qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    chat_model = ModelConfig(
+        provider="ollama",
+        model="m",
+        input_per_million=Decimal(0),
+        output_per_million=Decimal(0),
+    )
+    img_model = ModelConfig(
+        provider="openai_compatible",
+        model="img",
+        kind="image",
+        endpoint="yerel",
+        input_per_million=Decimal(0),
+        output_per_million=Decimal(0),
+    )
+    settings = Settings(
+        workspace=tmp_path,
+        state_dir=tmp_path / "s",
+        audit_path=tmp_path / "a.jsonl",
+        endpoints={"yerel": EndpointConfig(base_url="http://127.0.0.1:8000/v1")},
+        models={"bedava": chat_model, "resim": img_model},
+        primary_model="bedava",
+    )
+    monkeypatch.setattr(panel_mod, "load_settings", lambda _path: settings)
+    sec = PetSection(tmp_path / "pets", None, config_path=tmp_path / "c.yaml")
+    creator = sec.creator
+    assert creator is not None
+    creator.method.setCurrentIndex(1)
+
+    def broken_load(_path: Path) -> Settings:
+        raise yaml.YAMLError("bozuk yaml")
+
+    monkeypatch.setattr(panel_mod, "load_settings", broken_load)
+    creator.input.setText("kedi")
+    creator.send()
+    assert creator._busy()
+    for _ in range(500):
+        qapp.processEvents()
+        if creator._image_call is None:
+            break
+        creator._image_call.wait(20)
+    else:
+        raise AssertionError("resim çağrısı yanıt vermedi")
+    assert not creator._busy()
+    assert creator.send_button.isEnabled()
+    assert "Hata:" in creator.chat_log.toPlainText()
+    creator.shutdown()
+    sec.deleteLater()

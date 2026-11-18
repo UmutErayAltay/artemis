@@ -1,4 +1,4 @@
-"""Kullanıcının düzelttiği uygulama adlarını hatırlama (ADR 0044).
+"""Kullanıcının düzelttiği uygulama adlarını hatırlama (ADR 0044, ADR 0039 ek karar).
 
 "Hayır, Brave'i kastettim" gibi bir düzeltmeden sonra model söylenen adı izinli uygulamaya
 bağlar; sonraki turlarda aynı söyleyiş soru sormadan doğru uygulamaya gider. Takma ad izin
@@ -6,7 +6,10 @@ listesini genişletmez: hedef ``settings.applications`` içinde tam adla bulunma
 başka bir uygulamanın gerçek adı takma ad olamaz ("edge" Brave'e bağlanamaz).
 
 SIDE_EFFECT'tir: temiz turda sormadan, dış içerikle lekeli turda onayla yazılır; böylece
-web/dosya metni kullanıcı adına yönlendirme kuramaz. Kalıcı hafıza kapalıyken yazılmaz.
+web/dosya metni kullanıcı adına yönlendirme kuramaz. ``computer_use.mode == "auto"`` iken
+yalnız ``app_alias_remember`` ``auto_mode_ok = True`` ile onay atlar; kaldırıcı hedefler
+``refuse()`` ile otomatik kipte reddedilir (normal kipte onay kuralı değişmez).
+``app_alias_forget`` için otomatik kip istisnası yoktur. Kalıcı hafıza kapalıyken yazılmaz.
 """
 
 from typing import cast
@@ -15,6 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.tools.app_resolver import (
     MAX_ALIAS_CHARS,
+    UNINSTALL_WORDS,
     AliasStoreError,
     alias_store,
     normalize,
@@ -39,6 +43,14 @@ def _error(error: AliasStoreError) -> ToolResult:
     return ToolResult(status="error", message=f"Takma ad kaydı başarısız: {error}")
 
 
+def _is_uninstaller_target(application: str, context: ToolContext) -> bool:
+    target = resolve_application(context.settings.applications, {}, application, fuzzy=False)
+    if target.name is None:
+        return False
+    haystack = f"{target.name}\n{target.executable or ''}".casefold()
+    return any(word in haystack for word in UNINSTALL_WORDS)
+
+
 @register_tool
 class RememberApplicationAlias(BaseTool):
     name = "app_alias_remember"
@@ -51,6 +63,18 @@ class RememberApplicationAlias(BaseTool):
     )
     args_model = RememberAliasArguments
     risk = Risk.SIDE_EFFECT
+    auto_mode_ok = True
+
+    def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
+        if context.settings.computer_use.mode != "auto":
+            return None
+        args = cast(RememberAliasArguments, arguments)
+        if _is_uninstaller_target(args.application, context):
+            return (
+                "Kaldırıcı bir uygulamaya takma ad otomatik onayla öğrenilmez; "
+                "kullanıcı onayı gerekir."
+            )
+        return None
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(RememberAliasArguments, arguments)

@@ -38,6 +38,8 @@ _NATIVE_TYPE = "\n".join(
         "  public struct RECT {",
         "    public int Left; public int Top; public int Right; public int Bottom;",
         "  }",
+        '  [DllImport("user32.dll")] public static extern bool '
+        "SetProcessDpiAwarenessContext(IntPtr value);",
         '  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();',
         '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
         '  [DllImport("user32.dll")]',
@@ -47,6 +49,9 @@ _NATIVE_TYPE = "\n".join(
         '  [DllImport("dwmapi.dll")]',
         "  public static extern int DwmGetWindowAttribute(",
         "    IntPtr h, int attr, out RECT r, int size);",
+        '  [DllImport("dwmapi.dll")]',
+        "  public static extern int DwmGetWindowAttribute(",
+        "    IntPtr h, int attr, out int v, int size);",
         '  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr h, uint cmd);',
         '  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr h);',
         '  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr h);',
@@ -60,8 +65,12 @@ _NATIVE_TYPE = "\n".join(
         "      uint pid;",
         "      GetWindowThreadProcessId(h, out pid);",
         "      StringBuilder b = new StringBuilder(2);",
+        "      int cloaked = 0;",
+        "      // DWMWA_CLOAKED (14): gizli UWP/sanal masaüstü pencerelerini atla.",
         "      if (pid != ownPid && IsWindowVisible(h) && !IsIconic(h)",
-        "          && GetWindowText(h, b, 2) > 0) return h;",
+        "          && GetWindowText(h, b, 2) > 0",
+        "          && (DwmGetWindowAttribute(h, 14, out cloaked, 4) != 0",
+        "              || cloaked == 0)) return h;",
         "      h = GetWindow(h, 2);",
         "    }",
         "    return IntPtr.Zero;",
@@ -71,7 +80,30 @@ _NATIVE_TYPE = "\n".join(
     ]
 )
 
-# Neden bu yapı: `SetProcessDPIAware` yakalamadan ÖNCE çağrılır. Pencere sınırları için DWM'in
+# Ortak küçültme bloğu: Windows OCR büyük görselleri reddeder; MaxImageDimension üstü
+# görüntüler bellek içi HighQualityBicubic ölçeklemeyle sığdırılır.
+_DOWNSCALE_BITMAP = "\n".join(
+    [
+        "  $image = $bitmap",
+        "  $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
+        "  if ($width -gt $maxDim -or $height -gt $maxDim) {",
+        "    $ratio = [Math]::Min($maxDim / $width, $maxDim / $height)",
+        "    $newWidth = [Math]::Max(1, [int][Math]::Floor($width * $ratio))",
+        "    $newHeight = [Math]::Max(1, [int][Math]::Floor($height * $ratio))",
+        "    $scaled = New-Object System.Drawing.Bitmap $newWidth, $newHeight",
+        "    $scaledGraphics = [System.Drawing.Graphics]::FromImage($scaled)",
+        "    try {",
+        "      $scaledGraphics.InterpolationMode = "
+        "[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic",
+        "      $scaledGraphics.DrawImage($bitmap, 0, 0, $newWidth, $newHeight)",
+        "    } finally { $scaledGraphics.Dispose() }",
+        "    $image = $scaled",
+        "  }",
+    ]
+)
+
+# Neden bu yapı: Per-Monitor V2 DPI farkındalığı (düşüş: `SetProcessDPIAware`) yakalamadan ÖNCE
+# kurulur. Pencere sınırları için DWM'in
 # "extended frame bounds"u (9) tercih edilir çünkü `GetWindowRect` Windows 10/11'de görünmez
 # gölge kenarlıkları da kapsar; DWM başarısızsa (0 dönmezse) GetWindowRect'e düşülür.
 # WinRT `IAsyncOperation` PowerShell 5.1'de doğrudan beklenemez: `AsTask` genel yansıtma
@@ -87,7 +119,9 @@ SCREEN_SCRIPT = "\n".join(
         "Add-Type -AssemblyName System.Drawing",
         "Add-Type -AssemblyName System.Runtime.WindowsRuntime",
         _NATIVE_TYPE,
-        "[void][ArtemisNative]::SetProcessDPIAware()",
+        "try { if (-not [ArtemisNative]::SetProcessDpiAwarenessContext([IntPtr](-4))) "
+        "{ [void][ArtemisNative]::SetProcessDPIAware() } } "
+        "catch { [void][ArtemisNative]::SetProcessDPIAware() }",
         "$null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]",
         "$null = [Windows.Globalization.Language, Windows.Globalization, "
         "ContentType = WindowsRuntime]",
@@ -137,21 +171,7 @@ SCREEN_SCRIPT = "\n".join(
         "  $bitmap = New-Object System.Drawing.Bitmap $width, $height",
         "  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)",
         "  $graphics.CopyFromScreen($left, $top, 0, 0, $bitmap.Size)",
-        "  $image = $bitmap",
-        "  $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
-        "  if ($width -gt $maxDim -or $height -gt $maxDim) {",
-        "    $ratio = [Math]::Min($maxDim / $width, $maxDim / $height)",
-        "    $newWidth = [Math]::Max(1, [int][Math]::Floor($width * $ratio))",
-        "    $newHeight = [Math]::Max(1, [int][Math]::Floor($height * $ratio))",
-        "    $scaled = New-Object System.Drawing.Bitmap $newWidth, $newHeight",
-        "    $scaledGraphics = [System.Drawing.Graphics]::FromImage($scaled)",
-        "    try {",
-        "      $scaledGraphics.InterpolationMode = "
-        "[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic",
-        "      $scaledGraphics.DrawImage($bitmap, 0, 0, $newWidth, $newHeight)",
-        "    } finally { $scaledGraphics.Dispose() }",
-        "    $image = $scaled",
-        "  }",
+        _DOWNSCALE_BITMAP,
         "  $stream = New-Object System.IO.MemoryStream",
         "  $image.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)",
         "  $stream.Position = 0",
@@ -200,6 +220,8 @@ IMAGE_SCRIPT = "\n".join(
         "ContentType = WindowsRuntime]",
         "$null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics, "
         "ContentType = WindowsRuntime]",
+        "$null = [Windows.Graphics.Imaging.BitmapTransform, Windows.Graphics, "
+        "ContentType = WindowsRuntime]",
         "$null = [Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType = WindowsRuntime]",
         "$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | "
         "Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and "
@@ -221,12 +243,29 @@ IMAGE_SCRIPT = "\n".join(
         "  $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($stream)",
         "  $decoder = Wait-WinRT ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) "
         "([Windows.Graphics.Imaging.BitmapDecoder])",
-        "  $software = Wait-WinRT ($decoder.GetSoftwareBitmapAsync()) "
+        # Çözme WinRT'de kalır (HEIC gibi GDI+'nın okuyamadığı biçimler); büyük görsel yine WinRT
+        # BitmapTransform ile OCR sınırına küçültülür, reddedilmez (2026-11-18).
+        "  $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
+        "  $width = $decoder.PixelWidth; $height = $decoder.PixelHeight",
+        "  if ($width -le 0 -or $height -le 0) { exit 4 }",
+        "  if ($width -gt $maxDim -or $height -gt $maxDim) {",
+        "    $ratio = [Math]::Min($maxDim / $width, $maxDim / $height)",
+        "    $transform = New-Object Windows.Graphics.Imaging.BitmapTransform",
+        "    $transform.ScaledWidth = [uint32][Math]::Max(1, [Math]::Floor($width * $ratio))",
+        "    $transform.ScaledHeight = [uint32][Math]::Max(1, [Math]::Floor($height * $ratio))",
+        "    $transform.InterpolationMode = "
+        "[Windows.Graphics.Imaging.BitmapInterpolationMode]::Fant",
+        "    $software = Wait-WinRT ($decoder.GetSoftwareBitmapAsync("
+        "[Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, "
+        "[Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied, $transform, "
+        "[Windows.Graphics.Imaging.ExifOrientationMode]::RespectExifOrientation, "
+        "[Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage)) "
         "([Windows.Graphics.Imaging.SoftwareBitmap])",
+        "  } else {",
+        "    $software = Wait-WinRT ($decoder.GetSoftwareBitmapAsync()) "
+        "([Windows.Graphics.Imaging.SoftwareBitmap])",
+        "  }",
         "  try {",
-        "    $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
-        "    if ($software.PixelWidth -gt $maxDim -or $software.PixelHeight -gt $maxDim) "
-        "{ exit 4 }",
         "    $result = Wait-WinRT ($engine.RecognizeAsync($software)) "
         "([Windows.Media.Ocr.OcrResult])",
         "  } finally { $software.Dispose() }",
@@ -277,6 +316,12 @@ def _parse_payload(stdout: str) -> dict[str, object] | None:
     return payload if isinstance(payload, dict) else None
 
 
+def _powershell_path() -> str:
+    # CWD veya PATH üzerinden sahte powershell.exe yürütülmesini önlemek için mutlak yol.
+    root = os.environ.get("SYSTEMROOT") or r"C:\Windows"
+    return os.path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+
+
 def read_screen(
     scope: Literal["active_window", "screen"],
     *,
@@ -293,7 +338,7 @@ def read_screen(
     # `-EncodedCommand`: betik UTF-16-LE + base64; kapsam argv'de değil ortamda gider.
     encoded = base64.b64encode(SCREEN_SCRIPT.encode("utf-16-le")).decode("ascii")
     command = [
-        "powershell.exe",
+        _powershell_path(),
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy",
@@ -376,7 +421,7 @@ def read_image(
         return ScreenOutcome("unavailable", "Fotoğraf okuma yalnız Windows'ta çalışır.")
     encoded = base64.b64encode(IMAGE_SCRIPT.encode("utf-16-le")).decode("ascii")
     command = [
-        "powershell.exe", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
+        _powershell_path(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass",
         "-EncodedCommand", encoded,
     ]
     env = {**child_environment(), "ARTEMIS_OCR_IMAGE": path}

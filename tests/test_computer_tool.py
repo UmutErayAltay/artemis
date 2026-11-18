@@ -598,4 +598,6 @@ def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
         for definition in registry.definitions()
         if getattr(registry.get(definition.name), "auto_mode_ok", False)
     }
-    assert skipping == {"computer_use", "window_control", "screen_read", "open_url"}
+    assert skipping == {
+        "computer_use", "window_control", "screen_read", "open_url", "app_alias_remember"
+    }

@@ -66,7 +66,9 @@ def match_pairing(update: dict[str, Any], code: str) -> int | None:
     if not isinstance(chat_id, int) or isinstance(chat_id, bool) or chat_id != sender.get("id"):
         return None
     text = message.get("text")
-    if not isinstance(text, str) or not secrets.compare_digest(text.strip(), code):
+    if not isinstance(text, str) or not secrets.compare_digest(
+        text.strip().encode("utf-8"), code.encode("utf-8")
+    ):
         return None
     return chat_id
 
@@ -134,6 +136,14 @@ class TelegramJob(QThread):
             self.result = self._job(self)
         except TelegramError as error:
             self.result = error
+        except (OSError, ValueError, TypeError, KeyError, RuntimeError) as error:
+            # Ağ hataları istemcide TelegramError olur; kalan ayrıştırma/dosya hataları burada
+            # sabit metinle kapanır (mesaj token içerebilir). Asıl koruma _token_checked'teki
+            # sonuç türü denetimidir: sonuç str değilse token kaydedilmez.
+            self.result = TelegramError(
+                "Telegram işlemi beklenmeyen bir hatayla durdu.",
+                error_type=type(error).__name__,
+            )
 
 
 class TelegramSection(QWidget):
@@ -365,12 +375,15 @@ class TelegramSection(QWidget):
                 else f"Doğrulanamadı ({result.error_type}); token kaydedilmedi."
             )
             return
+        if not isinstance(result, str) or not result:
+            self.message.setText("Doğrulanamadı; token kaydedilmedi.")
+            return
         try:
             write_secret(typed, TOKEN_TARGET)
         except OSError:
             self.message.setText(f"Token saklanamadı; ortamda {config.token_env} tanımlayın.")
             return
-        self._username = str(result)
+        self._username = result
         self.message.setText(f"Doğrulandı: @{self._username}. Şimdi sohbeti eşleştir.")
         self.changed.emit()
 
@@ -407,9 +420,13 @@ class TelegramSection(QWidget):
                 texts.get(result.error_type, f"Eşleştirme başarısız ({result.error_type}).")
             )
             return
-        username: str
-        found: tuple[int, bool] | None
-        username, found = result  # type: ignore[misc]
+        if not isinstance(result, tuple) or len(result) != 2 or not isinstance(result[0], str):
+            self.message.setText("Eşleştirme başarısız (beklenmeyen sonuç).")
+            return
+        username, found = result
+        if found is not None and (not isinstance(found, tuple) or len(found) != 2):
+            self.message.setText("Eşleştirme başarısız (beklenmeyen sonuç).")
+            return
         self._username = username
         if found is None:
             self.message.setText("Eşleştirme sona erdi: kod gelmedi ya da iptal edildi.")
@@ -447,6 +464,8 @@ class TelegramSection(QWidget):
         def done(result: object) -> None:
             if isinstance(result, TelegramError):
                 self.message.setText(f"{label} gönderilemedi ({result.error_type}).")
+            elif result is not None:
+                self.message.setText(f"{label} gönderilemedi (beklenmeyen sonuç).")
             else:
                 self.message.setText(f"{label} gönderildi.")
 

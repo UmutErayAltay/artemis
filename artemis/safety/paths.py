@@ -1,5 +1,6 @@
 """Dosya araçlarının aynı kök ve yol kurallarını kullanmasını sağlar."""
 
+import os
 import re
 from pathlib import Path, PureWindowsPath
 
@@ -31,7 +32,11 @@ def safe_join(base: Path, target: str, *, allow_symlinks: bool = True) -> Path:
     candidate = root
     for part in parts:
         candidate /= part
-        if not allow_symlinks and candidate.is_symlink():
+        # Windows junction hedefleri is_symlink() ile görünmez;
+        # sembolik bağlantı gibi kaçış riski taşır.
+        if not allow_symlinks and (
+            candidate.is_symlink() or os.path.isjunction(candidate)
+        ):
             raise ValueError("Değişiklik yollarında sembolik bağlantı kabul edilmez.")
     candidate = candidate.resolve()
     if candidate == root:

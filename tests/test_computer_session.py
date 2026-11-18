@@ -41,6 +41,7 @@ class FakeBackend:
         self.fail: Exception | None = None
         self.window: tuple[int, tuple[int, int, int, int]] = (7, (0, 0, size[0], size[1]))
         self.window_error: Exception | None = None
+        self.window_rects: dict[int, tuple[int, int, int, int]] = {}
         # Noktadaki pencerenin kimliği; ön plan penceresinden bağımsızdır (onay penceresi odağı
         # alınca tıklanacak pencere değişmez).
         self.point_window = 7
@@ -49,10 +50,14 @@ class FakeBackend:
         # UIA yanıtı: True/False/None (okunamadı); sorulan metinler kaydedilir.
         self.uia: bool | None = None
         self.uia_asked: list[str] = []
+        self.focus_name: str | None = None
 
     def focused_value_contains(self, expected: str, timeout: float) -> bool | None:
         self.uia_asked.append(expected)
         return self.uia
+
+    def focused_name(self, timeout: float) -> str | None:
+        return self.focus_name
 
     def monitors(self) -> list[tuple[int, int, int, int]]:
         return list(self.monitor_rects)
@@ -71,6 +76,15 @@ class FakeBackend:
         if self.window_error is not None:
             raise self.window_error
         return self.window
+
+    def window_rect(self, hwnd: int) -> tuple[int, int, int, int]:
+        if self.window_error is not None:
+            raise self.window_error
+        if hwnd in self.window_rects:
+            return self.window_rects[hwnd]
+        if hwnd == self.window[0]:
+            return self.window[1]
+        return (0, 0, self.size[0], self.size[1])
 
     def process_at(self, x: int, y: int) -> tuple[str, int]:
         return self.at if self.at is not None else self.foreground
@@ -1343,3 +1357,262 @@ def test_action_memory_blocks_consecutive_identical_type() -> None:
     other = _signature(Action(type="key", keys="enter", reason="onayla", sensitive=False))
     mem.add(StepRecord(action="key", signature=other))
     assert not mem.is_repeat(sig)
+
+
+async def test_screen_mode_blocks_enter_on_destructive_focused_name() -> None:
+    backend = FakeBackend()
+    backend.focus_name = "Sil"
+    env = Env(act(type="key", keys="enter", reason="onayla"), DONE, YES, backend=backend)
+
+    result = await env.run("ayarları kaydet")
+
+    assert result.reason == "done"
+    assert backend.calls == []
+    blocked = env.audit.named("computer_blocked")
+    assert len(blocked) == 1
+    assert "yıkıcı bir öğe" in blocked[0]["reason"]
+    assert env.audit.named("computer_destructive_blocked") == [
+        {"turn_id": "t1", "element_kind": "Focus"}
+    ]
+
+
+async def test_screen_mode_allows_enter_when_goal_requests_delete() -> None:
+    backend = FakeBackend()
+    backend.focus_name = "Sil"
+    env = Env(
+        act(type="key", keys="enter", reason="taslağı sil"), DONE, YES, backend=backend
+    )
+
+    result = await env.run("eski taslağı sil")
+
+    assert result.reason == "done"
+    assert backend.calls == [("keys", ("enter",))]
+    assert env.audit.named("computer_blocked") == []
+
+
+async def test_screen_mode_allows_enter_when_focus_unreadable_and_audits() -> None:
+    backend = FakeBackend()
+    backend.focus_name = None
+    env = Env(act(type="key", keys="enter", reason="onayla"), DONE, YES, backend=backend)
+
+    result = await env.run("formu gönder")
+
+    assert result.reason == "done"
+    assert backend.calls == [("keys", ("enter",))]
+    assert env.audit.named("computer_focus_unreadable") == [{"turn_id": "t1"}]
+    assert env.audit.named("computer_blocked") == []
+
+
+async def test_screen_mode_blocks_space_on_destructive_focused_name() -> None:
+    backend = FakeBackend()
+    backend.focus_name = "Sil"
+    env = Env(act(type="key", keys="space", reason="onayla"), DONE, YES, backend=backend)
+
+    result = await env.run("ayarları kaydet")
+
+    assert result.reason == "done"
+    assert backend.calls == []
+    blocked = env.audit.named("computer_blocked")
+    assert len(blocked) == 1
+    assert "yıkıcı bir öğe" in blocked[0]["reason"]
+    assert env.audit.named("computer_destructive_blocked") == [
+        {"turn_id": "t1", "element_kind": "Focus"}
+    ]
+
+
+def test_windows_focused_name_parses_and_handles_failures(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from types import SimpleNamespace
+
+    from artemis.computer import windows
+
+    monkeypatch.setattr(windows.sys, "platform", "linux")
+    assert windows.focused_name(1.0, runner=lambda *a, **k: 1 / 0) is None
+
+    monkeypatch.setattr(windows.sys, "platform", "win32")
+    seen: dict[str, Any] = {}
+
+    def ok_runner(command: list[str], **kwargs: Any) -> Any:
+        seen.update(command=command, **kwargs)
+        return SimpleNamespace(stdout="Sil\r\n", returncode=0)
+
+    assert windows.focused_name(2.0, runner=ok_runner) == "Sil"
+    assert seen["timeout"] == 2.0
+    assert "-EncodedCommand" in seen["command"]
+
+    assert (
+        windows.focused_name(
+            1.0, runner=lambda *a, **k: SimpleNamespace(stdout="", returncode=0)
+        )
+        is None
+    )
+    assert (
+        windows.focused_name(
+            1.0, runner=lambda *a, **k: SimpleNamespace(stdout="Sil\r\n", returncode=4)
+        )
+        is None
+    )
+    capped = windows.focused_name(
+        1.0, runner=lambda *a, **k: SimpleNamespace(stdout=("A" * 250) + "\r\n", returncode=0)
+    )
+    assert capped == "A" * 200
+
+    def boom(*a: Any, **k: Any) -> Any:
+        raise OSError("powershell yok")
+
+    assert windows.focused_name(1.0, runner=boom) is None
+
+
+class _HybridElementsBackend(FakeBackend):
+    def __init__(self, uia_items: list[Any], vision_items: list[Any]) -> None:
+        super().__init__()
+        self._uia_items = uia_items
+        self._vision_items = vision_items
+        self.ui_calls = 0
+        self.vision_calls = 0
+
+    def ui_elements(self, hwnd: int) -> list[Any]:
+        self.ui_calls += 1
+        return list(self._uia_items)
+
+    def vision_elements(self, hwnd: int, start_id: int) -> list[Any]:
+        self.vision_calls += 1
+        return list(self._vision_items)
+
+
+async def test_hybrid_verification_attaches_screenshot_on_vision_fallback_and_reads_uia_once() -> (
+    None
+):
+    from artemis.computer.windows import UiElement
+
+    uia = [UiElement(1, "Button", "Tamam", (0, 0, 4, 2), interactive=True, focused=False)]
+    vision = [UiElement(2, "Text", "OCR Öğe", (4, 0, 4, 2), interactive=True, focused=False)]
+    backend = _HybridElementsBackend(uia, vision)
+    config = ComputerUseConfig(observation="hybrid", enabled=True, model="m")
+    env = Env(DONE, YES, backend=backend, config=config)
+    ui_calls_after_loop = 0
+
+    def on_call(call_index: int) -> None:
+        nonlocal ui_calls_after_loop
+        if call_index == 1:
+            ui_calls_after_loop = backend.ui_calls
+
+    env.provider.on_call = on_call
+    result = await env.run()
+
+    assert result.verified is True
+    assert backend.ui_calls - ui_calls_after_loop == 1
+    verify_messages = env.provider.seen[1]
+    assert any(m.image_png is not None for m in verify_messages)
+
+
+async def test_hybrid_verification_reuses_uia_elements_without_rereading() -> None:
+    from artemis.computer.windows import UiElement
+
+    uia = [
+        UiElement(i, "Button", f"Btn{i}", (0, 0, 2, 2), interactive=True, focused=False)
+        for i in range(1, 6)
+    ]
+    backend = _HybridElementsBackend(uia, [])
+    config = ComputerUseConfig(observation="hybrid", enabled=True, model="m")
+    env = Env(DONE, YES, backend=backend, config=config)
+    ui_calls_after_loop = 0
+
+    def on_call(call_index: int) -> None:
+        nonlocal ui_calls_after_loop
+        if call_index == 1:
+            ui_calls_after_loop = backend.ui_calls
+
+    env.provider.on_call = on_call
+    result = await env.run()
+
+    assert result.verified is True
+    assert backend.ui_calls - ui_calls_after_loop == 1
+    assert not any(m.image_png is not None for m in env.provider.seen[1])
+
+
+async def test_read_elements_skips_backend_when_past_limit_or_stopped() -> None:
+    from artemis.computer.windows import UiElement
+
+    backend = _HybridElementsBackend(
+        [UiElement(1, "Button", "Tamam", (0, 0, 2, 2), interactive=True, focused=False)],
+        [UiElement(2, "Text", "OCR", (2, 0, 2, 2), interactive=True, focused=False)],
+    )
+    clock = Clock()
+    stop = threading.Event()
+    session = ComputerSession(
+        provider=ScriptedVision(DONE),
+        backend=backend,
+        approve=lambda _name, _args: True,
+        audit=Audit(),
+        config=ComputerUseConfig(observation="hybrid", enabled=True, model="m"),
+        own_pid=OWN_PID,
+        stop=stop,
+        on_step=lambda _text: None,
+        provider_timeout=15.0,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+
+    clock.now = 10.0
+    assert await session._read_elements(1, limit=10.0) == []
+    assert await session._read_vision_elements(1, 1, limit=10.0) == []
+    assert backend.ui_calls == 0 and backend.vision_calls == 0
+
+    clock.now = 0.0
+    stop.set()
+    assert await session._read_elements(1, limit=10.0) == []
+    assert await session._read_vision_elements(1, 1, limit=10.0) == []
+    assert backend.ui_calls == 0 and backend.vision_calls == 0
+
+
+async def test_reason_and_ask_user_secrets_are_masked() -> None:
+    memory = SessionMemory()
+    env = Env(click(sensitive=True, reason="parola: Gizli123 ile giriyorum"), DONE, YES)
+    result = await env.run(memory=memory)
+
+    assert result.reason == "done"
+    assert len(env.approvals) == 1
+    gerekce = env.approvals[0][1]["gerekce"]
+    assert "Gizli123" not in gerekce and "[GİZLENDİ]" in gerekce
+    step_audit = env.audit.named("computer_step")[0]
+    assert "Gizli123" not in step_audit["reason"] and "[GİZLENDİ]" in step_audit["reason"]
+    assert "Gizli123" not in memory.steps[0].reason and "[GİZLENDİ]" in memory.steps[0].reason
+
+    ask_env = Env(act(type="ask_user", text="Devam için token: abc123def kullanayım mı?"))
+    ask_result = await ask_env.run()
+    assert ask_result.reason == "ask_user"
+    assert "abc123def" not in ask_result.summary and "[GİZLENDİ]" in ask_result.summary
+
+
+async def test_approved_click_aborts_when_same_window_moved_or_resized() -> None:
+    env = Env(click(sensitive=True), click(sensitive=True), click(sensitive=True), DONE, YES)
+    shift = {"n": 0}
+
+    def move_same_window() -> None:
+        shift["n"] += 10
+        s = shift["n"]
+        env.backend.window = (7, (s, s, s + 8, s + 4))
+
+    env.on_approve = move_same_window
+
+    result = await env.run()
+
+    assert result.reason == "blocked"
+    assert env.backend.calls == []
+    blocked = env.audit.named("computer_blocked")
+    assert len(blocked) == 3
+    assert "taşındı veya boyutu değişti" in blocked[0]["reason"]
+    assert "ATLANDI (click)" in env.provider.seen[1][1].content
+
+
+async def test_approved_click_executes_when_same_window_rect_unchanged() -> None:
+    env = Env(click(sensitive=True), DONE, YES)
+    env.on_approve = lambda: env.backend.window_rects.update({7: (0, 0, 8, 4)})
+
+    result = await env.run()
+
+    assert result.reason == "done"
+    assert env.backend.calls == [("click", 2, 1, "left", False)]
+    assert env.audit.named("computer_blocked") == []

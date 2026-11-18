@@ -257,3 +257,16 @@ def test_snapshot_failure_shows_error_not_loading(
     _load(app, panel)
     for card in (panel.routines, panel.research, panel.summaries, panel.notices):
         assert card.disabled_label.text() == "Otomasyon verisi okunamadı."
+
+
+def test_snapshot_type_error_shows_error_and_leaves_loading(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def broken(_path: Path) -> dict[str, Any]:
+        raise TypeError("beklenmedik zaman tipi")
+
+    monkeypatch.setattr(module, "load_snapshot", broken)
+    panel = AutomationPanel(config_path=_config(tmp_path))
+    _load(app, panel)
+    for card in (panel.routines, panel.research, panel.summaries, panel.notices):
+        assert card.disabled_label.text() == "Otomasyon verisi okunamadı."

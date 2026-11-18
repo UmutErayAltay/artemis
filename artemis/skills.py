@@ -16,6 +16,7 @@ kapıdan geçer. Dosyalar her turda ve "Yenile"de okunur (en çok 40 küçük do
 
 from __future__ import annotations
 
+import contextlib
 import os
 import re
 import sys
@@ -105,7 +106,7 @@ def location_problem(settings: Settings, folder: Path | None = None) -> str | No
     Metin kullanıcıya gösterilir: yapılandırma anahtarı içermez.
     """
     folder = folder or skills_dir(settings)
-    if folder.is_symlink():
+    if folder.is_symlink() or os.path.isjunction(folder):
         return "Beceriler klasörü sembolik bağlantı olamaz. Klasör seç ile başka bir klasör seç."
     real = folder.resolve()
     for label, root in _write_roots(settings):
@@ -122,10 +123,25 @@ def ensure_example(settings: Settings) -> None:
     folder = skills_dir(settings)
     if not settings.skills.enabled or location_problem(settings) or folder.exists():
         return
-    folder.mkdir(parents=True)
-    for name, text in templates():
-        with (folder / f"{name}.md").open("x", encoding="utf-8", newline="") as stream:
-            stream.write(text)
+    folder.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    try:
+        for name, text in templates():
+            target = folder / f"{name}.md"
+            try:
+                with target.open("x", encoding="utf-8", newline="") as stream:
+                    written.append(target)
+                    stream.write(text)
+            except FileExistsError:
+                # Eşzamanlı başka bir süreç aynı şablonu yazmış olabilir; dokunma.
+                continue
+    except OSError:
+        for path in written:
+            with contextlib.suppress(OSError):
+                path.unlink()
+        with contextlib.suppress(OSError):
+            folder.rmdir()
+        raise
 
 
 def parse_bytes(data: bytes, stem: str) -> Skill:
@@ -140,10 +156,11 @@ def parse_bytes(data: bytes, stem: str) -> Skill:
     except UnicodeDecodeError:
         raise ValueError("UTF-8 değil; Not Defteri'nde 'UTF-8' olarak kaydedin.") from None
     text = text.replace("\r\n", "\n")
-    if not text.startswith("---\n") or "\n---" not in text[4:]:
+    closing = re.search(r"\n---[ \t]*(?:\n|$)", text[4:]) if text.startswith("---\n") else None
+    if closing is None:
         raise ValueError("Dosya --- ile çevrili bir başlıkla başlamalı.")
-    head, _, rest = text[4:].partition("\n---")
-    body = rest.partition("\n")[2].strip()
+    head = text[4 : 4 + closing.start()]
+    body = text[4 + closing.end() :].strip()
     try:
         meta = yaml.safe_load(head)
     except yaml.YAMLError:
@@ -232,7 +249,11 @@ def replace_skill(settings: Settings, name: str, text: str, original: bytes) -> 
     folder, path = _skill_path(settings, name)
     tmp: str | None = None
     try:
-        if path.is_symlink() or path.resolve().parent != folder.resolve():
+        if (
+            path.is_symlink()
+            or os.path.isjunction(path)
+            or path.resolve().parent != folder.resolve()
+        ):
             raise SkillWriteError("Dosya sembolik bağlantı; değiştirilmez.")
         if path.read_bytes() != original:
             raise SkillWriteError(
@@ -292,7 +313,7 @@ def load_skills(settings: Settings) -> Catalog:
         return catalog
     for path in files:
         try:
-            if path.is_symlink():
+            if path.is_symlink() or os.path.isjunction(path):
                 raise ValueError("Sembolik bağlantı yok sayıldı.")
             if not path.is_file():
                 continue

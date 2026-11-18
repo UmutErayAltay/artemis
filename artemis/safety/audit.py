@@ -20,6 +20,9 @@ _SECRET_NAME = re.compile(
 )
 _BEARER = re.compile(r"(?i)\b(Bearer\s+)[^\s\"',;]+")
 _REDACTED = "[GİZLENDİ]"
+# Çok kısa ortam değerleri ("false", "0", "yes" gibi) tüm metinlerdeki sıradan
+# sözcükleri bozacağından yalnızca yeterince uzun değerler metin içi aramaya alınır.
+_MIN_SECRET_LENGTH = 8
 
 
 def _is_secret_key(key: str) -> bool:
@@ -44,7 +47,11 @@ def _is_secret_key(key: str) -> bool:
 def redact(value: Any) -> Any:
     """Ortam her kayıtta okunur; sonradan eklenen sırlar da korunur."""
     secrets = sorted(
-        {item for key, item in os.environ.items() if item and _is_secret_key(key)},
+        {
+            item
+            for key, item in os.environ.items()
+            if item and len(item) >= _MIN_SECRET_LENGTH and _is_secret_key(key)
+        },
         key=len,
         reverse=True,
     )
@@ -111,7 +118,12 @@ class AuditLog:
             return
 
     def emit(self, event: str, **fields: Any) -> None:
-        record = redact({**fields, "timestamp": datetime.now(UTC).isoformat(), "event": event})
+        clean_fields: dict[str, Any] = redact(fields)
+        record: dict[str, Any] = {
+            **clean_fields,
+            "timestamp": datetime.now(UTC).isoformat(),
+            "event": event,
+        }
         line = json.dumps(record, ensure_ascii=False, allow_nan=False) + "\n"
         with self._lock:
             self.path.parent.mkdir(parents=True, exist_ok=True)
