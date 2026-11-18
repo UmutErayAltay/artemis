@@ -112,10 +112,10 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     window.voice_dot = QLabel("●", window)
     window.voice_dot.setObjectName("voiceDot")
     window.voice_dot.hide()
-    window.voice_state = QLabel(_VOICE_LABELS["off"], window)
+    window.voice_state = QLabel(t(_VOICE_LABELS["off"]), window)
     window.voice_state.setAccessibleName(t("Ses durumu"))
     window.voice_state.hide()
-    window.voice_button = icon_toggle("Sesi aç veya kapat")
+    window.voice_button = icon_toggle(t("Sesi aç veya kapat"))
     window.voice_button.clicked.connect(window._toggle_voice)
     row.addWidget(window.voice_button)
     window.auto_button = icon_toggle(
@@ -123,7 +123,7 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     )
     window.auto_button.toggled.connect(window._toggle_auto_mode)
     row.addWidget(window.auto_button)
-    row.addWidget(HelpTip(_HELP_AUTO), 0, Qt.AlignmentFlag.AlignVCenter)
+    row.addWidget(HelpTip(t(_HELP_AUTO)), 0, Qt.AlignmentFlag.AlignVCenter)
     status_pill = QFrame()
     window.status_pill = status_pill
     status_pill.setObjectName("statusPill")
@@ -339,12 +339,13 @@ def build_sidebar(window: DesktopWindow, pages: list[tuple[str, QWidget]]) -> QF
     for label, page in pages:
         if label == "Ayarlar":
             navigation.addStretch(1)
-        button = QPushButton(label)
+        shown = t(label)
+        button = QPushButton(shown)
         button.setObjectName("navItem")
         button.setCheckable(True)
         button.setAutoExclusive(True)
-        button.setAccessibleName(label)
-        button.setToolTip(label)  # dar pencerede yalnız ikon kalır; ad ipucunda
+        button.setAccessibleName(shown)
+        button.setToolTip(shown)  # dar pencerede yalnız ikon kalır; ad ipucunda
         button.setIconSize(QSize(20, 20))
         button.clicked.connect(
             lambda _checked=False, target=page: window.tabs.setCurrentWidget(target)

@@ -392,7 +392,7 @@ class CreatorPanel(QFrame):
         self.state_combo = QComboBox()
         self.state_combo.setAccessibleName(t("Önizleme durumu"))
         for name in pet_animator.STATE_NAMES:
-            self.state_combo.addItem(name)
+            self.state_combo.addItem(t(name), name)
         self.state_combo.currentIndexChanged.connect(self._load_frames)
         # Uzun model adları sütunu genişletip dar pencerede yığılmayı engellemesin.
         for combo in (self.method, self.model_combo, self.state_combo):
@@ -762,7 +762,7 @@ class CreatorPanel(QFrame):
             )
 
     def _on_progress(self, done: int, total: int, row: int) -> None:
-        self.busy.setText(f"{done + 1}/{total}: {pet_animator.STATE_NAMES[row].lower()}…")
+        self.busy.setText(f"{done + 1}/{total}: {t(pet_animator.STATE_NAMES[row]).lower()}…")
 
     def _on_row(self, row: int, cells: object) -> None:
         """Satır gelir gelmez önizler (satırın kendi ölçeğiyle; nihai ölçek en sonda ortaktır)."""
@@ -797,7 +797,7 @@ class CreatorPanel(QFrame):
                 return
             self._sheet, fallback = result
             if fallback:
-                names = ", ".join(pet_animator.STATE_NAMES[r] for r in fallback)
+                names = ", ".join(t(pet_animator.STATE_NAMES[r]) for r in fallback)
                 self._log(
                     t("Uyarı"),
                     t("Model çıktısı alınamayan (prosedürel) satırlar: {names}.").format(
