@@ -33,6 +33,16 @@ _COMPRESSED_MIMES = (
 )
 _WAV_MIMES = ("audio/wav", "audio/x-wav")
 _COMPRESSED_ERROR = "Bulut konuşma sesi desteklenmeyen sıkıştırılmış biçimde geldi."
+
+
+def gemini_native_target(base_url: str, model: str) -> tuple[str, str]:
+    """Gemini yerel API kökü ve model adı.
+
+    Google bağlantısı çoğu zaman sohbet için OpenAI uyumlu `/v1beta/openai` köküyle kaydedilir;
+    `:streamGenerateContent` ve `/models` ise `/v1beta` altındadır. Model listesi adları
+    `models/` önekiyle verir; yol zaten `/models/` içerdiği için önek atılır (yoksa 404)."""
+    base = base_url.rstrip("/").removesuffix("/openai")
+    return base, model.strip().removeprefix("models/")
 _UNSUPPORTED_FORMAT_ERROR = "Bulut konuşma sesi desteklenmeyen ses biçiminde geldi."
 
 
@@ -226,10 +236,10 @@ class CloudSpeechSynthesizer:
         )
 
         if gemini:
-            url = (
-                f"{self.endpoint.base_url}/models/"
-                f"{self.config.tts_cloud_model}:streamGenerateContent?alt=sse"
+            base, model = gemini_native_target(
+                self.endpoint.base_url, self.config.tts_cloud_model
             )
+            url = f"{base}/models/{model}:streamGenerateContent?alt=sse"
             generation_config: dict[str, Any] = {"responseModalities": ["AUDIO"]}
             if self.config.tts_cloud_voice:
                 generation_config["speechConfig"] = {
@@ -263,6 +273,13 @@ class CloudSpeechSynthesizer:
                 client.stream("POST", url, json=payload, headers=headers) as response,
             ):
                 if response.status_code != 200:
+                    # Sessizlik yerine iz kalsın: ses yalnız hata olarak düşer, nedeni denetimde.
+                    self.audit.emit(
+                        "cloud_tts_error",
+                        service=self.endpoint_id,
+                        model=self.config.tts_cloud_model,
+                        status=response.status_code,
+                    )
                     if response.status_code == 429:
                         raise RuntimeError(
                             "Bulut konuşma sesi hız/kota sınırına takıldı (HTTP 429)."

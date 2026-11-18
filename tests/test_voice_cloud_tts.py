@@ -751,3 +751,25 @@ async def test_raw_pcm_starting_with_ff_sample_is_not_mistaken_for_mpeg(
         (chunk.sample_rate, chunk.channels) == (24000, 1) for chunk in openai_chunks
     )
     assert b"".join(chunk.pcm for chunk in openai_chunks) == openai_pcm
+
+
+@pytest.mark.parametrize(
+    ("base_url", "model", "expected"),
+    [
+        (
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            "models/gemini-tts",
+            ("https://generativelanguage.googleapis.com/v1beta", "gemini-tts"),
+        ),
+        (
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "gemini-tts",
+            ("https://generativelanguage.googleapis.com/v1beta", "gemini-tts"),
+        ),
+        ("http://127.0.0.1:9/v1", "gemini-tts", ("http://127.0.0.1:9/v1", "gemini-tts")),
+    ],
+)
+def test_gemini_native_target_strips_openai_suffix_and_models_prefix(
+    base_url: str, model: str, expected: tuple[str, str]
+) -> None:
+    assert cloud_tts.gemini_native_target(base_url, model) == expected

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.desktop.form_kit import field, meta_label
 from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
+from artemis.channels.voice.cloud_tts import gemini_native_target
 from artemis.config.settings import EndpointConfig, ModelConfig, load_settings
 
 if TYPE_CHECKING:
@@ -101,7 +102,7 @@ def fetch_tts_models(
     """Bulut konuşma modellerini getirir; hata metnine gövde ve anahtar girmez."""
     headers: dict[str, str] = {}
     if protocol == "gemini":
-        url = f"{base_url}/models?pageSize=1000"
+        url = f"{gemini_native_target(base_url, '')[0]}/models?pageSize=1000"
         if key:
             headers["x-goog-api-key"] = key
     else:
