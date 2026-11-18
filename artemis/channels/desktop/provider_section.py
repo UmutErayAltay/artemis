@@ -199,6 +199,8 @@ class ProviderSection(QWidget):
     image_box: QWidget
     speech_protocol: QComboBox
     speech_box: QWidget
+    chat_box: QWidget
+    kind_info: QLabel
     make_primary: QCheckBox
     add_button: QPushButton
     cli_test_button: QPushButton
@@ -950,8 +952,26 @@ class ProviderSection(QWidget):
         """Ayrıntı paneli seçili modelin durumunu gösterir."""
         selected = self._current_alias()
         row = next((r for r in self._model_data if r[0] == selected), None)
+        kind = row[5] if row else "chat"
+        self.chat_box.setVisible(kind == "chat")
+        self.kind_info.setVisible(kind != "chat")
+        if row and kind == "image":
+            self.kind_info.setText(
+                f"Görsel modeli · Bağlantı: {row[3]} · Model: {row[4]}\n"
+                "Resim üretme isteklerinde kullanılır. Beyin, zor işler, yedek ve "
+                "bilgisayar rolleri ile sohbet testi yalnız yazı modelleri içindir."
+            )
+        elif row and kind == "speech":
+            self.kind_info.setText(
+                f"Ses modeli · Bağlantı: {row[3]} · Model: {row[4]}\n"
+                "Kullanmak için Ayarlar > Ses > Konuşma sesi'nde Bulut'u seçip bu "
+                "modeli 'Bulut konuşma modeli' listesinden seç. Roller ve sohbet testi "
+                "yalnız yazı modelleri içindir."
+            )
+        else:
+            self.kind_info.setText("")
         brain, non_chat, hard = (
-            (row[1], row[5] != "chat", row[6]) if row else (False, False, False)
+            (row[1], kind != "chat", row[6]) if row else (False, False, False)
         )
         fallback = bool(selected) and selected == self._fallback
         computer = bool(selected) and selected == self._computer

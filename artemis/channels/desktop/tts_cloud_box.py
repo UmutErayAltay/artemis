@@ -161,19 +161,23 @@ class TtsCloudBox(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         panel.tts_cloud_saved = QComboBox()
-        panel.tts_cloud_saved.setAccessibleName("Kayıtlı ses modeli")
+        panel.tts_cloud_saved.setAccessibleName("Bulut konuşma modeli")
         panel.tts_cloud_saved.addItem("Elle ayarla", "")
-        field(layout, "Kayıtlı ses modeli", panel.tts_cloud_saved)
+        field(layout, "Bulut konuşma modeli", panel.tts_cloud_saved)
+
+        self._manual_box = QWidget()
+        manual_layout = QVBoxLayout(self._manual_box)
+        manual_layout.setContentsMargins(0, 0, 0, 0)
 
         panel.tts_cloud_server = QComboBox()
         panel.tts_cloud_server.setAccessibleName("Bulut konuşma sunucusu")
-        field(layout, "Konuşma sunucusu", panel.tts_cloud_server)
+        field(manual_layout, "Konuşma sunucusu", panel.tts_cloud_server)
 
         panel.tts_cloud_protocol = QComboBox()
         panel.tts_cloud_protocol.setAccessibleName("Bulut konuşma protokolü")
         panel.tts_cloud_protocol.addItem("OpenAI uyumlu · OpenRouter vb.", "openai")
         panel.tts_cloud_protocol.addItem("Gemini API", "gemini")
-        field(layout, "Protokol", panel.tts_cloud_protocol)
+        field(manual_layout, "Protokol", panel.tts_cloud_protocol)
 
         panel.tts_cloud_model = QComboBox()
         panel.tts_cloud_model.setEditable(True)
@@ -185,7 +189,8 @@ class TtsCloudBox(QWidget):
         model_row.setSpacing(8)
         model_row.addWidget(panel.tts_cloud_model, 1)
         model_row.addWidget(panel.tts_cloud_fetch_button)
-        field(layout, "Bulut konuşma modeli", model_row)
+        field(manual_layout, "Model kimliği", model_row)
+        layout.addWidget(self._manual_box)
 
         panel.tts_cloud_voice = QComboBox()
         panel.tts_cloud_voice.setEditable(True)
@@ -245,6 +250,8 @@ class TtsCloudBox(QWidget):
         # çalışma zamanının yeniden başlatılmasıyla yarışıp kapanışı geciktiriyordu.
         super().showEvent(event)
         self.reload_servers()
+        if self._panel.tts_cloud_saved.currentData():
+            self._ensure_voices()
 
     def _endpoint(self) -> tuple[str, EndpointConfig | None]:
         name = str(self._panel.tts_cloud_server.currentData() or "")
@@ -309,10 +316,22 @@ class TtsCloudBox(QWidget):
 
         self._sync_state()
 
+    def _ensure_voices(self) -> None:
+        panel = self._panel
+        model_id = panel.tts_cloud_model.currentText().strip()
+        protocol = str(panel.tts_cloud_protocol.currentData() or "openai")
+        if protocol == "gemini":
+            self._refill_voices(list(GEMINI_TTS_VOICES))
+        elif model_id in self._model_voices:
+            self._refill_voices(self._model_voices[model_id])
+        elif not panel._demo and self._endpoint()[1] is not None:
+            self._fetch_models()
+
     def _saved_picked(self, *_args: object) -> None:
         panel = self._panel
         alias = str(panel.tts_cloud_saved.currentData() or "")
         if not alias or panel._demo:
+            self._sync_state()
             return
         try:
             model = load_settings(panel.config_path).models.get(alias)
@@ -336,10 +355,9 @@ class TtsCloudBox(QWidget):
             panel.tts_cloud_model.setEditText(model.model)
         finally:
             panel.tts_cloud_model.blockSignals(model_blocked)
-        if model.model in self._model_voices:
-            self._refill_voices(self._model_voices[model.model])
         panel._mark_dirty()
         self._sync_state()
+        self._ensure_voices()
 
     def _model_changed(self, *_args: object) -> None:
         model_id = self._panel.tts_cloud_model.currentText().strip()
@@ -412,6 +430,7 @@ class TtsCloudBox(QWidget):
         panel = self._panel
         is_cloud = panel.tts_combo.currentData() == "cloud"
         self.setVisible(is_cloud)
+        self._manual_box.setVisible(not bool(panel.tts_cloud_saved.currentData()))
         if not is_cloud:
             panel.tts_cloud_hint.setText("")
             return

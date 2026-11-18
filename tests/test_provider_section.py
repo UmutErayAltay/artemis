@@ -1231,3 +1231,46 @@ def test_raw_normalizes_null_sections(app: QApplication, tmp_path: Path) -> None
     assert "yerel" in settings.endpoints
     assert "m-null" in settings.models
     assert settings.computer_use.model == "m-null"
+
+
+def test_detail_card_shows_kind_info_for_image_and_speech(
+    app: QApplication, tmp_path: Path
+) -> None:
+    path = config(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"] = {"bulut": {"base_url": "https://x.example/v1", "api_key": False}}
+    raw["models"]["resim-m"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gpt-image-1",
+        "kind": "image",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    raw["models"]["ses-m"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-flash-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    section = ProviderSection(path)
+
+    section.select_model("first")
+    assert not section.chat_box.isHidden()
+    assert section.kind_info.isHidden()
+    assert section.kind_info.text() == ""
+
+    section.select_model("resim-m")
+    assert section.chat_box.isHidden()
+    assert not section.kind_info.isHidden()
+    assert "Görsel modeli" in section.kind_info.text()
+
+    section.select_model("ses-m")
+    assert section.chat_box.isHidden()
+    assert not section.kind_info.isHidden()
+    assert "Bulut konuşma modeli" in section.kind_info.text()

@@ -180,12 +180,16 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     section.detail_title = QLabel()
     section.detail_title.setObjectName("sectionTitle")
     detail.addWidget(section.detail_title)
+    section.chat_box = QWidget()
+    chat_layout = QVBoxLayout(section.chat_box)
+    chat_layout.setContentsMargins(0, 0, 0, 0)
+    chat_layout.setSpacing(12)
     role_row = QHBoxLayout()
     role_row.setSpacing(8)
     for button in section.role_buttons:
         role_row.addWidget(button)
     role_row.addStretch(1)
-    field(detail, "Rol", role_row, help=(
+    field(chat_layout, "Rol", role_row, help=(
         "Beyin: sohbetlere bu model cevap verir. Zor işler: çok adımlı ve planlama isteyen "
         "turları bu model alır. Yedek: beyin kota, bağlantı ya da sunucu hatası verince tur "
         "bununla sürer. Bilgisayar: ekranı görüp tıklama bu modelle çalışır."
@@ -208,11 +212,17 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     retry_row.addWidget(section.retry_button)
     retry_row.addStretch(1)
     test_box.addLayout(retry_row)
-    field(detail, "Test", test_box, help=(
+    field(chat_layout, "Test", test_box, help=(
         "Seçili modeli senaryolarla dener. Ücretli modelde önce tahmini tutarı sorar; test "
         "bütçesi bu tahminin iki katıyla sınırlanır; yeniden denemede yalnız kalanların payı "
-        "sorulur. Resim modelleri denenmez."
+        "sorulur. Yalnız yazı modelleri denenir."
     ))
+    detail.addWidget(section.chat_box)
+    section.kind_info = meta_label("")
+    section.kind_info.setWordWrap(True)
+    section.kind_info.setAccessibleName("Model bilgisi")
+    section.kind_info.setVisible(False)
+    detail.addWidget(section.kind_info)
     detail.addLayout(button_row(section.remove_button))
     section.detail.setVisible(False)  # reload() model varsa gösterir
     section.model_list.currentItemChanged.connect(section._selection_changed)

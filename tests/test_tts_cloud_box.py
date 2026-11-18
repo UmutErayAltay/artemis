@@ -230,3 +230,84 @@ def test_tts_cloud_box_close_detaches_running_fetch_thread(
     assert thread.wait(3000)
     qt_app.processEvents()
     assert thread not in mod._DETACHED
+
+
+def test_tts_cloud_saved_gemini_hides_manual_box_and_fills_voices(
+    tmp_path: Path, qt_app: QApplication
+) -> None:
+    import yaml
+
+    from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
+
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["models"]["ses-gemini"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-flash-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    panel = SettingsPanel(path)
+    box = panel.tts_cloud_box
+    assert isinstance(box, TtsCloudBox)
+    assert not box._manual_box.isHidden()
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-gemini"))
+    assert box._manual_box.isHidden()
+    assert panel.tts_cloud_voice.count() == len(GEMINI_TTS_VOICES)
+
+    panel.tts_cloud_saved.setCurrentIndex(0)
+    assert not box._manual_box.isHidden()
+
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_tts_cloud_saved_openai_triggers_fetch_and_fills_voices(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    from artemis.channels.desktop import tts_cloud_box as mod
+    from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
+
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["models"]["ses-openai"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "openai/tts-1",
+        "kind": "speech",
+        "speech_protocol": "openai",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    monkeypatch.setattr(
+        mod,
+        "fetch_tts_models",
+        lambda _url, _protocol, _key: ("ok", [("openai/tts-1", ["alloy", "nova"])]),
+    )
+
+    panel = SettingsPanel(path)
+    box = panel.tts_cloud_box
+    assert isinstance(box, TtsCloudBox)
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-openai"))
+    assert box._fetch is not None
+    assert box._fetch.wait(2000)
+    qt_app.processEvents()
+
+    voices = [
+        panel.tts_cloud_voice.itemText(i) for i in range(panel.tts_cloud_voice.count())
+    ]
+    assert voices == ["alloy", "nova"]
+
+    panel.deleteLater()
+    qt_app.processEvents()
