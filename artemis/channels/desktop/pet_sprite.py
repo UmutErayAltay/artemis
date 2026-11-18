@@ -7,6 +7,7 @@ her üye `safe_join(allow_symlinks=False)` ve boyut sınırlarından geçer, gö
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
@@ -14,6 +15,7 @@ import re
 import shutil
 import stat
 import tempfile
+import uuid
 import zipfile
 import zlib
 from collections.abc import Callable
@@ -333,14 +335,25 @@ def import_pet(src: Path, pets_dir: Path, *, overwrite: bool = False) -> PetInfo
         info = read_pet(staging, "artemis")
         load_sheet(info)  # bozuk gövde kurulumdan önce yakalanır
         target = pets_dir / info.id
+        backup: Path | None = None
         if target.exists() or target.is_symlink():
             if not overwrite:
                 raise PetExistsError(f"'{info.id}' kimlikli pet zaten kurulu.")
             if target.is_symlink() or target.is_file():
                 target.unlink()
             else:
-                shutil.rmtree(target)
-        os.replace(staging, target)
+                backup = pets_dir / f".backup-{info.id}-{uuid.uuid4().hex}"
+                # Önce yedek ada taşınır; os.replace başarısız olursa eski pet geri alınır.
+                os.replace(target, backup)
+        try:
+            os.replace(staging, target)
+        except OSError:
+            if backup is not None and backup.exists():
+                with contextlib.suppress(OSError):
+                    os.replace(backup, target)
+            raise
+        if backup is not None:
+            shutil.rmtree(backup, ignore_errors=True)
         return read_pet(target, "artemis")
     except OSError as error:
         raise PetImportError(f"Pet kurulamadı: {error}") from error

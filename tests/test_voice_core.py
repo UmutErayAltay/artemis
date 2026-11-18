@@ -818,9 +818,14 @@ async def test_continuous_wake_alone_still_acknowledges():
 
 
 @pytest.mark.parametrize("phrase", [
-    "kesintisiz moda geç", "Kesintisiz modu aç", "Artemis, kesintisiz mod aç",
-    "SÜREKLİ DİNLE", "artemis sürekli dinle", "Artemis, kesintisiz sohbete geç.",
-    "kesintisiz sohbet modunu başlat", "Gezintisiz sohbet moduna geç bakayım.",
+    "Artemis, kesintisiz moda geç",
+    "Artemis, Kesintisiz modu aç",
+    "Artemis, kesintisiz mod aç",
+    "Artemis, SÜREKLİ DİNLE",
+    "artemis sürekli dinle",
+    "Artemis, kesintisiz sohbete geç.",
+    "Artemis, kesintisiz sohbet modunu başlat",
+    "Artemis, Gezintisiz sohbet moduna geç bakayım.",
 ])
 async def test_voice_toggle_enables_locally_with_spoken_confirmation(phrase):
     controller, runner, _, states = _continuous([phrase], continuous=False)
@@ -848,6 +853,95 @@ async def test_voice_toggle_disables_locally_with_spoken_confirmation(phrase):
         assert "mode:off" in states
     finally:
         await controller.close()
+
+
+async def test_voice_toggle_on_requires_wake_or_open_followup():
+    bare, runner_bare, _, states_bare = _continuous(["kesintisiz moda geç"], continuous=False)
+    awaiting, runner_awaiting, _, _ = _continuous(["kesintisiz moda geç"], continuous=False)
+    window, runner_window, _, _ = _continuous(["kesintisiz moda geç"], continuous=False)
+    off, runner_off, _, states_off = _continuous(["kesintisiz modu kapat"], continuous=True)
+    try:
+        await _say(bare)
+        assert bare.continuous is False
+        assert bare._spoken_text == ""
+        assert runner_bare.commands == []
+        assert "mode:on" not in states_bare
+
+        awaiting._awaiting_followup = True
+        await _say(awaiting)
+        assert awaiting.continuous is True
+        assert awaiting._spoken_text == "Kesintisiz mod açık."
+        assert runner_awaiting.commands == []
+
+        window._followup_until = 105.0
+        await _say(window)
+        assert window.continuous is True
+        assert window._spoken_text == "Kesintisiz mod açık."
+        assert runner_window.commands == []
+
+        await _say(off)
+        assert off.continuous is False
+        assert off._spoken_text == "Kesintisiz mod kapalı."
+        assert runner_off.commands == []
+        assert "mode:off" in states_off
+    finally:
+        await bare.close()
+        await awaiting.close()
+        await window.close()
+        await off.close()
+
+
+async def test_wake_command_clears_awaiting_followup_so_run_does_not_emit_listening_while_busy():
+    now = [10.0]
+    states: list[str] = []
+    thinking_started = asyncio.Event()
+    allow_reply = asyncio.Event()
+    checked = asyncio.Event()
+
+    class SlowRunner(FakeRunner):
+        async def run(self, text):
+            thinking_started.set()
+            await allow_reply.wait()
+            return await super().run(text)
+
+    class SlowRecognizer(FakeRecognizer):
+        async def transcribe(self, pcm):
+            # STT sürerken takip penceresi kapanmış olsun.
+            now[0] = 11.0
+            return await super().transcribe(pcm)
+
+    class Mic(FakeMic):
+        async def frames(self):
+            for _ in range(7):
+                yield AudioFrame(b"\x00\x00", now[0])
+            await thinking_started.wait()
+            yield AudioFrame(b"\x00\x00", now[0])
+            yield AudioFrame(b"\x00\x00", now[0])
+            checked.set()
+            await asyncio.Future()
+
+    controller = VoiceController(
+        SlowRunner(),
+        VoiceConfig(frame_ms=20, pre_roll_ms=0, end_silence_ms=100),
+        Mic(),
+        FakeVAD([True, True, False, False, False, False, False]),
+        SlowRecognizer(["Artemis saat kaç"]),
+        FakeTTS(),
+        FakeSink(),
+        clock=lambda: now[0],
+        on_state=states.append,
+    )
+    controller._awaiting_followup = True
+    controller._followup_until = 10.5
+    listening = asyncio.create_task(controller.run())
+    try:
+        await asyncio.wait_for(checked.wait(), 1)
+        assert states == ["listening", "thinking"]
+        assert not controller._awaiting_followup
+    finally:
+        allow_reply.set()
+        controller.request_stop()
+        await asyncio.wait_for(listening, 1)
 
 
 async def test_toggle_phrase_inside_longer_sentence_is_a_normal_command():

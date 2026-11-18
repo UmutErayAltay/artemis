@@ -27,8 +27,13 @@ class _UiElement:
 
 
 class _UiaBackend:
-    def __init__(self, elements: list[_UiElement]) -> None:
+    def __init__(
+        self,
+        elements: list[_UiElement],
+        visual_elements: list[_UiElement] | None = None,
+    ) -> None:
         self.elements = elements
+        self.visual_elements: list[_UiElement] = list(visual_elements or ())
         self.calls: list[tuple[Any, ...]] = []
         self.foreground = (r"C:\Program Files\App\app.exe", 100)
         self.window = (7, (0, 0, 800, 600))
@@ -59,6 +64,7 @@ class _UiaBackend:
         self.calls.append(("scroll", x, y, notches))
 
     def type_text(self, text: str, should_continue: Callable[[], bool]) -> int:
+        self.calls.append(("type", text))
         return len(text)
 
     def press_keys(self, keys: tuple[str, ...]) -> None:
@@ -69,6 +75,9 @@ class _UiaBackend:
 
     def ui_elements(self, hwnd: int) -> list[_UiElement]:
         return list(self.elements)
+
+    def vision_elements(self, hwnd: int, start_id: int) -> list[_UiElement]:
+        return list(self.visual_elements)
 
 
 class _ScriptedVision:
@@ -119,9 +128,10 @@ async def _run_uia_session(
     goal: str,
     *contents: str,
     elements: list[_UiElement],
+    visual_elements: list[_UiElement] | None = None,
     strict: bool = False,
 ) -> tuple[SessionResult, _UiaBackend, _ScriptedVision, _Audit]:
-    backend = _UiaBackend(elements)
+    backend = _UiaBackend(elements, visual_elements=visual_elements)
     provider = _ScriptedVision(*contents)
     audit = _Audit()
     clock = _Clock()
@@ -338,3 +348,179 @@ def test_uninstall_allowed_when_goal_requests_it() -> None:
 
 def test_caps_english_negated_goal_still_blocked() -> None:
     assert destructive_unrequested("UNINSTALL", "don't uninstall spotify") is not None
+
+
+def _make_direct_uia_session(
+    elements: list[Any], *, used_vision: bool = False
+) -> tuple[ComputerSession, _UiaBackend, _Audit]:
+    backend = _UiaBackend(elements)
+    audit = _Audit()
+    clock = _Clock()
+    config = ComputerUseConfig(
+        enabled=True, model="m", mode="auto", observation="uia", step_delay_seconds=0
+    )
+    session = ComputerSession(
+        provider=_ScriptedVision(_DONE, _YES),
+        backend=backend,
+        approve=lambda _n, _a: True,
+        audit=audit,
+        config=config,
+        own_pid=OWN_PID,
+        stop=threading.Event(),
+        on_step=lambda _s: None,
+        provider_timeout=15.0,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    session._goal = "Duyuruyu oku"
+    session._elements = {item.id: item for item in elements}
+    session._last_used_vision = used_vision
+    return session, backend, audit
+
+
+def _construct_type_action(text: str, reason: str = "Onayla") -> Any:
+    from artemis.computer.actions import Action
+
+    return Action.model_construct(
+        type="type",
+        text=text,
+        reason=reason,
+        screen=1,
+        x=None,
+        y=None,
+        element=None,
+        keys=None,
+        button="left",
+        double=False,
+        dy=None,
+        seconds=None,
+        ratio=None,
+        sensitive=False,
+        observed=None,
+        progress=None,
+    )
+
+
+async def test_session_gate_blocks_type_newline_on_focused_destructive_element() -> None:
+    from artemis.computer.windows import UiElement
+
+    elements = [
+        UiElement(
+            id=1,
+            kind="Button",
+            name="Hesabı sil",
+            rect=(10, 10, 80, 30),
+            interactive=True,
+            focused=True,
+        )
+    ]
+    for newline_text in ("\n", "\r\n", "merhaba\n", "tamam\r"):
+        # parse_action satır sonunu zaten şema katmanında reddedebilir; kapı doğrudan doğrulanır.
+        session, backend, audit = _make_direct_uia_session(elements)
+        reason = await session._act(_construct_type_action(newline_text), "t1", [], None, 100.0)
+        assert isinstance(reason, str) and "yıkıcı bir öğe" in reason
+        assert backend.calls == []
+        assert audit.named("computer_destructive_blocked") == [
+            {"turn_id": "t1", "element_kind": "Button"}
+        ]
+
+
+async def test_session_gate_blocks_type_space_on_focused_destructive_element() -> None:
+    elements = [
+        _UiElement(id=1, kind="Button", name="Hesabı sil", rect=(10, 10, 80, 30), focused=True)
+    ]
+    type_space = _act(type="type", text=" ", reason="Boşluk ile etkinleştir")
+    result, backend, _provider, audit = await _run_uia_session(
+        "Duyuruyu oku", type_space, _DONE, _YES, elements=elements
+    )
+    assert result.reason == "done"
+    assert backend.calls == []
+    assert audit.named("computer_destructive_blocked") == [
+        {"turn_id": "t1", "element_kind": "Button"}
+    ]
+
+
+async def test_session_gate_allows_ordinary_type_into_focused_edit() -> None:
+    elements = [
+        _UiElement(id=1, kind="Edit", name="Arama", rect=(10, 10, 120, 30), focused=True)
+    ]
+    type_text = _act(type="type", text="merhaba dünya", reason="Arama alanına yaz")
+    result, backend, _provider, audit = await _run_uia_session(
+        "Duyuruyu oku", type_text, _DONE, _YES, elements=elements
+    )
+    assert result.reason == "done"
+    assert backend.calls == [("type", "merhaba dünya")]
+    assert audit.named("computer_destructive_blocked") == []
+
+
+async def test_session_gate_blocks_enter_on_vision_list_without_focus() -> None:
+    visual = [
+        _UiElement(
+            id=1, kind="VisualText", name="Hesabı sil", rect=(10, 10, 80, 30), focused=False
+        )
+    ]
+    enter = _act(type="key", keys="enter", reason="Onayla")
+    result, backend, provider, audit = await _run_uia_session(
+        "Duyuruyu oku", enter, _DONE, _YES, elements=[], visual_elements=visual
+    )
+    assert result.reason == "done"
+    assert backend.calls == []
+    assert audit.named("computer_destructive_blocked") == []
+    blocked = audit.named("computer_blocked")
+    assert len(blocked) == 1
+    assert "görsel öğe listesi" in blocked[0]["reason"]
+    assert "click_element" in blocked[0]["reason"]
+    assert "Hesabı sil" not in blocked[0]["reason"]
+    assert "click_element" in str(provider.seen[1][1].content)
+
+
+async def test_session_gate_blocks_type_space_on_vision_list_without_focus() -> None:
+    visual = [
+        _UiElement(
+            id=1, kind="VisualText", name="Hesabı sil", rect=(10, 10, 80, 30), focused=False
+        )
+    ]
+    type_space = _act(type="type", text=" ", reason="Onayla")
+    result, backend, _provider, audit = await _run_uia_session(
+        "Duyuruyu oku", type_space, _DONE, _YES, elements=[], visual_elements=visual
+    )
+    assert result.reason == "done"
+    assert backend.calls == []
+    assert audit.named("computer_destructive_blocked") == []
+    blocked = audit.named("computer_blocked")
+    assert len(blocked) == 1 and "görsel öğe listesi" in blocked[0]["reason"]
+
+
+async def test_session_gate_blocks_type_newline_on_vision_list_without_focus() -> None:
+    from artemis.computer.windows import UiElement
+
+    visual = [
+        UiElement(
+            id=1,
+            kind="VisualText",
+            name="Hesabı sil",
+            rect=(10, 10, 80, 30),
+            interactive=True,
+            focused=False,
+        )
+    ]
+    session, backend, audit = _make_direct_uia_session(visual, used_vision=True)
+    reason = await session._act(_construct_type_action("\n"), "t1", [], None, 100.0)
+    assert isinstance(reason, str) and "görsel öğe listesi" in reason
+    assert "click_element" in reason and "Hesabı sil" not in reason
+    assert backend.calls == []
+    assert audit.named("computer_destructive_blocked") == []
+
+
+async def test_session_gate_allows_enter_on_uia_list_without_focus() -> None:
+    elements = [
+        _UiElement(id=1, kind="Button", name="Hesabı sil", rect=(10, 10, 80, 30), focused=False)
+    ]
+    enter = _act(type="key", keys="enter", reason="Onayla")
+    result, backend, _provider, audit = await _run_uia_session(
+        "Duyuruyu oku", enter, _DONE, _YES, elements=elements
+    )
+    assert result.reason == "done"
+    assert backend.calls == [("keys", ("enter",))]
+    assert audit.named("computer_destructive_blocked") == []
+    assert audit.named("computer_blocked") == []

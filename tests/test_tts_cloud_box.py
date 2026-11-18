@@ -130,3 +130,47 @@ def test_parse_gemini_tts_models_filters_tts_and_strips_prefix() -> None:
     ]
     assert all(voices == list(GEMINI_TTS_VOICES) for _, voices in parsed)
     assert "Kore" in GEMINI_TTS_VOICES and len(GEMINI_TTS_VOICES) == 30
+
+
+def test_tts_cloud_box_close_detaches_running_fetch_thread(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from artemis.channels.desktop import tts_cloud_box as mod
+    from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_fetch(
+        _base_url: str, _protocol: str, _key: str | None
+    ) -> tuple[str, list[tuple[str, list[str]]]]:
+        entered.set()
+        release.wait(5)
+        return "Bağlantı tamam, 0 ses modeli bulundu.", []
+
+    monkeypatch.setattr(mod, "fetch_tts_models", slow_fetch)
+    monkeypatch.setattr(mod, "_SHUTDOWN_WAIT_MS", 50)
+
+    panel = SettingsPanel(config(tmp_path, cloud=True))
+    panel.tts_combo.setCurrentIndex(panel.tts_combo.findData("cloud"))
+    panel.tts_cloud_server.setCurrentIndex(panel.tts_cloud_server.findData("bulut"))
+    box = panel.tts_cloud_box
+    assert isinstance(box, TtsCloudBox)
+    panel.tts_cloud_fetch_button.click()
+    assert entered.wait(3)
+
+    thread = box._fetch
+    assert thread is not None and thread.isRunning() and thread.parent() is box
+
+    box.close()
+    assert thread.parent() is None
+    assert thread in mod._DETACHED
+    panel.deleteLater()
+    qt_app.processEvents()
+
+    release.set()
+    assert thread.wait(3000)
+    qt_app.processEvents()
+    assert thread not in mod._DETACHED

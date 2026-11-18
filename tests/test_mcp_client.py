@@ -235,7 +235,9 @@ def test_command_in_working_directory_is_rejected(
     assert "çalışma dizini" in str(info.value).lower()
 
 
-@pytest.mark.parametrize("bad", ['a"b', "a&b", "a|b", "a<b", "a>b", "a^b", "a%b", "a!b"])
+@pytest.mark.parametrize(
+    "bad", ['a"b', "a&b", "a|b", "a<b", "a>b", "a^b", "a%b", "a!b", "a\rb", "a\nb"]
+)
 def test_batch_files_reject_metacharacters(bad: str) -> None:
     with pytest.raises(MCPError) as info:
         mcp_client.validate_command_arguments("C:\\x\\npx.cmd", ["ok", bad])

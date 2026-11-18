@@ -7,9 +7,10 @@ arayüzü kilitlemez. Otomatik indirme yapmaz.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 from PySide6.QtCore import Qt, QThread, QUrl, Signal
-from PySide6.QtGui import QDesktopServices
+from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -18,7 +19,17 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.update_check import UpdateResult, check_latest, current_version
+
+_SHUTDOWN_WAIT_MS = 6000
+# Süresi dolunca ayrılan iş parçacığı bitene dek GC tarafından toplanmasın diye tutulur.
+_DETACHED = DETACHED
+
+
+def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
+    # Bekleme süresi modülde kalır (testler kısaltır); gövde ortak modülde.
+    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 class UpdateCheckThread(QThread):
@@ -125,3 +136,15 @@ class UpdateSection(QWidget):
     def _on_open_clicked(self) -> None:
         if self._release_url:
             QDesktopServices.openUrl(QUrl(self._release_url))
+
+    def finish(self) -> None:
+        if _shutdown_thread(
+            self._thread,
+            ("done", self._on_done),
+            ("finished", self._on_thread_finished),
+        ):
+            self._thread = None
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.finish()
+        super().closeEvent(event)

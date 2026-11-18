@@ -299,6 +299,8 @@ class SelectionActions:
     async def _run(self, action: str) -> None:
         outcome, out_chars, model, cost = "error", 0, "", "0"
         message = "Model yanıt veremedi."
+        # Önceki eylemden kalan sonuç başarısız yeni eylemde geri yazılmasın.
+        self._result = ""
         self._emit("working", "")
         try:
             problem = self._problem()

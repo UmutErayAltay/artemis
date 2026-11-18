@@ -276,6 +276,19 @@ async def test_provider_error_is_reported_and_phase_released() -> None:
     assert not rig.actions.busy
 
 
+async def test_failed_run_clears_previous_result() -> None:
+    rig = Rig(answer=Completion(content="İlk sonuç", model="m"))
+    await rig.capture()
+    await rig.run("translate")
+    assert rig.actions._result == "İlk sonuç"
+    rig.error = ProviderError("bağlantı yok")
+    await rig.run("fix")
+    assert rig.actions._result == ""
+    await rig.write_back()
+    assert rig.world.typed == ""
+    assert rig.kinds("message")[-1] == "Yazılacak sonuç yok."
+
+
 # --- Gizlilik ------------------------------------------------------------------------------
 
 

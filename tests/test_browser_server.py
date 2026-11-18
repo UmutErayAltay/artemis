@@ -454,13 +454,40 @@ class _FakeBrowser:
         return self.context
 
 
+class _FakeResponse:
+    def __init__(self, status: int = 200, headers: dict[str, str] | None = None) -> None:
+        self.status = status
+        self.headers = headers or {}
+
+
 class _Route:
-    def __init__(self, url: str) -> None:
+    def __init__(
+        self,
+        url: str,
+        *,
+        response: _FakeResponse | None = None,
+        fetch_error: Exception | None = None,
+    ) -> None:
         self.request = type("R", (), {"url": url})()
         self.outcome = ""
+        self.fetched_max_redirects: int | None = None
+        self.fulfilled_response: Any = None
+        self._response = response or _FakeResponse()
+        self._fetch_error = fetch_error
 
     def continue_(self) -> None:
         self.outcome = "continue"
+
+    def fetch(self, *, max_redirects: int | None = None) -> _FakeResponse:
+        self.fetched_max_redirects = max_redirects
+        if self._fetch_error is not None:
+            raise self._fetch_error
+        self.outcome = "fetch"
+        return self._response
+
+    def fulfill(self, *, response: Any) -> None:
+        self.fulfilled_response = response
+        self.outcome = "fetch-then-fulfill" if self.outcome == "fetch" else "fulfill"
 
     def abort(self) -> None:
         self.outcome = "abort"
@@ -499,7 +526,7 @@ def test_real_backend_guards_whole_context_and_websockets_before_any_page() -> N
     context = fake.context
     assert context is not None
     for url, expected in [
-        ("https://example.org/a.js", "continue"),
+        ("https://example.org/a.js", "fetch-then-fulfill"),
         ("http://127.0.0.1:8080/", "abort"),
         ("file:///etc/passwd", "abort"),
     ]:
@@ -510,6 +537,63 @@ def test_real_backend_guards_whole_context_and_websockets_before_any_page() -> N
         sock = _Socket(url)
         context.socket_guard(sock)
         assert sock.outcome == expected, url
+
+
+def _drive_fake_context(playwright_error: type[Exception] = RuntimeError) -> _FakeContext:
+    recorder = _Recorder()
+    fake = _FakeBrowser(recorder)
+    request = browser.BrowseRequest.model_validate({"url": "https://example.org/"})
+
+    def public_only(url: str) -> bool:
+        return check_url(url, lambda host: [PUBLIC]) is None
+
+    browser.PlaywrightBackend._drive(fake, request, public_only, True, playwright_error)
+    assert fake.context is not None
+    return fake.context
+
+
+def test_guard_aborts_redirect_to_loopback_address() -> None:
+    context = _drive_fake_context()
+    route = _Route(
+        "https://example.org/",
+        response=_FakeResponse(status=302, headers={"location": "http://127.0.0.1/"}),
+    )
+    context.guard(route)
+    assert route.fetched_max_redirects == 0
+    assert route.outcome == "abort"
+    assert route.fulfilled_response is None
+
+
+def test_guard_fulfills_redirect_to_public_url() -> None:
+    context = _drive_fake_context()
+    redirect = _FakeResponse(status=302, headers={"location": "https://example.net/next"})
+    route = _Route("https://example.org/", response=redirect)
+    context.guard(route)
+    assert route.fetched_max_redirects == 0
+    assert route.outcome == "fetch-then-fulfill"
+    assert route.fulfilled_response is redirect
+
+
+def test_guard_fulfills_ok_response() -> None:
+    context = _drive_fake_context()
+    ok = _FakeResponse(status=200)
+    route = _Route("https://example.org/", response=ok)
+    context.guard(route)
+    assert route.fetched_max_redirects == 0
+    assert route.outcome == "fetch-then-fulfill"
+    assert route.fulfilled_response is ok
+
+
+def test_guard_aborts_when_fetch_raises_playwright_error() -> None:
+    class _FakePlaywrightError(Exception):
+        pass
+
+    context = _drive_fake_context(playwright_error=_FakePlaywrightError)
+    route = _Route("https://example.org/", fetch_error=_FakePlaywrightError("ağ hatası"))
+    context.guard(route)
+    assert route.fetched_max_redirects == 0
+    assert route.outcome == "abort"
+    assert route.fulfilled_response is None
 
 
 def test_chromium_disables_non_http_local_channels() -> None:

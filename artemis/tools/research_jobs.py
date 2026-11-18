@@ -178,7 +178,8 @@ class ResearchJobs:
         try:
             self._work(job_id, topic, limit, context)
         except Exception as error:  # noqa: BLE001 - iş parçacığı sınırı
-            with suppress(sqlite3.Error, OSError):
+            # Kilit: `cancel()` ile aynı kilitte sıralanır; durum `cancelling`de kalmaz.
+            with suppress(sqlite3.Error, OSError), self._lock:
                 self._update(
                     job_id,
                     status="error",

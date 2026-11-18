@@ -604,7 +604,17 @@ class VoiceController:
 
         on = has_verb(_CONTINUOUS_ON_VERBS)
         off = has_verb(_CONTINUOUS_OFF_VERBS)
-        return on if on != off else None
+        if on == off:
+            return None
+        # TV/arka plan konuşmasının sürekli dinlemeyi açmaması için kipi açma
+        # yalnızca uyandırma sözcüğüyle veya açık takip penceresinde kabul edilir.
+        if on and not (
+            span is not None
+            or self._awaiting_followup
+            or self.clock() <= self._followup_until
+        ):
+            return None
+        return on
 
     def _is_spoken_echo(self, text: str, speech_start: float) -> bool:
         if not self._spoken_text or speech_start > self._spoken_until:
@@ -691,6 +701,12 @@ class VoiceController:
                 self._awaiting_followup = True
                 self._emit_state("awaiting_command")
 
+    def _clear_followup(self) -> None:
+        # Takip tüketildiğinde run() döngüsünün meşgulken "listening" yaymaması için
+        # bitiş zamanı ile bayrak aynı noktada sıfırlanır.
+        self._followup_until = 0.0
+        self._awaiting_followup = False
+
     def _wake_command(self, transcript: str) -> str | None:
         """None: wake word yok/expired; boş dize: wake word tek başına."""
         span = find_wake_word(transcript, self.config.wake_word)
@@ -700,12 +716,12 @@ class VoiceController:
             if not tail.strip(" \t,.;:!?-") or is_ghost_transcript(tail):
                 self._followup_until = self.clock() + self.config.followup_seconds
                 return ""
-            self._followup_until = 0.0
+            self._clear_followup()
             return tail
         if self.clock() <= self._followup_until:
-            self._followup_until = 0.0
+            self._clear_followup()
             return transcript
-        self._followup_until = 0.0
+        self._clear_followup()
         # Kesintisiz kipte wake word'süz nihai söz komuttur (çıktı sırasında
         # _handle_utterance zaten wake word ister; yankı da öncesinde elenir).
         return transcript if self.continuous else None

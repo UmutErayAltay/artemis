@@ -205,6 +205,9 @@ def _mark_truncated(content: str, truncated: bool) -> str:
 
 def _arguments(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
+        if not value.strip():
+            # Akışlı veya argümansız araç çağrılarında boş metin boş nesne sayılır.
+            return {}
         try:
             decoded = json.loads(value)
         except (json.JSONDecodeError, ValueError):
@@ -225,7 +228,7 @@ def _chat_calls(value: Any) -> list[ToolCall]:
             ToolCall(
                 id=_string(item["id"]) if "id" in item else uuid4().hex,
                 name=_string(function.get("name")),
-                arguments=_arguments(function.get("arguments")),
+                arguments=_arguments(function.get("arguments", {})),
                 extra_content=_object(item["extra_content"]) if item.get("extra_content") else None,
             )
         )

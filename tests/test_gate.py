@@ -1,7 +1,10 @@
 import json
+import sqlite3
+import subprocess
 from pathlib import Path
 from typing import Any, ClassVar
 
+import httpx
 import pytest
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -714,3 +717,104 @@ async def test_trusted_site_never_waives_mandatory_approval(
     )
     assert result.status == 'denied'
     assert seen == ['site_read_test']
+
+
+class SqliteErrorTool(BaseTool):
+    name = "sqlite_error_test"
+    description = "SQLite hatasında denetim ve leke davranışını sınar."
+    args_model = FileArgs
+    risk: ClassVar[Risk] = Risk.READ_ONLY
+    external = True
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        raise sqlite3.OperationalError("veritabanı kilitli")
+
+
+class KeyErrorTool(BaseTool):
+    name = "key_error_test"
+    description = "LookupError hatasında denetim ve leke davranışını sınar."
+    args_model = FileArgs
+    risk: ClassVar[Risk] = Risk.READ_ONLY
+    external = True
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        raise KeyError("eksik_anahtar")
+
+
+class SubprocessErrorTool(BaseTool):
+    name = "subprocess_error_test"
+    description = "Alt süreç hatasında denetim ve leke davranışını sınar."
+    args_model = FileArgs
+    risk: ClassVar[Risk] = Risk.READ_ONLY
+    external = True
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        raise subprocess.TimeoutExpired("x", 1)
+
+
+class HttpErrorTool(BaseTool):
+    name = "http_error_test"
+    description = "HTTP hatasında denetim ve leke davranışını sınar."
+    args_model = FileArgs
+    risk: ClassVar[Risk] = Risk.READ_ONLY
+    external = True
+
+    async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+        raise httpx.ConnectError("baglanti yok")
+
+
+@pytest.mark.parametrize(
+    ("tool_cls", "expected_error"),
+    [
+        (SqliteErrorTool, "OperationalError"),
+        (KeyErrorTool, "KeyError"),
+        (SubprocessErrorTool, "TimeoutExpired"),
+        (HttpErrorTool, "ConnectError"),
+    ],
+)
+async def test_external_tool_sqlite_and_lookup_errors_are_caught_and_taint(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState],
+    tool_cls: type[BaseTool],
+    expected_error: str,
+) -> None:
+    gate, context, state = setup_gate
+    gate.registry.register(tool_cls)
+    result = await gate.dispatch(
+        call(tool_cls.name, path="ignored.txt"), context, state, lambda *_: True
+    )
+    assert result.status == "error"
+    assert not result.success
+    assert result.external is True
+    assert state.tainted is True
+    records = [
+        json.loads(line)
+        for line in context.audit.path.read_text(encoding="utf-8").splitlines()
+    ]
+    error = next(record for record in records if record["event"] == "tool_exception")
+    assert error["error_type"] == expected_error
+    assert any(record["event"] == "tool_result" for record in records)
+
+
+async def test_malformed_url_never_crashes_and_always_asks(
+    site_gate: tuple[SafetyGate, ToolContext],
+) -> None:
+    gate, context = site_gate
+    asked: list[str] = []
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        asked.append(arguments["url"])
+        return False
+
+    clean_result = await gate.dispatch(
+        call("site_read_test", url="http://[::1"), context, TurnState(), reject
+    )
+    assert clean_result.status == "denied"
+    assert not clean_result.success
+
+    remember_site(trusted_sites_path(context.settings.state_dir), "tr.wikipedia.org")
+    remember_site(trusted_sites_path(context.settings.state_dir), "http://[::1")
+    trusted_result = await gate.dispatch(
+        call("site_read_test", url="http://[::1"), context, TurnState(), reject
+    )
+    assert trusted_result.status == "denied"
+    assert asked == ["http://[::1", "http://[::1"]

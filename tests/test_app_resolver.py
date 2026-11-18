@@ -22,6 +22,7 @@ from artemis.tools.app_resolver import (
     skeleton,
 )
 from artemis.tools.base import Risk, ToolContext, ToolResult
+from artemis.tools.plugins.app_alias import ForgetApplicationAlias
 from artemis.tools.registry import discover_tools
 
 APPS = {
@@ -406,3 +407,55 @@ async def test_open_application_fuzzy_match_named_uninstaller_is_not_opened(
     )
     assert desktop.opened == []
     assert result.status == "error"
+
+
+async def test_auto_mode_remembers_alias_without_approval_and_audits_skip(
+    tmp_path: Path,
+) -> None:
+    context, _ = _context(tmp_path, computer_use={"mode": "auto"})
+    result, asked = await _dispatch(
+        context,
+        "app_alias_remember",
+        {"spoken": "breyv", "application": "Brave"},
+        tainted=True,
+    )
+    assert result.success
+    assert asked == []
+    assert alias_store(context.settings.state_dir).load() == {"breyv": "Brave"}
+    assert any(
+        record.get("event") == "approval_skipped"
+        and record.get("tool") == "app_alias_remember"
+        for record in _audit(context)
+    )
+
+
+@pytest.mark.parametrize("tainted", [False, True])
+async def test_auto_mode_refuses_alias_to_uninstaller_without_asking(
+    tmp_path: Path, tainted: bool
+) -> None:
+    context, _ = _context(tmp_path, computer_use={"mode": "auto"})
+    result, asked = await _dispatch(
+        context,
+        "app_alias_remember",
+        {"spoken": "temizle", "application": "Uninstall Brave"},
+        tainted=tainted,
+    )
+    assert not result.success and result.status == "error"
+    assert asked == []
+    assert not alias_store(context.settings.state_dir).path.exists()
+
+
+async def test_forget_alias_never_skips_approval_even_in_auto_mode(tmp_path: Path) -> None:
+    assert ForgetApplicationAlias.auto_mode_ok is False
+    context, _ = _context(tmp_path, computer_use={"mode": "auto"})
+    alias_store(context.settings.state_dir).save({"brev": "Brave"})
+    denied, asked = await _dispatch(
+        context,
+        "app_alias_forget",
+        {"spoken": "brev"},
+        tainted=True,
+        approve=False,
+    )
+    assert asked == [{"tool": "app_alias_forget", "spoken": "brev"}]
+    assert denied.status == "denied"
+    assert alias_store(context.settings.state_dir).load() == {"brev": "Brave"}

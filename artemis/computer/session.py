@@ -371,6 +371,7 @@ class ComputerSession:
         )
         while True:
             self._elements = {}
+            self._last_used_vision = False
             if self._stop.is_set():
                 return self._result("stopped", "Kullanıcı oturumu durdurdu.")
             if self._steps >= self._config.max_steps:
@@ -530,9 +531,22 @@ class ComputerSession:
         """ADR 0078 kapısı; öğeye, koordinata ya da odaktaki öğeye giden her girdide çalışır.
 
         Öğe: click_element'te seçilen öğe; koordinatlı tıklamada noktayı içeren en küçük öğe
-        (both kipinde UIA listesi vardır); onaylayan tuşta (enter/space) odaktaki öğe. Yalnız
-        ekran görüntüsü kipinde öğe adı yoktur, kapı çalışmaz (ADR 0078 bilinen tavan)."""
+        (both kipinde UIA listesi vardır); onaylayan tuşta (enter/space) ya da odağı tetikleyen
+        yazımda (satır sonu veya yalnız boşluk) odaktaki öğe. Yalnız ekran görüntüsü kipinde
+        öğe adı yoktur, kapı çalışmaz (ADR 0078 bilinen tavan)."""
         element: UiElement | None = None
+        typed_text = action.text or ""
+        activates_focused = (
+            action.type == "key"
+            and bool(set(parse_keys(action.keys or "")) & {"enter", "space"})
+        ) or (
+            action.type == "type"
+            and (
+                "\r" in typed_text
+                or "\n" in typed_text
+                or (bool(typed_text) and typed_text.isspace())
+            )
+        )
         if action.type == "click_element":
             element = self._elements.get(action.element or 0)
         elif action.type in _POINTER_ACTIONS and point is not None:
@@ -550,8 +564,15 @@ class ComputerSession:
             from artemis.computer.windows import UiElement as _Key
 
             element = _Key(0, "Key", "Sil", (0, 0, 0, 0), interactive=True, focused=False)
-        elif action.type == "key" and set(parse_keys(action.keys or "")) & {"enter", "space"}:
+        elif activates_focused:
             element = next((item for item in self._elements.values() if item.focused), None)
+            if element is None and self._elements and self._last_used_vision:
+                # OCR öğelerinde odak bilgisi yoktur (focused=False): enter/boşluk veya satır
+                # sonu yazımı farkında olmadan yıkıcı bir denetimi etkinleştirebilir.
+                return (
+                    "Odaktaki öğe bilinmiyor (görsel öğe listesi); "
+                    "enter/boşluk yerine hedef öğeye click_element ile tıkla."
+                )
         if element is None:
             return None
         safe_name = mask_screen_secrets(_LIST_SYNTAX.sub(" ", element.name))

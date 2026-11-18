@@ -217,6 +217,30 @@ def test_import_wrong_dims_and_overwrite_refusal(tmp_path: Path) -> None:
     assert sorted(p.name for p in pets.iterdir()) == ["blob"]
 
 
+def test_overwrite_restores_original_pet_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    pets = tmp_path / "pets"
+    first = make_pet(tmp_path / "a", meta={"displayName": "Birinci"})
+    ps.import_pet(first, pets)
+    second = make_pet(tmp_path / "b", meta={"displayName": "Ikinci"})
+    real_replace = os.replace
+
+    def fail_on_staging(src: str | os.PathLike[str], dst: str | os.PathLike[str]) -> None:
+        if Path(src).name.startswith(".import-") and Path(dst) == pets / "blob":
+            raise OSError("disk hatası")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(ps.os, "replace", fail_on_staging)
+    with pytest.raises(ps.PetImportError):
+        ps.import_pet(second, pets, overwrite=True)
+
+    assert (pets / "blob" / "pet.json").is_file()
+    assert (pets / "blob" / "spritesheet.png").is_file()
+    assert ps.read_pet(pets / "blob", "artemis").display_name == "Birinci"
+    assert [p.name for p in pets.iterdir()] == ["blob"]
+
+
 # ------------------------------------------------------------------- kayıt
 
 

@@ -165,3 +165,15 @@ hedef sekme ayırt edilmeden üç sekmeyi kapattı ve sonuç hep "doğrulanmadı
 `computer_use` gömülü Telegram kanalında da çalışır: oradaki host onayı Telegram düğmelerine
 götürür, `/dur` Esc'in karşılığıdır, ekran kilidi masaüstü ve Telegram oturumları arasında
 ortaktır. CLI `artemis telegram` host taşımaz.
+
+## Ek karar (2026-11-18): uygulama takma adı otomatik kipte
+
+Konuşma tanıma ("Breyv" -> "Brave") düzeltmelerinde her öğrenme adımı için lekeli turda
+"Uygulama adını hatırla" onayı sormak otomatik kipin akışını bozar; öğretme yalnızca
+izin listesindeki adlara bağlı düşük riskli yerel bir yazma olduğundan `app_alias_remember`
+aracına `auto_mode_ok = True` verildi. Kapsam yalnızca `app_alias_remember` ile sınırlıdır;
+`app_alias_forget` otomatik kipte de normal kurala uyarak onay bekler.
+Kaldırıcı uygulamalar için sınır korunur: `SafetyGate`'te `auto_skipped` akışı
+`CONFIRM_REQUIRED` riskini de atladığından, `RememberApplicationAlias.refuse()`
+`computer_use.mode == "auto"` iken kaldırıcı hedefi onay sormadan reddeder; normal kipte
+(`accept`) reddetmez ve `open_application` tarafındaki kullanıcı onayı aynen sürer.

@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
-from artemis.channels.desktop.operations import CARDS_KEPT, OperationLog
+from artemis.channels.desktop.operations import (
+    CARDS_KEPT,
+    CHIP_TONES,
+    Card,
+    OperationLog,
+    ToolOp,
+)
 
 LABELS = {
     "open_application": ("Uygulama açma", "Uygulama açıldı"),
@@ -186,3 +192,16 @@ def test_computer_step_shows_observed_as_muted_second_line() -> None:
     assert texts[1].startswith("↳ sonuç: video durdu") and len(texts[1]) <= len("↳ sonuç: ") + 120
     assert op.subrows[1].kind == "info"
     assert len(texts) == 3 and texts[2] == "Adım 3 · Tıklama"
+
+
+def test_chip_not_tamam_for_denied_or_interrupted() -> None:
+    denied_card = Card(
+        "r1", "onay", "12:00", ended=True, stop_reason="completed",
+        ops=[ToolOp("open_application", "Uygulama açma", state="denied")],
+    )
+    interrupted_card = Card(
+        "r2", "kesildi", "12:00", ended=True, stop_reason="completed",
+        ops=[ToolOp("open_application", "Uygulama açma", state="interrupted")],
+    )
+    assert denied_card.chip != "Tamam" and denied_card.chip in CHIP_TONES
+    assert interrupted_card.chip != "Tamam" and interrupted_card.chip in CHIP_TONES

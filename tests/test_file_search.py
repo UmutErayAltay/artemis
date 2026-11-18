@@ -515,3 +515,65 @@ def test_clear_does_not_unlink_while_thread_still_alive(
     assert env.index.path.exists()
     block.release.set()
     assert env.index.wait(10)
+
+
+def test_file_search_section_close_detaches_running_clear_job(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    import yaml
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop import file_search_section as mod
+    from artemis.channels.desktop.file_search_section import FileSearchSection
+
+    app = QApplication.instance() or QApplication([])
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    cfg = tmp_path / "config.yaml"
+    cfg.write_text(
+        yaml.safe_dump(
+            {
+                "workspace": str(tmp_path),
+                "state_dir": str(tmp_path / "state"),
+                "audit_path": str(tmp_path / "audit.jsonl"),
+                "persist_memory": False,
+                "file_search": {"enabled": True, "roots": [str(docs)]},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    entered = threading.Event()
+    release = threading.Event()
+    monkeypatch.setattr(mod, "_SHUTDOWN_WAIT_MS", 50)
+
+    section = FileSearchSection(cfg)
+    assert section._index is not None
+
+    def slow_clear() -> str:
+        entered.set()
+        release.wait(5)
+        return "İndeks silindi."
+
+    monkeypatch.setattr(section._index, "clear", slow_clear)
+    section.clear_button.click()
+    assert entered.wait(3)
+
+    thread = section._clearing
+    assert thread is not None and thread.isRunning() and thread.parent() is section
+
+    section.close()
+    assert thread.parent() is None
+    assert thread in mod._DETACHED
+    section.deleteLater()
+    app.processEvents()
+
+    release.set()
+    assert thread.wait(3000)
+    app.processEvents()
+    assert thread not in mod._DETACHED

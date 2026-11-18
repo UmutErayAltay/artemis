@@ -399,3 +399,79 @@ def test_utc_until_keeps_last_local_occurrence_after_midnight() -> None:
     events, _ = core.parse_events(data, TZ, begin, datetime(2026, 10, 24, tzinfo=TZ))
     # 22 Ekim 00:30 İstanbul = 21 Ekim 21:30Z: UNTIL dahildir; 23 Ekim dışarıda kalır.
     assert len(events) == 1
+
+
+def _calendar_mail_section(tmp_path: Path) -> Any:
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication, QVBoxLayout
+
+    from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
+
+    app = QApplication.instance() or QApplication([])
+    section = CalendarMailSection(
+        tmp_path / "config.yaml", calendar=QVBoxLayout(), mail=QVBoxLayout()
+    )
+    return app, section
+
+
+def test_section_invalid_timezone_reports_error_without_crash(tmp_path: Path) -> None:
+    from PySide6.QtWidgets import QWidget
+
+    from artemis.channels.desktop.calendar_mail_section import _Job, check_calendar
+
+    _app, section = _calendar_mail_section(tmp_path)
+    parent = QWidget()
+    message = check_calendar("https://example.invalid/a.ics", "Bilinmeyen/Bolge")
+    assert message is not None
+    job = _Job(lambda: check_calendar("https://example.invalid/a.ics", "Bilinmeyen/Bolge"), parent)
+    job.run()
+    assert job.error is not None and not job.verified
+    section.deleteLater()
+    parent.deleteLater()
+
+
+def test_section_source_error_in_job_sets_error_and_never_saves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.channels.desktop import calendar_mail_section as mod
+
+    app, section = _calendar_mail_section(tmp_path)
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(mod, "write_secret", lambda s, t: saved.append((s, t)))
+
+    def boom() -> str | None:
+        raise core.SourceError("sunucu hatası")
+
+    section._start(boom, "gizli-deger", core.ICS_TARGET, "Takvim")
+    assert section._job is not None
+    assert section._job.wait(3000)
+    app.processEvents()
+    assert section._job.error == "sunucu hatası"
+    assert not section._job.verified
+    assert saved == []
+    assert "Kaydedilmedi" in section.message.text()
+    section.deleteLater()
+
+
+def test_section_missing_result_never_saves(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.channels.desktop import calendar_mail_section as mod
+
+    app, section = _calendar_mail_section(tmp_path)
+    saved: list[tuple[str, str]] = []
+    monkeypatch.setattr(mod, "write_secret", lambda s, t: saved.append((s, t)))
+    # run() sonuç üretmeden biterse verified=False, error=None kalır; yine de kaydedilmez.
+    monkeypatch.setattr(mod._Job, "run", lambda self: None)
+
+    section._start(lambda: None, "gizli-deger", core.ICS_TARGET, "Takvim")
+    assert section._job is not None
+    assert section._job.wait(3000)
+    app.processEvents()
+    assert section._job.error is None and not section._job.verified
+    assert saved == []
+    assert "Kaydedilmedi" in section.message.text()
+    section.deleteLater()

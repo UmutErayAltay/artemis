@@ -4,15 +4,18 @@ from __future__ import annotations
 
 import asyncio
 import json
+import sqlite3
+import subprocess
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
 from pathlib import Path
 from time import monotonic
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlsplit
+from urllib.parse import SplitResult, urlsplit
 from uuid import uuid4
 
+import httpx
 from pydantic import BaseModel, ValidationError
 
 from artemis.tools.base import BaseTool, GateHandle, Risk, ToolContext, ToolResult, normalize_risk
@@ -50,12 +53,24 @@ def remember_site(path: Path, host: str) -> None:
     path.write_text(json.dumps(sorted(sites), ensure_ascii=False, indent=2), encoding="utf-8")
 
 
+def _safe_urlsplit(url: str) -> SplitResult | None:
+    """Bozuk URL'lerde ValueError yerine None döner; tur çökmez, site güvensiz sayılır."""
+    try:
+        return urlsplit(url)
+    except ValueError:
+        return None
+
+
 def site_of(external: bool, arguments: dict[str, Any]) -> str | None:
     """Dış içerik okuyan ve `url` alan araçta okunan sitenin host'u (ör. tarayıcı MCP)."""
     url = arguments.get("url")
     if not external or not isinstance(url, str):
         return None
-    parts = urlsplit(url)
+    parts = _safe_urlsplit(url)
+    if parts is None:
+        # Ayrıştırılamayan adres bilinen bir host'a indirgenemez; ham değeri döndürerek
+        # güvenilen site listesiyle eşleşmesini engelleriz ve her zaman onay isteriz.
+        return url or None
     if "\\" in url or "@" in parts.netloc or any(ord(ch) <= 0x20 or ord(ch) == 0x7F for ch in url):
         # Python ile tarayıcı (WHATWG) bu adresleri farklı host'a çözer:
         # `https://kotu.com\@iyi.com` Python'da `iyi.com`, Chromium'da `kotu.com`'dur. Ham netloc
@@ -178,13 +193,19 @@ class SafetyGate:
             isinstance(step, dict) and step.get("action") in _TRUSTED_STEP_ACTIONS for step in steps
         )
         url = normalized.get("url")
-        parts = urlsplit(url) if isinstance(url, str) else None
+        parts = _safe_urlsplit(url) if isinstance(url, str) else None
+        malformed_url = isinstance(url, str) and parts is None
+        tainted_context = state.tainted or state.history_external
+        # Sorgu/parça veri taşır; bozuk URL trusted_site'ta ayrıca reddedilir. Yol bilerek
+        # dışarıda: güvenilen sitede sızdırma için saldırganın o sitenin erişim kayıtlarını
+        # görmesi gerekir, yolu saymak "bir daha sorma"yı lekeli her turda bozardı (2026-11-18).
         carries_data = parts is not None and bool(parts.query or parts.fragment)
         trusted_site = (
             site is not None
             and risk is not Risk.CONFIRM_REQUIRED
             and not fills
-            and not ((state.tainted or state.history_external) and carries_data)
+            and not malformed_url
+            and not (tainted_context and carries_data)
             and site in load_trusted_sites(trusted_sites_path(context.settings.state_dir))
         )
         # Otomatik kipte yalnız `auto_mode_ok` aracın onayı atlanır (ADR 0039 ek karar):
@@ -301,7 +322,16 @@ class SafetyGate:
                 started,
             )
             raise
-        except (OSError, ValueError, RuntimeError, TypeError) as error:
+        except (
+            OSError,
+            ValueError,
+            RuntimeError,
+            TypeError,
+            sqlite3.Error,
+            subprocess.SubprocessError,
+            LookupError,
+            httpx.HTTPError,
+        ) as error:
             context.audit.emit(
                 "tool_exception",
                 turn_id=state.turn_id,

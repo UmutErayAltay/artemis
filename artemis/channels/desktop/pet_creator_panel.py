@@ -14,6 +14,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+import yaml
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import (
     QCloseEvent,
@@ -83,7 +84,7 @@ class ModelCall(QThread):
             self.done.emit("", "Model kota sınırında; biraz sonra yeniden dene.")
         except ProviderError as error:
             self.done.emit("", f"Model yanıt veremedi: {error}")
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, yaml.YAMLError) as error:
             self.done.emit("", f"Ayarlar ya da denetim kaydı kullanılamadı: {error}")
         else:
             self.done.emit(completion.content, "")
@@ -130,7 +131,7 @@ class ImageCall(QThread):
             self.done.emit(None, "Model kota sınırında; biraz sonra yeniden dene.")
         except (ProviderError, pipe.PetImageError) as error:
             self.done.emit(None, f"Resim modeli yanıt veremedi: {error}")
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, yaml.YAMLError) as error:
             self.done.emit(None, f"Ayarlar ya da denetim kaydı kullanılamadı: {error}")
         else:
             self.done.emit(result, "")

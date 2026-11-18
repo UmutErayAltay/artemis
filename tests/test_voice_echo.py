@@ -621,6 +621,17 @@ def test_reference_fills_playback_gaps_with_silence() -> None:
     assert reference.pull(2, at=100.202) == _pack_i16([3, 4])
 
 
+def test_reference_keeps_alignment_after_gap_exceeding_buffer() -> None:
+    clock = FakeClock()
+    reference = EchoReference(1000, max_ms=50, clock=clock)
+    reference.feed(_pack_i16([1, 2, 3]), 1000, 1, 2)  # 100.000-100.003
+
+    clock.now = 101.003  # max_ms (50 ms) değerinden büyük 1000 ms boşluk
+    reference.feed(_pack_i16([4, 5, 6]), 1000, 1, 2)
+
+    assert reference.pull(3, at=101.003) == _pack_i16([4, 5, 6])
+
+
 def test_microphone_passes_frame_start_time_to_canceller() -> None:
     frame = AudioFrame(pcm=_pack_i16([1] * 480), timestamp=10.0, sample_rate=48000)
     canceller = FakeCanceller()

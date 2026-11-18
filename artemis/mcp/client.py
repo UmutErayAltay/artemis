@@ -43,7 +43,7 @@ CLEANUP_SECONDS = 2.0
 # Bildirim seli tek tek küçük satırlarla da bellek/süre yiyebilir; oturum toplamı sınırlıdır.
 MAX_SESSION_BYTES = 8 << 20
 CANCEL_POLL_SECONDS = 0.1
-UNSAFE_BATCH_CHARACTERS = frozenset('"&|<>^%!')
+UNSAFE_BATCH_CHARACTERS = frozenset('"&|<>^%!\r\n')
 
 
 def _spawn_options() -> dict[str, Any]:

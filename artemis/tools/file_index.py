@@ -503,19 +503,22 @@ class FileIndex:
         dosyaya dokunulmaz ve kullanıcıya söylenir. İptal bayrağı açık kalır: dizinleyici
         kullanıcı yeniden dizinleme isteyene (`start`) dek indeksi yeniden oluşturmaz.
         """
-        self._cancel.set()
-        thread = self._thread
-        if thread is not None:
-            thread.join(JOIN_SECONDS)
-            if thread.is_alive():
-                return "Dizinleme henüz durmadı, indeks silinmedi; birazdan tekrar dene."
-        with self._lock:
-            try:
-                self.path.unlink(missing_ok=True)
-            except OSError:
-                return "İndeks silinemedi; Artemis'i kapatıp tekrar dene."
-        self._note = ""
-        return "İndeks silindi."
+        # Başlatma kilidi: `start()` ile sıraya girer; iptal+join ile silme arasına yeni koşu
+        # girip iptal bayrağını kaldıramaz ve silinen veritabanını yeniden yaratamaz.
+        with self._start_lock:
+            self._cancel.set()
+            thread = self._thread
+            if thread is not None:
+                thread.join(JOIN_SECONDS)
+                if thread.is_alive():
+                    return "Dizinleme henüz durmadı, indeks silinmedi; birazdan tekrar dene."
+            with self._lock:
+                try:
+                    self.path.unlink(missing_ok=True)
+                except OSError:
+                    return "İndeks silinemedi; Artemis'i kapatıp tekrar dene."
+            self._note = ""
+            return "İndeks silindi."
 
     def wait(self, timeout: float = 30.0) -> bool:
         """Testler için: dizinleme bitene dek bekler."""

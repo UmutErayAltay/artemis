@@ -134,3 +134,37 @@ def test_update_section_ui_smoke(qt_app: QApplication) -> None:
     assert section.result_label.text() == fake_result.message
 
     section.deleteLater()
+
+
+def test_update_section_close_detaches_running_thread(
+    qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from artemis.channels.desktop import update_section as mod
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    def slow_check() -> UpdateResult:
+        entered.set()
+        release.wait(5)
+        return UpdateResult(status="current", latest="", url="", message="Güncel.")
+
+    monkeypatch.setattr(mod, "_SHUTDOWN_WAIT_MS", 50)
+    section = UpdateSection(check=slow_check)
+    section.check_button.click()
+    assert entered.wait(3)
+    thread = section._thread
+    assert thread is not None and thread.isRunning() and thread.parent() is section
+
+    section.close()
+    assert thread.parent() is None
+    assert thread in mod._DETACHED
+    section.deleteLater()
+    qt_app.processEvents()
+
+    release.set()
+    assert thread.wait(3000)
+    qt_app.processEvents()
+    assert thread not in mod._DETACHED

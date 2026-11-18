@@ -1,4 +1,6 @@
 """Four native palettes must retain readable text, controls and mixed navigation."""
+import re
+
 import pytest
 
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEMES, stylesheet
@@ -124,7 +126,7 @@ def test_arrow_images_exist_for_every_theme() -> None:
     from pathlib import Path
 
     for name in THEMES:
-        for url in re.findall(r"url\(([^)]+)\)", stylesheet(name)):
+        for url in re.findall(r'url\("?([^)"]+)"?\)', stylesheet(name)):
             assert Path(url).is_file(), url
 
 
@@ -145,3 +147,10 @@ def test_buttons_and_fields_share_one_control_height() -> None:
         assert "QSpinBox {" in css and "min-height: 26px" in css, name
         primary = css.split("QPushButton#primary {", 1)[1].split("}", 1)[0]
         assert "min-height" not in primary, name
+
+
+def test_stylesheet_urls_are_quoted_for_paths_with_spaces() -> None:
+    # Boşluklu kurulum yolunda tırnaksız url(...) QSS'i bozar (ok/radyo ikonları gider).
+    for name in THEMES:
+        urls = re.findall(r"url\(([^)]*)\)", stylesheet(name))
+        assert urls and all(u.startswith('"') and u.endswith('"') for u in urls), name

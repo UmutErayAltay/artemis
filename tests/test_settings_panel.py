@@ -11,10 +11,10 @@ pytest.importorskip("PySide6")
 
 from artemis.brain import providers
 from artemis.channels.desktop import provider_section as section_module
+from artemis.channels.desktop.settings_io import microphone_choices
 from artemis.channels.desktop.settings_panel import (
     _same,
     _write_validated,
-    microphone_choices,
     save_choices,
 )
 from artemis.config.settings import load_settings
@@ -1282,3 +1282,90 @@ def test_save_button_beside_revert_writes_now_and_requests_apply(tmp_path: Path,
     panel.save_button.click()  # debounce beklenmez
     assert writes == [True] and not panel._dirty and applied == [True]
     panel.deleteLater()
+
+
+def test_finish_inventory_stops_and_detaches_running_stt_download(
+    tmp_path: Path, qt_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import threading
+
+    from PySide6.QtCore import QThread
+
+    from artemis.channels.desktop import settings_panel as module
+
+    class _CooperativeStt(QThread):
+        def __init__(self, parent) -> None:  # type: ignore[no-untyped-def]
+            super().__init__(parent)
+            self.entered = threading.Event()
+
+        def run(self) -> None:
+            self.entered.set()
+            while not self.isInterruptionRequested():
+                threading.Event().wait(0.01)
+
+    class _StuckStt(QThread):
+        def __init__(self, parent) -> None:  # type: ignore[no-untyped-def]
+            super().__init__(parent)
+            self.entered = threading.Event()
+            self.release = threading.Event()
+
+        def run(self) -> None:
+            self.entered.set()
+            self.release.wait(5)
+
+    panel = _panel(config(tmp_path))
+    cooperative = _CooperativeStt(panel)
+    cooperative.finished.connect(panel._stt_download_finished)
+    panel.stt_download_thread = cooperative  # type: ignore[assignment]
+    cooperative.start()
+    assert cooperative.entered.wait(3)
+    panel.finish_inventory()
+    assert not cooperative.isRunning()
+
+    monkeypatch.setattr(module, "_SHUTDOWN_WAIT_MS", 50)
+    stuck = _StuckStt(panel)
+    stuck.finished.connect(panel._stt_download_finished)
+    panel.stt_download_thread = stuck  # type: ignore[assignment]
+    stuck.start()
+    assert stuck.entered.wait(3)
+    panel.finish_inventory()
+    assert stuck.parent() is None
+    assert stuck in module._DETACHED
+    panel.deleteLater()
+    qt_app.processEvents()
+    stuck.release.set()
+    assert stuck.wait(3000)
+    qt_app.processEvents()
+    assert stuck not in module._DETACHED
+
+
+def test_refresh_devices_handles_none_default_device(
+    tmp_path: Path, qt_app, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import sys
+    import types
+
+    fake_sd = types.SimpleNamespace(
+        PortAudioError=RuntimeError,
+        default=types.SimpleNamespace(device=(None, None)),
+        query_devices=lambda: [
+            {"name": "Mikrofon (Test)", "hostapi": 0, "max_input_channels": 1},
+        ],
+        query_hostapis=lambda: [{"name": "MME"}],
+    )
+    monkeypatch.setitem(sys.modules, "sounddevice", fake_sd)
+
+    panel = _panel(config(tmp_path))
+    assert panel.device_combo.isEnabled()
+    items = [panel.device_combo.itemText(i) for i in range(panel.device_combo.count())]
+    assert "Sistem varsayılanı" in items
+    assert any("Test" in item for item in items)
+    assert not any("None" in item for item in items)
+    assert panel.current_device.text() == "Seçilmedi"
+
+    fake_sd.query_devices = lambda: []
+    panel.refresh()
+    assert panel.device_combo.itemText(0) == "Mikrofon bulunamadı"
+    assert panel.current_device.text() == "Seçilmedi"
+    panel.deleteLater()
+    qt_app.processEvents()

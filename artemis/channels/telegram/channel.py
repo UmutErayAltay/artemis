@@ -217,6 +217,8 @@ class TelegramChannel:
         self._offset: int | None = None
         # Gizli içerik görmüş turların kimlikleri (`observe` doldurur).
         self._private_turns: set[str] = set()
+        # Eşzamanlı gözetimsiz turların gizliliğini korumak için yalnız katılımlı turlar izlenir.
+        self._attended_turns: set[str] = set()
         # Bilgisayar kullanımı (ADR 0053). Onay yoklaması ile /dur yoklaması aynı anda
         # getUpdates açmasın (Telegram 409): ikisi de bu kilidi alır.
         self.computer_host: ComputerHost | None = None
@@ -246,10 +248,17 @@ class TelegramChannel:
         event = record.get("event")
         turn_id = record.get("turn_id")
         if event == "turn_start":
-            # Gözetimsiz brifing turu (ADR 0027) aynı denetime yazar ve kullanıcının
-            # yürüyen turu bekliyorken başlayabilir; onun gizlilik kaydını silmemeli.
             if not record.get("unattended"):
-                self._private_turns.clear()
+                # Yeni katılımlı tur başlarken önceki katılımlı turların izi temizlenir;
+                # eşzamanlı gözetimsiz turların gizlilik kaydı korunur.
+                self._private_turns -= self._attended_turns
+                self._attended_turns.clear()
+                if isinstance(turn_id, str):
+                    self._attended_turns.add(turn_id)
+        elif event == "turn_end":
+            if isinstance(turn_id, str):
+                self._private_turns.discard(turn_id)
+                self._attended_turns.discard(turn_id)
         elif (
             event == "privacy_decision"
             and record.get("cloud_allowed") is False

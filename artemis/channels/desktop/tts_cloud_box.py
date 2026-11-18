@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 from PySide6.QtCore import QThread, Signal
-from PySide6.QtGui import QShowEvent
+from PySide6.QtGui import QCloseEvent, QShowEvent
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,10 +20,21 @@ from PySide6.QtWidgets import (
 
 from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.desktop.form_kit import field, meta_label
+from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.config.settings import EndpointConfig, load_settings
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.settings_panel import SettingsPanel
+
+_SHUTDOWN_WAIT_MS = 6000
+# Süresi dolunca ayrılan iş parçacığı bitene dek GC tarafından toplanmasın diye tutulur.
+_DETACHED = DETACHED
+
+
+def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
+    # Bekleme süresi modülde kalır (testler kısaltır); gövde ortak modülde.
+    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
+
 
 GEMINI_TTS_VOICES: tuple[str, ...] = (
     "Zephyr", "Puck", "Charon", "Kore", "Fenrir", "Leda", "Orus", "Aoede",
@@ -359,6 +370,14 @@ class TtsCloudBox(QWidget):
         if not panel.tts_cloud_consent.isChecked():
             parts.append("Metin gönderme izni kapalıyken bulut sesi başlamaz.")
         panel.tts_cloud_hint.setText(" ".join(parts))
+
+    def finish(self) -> None:
+        if _shutdown_thread(self._fetch, ("done", self._fetch_done)):
+            self._fetch = None
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.finish()
+        super().closeEvent(event)
 
 
 def build_tts_cloud_box(panel: SettingsPanel, speech_layout: QVBoxLayout) -> TtsCloudBox:

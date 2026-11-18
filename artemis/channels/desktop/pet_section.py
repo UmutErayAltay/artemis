@@ -198,6 +198,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         self._current = pet_sprite.ORB
         self._pets: dict[str, PetInfo] = {}
         self._demo = demo
+        self._problem_shown = False
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 24)  # sayfa altında tutarlı 24px nefes payı
         layout.setSpacing(16)
@@ -489,12 +490,16 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         if pet_id is None:
             return
         self._current = pet_id
+        self._problem_shown = False
         self.skin_selected.emit(pet_id)
         self.refresh()
-        self.status.setText("Pet seçildi.")
+        # Sinyal dinleyicisi show_problem çağırdıysa hata iletisini ezme.
+        if not self._problem_shown:
+            self.status.setText("Pet seçildi.")
 
     def show_problem(self, message: str) -> None:
         """Pencere, pet yüklenemeyip küreye dönünce nedenini burada gösterir."""
+        self._problem_shown = True
         self._current = pet_sprite.ORB
         self.refresh()
         self.status.setText(message)

@@ -7,9 +7,12 @@ kutular ana panelin otomatik kaydındadır; deneme KAYITLI ayarları okur. Ağ �
 
 from __future__ import annotations
 
+import http.client
+import imaplib
+import urllib.error
 from collections.abc import Callable
 from pathlib import Path
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QWidget
@@ -22,12 +25,16 @@ from artemis.tools.credentials import delete_secret, write_secret
 
 def check_calendar(url: str, timezone: str) -> str | None:
     """Adres okunup ayrıştırılabiliyorsa None, yoksa kullanıcıya gösterilecek hata."""
-    local = ZoneInfo(timezone)
     try:
+        local = ZoneInfo(timezone)
         begin, end = core.day_window(local, None, 1)
         core.parse_events(core.fetch_ics(url), local, begin, end)
-    except (core.SourceError, ValueError) as error:
-        return str(error) if isinstance(error, core.SourceError) else "Takvim okunamadı."
+    except core.SourceError as error:
+        return str(error)
+    except ZoneInfoNotFoundError:
+        return "Geçersiz saat dilimi."
+    except (ValueError, OSError):
+        return "Takvim okunamadı."
     return None
 
 
@@ -39,6 +46,8 @@ def check_mail(host: str, port: int, username: str, password: str, folder: str) 
         )
     except core.SourceError as error:
         return str(error)
+    except (imaplib.IMAP4.error, OSError, ValueError):
+        return "Posta okunamadı."
     return None
 
 
@@ -47,9 +56,33 @@ class _Job(QThread):
         super().__init__(parent)
         self._job = job
         self.error: str | None = None
+        # Doğrulama gerçekten None ile tamamlanmadıkça sır kaydedilmemelidir.
+        self.verified = False
 
     def run(self) -> None:
-        self.error = self._job()
+        try:
+            error = self._job()
+        except core.SourceError as exc:
+            self.error = str(exc) or "Doğrulama tamamlanamadı."
+            self.verified = False
+        except (
+            ZoneInfoNotFoundError,
+            imaplib.IMAP4.error,
+            urllib.error.URLError,
+            http.client.HTTPException,
+            OSError,
+            ValueError,
+        ):
+            # Ham hata iletisi gizli adres/parola içerebileceğinden genel metin verilir.
+            self.error = "Doğrulama tamamlanamadı."
+            self.verified = False
+        else:
+            if error is None:
+                self.error = None
+                self.verified = True
+            else:
+                self.error = str(error) or "Doğrulama tamamlanamadı."
+                self.verified = False
 
 
 class CalendarMailSection(QWidget):
@@ -112,8 +145,9 @@ class CalendarMailSection(QWidget):
         thread = _Job(job, self)
 
         def done() -> None:
-            if thread.error is not None:
-                self.message.setText(f"{thread.error} Kaydedilmedi.")
+            if thread.error is not None or not thread.verified:
+                detail = thread.error or "Deneme sonucu alınamadı."
+                self.message.setText(f"{detail} Kaydedilmedi.")
                 return
             try:
                 write_secret(secret, target)
