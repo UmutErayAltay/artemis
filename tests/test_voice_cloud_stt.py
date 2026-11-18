@@ -1,4 +1,4 @@
-"""Karma tanıma (ADR 0046): bulut adaptörü, denetleyici kararı, ayar doğrulaması.
+"""Karma tanıma (ADR 0079): bulut adaptörü, denetleyici kararı, ayar doğrulaması.
 
 Ağ yalnız loopback sahte sunucudur; gerçek sır kullanılmaz.
 """

@@ -382,7 +382,7 @@ CLOUD_STT_TIMEOUT_SECONDS = 8.0
 
 
 class OpenAICompatibleTranscriber:
-    """Karma tanıma (ADR 0046): komut sesini buluttaki uca gönderir, metni döndürür.
+    """Karma tanıma (ADR 0079): komut sesini buluttaki uca gönderir, metni döndürür.
 
     Sınıf adı geçmişten kaldı. `stt_cloud_protocol: openai` OpenAI uyumlu
     `/audio/transcriptions` ucunu kullanır; `xai` xAI'nin uyumsuz `/stt` ucunu kullanır
@@ -426,7 +426,7 @@ class OpenAICompatibleTranscriber:
         if self.config.stt_language == "tr":
             data["language"] = "tr"
         path = "/stt" if xai else "/audio/transcriptions"
-        # prompt yok: Whisper gürültüde prompt metnini yankılıyor (ADR 0046 eki).
+        # prompt yok: Whisper gürültüde prompt metnini yankılıyor (ADR 0079 eki).
         # Gizlilik denetimi sesi göndermeden önce yazılır; ses ve metin kaydedilmez.
         self.audit.emit(
             "cloud_stt_transfer", service=self.endpoint_id, content_kind=self.content_kind,

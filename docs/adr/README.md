@@ -48,7 +48,6 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0044 — Söylenen uygulama adının çözümü ve öğretilen takma adlar](0044-spoken-application-names.md)
 - [0045 — Aşama 2 değerlendirme corpus'ları (Common Voice + sentetik TTS)](0045-evaluation-corpora.md)
 - [0046 — Onay, süre, ses ve veri sürekliliği](0046-reliability-controls.md)
-- [0046 — Tanıma hassasiyeti seçimi ve karma (yerel uyandırma + bulut komut) tanıma](0046-stt-precision-and-hybrid-cloud.md)
 - [0047 — İsteğe bağlı canlı yazı (yalnız gösterim)](0047-live-transcript.md)
 - [0048 — Sprite pet'ler, hızlı yazma kutusu ve pet üretici](0048-sprite-pets-quick-box-and-pet-creator.md)
 - [0049 — Takılabilir kod ajanı arka uçları ve başlangıç klasörü](0049-code-agent-backends-and-workdir.md)
@@ -81,3 +80,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0076 — Konuşma hafızasının diskte şifrelenmesi (DPAPI)](0076-hafiza-sifreleme.md)
 - [0077 — `open_url` lekeli turda sorulur, otomatik onayda sorulmaz](0077-open-url-lekeli-turda-sorulur.md)
 - [0078 — Yıkıcı öğe kapısı ve sıkı istem kuralları](0078-yikici-oge-kapisi-ve-siki-kurallar.md)
+- [0079 — Tanıma hassasiyeti seçimi ve karma (yerel uyandırma + bulut komut) tanıma](0079-stt-precision-and-hybrid-cloud.md)

@@ -136,7 +136,7 @@ class VoiceController:
         self._live_text = ""
         self._live_next_emit = 0.0
         self._live_stale = False
-        # ADR 0046: yalnız komut olacak söz için; uyandırma/yankı kararları hep yerel metinle.
+        # ADR 0079: yalnız komut olacak söz için; uyandırma/yankı kararları hep yerel metinle.
         self.cloud_recognizer = cloud_recognizer
         self._should_use_cloud = should_use_cloud
         self.config = config

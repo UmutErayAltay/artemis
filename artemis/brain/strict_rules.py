@@ -77,21 +77,30 @@ def _words(text: str) -> list[str]:
     lowered = text.replace("İ", "i").replace("I", "ı").lower()
     for phrase, word in _PHRASES:
         lowered = lowered.replace(phrase, word)
+    # "don't" / "can’t" -> "dont" / "cant": olumsuzluk tek sözcük kalsın (_NEGATORS).
+    lowered = lowered.replace("n't", "nt").replace("n’t", "nt")
     return _WORD.findall(lowered)
 
 
 # Türkçe olumsuzluk eki: "silme", "silmeyin", "kaldırmadan" izin değil yasaktır. Hedef tarafında
 # bu biçimler aileyi açmaz (ponytail: "silme işlemi" adı da açmaz; yanlış negatif yalnız sorar).
-_NEGATION = re.compile(r"^m[ae](?!k)")
+# Edilgen biçimler de: "silinmesin", "kaldırılmasın".
+_NEGATION = re.compile(r"^(?:[ıiuü][nl])?m[ae](?!k)")
+# Önündeki iki sözcükte bunlardan biri varsa yıkıcı sözcük izin değildir: "don't delete",
+# "do not remove", "without erasing", "asla silinmesin", "sakın kaldırma".
+_NEGATORS = frozenset({"not", "no", "never", "without", "dont", "doesnt", "didnt", "cant",
+                       "cannot", "wont", "shouldnt", "mustnt", "asla", "sakın", "sakin"})
 
 
 def _families(text: str, *, strong_only: bool = False) -> set[str]:
     found = set()
-    for word in _words(text):
+    words = _words(text)
+    for i, word in enumerate(words):
+        negated = strong_only and not _NEGATORS.isdisjoint(words[max(0, i - 2):i])
         for stem, family in _FAMILIES.items():
             if not word.startswith(stem) or (strong_only and stem in _WEAK_STEMS):
                 continue
-            if strong_only and _NEGATION.match(word[len(stem):]):
+            if negated or (strong_only and _NEGATION.match(word[len(stem):])):
                 continue
             found.add(family)
     return found

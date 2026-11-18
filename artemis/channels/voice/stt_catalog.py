@@ -69,7 +69,7 @@ _CATALOG_NAMES = frozenset(choice.name for choice in CATALOG)
 
 def recommended(vram_mb: int | None) -> str:
     """GPU belleğine göre etkileşimli asistan için varsayılan modeli seçer."""
-    # Eşik 3000 MB: large-v3 int8_float16 ile ~2,5 GB tutar, payı bırakır (ADR 0046).
+    # Eşik 3000 MB: large-v3 int8_float16 ile ~2,5 GB tutar, payı bırakır (ADR 0079).
     if vram_mb is None or vram_mb < 3000:
         return "small"
     return "large-v3"

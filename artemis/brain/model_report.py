@@ -188,7 +188,7 @@ def suggest_layout(
     return ana, (zor if zor != ana else None), (pc if pc != ana else None)
 
 
-_OBS_LABELS = {"uia": "UIA", "screen": "ekran", "both": "ikisi"}
+_OBS_LABELS = {"uia": "UIA", "screen": "ekran", "both": "ikisi", "hybrid": "karma"}
 
 
 def report_extra_tags(report: dict[str, object]) -> str:

@@ -314,3 +314,13 @@ async def test_session_gate_blocks_enter_on_focused_destructive_element() -> Non
     assert audit.named("computer_destructive_blocked") == [
         {"turn_id": "t1", "element_kind": "Button"}
     ]
+
+
+def test_gate_english_and_passive_negation_does_not_open() -> None:
+    for goal in ("don't delete anything, just list", "do not remove the files",
+                 "close it without deleting", "never erase my notes", "don’t delete it",
+                 "dosyalar asla silinmesin", "eklenti kaldırılmasın", "sakın silme"):
+        assert destructive_unrequested("Delete", goal) is not None, goal
+    assert destructive_unrequested("Delete", "delete the old file") is None
+    assert destructive_unrequested("Sil", "dosyayı sil, klasörü değil") is None
+    assert destructive_unrequested("Don't save", "close without saving, choose don't save") is None

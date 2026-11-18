@@ -53,5 +53,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libopengl0
-      - run: pytest -q tests/test_desktop_gui.py
-      - run: mypy artemis/channels/desktop/app.py artemis/channels/desktop/demo.py tests/test_desktop_gui.py
+      # `checks` PySide6 kurmaz; Qt testleri (importorskip) yalnız burada koşar.
+      - run: pytest -q
+      - run: mypy

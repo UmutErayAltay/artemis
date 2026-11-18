@@ -1,6 +1,7 @@
-# ADR 0046: Tanıma hassasiyeti seçimi ve karma (yerel uyandırma + bulut komut) tanıma
+# ADR 0079: Tanıma hassasiyeti seçimi ve karma (yerel uyandırma + bulut komut) tanıma
 
 - Tarih: 2026-10-26
+- Numara: ilk olarak 0046 verilmişti; 0046-reliability-controls ile çakıştığı için 2026-11-18'de 0079 yapıldı.
 - Durum: Kabul edildi (kullanıcı: panelde int8_float16 / float16 / bulut seçimi; bulutta
   uyandırma yerelde kalsın)
 

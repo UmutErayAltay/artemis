@@ -264,7 +264,7 @@ Güncel zincir, uçtan uca:
 - İsteğe bağlı KWS ön-kapısı uyandırma sözcüğü duyulmamış segmenti STT'ye göndermez; tek başına uyandırmaz,
   son karar `wake.py`'dedir ([ADR 0069](adr/0069-uyandirma-on-kapisi.md)).
 - STT: yerel faster-whisper ya da karma kip (yerel uyandırma + bulut komut;
-  [ADR 0046](adr/0046-stt-precision-and-hybrid-cloud.md), protokol [ADR 0050](adr/0050-xai-grok-ve-stt-protokolu.md)).
+  [ADR 0079](adr/0079-stt-precision-and-hybrid-cloud.md), protokol [ADR 0050](adr/0050-xai-grok-ve-stt-protokolu.md)).
   Canlı yazı yalnız gösterimdir ([ADR 0047](adr/0047-live-transcript.md)).
 - Yanıt cümle cümle seslendirilir ([ADR 0043](adr/0043-streaming-voice-response.md)). Söz kesme yalnız doğrulanmış
   kesin transkriptle olur ([ADR 0040](adr/0040-validated-playback-interruption.md)); uyandırmasız söz yalnız

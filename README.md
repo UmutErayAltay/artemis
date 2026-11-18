@@ -2,8 +2,8 @@
 
 Windows 11 için Türkçe kişisel masaüstü asistanı. Masaüstü paneli, sesli komut, pet,
 Telegram kanalı ve CLI; sağlayıcıdan bağımsız ajan döngüsünü, **tek güvenlik kapısını** ve
-araçları paylaşır. Yan etkili her adım ekranda tam argümanlarla onay ister; varsayılan cevap
-hayırdır.
+araçları paylaşır. Silme ve kapatma gibi riskli adımlar ile dış içerik okunduktan sonraki her
+yan etki ekranda tam argümanlarla onay ister; varsayılan cevap hayırdır.
 
 > **Durum: teknik önizleme.** Çekirdek (güvenlik kapısı, araçlar, ajan döngüsü, UI, ses hattı)
 > testlidir (3300+ test, Windows ve Ubuntu CI). Windows'ta gerçek cihaz kabulü kısmendir; neyin
@@ -217,7 +217,7 @@ uyandırmaya karar verir, komut sesi seçtiğiniz buluta gider. Sunucu **Ayarlar
 tanıma** bölümünden seçilir: sunucu adresi, protokol (`openai`: Whisper uyumlu
 `/audio/transcriptions`, örn. Groq; `xai`: xAI `/v1/stt`), model ve API anahtarı (Kimlik
 Bilgisi Yöneticisi'ne yazılır, YAML'a girmez). "Modelleri getir" sunucudan model listesini çeker.
-Komut sesi buluta gider, gizlilik denetimine yazılır ([ADR 0046](docs/adr/0046-stt-precision-and-hybrid-cloud.md),
+Komut sesi buluta gider, gizlilik denetimine yazılır ([ADR 0079](docs/adr/0079-stt-precision-and-hybrid-cloud.md),
 [ADR 0050](docs/adr/0050-xai-grok-ve-stt-protokolu.md)). xAI ucu Türkçe ile denenmedi.
 
 Uygulama adlarını `voice.stt_hotwords` listesine eklemek doğru hedef bulmayı artırabilir ama genel

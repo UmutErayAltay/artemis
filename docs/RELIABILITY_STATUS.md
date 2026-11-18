@@ -108,8 +108,9 @@ Bilerek değiştirilmeyenler / açık sınırlar:
   `uncertain` yapılır (`UndoJournal.reconcile_prepared`, 60 sn'den eski; taze satıra dokunulmaz).
   Dosya sisteminden "tamamlandı" çıkarılmaz; günlük hâlâ içerik yedeği değildir. Testler:
   `tests/test_undo.py`, `tests/test_runtime_lifecycle.py`.
-- Hafıza varsayılan açık, SQLite şifresiz, geçmiş saklama varsayılan sınırsız (0 gün);
-  değiştirilmedi, README'de yazılı. `memory.sqlite3` ve `degisiklikler.sqlite3` artık
+- Hafıza varsayılan açık, geçmiş saklama varsayılan sınırsız (0 gün); README'de yazılı.
+  `memory.encrypt_at_rest` açıkken (örnek config'te açık) geçmiş ve notlar Windows'ta DPAPI ile
+  sütun düzeyinde şifrelenir (ADR 0076). `memory.sqlite3` ve `degisiklikler.sqlite3` artık
   `PRAGMA user_version = 1` taşır. Dolu eski dosya geçiş süresince `<db>.bak-v<eski>` olarak
   yedeklenir (mkstemp + atomik değiştirme, 0o600, sembolik bağlantı/junction reddi); geçiş tek
   işlemdir ve başarıyla bitince yedek SİLİNİR (kalıcı yedek `memory_forget`/geçmiş silmeyi

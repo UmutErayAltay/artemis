@@ -743,7 +743,7 @@ class SettingsPanel(QWidget):
         self.layout().setContentsMargins(24 + side, 0, 24 + side, 24)  # type: ignore[union-attr]
 
     def _update_cloud_hint(self, *_args: object) -> None:
-        """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0046)."""
+        """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0079)."""
         gm = getattr(self, "game_mode", None)
         gt = getattr(self, "game_mode_target", None)
         if gm is not None and gt is not None:
