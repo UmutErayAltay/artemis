@@ -103,7 +103,7 @@ module = ["av", "av.*"]  # PyAV: [voice] ekiyle gelir (faster-whisper), CI check
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
-module = ["PySide6.*"]
+module = ["PySide6.*", "shiboken6", "shiboken6.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

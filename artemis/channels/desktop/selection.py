@@ -105,10 +105,11 @@ def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
 
     def has_nontext() -> bool:
         import ctypes
-        import platform
+        import sys
         from ctypes import wintypes
 
-        if platform.system() != "Windows":
+        # sys.platform (platform.system() değil): mypy Linux'ta Windows'a özel ctypes'ı atlar.
+        if sys.platform != "win32":
             return False
         # Pano geri yazımı yalnız düz metni korur; resim/dosya/RTF varsa kullanıcı verisi ezilmez.
         loader_name = "WinDLL"
