@@ -47,7 +47,6 @@ from PySide6.QtWidgets import (
 
 from artemis.brain.model_report import (
     merge_retry,
-    pass_rate,
     report_summary,
     suggest_layout,
 )
@@ -59,13 +58,21 @@ from artemis.brain.providers import (
 )
 from artemis.channels.desktop import themes
 from artemis.channels.desktop.provider_helpers import (
+    CLI_NAME,
+    ModelRow,
     _is_local_model,
     _scenario_count,
     _scenario_ids,
     _scenario_label,
-    _score,
     _slug,
     _write_json,
+    build_model_rows,
+    connection_label,
+    filter_model_rows,
+    layout_suggestion_text,
+    load_reports,
+    model_row_html,
+    sort_model_rows,
 )
 from artemis.channels.desktop.provider_layout import (
     PARALLEL_CHOICES,
@@ -83,8 +90,6 @@ from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import (
     ENDPOINT_ID_RE,
     EndpointConfig,
-    ModelConfig,
-    Settings,
     load_settings,
 )
 from artemis.tools.credentials import delete_secret, write_secret
@@ -97,7 +102,7 @@ TEST_OUTPUT_TOKENS = 20_000
 
 CLI_MODELS = ("haiku", "sonnet", "opus")
 CLI_KEY = ""  # bağlantı seçicide Claude aboneliğinin verisi (uç kimlikleri boş olamaz)
-CLI_NAME = "Claude aboneliği"
+
 _BAD_URL = "Adres geçersiz: https:// ile başlamalı (http yalnız yerel sunucu için)."
 
 # Satır içi renkler (HTML etiketleri) temadan gelir; sabit onaltılık renk yok, tema değişince
@@ -108,7 +113,7 @@ _COLOR_KEYS = ("muted", "accent", "warning", "error", "bg")
 WIDE_AT = 900  # bu genişlikten itibaren model ayrıntısı listenin yanında durur
 
 
-_Row = tuple[str, bool, bool, str, str, bool, bool, str]
+_Row = ModelRow
 
 _STATE_TEXT = {"bekliyor": "○", "geçti": "✓", "kaldı": "✗", "tehlikeli": "⚠"}
 
@@ -156,6 +161,9 @@ class ProviderSection(QWidget):
     # Alanları provider_layout kurar; burada yalnız tipleri bildirilir.
     banner: QLabel
     _test_settings: QSettings
+    sort_bar: QWidget
+    model_filter: QComboBox
+    filter_label: QLabel
     model_sort: QComboBox
     sort_label: QLabel
     model_list: QListWidget
@@ -189,6 +197,8 @@ class ProviderSection(QWidget):
     kind: QComboBox
     image_price: QLineEdit
     image_box: QWidget
+    speech_protocol: QComboBox
+    speech_box: QWidget
     make_primary: QCheckBox
     add_button: QPushButton
     cli_test_button: QPushButton
@@ -215,9 +225,9 @@ class ProviderSection(QWidget):
         self._auto_alias = ""
         self._problem: str | None = None
         self._colors = {key: themes.THEMES[themes.DEFAULT_THEME][key] for key in _COLOR_KEYS}
-        # (takma ad, beyin mi, eski ayar mı, bağlantı, model kimliği, resim mi, zor işler mi,
+        # (takma ad, beyin mi, eski ayar mı, bağlantı, model kimliği, tür, zor işler mi,
         # son test özeti)
-        self._model_data: list[tuple[str, bool, bool, str, str, bool, bool, str]] = []
+        self._model_data: list[ModelRow] = []
         self._reports_seen: dict[str, dict[str, object]] = {}  # takma ad -> son rapor
         self._model_test: QProcess | None = None
         self._testing = ""
@@ -281,12 +291,6 @@ class ProviderSection(QWidget):
         self._problem = reason
         self._render_banner()
 
-    @staticmethod
-    def _connection_label(model: ModelConfig) -> str:
-        if model.provider == "openai_compatible":
-            return str(model.endpoint)
-        return CLI_NAME if model.provider == "claude_cli" else model.provider
-
     def set_theme(self, palette: dict[str, str]) -> None:
         """Satır içi renkleri yeniden çizer; bağlantı taslağına (reload) dokunmaz."""
         self._colors = {key: palette[key] for key in _COLOR_KEYS}
@@ -303,7 +307,7 @@ class ProviderSection(QWidget):
         if self._problem:
             text, color = self._problem, self._colors["error"]
         elif model is not None:
-            text = f"Beyin: {settings.primary_model} ({self._connection_label(model)})"
+            text = f"Beyin: {settings.primary_model} ({connection_label(model)})"
             if settings.hard_model:
                 text += f" · Zor işler: {settings.hard_model}"
             if settings.fallback_model and settings.fallback_model != settings.primary_model:
@@ -326,49 +330,25 @@ class ProviderSection(QWidget):
         self.make_primary.setChecked(self._problem is not None)
         if self._problem and not settings.endpoints:
             self.connection_toggle.setChecked(True)  # ilk kurulumda form gizli kalmasın
-        reports = self._reports_seen = self._reports(settings)
+        reports = self._reports_seen = load_reports(settings)
         self._fallback = settings.fallback_model or ""
         self._computer = settings.computer_use.model or ""
-        self._model_data = [
-            (
-                alias,
-                alias == settings.primary_model,
-                # Eski openrouter/anthropic/ollama modelleri (CPA yolu) taşınmaz; kullanıcı siler.
-                model.provider not in {"openai_compatible", "claude_cli"},
-                self._connection_label(model),
-                model.model,
-                model.kind == "image",
-                alias == settings.hard_model,
-                report_summary(reports[alias]) if alias in reports else "",
-            )
-            for alias, model in settings.models.items()
-        ]
+        self._model_data = build_model_rows(settings, reports)
         self._render_models()
         self._suggested = suggest_layout(list(reports.values()), settings.primary_model)
         ana, zor, pc = self._suggested
         current = (
             settings.primary_model, settings.hard_model or None, settings.computer_use.model or None
         )
-        self.layout_label.setText(
-            f"Önerilen düzen (test sonuçlarına göre): Ana: {ana}"
-            + (f" · Zor işler: {zor}" if zor else "")
-            + (f" · Bilgisayar kullanımı: {pc}" if pc else "")
-            + (" — şu anki düzen bu." if (ana, zor, pc) == current else "")
-            if ana else ""
-        )
+        self.layout_label.setText(layout_suggestion_text(self._suggested, current))
         self.layout_label.setVisible(bool(ana))
         self._show_button(self.apply_layout_button, bool(ana) and (ana, zor, pc) != current)
-        # Liste kendi içinde kaydırılmasın: en çok 6 satır kadar uzar.
-        heights = [
-            self.model_list.item(index).sizeHint().height()
-            for index in range(min(self.model_list.count(), 6))
-        ]
-        self.model_list.setFixedHeight((sum(heights) or 70) + 12)
-        self.model_list.setVisible(self.model_list.count() > 0)
-        self.model_sort.setVisible(self.model_list.count() > 1)
-        self.sort_label.setVisible(self.model_list.count() > 1)
-        self.model_empty.setVisible(self.model_list.count() == 0)
-        self.detail.setVisible(self.model_list.count() > 0)
+        many = len(self._model_data) > 1
+        self.sort_bar.setVisible(many)
+        self.model_filter.setVisible(many)
+        self.filter_label.setVisible(many)
+        self.model_sort.setVisible(many)
+        self.sort_label.setVisible(many)
         self._sync_test_buttons()
         self.endpoint_list.clear()
         for name, endpoint in settings.endpoints.items():
@@ -401,33 +381,12 @@ class ProviderSection(QWidget):
         selected = self.model_list.currentItem()
         chosen = selected.data(Qt.ItemDataRole.UserRole) if selected is not None else None
         self.model_list.clear()
-        for alias, is_brain, legacy, connection, model_id, image, hard, _tested in self._sorted():
-            roles = [
-                f"<span style='color:{self._colors['accent']}'>{name}</span>"
-                for name, on in (("Beyin", is_brain), ("Zor işler", hard)) if on
-            ]
-            if alias == self._fallback and not is_brain:
-                roles.append(f"<span style='color:{self._colors['muted']}'>Yedek</span>")
-            muted = self._colors["muted"]
-            role_text = " · ".join(roles) or f"<span style='color:{muted}'>Rol yok</span>"
-            score = (
-                "Test sürüyor…" if alias == self._testing
-                else _score(self._reports_seen[alias]) if alias in self._reports_seen
-                else "test yok"
-            )
-            tag = (
-                f"&nbsp;&nbsp;<span style='color:{self._colors['warning']}'>eski ayar</span>"
-                if legacy else ""
-            )
-            kind = " · resim" if image else ""
+        for row in self._sorted():
+            alias = row[0]
             label = QLabel(
-                "<table width='100%' cellspacing='0'><tr>"
-                f"<td><b>{html.escape(alias)}</b>{tag}<br>"
-                f"<span style='color:{muted}'>"
-                f"{html.escape(connection)} · {html.escape(model_id)}{kind}</span></td>"
-                f"<td align='right'>{role_text}<br>"
-                f"<span style='color:{muted}'>{html.escape(score)}</span></td>"
-                "</tr></table>"
+                model_row_html(
+                    row, self._colors, self._fallback, self._testing, self._reports_seen
+                )
             )
             label.setTextFormat(Qt.TextFormat.RichText)
             label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
@@ -440,31 +399,46 @@ class ProviderSection(QWidget):
             self.model_list.setItemWidget(item, label)
             if alias == chosen:
                 self.model_list.setCurrentItem(item)
-        if self.model_list.currentItem() is None and self._model_data:
+        has_items = self.model_list.count() > 0
+        if self.model_list.currentItem() is None and has_items:
             # Ayrıntı paneli her zaman bir modeli gösterir: önce beyin modeli.
-            brain = next((i for i, row in enumerate(self._model_data) if row[1]), 0)
+            brain_aliases = {row[0] for row in self._model_data if row[1]}
+            brain = next(
+                (
+                    i for i in range(self.model_list.count())
+                    if self.model_list.item(i).data(Qt.ItemDataRole.UserRole) in brain_aliases
+                ),
+                0,
+            )
             self.model_list.setCurrentRow(brain)
+        # Liste kendi içinde kaydırılmasın: en çok 6 satır kadar uzar.
+        heights = [
+            self.model_list.item(index).sizeHint().height()
+            for index in range(min(self.model_list.count(), 6))
+        ]
+        self.model_list.setFixedHeight((sum(heights) or 70) + 12)
+        self.model_list.setVisible(has_items)
+        self.model_empty.setText(
+            "Bu türde model yok."
+            if self._model_data and not has_items
+            else "Henüz model eklenmedi. Aşağıdan bir model ekle."
+        )
+        self.model_empty.setVisible(not has_items)
+        self.detail.setVisible(has_items)
         self._sync_detail()
 
     def _sorted(self) -> list[_Row]:
-        key = self.model_sort.currentData()
-        rows = self._model_data
-        if key == "score":
-            def score(row: _Row) -> float:
-                report = self._reports_seen.get(row[0])
-                rate = pass_rate(report) if report else None
-                if report is None or rate is None:
-                    return 2.0  # test edilmemiş en sonda
-                # Tehlikeli hatalı model aynı yüzdedeki güvenli modelin altına iner.
-                return -rate + (1.0 if report.get("dangerous_errors") else 0.0)
-            return sorted(rows, key=score)
-        if key == "connection":
-            return sorted(rows, key=lambda row: (row[3].casefold(), row[0].casefold()))
-        if key == "role":
-            return sorted(rows, key=lambda row: (not row[1], not row[6], row[0] != self._fallback))
-        if key == "name":
-            return sorted(rows, key=lambda row: row[0].casefold())
-        return list(rows)
+        filtered = filter_model_rows(self._model_data, self.model_filter.currentData())
+        return sort_model_rows(
+            filtered,
+            self.model_sort.currentData(),
+            self._reports_seen,
+            self._fallback,
+        )
+
+    def _filter_changed(self, *_args: object) -> None:
+        self._test_settings.setValue("filter", self.model_filter.currentData())
+        self._render_models()
 
     def _sort_changed(self, *_args: object) -> None:
         self._test_settings.setValue("sort", self.model_sort.currentData())
@@ -586,22 +560,29 @@ class ProviderSection(QWidget):
             )
 
     def _sync_cli_button(self) -> None:
-        self.cli_test_button.setVisible(self.add_connection.currentData() == CLI_KEY)
-        # Resim modeli openai_compatible uç ister; Claude aboneliğinde seçilemez.
         cli = self.add_connection.currentData() == CLI_KEY
-        self.kind.model().item(1).setEnabled(not cli)  # type: ignore[attr-defined]
+        self.cli_test_button.setVisible(cli)
+        # Resim ve ses modelleri openai_compatible uç ister; Claude aboneliğinde seçilemez.
+        tip = "Resim ve ses modelleri Claude aboneliğiyle kullanılamaz." if cli else ""
+        for index in (1, 2):
+            item = self.kind.model().item(index)  # type: ignore[attr-defined]
+            item.setEnabled(not cli)
+            item.setToolTip(tip)
         if cli:
             self.kind.setCurrentIndex(0)
-        self.kind.setToolTip("Resim modeli Claude aboneliğiyle kullanılamaz." if cli else "")
+        self.kind.setToolTip(tip)
 
     def _sync_kind(self, *_args: object) -> None:
-        image = self.kind.currentData() == "image"
+        kind = self.kind.currentData()
+        image = kind == "image"
+        speech = kind == "speech"
         paid = self.paid.isChecked()
-        self.price_box.setVisible(paid and not image)
+        self.price_box.setVisible(paid and kind == "chat")
         self.image_box.setVisible(paid and image)
-        # Resim modeli beyin olamaz (settings doğrular); seçenek kapalı ve işaretsiz.
-        self.make_primary.setEnabled(not image)
-        if image:
+        self.speech_box.setVisible(speech)
+        # Resim ve ses modelleri beyin olamaz (settings doğrular); seçenek kapalı ve işaretsiz.
+        self.make_primary.setEnabled(kind == "chat")
+        if kind != "chat":
             self.make_primary.setChecked(False)
 
     def _default_alias(self, model: str) -> str:
@@ -708,14 +689,19 @@ class ProviderSection(QWidget):
         if not model or not alias:
             self.status.setText("Model adı yazın veya listeden seçin.")
             return
-        image = self.kind.currentData() == "image"
+        kind = str(self.kind.currentData() or "chat")
+        image = kind == "image"
+        speech = kind == "speech"
         if image and connection == CLI_KEY:
             self.status.setText("Resim modeli Claude aboneliğiyle kullanılamaz; bir uç seçin.")
+            return
+        if speech and connection == CLI_KEY:
+            self.status.setText("Ses modeli Claude aboneliğiyle kullanılamaz; bir uç seçin.")
             return
         try:
             prices = (
                 [Decimal(self.input_price.text() or "0"), Decimal(self.output_price.text() or "0")]
-                if self.paid.isChecked() and connection != CLI_KEY and not image
+                if self.paid.isChecked() and connection != CLI_KEY and kind == "chat"
                 else [Decimal(0), Decimal(0)]
             )
             image_cost = (
@@ -751,8 +737,11 @@ class ProviderSection(QWidget):
         if image:
             entry["kind"] = "image"
             entry["image_cost_usd"] = str(image_cost)
+        elif speech:
+            entry["kind"] = "speech"
+            entry["speech_protocol"] = str(self.speech_protocol.currentData() or "openai")
         models[alias] = entry
-        primary = self.make_primary.isChecked() and not image
+        primary = self.make_primary.isChecked() and kind == "chat"
         if primary:
             raw["primary_model"] = alias
         if not self._write(raw):
@@ -792,8 +781,8 @@ class ProviderSection(QWidget):
         except (OSError, yaml.YAMLError):
             self.status.setText("Ayarlar okunamadı.")
             return
-        if any(row[0] == alias and row[5] for row in self._model_data):
-            self.status.setText("Resim modeli beyin olamaz; bir sohbet modeli seçin.")
+        if any(row[0] == alias and row[5] != "chat" for row in self._model_data):
+            self.status.setText("Resim ve ses modelleri beyin modeli olamaz; sohbet modeli seçin.")
             return
         # Takma ada göre yazılır: aynı model kimliğini paylaşan modeller karışmaz.
         raw["primary_model"] = alias
@@ -834,28 +823,6 @@ class ProviderSection(QWidget):
         self.changed.emit()
 
     # --- Model kademesi ve model testi ---------------------------------------------------
-
-    def _reports(self, settings: Settings) -> dict[str, dict[str, object]]:
-        """Kaydedilmiş son test raporları (takma ad -> rapor); okunamayan rapor yok sayılır."""
-        folder = settings.state_dir / "model_testleri"
-        found: dict[str, dict[str, object]] = {}
-        for alias in settings.models:
-            path = folder / f"{_slug(alias) or 'model'}.json"
-            try:
-                report = json.loads(path.read_text(encoding="utf-8"))
-            except (OSError, ValueError):
-                continue
-            # Eksik/bozuk rapor öneriyi (suggest_layout) çökertmesin: alanlar doğrulanır.
-            if (
-                isinstance(report, dict)
-                and report.get("model") == alias
-                and isinstance(report.get("zor"), dict)
-                and isinstance(report["zor"].get("rate"), int | float)
-                and isinstance(report.get("median_seconds"), int | float)
-                and isinstance(report.get("roles"), list)
-            ):
-                found[alias] = report
-        return found
 
     # Bağlı yöntemler: self'i yakalayan lambda Qt bağlantısında referans döngüsü kurar ve gc
     # paneli yanlış iş parçacığında toplayınca erişim ihlali çıkar (2026-10-31 bulgusu).
@@ -983,11 +950,13 @@ class ProviderSection(QWidget):
         """Ayrıntı paneli seçili modelin durumunu gösterir."""
         selected = self._current_alias()
         row = next((r for r in self._model_data if r[0] == selected), None)
-        brain, image, hard = (row[1], row[5], row[6]) if row else (False, False, False)
+        brain, non_chat, hard = (
+            (row[1], row[5] != "chat", row[6]) if row else (False, False, False)
+        )
         fallback = bool(selected) and selected == self._fallback
         computer = bool(selected) and selected == self._computer
         self.detail_title.setText(selected or "")
-        reason = "Resim modeli bu rolü üstlenemez." if image else (
+        reason = "Resim ve ses modelleri bu rolü üstlenemez." if non_chat else (
             "Bu model zaten beyin; bu rol için başka bir model seç." if brain else ""
         )
         hard_tip = "Çok adımlı ve planlama isteyen turlar bu modelle çalışır."
@@ -996,10 +965,10 @@ class ProviderSection(QWidget):
         )
         computer_tip = "Ekranı görüp tıklama bu modelle çalışır; seçilmezse beyin kullanılır."
         for button, name, on, tip, free in (
-            (self.primary_button, "Beyin", brain, None, not image),
-            (self.hard_button, "Zor işler", hard, hard_tip, not image),
-            (self.fallback_button, "Yedek", fallback, fallback_tip, not image and not brain),
-            (self.computer_button, "Bilgisayar", computer, computer_tip, not image),
+            (self.primary_button, "Beyin", brain, None, not non_chat),
+            (self.hard_button, "Zor işler", hard, hard_tip, not non_chat),
+            (self.fallback_button, "Yedek", fallback, fallback_tip, not non_chat and not brain),
+            (self.computer_button, "Bilgisayar", computer, computer_tip, not non_chat),
         ):
             button.setChecked(on)
             button.setText(("✓ " if on else "") + name)
@@ -1028,8 +997,10 @@ class ProviderSection(QWidget):
             self.status.setText("Ayarlar okunamadı.")
             return
         model = settings.models.get(alias)
-        if model is None or model.kind == "image":
-            self.status.setText(f"Resim modeli {name.lower()} modeli olamaz; sohbet modeli seçin.")
+        if model is None or model.kind != "chat":
+            self.status.setText(
+                f"Resim ve ses modelleri {name.lower()} modeli olamaz; sohbet modeli seçin."
+            )
             return
         if key == "fallback_model" and alias == settings.primary_model:
             self.status.setText(f"Bu model zaten beyin; {name.lower()} için başka bir model seçin.")
@@ -1087,6 +1058,9 @@ class ProviderSection(QWidget):
         model = settings.models[alias]
         if model.kind == "image":
             self.status.setText("Resim modeli sohbet senaryolarıyla test edilmez.")
+            return
+        if model.kind == "speech":
+            self.status.setText("Ses modeli sohbet senaryolarıyla test edilmez.")
             return
         arguments = ["-m", "bench.model_testi", "--config", str(self.config_path), "--model", alias]
         if model.input_per_million or model.output_per_million:

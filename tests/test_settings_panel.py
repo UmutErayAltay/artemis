@@ -361,6 +361,10 @@ _UNBOUND_WIDGETS = {
     "advanced_devices": "yalnız görünüm; config'e yazılmaz",
     "section_combo": "dar pencerede bölüm listesinin yerine geçen gezinme; config'e yazılmaz",
     "default_agent_combo": "code_agent.default_agent: code_agent_values ile ajanlarla yazılır",
+    "tts_cloud_saved": (
+        "Ses panelinin kayıtlı model seçicisi; config'e yazılmaz, "
+        "seçince tts_cloud_* alanları dolar"
+    ),
 }
 
 

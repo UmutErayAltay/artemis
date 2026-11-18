@@ -245,10 +245,41 @@ def test_rejects_non_image_model(tmp_path: Path) -> None:
 
 def test_image_model_cannot_be_chat_model(tmp_path: Path) -> None:
     base = make_settings(tmp_path)
-    with pytest.raises(ValidationError, match="Resim modeli"):
+    with pytest.raises(ValidationError, match="Resim ve ses modelleri"):
         base.model_validate({**base.model_dump(), "primary_model": "resim"})
     with pytest.raises(ValidationError):
         image_model(provider="ollama", endpoint=None)
+
+
+def test_speech_model_rules(tmp_path: Path) -> None:
+    speech = ModelConfig(
+        provider="openai_compatible",
+        endpoint="proxy",
+        model="tts-1",
+        kind="speech",
+        input_per_million=Decimal(0),
+        output_per_million=Decimal(0),
+    )
+    assert speech.speech_protocol == "openai"
+    with pytest.raises(ValidationError, match="Ses modeli openai_compatible"):
+        ModelConfig(
+            provider="ollama",
+            model="tts-1",
+            kind="speech",
+            input_per_million=Decimal(0),
+            output_per_million=Decimal(0),
+        )
+    base = make_settings(tmp_path)
+    dumped = base.model_dump()
+    dumped["models"]["ses"] = speech.model_dump()
+    for patch in (
+        {"primary_model": "ses"},
+        {"hard_model": "ses"},
+        {"computer_use": {**dumped["computer_use"], "model": "ses"}},
+        {"computer_use": {**dumped["computer_use"], "fallback_models": ("ses",)}},
+    ):
+        with pytest.raises(ValidationError, match="Resim ve ses modelleri"):
+            Settings.model_validate({**dumped, **patch})
 
 
 # ------------------------------------------------------------------ dilimleyici

@@ -49,7 +49,63 @@ def test_tts_cloud_box_visibility_follows_tts_combo(tmp_path: Path, qt_app: QApp
     assert "kayıtlı değil" in panel.tts_cloud_hint.text()
     assert "Ücretli modele izin ver" in panel.tts_cloud_hint.text()
     assert "Metin gönderme izni kapalıyken" in panel.tts_cloud_hint.text()
+    assert "Ses modeli eklemek için" in panel.tts_cloud_hint.text()
     panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_tts_cloud_saved_lists_only_speech_and_fills_fields(
+    tmp_path: Path, qt_app: QApplication
+) -> None:
+    import yaml
+
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["models"]["resim-m"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gpt-image-1",
+        "kind": "image",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    raw["models"]["ses-gemini"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-flash-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    panel = SettingsPanel(path)
+    items = [panel.tts_cloud_saved.itemData(i) for i in range(panel.tts_cloud_saved.count())]
+    assert items == ["", "ses-gemini"]
+    panel.tts_combo.setCurrentIndex(panel.tts_combo.findData("cloud"))
+    assert "Ses modeli eklemek için" not in panel.tts_cloud_hint.text()
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-gemini"))
+    assert panel.tts_cloud_server.currentData() == "bulut"
+    assert panel.tts_cloud_protocol.currentData() == "gemini"
+    assert panel.tts_cloud_model.currentText() == "gemini-2.5-flash-preview-tts"
+    assert panel._dirty is True
+
+    # Alan elle değişince seçim "Elle ayarla"ya döner; sonra kayıtlı model yeniden seçilir.
+    panel.tts_cloud_protocol.setCurrentIndex(panel.tts_cloud_protocol.findData("openai"))
+    assert panel.tts_cloud_saved.currentData() == ""
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-gemini"))
+    assert panel.tts_cloud_protocol.currentData() == "gemini"
+
+    save_choices(path, None, values=panel.values())
+    reloaded = SettingsPanel(path)
+    reloaded.show()
+    assert reloaded.tts_cloud_saved.currentData() == "ses-gemini"
+    assert reloaded._dirty is False
+
+    panel.deleteLater()
+    reloaded.deleteLater()
     qt_app.processEvents()
 
 

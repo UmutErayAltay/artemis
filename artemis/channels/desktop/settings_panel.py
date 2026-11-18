@@ -239,6 +239,7 @@ class SettingsPanel(QWidget):
     cloud_stt_hint: QLabel
     tts_combo: QComboBox
     tts_cloud_box: QWidget
+    tts_cloud_saved: QComboBox
     tts_cloud_server: QComboBox
     tts_cloud_protocol: QComboBox
     tts_cloud_model: QComboBox

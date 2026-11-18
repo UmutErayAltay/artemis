@@ -21,7 +21,7 @@ from PySide6.QtWidgets import (
 from artemis.brain.providers import stored_endpoint_key
 from artemis.channels.desktop.form_kit import field, meta_label
 from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
-from artemis.config.settings import EndpointConfig, load_settings
+from artemis.config.settings import EndpointConfig, ModelConfig, load_settings
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.settings_panel import SettingsPanel
@@ -155,9 +155,15 @@ class TtsCloudBox(QWidget):
         self._fetch: TtsModelFetch | None = None
         self._fetch_for: tuple[str, str] = ("", "")
         self._model_voices: dict[str, list[str]] = {}
+        self._speech_models: dict[str, ModelConfig] = {}
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
+
+        panel.tts_cloud_saved = QComboBox()
+        panel.tts_cloud_saved.setAccessibleName("Kayıtlı ses modeli")
+        panel.tts_cloud_saved.addItem("Elle ayarla", "")
+        field(layout, "Kayıtlı ses modeli", panel.tts_cloud_saved)
 
         panel.tts_cloud_server = QComboBox()
         panel.tts_cloud_server.setAccessibleName("Bulut konuşma sunucusu")
@@ -208,6 +214,7 @@ class TtsCloudBox(QWidget):
         layout.addWidget(panel.tts_cloud_hint)
 
         panel.tts_combo.currentIndexChanged.connect(self._sync_state)
+        panel.tts_cloud_saved.currentIndexChanged.connect(self._saved_picked)
         panel.tts_cloud_server.currentIndexChanged.connect(self._sync_state)
         panel.tts_cloud_protocol.currentIndexChanged.connect(self._sync_state)
         panel.tts_cloud_model.currentTextChanged.connect(self._model_changed)
@@ -252,9 +259,16 @@ class TtsCloudBox(QWidget):
         if self._panel._demo:
             return
         try:
-            endpoints = list(load_settings(self._panel.config_path).endpoints)
+            settings = load_settings(self._panel.config_path)
         except (OSError, ValueError):
             return
+        endpoints = list(settings.endpoints)
+        speech_models = self._speech_models = {
+            alias: model
+            for alias, model in settings.models.items()
+            if model.kind == "speech"
+        }
+
         combo = self._panel.tts_cloud_server
         current = combo.currentData()
         blocked = combo.blockSignals(True)
@@ -266,6 +280,65 @@ class TtsCloudBox(QWidget):
             combo.setCurrentIndex(max(0, combo.findData(current)))
         finally:
             combo.blockSignals(blocked)
+
+        saved_combo = self._panel.tts_cloud_saved
+        saved_current = saved_combo.currentData()
+        saved_blocked = saved_combo.blockSignals(True)
+        try:
+            saved_combo.clear()
+            saved_combo.addItem("Elle ayarla", "")
+            for alias in speech_models:
+                saved_combo.addItem(alias, alias)
+            server = str(self._panel.tts_cloud_server.currentData() or "")
+            protocol = str(self._panel.tts_cloud_protocol.currentData() or "openai")
+            model_id = self._panel.tts_cloud_model.currentText().strip()
+            matched = next(
+                (
+                    alias
+                    for alias, model in speech_models.items()
+                    if model.endpoint == server
+                    and model.speech_protocol == protocol
+                    and model.model == model_id
+                ),
+                None,
+            )
+            target = matched if matched is not None else saved_current
+            saved_combo.setCurrentIndex(max(0, saved_combo.findData(target)))
+        finally:
+            saved_combo.blockSignals(saved_blocked)
+
+        self._sync_state()
+
+    def _saved_picked(self, *_args: object) -> None:
+        panel = self._panel
+        alias = str(panel.tts_cloud_saved.currentData() or "")
+        if not alias or panel._demo:
+            return
+        try:
+            model = load_settings(panel.config_path).models.get(alias)
+        except (OSError, ValueError):
+            return
+        if model is None or model.kind != "speech":
+            return
+        for combo, value in (
+            (panel.tts_cloud_server, model.endpoint or ""),
+            (panel.tts_cloud_protocol, model.speech_protocol),
+        ):
+            blocked = combo.blockSignals(True)
+            try:
+                idx = combo.findData(value)
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+            finally:
+                combo.blockSignals(blocked)
+        model_blocked = panel.tts_cloud_model.blockSignals(True)
+        try:
+            panel.tts_cloud_model.setEditText(model.model)
+        finally:
+            panel.tts_cloud_model.blockSignals(model_blocked)
+        if model.model in self._model_voices:
+            self._refill_voices(self._model_voices[model.model])
+        panel._mark_dirty()
         self._sync_state()
 
     def _model_changed(self, *_args: object) -> None:
@@ -342,6 +415,7 @@ class TtsCloudBox(QWidget):
         if not is_cloud:
             panel.tts_cloud_hint.setText("")
             return
+        self._drop_diverged_saved()
         name, endpoint = self._endpoint()
         live = not panel._demo
         panel.tts_cloud_fetch_button.setEnabled(live and endpoint is not None)
@@ -369,7 +443,30 @@ class TtsCloudBox(QWidget):
             )
         if not panel.tts_cloud_consent.isChecked():
             parts.append("Metin gönderme izni kapalıyken bulut sesi başlamaz.")
+        if panel.tts_cloud_saved.count() <= 1:
+            parts.append(
+                "Ses modeli eklemek için Ayarlar > Model > Model ekle'de türü Ses seç."
+            )
         panel.tts_cloud_hint.setText(" ".join(parts))
+
+    def _drop_diverged_saved(self) -> None:
+        # Kayıtlı model seçildikten sonra alanlar elle değişirse seçim "Elle ayarla"ya döner;
+        # yoksa liste artık kullanılmayan modeli gösterirdi.
+        panel = self._panel
+        model = self._speech_models.get(str(panel.tts_cloud_saved.currentData() or ""))
+        if model is None:
+            return
+        same = (
+            str(panel.tts_cloud_server.currentData() or "") == (model.endpoint or "")
+            and str(panel.tts_cloud_protocol.currentData() or "openai") == model.speech_protocol
+            and panel.tts_cloud_model.currentText().strip() == model.model
+        )
+        if not same:
+            blocked = panel.tts_cloud_saved.blockSignals(True)
+            try:
+                panel.tts_cloud_saved.setCurrentIndex(0)
+            finally:
+                panel.tts_cloud_saved.blockSignals(blocked)
 
     def finish(self) -> None:
         if _shutdown_thread(self._fetch, ("done", self._fetch_done)):

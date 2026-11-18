@@ -89,7 +89,20 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     section._test_settings = QSettings(
         QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Artemis", "model_test"
     )
-    # Sıralama yalnız görünüm: config'teki model sırası değişmez.
+    # Süzme ve sıralama yalnız görünüm: config'teki model sırası değişmez.
+    section.model_filter = QComboBox()
+    section.model_filter.setAccessibleName("Modelleri süz")
+    for label, key in (
+        ("Tümü", "all"),
+        ("Yazı", "chat"),
+        ("Görsel", "image"),
+        ("Ses", "speech"),
+    ):
+        section.model_filter.addItem(label, key)
+    saved_filter = section.model_filter.findData(section._test_settings.value("filter", "all"))
+    section.model_filter.setCurrentIndex(max(saved_filter, 0))
+    section.model_filter.currentIndexChanged.connect(section._filter_changed)
+    section.filter_label = meta_label("Göster")
     section.model_sort = QComboBox()
     section.model_sort.setAccessibleName("Modelleri sırala")
     for label, key in _SORTS:
@@ -216,14 +229,21 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     left.setSpacing(12)
     # "Sırala" liste sütununun başlığında, listenin sağ kenarıyla hizalı: eskiden bütün sayfa
     # genişliğine yaslanıp kaydırma çubuğuna biniyordu (UX-03).
-    sort_row = QHBoxLayout()
+    section.sort_bar = QWidget()
+    section.sort_bar.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
+    sort_row = QHBoxLayout(section.sort_bar)
     sort_row.setContentsMargins(0, 0, 0, 0)
     sort_row.setSpacing(8)
     sort_row.addStretch(1)
+    sort_row.addWidget(section.filter_label, 0, Qt.AlignmentFlag.AlignVCenter)
+    sort_row.addWidget(section.model_filter, 0, Qt.AlignmentFlag.AlignVCenter)
     sort_row.addWidget(section.sort_label, 0, Qt.AlignmentFlag.AlignVCenter)
     sort_row.addWidget(section.model_sort, 0, Qt.AlignmentFlag.AlignVCenter)
-    left.addLayout(sort_row)
+    left.addWidget(section.sort_bar)
     # Gizli başlar: reload() iki ve daha çok modelde açar; demo/boş listede sıralanacak şey yok.
+    section.sort_bar.setVisible(False)
+    section.model_filter.setVisible(False)
+    section.filter_label.setVisible(False)
     section.model_sort.setVisible(False)
     section.sort_label.setVisible(False)
     left.addWidget(section.model_list)
@@ -278,6 +298,7 @@ def build_add_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     section.kind.setAccessibleName("Model türü")
     section.kind.addItem("Sohbet", "chat")
     section.kind.addItem("Resim", "image")
+    section.kind.addItem("Ses", "speech")
     section.image_price = QLineEdit("0")
     section.image_price.setAccessibleName("Resim başına USD")
     section.image_box = QWidget()
@@ -289,6 +310,16 @@ def build_add_box(section: ProviderSection, layout: QVBoxLayout) -> None:
         "Her çağrıda bütçeden bu tutar ayrılır (rezervasyon).",
     )
     section.image_box.setVisible(False)
+    section.speech_protocol = QComboBox()
+    section.speech_protocol.setAccessibleName("Ses protokolü")
+    section.speech_protocol.addItem("OpenAI uyumlu · OpenRouter vb.", "openai")
+    section.speech_protocol.addItem("Gemini API", "gemini")
+    section.speech_box = QWidget()
+    section.speech_box.setObjectName("cardRow")
+    speech_layout = QVBoxLayout(section.speech_box)
+    speech_layout.setContentsMargins(0, 0, 0, 0)
+    field(speech_layout, "Protokol", section.speech_protocol)
+    section.speech_box.setVisible(False)
     section.make_primary = QCheckBox("Beyin modeli yap")
     section.kind.currentIndexChanged.connect(section._sync_kind)
     section.paid.toggled.connect(section._sync_kind)
@@ -303,6 +334,7 @@ def build_add_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     )))
     add.addWidget(section.price_box)
     add.addWidget(section.image_box)
+    add.addWidget(section.speech_box)
     add.addWidget(section.make_primary)
     section.add_button = QPushButton("Ekle")
     section.add_button.setObjectName("primary")
