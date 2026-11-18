@@ -43,16 +43,17 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.providers import stored_endpoint_key
+from artemis.channels.desktop import provider_section
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.file_search_section import FileSearchSection
 from artemis.channels.desktop.page_kit import PAGE_MAX_WIDTH, CurrentPageStack
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.provider_section import (
-    ConnectionTest,
     ProviderSection,
     store_endpoint_key,
 )
+from artemis.channels.desktop.provider_workers import ConnectionTest
 from artemis.channels.desktop.routines_section import RoutinesSection
 from artemis.channels.desktop.settings_io import (
     PANEL_BINDINGS,
@@ -834,7 +835,9 @@ class SettingsPanel(QWidget):
             key = self.cloud_key.text().strip() or stored_endpoint_key(name)
         self.cloud_stt_hint.setText("Model listesi alınıyor…")
         self._cloud_fetch_for = name
-        self._cloud_fetch = ConnectionTest(endpoint.base_url, key, self)
+        self._cloud_fetch = ConnectionTest(
+            endpoint.base_url, key, self, provider_section.probe_models
+        )
         self._cloud_fetch.done.connect(self._cloud_models_done)
         self._cloud_fetch.start()
 

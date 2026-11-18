@@ -38,6 +38,8 @@ _NATIVE_TYPE = "\n".join(
         "  public struct RECT {",
         "    public int Left; public int Top; public int Right; public int Bottom;",
         "  }",
+        '  [DllImport("user32.dll")] public static extern bool '
+        "SetProcessDpiAwarenessContext(IntPtr value);",
         '  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();',
         '  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();',
         '  [DllImport("user32.dll")]',
@@ -78,7 +80,30 @@ _NATIVE_TYPE = "\n".join(
     ]
 )
 
-# Neden bu yapı: `SetProcessDPIAware` yakalamadan ÖNCE çağrılır. Pencere sınırları için DWM'in
+# Ortak küçültme bloğu: Windows OCR büyük görselleri reddeder; MaxImageDimension üstü
+# görüntüler bellek içi HighQualityBicubic ölçeklemeyle sığdırılır.
+_DOWNSCALE_BITMAP = "\n".join(
+    [
+        "  $image = $bitmap",
+        "  $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
+        "  if ($width -gt $maxDim -or $height -gt $maxDim) {",
+        "    $ratio = [Math]::Min($maxDim / $width, $maxDim / $height)",
+        "    $newWidth = [Math]::Max(1, [int][Math]::Floor($width * $ratio))",
+        "    $newHeight = [Math]::Max(1, [int][Math]::Floor($height * $ratio))",
+        "    $scaled = New-Object System.Drawing.Bitmap $newWidth, $newHeight",
+        "    $scaledGraphics = [System.Drawing.Graphics]::FromImage($scaled)",
+        "    try {",
+        "      $scaledGraphics.InterpolationMode = "
+        "[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic",
+        "      $scaledGraphics.DrawImage($bitmap, 0, 0, $newWidth, $newHeight)",
+        "    } finally { $scaledGraphics.Dispose() }",
+        "    $image = $scaled",
+        "  }",
+    ]
+)
+
+# Neden bu yapı: Per-Monitor V2 DPI farkındalığı (düşüş: `SetProcessDPIAware`) yakalamadan ÖNCE
+# kurulur. Pencere sınırları için DWM'in
 # "extended frame bounds"u (9) tercih edilir çünkü `GetWindowRect` Windows 10/11'de görünmez
 # gölge kenarlıkları da kapsar; DWM başarısızsa (0 dönmezse) GetWindowRect'e düşülür.
 # WinRT `IAsyncOperation` PowerShell 5.1'de doğrudan beklenemez: `AsTask` genel yansıtma
@@ -94,7 +119,9 @@ SCREEN_SCRIPT = "\n".join(
         "Add-Type -AssemblyName System.Drawing",
         "Add-Type -AssemblyName System.Runtime.WindowsRuntime",
         _NATIVE_TYPE,
-        "[void][ArtemisNative]::SetProcessDPIAware()",
+        "try { if (-not [ArtemisNative]::SetProcessDpiAwarenessContext([IntPtr](-4))) "
+        "{ [void][ArtemisNative]::SetProcessDPIAware() } } "
+        "catch { [void][ArtemisNative]::SetProcessDPIAware() }",
         "$null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]",
         "$null = [Windows.Globalization.Language, Windows.Globalization, "
         "ContentType = WindowsRuntime]",
@@ -144,21 +171,7 @@ SCREEN_SCRIPT = "\n".join(
         "  $bitmap = New-Object System.Drawing.Bitmap $width, $height",
         "  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)",
         "  $graphics.CopyFromScreen($left, $top, 0, 0, $bitmap.Size)",
-        "  $image = $bitmap",
-        "  $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
-        "  if ($width -gt $maxDim -or $height -gt $maxDim) {",
-        "    $ratio = [Math]::Min($maxDim / $width, $maxDim / $height)",
-        "    $newWidth = [Math]::Max(1, [int][Math]::Floor($width * $ratio))",
-        "    $newHeight = [Math]::Max(1, [int][Math]::Floor($height * $ratio))",
-        "    $scaled = New-Object System.Drawing.Bitmap $newWidth, $newHeight",
-        "    $scaledGraphics = [System.Drawing.Graphics]::FromImage($scaled)",
-        "    try {",
-        "      $scaledGraphics.InterpolationMode = "
-        "[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic",
-        "      $scaledGraphics.DrawImage($bitmap, 0, 0, $newWidth, $newHeight)",
-        "    } finally { $scaledGraphics.Dispose() }",
-        "    $image = $scaled",
-        "  }",
+        _DOWNSCALE_BITMAP,
         "  $stream = New-Object System.IO.MemoryStream",
         "  $image.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)",
         "  $stream.Position = 0",
@@ -207,6 +220,8 @@ IMAGE_SCRIPT = "\n".join(
         "ContentType = WindowsRuntime]",
         "$null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics, "
         "ContentType = WindowsRuntime]",
+        "$null = [Windows.Graphics.Imaging.BitmapTransform, Windows.Graphics, "
+        "ContentType = WindowsRuntime]",
         "$null = [Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType = WindowsRuntime]",
         "$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | "
         "Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and "
@@ -228,12 +243,29 @@ IMAGE_SCRIPT = "\n".join(
         "  $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($stream)",
         "  $decoder = Wait-WinRT ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) "
         "([Windows.Graphics.Imaging.BitmapDecoder])",
-        "  $software = Wait-WinRT ($decoder.GetSoftwareBitmapAsync()) "
+        # Çözme WinRT'de kalır (HEIC gibi GDI+'nın okuyamadığı biçimler); büyük görsel yine WinRT
+        # BitmapTransform ile OCR sınırına küçültülür, reddedilmez (2026-11-18).
+        "  $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
+        "  $width = $decoder.PixelWidth; $height = $decoder.PixelHeight",
+        "  if ($width -le 0 -or $height -le 0) { exit 4 }",
+        "  if ($width -gt $maxDim -or $height -gt $maxDim) {",
+        "    $ratio = [Math]::Min($maxDim / $width, $maxDim / $height)",
+        "    $transform = New-Object Windows.Graphics.Imaging.BitmapTransform",
+        "    $transform.ScaledWidth = [uint32][Math]::Max(1, [Math]::Floor($width * $ratio))",
+        "    $transform.ScaledHeight = [uint32][Math]::Max(1, [Math]::Floor($height * $ratio))",
+        "    $transform.InterpolationMode = "
+        "[Windows.Graphics.Imaging.BitmapInterpolationMode]::Fant",
+        "    $software = Wait-WinRT ($decoder.GetSoftwareBitmapAsync("
+        "[Windows.Graphics.Imaging.BitmapPixelFormat]::Bgra8, "
+        "[Windows.Graphics.Imaging.BitmapAlphaMode]::Premultiplied, $transform, "
+        "[Windows.Graphics.Imaging.ExifOrientationMode]::RespectExifOrientation, "
+        "[Windows.Graphics.Imaging.ColorManagementMode]::DoNotColorManage)) "
         "([Windows.Graphics.Imaging.SoftwareBitmap])",
+        "  } else {",
+        "    $software = Wait-WinRT ($decoder.GetSoftwareBitmapAsync()) "
+        "([Windows.Graphics.Imaging.SoftwareBitmap])",
+        "  }",
         "  try {",
-        "    $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
-        "    if ($software.PixelWidth -gt $maxDim -or $software.PixelHeight -gt $maxDim) "
-        "{ exit 4 }",
         "    $result = Wait-WinRT ($engine.RecognizeAsync($software)) "
         "([Windows.Media.Ocr.OcrResult])",
         "  } finally { $software.Dispose() }",

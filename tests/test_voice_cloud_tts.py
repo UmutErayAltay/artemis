@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import io
 import json
 import socket
 import time
+import wave
 from collections.abc import Iterator
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -190,8 +192,20 @@ async def test_audit_emitted_before_request_and_without_text(
             "allowed": True,
         },
     )
+    expected_format_event = (
+        "cloud_tts_format",
+        {
+            "service": "bulut",
+            "model": "heygen/heygen-voice-1-turbo:free",
+            "container": "raw",
+            "mime": "audio/pcm",
+            "sample_rate": 24000,
+            "channels": 1,
+            "sample_width": 2,
+        },
+    )
     assert seen_audit_during_post == [expected_event]
-    assert audit.records == [expected_event]
+    assert audit.records == [expected_event, expected_format_event]
     assert secret_text not in str(audit.records)
 
 
@@ -529,7 +543,9 @@ async def test_voice_controller_cloud_tts_blocks_private_and_allows_non_private(
         await controller._run_and_speak("merhaba")
         assert len(server.requests) == 1
         assert sink.chunks == [b"\x01\x00\x02\x00"]
-        assert audit.records[-1][1]["allowed"] is True
+        transfer_records = [f for ev, f in audit.records if ev == "cloud_tts_transfer"]
+        assert len(transfer_records) == 1
+        assert transfer_records[0]["allowed"] is True
 
         # Yerel TTS varken gizli yanıt sunucuya hiç gitmez, yerel senteze yönlenir.
         audit.records.clear()
@@ -557,3 +573,181 @@ async def test_voice_controller_cloud_tts_blocks_private_and_allows_non_private(
         assert audit.records[0][1]["reason"] == "private"
     finally:
         await controller.close()
+
+
+def _make_wav_bytes(
+    frames: bytes, *, rate: int = 44100, channels: int = 2, sampwidth: int = 2
+) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as wav:
+        wav.setnchannels(channels)
+        wav.setsampwidth(sampwidth)
+        wav.setframerate(rate)
+        wav.writeframes(frames)
+    return buf.getvalue()
+
+
+async def test_gemini_decodes_wav_part_preserving_rate_channels_and_stripping_header(
+    server: Server,
+) -> None:
+    frames = b"\x01\x00\x02\x00\x03\x00\x04\x00" * 4
+    wav_bytes = _make_wav_bytes(frames, rate=44100, channels=2, sampwidth=2)
+    server.headers = {"Content-Type": "text/event-stream"}
+    server.body_chunks = [_sse_event(wav_bytes, mime_type="audio/wav")]
+    synth, audit = _synthesizer(
+        server,
+        api_key=False,
+        tts_cloud_protocol="gemini",
+        tts_cloud_model="fish-audio/s2.1-pro-free:free",
+        tts_cloud_sample_rate=16000,
+    )
+    chunks = [chunk async for chunk in synth.stream("Merhaba", asyncio.Event())]
+    assert len(chunks) >= 1
+    assert all(
+        (chunk.sample_rate, chunk.channels, chunk.sample_width) == (44100, 2, 2)
+        for chunk in chunks
+    )
+    joined = b"".join(chunk.pcm for chunk in chunks)
+    assert joined == frames
+    assert b"RIFF" not in joined
+    format_records = [f for ev, f in audit.records if ev == "cloud_tts_format"]
+    assert format_records == [
+        {
+            "service": "bulut",
+            "model": "fish-audio/s2.1-pro-free:free",
+            "container": "wav",
+            "mime": "audio/wav",
+            "sample_rate": 44100,
+            "channels": 2,
+            "sample_width": 2,
+        }
+    ]
+
+
+async def test_gemini_raw_l16_reads_rate_and_channels_from_mime(server: Server) -> None:
+    raw_pcm = b"\x10\x00\x20\x00\x30\x00\x40\x00"
+    server.headers = {"Content-Type": "text/event-stream"}
+    server.body_chunks = [_sse_event(raw_pcm, mime_type="audio/l16; rate=24000; channels=1")]
+    synth, _ = _synthesizer(
+        server,
+        api_key=False,
+        tts_cloud_protocol="gemini",
+        tts_cloud_model="gemini-2.5-flash-preview-tts",
+        tts_cloud_sample_rate=16000,
+    )
+    chunks = [chunk async for chunk in synth.stream("Test", asyncio.Event())]
+    assert len(chunks) == 1
+    assert (chunks[0].sample_rate, chunks[0].channels, chunks[0].sample_width) == (24000, 1, 2)
+    assert chunks[0].pcm == raw_pcm
+
+
+async def test_openai_wav_response_buffers_and_decodes_without_header(server: Server) -> None:
+    frames = b"\x05\x00\x06\x00\x07\x00\x08\x00" * 3
+    wav_bytes = _make_wav_bytes(frames, rate=44100, channels=2, sampwidth=2)
+    server.headers = {"Content-Type": "audio/wav"}
+    server.body_chunks = [wav_bytes[:16], wav_bytes[16:]]
+    synth, _ = _synthesizer(server, tts_cloud_sample_rate=16000)
+    chunks = [chunk async for chunk in synth.stream("Merhaba", asyncio.Event())]
+    assert len(chunks) == 1
+    assert (chunks[0].sample_rate, chunks[0].channels, chunks[0].sample_width) == (44100, 2, 2)
+    assert chunks[0].pcm == frames
+    assert b"RIFF" not in chunks[0].pcm
+
+
+@pytest.mark.parametrize(
+    ("payload", "mime"),
+    [
+        (b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\x00" * 16, "audio/mpeg"),
+        (b"\xff\xfb\x90\x00" + b"\x00" * 16, "audio/pcm"),
+        (b"OggS\x00\x02" + b"\x00" * 16, "audio/ogg"),
+        # Her denetim tek başına yakalamalı: nötr mime + sıkıştırılmış imza, ve tersi.
+        (b"ID3\x04\x00\x00\x00\x00\x00\x00" + b"\x00" * 16, "audio/pcm"),
+        (b"OggS\x00\x02" + b"\x00" * 16, "application/octet-stream"),
+        (b"fLaC\x00\x00\x00\x22" + b"\x00" * 16, "audio/pcm"),
+        (b"\x01\x02" * 12, "audio/flac"),
+    ],
+)
+async def test_compressed_audio_raises_before_yielding_on_openai_and_gemini(
+    server: Server, payload: bytes, mime: str
+) -> None:
+    server.headers = {"Content-Type": mime}
+    server.body_chunks = [payload[:2], payload[2:]]
+    openai_synth, _ = _synthesizer(server)
+    openai_yielded: list[PCMChunk] = []
+    with pytest.raises(RuntimeError):
+        async for chunk in openai_synth.stream("Test", asyncio.Event()):
+            openai_yielded.append(chunk)
+    assert openai_yielded == []
+
+    server.headers = {"Content-Type": "text/event-stream"}
+    server.body_chunks = [_sse_event(payload, mime_type=mime)]
+    gemini_synth, _ = _synthesizer(
+        server,
+        api_key=False,
+        tts_cloud_protocol="gemini",
+        tts_cloud_model="gemini-2.5-flash-preview-tts",
+    )
+    gemini_yielded: list[PCMChunk] = []
+    with pytest.raises(RuntimeError):
+        async for chunk in gemini_synth.stream("Test", asyncio.Event()):
+            gemini_yielded.append(chunk)
+    assert gemini_yielded == []
+
+
+async def test_wav_unsupported_sample_width_raises_runtime_error(server: Server) -> None:
+    wav_8bit = _make_wav_bytes(b"\x80\x81\x82\x83", rate=22050, channels=1, sampwidth=1)
+
+    server.headers = {"Content-Type": "audio/wav"}
+    server.body_chunks = [wav_8bit]
+    openai_synth, _ = _synthesizer(server)
+    openai_yielded: list[PCMChunk] = []
+    with pytest.raises(RuntimeError):
+        async for chunk in openai_synth.stream("Test", asyncio.Event()):
+            openai_yielded.append(chunk)
+    assert openai_yielded == []
+
+    server.headers = {"Content-Type": "text/event-stream"}
+    server.body_chunks = [_sse_event(wav_8bit, mime_type="audio/wav")]
+    gemini_synth, _ = _synthesizer(
+        server,
+        api_key=False,
+        tts_cloud_protocol="gemini",
+        tts_cloud_model="gemini-2.5-flash-preview-tts",
+    )
+    gemini_yielded: list[PCMChunk] = []
+    with pytest.raises(RuntimeError):
+        async for chunk in gemini_synth.stream("Test", asyncio.Event()):
+            gemini_yielded.append(chunk)
+    assert gemini_yielded == []
+
+
+async def test_raw_pcm_starting_with_ff_sample_is_not_mistaken_for_mpeg(
+    server: Server,
+) -> None:
+    gemini_pcm = b"\xff\xff\x10\x00\x20\x00"
+    server.headers = {"Content-Type": "text/event-stream"}
+    server.body_chunks = [_sse_event(gemini_pcm, mime_type="audio/l16; rate=24000; channels=1")]
+    gemini_synth, _ = _synthesizer(
+        server,
+        api_key=False,
+        tts_cloud_protocol="gemini",
+        tts_cloud_model="gemini-2.5-flash-preview-tts",
+        tts_cloud_sample_rate=16000,
+    )
+    gemini_chunks = [chunk async for chunk in gemini_synth.stream("Test", asyncio.Event())]
+    assert len(gemini_chunks) >= 1
+    assert all(
+        (chunk.sample_rate, chunk.channels) == (24000, 1) for chunk in gemini_chunks
+    )
+    assert b"".join(chunk.pcm for chunk in gemini_chunks) == gemini_pcm
+
+    openai_pcm = b"\xff\xff\x10\x00"
+    server.headers = {"Content-Type": "audio/pcm"}
+    server.body_chunks = [openai_pcm]
+    openai_synth, _ = _synthesizer(server)
+    openai_chunks = [chunk async for chunk in openai_synth.stream("Test", asyncio.Event())]
+    assert len(openai_chunks) >= 1
+    assert all(
+        (chunk.sample_rate, chunk.channels) == (24000, 1) for chunk in openai_chunks
+    )
+    assert b"".join(chunk.pcm for chunk in openai_chunks) == openai_pcm

@@ -53,13 +53,34 @@ def _segments(path: str) -> list[str]:
     return [part for part in path.replace("\\", "/").split("/") if part not in ("", ".")]
 
 
+def _fold_matches(haystack: str, needle: str, *, substring: bool) -> bool:
+    """Türkçe katlama veya klasik casefold ile eşleşir; hariç tutma asla zayıflamaz."""
+    for fold in (turkish_fold, str.casefold):
+        folded_haystack = fold(haystack)
+        folded_needle = fold(needle)
+        if not folded_needle:
+            continue
+        if substring:
+            if folded_needle in folded_haystack:
+                return True
+        elif folded_haystack == folded_needle:
+            return True
+    return False
+
+
 def _folder_entry_matches(folder_path: str, exclude: Sequence[str]) -> bool:
     """`/` ile biten girdilerden biri klasör yolunda geçiyor mu? (başta veya içte)"""
-    haystack = "/".join(_segments(folder_path)).casefold() + "/"
+    joined_folder = "/".join(_segments(folder_path))
+    if not joined_folder:
+        return False
+    haystack = joined_folder + "/"
     for entry in exclude:
         if not entry.replace("\\", "/").endswith("/"):
             continue
-        if "/".join(_segments(entry)).casefold() + "/" in haystack:
+        pattern = "/".join(_segments(entry))
+        if not pattern:
+            continue
+        if _fold_matches(haystack, pattern + "/", substring=True):
             return True
     return False
 
@@ -80,16 +101,16 @@ def is_excluded(relative: str, exclude: Sequence[str]) -> bool:
         return True
     if not parts[-1].casefold().endswith(".md"):
         return True
-    joined = "/".join(parts).casefold()
+    joined = "/".join(parts)
     for entry in exclude:
         normalized = entry.replace("\\", "/")
-        folded = "/".join(_segments(normalized)).casefold()
-        if not folded:
+        pattern = "/".join(_segments(normalized))
+        if not pattern:
             continue
         if normalized.endswith("/"):
-            if folded + "/" in joined:
+            if _fold_matches(joined, pattern + "/", substring=True):
                 return True
-        elif joined == folded:
+        elif _fold_matches(joined, pattern, substring=False):
             return True
     return False
 

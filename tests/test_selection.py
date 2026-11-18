@@ -58,6 +58,9 @@ class World:
         self.typed = ""
         self.keys_down = 0
         self.copy_error: Exception | None = None
+        self.read_error: Exception | None = None
+        self.nontext = False
+        self.copy_calls = 0
         self.focus_works = True
         self.focus_calls: list[int] = []
         self.clip_history: list[str] = []
@@ -76,7 +79,13 @@ class World:
         self.clip_history.append(text)
         return True
 
+    def read(self) -> str:
+        if self.read_error is not None:
+            raise self.read_error
+        return self.clip
+
     def copy(self) -> None:
+        self.copy_calls += 1
         if self.copy_error is not None:
             raise self.copy_error
         if self.selection is not None:
@@ -97,7 +106,13 @@ class World:
             lambda: self.window, lambda: 222, self.type_text, lambda press: FakeHotkey()
         )
         return SelectionBackend(
-            window, lambda: self.clip, self.write, self.copy, self.modifiers_down, self.focus
+            window,
+            self.read,
+            self.write,
+            self.copy,
+            self.modifiers_down,
+            self.focus,
+            lambda: self.nontext,
         )
 
 
@@ -582,3 +597,27 @@ def test_window_registers_selection_hotkey_only_when_enabled(
         while time.monotonic() < deadline and not window.bridge.stopped:
             app.processEvents()
             time.sleep(0.01)
+
+
+async def test_nontext_clipboard_is_refused_without_copy_or_sentinel() -> None:
+    rig = Rig()
+    rig.world.nontext = True
+    await rig.capture()
+    assert rig.world.copy_calls == 0
+    assert rig.world.clip_history == []
+    assert rig.kinds("ready") == []
+    assert "metin dışı" in rig.kinds("message")[-1]
+    assert rig.audit.named("selection_capture") == [{"outcome": "nontext_clipboard", "chars": 0}]
+    assert not rig.actions.busy
+
+
+async def test_read_clipboard_oserror_refuses_without_crashing() -> None:
+    rig = Rig()
+    rig.world.read_error = OSError("pano kilitli")
+    await rig.capture()
+    assert rig.world.copy_calls == 0
+    assert rig.world.clip_history == []
+    assert rig.kinds("ready") == []
+    assert "pano kullanılamıyor" in rig.kinds("message")[-1]
+    assert rig.audit.named("selection_capture") == [{"outcome": "error", "chars": 0}]
+    assert not rig.actions.busy

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import sys
 import tempfile
 from collections.abc import Callable
@@ -68,9 +69,7 @@ from artemis.channels.desktop.instance import (
     instance_name,
     set_app_user_model_id,
 )
-from artemis.channels.desktop.operations import (
-    OperationLog,
-)
+from artemis.channels.desktop.operations import OperationLog
 from artemis.channels.desktop.page_kit import center_page
 from artemis.channels.desktop.pet import PetWidget
 from artemis.channels.desktop.pet_sprite import pets_dir_for
@@ -222,12 +221,8 @@ class DesktopWindow(QMainWindow):
 
                 settings, provider, registry, audit = create_demo_parts(temp_root, on_record)
                 runtime = create_runtime(
-                    path,
-                    approve,
-                    settings=settings,
-                    provider=provider,
-                    registry=registry,
-                    audit=audit,
+                    path, approve, settings=settings,
+                    provider=provider, registry=registry, audit=audit,
                 )
                 runtime.context.services["demo_records"] = {"sample": "Demo kitaplığı: örnek metin"}
                 return runtime
@@ -307,9 +302,7 @@ class DesktopWindow(QMainWindow):
         if size not in self._pet_cache:
             info = pet_sprite.find_pet(self.pet.skin, pets_dir_for(self._config_path))
             try:
-                self._pet_cache[size] = (
-                    pet_sprite.preview(info, size) if info is not None else None
-                )
+                self._pet_cache[size] = pet_sprite.preview(info, size) if info else None
             except pet_sprite.PetError:
                 self._pet_cache[size] = None
         return self._pet_cache[size]
@@ -558,8 +551,7 @@ class DesktopWindow(QMainWindow):
         sidebar = build_sidebar(self, [
             ("Sohbet", self.chat_page), ("Projeler", self.projects_page),
             ("Otomasyon", self.automation_page), ("Petler", self.pet_page),
-            ("Geçmiş", self.data_page),
-            ("Ayarlar", self.settings_scroll),
+            ("Geçmiş", self.data_page), ("Ayarlar", self.settings_scroll),
         ])
         self.tabs.currentChanged.connect(self._sync_navigation)
         self._settings_open = self.tabs.currentWidget() is self.settings_scroll
@@ -971,43 +963,49 @@ class DesktopWindow(QMainWindow):
         elif not self.bridge.stop_voice():
             self.voice_button.setChecked(False)
 
-    def _toggle_auto_mode(self, checked: bool) -> None:
-        """Üst çubuktaki düğme: kip anında değişir ve config'e yazılır.
+    def _sync_auto_controls(self, on: bool) -> None:
+        # İki denetim de sinyalsiz eşitlenir: düğme ve ayar kutusu aynı kipi göstermeli.
+        for control in (self.settings_panel.computer_auto, self.auto_button):
+            control.blockSignals(True)
+            control.setChecked(on)
+            control.blockSignals(False)
+        self._show_auto_state(on)
 
-        Kip oturum içi onayı belirler; tarayıcıdan sonra "Uygula" beklemek istenmeyen
-        sürpriz olurdu, bu yüzden düğme hem runtime'a hem config'e anında yazar.
-        """
+    def _toggle_auto_mode(self, checked: bool) -> None:
+        """Üst çubuktaki düğme: kip anında değişir ve config'e yazılır."""
         mode = "auto" if checked else "accept"
-        saved = True
         if checked and not self._demo and not self._confirm_auto_mode():
-            # Vazgeçilirse iki denetim de kapalı kalır; kip hiç değişmez.
-            for control in (self.settings_panel.computer_auto, self.auto_button):
-                control.blockSignals(True)
-                control.setChecked(False)
-                control.blockSignals(False)
-            self._show_auto_state(False)
+            self._sync_auto_controls(False)
             return
+        shown = checked
         if not self._demo:
-            # Önce config: yazılamayan kip runtime'a uygulanırsa güvenlik ayarı sessizce
-            # diskten ayrışırdı (yeniden açılışta eski kip döner).
+            saved, applied = True, False
             try:
                 save_computer_mode(self._config_path, mode)
             except (OSError, ValueError):
                 saved = False
-                self._set_status("Kip kaydedilemedi", "error")
-            else:
-                if not self.bridge.set_computer_mode(mode):
-                    # Runtime hazır değilse yalnız config yazılmıştır; açılışta geçerli olur.
-                    self._set_status("Kip kaydedilecek", "running")
-        shown = checked if saved else not checked
-        # İki denetim de sinyalsiz eşitlenir: düğme ve ayar kutusu aynı kipi göstermeli.
-        for control in (self.settings_panel.computer_auto, self.auto_button):
-            control.blockSignals(True)
-            control.setChecked(shown)
-            control.blockSignals(False)
-        self._show_auto_state(shown)
-        if saved and not self._demo:
-            self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
+            # Kapatma güvenli kip (accept) içindir; disk yazılmasa bile runtime kapanır.
+            if saved or not checked:
+                applied = self.bridge.set_computer_mode(mode)
+            if checked and (not saved or not applied):
+                if saved and not applied:
+                    # Uygulanamayan auto diskte kalmasın; geri yazılamazsa durum yine hata gösterir.
+                    with contextlib.suppress(OSError, ValueError):
+                        save_computer_mode(self._config_path, "accept")
+                msg = "Kip kaydedilemedi" if not saved else "Otomatik onay uygulanamadı"
+                self._set_status(msg, "error")
+                shown = False
+            elif not checked:
+                if not saved or not applied:
+                    msg = (
+                        "Kip kapatıldı ama kaydedilemedi" if applied
+                        else "Kip çalışma zamanına uygulanamadı"
+                    )
+                    self._set_status(msg, "error")
+                shown = not applied
+            if saved and applied:
+                self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
+        self._sync_auto_controls(shown)
 
     def _auto_mode_box(self) -> tuple[QMessageBox, QPushButton]:
         """Uyarı kutusu ve "aç" düğmesi; ayrı kurulur ki README görüntüsü bloklamadan alınsın."""
@@ -1209,6 +1207,7 @@ class DesktopWindow(QMainWindow):
             self._selection_hotkey = None
         self.selection_popup.close()
         self.settings_panel.finish_inventory()
+        self.settings_panel.providers.shutdown()
         if self._tray is not None:
             self._tray.hide()
         self.overlay.close()
@@ -1235,11 +1234,7 @@ class DesktopWindow(QMainWindow):
 
 
 def build_window(
-    config_path: Path,
-    *,
-    demo: bool = False,
-    voice: bool = False,
-    app: QApplication | None = None,
+    config_path: Path, *, demo: bool = False, voice: bool = False, app: QApplication | None = None
 ) -> DesktopWindow:
     """GUI factory; offscreen kabul testleri aynı gerçek pencereyi kullanır."""
     current = app if app is not None else QApplication.instance()

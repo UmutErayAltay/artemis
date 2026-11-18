@@ -1026,3 +1026,127 @@ def test_add_model_rejects_negative_and_nan_text_prices(app: QApplication, tmp_p
         section._add_model()
         assert section.status.text() == "Fiyat sayı olmalı (ücretsiz için 0)."
         assert path.read_bytes() == before
+
+
+def test_model_test_error_occurred_recovers_ui(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(section_module.QProcess, "start", lambda _s, _e, _a: None)
+    section = ProviderSection(_three_models(tmp_path))
+    section.select_model("sonnet 5-5")
+    section._test_model()
+    assert section._model_test is not None
+    assert section.model_test_button.text() == "Durdur"
+
+    section._model_test.errorOccurred.emit(section_module.QProcess.ProcessError.FailedToStart)
+    app.processEvents()
+
+    assert section._model_test is None
+    assert section._testing == ""
+    assert section.model_test_button.isEnabled()
+    assert section.model_test_button.text() == "Test et"
+    assert "başlatılamadı" in section.status.text()
+
+
+def test_model_test_removes_old_report_and_ignores_nonzero_exit(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(section_module.QProcess, "start", lambda _s, _e, _a: None)
+    path = _three_models(tmp_path)
+    _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
+    folder = tmp_path / "state" / "model_testleri"
+    report = folder / "sonnet-5-5.json"
+    retry_report = folder / "sonnet-5-5.yeniden.json"
+    retry_report.write_text("{}", encoding="utf-8")
+
+    section = ProviderSection(path)
+    section.select_model("sonnet 5-5")
+    section._test_model()
+
+    assert not report.exists()
+    assert not retry_report.exists()
+
+    # Çöken süreç bir şekilde rapor bıraksa bile sıfır dışı çıkış kodunda okunmaz.
+    _report(tmp_path, "sonnet 5-5", 7, 8, ["ana", "zor"])
+    section._model_test_finished(1, section_module.QProcess.ExitStatus.CrashExit)
+    assert section._model_test is None
+    assert section._last is None
+    assert "kod 1" in section.status.text()
+
+
+def test_provider_section_shutdown_stops_threads_and_process(
+    app: QApplication, tmp_path: Path
+) -> None:
+    class _FakeSignal:
+        def disconnect(self, _slot: Any) -> None:
+            pass
+
+    class _FakeThread:
+        def __init__(self) -> None:
+            self.interrupted = False
+            self.waited: list[int] = []
+            self.done = _FakeSignal()
+
+        def isRunning(self) -> bool:
+            return True
+
+        def requestInterruption(self) -> None:
+            self.interrupted = True
+
+        def wait(self, ms: int) -> bool:
+            self.waited.append(ms)
+            return True
+
+    class _FakeRunningProcess(_FakeProcess):
+        def __init__(self) -> None:
+            super().__init__()
+            self.finished = _FakeSignal()
+            self.errorOccurred = _FakeSignal()
+            self.readyReadStandardOutput = _FakeSignal()
+
+        def waitForFinished(self, ms: int) -> bool:
+            self.calls.append(f"wait:{ms}")
+            return False
+
+    section = ProviderSection(_three_models(tmp_path))
+    thread = _FakeThread()
+    process = _FakeRunningProcess()
+    section._test = thread  # type: ignore[assignment]
+    section._model_test = process  # type: ignore[assignment]
+    section._testing = "sonnet 5-5"
+
+    section.shutdown()
+
+    assert section._test is None
+    assert thread.interrupted and thread.waited == [500]
+    assert section._model_test is None and section._testing == ""
+    assert process.calls == ["terminate", "wait:500", "kill", "wait:500"]
+
+
+def test_raw_normalizes_null_sections(app: QApplication, tmp_path: Path) -> None:
+    path = config(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"] = None
+    raw["models"] = None
+    raw["computer_use"] = None
+    raw.pop("primary_model", None)
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    section = ProviderSection(path)
+    normalized = section._raw()
+    assert normalized["endpoints"] == {}
+    assert normalized["models"] == {}
+    assert normalized["computer_use"] == {}
+
+    _fill(section, "yerel", "https://x.example/v1")
+    section._save()
+    section.model_name.setEditText("m-null")
+    section.make_primary.setChecked(True)
+    section._add_model()
+    section.select_model("m-null")
+    section._toggle_role("computer_use")
+
+    settings = load_settings(path)
+    assert "yerel" in settings.endpoints
+    assert "m-null" in settings.models
+    assert settings.computer_use.model == "m-null"

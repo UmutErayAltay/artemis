@@ -588,3 +588,46 @@ async def test_code_agent_start_runs_blocking_start_off_event_loop(
     assert result.status == "sent"
     assert fake_jobs.start_thread_id is not None
     assert fake_jobs.start_thread_id != loop_thread_id
+
+
+async def test_prepare_finds_auto_discovered_project_without_status_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repos_dir = tmp_path / "repos"
+    auto_proj = repos_dir / "auto-proj"
+    auto_proj.mkdir(parents=True)
+    discovered_calls: list[tuple[str, Path]] = []
+
+    def fake_discover(owner: str, root: Path) -> dict[str, Path]:
+        discovered_calls.append((owner, root))
+        return {"auto-proj": auto_proj}
+
+    monkeypatch.setattr("artemis.tools.plugins.code_agent.discover_projects", fake_discover)
+    jobs, factory = make_jobs(tmp_path, reply())
+    tool_context = ToolContext(
+        workspace=tmp_path,
+        settings=Settings(
+            code_agent=CodeAgentConfig(
+                github_owner="owner",
+                repos_dir=repos_dir,
+                command=sys.executable,
+            )
+        ),
+        audit=jobs._audit,
+        services={"code_agent_jobs": jobs},
+    )
+    args = PrepareArguments(
+        project="auto-proj",
+        task="Görev",
+        scope=("Dosya ekle",),
+        acceptance=("Test geçer",),
+    )
+    result = await CodeAgentPrepare().execute(args, tool_context)
+    jobs.shutdown()
+    assert result.success is True
+    assert "İzinli proje bulunamadı" not in result.message
+    spec = ProjectSpec.model_validate(result.data["spec"])
+    assert spec.project == "auto-proj"
+    assert spec.repo_path == str(auto_proj.resolve())
+    assert discovered_calls == [("owner", repos_dir)]
+    assert factory.calls == []

@@ -696,3 +696,70 @@ def test_found_keyed_proxy_stores_key_only_in_vault(tmp_path: Path, qt_app) -> N
     wizard.preset_combo.setCurrentIndex(1)  # başka sağlayıcı seçilince yerel kip biter
     assert wizard._local is None and not wizard.preset_combo.isHidden()
     wizard.deleteLater()
+
+
+def test_on_gemini_validated_never_calls_delete_later_while_thread_running(
+    tmp_path: Path, qt_app
+) -> None:
+    class _FakeFinished:
+        def __init__(self) -> None:
+            self.slots: list[Any] = []
+
+        def connect(self, slot: Any) -> None:
+            self.slots.append(slot)
+
+        def disconnect(self, slot: Any) -> None:
+            if slot in self.slots:
+                self.slots.remove(slot)
+
+    class _FakeRunningThread:
+        def __init__(self) -> None:
+            self.running = True
+            self.deleted_while_running = False
+            self.deleted = 0
+            self.finished = _FakeFinished()
+            self.finished_with = _FakeFinished()
+
+        def isRunning(self) -> bool:
+            return self.running
+
+        def isFinished(self) -> bool:
+            return not self.running
+
+        def requestInterruption(self) -> None:
+            pass
+
+        def wait(self, _ms: int) -> bool:
+            return False  # iş parçacığı hemen bitmedi
+
+        def setParent(self, _parent: Any) -> None:
+            pass
+
+        def deleteLater(self) -> None:
+            if self.running:
+                self.deleted_while_running = True
+            self.deleted += 1
+
+    path = _write_base_config(tmp_path)
+    wizard = ConnectWizard(
+        path,
+        open_url=lambda _url: None,
+        oauth=OpenRouterPkce(http=_UnexpectedNetworkHttp()),
+        run_cli=lambda _name: None,
+        store_key=lambda _ep, _k: None,
+        clipboard=_FakeClipboard(),
+    )
+    fake_thread = _FakeRunningThread()
+    wizard._gemini_thread = fake_thread  # type: ignore[assignment]
+
+    wizard._on_gemini_validated("AIza" + "C" * 35, 401)
+
+    assert wizard._gemini_thread is None
+    assert not fake_thread.deleted_while_running
+    assert fake_thread.deleted == 0
+    assert fake_thread.finished.slots
+    fake_thread.running = False
+    for slot in fake_thread.finished.slots:
+        slot()
+    assert fake_thread.deleted == 1
+    wizard.deleteLater()

@@ -41,6 +41,7 @@ class FakeBackend:
         self.fail: Exception | None = None
         self.window: tuple[int, tuple[int, int, int, int]] = (7, (0, 0, size[0], size[1]))
         self.window_error: Exception | None = None
+        self.window_rects: dict[int, tuple[int, int, int, int]] = {}
         # Noktadaki pencerenin kimliği; ön plan penceresinden bağımsızdır (onay penceresi odağı
         # alınca tıklanacak pencere değişmez).
         self.point_window = 7
@@ -75,6 +76,15 @@ class FakeBackend:
         if self.window_error is not None:
             raise self.window_error
         return self.window
+
+    def window_rect(self, hwnd: int) -> tuple[int, int, int, int]:
+        if self.window_error is not None:
+            raise self.window_error
+        if hwnd in self.window_rects:
+            return self.window_rects[hwnd]
+        if hwnd == self.window[0]:
+            return self.window[1]
+        return (0, 0, self.size[0], self.size[1])
 
     def process_at(self, x: int, y: int) -> tuple[str, int]:
         return self.at if self.at is not None else self.foreground
@@ -1574,3 +1584,35 @@ async def test_reason_and_ask_user_secrets_are_masked() -> None:
     ask_result = await ask_env.run()
     assert ask_result.reason == "ask_user"
     assert "abc123def" not in ask_result.summary and "[GİZLENDİ]" in ask_result.summary
+
+
+async def test_approved_click_aborts_when_same_window_moved_or_resized() -> None:
+    env = Env(click(sensitive=True), click(sensitive=True), click(sensitive=True), DONE, YES)
+    shift = {"n": 0}
+
+    def move_same_window() -> None:
+        shift["n"] += 10
+        s = shift["n"]
+        env.backend.window = (7, (s, s, s + 8, s + 4))
+
+    env.on_approve = move_same_window
+
+    result = await env.run()
+
+    assert result.reason == "blocked"
+    assert env.backend.calls == []
+    blocked = env.audit.named("computer_blocked")
+    assert len(blocked) == 3
+    assert "taşındı veya boyutu değişti" in blocked[0]["reason"]
+    assert "ATLANDI (click)" in env.provider.seen[1][1].content
+
+
+async def test_approved_click_executes_when_same_window_rect_unchanged() -> None:
+    env = Env(click(sensitive=True), DONE, YES)
+    env.on_approve = lambda: env.backend.window_rects.update({7: (0, 0, 8, 4)})
+
+    result = await env.run()
+
+    assert result.reason == "done"
+    assert env.backend.calls == [("click", 2, 1, "left", False)]
+    assert env.audit.named("computer_blocked") == []

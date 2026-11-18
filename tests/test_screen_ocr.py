@@ -239,3 +239,26 @@ def test_target_script_skips_cloaked_windows() -> None:
     assert "DwmGetWindowAttribute(" in target_body
     assert "14" in target_body
     assert "out cloaked, 4" in target_body
+
+
+def test_screen_script_uses_per_monitor_v2_dpi_with_fallback_before_capture() -> None:
+    assert "SetProcessDpiAwarenessContext" in SCREEN_SCRIPT
+    assert "-4" in SCREEN_SCRIPT
+    assert "SetProcessDPIAware" in SCREEN_SCRIPT
+    call_idx = SCREEN_SCRIPT.index("SetProcessDpiAwarenessContext([IntPtr](-4))")
+    fallback_idx = SCREEN_SCRIPT.index("SetProcessDPIAware()", call_idx)
+    assert call_idx < fallback_idx < SCREEN_SCRIPT.index("[ArtemisNative]::Target")
+    assert call_idx < SCREEN_SCRIPT.index("[ArtemisNative]::GetWindowRect")
+    assert call_idx < SCREEN_SCRIPT.index("OcrEngine")
+
+
+def test_image_script_downscales_oversized_images_instead_of_exiting_4() -> None:
+    from artemis.perception.screen import IMAGE_SCRIPT
+
+    # Büyük görsel WinRT BitmapTransform ile küçültülür; çözme WinRT'de kalır (HEIC vb. GDI+
+    # olmadan okunur). Canlı doğrulama 2026-11-18: 14000x3000 PNG okundu.
+    assert "MaxImageDimension" in IMAGE_SCRIPT
+    assert "BitmapTransform" in IMAGE_SCRIPT and "ScaledWidth" in IMAGE_SCRIPT
+    assert "System.Drawing" not in IMAGE_SCRIPT
+    assert re.search(r"-gt \$maxDim\)\s*\{\s*exit 4", IMAGE_SCRIPT) is None
+    assert "$width -le 0 -or $height -le 0" in IMAGE_SCRIPT

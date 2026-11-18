@@ -54,6 +54,10 @@ _PRIVACY = (
 _BUSY = "Seçili metin eylemi sürüyor; bitmesini bekleyin."
 _DICTATION_ON = "Dikte sürerken seçili metin eylemi kullanılamaz."
 _NOT_RESTORED = "Pano eski haline getirilemedi; önceki metin kaybolmuş olabilir."
+_NONTEXT_CLIPBOARD = (
+    "Panoda metin dışı içerik (resim, dosya veya biçimli veri) var; veri kaybını "
+    "önlemek için seçili metin alınmadı."
+)
 
 
 class _Audit(Protocol):
@@ -70,6 +74,7 @@ class SelectionBackend:
     send_copy: Callable[[], None]  # Ctrl+C
     modifiers_down: Callable[[], bool]
     focus_window: Callable[[int], bool]
+    has_nontext_clipboard: Callable[[], bool] = lambda: False
 
 
 def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
@@ -98,7 +103,40 @@ def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
 
         return windows.focus_window(hwnd)
 
-    return SelectionBackend(window, read, write, copy, down, focus)
+    def has_nontext() -> bool:
+        import ctypes
+        import platform
+        from ctypes import wintypes
+
+        if platform.system() != "Windows":
+            return False
+        # Pano geri yazımı yalnız düz metni korur; resim/dosya/RTF varsa kullanıcı verisi ezilmez.
+        loader_name = "WinDLL"
+        win_dll: Any = getattr(ctypes, loader_name)
+        user32 = win_dll("user32", use_last_error=True)
+        user32.OpenClipboard.argtypes = [wintypes.HWND]
+        user32.OpenClipboard.restype = wintypes.BOOL
+        user32.EnumClipboardFormats.argtypes = [wintypes.UINT]
+        user32.EnumClipboardFormats.restype = wintypes.UINT
+        user32.CloseClipboard.restype = wintypes.BOOL
+        if not user32.OpenClipboard(None):
+            raise OSError("Pano başka bir uygulama tarafından kullanılıyor.")
+        try:
+            text_formats = {1, 7, 13, 16}  # CF_TEXT, CF_OEMTEXT, CF_UNICODETEXT, CF_LOCALE
+            fmt = 0
+            while True:
+                ctypes.set_last_error(0)
+                fmt = user32.EnumClipboardFormats(fmt)
+                if fmt == 0:
+                    if ctypes.get_last_error() != 0:
+                        raise OSError("Pano biçimleri okunamadı.")
+                    return False
+                if fmt not in text_formats:
+                    return True
+        finally:
+            user32.CloseClipboard()
+
+    return SelectionBackend(window, read, write, copy, down, focus, has_nontext)
 
 
 def local_chat_alias(settings: Settings) -> str | None:
@@ -232,6 +270,9 @@ class SelectionActions:
             if not await self._keys_released():
                 outcome, message = "keys_down", "Kısayol tuşlarını bırakıp yeniden deneyin."
                 return
+            if await asyncio.to_thread(self._backend.has_nontext_clipboard):
+                outcome, message = "nontext_clipboard", _NONTEXT_CLIPBOARD
+                return
             text = await self._copy_selection(target)
             if text is None:
                 outcome, message = "no_target", "Pencere değişti; seçili metin alınmadı."
@@ -268,7 +309,10 @@ class SelectionActions:
         """Panoyu yedekler, benzersiz bir işaret yazar, Ctrl+C gönderir, işaret değişince okur.
         Her yolda önceki pano metni geri yazılır (try/finally)."""
         backend = self._backend
-        previous = await asyncio.to_thread(backend.read_clipboard)
+        try:
+            previous = await asyncio.to_thread(backend.read_clipboard)
+        except OSError as error:
+            raise OSError("Pano yedeği okunamadı.") from error
         sentinel = f"artemis-secim-{uuid4().hex}"
         text = ""
         try:

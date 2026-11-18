@@ -6,17 +6,16 @@ seçilir. Anahtar YAML'a, loga ve mesajlara girmez; yalnız Kimlik Bilgisi Yöne
 
 from __future__ import annotations
 
-import asyncio
+import contextlib
 import html
 import json
 import os
 import re
 import shutil
 import sys
-from collections.abc import Mapping
+from collections.abc import Callable
 from decimal import ROUND_UP, Decimal, InvalidOperation
 from pathlib import Path
-from urllib.parse import urlsplit
 
 import httpx
 import yaml
@@ -26,11 +25,10 @@ from PySide6.QtCore import (
     QSettings,
     QSize,
     Qt,
-    QThread,
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QColor, QResizeEvent
+from PySide6.QtGui import QCloseEvent, QColor, QResizeEvent
 from PySide6.QtWidgets import (
     QBoxLayout,
     QCheckBox,
@@ -47,23 +45,28 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.brain.errors import ProviderError
 from artemis.brain.model_report import (
-    SCENARIO_IDS,
     merge_retry,
     pass_rate,
     report_summary,
     suggest_layout,
 )
-from artemis.brain.models import Message
 from artemis.brain.providers import (
-    ClaudeCliProvider,
     credential_prefix,
     endpoint_key_variable,
     provider_problem,
     stored_endpoint_key,
 )
 from artemis.channels.desktop import themes
+from artemis.channels.desktop.provider_helpers import (
+    _is_local_model,
+    _scenario_count,
+    _scenario_ids,
+    _scenario_label,
+    _score,
+    _slug,
+    _write_json,
+)
 from artemis.channels.desktop.provider_layout import (
     PARALLEL_CHOICES,
     PARALLEL_TEST,
@@ -73,7 +76,9 @@ from artemis.channels.desktop.provider_layout import (
     build_connections_box,
     build_models_box,
 )
+from artemis.channels.desktop.provider_workers import CliTest, ConnectionTest
 from artemis.channels.desktop.settings_io import _write_validated
+from artemis.channels.desktop.thread_shutdown import shutdown_thread
 from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import (
     ENDPOINT_ID_RE,
@@ -101,30 +106,6 @@ _COLOR_KEYS = ("muted", "accent", "warning", "error", "bg")
 
 
 WIDE_AT = 900  # bu genişlikten itibaren model ayrıntısı listenin yanında durur
-LOCAL_HOSTS = {"localhost", "127.0.0.1", "::1"}
-
-
-def _is_local_model(model: ModelConfig, endpoints: Mapping[str, EndpointConfig]) -> bool:
-    if model.provider == "ollama":
-        return True
-    endpoint = endpoints.get(model.endpoint or "")
-    return endpoint is not None and urlsplit(endpoint.base_url).hostname in LOCAL_HOSTS
-
-
-def _scenario_ids() -> list[str]:
-    return list(SCENARIO_IDS)
-
-
-def _scenario_count() -> int:
-    return len(_scenario_ids())
-
-
-def _scenario_label(scenario_id: str) -> str:
-    """'temel_dosya_oku' -> 'dosya oku' (kategori öneki ve alt çizgiler görünmez)."""
-    for prefix in ("temel_", "zor_", "pc_"):
-        if scenario_id.startswith(prefix):
-            scenario_id = scenario_id[len(prefix):]
-    return scenario_id.replace("_", " ")
 
 
 _Row = tuple[str, bool, bool, str, str, bool, bool, str]
@@ -161,54 +142,6 @@ def probe_models(base_url: str, key: str | None) -> tuple[str, list[str]]:
     return f"Bağlantı tamam, {len(models)} model bulundu.", models
 
 
-class ConnectionTest(QThread):
-    done = Signal(str, list)
-
-    def __init__(self, base_url: str, key: str | None, parent: QWidget) -> None:
-        super().__init__(parent)
-        self._base_url = base_url
-        self._key = key
-
-    def run(self) -> None:
-        message, models = probe_models(self._base_url, self._key)
-        self.done.emit(message, models)
-
-
-class CliTest(QThread):
-    """Tek küçük gerçek istek atar (abonelik kotasından az miktar harcar)."""
-
-    done = Signal(str)
-
-    def __init__(self, config_path: Path, model: str, parent: QWidget) -> None:
-        super().__init__(parent)
-        self._config_path = config_path
-        self._model = model
-
-    def run(self) -> None:
-        try:
-            settings = load_settings(self._config_path)
-            model = ModelConfig(
-                provider="claude_cli",
-                model=self._model,
-                input_per_million=Decimal(0),
-                output_per_million=Decimal(0),
-            )
-            prompt = [Message(role="user", content="Tek kelimeyle yanıt ver: merhaba")]
-            provider = ClaudeCliProvider(settings, model)
-            completion = asyncio.run(provider.complete(prompt, [], timeout=60))
-        except ProviderError as error:
-            self.done.emit(str(error))
-            return
-        except (OSError, ValueError):
-            self.done.emit("Test çalıştırılamadı.")
-            return
-        self.done.emit(
-            "Claude Code aboneliği çalışıyor."
-            if completion.content.strip()
-            else "Claude Code boş yanıt verdi."
-        )
-
-
 def store_endpoint_key(name: str, typed: str) -> str | None:
     """Anahtarı kasaya yazar (YAML'a asla); kasa yoksa "ortamda X tanımlayın." döner."""
     try:
@@ -216,12 +149,6 @@ def store_endpoint_key(name: str, typed: str) -> str | None:
     except OSError:
         return f"ortamda {endpoint_key_variable(name)} tanımlayın."
     return None
-
-
-def _slug(text: str) -> str:
-    # ponytail: "a/b" ile "a-b" aynı rapor dosyasına düşer; takma adlar okunur kalsın diye
-    # bilinçli (2026-11-18). Çakışma ölçülürse rapor adına ayrı özet ekle.
-    return re.sub(r"[^A-Za-z0-9_-]", "-", text).strip("-")[:40]
 
 
 class ProviderSection(QWidget):
@@ -600,8 +527,8 @@ class ProviderSection(QWidget):
         if self.needs_key.isChecked():
             key = self.key.text().strip() or stored_endpoint_key(name)
         self.status.setText("Bağlantı deneniyor…")
-        self._test = ConnectionTest(url, key, self)
-        self._test.done.connect(lambda message, _models: self.status.setText(message))
+        self._test = ConnectionTest(url, key, self, probe_models)
+        self._test.done.connect(self._connection_test_done)
         self._test.start()
 
     def _fetch_models(self) -> None:
@@ -620,9 +547,12 @@ class ProviderSection(QWidget):
             return
         key = stored_endpoint_key(name) if endpoint.api_key else None
         self.status.setText("Model listesi alınıyor…")
-        self._fetch = ConnectionTest(endpoint.base_url, key, self)
+        self._fetch = ConnectionTest(endpoint.base_url, key, self, probe_models)
         self._fetch.done.connect(self._fetch_done)
         self._fetch.start()
+
+    def _connection_test_done(self, message: str, _models: list[str]) -> None:
+        self.status.setText(message)
 
     def _fetch_done(self, message: str, models: list[str]) -> None:
         self.status.setText(message)
@@ -686,8 +616,19 @@ class ProviderSection(QWidget):
             self._auto_alias = self._default_alias(text.strip())
             self.alias.setText(self._auto_alias)
 
+    def _cli_test_done(self, message: str) -> None:
+        self.status.setText(message)
+
     def _raw(self) -> dict[str, object]:
-        return yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
+        loaded = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        raw: dict[str, object] = loaded if isinstance(loaded, dict) else {}
+        # `endpoints:`/`models:` null ise setdefault None dönerdi; boş sözlük yapılır.
+        for key in ("endpoints", "models"):
+            if not isinstance(raw.get(key), dict):
+                raw[key] = {}
+        if "computer_use" in raw and not isinstance(raw["computer_use"], dict):
+            raw["computer_use"] = {}
+        return raw
 
     def _write(self, raw: dict[str, object]) -> bool:
         try:
@@ -754,7 +695,7 @@ class ProviderSection(QWidget):
         self.status.setText("Claude Code deneniyor…")
         model = self.model_name.currentText().strip() or "haiku"
         self._cli_test = CliTest(self.config_path, model, self)
-        self._cli_test.done.connect(self.status.setText)
+        self._cli_test.done.connect(self._cli_test_done)
         self._cli_test.start()
 
     def _add_model(self) -> None:
@@ -965,7 +906,26 @@ class ProviderSection(QWidget):
         self.parallel_test.setToolTip(tip)
         self.parallel_count.setToolTip(tip)
 
-    def _model_test_finished(self, *_args: object) -> None:
+    def _abort_model_test(self, message: str) -> None:
+        """Test süreci bitmeden ya da hatayla düştüğünde arayüzü kurtarır (eski rapor okunmaz)."""
+        process, self._model_test, self._testing = self._model_test, None, ""
+        self._retrying = False
+        if process is not None:
+            process.deleteLater()
+        self.reload()
+        self._render_test_list()
+        self.status.setText(message)
+
+    def _model_test_error(self, error: QProcess.ProcessError) -> None:
+        # FailedToStart'ta `finished` gelmez; arayüz "test sürüyor"da kalmasın.
+        if not self._stopping and self._model_test is not None:
+            self._abort_model_test(f"{self._testing or 'Model'} testi başlatılamadı veya kesildi.")
+
+    def _model_test_finished(
+        self,
+        exit_code: int = 0,
+        exit_status: QProcess.ExitStatus = QProcess.ExitStatus.NormalExit,
+    ) -> None:
         if self._stopping:
             self._stopping = self._retrying = False
             process, self._model_test, self._testing = self._model_test, None, ""
@@ -974,7 +934,46 @@ class ProviderSection(QWidget):
             self.reload()
             self.status.setText("Test durduruldu")
             return
+        if self._model_test is None and not self._testing:
+            return
+        if exit_code != 0 or exit_status != QProcess.ExitStatus.NormalExit:
+            self._abort_model_test(f"{self._testing} testi hata ile sonlandı (kod {exit_code}).")
+            return
         self._model_test_done(self._testing, self._test_report)
+
+    def shutdown(self) -> None:
+        """Panel kapanırken test iş parçacıklarını ve alt süreci sınırlı sürede durdurur."""
+        threads: tuple[tuple[str, Callable[..., None]], ...] = (
+            ("_test", self._connection_test_done),
+            ("_fetch", self._fetch_done),
+            ("_cli_test", self._cli_test_done),
+        )
+        for attr, slot in threads:
+            thread = getattr(self, attr, None)
+            setattr(self, attr, None)
+            shutdown_thread(thread, ("done", slot), wait_ms=500)
+        process, self._model_test, self._testing = self._model_test, None, ""
+        self._retrying = False
+        if process is None:
+            return
+        self._stopping = True
+        for signal, slot in (
+            (process.finished, self._model_test_finished),
+            (process.errorOccurred, self._model_test_error),
+            (process.readyReadStandardOutput, self._model_test_output),
+        ):
+            with contextlib.suppress(RuntimeError, TypeError):
+                signal.disconnect(slot)
+        if process.state() != QProcess.ProcessState.NotRunning:
+            process.terminate()
+            if not process.waitForFinished(500):
+                process.kill()
+                process.waitForFinished(500)
+        process.deleteLater()
+
+    def closeEvent(self, event: QCloseEvent) -> None:
+        self.shutdown()
+        super().closeEvent(event)
 
     def _current_alias(self) -> str | None:
         item = self.model_list.currentItem()
@@ -1109,8 +1108,13 @@ class ProviderSection(QWidget):
         for scenario_id in only or []:
             arguments += ["--senaryo", scenario_id]
         # Yeniden deneme ayrı dosyaya yazar: tam rapor kısmi raporla ezilmez, sonra birleştirilir.
-        suffix = ".yeniden" if only else ""
-        report = settings.state_dir / "model_testleri" / f"{_slug(alias) or 'model'}{suffix}.json"
+        folder = settings.state_dir / "model_testleri"
+        slug = _slug(alias) or "model"
+        report = folder / f"{slug}{'.yeniden' if only else ''}.json"
+        # Eski rapor kalırsa çöken koşu önceki sonucu gösterirdi; başlamadan silinir.
+        report.unlink(missing_ok=True)
+        if not only:
+            (folder / f"{slug}.yeniden.json").unlink(missing_ok=True)
         arguments += ["--rapor", str(report)]
         process = QProcess(self)
         environment = QProcessEnvironment()
@@ -1127,6 +1131,7 @@ class ProviderSection(QWidget):
         process.readyReadStandardOutput.connect(self._model_test_output)
         self._test_report = report
         process.finished.connect(self._model_test_finished)
+        process.errorOccurred.connect(self._model_test_error)
         self._model_test, self._testing = process, alias
         self._retrying, self._test_buffer = bool(only), ""
         if only:
@@ -1280,18 +1285,3 @@ class ProviderSection(QWidget):
         self.changed.emit()
 
 
-def _write_json(path: Path, data: object) -> None:
-    """Geçici dosyaya yazıp yerine koyar: yarım rapor kalmaz."""
-    temp = path.with_suffix(".tmp")
-    temp.write_text(json.dumps(data, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
-    os.replace(temp, path)
-
-
-def _score(report: dict[str, object]) -> str:
-    """Listede tek sayı: geçen senaryoların yüzdesi ('%87'); tehlikeli hata metinle belirtilir."""
-    rate = pass_rate(report)
-    if rate is None:
-        return ""
-    return f"%{round(100 * rate)}" + (
-        " · tehlikeli hata" if report.get("dangerous_errors") else ""
-    )

@@ -379,6 +379,17 @@ def foreground_window() -> tuple[int, tuple[int, int, int, int]]:
     return int(hwnd), (int(rect.left), int(rect.top), int(rect.right), int(rect.bottom))
 
 
+def window_rect(hwnd: int) -> tuple[int, int, int, int]:
+    """Verilen pencere kimliğinin güncel (sol, üst, sağ, alt) dikdörtgenini döndürür;
+    onay sırasında taşınma/yeniden boyutlanma denetimi için (session._stale_reason)."""
+    _require_windows()
+    user32 = _libs()[0]
+    rect = wintypes.RECT()
+    if hwnd <= 0 or not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        raise OSError("Pencere dikdörtgeni okunamadı (GetWindowRect).")
+    return int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
+
+
 def process_at(x: int, y: int) -> tuple[str, int]:
     """Fiziksel (x, y) noktasındaki üst düzey pencerenin (exe yolu, pid).
 
@@ -566,6 +577,8 @@ _FOCUS_SCRIPT = "\n".join(
         "  Add-Type -AssemblyName UIAutomationClient",
         "  Add-Type -AssemblyName UIAutomationTypes",
         "  $e = [System.Windows.Automation.AutomationElement]::FocusedElement",
+        # Parola alanlarının içeriği hiçbir koşulda okunmaz; sözleşme gereği bilinmiyor ('?') döner.
+        "  if ($null -eq $e -or $e.Current.IsPassword) { '?'; exit 0 }",
         "  $p = $null",
         "  $vp = [System.Windows.Automation.ValuePattern]::Pattern",
         "  $tp = [System.Windows.Automation.TextPattern]::Pattern",
@@ -690,6 +703,20 @@ _UIA_SCRIPT = "\n".join(
         "$ErrorActionPreference = 'Stop'",
         "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
         "try {",
+        # Karma DPI çoklu monitörlerde BoundingRectangle kaymasını önlemek için UIA'dan önce
+        # Per-Monitor V2 DPI farkındalığı kurulur; eski Windows'ta SetProcessDPIAware'e düşülür.
+        "  Add-Type -TypeDefinition @'",
+        "using System;",
+        "using System.Runtime.InteropServices;",
+        "public static class ArtemisUiaNative {",
+        '  [DllImport("user32.dll")] public static extern bool '
+        "SetProcessDpiAwarenessContext(IntPtr value);",
+        '  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();',
+        "}",
+        "'@",
+        "  try { if (-not [ArtemisUiaNative]::SetProcessDpiAwarenessContext([IntPtr](-4))) "
+        "{ [void][ArtemisUiaNative]::SetProcessDPIAware() } } "
+        "catch { [void][ArtemisUiaNative]::SetProcessDPIAware() }",
         "  Add-Type -AssemblyName UIAutomationClient",
         "  Add-Type -AssemblyName UIAutomationTypes",
         "  $hwnd = [IntPtr][long]$env:ARTEMIS_UIA_HWND",

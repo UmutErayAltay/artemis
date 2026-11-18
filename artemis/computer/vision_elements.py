@@ -37,6 +37,8 @@ _VISION_OCR_SCRIPT = "\n".join(
         "  [StructLayout(LayoutKind.Sequential)]",
         "  public struct RECT { public int Left; public int Top; "
         "public int Right; public int Bottom; }",
+        '  [DllImport("user32.dll")] public static extern bool '
+        "SetProcessDpiAwarenessContext(IntPtr value);",
         '  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();',
         '  [DllImport("user32.dll")] public static extern bool GetWindowRect('
         "IntPtr h, out RECT r);",
@@ -44,7 +46,9 @@ _VISION_OCR_SCRIPT = "\n".join(
         "IntPtr h, int attr, out RECT r, int size);",
         "}",
         "'@",
-        "[void][ArtemisVisionNative]::SetProcessDPIAware()",
+        "try { if (-not [ArtemisVisionNative]::SetProcessDpiAwarenessContext([IntPtr](-4))) "
+        "{ [void][ArtemisVisionNative]::SetProcessDPIAware() } } "
+        "catch { [void][ArtemisVisionNative]::SetProcessDPIAware() }",
         "$rect = New-Object ArtemisVisionNative+RECT",
         "$sz = [System.Runtime.InteropServices.Marshal]::SizeOf([type][ArtemisVisionNative+RECT])",
         "if ([ArtemisVisionNative]::DwmGetWindowAttribute($hwnd, 9, [ref]$rect, $sz) -ne 0) {",

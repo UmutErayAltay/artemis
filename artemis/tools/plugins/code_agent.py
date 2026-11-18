@@ -133,10 +133,11 @@ class CodeAgentPrepare(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(PrepareArguments, arguments)
         jobs = _jobs(context)
-        # Hazırlama subprocess çalıştırmaz; keşif status turunun yerel snapshot'ıdır.
+        # Hazırlama subprocess çalıştırmaz; status çağrısı beklenmeden keşfedilen projeler de
+        # bulunsun (salt yerel klasör taraması).
         known = {
             **context.services.get("code_agent_project_paths", {}),
-            **context.settings.code_agent.projects,
+            **available_projects(context.settings.code_agent),
         }
         if jobs is None or args.project not in known:
             return ToolResult(message="İzinli proje bulunamadı; taslak hazırlanmadı.")

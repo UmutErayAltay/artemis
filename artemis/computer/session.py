@@ -100,6 +100,7 @@ class ComputerBackend(Protocol):
     def capture(self, left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]: ...
     def foreground_process(self) -> tuple[str, int]: ...
     def foreground_window(self) -> tuple[int, tuple[int, int, int, int]]: ...
+    def window_rect(self, hwnd: int) -> tuple[int, int, int, int]: ...
     def process_at(self, x: int, y: int) -> tuple[str, int]: ...
     def window_at(self, x: int, y: int) -> int: ...
     def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None: ...
@@ -1006,8 +1007,8 @@ class ComputerSession:
             return self._result("timeout", "Oturum süresi doldu.")
         if action.type != "wait":
             # Onay penceresi odağı kendisi değiştirir; onaylı adımda yakalama anındaki ön plan
-            # karşılaştırması atlanır. Bunun yerine hedef, onaylanan pencere kimliğine bağlıdır
-            # (yukarıda ve gönderimden hemen önce denetlenir); monitör düzeni yine denetlenir.
+            # karşılaştırması atlanır. Bunun yerine hedef, onaylanan pencere kimliğine ve
+            # dikdörtgenine bağlıdır; monitör düzeni yine denetlenir.
             stale = await self._stale_reason(layout, check_window=approved is not True)
             if stale:
                 return stale
@@ -1093,13 +1094,26 @@ class ComputerSession:
             return _Stale("Ekran düzeni doğrulanamadı")
         try:
             monitors = await asyncio.to_thread(self._backend.monitors)
-            window = await asyncio.to_thread(self._backend.foreground_window)
+            window = (
+                await asyncio.to_thread(self._backend.foreground_window)
+                if check_window
+                else None
+            )
+            # Onay diyalogu odağı çaldığı için kimlik değişimi atlanır; ancak aynı pencere
+            # onay sırasında taşınmış/boyutlanmışsa koordinatlar eskimiş demektir.
+            current_rect = (
+                None
+                if check_window
+                else await asyncio.to_thread(self._backend.window_rect, layout.window[0])
+            )
         except (OSError, RuntimeError) as error:
             return _Stale(f"Ekran düzeni okunamadı ({error})")
         if monitors != layout.monitors:
             return _Stale("Ekran düzeni değişti")
         if check_window and window != layout.window:
             return _Stale("Ön plandaki pencere değişti veya taşındı")
+        if not check_window and current_rect != layout.window[1]:
+            return _Stale("Hedef pencere onay sırasında taşındı veya boyutu değişti")
         return None
 
     def _holder(self, action_type: str, point: tuple[int, int] | None) -> tuple[str, int]:
