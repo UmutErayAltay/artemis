@@ -99,10 +99,10 @@ class VoiceConfig(BaseModel):
     require_wake_during_output: bool = True
     # ADR 0042: konuşurken uyandırmasız doğrulanmış söz yalnız susturur, komut çalıştırmaz.
     barge_in_without_wake: bool = True
-    # ADR 0046 eki: False iken söz kesme ve yanıt sonu takip penceresi açmaz (Artemis demeden
+    # ADR 0079 eki: False iken söz kesme ve yanıt sonu takip penceresi açmaz (Artemis demeden
     # dinleme yok); tek başına "Artemis" karşılığı takibi her zaman açar. True: eski davranış.
     followup_listening: bool = False
-    # Uyandırma karşılığı; çok kısa metin EMA TTS'te bozuk çıkıyordu (ADR 0046 eki).
+    # Uyandırma karşılığı; çok kısa metin EMA TTS'te bozuk çıkıyordu (ADR 0079 eki).
     wake_ack_text: str = Field(default="Seni dinliyorum.", min_length=1, max_length=40)
     # ADR 0043: model yazarken cümle cümle seslendir; sağlayıcı akmıyorsa tam yanıt beklenir.
     streaming: bool = True
@@ -157,7 +157,7 @@ class VoiceConfig(BaseModel):
     # Öğretilmiş uygulama takma adlarının hedef adları STT ipucuna eklenir (ADR 0044).
     # Varsayılan kapalı: geniş hotword listesi uyandırmada yan etki verdi (CPA_LOCAL_TEST).
     stt_alias_hotwords: bool = False
-    # ADR 0046: hybrid'de uyandırma/yankı kararları yerel metinle verilir, yalnız komut olacak
+    # ADR 0079: hybrid'de uyandırma/yankı kararları yerel metinle verilir, yalnız komut olacak
     # sözün sesi `stt_cloud_endpoint` ucuna (üst düzey `endpoints` kimliği) gider.
     stt_mode: Literal["local", "hybrid"] = "local"
     stt_cloud_endpoint: str = ""

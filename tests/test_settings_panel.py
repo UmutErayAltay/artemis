@@ -42,7 +42,7 @@ def config(tmp_path: Path, *, local: bool = True, cloud: bool = False) -> Path:
         "applications": {"brave": "brave.exe"}, "close_without_confirmation": ["brave"],
         "models": {"first": {"provider": "openrouter", "model": "first-model",
                              "input_per_million": "0", "output_per_million": "0"}},
-        # Karma tanıma kutusu açılınca doğrulama uç + model ister (ADR 0046).
+        # Karma tanıma kutusu açılınca doğrulama uç + model ister (ADR 0079).
         **({"endpoints": {"bulut": {"base_url": "https://api.example.com/v1"},
                           "bulut2": {"base_url": "https://api2.example.com/v1"}}}
            if cloud else {}),

@@ -48,10 +48,13 @@ jobs:
           python-version: '3.12'
           cache: pip
       - run: python -m pip install -e ".[dev,desktop]"
+      # Tam pytest burada da koşar: `checks` ile aynı isteğe bağlı test bağımlılıkları.
+      - run: python -m pip install numpy==2.5.3 onnxruntime==1.31.0 livekit==1.1.20 pyarrow==25.0.1
       - name: Install Qt runtime libraries
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libegl1 libopengl0
-      - run: pytest -q tests/test_desktop_gui.py
-      - run: mypy artemis/channels/desktop/app.py artemis/channels/desktop/demo.py tests/test_desktop_gui.py
+      # `checks` PySide6 kurmaz; Qt testleri (importorskip) yalnız burada koşar.
+      - run: pytest -q
+      - run: mypy

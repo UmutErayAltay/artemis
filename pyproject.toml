@@ -7,6 +7,8 @@ name = "artemis-tr"
 version = "0.2.0"
 description = "Türkçe, güvenlik kapılı kişisel masaüstü asistanı"
 requires-python = ">=3.12"
+license = "Apache-2.0"
+license-files = ["LICENSE", "LICENSES/*.txt", "THIRD_PARTY_NOTICES.md"]
 dependencies = [
   "pydantic==2.12.3",
   "httpx==0.28.1",

@@ -321,7 +321,7 @@ async def build_voice_controller(
         local_voice = alias_hotword_config(settings)
         if cloud_recognizer is not None:
             # Hybrid'de yerel tanıyıcı yalnız uyandırmaya karar verir; tam hotword listesi
-            # "Artemis tarayıcı" gibi kuyruk halüsinasyonu üretiyordu (ADR 0046 eki).
+            # "Artemis tarayıcı" gibi kuyruk halüsinasyonu üretiyordu (ADR 0079 eki).
             local_voice = VoiceConfig.model_validate(
                 {**local_voice.model_dump(), "stt_hotwords": (local_voice.wake_word,)}
             )

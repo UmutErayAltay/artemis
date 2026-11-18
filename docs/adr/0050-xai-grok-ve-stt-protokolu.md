@@ -1,6 +1,6 @@
 # ADR 0050 — xAI Grok bağlantısı ve bulut tanıma protokolü seçimi
 
-**Durum:** Kabul (2026-11-02). ADR 0046'yı genişletir; SafetyGate ve gizlilik anlamı değişmez.
+**Durum:** Kabul (2026-11-02). ADR 0079'u genişletir; SafetyGate ve gizlilik anlamı değişmez.
 
 **Bağlam:** Kullanıcı xAI Grok'u sohbet modeli ve karma tanıma sunucusu olarak kullanmak
 istedi. Sohbet ucu (`https://api.x.ai/v1`) OpenAI uyumludur. xAI'nin STT REST ucu ise

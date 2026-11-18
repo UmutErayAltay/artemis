@@ -2,14 +2,15 @@
 
 Windows 11 için Türkçe kişisel masaüstü asistanı. Masaüstü paneli, sesli komut, pet,
 Telegram kanalı ve CLI; sağlayıcıdan bağımsız ajan döngüsünü, **tek güvenlik kapısını** ve
-araçları paylaşır. Yan etkili her adım ekranda tam argümanlarla onay ister; varsayılan cevap
-hayırdır.
+araçları paylaşır. Silme ve kapatma gibi riskli adımlar ile dış içerik okunduktan sonraki her
+yan etki ekranda tam argümanlarla onay ister; varsayılan cevap hayırdır.
 
 > **Durum: teknik önizleme.** Çekirdek (güvenlik kapısı, araçlar, ajan döngüsü, UI, ses hattı)
 > testlidir (3300+ test, Windows ve Ubuntu CI). Windows'ta gerçek cihaz kabulü kısmendir; neyin
 > doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Windows kurucusu
 > [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasından indirilir ya da kaynaktan
-> derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)); henüz lisans yoktur.
+> derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)). Lisans: [Apache-2.0](LICENSE); kurucudaki üçüncü
+> taraf bileşenler (GPL-3.0 Piper dahil) için [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 Neler var:
 
@@ -217,7 +218,7 @@ uyandırmaya karar verir, komut sesi seçtiğiniz buluta gider. Sunucu **Ayarlar
 tanıma** bölümünden seçilir: sunucu adresi, protokol (`openai`: Whisper uyumlu
 `/audio/transcriptions`, örn. Groq; `xai`: xAI `/v1/stt`), model ve API anahtarı (Kimlik
 Bilgisi Yöneticisi'ne yazılır, YAML'a girmez). "Modelleri getir" sunucudan model listesini çeker.
-Komut sesi buluta gider, gizlilik denetimine yazılır ([ADR 0046](docs/adr/0046-stt-precision-and-hybrid-cloud.md),
+Komut sesi buluta gider, gizlilik denetimine yazılır ([ADR 0079](docs/adr/0079-stt-precision-and-hybrid-cloud.md),
 [ADR 0050](docs/adr/0050-xai-grok-ve-stt-protokolu.md)). xAI ucu Türkçe ile denenmedi.
 
 Uygulama adlarını `voice.stt_hotwords` listesine eklemek doğru hedef bulmayı artırabilir ama genel
@@ -920,3 +921,11 @@ kabulü; temiz bir Windows'ta ilk kurulum deneyimi.
 Ses tanıma beklerken yakalama devam eder; iki bekleyen segment sınırı aşılırsa uyarı verilir.
 Ses raporu STT kuyruk/çözüm sürelerini ve mikrofon düşmelerini gösterir; sınırsız yükte
 kayıpsız ses veya çalışan native STT'yi anında kesme garantisi yoktur.
+
+## Lisans
+
+Telif hakkı 2026 Umut Eray Altay. Artemis'in kaynak kodu [Apache License 2.0](LICENSE) ile
+lisanslıdır. Windows kurucusu kendi lisanslarıyla gelen üçüncü taraf bileşenler de içerir (Piper
+TTS: GPL-3.0-or-later; PySide6 ve edge-tts: LGPL-3.0; certifi: MPL-2.0); bu yüzden ikili paketin
+bütünü GPL-3.0 şartlarıyla dağıtılır. Ayrıntı ve kaynak bağlantıları:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

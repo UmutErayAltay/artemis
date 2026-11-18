@@ -379,7 +379,8 @@ def test_action_row_inside_viewport_with_combos(tmp_path: Path, app: QApplicatio
     viewport = panel.findChild(QScrollArea).viewport()
     for widget in (panel.prepare_button, panel.prepare_reason):
         bottom = widget.mapTo(viewport, QPoint(0, widget.height())).y()
-        assert 0 < bottom <= viewport.height(), (widget, bottom, viewport.height())
+        # 2 px pay: CI Linux fontları satır yüksekliğini 1 px büyütüyor.
+        assert 0 < bottom <= viewport.height() + 2, (widget, bottom, viewport.height())
     # Geniş düzende iki seçici aynı satırda, dar düzende alt alta.
     assert panel.agent_combo.mapTo(panel, QPoint(0, 0)).y() == panel.workdir_combo.mapTo(
         panel, QPoint(0, 0)
@@ -408,7 +409,8 @@ def test_action_row_and_default_button_inside_viewport_with_warning_chip(
     viewport = panel.findChild(QScrollArea).viewport()
     for widget in (panel.prepare_button, panel.default_button, panel.workdir_warning):
         bottom = widget.mapTo(viewport, QPoint(0, widget.height())).y()
-        assert 0 < bottom <= viewport.height(), (widget, bottom, viewport.height())
+        # 2 px pay: CI Linux fontları satır yüksekliğini 1 px büyütüyor.
+        assert 0 < bottom <= viewport.height() + 2, (widget, bottom, viewport.height())
     panel.close()
 
 
