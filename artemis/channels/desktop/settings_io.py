@@ -100,6 +100,7 @@ _STANDARD_PRECISIONS = ("int8_float16", "float16")
 # Panelin "Uygula" ile yazdığı ve "yenile" ile okuduğu sade alanlar. Özel mantığı olanlar
 # (mikrofon aygıtı, STT model yolu, uygulama listesi, code_agent) save_choices'ta açık kalır.
 PANEL_BINDINGS: tuple[PanelBinding, ...] = (
+    _combo(("language",), "language_combo", fallback_first=True),
     PanelBinding(
         ("voice", "wake_word"), "wake_name",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),

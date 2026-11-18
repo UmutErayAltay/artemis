@@ -894,6 +894,8 @@ class FileSearchConfig(BaseModel):
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    # Arayüz ve yanıt dili; ADR yok, basit tercih.
+    language: Literal["tr", "en"] = "tr"
     workspace: Path = Path("desktop")
     state_dir: Path = Path(".artemis")
     audit_path: Path = Path(".artemis/audit.jsonl")

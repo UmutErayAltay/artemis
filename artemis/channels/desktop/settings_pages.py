@@ -57,6 +57,7 @@ from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
 from artemis.channels.desktop.update_section import UpdateSection
 from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import BUILTIN_AGENT
+from artemis.i18n import t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.settings_panel import SettingsPanel
@@ -566,6 +567,18 @@ def build_look_page(panel: SettingsPanel) -> None:
     panel.theme_combo.currentIndexChanged.connect(panel._sync_theme_cards)
     panel.theme_combo.currentIndexChanged.connect(panel.saved_notes["Görünüm"].flash)
     panel._sync_theme_cards()
+    lang_box, lang = group(t("Dil"))
+    panel.language_combo = QComboBox()
+    panel.language_combo.setAccessibleName(t("Arayüz dili"))
+    panel.language_combo.addItem(t("Türkçe"), "tr")
+    panel.language_combo.addItem("English", "en")
+    field(
+        lang,
+        t("Arayüz dili"),
+        panel.language_combo,
+        hint=t("Değişiklik Artemis yeniden başlatılınca geçerli olur."),
+    )
+    look.addWidget(lang_box)
     look.addStretch(1)
 
 

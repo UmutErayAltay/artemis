@@ -121,6 +121,7 @@ from artemis.channels.desktop.window_theme import (
 )
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings
+from artemis.i18n import set_language
 from artemis.safety.audit import AuditLog
 from artemis.tools.toast import ToastOutcome, show_toast
 
@@ -1282,6 +1283,10 @@ def run_desktop(
     app.setWindowIcon(app_icon())
     app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(_STYLE)
+    if not demo:
+        # Ayar okunamazsa arayüz Türkçe kalır.
+        with contextlib.suppress(OSError, ValueError, yaml.YAMLError):
+            set_language(load_settings(config_path).language)
     maybe_connect(config_path)
     window = build_window(config_path, demo=demo, voice=voice, app=app)
     if server is not None:

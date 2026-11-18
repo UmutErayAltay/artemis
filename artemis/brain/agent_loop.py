@@ -535,6 +535,12 @@ class AgentLoop:
             if emotion_tags
             else ""
         )
+        language_instruction = (
+            "\n\nArayüz dili İngilizce: kullanıcıya İngilizce yanıt ver "
+            "(kullanıcı başka dilde yazarsa onun dilini kullan)."
+            if settings.language == "en"
+            else ""
+        )
         messages = [
             Message(
                 role="system",
@@ -571,6 +577,7 @@ class AgentLoop:
                     " Ayarlar > Uygulamalar'dan eklemesini söyle."
                 )
                 + emotion_instruction
+                + language_instruction
                 + public_notes
                 + public_companion
                 + prompt_section(skills),

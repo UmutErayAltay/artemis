@@ -271,6 +271,7 @@ class SettingsPanel(QWidget):
     providers: ProviderSection
     pet: PetSection
     theme_combo: QComboBox
+    language_combo: QComboBox
     theme_cards: dict[str, _ThemeCard]
     _theme_grid: QGridLayout
     _theme_columns: int
