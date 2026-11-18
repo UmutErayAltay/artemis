@@ -61,13 +61,10 @@ def test_demo_and_ses_are_both_passed_and_demo_ownership_stays_in_the_window(
 ):
     # CLI bayrakları olduğu gibi iletir; demoda sesi kapatan karar pencerededir (GUI testi).
     assert _run_cli(monkeypatch, "desktop", "--demo", "--ses") == 0
-    assert desktop_calls == [
-        {
-            "config_path": Path("config/config.yaml"),
-            "demo": True,
-            "voice": True,
-            "background": False,
-        }
+    # config yolu ortama bağlı (depoda config/config.yaml yoksa kullanıcı veri klasörü); burada
+    # yalnız bayraklar sınanır.
+    assert [{k: v for k, v in call.items() if k != "config_path"} for call in desktop_calls] == [
+        {"demo": True, "voice": True, "background": False}
     ]
 
 
