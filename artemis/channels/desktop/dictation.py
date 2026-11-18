@@ -19,6 +19,7 @@ from typing import Any, Protocol
 
 from artemis.channels.desktop.hotkey import GlobalHotkey
 from artemis.channels.voice.core import Microphone, SpeechRecognizer
+from artemis.i18n import t
 
 _ESC_UNAVAILABLE = "Esc kısayolu kullanılamıyor; yazımı durdurmak için başka pencereye geçin."
 _VOICE_ON = "Ses açıkken dikte kullanılamaz; önce sesi kapatın."
@@ -165,18 +166,18 @@ class Dictation:
             self._stop.set()
             return
         if self._phase != "idle":
-            self._emit("message", _BUSY)
+            self._emit("message", t(_BUSY))
             return
         # Önce kendi bayrağımızı kaldırıp sonra sese bakarız: köprü de önce kendi bayrağını
         # kaldırıp bize bakar, böylece ses ve dikte aynı anda mikrofon açamaz.
         self._phase = "recording"
         if self._voice_active():
             self._phase = "idle"
-            self._emit("message", _VOICE_ON)
+            self._emit("message", t(_VOICE_ON))
             return
         if self._other_busy():
             self._phase = "idle"
-            self._emit("message", _SELECTION_ON)
+            self._emit("message", t(_SELECTION_ON))
             return
         self._stop = asyncio.Event()
         self._task = asyncio.create_task(self._session())
@@ -198,7 +199,7 @@ class Dictation:
         target = self._target()
         self._emit("listening", "")
         outcome, chars, typed = "error", 0, 0
-        message = "Dikte çalışmadı; ses ve model ayarlarını kontrol edin."
+        message = t("Dikte çalışmadı; ses ve model ayarlarını kontrol edin.")
         text = ""
         prepare = asyncio.ensure_future(self._recognizer_ready())
         prepare.add_done_callback(lambda done: done.cancelled() or done.exception())
@@ -210,7 +211,7 @@ class Dictation:
             text = clean_transcript(await recognizer.transcribe(pcm)) if pcm else ""
             chars = len(text)
             if not text:
-                outcome, message = "empty", "Dikte: konuşma anlaşılamadı."
+                outcome, message = "empty", t("Dikte: konuşma anlaşılamadı.")
             else:
                 outcome, typed, message = await self._type(text, target)
         except asyncio.CancelledError:
@@ -268,28 +269,28 @@ class Dictation:
         outcome, typed = await type_into_target(
             self._backend, text, target, self._own_pid,
             closing=lambda: self._closing,
-            esc_unavailable=lambda: self._emit("message", _ESC_UNAVAILABLE),
+            esc_unavailable=lambda: self._emit("message", t(_ESC_UNAVAILABLE)),
         )
         if outcome == "typed":
-            return outcome, typed, f"Dikte: {typed} karakter gönderildi."
+            return outcome, typed, t("Dikte: {typed} karakter gönderildi.").format(typed=typed)
         if outcome == "partial":
             return (
                 outcome, typed,
-                f"Dikte yarım kaldı: {typed}/{len(text)} karakter yazıldı, geri alınmadı. "
-                "Tam metin panelde.",
+                t("Dikte yarım kaldı: {typed}/{total} karakter yazıldı, geri alınmadı. "
+                  "Tam metin panelde.").format(typed=typed, total=len(text)),
             )
         if outcome == "error":
             # Kaç karakterin gittiği bilinmez; başarı denmez, gidenin geri alınmadığı söylenir.
             return (
                 outcome, 0,
-                "Dikte yazımı hata verdi; bir kısmı yazılmış olabilir, geri alınmadı.",
+                t("Dikte yazımı hata verdi; bir kısmı yazılmış olabilir, geri alınmadı."),
             )
         if outcome == "cancelled":
-            return outcome, 0, "Dikte durduruldu (Esc); hiçbir şey yazılmadı. Metin panelde."
+            return outcome, 0, t("Dikte durduruldu (Esc); hiçbir şey yazılmadı. Metin panelde.")
         if target is None or self._target() != target:
             # Yazım hiç başlamadan hedef yok ya da değişmişti.
             return (
                 "no_target", 0,
-                "Dikte yazılmadı: hedef pencere yok ya da değişti. Metin panelde.",
+                t("Dikte yazılmadı: hedef pencere yok ya da değişti. Metin panelde."),
             )
-        return "no_target", 0, "Dikte yazılmadı: hedef pencere değişti. Metin panelde."
+        return "no_target", 0, t("Dikte yazılmadı: hedef pencere değişti. Metin panelde.")

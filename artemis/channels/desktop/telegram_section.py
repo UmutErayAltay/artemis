@@ -30,6 +30,7 @@ from artemis.channels.telegram.api import (
 from artemis.channels.telegram.channel import (
     _FORWARD_KEYS,
     STATUS_CONFLICT,
+    STATUS_ERROR,
     STATUS_RUNNING,
     STATUS_STARTING,
     STATUS_STOPPED,
@@ -237,6 +238,9 @@ class TelegramSection(QWidget):
             return t(blocker)
         if not enabled:
             return t("Kapalı.")
+        # Durum Türkçe sabit olarak gelir (mantık onunla karşılaştırır); yalnız gösterimde çevrilir.
+        if self._channel_text.startswith(STATUS_ERROR):
+            return t(STATUS_ERROR) + self._channel_text[len(STATUS_ERROR):]
         return {
             STATUS_RUNNING: t("Çalışıyor"),
             STATUS_STARTING: t("Başlıyor…"),

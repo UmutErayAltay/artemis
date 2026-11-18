@@ -24,6 +24,7 @@ from artemis.channels.desktop.provider_helpers import speech_cost_text
 from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.channels.voice.cloud_tts import gemini_native_target
 from artemis.config.settings import EndpointConfig, ModelConfig, load_settings
+from artemis.i18n import t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.settings_panel import SettingsPanel
@@ -113,21 +114,31 @@ def fetch_tts_models(
     try:
         response = httpx.get(url, headers=headers, timeout=10.0, follow_redirects=False)
     except httpx.HTTPError:
-        return "Sunucuya ulaşılamadı (adres doğru mu, sunucu çalışıyor mu?).", []
+        return t("Sunucuya ulaşılamadı (adres doğru mu, sunucu çalışıyor mu?)."), []
     if response.status_code in {401, 403}:
-        return f"Sunucu API anahtarını reddetti (HTTP {response.status_code}).", []
+        return (
+            t("Sunucu API anahtarını reddetti (HTTP {status}).").format(
+                status=response.status_code
+            ),
+            [],
+        )
     if response.status_code != 200:
-        return f"Sunucu beklenmeyen yanıt verdi (HTTP {response.status_code}).", []
+        return (
+            t("Sunucu beklenmeyen yanıt verdi (HTTP {status}).").format(
+                status=response.status_code
+            ),
+            [],
+        )
     try:
         payload = response.json()
     except ValueError:
-        return "Bağlantı var ama model listesi okunamadı; model adını elle yazabilirsin.", []
+        return t("Bağlantı var ama model listesi okunamadı; model adını elle yazabilirsin."), []
     models = (
         parse_gemini_tts_models(payload)
         if protocol == "gemini"
         else parse_openai_tts_models(payload)
     )
-    return f"Bağlantı tamam, {len(models)} ses modeli bulundu.", models
+    return t("Bağlantı tamam, {count} ses modeli bulundu.").format(count=len(models)), models
 
 
 class TtsModelFetch(QThread):
@@ -163,61 +174,61 @@ class TtsCloudBox(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
 
         panel.tts_cloud_saved = QComboBox()
-        panel.tts_cloud_saved.setAccessibleName("Bulut konuşma modeli")
-        panel.tts_cloud_saved.addItem("Elle ayarla", "")
-        field(layout, "Bulut konuşma modeli", panel.tts_cloud_saved)
+        panel.tts_cloud_saved.setAccessibleName(t("Bulut konuşma modeli"))
+        panel.tts_cloud_saved.addItem(t("Elle ayarla"), "")
+        field(layout, t("Bulut konuşma modeli"), panel.tts_cloud_saved)
 
         self._manual_box = QWidget()
         manual_layout = QVBoxLayout(self._manual_box)
         manual_layout.setContentsMargins(0, 0, 0, 0)
 
         panel.tts_cloud_server = QComboBox()
-        panel.tts_cloud_server.setAccessibleName("Bulut konuşma sunucusu")
-        field(manual_layout, "Konuşma sunucusu", panel.tts_cloud_server)
+        panel.tts_cloud_server.setAccessibleName(t("Bulut konuşma sunucusu"))
+        field(manual_layout, t("Konuşma sunucusu"), panel.tts_cloud_server)
 
         panel.tts_cloud_protocol = QComboBox()
-        panel.tts_cloud_protocol.setAccessibleName("Bulut konuşma protokolü")
-        panel.tts_cloud_protocol.addItem("OpenAI uyumlu · OpenRouter vb.", "openai")
-        panel.tts_cloud_protocol.addItem("Gemini API", "gemini")
-        field(manual_layout, "Protokol", panel.tts_cloud_protocol)
+        panel.tts_cloud_protocol.setAccessibleName(t("Bulut konuşma protokolü"))
+        panel.tts_cloud_protocol.addItem(t("OpenAI uyumlu · OpenRouter vb."), "openai")
+        panel.tts_cloud_protocol.addItem(t("Gemini API"), "gemini")
+        field(manual_layout, t("Protokol"), panel.tts_cloud_protocol)
 
         panel.tts_cloud_model = QComboBox()
         panel.tts_cloud_model.setEditable(True)
-        panel.tts_cloud_model.setAccessibleName("Bulut konuşma modeli")
-        panel.tts_cloud_fetch_button = QPushButton("Ses modellerini getir")
-        panel.tts_cloud_fetch_button.setAccessibleName("Ses modellerini getir")
+        panel.tts_cloud_model.setAccessibleName(t("Bulut konuşma modeli"))
+        panel.tts_cloud_fetch_button = QPushButton(t("Ses modellerini getir"))
+        panel.tts_cloud_fetch_button.setAccessibleName(t("Ses modellerini getir"))
         panel.tts_cloud_fetch_button.clicked.connect(self._fetch_models)
         model_row = QHBoxLayout()
         model_row.setSpacing(8)
         model_row.addWidget(panel.tts_cloud_model, 1)
         model_row.addWidget(panel.tts_cloud_fetch_button)
-        field(manual_layout, "Model kimliği", model_row)
+        field(manual_layout, t("Model kimliği"), model_row)
         layout.addWidget(self._manual_box)
 
         panel.tts_cloud_voice = QComboBox()
         panel.tts_cloud_voice.setEditable(True)
-        panel.tts_cloud_voice.setAccessibleName("Bulut konuşma sesi")
-        field(layout, "Ses", panel.tts_cloud_voice)
+        panel.tts_cloud_voice.setAccessibleName(t("Bulut konuşma sesi"))
+        field(layout, t("Ses"), panel.tts_cloud_voice)
 
-        panel.tts_cloud_consent = QCheckBox("Yanıt metni bu bulut sunucusuna gönderilsin")
-        panel.tts_cloud_consent.setAccessibleName("Yanıt metni bu bulut sunucusuna gönderilsin")
+        panel.tts_cloud_consent = QCheckBox(t("Yanıt metni bu bulut sunucusuna gönderilsin"))
+        panel.tts_cloud_consent.setAccessibleName(t("Yanıt metni bu bulut sunucusuna gönderilsin"))
         layout.addWidget(panel.tts_cloud_consent)
 
-        panel.tts_cloud_paid = QCheckBox("Ücretli modele izin ver")
-        panel.tts_cloud_paid.setAccessibleName("Ücretli modele izin ver")
+        panel.tts_cloud_paid = QCheckBox(t("Ücretli modele izin ver"))
+        panel.tts_cloud_paid.setAccessibleName(t("Ücretli modele izin ver"))
         layout.addWidget(panel.tts_cloud_paid)
 
-        panel.tts_cloud_emotion = QCheckBox("Bu model duygu etiketlerini destekliyor")
-        panel.tts_cloud_emotion.setAccessibleName("Bu model duygu etiketlerini destekliyor")
+        panel.tts_cloud_emotion = QCheckBox(t("Bu model duygu etiketlerini destekliyor"))
+        panel.tts_cloud_emotion.setAccessibleName(t("Bu model duygu etiketlerini destekliyor"))
         layout.addWidget(panel.tts_cloud_emotion)
 
         panel.tts_cloud_emotion_tags = QLineEdit()
         panel.tts_cloud_emotion_tags.setPlaceholderText("[laugh] [sigh] [whisper]")
-        panel.tts_cloud_emotion_tags.setAccessibleName("Duygu etiketleri")
-        field(layout, "Duygu etiketleri", panel.tts_cloud_emotion_tags)
+        panel.tts_cloud_emotion_tags.setAccessibleName(t("Duygu etiketleri"))
+        field(layout, t("Duygu etiketleri"), panel.tts_cloud_emotion_tags)
 
         panel.tts_cloud_hint = meta_label("")
-        panel.tts_cloud_hint.setAccessibleName("Bulut konuşma bilgisi")
+        panel.tts_cloud_hint.setAccessibleName(t("Bulut konuşma bilgisi"))
         layout.addWidget(panel.tts_cloud_hint)
 
         panel.tts_combo.currentIndexChanged.connect(self._sync_state)
@@ -283,7 +294,7 @@ class TtsCloudBox(QWidget):
         blocked = combo.blockSignals(True)
         try:
             combo.clear()
-            combo.addItem("Seçilmedi", "")
+            combo.addItem(t("Seçilmedi"), "")
             for name in endpoints:
                 combo.addItem(name, name)
             combo.setCurrentIndex(max(0, combo.findData(current)))
@@ -295,7 +306,7 @@ class TtsCloudBox(QWidget):
         saved_blocked = saved_combo.blockSignals(True)
         try:
             saved_combo.clear()
-            saved_combo.addItem("Elle ayarla", "")
+            saved_combo.addItem(t("Elle ayarla"), "")
             for alias in speech_models:
                 saved_combo.addItem(alias, alias)
             server = str(self._panel.tts_cloud_server.currentData() or "")
@@ -391,7 +402,7 @@ class TtsCloudBox(QWidget):
             return
         protocol = str(self._panel.tts_cloud_protocol.currentData() or "openai")
         key = stored_endpoint_key(name) if endpoint.api_key else None
-        self._panel.tts_cloud_hint.setText("Ses modelleri alınıyor…")
+        self._panel.tts_cloud_hint.setText(t("Ses modelleri alınıyor…"))
         self._fetch_for = (name, protocol)
         self._fetch = TtsModelFetch(endpoint.base_url, protocol, key, self)
         self._fetch.done.connect(self._fetch_done)
@@ -448,12 +459,14 @@ class TtsCloudBox(QWidget):
         if status_prefix:
             parts.append(status_prefix)
         parts.append(
-            "Yanıt metni konuşmaya çevrilmek üzere seçtiğin bulut sunucusuna gönderilir."
+            t("Yanıt metni konuşmaya çevrilmek üzere seçtiğin bulut sunucusuna gönderilir.")
         )
         if endpoint is not None and endpoint.api_key and not stored_endpoint_key(name):
             parts.append(
-                "Bu sunucu için anahtar kayıtlı değil; "
-                "Ayarlar > Model > Bağlantılar bölümünden kaydet."
+                t(
+                    "Bu sunucu için anahtar kayıtlı değil; "
+                    "Ayarlar > Model > Bağlantılar bölümünden kaydet."
+                )
             )
         saved_alias = str(panel.tts_cloud_saved.currentData() or "")
         saved_model = self._speech_models.get(saved_alias)
@@ -468,7 +481,7 @@ class TtsCloudBox(QWidget):
                     parts.append(cost)
                 if not panel.tts_cloud_paid.isChecked():
                     parts.append(
-                        "Bu model ücretli; kullanmak için 'Ücretli modele izin ver'i işaretle."
+                        t("Bu model ücretli; kullanmak için 'Ücretli modele izin ver'i işaretle.")
                     )
         else:
             panel.tts_cloud_paid.setVisible(True)
@@ -477,13 +490,16 @@ class TtsCloudBox(QWidget):
             paid = protocol == "gemini" or not model_id.endswith(":free")
             if paid and not panel.tts_cloud_paid.isChecked():
                 parts.append(
-                    "Bu model ücretli olabilir; kullanmak için 'Ücretli modele izin ver'i işaretle."
+                    t(
+                        "Bu model ücretli olabilir; "
+                        "kullanmak için 'Ücretli modele izin ver'i işaretle."
+                    )
                 )
         if not panel.tts_cloud_consent.isChecked():
-            parts.append("Metin gönderme izni kapalıyken bulut sesi başlamaz.")
+            parts.append(t("Metin gönderme izni kapalıyken bulut sesi başlamaz."))
         if panel.tts_cloud_saved.count() <= 1:
             parts.append(
-                "Ses modeli eklemek için Ayarlar > Model > Model ekle'de türü Ses seç."
+                t("Ses modeli eklemek için Ayarlar > Model > Model ekle'de türü Ses seç.")
             )
         panel.tts_cloud_hint.setText(" ".join(parts))
 

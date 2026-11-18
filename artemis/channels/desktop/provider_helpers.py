@@ -6,12 +6,15 @@ import html
 import json
 import os
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from pathlib import Path
 from urllib.parse import urlsplit
 
+import httpx
+
 from artemis.brain.model_report import SCENARIO_IDS, pass_rate, report_summary
+from artemis.brain.providers import credential_prefix, endpoint_key_variable
 from artemis.config.settings import EndpointConfig, ModelConfig, Settings
 from artemis.i18n import t
 
@@ -258,3 +261,47 @@ def speech_cost_map(settings: Settings) -> dict[str, str]:
         for alias, model in settings.models.items()
         if model.kind == "speech"
     }
+
+
+def probe_models(base_url: str, key: str | None) -> tuple[str, list[str]]:
+    """GET {base_url}/models; yanıt gövdesi, başlık ve anahtar mesaja asla girmez."""
+    headers = {"Authorization": f"Bearer {key}"} if key else {}
+    try:
+        response = httpx.get(
+            f"{base_url}/models", headers=headers, timeout=5, follow_redirects=False
+        )
+    except httpx.HTTPError:
+        return t("Sunucuya ulaşılamadı (adres doğru mu, sunucu çalışıyor mu?)."), []
+    if response.status_code in {401, 403}:
+        return t("Sunucu API anahtarını reddetti; anahtarı kontrol edin."), []
+    if response.status_code == 404:
+        return t("/models desteklenmiyor; model adını elle yazabilirsiniz."), []
+    if response.status_code != 200:
+        return t("Sunucu beklenmeyen yanıt verdi (HTTP {code}).").format(
+            code=response.status_code
+        ), []
+    try:
+        data = response.json()["data"]
+        models = sorted(
+            {
+                item["id"]
+                for item in data
+                if isinstance(item, dict) and isinstance(item.get("id"), str)
+            }
+        )
+    except (ValueError, KeyError, TypeError):
+        return t("Bağlantı var ama model listesi okunamadı; model adını elle yazabilirsiniz."), []
+    return t("Bağlantı tamam, {count} model bulundu.").format(count=len(models)), models
+
+
+def store_endpoint_key(
+    name: str, typed: str, writer: Callable[[str, str], None]
+) -> str | None:
+    # Yazıcı açıkça verilir: testler provider_section.write_secret'i sahteler; varsayılan
+    # buradaki gerçek kasaya giderdi.
+    """Anahtarı kasaya yazar (YAML'a asla); kasa yoksa "ortamda X tanımlayın." döner."""
+    try:
+        writer(typed, f"{credential_prefix()}/{name}")
+    except OSError:
+        return t("ortamda {var} tanımlayın.").format(var=endpoint_key_variable(name))
+    return None

@@ -12,6 +12,7 @@ import re
 import xml.etree.ElementTree as ET
 
 from artemis.channels.desktop.pet_sprite import ID_RE
+from artemis.i18n import t
 
 MAX_SVG_BYTES = 64 * 1024
 MAX_ELEMENTS = 2000
@@ -87,7 +88,7 @@ def _clean(element: ET.Element, depth: int, budget: list[int]) -> ET.Element | N
         return None
     budget[0] -= 1
     if budget[0] < 0:
-        raise SvgError("SVG çok karmaşık (öğe sayısı sınırı aşıldı).")
+        raise SvgError(t("SVG çok karmaşık (öğe sayısı sınırı aşıldı)."))
     clean = ET.Element(f"{{{SVG_NS}}}{name}")
     for key, value in element.attrib.items():
         if key == "id":
@@ -110,23 +111,23 @@ def _clean(element: ET.Element, depth: int, budget: list[int]) -> ET.Element | N
 def sanitize_svg(svg: str) -> str:
     """Beyaz listeyle temizlenmiş SVG metni; kullanılamıyorsa SvgError."""
     if len(svg.encode("utf-8")) > MAX_SVG_BYTES:
-        raise SvgError("SVG 64 KB'tan büyük.")
+        raise SvgError(t("SVG 64 KB'tan büyük."))
     body = _XML_DECL.sub("", svg, count=1)
     if _FORBIDDEN.search(body):
-        raise SvgError("SVG'de DOCTYPE, ENTITY ya da işlem yönergesi var; reddedildi.")
+        raise SvgError(t("SVG'de DOCTYPE, ENTITY ya da işlem yönergesi var; reddedildi."))
     try:
         root = ET.fromstring(body.strip())
     except ET.ParseError as error:
-        raise SvgError(f"SVG ayrıştırılamadı: {error}") from error
+        raise SvgError(t("SVG ayrıştırılamadı: {error}").format(error=error)) from error
     if root.tag.rsplit("}", 1)[-1] != "svg":
-        raise SvgError("Kök öğe <svg> olmalı.")
+        raise SvgError(t("Kök öğe <svg> olmalı."))
     clean = _clean(root, 0, [MAX_ELEMENTS])
     assert clean is not None  # kök svg beyaz listede
     clean.attrib.pop("width", None)  # boyutu çizici belirler
     clean.attrib.pop("height", None)
     clean.set("viewBox", clean.get("viewBox") or VIEWBOX)
     if len(clean) == 0:
-        raise SvgError("SVG boş: çizilebilir öğe kalmadı.")
+        raise SvgError(t("SVG boş: çizilebilir öğe kalmadı."))
     ET.register_namespace("", SVG_NS)
     return ET.tostring(clean, encoding="unicode")
 

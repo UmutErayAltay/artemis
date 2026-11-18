@@ -17,7 +17,6 @@ from collections.abc import Callable
 from decimal import ROUND_UP, Decimal, InvalidOperation
 from pathlib import Path
 
-import httpx
 import yaml
 from PySide6.QtCore import (
     QProcess,
@@ -45,11 +44,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.brain.model_report import (
-    merge_retry,
-    report_summary,
-    suggest_layout,
-)
+from artemis.brain.model_report import merge_retry, report_summary, suggest_layout
 from artemis.brain.providers import (
     credential_prefix,
     endpoint_key_variable,
@@ -76,6 +71,8 @@ from artemis.channels.desktop.provider_helpers import (
     speech_cost_map,
     speech_cost_text_from_fields,
 )
+from artemis.channels.desktop.provider_helpers import probe_models as probe_models
+from artemis.channels.desktop.provider_helpers import store_endpoint_key as store_endpoint_key
 from artemis.channels.desktop.provider_layout import (
     PARALLEL_CHOICES,
     PARALLEL_TEST,
@@ -89,12 +86,10 @@ from artemis.channels.desktop.provider_workers import CliTest, ConnectionTest
 from artemis.channels.desktop.settings_io import _write_validated
 from artemis.channels.desktop.thread_shutdown import shutdown_thread
 from artemis.channels.desktop.widgets import with_help
-from artemis.config.settings import (
-    ENDPOINT_ID_RE,
-    EndpointConfig,
-    load_settings,
-)
-from artemis.tools.credentials import delete_secret, write_secret
+from artemis.config.settings import ENDPOINT_ID_RE, EndpointConfig, load_settings
+from artemis.i18n import t
+from artemis.tools.credentials import delete_secret
+from artemis.tools.credentials import write_secret as write_secret
 from artemis.tools.platform import child_environment
 
 # Model testi bir koşuda yaklaşık bu kadar token harcar (2026-11-07 ölçümü: ~340 bin giriş);
@@ -110,52 +105,9 @@ _BAD_URL = "Adres geçersiz: https:// ile başlamalı (http yalnız yerel sunucu
 # Satır içi renkler (HTML etiketleri) temadan gelir; sabit onaltılık renk yok, tema değişince
 # set_theme yeniden çizer.
 _COLOR_KEYS = ("muted", "accent", "warning", "error", "bg")
-
-
 WIDE_AT = 900  # bu genişlikten itibaren model ayrıntısı listenin yanında durur
-
-
 _Row = ModelRow
-
 _STATE_TEXT = {"bekliyor": "○", "geçti": "✓", "kaldı": "✗", "tehlikeli": "⚠"}
-
-
-def probe_models(base_url: str, key: str | None) -> tuple[str, list[str]]:
-    """GET {base_url}/models; yanıt gövdesi, başlık ve anahtar mesaja asla girmez."""
-    headers = {"Authorization": f"Bearer {key}"} if key else {}
-    try:
-        response = httpx.get(
-            f"{base_url}/models", headers=headers, timeout=5, follow_redirects=False
-        )
-    except httpx.HTTPError:
-        return "Sunucuya ulaşılamadı (adres doğru mu, sunucu çalışıyor mu?).", []
-    if response.status_code in {401, 403}:
-        return "Sunucu API anahtarını reddetti; anahtarı kontrol edin.", []
-    if response.status_code == 404:
-        return "/models desteklenmiyor; model adını elle yazabilirsiniz.", []
-    if response.status_code != 200:
-        return f"Sunucu beklenmeyen yanıt verdi (HTTP {response.status_code}).", []
-    try:
-        data = response.json()["data"]
-        models = sorted(
-            {
-                item["id"]
-                for item in data
-                if isinstance(item, dict) and isinstance(item.get("id"), str)
-            }
-        )
-    except (ValueError, KeyError, TypeError):
-        return "Bağlantı var ama model listesi okunamadı; model adını elle yazabilirsiniz.", []
-    return f"Bağlantı tamam, {len(models)} model bulundu.", models
-
-
-def store_endpoint_key(name: str, typed: str) -> str | None:
-    """Anahtarı kasaya yazar (YAML'a asla); kasa yoksa "ortamda X tanımlayın." döner."""
-    try:
-        write_secret(typed, f"{credential_prefix()}/{name}")
-    except OSError:
-        return f"ortamda {endpoint_key_variable(name)} tanımlayın."
-    return None
 
 
 class ProviderSection(QWidget):
@@ -257,10 +209,10 @@ class ProviderSection(QWidget):
         self._sync_model_field()
         if demo:
             # Demo'da reload çalışmaz; boş açılır liste yerine ne yapılacağını söyleyen soluk satır.
-            self.add_connection.addItem("Bağlantı yok — aşağıdan ekle", None)
+            self.add_connection.addItem(t("Bağlantı yok — aşağıdan ekle"), None)
             self._sync_model_field()
             self.setEnabled(False)
-            self.status.setText("Demo modunda bağlantılar ve modeller değiştirilmez.")
+            self.status.setText(t("Demo modunda bağlantılar ve modeller değiştirilmez."))
         else:
             self.reload()
 
@@ -313,14 +265,16 @@ class ProviderSection(QWidget):
         if self._problem:
             text, color = self._problem, self._colors["error"]
         elif model is not None:
-            text = f"Beyin: {settings.primary_model} ({connection_label(model)})"
+            text = t("Beyin: {model} ({conn})").format(
+                model=settings.primary_model, conn=connection_label(model)
+            )
             if settings.hard_model:
-                text += f" · Zor işler: {settings.hard_model}"
+                text += " · " + t("Zor işler: {model}").format(model=settings.hard_model)
             if settings.fallback_model and settings.fallback_model != settings.primary_model:
-                text += f" · Yedek: {settings.fallback_model}"
+                text += " · " + t("Yedek: {model}").format(model=settings.fallback_model)
             color = self._colors["accent"]
         else:
-            text, color = "Henüz beyin modeli seçilmedi.", self._colors["error"]
+            text, color = t("Henüz beyin modeli seçilmedi."), self._colors["error"]
         self.banner.setText(text)
         self.banner.setVisible(bool(text))
         self.banner.setStyleSheet(f"color: {color}; font-weight: 600;")
@@ -329,7 +283,7 @@ class ProviderSection(QWidget):
         try:
             settings = load_settings(self.config_path)
         except (OSError, ValueError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         self._problem = provider_problem(settings)
         self._render_banner()
@@ -360,9 +314,9 @@ class ProviderSection(QWidget):
         self.endpoint_list.clear()
         for name, endpoint in settings.endpoints.items():
             if not endpoint.api_key:
-                state = "anahtarsız"
+                state = t("anahtarsız")
             else:
-                state = "anahtar kayıtlı" if stored_endpoint_key(name) else "anahtar yok"
+                state = t("anahtar kayıtlı") if stored_endpoint_key(name) else t("anahtar yok")
             self.endpoint_list.addItem(f"{name} — {endpoint.base_url} ({state})")
             self.endpoint_list.item(self.endpoint_list.count() - 1).setData(
                 Qt.ItemDataRole.UserRole, name
@@ -377,7 +331,7 @@ class ProviderSection(QWidget):
         self.add_connection.clear()
         for name in settings.endpoints:
             self.add_connection.addItem(name, name)
-        self.add_connection.addItem(CLI_NAME, CLI_KEY)
+        self.add_connection.addItem(t(CLI_NAME), CLI_KEY)
         self.add_connection.setCurrentIndex(max(self.add_connection.findData(chosen), 0))
         self.add_connection.blockSignals(False)
         if self.add_connection.currentData() != chosen:
@@ -426,9 +380,9 @@ class ProviderSection(QWidget):
         self.model_list.setFixedHeight((sum(heights) or 70) + 12)
         self.model_list.setVisible(has_items)
         self.model_empty.setText(
-            "Bu türde model yok."
+            t("Bu türde model yok.")
             if self._model_data and not has_items
-            else "Henüz model eklenmedi. Aşağıdan bir model ekle."
+            else t("Henüz model eklenmedi. Aşağıdan bir model ekle.")
         )
         self.model_empty.setVisible(not has_items)
         self.detail.setVisible(has_items)
@@ -478,7 +432,7 @@ class ProviderSection(QWidget):
         self.base_url.setText(endpoint.base_url)
         self.needs_key.setChecked(endpoint.api_key)
         self.key.clear()
-        self.key.setPlaceholderText("kayıtlı" if stored_endpoint_key(name) else "")
+        self.key.setPlaceholderText(t("kayıtlı") if stored_endpoint_key(name) else "")
 
     def _apply_preset(self) -> None:
         _label, slug, url, needs_key = PRESETS[self.preset.currentData()]
@@ -490,12 +444,12 @@ class ProviderSection(QWidget):
     def _valid_form(self) -> tuple[str, str] | None:
         name, url = self.endpoint_id.text().strip(), self.base_url.text().strip()
         if not ENDPOINT_ID_RE.fullmatch(name):
-            self.status.setText("Kimlik 1-40 karakter olmalı: harf, rakam, _ ve -.")
+            self.status.setText(t("Kimlik 1-40 karakter olmalı: harf, rakam, _ ve -."))
             return None
         try:
             EndpointConfig(base_url=url)
         except ValueError:  # pydantic mesajı girdiyi içerebilir; sabit metin kullanılır
-            self.status.setText(_BAD_URL)
+            self.status.setText(t(_BAD_URL))
             return None
         return name, url.rstrip("/")
 
@@ -507,7 +461,7 @@ class ProviderSection(QWidget):
         key = None
         if self.needs_key.isChecked():
             key = self.key.text().strip() or stored_endpoint_key(name)
-        self.status.setText("Bağlantı deneniyor…")
+        self.status.setText(t("Bağlantı deneniyor…"))
         self._test = ConnectionTest(url, key, self, probe_models)
         self._test.done.connect(self._connection_test_done)
         self._test.start()
@@ -519,15 +473,15 @@ class ProviderSection(QWidget):
             self._fill_models(list(CLI_MODELS))
             return
         if name is None or (self._fetch is not None and self._fetch.isRunning()):
-            self.status.setText("Önce bir bağlantı ekleyin.")
+            self.status.setText(t("Önce bir bağlantı ekleyin."))
             return
         try:
             endpoint = load_settings(self.config_path).endpoints[name]
         except (OSError, ValueError, KeyError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         key = stored_endpoint_key(name) if endpoint.api_key else None
-        self.status.setText("Model listesi alınıyor…")
+        self.status.setText(t("Model listesi alınıyor…"))
         self._fetch = ConnectionTest(endpoint.base_url, key, self, probe_models)
         self._fetch.done.connect(self._fetch_done)
         self._fetch.start()
@@ -551,7 +505,7 @@ class ProviderSection(QWidget):
         self.fetch_button.setEnabled(ready)
         if self.model_hint is not None:
             self.model_hint.setPlaceholderText(
-                "Model adı yaz veya listeyi getir" if ready else "Önce bağlantı seç"
+                t("Model adı yaz veya listeyi getir") if ready else t("Önce bağlantı seç")
             )
 
     def _connection_changed(self) -> None:
@@ -561,16 +515,16 @@ class ProviderSection(QWidget):
         if self.add_connection.currentData() == CLI_KEY:
             found = shutil.which("claude")
             self.status.setText(
-                f"Claude Code CLI bulundu: {found}"
+                t("Claude Code CLI bulundu: {found}").format(found=found)
                 if found
-                else "Claude Code CLI bulunamadı. Kur ve Claude Code ile giriş yap."
+                else t("Claude Code CLI bulunamadı. Kur ve Claude Code ile giriş yap.")
             )
 
     def _sync_cli_button(self) -> None:
         cli = self.add_connection.currentData() == CLI_KEY
         self.cli_test_button.setVisible(cli)
         # Resim ve ses modelleri openai_compatible uç ister; Claude aboneliğinde seçilemez.
-        tip = "Resim ve ses modelleri Claude aboneliğiyle kullanılamaz." if cli else ""
+        tip = t("Resim ve ses modelleri Claude aboneliğiyle kullanılamaz.") if cli else ""
         for index in (1, 2):
             item = self.kind.model().item(index)  # type: ignore[attr-defined]
             item.setEnabled(not cli)
@@ -626,7 +580,7 @@ class ProviderSection(QWidget):
         try:
             _write_validated(self.config_path, raw)
         except (OSError, ValueError, yaml.YAMLError):
-            self.status.setText("Kaydedilemedi; mevcut ayarlar korunuyor.")
+            self.status.setText(t("Kaydedilemedi; mevcut ayarlar korunuyor."))
             return False
         return True
 
@@ -640,12 +594,14 @@ class ProviderSection(QWidget):
         endpoints[name] = {"base_url": url, "api_key": self.needs_key.isChecked()}
         if not self._write(raw):
             return
-        message = "Bağlantı kaydedildi."
+        message = t("Bağlantı kaydedildi.")
         typed = self.key.text().strip()
         if typed and self.needs_key.isChecked():
-            failure = store_endpoint_key(name, typed)
+            failure = store_endpoint_key(name, typed, write_secret)
             if failure:
-                message = f"Bağlantı kaydedildi ama anahtar saklanamadı; {failure}"
+                message = t("Bağlantı kaydedildi ama anahtar saklanamadı; {failure}").format(
+                    failure=failure
+                )
         self.key.clear()
         self.reload()
         # Yeni model eklerken kaydedilen bağlantı hazır seçili gelir.
@@ -658,15 +614,17 @@ class ProviderSection(QWidget):
         try:
             settings = load_settings(self.config_path)
         except (OSError, ValueError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         if name not in settings.endpoints:
-            self.status.setText("Silinecek kayıtlı bir bağlantı seçin.")
+            self.status.setText(t("Silinecek kayıtlı bir bağlantı seçin."))
             return
         if any(model.endpoint == name for model in settings.models.values()):
             self.status.setText(
-                "Bu bağlantıyı kullanan modeller var; önce Modeller listesinden 'Kaldır' ile "
-                "o modelleri kaldırın."
+                t(
+                    "Bu bağlantıyı kullanan modeller var; önce Modeller listesinden 'Kaldır' ile "
+                    "o modelleri kaldırın."
+                )
             )
             return
         raw = self._raw()
@@ -678,13 +636,13 @@ class ProviderSection(QWidget):
         self.base_url.clear()
         self.key.clear()
         self.reload()
-        self.status.setText("Bağlantı silindi.")
+        self.status.setText(t("Bağlantı silindi."))
         self.changed.emit()
 
     def _test_cli(self) -> None:
         if self._cli_test is not None and self._cli_test.isRunning():
             return
-        self.status.setText("Claude Code deneniyor…")
+        self.status.setText(t("Claude Code deneniyor…"))
         model = self.model_name.currentText().strip() or "haiku"
         self._cli_test = CliTest(self.config_path, model, self)
         self._cli_test.done.connect(self._cli_test_done)
@@ -695,19 +653,19 @@ class ProviderSection(QWidget):
         model = self.model_name.currentText().strip()
         alias = self.alias.text().strip() or self._default_alias(model)
         if connection is None:
-            self.status.setText("Önce bir bağlantı ekleyin.")
+            self.status.setText(t("Önce bir bağlantı ekleyin."))
             return
         if not model or not alias:
-            self.status.setText("Model adı yazın veya listeden seçin.")
+            self.status.setText(t("Model adı yazın veya listeden seçin."))
             return
         kind = str(self.kind.currentData() or "chat")
         image = kind == "image"
         speech = kind == "speech"
         if image and connection == CLI_KEY:
-            self.status.setText("Resim modeli Claude aboneliğiyle kullanılamaz; bir uç seçin.")
+            self.status.setText(t("Resim modeli Claude aboneliğiyle kullanılamaz; bir uç seçin."))
             return
         if speech and connection == CLI_KEY:
-            self.status.setText("Ses modeli Claude aboneliğiyle kullanılamaz; bir uç seçin.")
+            self.status.setText(t("Ses modeli Claude aboneliğiyle kullanılamaz; bir uç seçin."))
             return
         try:
             prices = (
@@ -724,16 +682,16 @@ class ProviderSection(QWidget):
                 raise InvalidOperation
             settings = load_settings(self.config_path)
         except InvalidOperation:
-            self.status.setText("Fiyat sayı olmalı (ücretsiz için 0).")
+            self.status.setText(t("Fiyat sayı olmalı (ücretsiz için 0)."))
             return
         except (OSError, ValueError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         if connection != CLI_KEY and connection not in settings.endpoints:
-            self.status.setText("Önce bağlantıyı kaydedin.")
+            self.status.setText(t("Önce bağlantıyı kaydedin."))
             return
         if alias in settings.models:
-            self.status.setText("Bu takma ad kullanımda; başka bir ad yazın.")
+            self.status.setText(t("Bu takma ad kullanımda; başka bir ad yazın."))
             return
         raw = self._raw()
         models: dict[str, object] = raw.setdefault("models", {})  # type: ignore[assignment]
@@ -763,31 +721,30 @@ class ProviderSection(QWidget):
             any(price > 0 for price in prices) or image_cost > 0
         )
         self.status.setText(
-            "Model eklendi."
+            t("Model eklendi.")
             + (
-                " Ücretli model bütçe korumasınca engellenir; "
-                "ücretli kullanım izni ayar dosyasından verilir."
-                if paid
-                else ""
+                " " + t(
+                    "Ücretli model bütçe korumasınca engellenir; ücretli kullanım izni ayar "
+                    "dosyasından verilir."
+                )
+                if paid else ""
             )
             + (
-                " Ses panelinde 'Ücretli modele izin ver' işaretlenmeden kullanılmaz."
-                if paid_speech
-                else ""
+                " " + t("Ses panelinde 'Ücretli modele izin ver' işaretlenmeden kullanılmaz.")
+                if paid_speech else ""
             )
             + (
-                " Resim başına fiyat her çağrıda bütçeden ayrılan bir rezervasyondur."
-                if image_cost > 0
-                else ""
+                " " + t("Resim başına fiyat her çağrıda bütçeden ayrılan bir rezervasyondur.")
+                if image_cost > 0 else ""
             )
-            + (" Beyin modeli yapıldı." if primary else "")
+            + (" " + t("Beyin modeli yapıldı.") if primary else "")
         )
         self.changed.emit()
 
     def _selected_alias(self) -> str | None:
         item = self.model_list.currentItem()
         if item is None:
-            self.status.setText("Önce listeden bir model seçin.")
+            self.status.setText(t("Önce listeden bir model seçin."))
             return None
         return str(item.data(Qt.ItemDataRole.UserRole))
 
@@ -798,10 +755,11 @@ class ProviderSection(QWidget):
         try:
             raw = self._raw()
         except (OSError, yaml.YAMLError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         if any(row[0] == alias and row[5] != "chat" for row in self._model_data):
-            self.status.setText("Resim ve ses modelleri beyin modeli olamaz; sohbet modeli seçin.")
+            msg = t("Resim ve ses modelleri beyin modeli olamaz; sohbet modeli seçin.")
+            self.status.setText(msg)
             return
         # Takma ada göre yazılır: aynı model kimliğini paylaşan modeller karışmaz.
         raw["primary_model"] = alias
@@ -810,7 +768,7 @@ class ProviderSection(QWidget):
         if not self._write(raw):
             return
         self.reload()
-        self.status.setText(f"Beyin modeli: {alias}.")
+        self.status.setText(t("Beyin modeli: {alias}.").format(alias=alias))
         self.changed.emit()
 
     def _remove_model(self) -> None:
@@ -820,25 +778,29 @@ class ProviderSection(QWidget):
         try:
             settings = load_settings(self.config_path)
         except (OSError, ValueError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         if alias == settings.primary_model:
-            self.status.setText("Beyin modeli kaldırılamaz; önce başka bir modeli beyin yapın.")
+            self.status.setText(t("Beyin modeli kaldırılamaz; önce başka bir modeli beyin yapın."))
             return
         for holder, role, button in (
-            (settings.fallback_model, "Arıza yedeği", "Yedek'i"),
-            (settings.hard_model, "Zor işler modeli", "Zor işler'i"),
-            (settings.computer_use.model, "Bilgisayar kullanımı modeli", "Bilgisayar'ı"),
+            (settings.fallback_model, t("Arıza yedeği"), t("Yedek'i")),
+            (settings.hard_model, t("Zor işler modeli"), t("Zor işler'i")),
+            (settings.computer_use.model, t("Bilgisayar kullanımı modeli"), t("Bilgisayar'ı")),
         ):
             if alias == holder:
-                self.status.setText(f"{role} kaldırılamaz; önce Rol'den {button} kapat.")
+                self.status.setText(
+                    t("{role} kaldırılamaz; önce Rol'den {button} kapat.").format(
+                        role=role, button=button
+                    )
+                )
                 return
         raw = self._raw()
         raw["models"].pop(alias, None)  # type: ignore[attr-defined]
         if not self._write(raw):
             return
         self.reload()
-        self.status.setText("Model kaldırıldı.")
+        self.status.setText(t("Model kaldırıldı."))
         self.changed.emit()
 
     # --- Model kademesi ve model testi ---------------------------------------------------
@@ -885,9 +847,14 @@ class ProviderSection(QWidget):
         except (OSError, ValueError):
             local = False
         tip = (
-            f"Aynı anda {count} senaryo. Bu bağlantı bu bilgisayarda çalışıyor: "
-            "sunucu tek istek kaldırıyorsa sırayla çalıştırmak daha hızlı olabilir."
-            if local else f"Aynı anda {count} senaryo; API modellerinde testi kısaltır."
+            t(
+                "Aynı anda {count} senaryo. Bu bağlantı bu bilgisayarda çalışıyor: "
+                "sunucu tek istek kaldırıyorsa sırayla çalıştırmak daha hızlı olabilir."
+            ).format(count=count)
+            if local
+            else t("Aynı anda {count} senaryo; API modellerinde testi kısaltır.").format(
+                count=count
+            )
         )
         self.parallel_test.setToolTip(tip)
         self.parallel_count.setToolTip(tip)
@@ -905,7 +872,11 @@ class ProviderSection(QWidget):
     def _model_test_error(self, error: QProcess.ProcessError) -> None:
         # FailedToStart'ta `finished` gelmez; arayüz "test sürüyor"da kalmasın.
         if not self._stopping and self._model_test is not None:
-            self._abort_model_test(f"{self._testing or 'Model'} testi başlatılamadı veya kesildi.")
+            self._abort_model_test(
+                t("{model} testi başlatılamadı veya kesildi.").format(
+                    model=self._testing or t("Model")
+                )
+            )
 
     def _model_test_finished(
         self,
@@ -918,12 +889,16 @@ class ProviderSection(QWidget):
             if process is not None:
                 process.deleteLater()
             self.reload()
-            self.status.setText("Test durduruldu")
+            self.status.setText(t("Test durduruldu"))
             return
         if self._model_test is None and not self._testing:
             return
         if exit_code != 0 or exit_status != QProcess.ExitStatus.NormalExit:
-            self._abort_model_test(f"{self._testing} testi hata ile sonlandı (kod {exit_code}).")
+            self._abort_model_test(
+                t("{model} testi hata ile sonlandı (kod {code}).").format(
+                    model=self._testing, code=exit_code
+                )
+            )
             return
         self._model_test_done(self._testing, self._test_report)
 
@@ -974,17 +949,21 @@ class ProviderSection(QWidget):
         self.kind_info.setVisible(kind != "chat")
         if row and kind == "image":
             self.kind_info.setText(
-                f"Görsel modeli · Bağlantı: {row[3]} · Model: {row[4]}\n"
-                "Resim üretme isteklerinde kullanılır. Beyin, zor işler, yedek ve "
-                "bilgisayar rolleri ile sohbet testi yalnız yazı modelleri içindir."
+                t(
+                    "Görsel modeli · Bağlantı: {conn} · Model: {model}\n"
+                    "Resim üretme isteklerinde kullanılır. Beyin, zor işler, yedek ve "
+                    "bilgisayar rolleri ile sohbet testi yalnız yazı modelleri içindir."
+                ).format(conn=row[3], model=row[4])
             )
         elif row and kind == "speech":
             note = self._speech_cost.get(row[0], "")
             self.kind_info.setText(
-                f"Ses modeli · Bağlantı: {row[3]} · Model: {row[4]}\n"
-                "Kullanmak için Ayarlar > Ses > Konuşma sesi'nde Bulut'u seçip bu "
-                "modeli 'Bulut konuşma modeli' listesinden seç. Roller ve sohbet testi "
-                "yalnız yazı modelleri içindir."
+                t(
+                    "Ses modeli · Bağlantı: {conn} · Model: {model}\n"
+                    "Kullanmak için Ayarlar > Ses > Konuşma sesi'nde Bulut'u seçip bu "
+                    "modeli 'Bulut konuşma modeli' listesinden seç. Roller ve sohbet testi "
+                    "yalnız yazı modelleri içindir."
+                ).format(conn=row[3], model=row[4])
                 + (f"\n{note}" if note else "")
             )
         else:
@@ -995,19 +974,19 @@ class ProviderSection(QWidget):
         fallback = bool(selected) and selected == self._fallback
         computer = bool(selected) and selected == self._computer
         self.detail_title.setText(selected or "")
-        reason = "Resim ve ses modelleri bu rolü üstlenemez." if non_chat else (
-            "Bu model zaten beyin; bu rol için başka bir model seç." if brain else ""
+        reason = t("Resim ve ses modelleri bu rolü üstlenemez.") if non_chat else (
+            t("Bu model zaten beyin; bu rol için başka bir model seç.") if brain else ""
         )
-        hard_tip = "Çok adımlı ve planlama isteyen turlar bu modelle çalışır."
-        fallback_tip = (
+        hard_tip = t("Çok adımlı ve planlama isteyen turlar bu modelle çalışır.")
+        fallback_tip = t(
             "Beyin modeli kotaya takılır ya da yanıt vermezse Artemis bu modelle devam eder."
         )
-        computer_tip = "Ekranı görüp tıklama bu modelle çalışır; seçilmezse beyin kullanılır."
+        computer_tip = t("Ekranı görüp tıklama bu modelle çalışır; seçilmezse beyin kullanılır.")
         for button, name, on, tip, free in (
-            (self.primary_button, "Beyin", brain, None, not non_chat),
-            (self.hard_button, "Zor işler", hard, hard_tip, not non_chat),
-            (self.fallback_button, "Yedek", fallback, fallback_tip, not non_chat and not brain),
-            (self.computer_button, "Bilgisayar", computer, computer_tip, not non_chat),
+            (self.primary_button, t("Beyin"), brain, None, not non_chat),
+            (self.hard_button, t("Zor işler"), hard, hard_tip, not non_chat),
+            (self.fallback_button, t("Yedek"), fallback, fallback_tip, not non_chat and not brain),
+            (self.computer_button, t("Bilgisayar"), computer, computer_tip, not non_chat),
         ):
             button.setChecked(on)
             button.setText(("✓ " if on else "") + name)
@@ -1018,7 +997,8 @@ class ProviderSection(QWidget):
             report_summary(self._reports_seen[selected]) if selected in self._reports_seen else ""
         )
         self.test_result.setText(
-            summary.replace("Test:", "Son test:", 1) if summary else "Bu model henüz test edilmedi."
+            summary.replace(t("Test:"), t("Son test:"), 1)
+            if summary else t("Bu model henüz test edilmedi.")
         )
         self._sync_test_buttons()
         self._parallel_tip()
@@ -1033,22 +1013,28 @@ class ProviderSection(QWidget):
             settings = load_settings(self.config_path)
             raw = self._raw()
         except (OSError, ValueError, yaml.YAMLError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         model = settings.models.get(alias)
         if model is None or model.kind != "chat":
             self.status.setText(
-                f"Resim ve ses modelleri {name.lower()} modeli olamaz; sohbet modeli seçin."
+                t("Resim ve ses modelleri {role} modeli olamaz; sohbet modeli seçin.").format(
+                    role=t(name).lower()
+                )
             )
             return
         if key == "fallback_model" and alias == settings.primary_model:
-            self.status.setText(f"Bu model zaten beyin; {name.lower()} için başka bir model seçin.")
+            self.status.setText(
+                t("Bu model zaten beyin; {role} için başka bir model seçin.").format(
+                    role=t(name).lower()
+                )
+            )
             return
         # computer_use.model iç içe alandır; diğer roller kök anahtardır.
         section = raw.setdefault("computer_use", {}) if key == "computer_use" else raw
         field = "model" if key == "computer_use" else key
         if not isinstance(section, dict):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         removing = section.get(field) == alias
         if removing:
@@ -1058,15 +1044,17 @@ class ProviderSection(QWidget):
         if not self._write(raw):
             return
         self.reload()
-        self.status.setText(off if removing else on.format(alias=alias))
+        self.status.setText(t(off) if removing else t(on).format(alias=alias))
         self.changed.emit()
 
     def _confirm_paid(self, alias: str, cost: Decimal) -> bool:
         """Ücretli modelde testten önce bir kez sorulur (varsayılan Hayır)."""
         answer = QMessageBox.question(
             self,
-            "Ücretli model testi",
-            f"{alias} ücretli. Test yaklaşık {cost} USD harcayabilir. Başlatılsın mı?",
+            t("Ücretli model testi"),
+            t("{alias} ücretli. Test yaklaşık {cost} USD harcayabilir. Başlatılsın mı?").format(
+                alias=alias, cost=cost
+            ),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -1087,19 +1075,21 @@ class ProviderSection(QWidget):
         if alias is None:
             return
         if self._model_test is not None:
-            self.status.setText(f"{self._testing} testi sürüyor; bitmesini bekleyin.")
+            self.status.setText(
+                t("{model} testi sürüyor; bitmesini bekleyin.").format(model=self._testing)
+            )
             return
         try:
             settings = load_settings(self.config_path)
         except (OSError, ValueError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         model = settings.models[alias]
         if model.kind == "image":
-            self.status.setText("Resim modeli sohbet senaryolarıyla test edilmez.")
+            self.status.setText(t("Resim modeli sohbet senaryolarıyla test edilmez."))
             return
         if model.kind == "speech":
-            self.status.setText("Ses modeli sohbet senaryolarıyla test edilmez.")
+            self.status.setText(t("Ses modeli sohbet senaryolarıyla test edilmez."))
             return
         arguments = ["-m", "bench.model_testi", "--config", str(self.config_path), "--model", alias]
         if model.input_per_million or model.output_per_million:
@@ -1111,7 +1101,7 @@ class ProviderSection(QWidget):
                 cost = cost * len(only) / _scenario_count()
             cost = cost.quantize(Decimal("0.01"), rounding=ROUND_UP)
             if not self._confirm_paid(alias, cost):
-                self.status.setText("Test başlatılmadı.")
+                self.status.setText(t("Test başlatılmadı."))
                 return
             # Bütçe tavanı tahminin iki katı: test bunu aşamaz (rezervasyon korur).
             arguments += ["--ucretli-onay", "--butce", str(cost * 2)]
@@ -1156,7 +1146,11 @@ class ProviderSection(QWidget):
         self._render_test_list()
         self._render_models()
         count = len(only) if only else _scenario_count()
-        self.status.setText(f"{alias} test ediliyor ({count} senaryo, birkaç dakika sürer)…")
+        self.status.setText(
+            t("{alias} test ediliyor ({count} senaryo, birkaç dakika sürer)…").format(
+                alias=alias, count=count
+            )
+        )
         process.start(sys.executable, arguments)
 
     def _stop_test(self) -> None:
@@ -1164,7 +1158,7 @@ class ProviderSection(QWidget):
         if process is None or self._stopping:
             return
         self._stopping = True
-        self.status.setText("Test durduruluyor…")
+        self.status.setText(t("Test durduruluyor…"))
         process.terminate()
         QTimer.singleShot(3000, self._kill_test)
 
@@ -1179,8 +1173,8 @@ class ProviderSection(QWidget):
     def _render_test_list(self) -> None:
         self.test_list.clear()
         for key, state in self._test_rows.items():
-            note = " (2. deneme)" if state == "geçti" and key in self._second else ""
-            item = QListWidgetItem(f"{_STATE_TEXT[state]} {_scenario_label(key)}: {state}{note}")
+            note = " " + t("(2. deneme)") if state == "geçti" and key in self._second else ""
+            item = QListWidgetItem(f"{_STATE_TEXT[state]} {_scenario_label(key)}: {t(state)}{note}")
             # Kalan adım kırmızı tonla parlar; tehlikeli adım dolu kırmızı ve kalın: ayırt edilir.
             if state in ("kaldı", "tehlikeli"):
                 red = QColor(self._colors["error"])
@@ -1205,13 +1199,14 @@ class ProviderSection(QWidget):
         here = shown == selected
         self.test_list.setVisible(bool(self._test_rows) and here)
         # Tek düğme: test sürerken aynı yerde "Durdur" olur; başka modelin testi sürüyorsa kapalı.
-        self.model_test_button.setText("Durdur" if mine else "Test et")
+        self.model_test_button.setText(t("Durdur") if mine else t("Test et"))
         self.model_test_button.setEnabled(not running or mine)
         self.model_test_button.setToolTip(
-            "Çalışan testi durdurur; rapor kaydedilmez." if mine
-            else f"{self._testing} testi sürüyor; bitmesini bekle." if running
-            else f"{_scenario_count()} senaryoluk testi arka planda çalıştırır; "
-            "bilgisayarına dokunmaz."
+            t("Çalışan testi durdurur; rapor kaydedilmez.") if mine
+            else t("{model} testi sürüyor; bitmesini bekle.").format(model=self._testing) if running
+            else t(
+                "{count} senaryoluk testi arka planda çalıştırır; bilgisayarına dokunmaz."
+            ).format(count=_scenario_count())
         )
         # Kademeli testin ("ana + zor") adı tek model değil: yeniden deneme yalnız tek modelde.
         retryable = self._last is not None and str(self._last[1].get("model", "")) in [
@@ -1234,7 +1229,11 @@ class ProviderSection(QWidget):
         for line in lines:
             parts = line.split()
             if len(parts) == 4 and parts[0] == "ilerleme":
-                self.status.setText(f"{self._testing} test ediliyor: {parts[1]} senaryo bitti…")
+                self.status.setText(
+                    t("{model} test ediliyor: {done} senaryo bitti…").format(
+                        model=self._testing, done=parts[1]
+                    )
+                )
                 if parts[2] in self._test_rows and parts[3] in _STATE_TEXT:
                     self._test_rows[parts[2]] = parts[3]
                     if parts[3] == "geçti" and self._retrying:
@@ -1257,7 +1256,9 @@ class ProviderSection(QWidget):
         except (OSError, ValueError, KeyError, TypeError):
             self.reload()
             self._render_test_list()
-            self.status.setText(f"{alias} testi tamamlanamadı (bağlantı veya ayar sorunu).")
+            self.status.setText(
+                t("{alias} testi tamamlanamadı (bağlantı veya ayar sorunu).").format(alias=alias)
+            )
             return
         self._last = (report_path, report)
         done = report.get("scenarios", [])
@@ -1277,7 +1278,7 @@ class ProviderSection(QWidget):
         try:
             raw = self._raw()
         except (OSError, yaml.YAMLError):
-            self.status.setText("Ayarlar okunamadı.")
+            self.status.setText(t("Ayarlar okunamadı."))
             return
         raw["primary_model"] = ana
         if zor:
@@ -1292,9 +1293,8 @@ class ProviderSection(QWidget):
             return
         self.reload()
         self.status.setText(
-            f"Düzen uygulandı. Beyin: {ana}" + (f", zor işler: {zor}" if zor else "")
-            + (f", bilgisayar kullanımı: {pc}" if pc else "") + "."
+            t("Düzen uygulandı. Beyin: {ana}").format(ana=ana)
+            + (t(", zor işler: {zor}").format(zor=zor) if zor else "")
+            + (t(", bilgisayar kullanımı: {pc}").format(pc=pc) if pc else "") + "."
         )
         self.changed.emit()
-
-

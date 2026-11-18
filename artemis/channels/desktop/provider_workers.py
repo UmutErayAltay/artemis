@@ -17,6 +17,7 @@ from artemis.brain.errors import ProviderError
 from artemis.brain.models import Message
 from artemis.brain.providers import ClaudeCliProvider
 from artemis.config.settings import ModelConfig, load_settings
+from artemis.i18n import t
 
 
 class ConnectionTest(QThread):
@@ -66,10 +67,10 @@ class CliTest(QThread):
             self.done.emit(str(error))
             return
         except (OSError, ValueError):
-            self.done.emit("Test çalıştırılamadı.")
+            self.done.emit(t("Test çalıştırılamadı."))
             return
         self.done.emit(
-            "Claude Code aboneliği çalışıyor."
+            t("Claude Code aboneliği çalışıyor.")
             if completion.content.strip()
-            else "Claude Code boş yanıt verdi."
+            else t("Claude Code boş yanıt verdi.")
         )

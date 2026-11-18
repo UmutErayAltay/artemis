@@ -27,6 +27,7 @@ from artemis.channels.desktop.dictation import (
     type_into_target,
 )
 from artemis.config.settings import Settings
+from artemis.i18n import t
 
 MAX_CHARS = 6000
 ACTIONS = ("translate", "fix", "summarize", "explain")
@@ -214,20 +215,20 @@ class SelectionActions:
 
     def _begin(self, phase: str, *, need_ready: bool = False) -> bool:
         if self.busy or self._closing:
-            self._emit("message", _BUSY)
+            self._emit("message", t(_BUSY))
             return False
         if need_ready and self._phase != "ready":
-            self._emit("message", _NO_SELECTION)
+            self._emit("message", t(_NO_SELECTION))
             return False
         if self._other_busy():
-            self._emit("message", _DICTATION_ON)
+            self._emit("message", t(_DICTATION_ON))
             return False
         self._phase = phase
         return True
 
     def _problem(self) -> str:
         if not self._cloud_allowed and self._local_alias is None:
-            return _PRIVACY
+            return t(_PRIVACY)
         return ""
 
     def start_capture(self) -> None:
@@ -240,14 +241,14 @@ class SelectionActions:
 
     def start_run(self, action: str) -> None:
         if action not in ACTIONS:
-            self._emit("message", "Bilinmeyen eylem.")
+            self._emit("message", t("Bilinmeyen eylem."))
             return
         if self._begin("working", need_ready=True):
             self._task = asyncio.create_task(self._run(action))
 
     def start_write_back(self) -> None:
         if not self._result:
-            self._emit("message", "Yazılacak sonuç yok.")
+            self._emit("message", t("Yazılacak sonuç yok."))
             return
         if self._begin("writing", need_ready=True):
             self._task = asyncio.create_task(self._write_back())
@@ -260,34 +261,38 @@ class SelectionActions:
     # --- Yakalama ----------------------------------------------------------------------------
 
     async def _capture(self) -> None:
-        outcome, chars, message = "error", 0, "Seçili metin alınamadı; pano kullanılamıyor."
+        outcome, chars, message = "error", 0, t("Seçili metin alınamadı; pano kullanılamıyor.")
         keep_ready = False
         try:
             self._text, self._result, self._truncated, self._target = "", "", False, None
             target = foreground_target(self._backend.window, self._own_pid)
             if target is None:
-                outcome, message = "no_target", "Seçili metin için hedef pencere yok."
+                outcome, message = "no_target", t("Seçili metin için hedef pencere yok.")
                 return
             if not await self._keys_released():
-                outcome, message = "keys_down", "Kısayol tuşlarını bırakıp yeniden deneyin."
+                outcome, message = "keys_down", t("Kısayol tuşlarını bırakıp yeniden deneyin.")
                 return
             if await asyncio.to_thread(self._backend.has_nontext_clipboard):
-                outcome, message = "nontext_clipboard", _NONTEXT_CLIPBOARD
+                outcome, message = "nontext_clipboard", t(_NONTEXT_CLIPBOARD)
                 return
             text = await self._copy_selection(target)
             if text is None:
-                outcome, message = "no_target", "Pencere değişti; seçili metin alınmadı."
+                outcome, message = "no_target", t("Pencere değişti; seçili metin alınmadı.")
                 return
             if not text.strip():
-                outcome, message = "no_selection", _NO_SELECTION
+                outcome, message = "no_selection", t(_NO_SELECTION)
                 return
             self._truncated = len(text) > MAX_CHARS
             self._text = text[:MAX_CHARS]
             self._target = target
             chars = len(self._text)
             outcome, keep_ready = "captured", True
-            note = f" (ilk {MAX_CHARS} karakter alındı)" if self._truncated else ""
-            message = f"{chars} karakter seçildi{note}."
+            note = (
+                t(" (ilk {max_chars} karakter alındı)").format(max_chars=MAX_CHARS)
+                if self._truncated
+                else ""
+            )
+            message = t("{chars} karakter seçildi{note}.").format(chars=chars, note=note)
         except asyncio.CancelledError:
             outcome = "cancelled"
             raise
@@ -334,7 +339,7 @@ class SelectionActions:
             with contextlib.suppress(OSError, ValueError):
                 restored = await asyncio.to_thread(backend.write_clipboard, previous)
             if not restored:
-                self._emit("message", _NOT_RESTORED)
+                self._emit("message", t(_NOT_RESTORED))
         if foreground_target(backend.window, self._own_pid) != target:
             return None
         return text
@@ -343,7 +348,7 @@ class SelectionActions:
 
     async def _run(self, action: str) -> None:
         outcome, out_chars, model, cost = "error", 0, "", "0"
-        message = "Model yanıt veremedi."
+        message = t("Model yanıt veremedi.")
         # Önceki eylemden kalan sonuç başarısız yeni eylemde geri yazılmasın.
         self._result = ""
         self._emit("working", "")
@@ -366,11 +371,14 @@ class SelectionActions:
             model = completion.model
             cost = str(completion.usage.cost_usd)
             if private and not completion.local_model:
-                outcome, message = "privacy_refused", "Yanıt yerel modelden gelmedi; gösterilmedi."
+                outcome, message = (
+                    "privacy_refused",
+                    t("Yanıt yerel modelden gelmedi; gösterilmedi."),
+                )
                 return
             result = completion.content.strip()
             if not result:
-                outcome, message = "empty", "Model boş yanıt verdi."
+                outcome, message = "empty", t("Model boş yanıt verdi.")
                 return
             self._result = result
             out_chars = len(result)
@@ -379,11 +387,14 @@ class SelectionActions:
             outcome = "cancelled"
             raise
         except BudgetExceeded:
-            outcome, message = "budget", "Günlük maliyet tavanı bu çağrıyı engelledi."
+            outcome, message = "budget", t("Günlük maliyet tavanı bu çağrıyı engelledi.")
         except TimeoutError:
-            outcome, message = "timeout", "Model zamanında yanıt vermedi."
+            outcome, message = "timeout", t("Model zamanında yanıt vermedi.")
         except ProviderError as error:
-            outcome, message = "provider_error", f"Model sağlayıcısı yanıt veremedi: {error}"
+            outcome, message = (
+                "provider_error",
+                t("Model sağlayıcısı yanıt veremedi: {error}").format(error=error),
+            )
         except (OSError, RuntimeError, ValueError):
             pass
         finally:
@@ -413,27 +424,32 @@ class SelectionActions:
     async def _write_back(self) -> None:
         outcome, typed = "error", 0
         text = clean_transcript(self._result)
-        message = "Yazım hata verdi; bir kısmı yazılmış olabilir, geri alınmadı. Sonuç ekranda."
+        message = t("Yazım hata verdi; bir kısmı yazılmış olabilir, geri alınmadı. Sonuç ekranda.")
         keep = True
         try:
             if self._target is None or not await self._focus_target(self._target):
-                outcome, message = "no_target", "Hedef pencere değişti; yazılmadı. Sonuç ekranda."
+                outcome, message = (
+                    "no_target",
+                    t("Hedef pencere değişti; yazılmadı. Sonuç ekranda."),
+                )
                 return
             outcome, typed = await type_into_target(
                 self._backend.window, text, self._target, self._own_pid,
                 closing=lambda: self._closing,
                 esc_unavailable=lambda: self._emit(
-                    "message", "Esc kısayolu kullanılamıyor; yazımı başka pencereyle durdurun."
+                    "message", t("Esc kısayolu kullanılamıyor; yazımı başka pencereyle durdurun.")
                 ),
             )
             if outcome == "typed":
-                message, keep = f"{typed} karakter gönderildi.", False
+                message, keep = t("{typed} karakter gönderildi.").format(typed=typed), False
             elif outcome == "partial":
-                message = f"Yarım kaldı: {typed}/{len(text)} karakter yazıldı, geri alınmadı."
+                message = t(
+                    "Yarım kaldı: {typed}/{total} karakter yazıldı, geri alınmadı."
+                ).format(typed=typed, total=len(text))
             elif outcome == "cancelled":
-                message = "Yazım durduruldu (Esc); hiçbir şey yazılmadı. Sonuç ekranda."
+                message = t("Yazım durduruldu (Esc); hiçbir şey yazılmadı. Sonuç ekranda.")
             elif outcome == "no_target":
-                message = "Hedef pencere değişti; yazılmadı. Sonuç ekranda."
+                message = t("Hedef pencere değişti; yazılmadı. Sonuç ekranda.")
         except asyncio.CancelledError:
             outcome = "cancelled"
             raise

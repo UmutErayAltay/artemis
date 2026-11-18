@@ -17,6 +17,7 @@ from artemis.config.settings import (
     Settings,
     load_settings,
 )
+from artemis.i18n import t
 
 SettingPath = tuple[str, ...]
 
@@ -79,7 +80,7 @@ def _precision_binding() -> PanelBinding:
             if combo.itemData(index) not in _STANDARD_PRECISIONS:
                 combo.removeItem(index)
         if combo.findData(value) < 0:
-            combo.addItem(f"Özel ({value})", value)
+            combo.addItem(t("Özel ({value})").format(value=value), value)
         combo.setCurrentIndex(combo.findData(value))
 
     return PanelBinding(
@@ -357,9 +358,9 @@ def microphone_choices(
         if isinstance(active, int) and active in indices:
             selected = active
         if name.startswith("Microphone Array ("):
-            name = "Dahili mikrofon — " + name[len("Microphone Array ("):].rstrip(")")
+            name = t("Dahili mikrofon — ") + name[len("Microphone Array ("):].rstrip(")")
         elif name.startswith("Mikrofon ("):
-            name = "Mikrofon — " + name[len("Mikrofon ("):].rstrip(")")
+            name = t("Mikrofon — ") + name[len("Mikrofon ("):].rstrip(")")
         result.append((name, selected, indices))
     if advanced and wasapi:
         seen = {name.casefold() for name, _, _ in result}
@@ -380,7 +381,7 @@ def refresh_device_combo(panel: Any, settings: Settings) -> None:
     """Mikrofon açılır listesini doldurur (SettingsPanel'den taşındı: dosya boyutu sınırı)."""
     panel.device_combo.clear()
     panel.device_combo.setEnabled(not panel._demo)
-    panel.device_combo.addItem("Sistem varsayılanı", None)
+    panel.device_combo.addItem(t("Sistem varsayılanı"), None)
     audio_errors: tuple[type[Exception], ...] = (ImportError, OSError, RuntimeError, ValueError)
     try:
         sd = importlib.import_module("sounddevice")
@@ -410,9 +411,12 @@ def refresh_device_combo(panel: Any, settings: Settings) -> None:
             if settings.voice.input_device in indices:
                 panel.device_combo.setCurrentIndex(panel.device_combo.count() - 1)
         if active is not None and active_name == str(active):
-            panel.device_combo.addItem(f"Mevcut giriş ({active})", settings.voice.input_device)
+            panel.device_combo.addItem(
+                t("Mevcut giriş ({active})").format(active=active),
+                settings.voice.input_device,
+            )
             panel.device_combo.setCurrentIndex(panel.device_combo.count() - 1)
         panel._set_current_device(active_name)
     except audio_errors:
         panel._no_device()
-        panel.current_device.setText("Seçilmedi (mikrofon aygıtları okunamadı)")
+        panel.current_device.setText(t("Seçilmedi (mikrofon aygıtları okunamadı)"))

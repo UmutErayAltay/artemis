@@ -11,6 +11,8 @@ from PySide6.QtCore import QByteArray, QSize, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
+from artemis.i18n import t
+
 # 24x24 görünüm kutusu; çizgi ikonlar `stroke`, dolu olanlar kendi `fill`ini taşır.
 _ICONS: dict[str, str] = {
     "chat": (
@@ -99,9 +101,9 @@ def icon_size(size: int = 20) -> QSize:
 def greeting_for_hour(hour: int) -> str:
     """Saate göre Türkçe selamlama; kişi adı bilinçli olarak yoktur (kullanıcı ayarı yok)."""
     if 5 <= hour < 12:
-        return "Günaydın"
+        return t("Günaydın")
     if 12 <= hour < 18:
-        return "İyi günler"
+        return t("İyi günler")
     if 18 <= hour < 23:
-        return "İyi akşamlar"
-    return "İyi geceler"
+        return t("İyi akşamlar")
+    return t("İyi geceler")

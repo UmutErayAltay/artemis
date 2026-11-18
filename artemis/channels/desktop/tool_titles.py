@@ -8,6 +8,8 @@ eklenince `tests/test_tool_titles.py` bu tabloları doldurmayı zorlar. Bilinmey
 # ruff: noqa: E501
 from __future__ import annotations
 
+from artemis.i18n import t
+
 # (başlık, kısa özet)
 _TOOLS: dict[str, tuple[str, str]] = {
     "app_alias_forget": ("Uygulama takma adını unut", "Söylediğin bir uygulama adı eşlemesini siler."),
@@ -140,17 +142,17 @@ TOOL_TITLES: dict[str, str] = {name: title for name, (title, _s) in _TOOLS.items
 
 
 def tool_title(name: str) -> str:
-    return TOOL_TITLES.get(name, name)
+    return t(TOOL_TITLES[name]) if name in TOOL_TITLES else name
 
 
 def tool_summary(name: str) -> str | None:
-    return _TOOLS[name][1] if name in _TOOLS else None
+    return t(_TOOLS[name][1]) if name in _TOOLS else None
 
 
 def arg_label(arg: str) -> str:
-    return _ARGS.get(arg, arg)
+    return t(_ARGS[arg]) if arg in _ARGS else arg
 
 
 def tool_display(name: str) -> str:
     """Birleşik görünüm: "Web'de ara (web_search)"; bilinmeyen araç yalnız kimlik."""
-    return f"{TOOL_TITLES[name]} ({name})" if name in TOOL_TITLES else name
+    return f"{t(TOOL_TITLES[name])} ({name})" if name in TOOL_TITLES else name

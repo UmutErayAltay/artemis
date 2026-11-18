@@ -804,7 +804,7 @@ class SettingsPanel(QWidget):
         if not name or endpoint is None or not endpoint.api_key or not typed:
             self.cloud_stt_hint.setText(t("Önce bir sunucu seç ve anahtarı yaz."))
             return
-        failure = store_endpoint_key(name, typed)
+        failure = store_endpoint_key(name, typed, provider_section.write_secret)
         self.cloud_key.clear()
         self._update_cloud_hint()
         self.cloud_stt_hint.setText(

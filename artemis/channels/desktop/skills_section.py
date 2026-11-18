@@ -28,6 +28,7 @@ from artemis.channels.desktop.settings_io import _write_validated
 from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.channels.desktop.skill_dialog import SkillDialog, read_for_edit
 from artemis.config.settings import Settings, load_settings
+from artemis.i18n import t
 from artemis.skills import (
     NAME_PATTERN,
     SkillWriteError,
@@ -53,47 +54,49 @@ class SkillsSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        valid_box, valid = group("Geçerli beceriler", divided=False)
+        valid_box, valid = group(t("Geçerli beceriler"), divided=False)
         layout.addWidget(valid_box)
         self.valid_list = QListWidget()
-        self.valid_list.setAccessibleName("Geçerli beceriler")
+        self.valid_list.setAccessibleName(t("Geçerli beceriler"))
         self.valid_area = ListWithEmpty(
-            self.valid_list, "Henüz beceri yok", "", "Yeni beceri…",
+            self.valid_list, t("Henüz beceri yok"), "", t("Yeni beceri…"),
         )
         if self.valid_area.empty.action_button is not None:
             self.valid_area.empty.action_button.setEnabled(not demo)
             self.valid_area.empty.action_button.clicked.connect(self._new_skill)
         valid.addWidget(self.valid_area)
-        invalid_box, invalid = group("Geçersiz dosyalar")
+        invalid_box, invalid = group(t("Geçersiz dosyalar"))
         layout.addWidget(invalid_box)
         self.invalid_list = QListWidget()
-        self.invalid_list.setAccessibleName("Geçersiz beceri dosyaları")
-        self.invalid_area = ListWithEmpty(self.invalid_list, "Geçersiz dosya yok", height=120)
+        self.invalid_list.setAccessibleName(t("Geçersiz beceri dosyaları"))
+        self.invalid_area = ListWithEmpty(
+            self.invalid_list, t("Geçersiz dosya yok"), height=120,
+        )
         invalid.addWidget(self.invalid_area)
-        self.new_button = QPushButton("Yeni beceri…")
+        self.new_button = QPushButton(t("Yeni beceri…"))
         self.new_button.setObjectName("primary")
-        self.try_button = QPushButton("Dene")
-        self.try_button.setToolTip("Sohbet kutusuna /beceri-adı yazar, göndermez")
-        self.edit_button = QPushButton("Düzenle")
-        self.delete_button = QPushButton("Sil")
+        self.try_button = QPushButton(t("Dene"))
+        self.try_button.setToolTip(t("Sohbet kutusuna /beceri-adı yazar, göndermez"))
+        self.edit_button = QPushButton(t("Düzenle"))
+        self.delete_button = QPushButton(t("Sil"))
         for button in (self.try_button, self.edit_button, self.delete_button):
             button.setEnabled(False)
         valid.addLayout(button_row(
             self.delete_button, self.edit_button, self.try_button, self.new_button,
         ))
-        self.fix_button = QPushButton("Düzelt")
-        self.fix_button.setToolTip("Bozuk dosyayı uygulama içinde aç ve onar")
-        self.delete_invalid_button = QPushButton("Sil")
+        self.fix_button = QPushButton(t("Düzelt"))
+        self.fix_button.setToolTip(t("Bozuk dosyayı uygulama içinde aç ve onar"))
+        self.delete_invalid_button = QPushButton(t("Sil"))
         self.fix_button.setEnabled(False)
         self.delete_invalid_button.setEnabled(False)
         invalid.addLayout(button_row(
             self.delete_invalid_button, self.fix_button,
         ))
         # Klasörü göster yalnız dosya gezginini açar (düzenleyici değil); ikincil, düşük vurgu.
-        self.open_button = QPushButton("Klasörü göster")
-        self.choose_button = QPushButton("Klasör seç…")
-        self.refresh_button = QPushButton("Yenile")
-        invalid.addWidget(meta_label("Beceri dosyalarını bu klasöre .md olarak koy:"))
+        self.open_button = QPushButton(t("Klasörü göster"))
+        self.choose_button = QPushButton(t("Klasör seç…"))
+        self.refresh_button = QPushButton(t("Yenile"))
+        invalid.addWidget(meta_label(t("Beceri dosyalarını bu klasöre .md olarak koy:")))
         self.folder_label = meta_label("")
         self.folder_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         invalid.addWidget(self.folder_label)
@@ -101,8 +104,8 @@ class SkillsSection(QWidget):
             self.choose_button, self.open_button, self.refresh_button,
         ))
         invalid.addWidget(meta_label(
-            "Beceri metni yerel bir dosyadır; bulut modele giden istemin parçası olur, "
-            "başka bir kullanıcı metni gibi. Beceri izin vermez: her adım normal onaydan geçer."
+            t("Beceri metni yerel bir dosyadır; bulut modele giden istemin parçası olur, "
+              "başka bir kullanıcı metni gibi. Beceri izin vermez: her adım normal onaydan geçer."),
         ))
         self.notice = meta_label("")
         layout.addWidget(self.notice)
@@ -129,13 +132,13 @@ class SkillsSection(QWidget):
             self._settings = load_settings(self._config_path)
         except (OSError, ValueError):
             self._settings = None
-            self.notice.setText("Ayar dosyası okunamadı.")
-            self.valid_area.show_empty("Beceriler okunamadı")
-            self.invalid_area.show_empty("Beceriler okunamadı")
+            self.notice.setText(t("Ayar dosyası okunamadı."))
+            self.valid_area.show_empty(t("Beceriler okunamadı"))
+            self.invalid_area.show_empty(t("Beceriler okunamadı"))
         else:
             if not self._settings.skills.enabled:
-                self.valid_area.show_empty("Beceriler kapalı")
-                self.invalid_area.show_empty("Beceriler kapalı")
+                self.valid_area.show_empty(t("Beceriler kapalı"))
+                self.invalid_area.show_empty(t("Beceriler kapalı"))
             else:
                 self.folder_label.setText(str(skills_dir(self._settings)))
                 catalog = load_skills(self._settings)
@@ -153,11 +156,11 @@ class SkillsSection(QWidget):
                 if self.valid_list.count():
                     self.valid_area.show_list()
                 else:
-                    self.valid_area.show_empty("Henüz beceri yok", action=True)
+                    self.valid_area.show_empty(t("Henüz beceri yok"), action=True)
                 if self.invalid_list.count():
                     self.invalid_area.show_list()
                 else:
-                    self.invalid_area.show_empty("Geçersiz dosya yok")
+                    self.invalid_area.show_empty(t("Geçersiz dosya yok"))
         enabled = self._settings is not None and self._settings.skills.enabled
         self.open_button.setEnabled(enabled and not self._demo)
         self.new_button.setEnabled(enabled and not self._demo)
@@ -174,10 +177,10 @@ class SkillsSection(QWidget):
                 legacy.is_dir() and location_problem(settings, legacy)
                 and any(legacy.glob("*.md"))
             ):
-                return (
-                    f"Eski klasör ({legacy}) güvenli olmadığı için kullanılmıyor. İçindeki "
-                    f"dosyaları {skills_dir(settings)} klasörüne kendin taşı."
-                )
+                return t(
+                    "Eski klasör ({legacy}) güvenli olmadığı için kullanılmıyor. "
+                    "İçindeki dosyaları {target} klasörüne kendin taşı."
+                ).format(legacy=legacy, target=skills_dir(settings))
         except OSError:
             pass
         return ""
@@ -245,7 +248,8 @@ class SkillsSection(QWidget):
         if settings is None:
             return
         answer = QMessageBox.question(
-            self, "Beceriyi sil", f"{file_name} silinsin mi? Bu geri alınamaz.",
+            self, t("Beceriyi sil"),
+            t("{file_name} silinsin mi? Bu geri alınamaz.").format(file_name=file_name),
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
         )
@@ -282,7 +286,7 @@ class SkillsSection(QWidget):
             folder = skills_dir(settings)
             folder.mkdir(parents=True, exist_ok=True)
         except OSError:
-            self.notice.setText("Klasör oluşturulamadı.")
+            self.notice.setText(t("Klasör oluşturulamadı."))
             return
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
@@ -291,7 +295,7 @@ class SkillsSection(QWidget):
         if settings is None:
             return
         chosen = QFileDialog.getExistingDirectory(
-            self, "Beceri klasörünü seç", str(skills_dir(settings)),
+            self, t("Beceri klasörünü seç"), str(skills_dir(settings)),
         )
         if not chosen:
             return
@@ -308,6 +312,6 @@ class SkillsSection(QWidget):
             _write_validated(self._config_path, raw)
         except (OSError, ValueError, yaml.YAMLError):
             self.refresh()
-            self.notice.setText("Klasör kaydedilemedi.")
+            self.notice.setText(t("Klasör kaydedilemedi."))
             return
         self.refresh()

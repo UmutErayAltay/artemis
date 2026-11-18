@@ -19,6 +19,7 @@ from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.channels.desktop import pet_animator
 from artemis.channels.desktop import pet_sprite as ps
 from artemis.channels.desktop.pet_sprite import CELL_H, CELL_W, FRAMES
+from artemis.i18n import t
 
 Generate = Callable[[str, bytes | None, str], bytes]  # (istem, referans PNG, boyut) -> PNG/WebP
 
@@ -95,10 +96,10 @@ def decode(data: bytes, size: str) -> QImage:
         or header_size.height() <= 0
         or max(header_size.width(), header_size.height()) > MAX_SIDE
     ):
-        raise PetImageError("Model görseli çözülemedi ya da çok büyük.")
+        raise PetImageError(t("Model görseli çözülemedi ya da çok büyük."))
     image = reader.read()
     if image.isNull() or max(image.width(), image.height()) > MAX_SIDE:
-        raise PetImageError("Model görseli çözülemedi ya da çok büyük.")
+        raise PetImageError(t("Model görseli çözülemedi ya da çok büyük."))
     return image.convertToFormat(QImage.Format.Format_ARGB32)
 
 
@@ -106,7 +107,7 @@ def to_png(image: QImage) -> bytes:
     buffer = QBuffer()
     buffer.open(QIODevice.OpenModeFlag.WriteOnly)
     if not image.save(buffer, "PNG"):  # type: ignore[call-overload]
-        raise PetImageError("Görsel PNG olarak yazılamadı.")
+        raise PetImageError(t("Görsel PNG olarak yazılamadı."))
     return bytes(buffer.data().data())
 
 
@@ -342,7 +343,7 @@ def trim_or_none(image: QImage) -> tuple[QImage, int] | None:
 def trim(image: QImage) -> QImage:
     trimmed = trim_or_none(image)
     if trimmed is None:
-        raise PetImageError("Model görseli boş çıktı.")
+        raise PetImageError(t("Model görseli boş çıktı."))
     return trimmed[0]
 
 
@@ -365,7 +366,7 @@ def row_scale(frames: list[Frame | None], base: QImage) -> float:
     """
     live = [f for f in frames if f is not None]
     if not live:
-        raise PetImageError("Hiçbir satırdan kullanılabilir kare çıkmadı.")
+        raise PetImageError(t("Hiçbir satırdan kullanılabilir kare çıkmadı."))
     base_fit = min(FILL * CELL_H / base.height(), 0.98 * CELL_W / base.width())
     ratio = (sum(_mask(base)) / median(sum(_mask(f.image)) for f in live)) ** 0.5
     _ground, height, width = _envelope(frames)
@@ -458,7 +459,7 @@ def animate(
                 strip = decode(generate(row_prompt(row), base_png, STRIP_SIZE), STRIP_SIZE)
                 frames = slice_strip(strip, FRAMES[row])
                 if not any(frames):
-                    raise PetImageError("Şerit boş.")
+                    raise PetImageError(t("Şerit boş."))
             except BudgetExceeded:
                 raise
             except (ProviderError, PetImageError):

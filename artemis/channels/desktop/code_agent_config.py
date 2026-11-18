@@ -32,6 +32,7 @@ from artemis.config.settings import (
     OWN_REPO_ALIAS,
     AgentProfile,
 )
+from artemis.i18n import t
 
 # Yalnız okunur: önbellek doluysa sonucu gösterir, PowerShell hiçbir koşulda çalıştırılmaz.
 from artemis.tools.code_agent_backends import _LOCATE_CACHE
@@ -55,11 +56,11 @@ def slug_alias(folder_name: str) -> str:
 
 def workdir_alias_error(alias: str, taken: Iterable[str]) -> str | None:
     if not ALIAS_RE.fullmatch(alias):
-        return "Takma ad 1-32 küçük harf, rakam, _ veya - olmalı."
+        return t("Takma ad 1-32 küçük harf, rakam, _ veya - olmalı.")
     if alias == OWN_REPO_ALIAS:
-        return f"'{OWN_REPO_ALIAS}' ayrılmış addır (projenin kendi klasörü)."
+        return t("'{alias}' ayrılmış addır (projenin kendi klasörü).").format(alias=OWN_REPO_ALIAS)
     if alias in set(taken):
-        return "Bu takma ad zaten kullanılıyor."
+        return t("Bu takma ad zaten kullanılıyor.")
     return None
 
 
@@ -134,16 +135,16 @@ def command_status(command: str | None) -> str:
     çalıştırabildiği için arayüz iş parçacığında çağrılmaz.
     """
     if not command:
-        return "komut yok"
+        return t("komut yok")
     if command in _LOCATE_CACHE:
-        return "bulundu" if _LOCATE_CACHE[command] else "bulunamadı"
+        return t("bulundu") if _LOCATE_CACHE[command] else t("bulunamadı")
     if Path(command).is_absolute():
-        return "bulundu" if Path(command).is_file() else "bulunamadı"
+        return t("bulundu") if Path(command).is_file() else t("bulunamadı")
     if shutil.which(command):
-        return "bulundu"
+        return t("bulundu")
     if command == "codex":
-        return "PATH'te yok (ilk kullanımda ayrıca aranır)"
-    return "PATH'te yok"
+        return t("PATH'te yok (ilk kullanımda ayrıca aranır)")
+    return t("PATH'te yok")
 
 
 class AgentFormError(ValueError):
@@ -162,18 +163,20 @@ def parse_agent_form(
     """Özel (generic) ajan formunu arka uç AgentProfile modeliyle doğrular."""
     name = name.strip()
     if not ALIAS_RE.fullmatch(name):
-        raise AgentFormError("Ad 1-32 küçük harf, rakam, _ veya - olmalı.")
+        raise AgentFormError(t("Ad 1-32 küçük harf, rakam, _ veya - olmalı."))
     if name in BUILTIN_AGENTS or name in set(taken):
-        raise AgentFormError("Bu ad zaten kullanılıyor.")
+        raise AgentFormError(t("Bu ad zaten kullanılıyor."))
     command = command.strip()
     if not command:
-        raise AgentFormError("Komut gerekli.")
+        raise AgentFormError(t("Komut gerekli."))
     args = tuple(line for line in args_text.splitlines() if line.strip())
     visible_args = tuple(line for line in visible_args_text.splitlines() if line.strip())
     env = tuple(part for part in re.split(r"[,\s]+", env_text.strip()) if part)
     for variable in env:
         if not ENV_NAME_RE.fullmatch(variable):
-            raise AgentFormError(f"Ortam değişkeni adı büyük harfli olmalı: {variable}")
+            raise AgentFormError(
+                t("Ortam değişkeni adı büyük harfli olmalı: {variable}").format(variable=variable)
+            )
     try:
         profile = AgentProfile(
             kind="generic",
@@ -193,60 +196,64 @@ class AgentDialog(FormDialog):
     """Özel ajan ekleme penceresi; doğrulama `parse_agent_form`da, hata satır içi gösterilir."""
 
     def __init__(self, taken: Iterable[str], parent: Any = None) -> None:
-        super().__init__("Özel kod ajanı", 480, parent)
+        super().__init__(t("Özel kod ajanı"), 480, parent)
         self._taken = tuple(taken)
         self.result_profile: tuple[str, dict[str, Any]] | None = None
-        self.setWindowTitle("Özel kod ajanı ekle")
+        self.setWindowTitle(t("Özel kod ajanı ekle"))
         layout = self.form
         self.name = QLineEdit()
-        self.name.setPlaceholderText("Örn. aider")
+        self.name.setPlaceholderText(t("Örn. aider"))
         self.command = QLineEdit()
-        self.command.setPlaceholderText("Örn. aider")
+        self.command.setPlaceholderText(t("Örn. aider"))
         self.args = QPlainTextEdit()
         self.args.setPlaceholderText(
-            "Her satır bir argüman. Yer tutucular: {prompt_file} {workdir} {repo}"
+            t("Her satır bir argüman. Yer tutucular: {prompt_file} {workdir} {repo}")
         )
         self.args.setFixedHeight(72)
         self.visible_args = QPlainTextEdit()
         self.visible_args.setPlaceholderText(
-            "Boşsa görünür kip kapalı. Yer tutucular: {prompt_file} {prompt} {workdir} {repo}"
+            t("Boşsa görünür kip kapalı. Yer tutucular: {prompt_file} {prompt} {workdir} {repo}")
         )
         self.visible_args.setFixedHeight(72)
         self.prompt_via = QComboBox()
-        self.prompt_via.addItem("Standart girdi (stdin)", "stdin")
-        self.prompt_via.addItem("Geçici dosya ({prompt_file})", "file")
+        self.prompt_via.addItem(t("Standart girdi (stdin)"), "stdin")
+        self.prompt_via.addItem(t("Geçici dosya ({prompt_file})"), "file")
         self.env = QLineEdit()
-        self.env.setPlaceholderText("Örn. OPENAI_API_KEY, AIDER_MODEL")
+        self.env.setPlaceholderText(t("Örn. OPENAI_API_KEY, AIDER_MODEL"))
         for caption, widget, hint, help_text in (
             (
-                "Ad", self.name, "Küçük harf, rakam, _ veya -",
+                t("Ad"), self.name, t("Küçük harf, rakam, _ veya -"),
                 "",
             ),
             (
-                "Komut", self.command, None,
-                "Ajanı başlatan program. Bu bilgisayarda bulunabilir olmalı; Artemis bu komutu "
-                "kod işi sırasında çalıştırır.",
+                t("Komut"), self.command, None,
+                t(
+                    "Ajanı başlatan program. Bu bilgisayarda bulunabilir olmalı; Artemis bu komutu "
+                    "kod işi sırasında çalıştırır."
+                ),
             ),
             (
-                "Argümanlar", self.args, None,
+                t("Argümanlar"), self.args, None,
 "",
             ),
             (
-                "İstem biçimi", self.prompt_via, None,
+                t("İstem biçimi"), self.prompt_via, None,
 "",
             ),
             (
-                "Görünür pencere argümanları (isteğe bağlı)",
+                t("Görünür pencere argümanları (isteğe bağlı)"),
                 self.visible_args,
-                "Satır başına bir argüman. {prompt} kısa yönerge, {prompt_file} tam istemdir.",
+                t("Satır başına bir argüman. {prompt} kısa yönerge, {prompt_file} tam istemdir."),
 "",
             ),
             (
-                "Ortam değişkeni adları (isteğe bağlı)",
+                t("Ortam değişkeni adları (isteğe bağlı)"),
                 self.env,
-                "Yalnız adlar saklanır; değerler asla yazılmaz. Değeri kendi ortamında tanımla.",
-                "Ajana aktarılacak ortam değişkenlerinin adları. Değerler ayar dosyasına "
-                "yazılmaz; senin ortamından okunur.",
+                t("Yalnız adlar saklanır; değerler asla yazılmaz. Değeri kendi ortamında tanımla."),
+                t(
+                    "Ajana aktarılacak ortam değişkenlerinin adları. Değerler ayar dosyasına "
+                    "yazılmaz; senin ortamından okunur."
+                ),
             ),
         ):
             widget.setAccessibleName(caption)
@@ -265,7 +272,7 @@ class AgentDialog(FormDialog):
         self.error.setWordWrap(True)
         self.error.hide()
         layout.addWidget(self.error)
-        self.add_buttons("Ekle")
+        self.add_buttons(t("Ekle"))
 
     def submit(self) -> None:
         try:

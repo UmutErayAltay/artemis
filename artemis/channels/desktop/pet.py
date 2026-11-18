@@ -41,6 +41,7 @@ from PySide6.QtWidgets import QApplication, QMenu, QWidget
 from artemis.channels.desktop import pet_sprite, themes
 from artemis.channels.desktop.pet_quick import QuickBox
 from artemis.channels.desktop.pet_sprite import SpritePet
+from artemis.i18n import t
 
 log = logging.getLogger(__name__)
 
@@ -101,11 +102,15 @@ def commit_count(commits: Any) -> int:
 
 
 def job_summary(project: str, status: str, commits: Any) -> str:
-    name = truncate(project or "kod ajanı", 40)
+    name = truncate(project or t("kod ajanı"), 40)
     if status != "done":
-        return f"{name}: hata"
+        return t("{name}: hata").format(name=name)
     count = commit_count(commits)
-    return f"{name}: bitti, {count} commit" if count else f"{name}: bitti, commit yok"
+    return (
+        t("{name}: bitti, {count} commit").format(name=name, count=count)
+        if count
+        else t("{name}: bitti, commit yok").format(name=name)
+    )
 
 
 def clamp_anchor(pos: QPoint, area: QRect) -> QPoint:
@@ -386,21 +391,23 @@ class PetWidget(QWidget):
 
     def job_lines(self) -> list[str]:
         """Etkin işlerin kısa listesi: 'web · çalışıyor', 'api · girdi bekliyor'."""
-        label = {"running": "çalışıyor", "waiting": "girdi bekliyor"}
+        label = {"running": t("çalışıyor"), "waiting": t("girdi bekliyor")}
         lines = [
-            f"{truncate(project or 'kod ajanı', 24)} · {label[status]}"
+            f"{truncate(project or t('kod ajanı'), 24)} · {label[status]}"
             for project, status in self._jobs.values()
         ]
-        return lines[:4] + ([f"+{len(lines) - 4} iş daha"] if len(lines) > 4 else [])
+        return lines[:4] + (
+            [t("+{count} iş daha").format(count=len(lines) - 4)] if len(lines) > 4 else []
+        )
 
     def _say_jobs(self) -> None:
         if self._jobs:
             self.say("\n".join(self.job_lines()), "job", flat=False)
 
     def _refresh_access(self) -> None:
-        text = DESCRIPTIONS[self.state]
+        text = t(DESCRIPTIONS[self.state])
         if self._jobs:
-            text += f"; {len(self._jobs)} kod işi çalışıyor"
+            text += t("; {count} kod işi çalışıyor").format(count=len(self._jobs))
         self.setAccessibleDescription(text)
         self.setToolTip(text)
 
@@ -476,12 +483,14 @@ class PetWidget(QWidget):
                 else None
             )
             if info is None:
-                raise pet_sprite.PetError(f"'{pet_id}' kimlikli pet bulunamadı.")
+                raise pet_sprite.PetError(
+                    t("'{pet_id}' kimlikli pet bulunamadı.").format(pet_id=pet_id)
+                )
             sprite = SpritePet(info, BODY)
         except pet_sprite.PetError as error:
             log.warning("Pet yüklenemedi, küre kullanılıyor: %s", error)
             self._sprite, self._skin = None, pet_sprite.ORB
-            return f"Pet yüklenemedi, küre kullanılıyor: {error}"
+            return t("Pet yüklenemedi, küre kullanılıyor: {error}").format(error=error)
         self._sprite, self._skin = sprite, info.id
         self._frame_t = 0.0
         if persist:
@@ -531,17 +540,17 @@ class PetWidget(QWidget):
 
     def build_menu(self) -> QMenu:
         menu = QMenu(self)
-        menu.addAction("Paneli aç").triggered.connect(self._on_show_panel)
-        menu.addAction("Hızlı komut").triggered.connect(self._on_quick)
+        menu.addAction(t("Paneli aç")).triggered.connect(self._on_show_panel)
+        menu.addAction(t("Hızlı komut")).triggered.connect(self._on_quick)
         voice_on = self._voice != "off"
-        menu.addAction("Sesi kapat" if voice_on else "Sesi aç").triggered.connect(
+        menu.addAction(t("Sesi kapat") if voice_on else t("Sesi aç")).triggered.connect(
             self._on_toggle_voice
         )
         menu.addSeparator()
-        menu.addAction("Peti gizle").triggered.connect(lambda: self.set_pet_visible(False))
+        menu.addAction(t("Peti gizle")).triggered.connect(lambda: self.set_pet_visible(False))
         menu.addSeparator()
         # Tepsideki "Çıkış" ile aynı yol: işçi temiz kapanır, uygulama sonlanır.
-        menu.addAction("Kapat").triggered.connect(self._on_quit)
+        menu.addAction(t("Kapat")).triggered.connect(self._on_quit)
         return menu
 
     def contextMenuEvent(self, event: QContextMenuEvent) -> None:

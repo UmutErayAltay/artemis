@@ -25,6 +25,7 @@ from artemis.channels.telegram.channel import (
     serve_telegram,
 )
 from artemis.config.settings import TelegramConfig
+from artemis.i18n import t
 
 JOIN_SECONDS = 10.0
 _EXECUTOR_SECONDS = 5.0
@@ -35,7 +36,7 @@ STOPPING_TEXT = "Kanal kapanıyor (sürmekte olan tur bitince); birkaç saniye s
 def channel_blocker(config: TelegramConfig) -> str | None:
     """Kanalın başlayamama nedeni (token ya da sohbet yok); None = başlayabilir."""
     if config.chat_id is None or resolve_telegram_token(config) is None:
-        return MISSING_TEXT
+        return t(MISSING_TEXT)
     return None
 
 

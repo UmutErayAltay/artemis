@@ -45,6 +45,7 @@ from PySide6.QtWidgets import (
 
 from artemis.channels.desktop.form_kit import meta_label
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEMES
+from artemis.i18n import t
 from artemis.text import search_fold
 
 _ITEM_HEIGHT = 30  # bölüm satırı; dar pencerede liste kendi kaydırıcısına ihtiyaç duymasın
@@ -186,14 +187,15 @@ class _ThemeCard(QFrame):
         row.setSpacing(12)
         swatch = QLabel()
         swatch.setPixmap(_swatch(key))
-        swatch.setAccessibleName(f"{label} önizleme")
+        swatch.setAccessibleName(t("{label} önizleme").format(label=label))
         self.radio = QRadioButton(label)
         self.radio.toggled.connect(self._selected)
         text = QVBoxLayout()
         text.setSpacing(4)
         text.addStretch(1)
         text.addWidget(self.radio)
-        hint = meta_label(_THEME_HINTS.get(key, ""))
+        hint_text = _THEME_HINTS.get(key, "")
+        hint = meta_label(t(hint_text) if hint_text else "")
         hint.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         text.addWidget(hint)
         text.addStretch(1)
@@ -214,9 +216,9 @@ class _SavedNote(QLabel):
     """Anında kaydedilen bir denetim çalışınca kısa süre "Kaydedildi" der (renge bağlı değil)."""
 
     def __init__(self) -> None:
-        super().__init__("Kaydedildi")
+        super().__init__(t("Kaydedildi"))
         self.setObjectName("meta")
-        self.setAccessibleName("Kayıt durumu")
+        self.setAccessibleName(t("Kayıt durumu"))
         self.setVisible(False)
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
@@ -237,7 +239,7 @@ class _Notice(QLabel):
     def __init__(self) -> None:
         super().__init__("")
         self.setObjectName("meta")
-        self.setAccessibleName("Durum")
+        self.setAccessibleName(t("Durum"))
         self.setWordWrap(True)
         self.setTextFormat(Qt.TextFormat.PlainText)
         self.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)

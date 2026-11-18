@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.i18n import t
+
 
 class _DataBrowser(QTextBrowser):
     def loadResource(self, type: int, name: Any) -> Any:  # noqa: A002 - Qt imzası
@@ -57,8 +59,8 @@ class TextViewerDialog(QDialog):
         else:
             self.browser.setPlainText(text)
         layout.addWidget(self.browser, 1)
-        self.copy_button = QPushButton("Kopyala")
-        self.close_button = QPushButton("Kapat")
+        self.copy_button = QPushButton(t("Kopyala"))
+        self.close_button = QPushButton(t("Kapat"))
         self.close_button.setObjectName("primary")
         self.close_button.setDefault(True)
         row = QHBoxLayout()
@@ -93,9 +95,9 @@ def open_text_file(path: Path, title: str, parent: QWidget | None = None) -> Non
         with path.open("rb") as handle:
             raw = handle.read(_MAX_BYTES + 1)
     except OSError:
-        QMessageBox.warning(parent, title, "Dosya okunamadı.")
+        QMessageBox.warning(parent, title, t("Dosya okunamadı."))
         return
     text = raw[:_MAX_BYTES].decode("utf-8", errors="replace")
     if len(raw) > _MAX_BYTES:
-        text += "\n\n… (dosya çok uzun; baştaki 1 MB gösterildi)"
+        text += "\n\n" + t("… (dosya çok uzun; baştaki 1 MB gösterildi)")
     TextViewerDialog(title, text, parent=parent).exec()

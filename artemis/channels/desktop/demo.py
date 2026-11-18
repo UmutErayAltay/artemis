@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.brain.models import Completion, Message, ToolCall
 from artemis.config.settings import ModelConfig, Settings
+from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import ToolRegistry
@@ -40,8 +41,8 @@ class DemoReadTool(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message="Demo örnek verisi okundu.",
-            data={"sample": records.get("sample", "Yerel örnek bilgi")},
+            message=t("Demo örnek verisi okundu."),
+            data={"sample": records.get("sample", t("Yerel örnek bilgi"))},
         )
 
 
@@ -60,7 +61,7 @@ class DemoWriteTool(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message="Demo belleği güncellendi.",
+            message=t("Demo belleği güncellendi."),
             data={"key": values.key, "value": values.value},
         )
 
@@ -84,11 +85,11 @@ class DemoProvider:
         if tool_messages:
             joined = "\n".join(message.content for message in tool_messages)
             if '"status":"denied"' in joined or "onaylamadı" in joined:
-                text = "DEMO · Onay verilmedi; geçici demo belleği değiştirilmedi."
+                text = t("DEMO · Onay verilmedi; geçici demo belleği değiştirilmedi.")
             elif "demo_write_memory" in joined or "Demo belleği güncellendi" in joined:
-                text = "DEMO · Örnek veri işlendi ve yalnız geçici demo belleği güncellendi."
+                text = t("DEMO · Örnek veri işlendi ve yalnız geçici demo belleği güncellendi.")
             else:
-                text = "DEMO · Örnek veri okundu; dışarıda hiçbir işlem yapılmadı."
+                text = t("DEMO · Örnek veri okundu; dışarıda hiçbir işlem yapılmadı.")
             return Completion(content=text, provider="demo", model="demo")
 
         user_text = next(
@@ -114,7 +115,7 @@ class DemoProvider:
                 model="demo",
             )
         return Completion(
-            content=(
+            content=t(
                 "DEMO · Bu girdi yalnız çevrimdışı demo sağlayıcısına ulaştı; "
                 "gerçek bir iş yapılmadı. Güvenli onay örneği için ‘örnek akış’ yazın."
             ),

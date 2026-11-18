@@ -41,7 +41,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.providers import stored_endpoint_key
-from artemis.channels.desktop import themes
+from artemis.channels.desktop import provider_section, themes
 from artemis.channels.desktop.provider_helpers import _slug
 from artemis.channels.desktop.provider_layout import PRESETS
 from artemis.channels.desktop.provider_section import store_endpoint_key
@@ -521,7 +521,9 @@ class ConnectWizard(QDialog):
         self._open_url: Callable[[str], object] = open_url or _default_open_url
         self._oauth: OpenRouterPkce = oauth or OpenRouterPkce()
         self._which: Callable[[str], str | None] = run_cli or shutil.which
-        self._store_key: Callable[[str, str], str | None] = store_key or store_endpoint_key
+        self._store_key: Callable[[str, str], str | None] = store_key or (
+            lambda name, typed: store_endpoint_key(name, typed, provider_section.write_secret)
+        )
         self._clipboard: Any = clipboard
         self._gemini_validator: Callable[[str], int] = gemini_validator or validate_gemini_key
         self._local_probe = local_probe or probe_local_services

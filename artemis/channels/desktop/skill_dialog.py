@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from artemis.channels.desktop.dialog_shell import FormDialog
 from artemis.channels.desktop.widgets import HelpTip
 from artemis.config.settings import Settings
+from artemis.i18n import t
 from artemis.skills import (
     MAX_BODY,
     MAX_DESCRIPTION,
@@ -47,7 +48,7 @@ _BLANK = "Boş"
 _BODY_HELP = (
     "Model bu beceriyi seçince bu talimatı okur; araç çağrıları yine onay kurallarına tabidir. "
     "Kişisel veri yazma: bulut modele gidebilir. "
-    f"En çok {MAX_BODY} karakter; uzun tarifler kesilmesin diye kısa tut."
+    "En çok {max_body} karakter; uzun tarifler kesilmesin diye kısa tut."
 )
 _BODY_PLACEHOLDER = (
     "Kullanıcı ... isterse:\n\n"
@@ -87,20 +88,22 @@ class SkillDialog(FormDialog):
         self, settings: Settings, name: str | None = None, original: bytes | None = None,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__("Beceriyi düzenle" if name is not None else "Yeni beceri", 560, parent)
+        super().__init__(
+            t("Beceriyi düzenle") if name is not None else t("Yeni beceri"), 560, parent,
+        )
         self._settings = settings
         self._edit = name is not None
         self._original = original or b""
         self._raw = False
         self._template_index = 0
         self._templates = templates()
-        self.setWindowTitle("Beceriyi düzenle" if self._edit else "Yeni beceri")
+        self.setWindowTitle(t("Beceriyi düzenle") if self._edit else t("Yeni beceri"))
         layout = self.form
         layout.setSpacing(8)
 
         self.template = QComboBox()
-        self.template.setAccessibleName("Başlangıç")
-        self.template.addItem(_BLANK)
+        self.template.setAccessibleName(t("Başlangıç"))
+        self.template.addItem(t(_BLANK))
         for template_name, text in self._templates:
             self.template.addItem(template_name)
             self.template.setItemData(
@@ -109,20 +112,20 @@ class SkillDialog(FormDialog):
             )
         self.template.currentIndexChanged.connect(self._template_changed)
         if not self._edit:
-            self._caption(layout, "Başlangıç", _row(
+            self._caption(layout, t("Başlangıç"), _row(
                 self.template, "",
             ))
 
         self.name = QLineEdit(name or "")
-        self.name.setAccessibleName("Ad")
+        self.name.setAccessibleName(t("Ad"))
         self.name.setReadOnly(self._edit)
-        self.name.setPlaceholderText("örn. haftalik-rapor")
+        self.name.setPlaceholderText(t("örn. haftalik-rapor"))
         self.name.textChanged.connect(self._validate)
-        self._caption(layout, "Ad", _row(self.name, ""))
+        self._caption(layout, t("Ad"), _row(self.name, ""))
         self.name_hint = QLabel("")
         self.name_hint.setObjectName("warnNote")
         self.name_hint.setWordWrap(True)
-        self.use_slug = QPushButton("Öneriyi kullan")
+        self.use_slug = QPushButton(t("Öneriyi kullan"))
         self.use_slug.clicked.connect(self._apply_slug)
         slug_row = QHBoxLayout()
         slug_row.addWidget(self.name_hint, 1)
@@ -130,22 +133,22 @@ class SkillDialog(FormDialog):
         layout.addLayout(slug_row)
 
         self.description = QLineEdit()
-        self.description.setAccessibleName("Açıklama")
-        self.description.setPlaceholderText("Ne zaman kullanılır? Tek cümle.")
+        self.description.setAccessibleName(t("Açıklama"))
+        self.description.setPlaceholderText(t("Ne zaman kullanılır? Tek cümle."))
         self.description.textChanged.connect(self._validate)
         self.description_box = QWidget()  # ham kipte topluca gizlenir
         self.description_box.setObjectName("flat")
         box = QVBoxLayout(self.description_box)
         box.setContentsMargins(0, 0, 0, 0)
         box.setSpacing(8)
-        self._caption(box, "Açıklama", _row(self.description, ""))
+        self._caption(box, t("Açıklama"), _row(self.description, ""))
         self.description_count = self._counter(box)
         layout.addWidget(self.description_box)
 
         self.body = QPlainTextEdit()
-        self.body.setAccessibleName("Talimat")
+        self.body.setAccessibleName(t("Talimat"))
         self.body.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
-        self.body.setPlaceholderText(_BODY_PLACEHOLDER)
+        self.body.setPlaceholderText(t(_BODY_PLACEHOLDER))
         self.body.setMinimumHeight(180)
         self.body.textChanged.connect(self._validate)
         self.preview = QTextBrowser()  # bağlar açılmaz: beceri metni dışarıya yönlendirmez
@@ -155,13 +158,15 @@ class SkillDialog(FormDialog):
         self.stack = QStackedWidget()
         self.stack.addWidget(self.body)
         self.stack.addWidget(self.preview)
-        self.preview_toggle = QPushButton("Önizleme")
+        self.preview_toggle = QPushButton(t("Önizleme"))
         self.preview_toggle.setCheckable(True)
         self.preview_toggle.toggled.connect(self._toggle_preview)
         head = QHBoxLayout()
-        caption = QLabel("Talimat")
+        caption = QLabel(t("Talimat"))
         caption.setObjectName("fieldLabel")
-        head.addLayout(_row(caption, _BODY_HELP, fill=False), 1)
+        head.addLayout(
+            _row(caption, t(_BODY_HELP).format(max_body=MAX_BODY), fill=False), 1,
+        )
         head.addWidget(self.preview_toggle)
         self.body_caption = QWidget()
         self.body_caption.setObjectName("flat")
@@ -172,11 +177,11 @@ class SkillDialog(FormDialog):
 
         # Ham kip: geçersiz dosyayı olduğu gibi göster, kullanıcı düzeltsin.
         self.raw = QPlainTextEdit()
-        self.raw.setAccessibleName("Dosya metni")
+        self.raw.setAccessibleName(t("Dosya metni"))
         self.raw.setFont(QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont))
         self.raw.setMinimumHeight(260)
         self.raw.textChanged.connect(self._validate)
-        raw_label = QLabel("Dosya metni")
+        raw_label = QLabel(t("Dosya metni"))
         raw_label.setObjectName("fieldLabel")
         self.raw_caption = QWidget()  # ham kipte topluca görünür
         self.raw_caption.setObjectName("flat")
@@ -188,7 +193,7 @@ class SkillDialog(FormDialog):
         self.status.setObjectName("warnNote")
         self.status.setWordWrap(True)
         self._outer.addWidget(self.status)
-        self.add_buttons("Kaydet" if self._edit else "Ekle")
+        self.add_buttons(t("Kaydet") if self._edit else t("Ekle"))
         self.save_button = self.ok_button
 
         if self._edit:
@@ -252,7 +257,7 @@ class SkillDialog(FormDialog):
         if on:
             self.preview.setMarkdown(self.body.toPlainText().strip())
         self.stack.setCurrentWidget(self.preview if on else self.body)
-        self.preview_toggle.setText("Düzenle" if on else "Önizleme")
+        self.preview_toggle.setText(t("Düzenle") if on else t("Önizleme"))
 
     def _apply_slug(self) -> None:
         self.name.setText(slugify(self.name.text()))
@@ -268,7 +273,8 @@ class SkillDialog(FormDialog):
             return
         if self.body.toPlainText().strip() or self.description.text().strip():
             answer = QMessageBox.question(
-                self, "Şablon", "Yazdığın açıklama ve talimat şablonla değiştirilsin mi?",
+                self, t("Şablon"),
+                t("Yazdığın açıklama ve talimat şablonla değiştirilsin mi?"),
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                 QMessageBox.StandardButton.No,
             )
@@ -293,13 +299,15 @@ class SkillDialog(FormDialog):
         if self._edit:
             return ""
         if not name:
-            return "Ad yaz."
+            return t("Ad yaz.")
         if not NAME_PATTERN.fullmatch(name):
             if len(name) > 40:
-                return "Ad en çok 40 karakter olabilir."
-            return "Ad yalnız küçük harf (a-z), rakam ve tire içerebilir."
+                return t("Ad en çok 40 karakter olabilir.")
+            return t("Ad yalnız küçük harf (a-z), rakam ve tire içerebilir.")
         if (skills_dir(self._settings) / f"{name}.md").exists():
-            return f"'{name}' adında bir beceri zaten var; üzerine yazılmaz."
+            return t(
+                "'{name}' adında bir beceri zaten var; üzerine yazılmaz."
+            ).format(name=name)
         return ""
 
     def _problem(self) -> str:
@@ -311,13 +319,17 @@ class SkillDialog(FormDialog):
             if problem:
                 return problem
             if not description:
-                return "Açıklama boş olamaz."
+                return t("Açıklama boş olamaz.")
             if len(description) > MAX_DESCRIPTION:
-                return f"Açıklama en çok {MAX_DESCRIPTION} karakter olabilir."
+                return t(
+                    "Açıklama en çok {max_description} karakter olabilir."
+                ).format(max_description=MAX_DESCRIPTION)
             if not body:
-                return "Talimat boş olamaz."
+                return t("Talimat boş olamaz.")
             if len(body) > MAX_BODY:
-                return f"Talimat en çok {MAX_BODY} karakter olabilir."
+                return t("Talimat en çok {max_body} karakter olabilir.").format(
+                    max_body=MAX_BODY,
+                )
         try:
             parse_bytes(self._file_text().encode("utf-8"), self.name.text().strip())
         except ValueError as error:
@@ -371,8 +383,8 @@ def read_for_edit(settings: Settings, name: str) -> bytes:
     path = skills_dir(settings) / f"{name}.md"
     try:
         if path.is_symlink() or not path.is_file():
-            raise SkillWriteError("Dosya bulunamadı ya da sembolik bağlantı; düzenlenmez.")
+            raise SkillWriteError(t("Dosya bulunamadı ya da sembolik bağlantı; düzenlenmez."))
         return path.read_bytes()
     except OSError:
-        raise SkillWriteError("Dosya okunamadı.") from None
+        raise SkillWriteError(t("Dosya okunamadı.")) from None
 

@@ -19,6 +19,7 @@ from artemis.channels.desktop.form_kit import button_row, group, meta_label
 from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.config.settings import Settings, load_settings
+from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 from artemis.tools.file_index import FileIndex, usable_roots
 
@@ -53,12 +54,13 @@ class FileSearchSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        roots_box, roots = group("Aranacak klasörler", divided=False)
+        roots_box, roots = group(t("Aranacak klasörler"), divided=False)
         layout.addWidget(roots_box)
         self.roots_list = QListWidget()
-        self.roots_list.setAccessibleName("Aranacak klasörler")
+        self.roots_list.setAccessibleName(t("Aranacak klasörler"))
         self.roots_area = ListWithEmpty(
-            self.roots_list, "Henüz klasör eklenmedi", "Klasör ekle ile başla.", height=144,
+            self.roots_list, t("Henüz klasör eklenmedi"), t("Klasör ekle ile başla."),
+            height=144,
         )
         roots.addWidget(self.roots_area)
         # Liste Uygula yenilemesinde, ekle/çıkar düğmelerinde ve testlerde değişir; boş durum
@@ -67,21 +69,21 @@ class FileSearchSection(QWidget):
         for signal in (model.rowsInserted, model.rowsRemoved, model.modelReset):
             signal.connect(self._sync_roots)
         self._sync_roots()
-        self.add_button = QPushButton("Klasör ekle")
+        self.add_button = QPushButton(t("Klasör ekle"))
         self.add_button.setObjectName("primary")
-        self.remove_button = QPushButton("Listeden çıkar")
+        self.remove_button = QPushButton(t("Listeden çıkar"))
         roots.addLayout(button_row(self.remove_button, self.add_button))
-        index_box, index = group("İndeks")
+        index_box, index = group(t("İndeks"))
         layout.addWidget(index_box)
         self.status_label = meta_label("")
         index.addWidget(self.status_label)
-        self.reindex_button = QPushButton("Yeniden dizinle")
-        self.clear_button = QPushButton("Dizini sil")
+        self.reindex_button = QPushButton(t("Yeniden dizinle"))
+        self.clear_button = QPushButton(t("Dizini sil"))
         index.addLayout(button_row(self.clear_button, self.reindex_button))
         index.addWidget(meta_label(
-            "İndeks dosya içeriğinden alınan kişisel metni yalnız Artemis'in veri klasöründe "
-            "tutar. "
-            "Gizli görünen dosyalar (.env, anahtar, parola adları) ve bağlantılar dizinlenmez."
+            t("İndeks dosya içeriğinden alınan kişisel metni yalnız Artemis'in "
+              "veri klasöründe tutar. Gizli görünen dosyalar (.env, anahtar, "
+              "parola adları) ve bağlantılar dizinlenmez.")
         ))
         self.notice = meta_label("")
         layout.addWidget(self.notice)
@@ -101,13 +103,15 @@ class FileSearchSection(QWidget):
         if self.roots_list.count():
             self.roots_area.show_list()
         else:
-            self.roots_area.show_empty("Henüz klasör eklenmedi", "Klasör ekle ile başla.")
+            self.roots_area.show_empty(
+                t("Henüz klasör eklenmedi"), t("Klasör ekle ile başla."),
+            )
 
     def _settings(self) -> Settings | None:
         try:
             return load_settings(self._config_path)
         except (OSError, ValueError):
-            self.notice.setText("Ayar dosyası okunamadı.")
+            self.notice.setText(t("Ayar dosyası okunamadı."))
             return None
 
     def refresh(self) -> None:
@@ -127,12 +131,17 @@ class FileSearchSection(QWidget):
             self.status_label.setText("")
             return
         if not index.available:
-            self.status_label.setText("Bu SQLite sürümünde FTS5 yok; dosya araması kullanılamaz.")
+            self.status_label.setText(
+                t("Bu SQLite sürümünde FTS5 yok; dosya araması kullanılamaz.")
+            )
             return
         info = index.status()
-        text = f"{info['files']} dosya · son dizinleme: {info['last_run'] or 'henüz yok'}"
+        last_run = info["last_run"] or t("henüz yok")
+        text = t("{files} dosya · son dizinleme: {last_run}").format(
+            files=info["files"], last_run=last_run,
+        )
         if info["running"]:
-            text += " · dizinleniyor"
+            text += " · " + t("dizinleniyor")
             self._timer.start()
         else:
             self._timer.stop()
@@ -141,7 +150,7 @@ class FileSearchSection(QWidget):
         self.status_label.setText(text)
 
     def _add(self) -> None:
-        folder = QFileDialog.getExistingDirectory(self, "Aranacak klasörü seç")
+        folder = QFileDialog.getExistingDirectory(self, t("Aranacak klasörü seç"))
         if folder:
             path = str(Path(folder))
             if not self.roots_list.findItems(path, Qt.MatchFlag.MatchExactly):
@@ -156,17 +165,19 @@ class FileSearchSection(QWidget):
         if settings is None or self._index is None:
             return
         if not settings.file_search.enabled:
-            self.notice.setText("Dosya araması kapalı. Önce Dosya aramasını kullan kutusunu aç.")
+            self.notice.setText(
+                t("Dosya araması kapalı. Önce Dosya aramasını kullan kutusunu aç.")
+            )
         elif self._index.start():
-            self.notice.setText("Dizinleme başladı.")
+            self.notice.setText(t("Dizinleme başladı."))
         else:
-            self.notice.setText("Dizinleme zaten sürüyor.")
+            self.notice.setText(t("Dizinleme zaten sürüyor."))
         self._show_status()
 
     def _clear(self) -> None:
         if self._index is None or self._clearing is not None:
             return
-        self.notice.setText("İndeks siliniyor...")
+        self.notice.setText(t("İndeks siliniyor..."))
         self.clear_button.setEnabled(False)
         job = _ClearJob(self._index, self)
         job.done.connect(self._cleared)
