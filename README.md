@@ -70,11 +70,11 @@ açıklanır.
 Videolar demo arayüzünün gerçek ekran görüntüleriyle hazırlandı (Remotion), seslendirme Türkçedir.
 İngilizce seslendirmeli sürümler [README.en.md](README.en.md#videos) içindedir.
 
-**Tanıtım (≈90 sn)**
+**Tanıtım (≈100 sn)**
 
 https://github.com/user-attachments/assets/8b360cd1-dbf7-4849-a8b9-85d3b9a67601
 
-**Kurulum rehberi (≈50 sn)**
+**Kurulum rehberi (≈35 sn)**
 
 https://github.com/user-attachments/assets/16b5b915-855e-401c-b378-0a021449c0c4
 
