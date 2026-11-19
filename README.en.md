@@ -24,9 +24,13 @@ Artemis is a Turkish, single-user personal desktop assistant for Windows 11. The
 
 Made with Remotion from real screenshots of the demo UI; English narration.
 
-| Product tour (≈100 s) | Setup guide (≈50 s) |
-| --- | --- |
-| [![Artemis product tour](docs/assets/video/artemis-promo-en.jpg)](docs/assets/video/artemis-promo-en.mp4) | [![Artemis setup guide](docs/assets/video/artemis-setup-en.jpg)](docs/assets/video/artemis-setup-en.mp4) |
+**Product tour (≈100 s)**
+
+https://github.com/user-attachments/assets/08f74545-0265-4266-8279-aed56c2791c6
+
+**Setup guide (≈50 s)**
+
+https://github.com/user-attachments/assets/c35a73a0-d3ba-4bfc-8b5a-b59fe9ae9cc2
 
 ## Windows package and first run
 
