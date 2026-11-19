@@ -30,6 +30,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.channels.desktop.about_section import AboutSection
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.file_search_section import FileSearchSection
 from artemis.channels.desktop.form_kit import button_row, divider, field, group, meta_label
@@ -959,8 +960,15 @@ def build_apps_page(panel: SettingsPanel) -> None:
 
 
 def build_about_page(panel: SettingsPanel) -> None:
-    about = add_page(panel, t("Hakkında"), t("Sürüm ve güncelleme denetimi."))
-    box, body = group(t("Güncelleme"), divided=False)
+    about = add_page(
+        panel,
+        t("Hakkında"),
+        t("Sürüm, lisans, bağlantılar ve güncelleme."),
+    )
+    panel.about_section = AboutSection(panel.config_path, parent=panel)
+    about.addWidget(panel.about_section)
+    box, body = group(t("Güncelleme"))
     panel.update_section = UpdateSection(panel)
     body.addWidget(panel.update_section)
     about.addWidget(box)
+    about.addStretch(1)

@@ -112,8 +112,6 @@ _BLOCK_MAX_WIDTH = PAGE_MAX_WIDTH  # liste + sayfa bloğu; geniş pencerede orta
 # ~500px kalır ve hiçbir sayfa taşmaz (2026-11-15 ölçüm).
 _COMPACT_PANEL_WIDTH = 760
 _GROUP_TARGET_ROLE = Qt.ItemDataRole.UserRole + 2  # seçicide grup başlığı -> ilk sayfa satırı
-_AUTOSAVE_MS = 800  # son düzenlemeden sonra bu kadar durulunca kaydedilir
-
 
 
 GitHubSyncFunction = Callable[[str, Path, Runner, Callable[[], bool]], SyncReport]
@@ -177,7 +175,7 @@ def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> b
 
 class SettingsPanel(QWidget):
     theme_changed = Signal(str)
-    # Otomatik kayıt isteği (düzenleme durulunca ya da flush): mikrofon aygıtı; model seçimi
+    # Kayıt isteği (Kaydet ya da çıkış onayı): mikrofon aygıtı; model seçimi
     # ProviderSection'da. Pencere yazar, sonra mark_saved()/save_failed() ile geri bildirir.
     apply_requested = Signal(object)
     save_requested = Signal()  # "Kaydet": yazıldı, beklemeden uygula
@@ -306,6 +304,7 @@ class SettingsPanel(QWidget):
     application_hint: QLabel
     advanced_box: QWidget
     update_section: UpdateSection
+    about_section: QWidget
 
     def __init__(
         self,
@@ -335,13 +334,10 @@ class SettingsPanel(QWidget):
         self.applications: dict[str, str] = {}
         self._dirty = False
         self._failed = False
+        self._loading = False
         self._baseline_bytes: bytes | None = None
         self._baseline_dump: dict[str, Any] | None = None
-        # Tek vuruşlu zamanlayıcılar bağlı yöntemle çalışır (lambda kendini yakalarsa GC çöker).
-        self._save_timer = QTimer(self)
-        self._save_timer.setSingleShot(True)
-        self._save_timer.setInterval(_AUTOSAVE_MS)
-        self._save_timer.timeout.connect(self._apply)
+        # Tek vuruşlu zamanlayıcı bağlı yöntemle çalışır (lambda kendini yakalarsa GC çöker).
         self._disk_timer = QTimer(self)
         self._disk_timer.setSingleShot(True)
         self._disk_timer.setInterval(200)
@@ -574,23 +570,25 @@ class SettingsPanel(QWidget):
         self.triggers_enabled.blockSignals(blocked)
 
     def _tick_proactive(self) -> None:
-        """Dosyaya yazmaz: kutuyu işaretler (toggled -> kirli), kaydı otomatik kayıt yapar."""
+        """Dosyaya yazmaz: kutuyu işaretler (toggled -> kirli), kaydı Kaydet yapar."""
         self.proactive_enabled.setChecked(True)
 
+    @property
+    def has_unsaved(self) -> bool:
+        """Kaydedilmemiş kullanıcı değişikliği var mı (demo modunda her zaman False)."""
+        return self._dirty and not self._demo
+
     def _mark_dirty(self, *_args: object) -> None:
-        if not self._demo:
+        if not self._demo and not self._loading:
             # ponytail: kirli bölüm = o an açık olan; değişiklik yalnız görünen sayfada olur.
             self._dirty_rows.add(self.stack.currentIndex())
             self._set_dirty(True)
-            # Her düzenleme sayacı yeniden başlatır: yazma duraksayınca tek kez olur.
-            self._save_timer.start()
 
     def _set_dirty(self, dirty: bool) -> None:
-        """Tema gibi anında uygulananlar buraya uğramaz. Temizlenince bekleyen otomatik kayıt da
-        düşer: kodla yenileme/geri alma sonradan eski değeri dosyaya yazmasın."""
+        """Tema gibi anında uygulananlar buraya uğramaz. Temizlenince hata ve kirli noktalar da
+        sıfırlanır."""
         self._dirty = dirty
         if not dirty:
-            self._save_timer.stop()
             self._failed = False
             self.retry_button.setVisible(False)
             self._dirty_rows.clear()
@@ -601,16 +599,23 @@ class SettingsPanel(QWidget):
         self.apply_requested.emit(self.device_combo.currentData())
 
     def flush(self) -> None:
-        """Bekleyen değişiklik varsa debounce'u beklemeden kaydettirir (sekme/pencere çıkışı)."""
+        """Bekleyen değişiklik varsa hemen kaydettirir (Kaydet düğmesi ve çıkış onayı)."""
         if self._dirty and not self._demo:
-            self._save_timer.stop()
             self._apply()
 
+    def discard_changes(self) -> None:
+        """Kaydedilmemiş düzenlemeleri atar ve tüm denetimleri kayıtlı config'ten yeniler."""
+        if self._demo:
+            return
+        self.refresh()
+        self._set_dirty(False)
+        self.notice.setText("")
+
     def mark_saved(self, written: bool = True) -> None:
-        """Pencere kaydı yazdı: temiz say. Yeniden kurulum sekmeden çıkınca yapılır."""
+        """Pencere kaydı yazdı: temiz say."""
         self._set_dirty(False)
         if written:
-            self.notice.setText(t("Kaydedildi · Ayarlar'dan çıkınca uygulanır"))
+            self.notice.setText(t("Kaydedildi"))
 
     def save_failed(self, text: str) -> None:
         """Kayıt reddedildi: değişiklik kirli kalır (bölüm noktaları durur), hata kalıcıdır."""
@@ -637,7 +642,6 @@ class SettingsPanel(QWidget):
         Yalnız config dosyası alınır; kasadaki parolalar bilerek bellekte tutulmaz."""
         if self._demo:
             return
-        self.flush()  # bekleyen düzenleme yeni taban çizgisine karışmasın
         try:
             self._baseline_bytes = self.config_path.read_bytes()
             self._baseline_dump = load_settings(self.config_path).model_dump(mode="json")
@@ -679,7 +683,6 @@ class SettingsPanel(QWidget):
         baseline = self._baseline_bytes
         if baseline is None or self._demo:
             return
-        self._save_timer.stop()  # bekleyen otomatik kayıt geri almanın üstüne yazmasın
         temporary = ""
         try:
             descriptor, temporary = tempfile.mkstemp(
@@ -977,7 +980,7 @@ class SettingsPanel(QWidget):
     def _stt_download_done(self, _path: Path) -> None:
         choice = self._selected_stt_choice()
         self._populate_stt_choices(choice.name if choice is not None else None)
-        self.stt_status.setText(t("İndirildi; kendiliğinden kaydedilir."))
+        self.stt_status.setText(t("İndirildi; Kaydet ile kaydedilir."))
         self._mark_dirty()
 
     def _stt_download_failed(self, error_type: str) -> None:
@@ -989,6 +992,7 @@ class SettingsPanel(QWidget):
         self._update_stt_download_button()
 
     def refresh(self) -> None:
+        self._loading = True
         try:
             settings = load_settings(self.config_path)
             self.providers.reload()
@@ -1034,6 +1038,8 @@ class SettingsPanel(QWidget):
         except (OSError, ValueError, KeyError):
             self.notice.setText(t("Ayarlar okunamadı."))
             return
+        finally:
+            self._loading = False
 
     def _no_device(self) -> None:
         """Giriş yoksa liste boş kalmaz: soluk, kapalı satır nedenini söyler."""
@@ -1099,7 +1105,7 @@ class SettingsPanel(QWidget):
         self.applications[alias] = str(path)
         self._refresh_applications()
         self._mark_dirty()
-        self.notice.setText(t("Uygulama eklendi; kendiliğinden kaydedilir."))
+        self.notice.setText(t("Uygulama eklendi; Kaydet ile kaydedilir."))
 
     def _remove_application(self) -> None:
         item = self.application_list.currentItem()
@@ -1107,7 +1113,7 @@ class SettingsPanel(QWidget):
             del self.applications[item.data(Qt.ItemDataRole.UserRole)]
             self._refresh_applications()
             self._mark_dirty()
-            self.notice.setText(t("Uygulama listeden çıkarıldı; kendiliğinden kaydedilir."))
+            self.notice.setText(t("Uygulama listeden çıkarıldı; Kaydet ile kaydedilir."))
 
     def values(self) -> dict[SettingPath, Any]:
         """PANEL_BINDINGS alanlarının panelde görünen değeri; save_choices(values=...) için."""
@@ -1173,7 +1179,7 @@ class SettingsPanel(QWidget):
         self.code_agents[name] = profile
         self._refresh_code_agents()
         self._mark_dirty()
-        self.agent_hint.setText(t("'{name}' eklendi; kendiliğinden kaydedilir.").format(name=name))
+        self.agent_hint.setText(t("'{name}' eklendi; Kaydet ile kaydedilir.").format(name=name))
 
     def _add_custom_agent(self) -> None:
         dialog = AgentDialog((*BUILTIN_AGENTS, *self.code_agents), self)

@@ -1,0 +1,12 @@
+{
+  "'{name}' eklendi; Kaydet ile kaydedilir.": "'{name}' added; click Save to save.",
+  "Ayarlarda kaydedilmemiş değişiklikler var. Ne yapılsın?": "You have unsaved changes in Settings. What would you like to do?",
+  "Değişiklikleri at": "Discard changes",
+  "Kaydedildi": "Saved",
+  "Kaydedilmemiş değişiklikler": "Unsaved changes",
+  "Kaydet": "Save",
+  "Uygulama eklendi; Kaydet ile kaydedilir.": "Application added; click Save to save.",
+  "Uygulama listeden çıkarıldı; Kaydet ile kaydedilir.": "Application removed from the list; click Save to save.",
+  "Vazgeç": "Cancel",
+  "İndirildi; Kaydet ile kaydedilir.": "Downloaded; click Save to save."
+}

@@ -120,3 +120,16 @@ def auto_mode_warning_accepted(monkeypatch):
     except ImportError:
         return
     monkeypatch.setattr(DesktopWindow, "_confirm_auto_mode", lambda self: True)
+
+
+@pytest.fixture(autouse=True)
+def _no_modal_unsaved_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Ayarlardan çıkışta açılan "kaydedilmemiş değişiklik" penceresi testi kilitlemesin.
+
+    Varsayılan cevap "kaydet"tir (eski otomatik kayıt davranışı); at/vazgeç yollarını sınayan
+    testler kendi cevabını verir. PySide6'sız CI işinde modül yoktur, fixture bir şey yapmaz."""
+    try:
+        from artemis.channels.desktop import window_restart
+    except ImportError:
+        return
+    monkeypatch.setattr(window_restart, "_ask_unsaved", lambda _window: "save")

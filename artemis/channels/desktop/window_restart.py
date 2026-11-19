@@ -5,12 +5,13 @@ Config değişince çalışma zamanını kurmanın tek girişi `request_restart`
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import ValidationError
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QApplication, QLabel, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QSystemTrayIcon
 
 from artemis.brain.providers import provider_problem
 from artemis.channels.desktop.retranslate import retranslate_widgets
@@ -139,8 +140,46 @@ def github_synced(window: DesktopWindow, report: Any, auto: bool) -> None:
         window._tray.showMessage("Artemis", text, QSystemTrayIcon.MessageIcon.Information, 6000)
 
 
+def _prompt_unsaved(window: DesktopWindow) -> str:
+    """Kaydedilmemiş değişiklik sorusu: 'save' | 'discard' | 'cancel' döndürür."""
+    box = QMessageBox(window)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(t("Kaydedilmemiş değişiklikler"))
+    box.setText(t("Ayarlarda kaydedilmemiş değişiklikler var. Ne yapılsın?"))
+    save_btn = box.addButton(t("Kaydet"), QMessageBox.ButtonRole.AcceptRole)
+    discard_btn = box.addButton(t("Değişiklikleri at"), QMessageBox.ButtonRole.DestructiveRole)
+    cancel_btn = box.addButton(t("Vazgeç"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(save_btn)
+    box.setEscapeButton(cancel_btn)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is save_btn:
+        return "save"
+    if clicked is discard_btn:
+        return "discard"
+    return "cancel"
+
+
+_ask_unsaved: Callable[[DesktopWindow], str] = _prompt_unsaved
+
+
+def leave_settings(window: DesktopWindow) -> bool:
+    """Ayarlar'dan çıkarken ya da uygulamadan çıkarken kaydedilmemiş değişiklikleri çözer."""
+    panel = window.settings_panel
+    if not panel.has_unsaved:
+        return True
+    choice = _ask_unsaved(window)
+    if choice == "save":
+        panel.flush()
+        return not panel.has_unsaved
+    if choice == "discard":
+        panel.discard_changes()
+        return True
+    return False
+
+
 def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
-    """Otomatik kayıt: doğrular ve yazar, yeniden kurmaz (sekmeden çıkınca kurulur)."""
+    """Ayar kaydı: doğrular ve yazar, yeniden kurmaz (Kaydet ya da sekmeden çıkınca kurulur)."""
     panel = window.settings_panel
     if window._demo or window._exiting:
         panel.save_failed(t("Ayarları değiştirmek için işlemin bitmesini bekle."))
@@ -202,3 +241,12 @@ def restart_runtime(window: DesktopWindow) -> None:
     window.bridge.shutdown()
     window._set_status(t("Ayarlar uygulanıyor…"), "running")
     window._set_controls()
+
+
+def stay_in_settings(window: DesktopWindow) -> None:
+    """Çıkış iptal edildi: Ayarlar sekmesine, sekme değişimi işleyicisini tetiklemeden dönülür."""
+    blocked = window.tabs.blockSignals(True)
+    window.tabs.setCurrentWidget(window.settings_scroll)
+    window.tabs.blockSignals(blocked)
+    window._settings_open = True
+    window._sync_navigation()

@@ -106,10 +106,12 @@ from artemis.channels.desktop.window_restart import (
     check_provider,
     code_agent_config_saved,
     github_synced,
+    leave_settings,
     maybe_restart_for_config,
     providers_changed,
     request_restart,
     restart_runtime,
+    stay_in_settings,
     telegram_changed,
 )
 from artemis.channels.desktop.window_theme import (
@@ -597,8 +599,7 @@ class DesktopWindow(QMainWindow):
             button.setChecked(page is self.tabs.currentWidget())
 
     def _settings_tab_changed(self, *_args: object) -> None:
-        """Ayarlar'dan çıkış: bekleyen düzenleme yazılır, sonra tek yeniden kurulum. Girişte
-        "geri al" taban çizgisi o anki kayıtlı dosyadan yenilenir."""
+        """Ayarlar'dan çıkışta kaydedilmemiş değişiklik sorulur; girişte taban çizgisi alınır."""
         is_open = self.tabs.currentWidget() is self.settings_scroll
         if is_open == self._settings_open:
             return
@@ -606,7 +607,9 @@ class DesktopWindow(QMainWindow):
         if is_open:
             self.settings_panel.begin_session()
             return
-        self.settings_panel.flush()
+        if not leave_settings(self):
+            stay_in_settings(self)
+            return
         if self._settings_restart_pending:
             self._request_restart(self.settings_panel.notice)
 
@@ -1179,8 +1182,9 @@ class DesktopWindow(QMainWindow):
         add_step(self, block, activity)
 
     def _request_exit(self) -> None:
-        # Bekleyen düzenleme kaybolmasın; _exiting kayıtları reddeder, o yüzden önce.
-        self.settings_panel.flush()
+        # Kaydedilmemiş düzenleme varsa kullanıcıya sorulur; Vazgeç veya hata çıkışı iptal eder.
+        if not leave_settings(self):
+            return
         self._exiting = True
         if self._approval_dialog is not None:
             self._approval_dialog.reject()
