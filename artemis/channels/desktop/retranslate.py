@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QMenu,
+    QPlainTextEdit,
     QTabBar,
     QTabWidget,
     QTextEdit,
@@ -40,6 +41,7 @@ def _update_str(getter: object, setter: object, language: str) -> None:
 def _retranslate_widget(widget: QWidget, language: str) -> None:
     _update_str(widget.toolTip, widget.setToolTip, language)
     _update_str(widget.accessibleName, widget.setAccessibleName, language)
+    _update_str(widget.accessibleDescription, widget.setAccessibleDescription, language)
     _update_str(widget.windowTitle, widget.setWindowTitle, language)
     _update_str(widget.statusTip, widget.setStatusTip, language)
 
@@ -47,7 +49,7 @@ def _retranslate_widget(widget: QWidget, language: str) -> None:
         _update_str(widget.text, widget.setText, language)
     if isinstance(widget, QAbstractButton):
         _update_str(widget.text, widget.setText, language)
-    if isinstance(widget, QLineEdit | QTextEdit):
+    if isinstance(widget, QLineEdit | QTextEdit | QPlainTextEdit):
         _update_str(widget.placeholderText, widget.setPlaceholderText, language)
     if isinstance(widget, QGroupBox):
         _update_str(widget.title, widget.setTitle, language)
