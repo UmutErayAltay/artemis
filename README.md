@@ -70,7 +70,7 @@ açıklanır.
 Videolar demo arayüzünün gerçek ekran görüntüleriyle hazırlandı (Remotion), seslendirme Türkçedir.
 İngilizce seslendirmeli sürümler [README.en.md](README.en.md#videos) içindedir.
 
-| Tanıtım (≈80 sn) | Kurulum rehberi (≈50 sn) |
+| Tanıtım (≈90 sn) | Kurulum rehberi (≈50 sn) |
 | --- | --- |
 | [![Artemis tanıtım videosu](docs/assets/video/artemis-tanitim.jpg)](docs/assets/video/artemis-tanitim.mp4) | [![Artemis kurulum rehberi videosu](docs/assets/video/artemis-kurulum.jpg)](docs/assets/video/artemis-kurulum.mp4) |
 
