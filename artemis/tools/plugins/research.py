@@ -12,6 +12,7 @@ from typing import Any, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
 from artemis.tools.research_jobs import ResearchError, ResearchJobs
@@ -44,7 +45,11 @@ def _jobs(context: ToolContext) -> ResearchJobs | None:
 
 
 def _refuse(context: ToolContext) -> str | None:
-    return None if context.settings.research.enabled else _DISABLED
+    return (
+        None
+        if context.settings.research.enabled
+        else t("Araştırma işi kapalı: config içinde research.enabled: true gerekir.")
+    )
 
 
 class _ResearchTool(BaseTool):
@@ -68,15 +73,17 @@ class ResearchStart(_ResearchTool):
         args = cast(StartArguments, arguments)
         jobs = _jobs(context)
         if jobs is None:
-            return ToolResult(message=_UNAVAILABLE)
+            return ToolResult(
+                message=t("Araştırma işi bu kanalda kullanılamıyor; masaüstünden kullanın.")
+            )
         try:
             job_id = jobs.start(args.topic.strip(), args.max_searches)
         except (ResearchError, OSError) as error:
-            return ToolResult(message=str(error) or "Araştırma başlatılamadı.")
+            return ToolResult(message=str(error) or t("Araştırma başlatılamadı."))
         return ToolResult(
             success=True,
             status="ok",
-            message="Araştırma arka planda başladı; bitince bildirim gelir.",
+            message=t("Araştırma arka planda başladı; bitince bildirim gelir."),
             data={"job_id": job_id},
         )
 
@@ -94,21 +101,23 @@ class ResearchStatus(_ResearchTool):
         args = cast(JobArguments, arguments)
         jobs = _jobs(context)
         if jobs is None:
-            return ToolResult(message=_UNAVAILABLE)
+            return ToolResult(
+                message=t("Araştırma işi bu kanalda kullanılamıyor; masaüstünden kullanın.")
+            )
         job = jobs.get(args.job_id)
         if job is None:
-            return ToolResult(message="Araştırma işi bulunamadı.")
+            return ToolResult(message=t("Araştırma işi bulunamadı."))
         data = dict(job)
-        message = f"Araştırma durumu: {job['status']}."
+        message = t("Araştırma durumu: {status}.").format(status=job["status"])
         if job.get("status") == "done":
             report = jobs.report_path(str(job["id"]))
             with suppress(ValueError):
                 rel = report.relative_to(context.workspace).as_posix()
                 data["report_path"] = rel
-                message = (
-                    f"Araştırma durumu: done. Rapor dosyası: {rel} "
+                message = t(
+                    "Araştırma durumu: done. Rapor dosyası: {rel} "
                     "(Not Defteri ile açmak için file_path olarak doğrudan bunu kullan)."
-                )
+                ).format(rel=rel)
         return ToolResult(success=True, status="ok", message=message, data=data)
 
 
@@ -127,22 +136,26 @@ class ResearchResult(_ResearchTool):
         args = cast(JobArguments, arguments)
         jobs = _jobs(context)
         if jobs is None:
-            return ToolResult(message=_UNAVAILABLE)
+            return ToolResult(
+                message=t("Araştırma işi bu kanalda kullanılamıyor; masaüstünden kullanın.")
+            )
         job = jobs.get(args.job_id)
         if job is None:
-            return ToolResult(message="Araştırma işi bulunamadı.")
+            return ToolResult(message=t("Araştırma işi bulunamadı."))
         if job["status"] != "done":
-            return ToolResult(message=f"Rapor yok; iş durumu: {job['status']}.")
+            return ToolResult(
+                message=t("Rapor yok; iş durumu: {status}.").format(status=job["status"])
+            )
         try:
             with jobs.report_path(job["id"]).open(encoding="utf-8") as handle:
                 text = handle.read(_REPORT_READ_CHARS)
         except (OSError, UnicodeDecodeError):
-            return ToolResult(message="Rapor dosyası okunamadı.")
+            return ToolResult(message=t("Rapor dosyası okunamadı."))
         data: dict[str, Any] = {"job_id": job["id"], "report": text}
         return ToolResult(
             success=True,
             status="ok",
-            message="Rapor okundu.",
+            message=t("Rapor okundu."),
             data=data,
             external=True,
             content_kind="web",
@@ -161,13 +174,15 @@ class ResearchCancel(_ResearchTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         jobs = _jobs(context)
         if jobs is None:
-            return ToolResult(message=_UNAVAILABLE)
+            return ToolResult(
+                message=t("Araştırma işi bu kanalda kullanılamıyor; masaüstünden kullanın.")
+            )
         job_id = jobs.cancel()
         if job_id is None:
-            return ToolResult(message="Çalışan araştırma yok.")
+            return ToolResult(message=t("Çalışan araştırma yok."))
         # İstek gitti ama işin durduğu doğrulanmadı: başarı değil, "sent".
         return ToolResult(
             status="sent",
-            message="İptal istendi; iş durunca durumu 'cancelled' olur (research_status).",
+            message=t("İptal istendi; iş durunca durumu 'cancelled' olur (research_status)."),
             data={"job_id": job_id},
         )

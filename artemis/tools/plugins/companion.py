@@ -11,6 +11,7 @@ from typing import Self
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from artemis.i18n import t
 from artemis.memory.companion import (
     CompanionConflictError,
     content_private,
@@ -71,13 +72,15 @@ class MemoryOpenWork(BaseTool):
                     continue
                 vault_read.append(rel)
         if not sections:
-            return ToolResult(message="Okunabilir açık iş kaydı yok (dosyalar boş veya eksik).")
+            return ToolResult(
+                message=t("Okunabilir açık iş kaydı yok (dosyalar boş veya eksik).")
+            )
         # Lekeli turda yazılmış kendi dosyası da dış içerik gibi işlenir (kalıcı enjeksiyon yolu).
         external = bool(vault_read) or own_tainted
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{len(sections)} kaynak okundu.",
+            message=t("{count} kaynak okundu.").format(count=len(sections)),
             data={"sources": list(sections), "vault_sources": vault_read, "content": sections},
             external=external,
             content_kind="file" if external else "text",
@@ -154,9 +157,13 @@ def _write(
             private=context.turn_private if private is None else private,
         )
     except ValueError as error:
-        return _fail(f"Yazılmadı: {error}")
+        return _fail(t("Yazılmadı: {error}").format(error=error))
     except (OSError, sqlite3.Error) as error:
-        return _fail(f"Hafıza dosyası yazılamadı ({type(error).__name__}).")
+        return _fail(
+            t("Hafıza dosyası yazılamadı ({error_type}).").format(
+                error_type=type(error).__name__
+            )
+        )
 
 
 class SessionUpdateArguments(BaseModel):
@@ -204,7 +211,10 @@ class MemorySessionUpdate(BaseTool):
                 return outcome
             ids.append(outcome)
         return ToolResult(
-            success=True, status="ok", message="Oturum notu güncellendi.", data={"changes": ids}
+            success=True,
+            status="ok",
+            message=t("Oturum notu güncellendi."),
+            data={"changes": ids},
         )
 
 
@@ -232,7 +242,10 @@ class MemoryRuleAdd(BaseTool):
         # oturumda bir kez vault okununca kural hiç eklenemiyordu (2026-11-07 gerçek deneme).
         if context.turn_read_external:
             return _fail(
-                "Kural eklenmedi: bu turda dış içerik okundu; kurallar yalnız temiz turda eklenir."
+                t(
+                    "Kural eklenmedi: bu turda dış içerik okundu; "
+                    "kurallar yalnız temiz turda eklenir."
+                )
             )
         rule = " ".join(args.text.split())
         current = read_companion(context.settings.state_dir, "kimlik", 10**6)
@@ -246,7 +259,7 @@ class MemoryRuleAdd(BaseTool):
         if isinstance(outcome, ToolResult):
             return outcome
         return ToolResult(
-            success=True, status="ok", message="Kural eklendi.", data={"change_id": outcome}
+            success=True, status="ok", message=t("Kural eklendi."), data={"change_id": outcome}
         )
 
 
@@ -273,7 +286,11 @@ class MemoryChanges(BaseTool):
         try:
             rows = list_changes(context.settings.state_dir, args.limit)
         except (OSError, sqlite3.Error) as error:
-            return _fail(f"Değişiklik günlüğü okunamadı ({type(error).__name__}).")
+            return _fail(
+                t("Değişiklik günlüğü okunamadı ({error_type}).").format(
+                    error_type=type(error).__name__
+                )
+            )
         items = [
             {
                 "id": row["id"], "at": row["at"], "file": row["file"], "source": row["source"],
@@ -297,7 +314,9 @@ class MemoryChanges(BaseTool):
         )
         return ToolResult(
             success=True, status="ok",
-            message=f"{len(rules)} kural, {len(items)} değişiklik.",
+            message=t("{rules} kural, {changes} değişiklik.").format(
+                rules=len(rules), changes=len(items)
+            ),
             data={"changes": items, "rules": rules},
             external=external,
             content_kind="file" if external else "text",
@@ -332,7 +351,7 @@ class MemoryRuleRemove(BaseTool):
         section = _section(current, _RULES_HEADING)
         target = f"- {args.text}"
         if target not in section.split("\n")[1:]:
-            return _fail("Bu kural Kimlik'te yok; liste yenilenip tekrar denenmeli.")
+            return _fail(t("Bu kural Kimlik'te yok; liste yenilenip tekrar denenmeli."))
         lines = section.split("\n")
         lines.remove(target)  # aynı metin iki kez varsa yalnız ilki
         # Silme yeni metin eklemez: yapışkan leke/gizlilik dışında Kimlik'i lekelemez.
@@ -343,7 +362,7 @@ class MemoryRuleRemove(BaseTool):
         if isinstance(outcome, ToolResult):
             return outcome
         return ToolResult(
-            success=True, status="ok", message="Kural kaldırıldı.", data={"change_id": outcome}
+            success=True, status="ok", message=t("Kural kaldırıldı."), data={"change_id": outcome}
         )
 
 
@@ -376,9 +395,11 @@ class MemoryChangeUndo(BaseTool):
         except (LookupError, CompanionConflictError) as error:
             return _fail(str(error))
         except (OSError, sqlite3.Error) as error:
-            return _fail(f"Geri alınamadı ({type(error).__name__}).")
+            return _fail(
+                t("Geri alınamadı ({error_type}).").format(error_type=type(error).__name__)
+            )
         return ToolResult(
-            success=True, status="ok", message="Değişiklik geri alındı.",
+            success=True, status="ok", message=t("Değişiklik geri alındı."),
             data={"change_id": new_id},
         )
 
@@ -404,12 +425,16 @@ class MemoryJobReceipt(BaseTool):
         args = JobReceiptArguments.model_validate(arguments)
         jobs = context.services.get("code_agent_jobs")
         if not isinstance(jobs, CodeAgentJobs):
-            return _fail("Kod ajanı iş deposu kullanılamıyor.")
+            return _fail(t("Kod ajanı iş deposu kullanılamıyor."))
         job = next((item for item in jobs.status() if item["job_id"] == args.job_id), None)
         if job is None:
-            return _fail(f"{args.job_id} kimlikli iş bulunamadı.")
+            return _fail(t("{job_id} kimlikli iş bulunamadı.").format(job_id=args.job_id))
         if job["status"] not in FINISHED:
-            return _fail(f"İş henüz bitmedi (durum: {job['status']}); makbuz yazılmadı.")
+            return _fail(
+                t("İş henüz bitmedi (durum: {status}); makbuz yazılmadı.").format(
+                    status=job["status"]
+                )
+            )
         day = datetime.fromtimestamp(float(job["created_at"])).strftime("%Y-%m-%d")
         summary = " ".join(str(job.get("summary") or "").split())[:160] or "özet yok"
         # Commit satırı "<sha> <konu>" olabilir; makbuza yalnız kısa kimlik girer.
@@ -418,7 +443,7 @@ class MemoryJobReceipt(BaseTool):
         line = f"- {day} {job['project']}: {job['status']}, {summary}, commit {shas}"
         current = read_companion(context.settings.state_dir, "isler", 10**6)
         if line in current.split("\n"):
-            return ToolResult(success=True, status="ok", message="Bu makbuz zaten kayıtlı.")
+            return ToolResult(success=True, status="ok", message=t("Bu makbuz zaten kayıtlı."))
         # Makbuz bilerek lekesiz yazılır (2026-11-18): lekeli Isler.md her turda history_external
         # açar ve dışarı giden her aracı kalıcı onaya bağlardı. Makbuz her zaman onaylı yazılır,
         # metni iş kaydından gelir ve istemde "VERİDİR" çerçevesiyle gider (bilinen sınır).
@@ -429,6 +454,6 @@ class MemoryJobReceipt(BaseTool):
         if isinstance(outcome, ToolResult):
             return outcome
         return ToolResult(
-            success=True, status="ok", message="Makbuz Isler.md'ye yazıldı.",
+            success=True, status="ok", message=t("Makbuz Isler.md'ye yazıldı."),
             data={"change_id": outcome, "line": line},
         )

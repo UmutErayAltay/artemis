@@ -8,6 +8,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.skills import NAME_PATTERN, load_skills
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
@@ -34,7 +35,7 @@ class SkillRead(BaseTool):
     def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
         if context.settings.skills.enabled:
             return None
-        return "Beceriler kapalı: config içinde skills.enabled: true gerekir."
+        return t("Beceriler kapalı: config içinde skills.enabled: true gerekir.")
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         name = cast(SkillReadArguments, arguments).name
@@ -43,7 +44,9 @@ class SkillRead(BaseTool):
             return ToolResult(message=catalog.refused)
         skill = catalog.get(name)
         if skill is None:
-            return ToolResult(message=f"{name} adında geçerli bir beceri yok.")
+            return ToolResult(
+                message=t("{name} adında geçerli bir beceri yok.").format(name=name)
+            )
         return ToolResult(
             success=True, status="ok", message=skill.body, data={"name": skill.name}
         )

@@ -14,6 +14,7 @@ from typing import Any, cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.brain.models import ToolCall
+from artemis.i18n import t
 from artemis.proactive.routines import (
     MAX_ROUTINES,
     MAX_STEPS,
@@ -61,7 +62,11 @@ def _store(context: ToolContext) -> RoutineStore:
 
 
 def _disabled(context: ToolContext) -> str | None:
-    return None if context.settings.routines.enabled else _DISABLED
+    return (
+        None
+        if context.settings.routines.enabled
+        else t("Rutinler kapalı: config içinde routines.enabled: true gerekir.")
+    )
 
 
 def _summary(routine: Routine) -> dict[str, Any]:
@@ -93,7 +98,7 @@ class RoutineList(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{len(routines)} rutin var.",
+            message=t("{count} rutin var.").format(count=len(routines)),
             data={"routines": [_summary(item) for item in routines]},
         )
 
@@ -118,17 +123,23 @@ class RoutineRun(BaseTool):
         handle = context.gate_handle
         if handle is None:
             # Kapıdan gelmeyen çağrıda adımları onaysız çalıştırmak yerine hiç çalıştırılmaz.
-            return ToolResult(message="Rutin yalnız güvenlik kapısı üzerinden çalıştırılır.")
+            return ToolResult(
+                message=t("Rutin yalnız güvenlik kapısı üzerinden çalıştırılır.")
+            )
         try:
             routine = _store(context).find(args.name)
         except RoutinesError as error:
             return ToolResult(message=str(error))
         if routine is None:
-            return ToolResult(message=f"«{args.name}» adında bir rutin yok.")
+            return ToolResult(
+                message=t("«{name}» adında bir rutin yok.").format(name=args.name)
+            )
         try:
             steps = validate_steps(routine.steps, handle.registry)
         except ValueError as error:
-            return ToolResult(message=f"Rutin çalıştırılmadı: {error}")
+            return ToolResult(
+                message=t("Rutin çalıştırılmadı: {error}").format(error=error)
+            )
         audit = context.audit
         audit.emit(
             "routine_run_start", turn_id=context.turn_id, name=routine.name, steps=len(steps)
@@ -180,10 +191,19 @@ class RoutineRun(BaseTool):
                 success=unverified == 0,
                 status="ok" if unverified == 0 else "sent",
                 message=(
-                    f"«{routine.name}» tamamlandı: {done}/{len(steps)} adım."
+                    t("«{name}» tamamlandı: {done}/{total} adım.").format(
+                        name=routine.name, done=done, total=len(steps)
+                    )
                     if unverified == 0
-                    else f"«{routine.name}»: {done}/{len(steps)} adım gönderildi; "
-                    f"{unverified} adımın sonucu doğrulanmadı."
+                    else t(
+                        "«{name}»: {done}/{total} adım gönderildi; "
+                        "{unverified} adımın sonucu doğrulanmadı."
+                    ).format(
+                        name=routine.name,
+                        done=done,
+                        total=len(steps),
+                        unverified=unverified,
+                    )
                 ),
                 data=data,
                 external=external,
@@ -191,12 +211,23 @@ class RoutineRun(BaseTool):
                 content_kind=kind,
             )
         last = results[-1]
-        reason = "onaylanmadı" if last.status == "denied" else f"başarısız ({last.message})"
+        reason = (
+            t("onaylanmadı")
+            if last.status == "denied"
+            else t("başarısız ({message})").format(message=last.message)
+        )
         return ToolResult(
             status="denied" if last.status == "denied" else "error",
-            message=(
-                f"«{routine.name}» durdu: {done}/{len(steps)} adım tamamlandı; "
-                f"{len(results)}. adım ({steps[len(results) - 1].tool}) {reason}."
+            message=t(
+                "«{name}» durdu: {done}/{total} adım tamamlandı; "
+                "{step}. adım ({tool}) {reason}."
+            ).format(
+                name=routine.name,
+                done=done,
+                total=len(steps),
+                step=len(results),
+                tool=steps[len(results) - 1].tool,
+                reason=reason,
             ),
             data=data,
             external=external,
@@ -224,7 +255,7 @@ class RoutineSave(BaseTool):
         # memory_rule_add ile aynı kural (ADR 0054): dış içerik okunmuş turda kalıcı iş
         # tarifi yazılmaz; enjekte edilmiş metin sonradan "kendi rutinim" diye çalışmasın.
         if context.turn_read_external:
-            return (
+            return t(
                 "Rutin kaydedilmedi: bu turda dış içerik okundu; "
                 "rutinler yalnız temiz turda kaydedilir."
             )
@@ -237,19 +268,27 @@ class RoutineSave(BaseTool):
             return ToolResult(message=refusal)
         handle = context.gate_handle
         if handle is None:
-            return ToolResult(message="Rutin yalnız güvenlik kapısı üzerinden kaydedilir.")
+            return ToolResult(
+                message=t("Rutin yalnız güvenlik kapısı üzerinden kaydedilir.")
+            )
         name = " ".join(args.name.split())
         try:
             steps = validate_steps(args.steps, handle.registry)
         except ValueError as error:
-            return ToolResult(message=f"Rutin kaydedilmedi: {error}")
+            return ToolResult(
+                message=t("Rutin kaydedilmedi: {error}").format(error=error)
+            )
         store = _store(context)
         try:
             routines = store.load()
             key = name_key(name)
             old = next((item for item in routines if name_key(item.name) == key), None)
             if old is None and len(routines) >= MAX_ROUTINES:
-                return ToolResult(message=f"En çok {MAX_ROUTINES} rutin kaydedilebilir.")
+                return ToolResult(
+                    message=t("En çok {max_routines} rutin kaydedilebilir.").format(
+                        max_routines=MAX_ROUTINES
+                    )
+                )
             # Var olan rutinin kullanıcı tarafından Ayarlar'da kurulan zamanı korunur.
             new = Routine(name=name, steps=steps, schedule=old.schedule if old else None)
             kept = [new if item is old else item for item in routines]
@@ -258,11 +297,13 @@ class RoutineSave(BaseTool):
         except RoutinesError as error:
             return ToolResult(message=str(error))
         if stored is None or stored.steps != steps:
-            return ToolResult(message="Rutin kaydı doğrulanamadı.")
+            return ToolResult(message=t("Rutin kaydı doğrulanamadı."))
         return ToolResult(
             success=True,
             status="ok",
-            message=f"«{name}» rutini kaydedildi ({len(steps)} adım).",
+            message=t("«{name}» rutini kaydedildi ({count} adım).").format(
+                name=name, count=len(steps)
+            ),
             data={"name": name, "steps": len(steps)},
         )
 
@@ -287,11 +328,17 @@ class RoutineDelete(BaseTool):
             routines = store.load()
             kept = [item for item in routines if name_key(item.name) != key]
             if len(kept) == len(routines):
-                return ToolResult(message=f"«{args.name}» adında bir rutin yok.")
+                return ToolResult(
+                    message=t("«{name}» adında bir rutin yok.").format(name=args.name)
+                )
             store.save(kept)
             gone = store.find(args.name) is None
         except RoutinesError as error:
             return ToolResult(message=str(error))
         if not gone:
-            return ToolResult(message="Rutin silinemedi; kayıt hâlâ duruyor.")
-        return ToolResult(success=True, status="ok", message=f"«{args.name}» rutini silindi.")
+            return ToolResult(message=t("Rutin silinemedi; kayıt hâlâ duruyor."))
+        return ToolResult(
+            success=True,
+            status="ok",
+            message=t("«{name}» rutini silindi.").format(name=args.name),
+        )

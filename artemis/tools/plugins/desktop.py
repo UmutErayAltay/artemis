@@ -7,6 +7,7 @@ from urllib.parse import urlsplit
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.safety.paths import safe_join
 from artemis.tools.app_resolver import (
     UNINSTALL_WORDS,
@@ -56,15 +57,15 @@ def application_executable(context: ToolContext, name: str) -> str | None:
 def _unresolved(name: str, match: AppMatch, *, action: str) -> ToolResult:
     """Kesin olmayan eşleşmede işlem yapılmaz; model kullanıcıya sorar."""
     if match.kind == "none":
-        return ToolResult(status="error", message="Uygulama izin listesinde yok.")
+        return ToolResult(status="error", message=t("Uygulama izin listesinde yok."))
     candidates = list(match.candidates) if match.kind == "ambiguous" else [match.name or ""]
     listed = ", ".join(candidates)
     return ToolResult(
         status="error",
-        message=(
-            f"'{name}' tam eşleşmedi; olası uygulamalar: {listed}. Tahminle {action}; "
+        message=t(
+            "'{name}' tam eşleşmedi; olası uygulamalar: {listed}. Tahminle {action}; "
             "kullanıcıya hangisini kastettiğini sor ve tam adla yeniden iste."
-        ),
+        ).format(name=name, listed=listed, action=action),
         data={"requested": name, "candidates": candidates},
     )
 
@@ -89,9 +90,9 @@ def desktop_error(error: Exception) -> ToolResult:
     # Exception metinleri komut satırı veya süreç ayrıntısı taşıyabilir; kullanıcıya
     # ham repr/argv sızdırmadan hatayı dürüstçe bildir.
     if isinstance(error, UnsupportedPlatformError):
-        message = "Bu masaüstü işlemi yalnız Windows'ta destekleniyor."
+        message = t("Bu masaüstü işlemi yalnız Windows'ta destekleniyor.")
     else:
-        message = "Masaüstü işlemi yapılamadı."
+        message = t("Masaüstü işlemi yapılamadı.")
     return ToolResult(status="error", message=message)
 
 
@@ -161,7 +162,7 @@ class OpenApplication(BaseTool):
                 or _uninstaller(match.executable)
             )
         ):
-            return _unresolved(args.name, match, action="açma")
+            return _unresolved(args.name, match, action=t("açma"))
         executable = match.executable
         if match.kind == "fuzzy":
             context.audit.emit(
@@ -171,7 +172,9 @@ class OpenApplication(BaseTool):
         if match.kind != "fuzzy":
             return result
         return result.model_copy(update={
-            "message": f"'{args.name}' için en yakın uygulama {match.name}. {result.message}",
+            "message": t("'{requested}' için en yakın uygulama {application}. {message}").format(
+                requested=args.name, application=match.name, message=result.message
+            ),
             "data": {**result.data, "application": match.name, "requested": args.name},
         })
 
@@ -186,9 +189,11 @@ class OpenApplication(BaseTool):
                 # Yalnız metin dosyası: aksi hâlde model çalışma klasörüne yazdığı .py/.vbs/.ps1'i
                 # python/wscript/powershell'e "açtırıp" onaysız kod çalıştırabilirdi (2026-11-18).
                 if target.suffix.lower() not in _TEXT_DOCUMENT_SUFFIXES:
-                    return ToolResult(message="Yalnız metin dosyaları (.txt, .md …) açılabilir.")
+                    return ToolResult(
+                        message=t("Yalnız metin dosyaları (.txt, .md …) açılabilir.")
+                    )
                 if not target.is_file():
-                    return ToolResult(message="Açılacak metin dosyası bulunamadı.")
+                    return ToolResult(message=t("Açılacak metin dosyası bulunamadı."))
                 document = str(target)
                 payload["file_path"] = document
             if "desktop" in context.services:
@@ -207,7 +212,7 @@ class OpenApplication(BaseTool):
                     )
                 )
             return ToolResult(
-                status="sent", message="Uygulama açma komutu gönderildi; açıldığı doğrulanmadı."
+                status="sent", message=t("Uygulama açma komutu gönderildi; açıldığı doğrulanmadı.")
             )
         except (OSError, UnsupportedPlatformError, ValueError, subprocess.SubprocessError) as error:
             return desktop_error(error)
@@ -257,7 +262,7 @@ class CloseApplication(BaseTool):
         if executable is None:
             # Kapatma yakın eşleşmeyle asla yapılmaz; yalnız öneri döner.
             return _unresolved(
-                args.name, application_match(context, args.name, fuzzy=True), action="kapatma"
+                args.name, application_match(context, args.name, fuzzy=True), action=t("kapatma")
             )
         try:
             if "desktop" in context.services:
@@ -271,11 +276,13 @@ class CloseApplication(BaseTool):
                     )
                 )
             if not closed:
-                return ToolResult(status="error", message="Uygulamanın kapandığı doğrulanamadı.")
+                return ToolResult(
+                    status="error", message=t("Uygulamanın kapandığı doğrulanamadı.")
+                )
             return ToolResult(
                 success=True,
                 status="ok",
-                message="Uygulamanın adıyla eşleşen tüm süreçler kapandı.",
+                message=t("Uygulamanın adıyla eşleşen tüm süreçler kapandı."),
             )
         except (OSError, UnsupportedPlatformError, ValueError, subprocess.SubprocessError) as error:
             return desktop_error(error)
@@ -305,7 +312,7 @@ class ReadClipboard(BaseTool):
             return ToolResult(
                 success=True,
                 status="ok",
-                message="Pano okundu.",
+                message=t("Pano okundu."),
                 data={"text": value},
                 external=True,
                 content_kind="clipboard",
@@ -335,8 +342,8 @@ class WriteClipboard(BaseTool):
                     await run_default_action("write_clipboard", {"text": args.text}, context)
                 )
             if not written:
-                return ToolResult(status="error", message="Panoya yazma doğrulanamadı.")
-            return ToolResult(success=True, status="ok", message="Pano metni yazıldı.")
+                return ToolResult(status="error", message=t("Panoya yazma doğrulanamadı."))
+            return ToolResult(success=True, status="ok", message=t("Pano metni yazıldı."))
         except (OSError, UnsupportedPlatformError, ValueError) as error:
             return desktop_error(error)
 
@@ -385,10 +392,11 @@ class OpenURL(BaseTool):
                 submitted = await run_blocking(opener, args.url)
                 if not submitted:
                     return ToolResult(
-                        status="error", message="Tarayıcı açma isteğini kabul etmedi."
+                        status="error", message=t("Tarayıcı açma isteğini kabul etmedi.")
                     )
             return ToolResult(
-                status="sent", message="URL tarayıcıya gönderildi; sayfanın açıldığı doğrulanmadı."
+                status="sent",
+                message=t("URL tarayıcıya gönderildi; sayfanın açıldığı doğrulanmadı."),
             )
         except (
             OSError,

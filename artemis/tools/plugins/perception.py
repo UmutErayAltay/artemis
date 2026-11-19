@@ -13,6 +13,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict
 
+from artemis.i18n import t
 from artemis.perception.screen import read_screen
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
@@ -53,7 +54,9 @@ class ScreenRead(BaseTool):
         config = context.settings.perception
         if not config.screen_enabled:
             return ToolResult(
-                message="Ekran okuma kapalı: config içinde perception.screen_enabled: true gerekir."
+                message=t(
+                    "Ekran okuma kapalı: config içinde perception.screen_enabled: true gerekir."
+                )
             )
         reader = context.services.get("screen_reader", read_screen)
         outcome = await asyncio.to_thread(reader, args.scope, timeout=config.timeout_seconds)
@@ -78,7 +81,7 @@ class ScreenRead(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message="Ekran metni okundu.",
+            message=t("Ekran metni okundu."),
             data=data,
             external=True,
             content_kind="screen",

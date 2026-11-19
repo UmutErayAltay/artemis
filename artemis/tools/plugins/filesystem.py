@@ -5,6 +5,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.safety.paths import safe_join
 from artemis.safety.undo import UndoJournal
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
@@ -41,16 +42,19 @@ class RenameArguments(PathArguments):
 def failure(error: OSError | ValueError | UnicodeError) -> ToolResult:
     """Ham istisna metnindeki kullanıcı yolu veya sırları dışarı çıkarmaz."""
     if isinstance(error, FileNotFoundError):
-        detail = "hedef bulunamadı."
+        detail = t("hedef bulunamadı.")
     elif isinstance(error, PermissionError):
-        detail = "erişim reddedildi."
+        detail = t("erişim reddedildi.")
     elif isinstance(error, UnicodeError):
-        detail = "dosya geçerli UTF-8 metni değil."
+        detail = t("dosya geçerli UTF-8 metni değil.")
     elif isinstance(error, ValueError):
-        detail = "yol veya işlem geçersiz."
+        detail = t("yol veya işlem geçersiz.")
     else:
-        detail = "işletim sistemi işlemi başarısız oldu."
-    return ToolResult(status="error", message=f"Dosya işlemi başarısız: {detail}")
+        detail = t("işletim sistemi işlemi başarısız oldu.")
+    return ToolResult(
+        status="error",
+        message=t("Dosya işlemi başarısız: {detail}").format(detail=detail),
+    )
 
 
 def move_verified(source: Path, destination: Path) -> ToolResult:
@@ -62,7 +66,7 @@ def move_verified(source: Path, destination: Path) -> ToolResult:
     source.rename(destination)
     if source.exists() or not destination.is_file():
         raise OSError("Taşıma sonucu doğrulanamadı.")
-    return ToolResult(success=True, status="ok", message="Dosya taşındı.")
+    return ToolResult(success=True, status="ok", message=t("Dosya taşındı."))
 
 
 @register_tool
@@ -107,7 +111,7 @@ class ListFiles(BaseTool):
             return ToolResult(
                 success=True,
                 status="ok",
-                message=f"{len(entries)} öğe listelendi.",
+                message=t("{count} öğe listelendi.").format(count=len(entries)),
                 data={"entries": entries},
                 external=True,
             )
@@ -138,7 +142,7 @@ class ReadFile(BaseTool):
             return ToolResult(
                 success=True,
                 status="ok",
-                message="Dosya okundu.",
+                message=t("Dosya okundu."),
                 data={"content": content[:262_144], "truncated": truncated},
                 external=True,
                 content_kind="file",
@@ -164,7 +168,7 @@ class CreateFile(BaseTool):
                 stream.write(args.content)
             if path.read_bytes() != args.content.encode("utf-8"):
                 raise OSError("Yazılan içerik doğrulanamadı.")
-            return ToolResult(success=True, status="ok", message="Dosya oluşturuldu.")
+            return ToolResult(success=True, status="ok", message=t("Dosya oluşturuldu."))
         except (OSError, ValueError, UnicodeError) as error:
             return failure(error)
 
@@ -255,13 +259,15 @@ class DeleteFile(BaseTool):
                 except (OSError, ValueError):
                     return ToolResult(
                         status="error",
-                        message="Dosya işlemi sonuçlandı; günlük kaydı hazırlanmış durumda kaldı.",
+                        message=t(
+                            "Dosya işlemi sonuçlandı; günlük kaydı hazırlanmış durumda kaldı."
+                        ),
                         data={"undo_record_id": record.record_id, "undo_status": "prepared"},
                     )
                 if removed:
                     return ToolResult(
                         status="error",
-                        message="Dosya taşınmış olabilir; işlem sonucu belirsiz.",
+                        message=t("Dosya taşınmış olabilir; işlem sonucu belirsiz."),
                         data={"undo_record_id": record.record_id, "undo_status": "uncertain"},
                     )
                 result = failure(OSError("Dosya geri dönüşüm kutusuna taşınamadı."))
@@ -275,12 +281,14 @@ class DeleteFile(BaseTool):
                 except (OSError, ValueError):
                     return ToolResult(
                         status="error",
-                        message="Dosya taşınmadı; geri alma kaydı hazırlanmış durumda kaldı.",
+                        message=t(
+                            "Dosya taşınmadı; geri alma kaydı hazırlanmış durumda kaldı."
+                        ),
                         data={"undo_record_id": record.record_id, "undo_status": "prepared"},
                     )
                 return ToolResult(
                     status="error",
-                    message="Dosya geri dönüşüm kutusuna taşınmadı.",
+                    message=t("Dosya geri dönüşüm kutusuna taşınmadı."),
                     data={"undo_record_id": record.record_id, "undo_status": "failed"},
                 )
             try:
@@ -288,13 +296,13 @@ class DeleteFile(BaseTool):
             except (OSError, ValueError):
                 return ToolResult(
                     status="error",
-                    message="Dosya taşındı; günlük kaydı hazırlanmış durumda kaldı.",
+                    message=t("Dosya taşındı; günlük kaydı hazırlanmış durumda kaldı."),
                     data={"undo_record_id": record.record_id, "undo_status": "prepared"},
                 )
             return ToolResult(
                 success=True,
                 status="ok",
-                message="Dosya geri dönüşüm kutusuna taşındı.",
+                message=t("Dosya geri dönüşüm kutusuna taşındı."),
                 data={"undo_record_id": record.record_id, "undo_status": "completed"},
             )
         except (OSError, ValueError) as error:
@@ -317,6 +325,6 @@ class CreateDirectory(BaseTool):
             path.mkdir()
             if not path.is_dir():
                 raise OSError("Klasör oluşturma doğrulanamadı.")
-            return ToolResult(success=True, status="ok", message="Klasör oluşturuldu.")
+            return ToolResult(success=True, status="ok", message=t("Klasör oluşturuldu."))
         except (OSError, ValueError) as error:
             return failure(error)

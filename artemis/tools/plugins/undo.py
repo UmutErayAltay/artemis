@@ -5,6 +5,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.safety.undo import UndoJournal
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
@@ -37,14 +38,14 @@ class ListUndoRecords(BaseTool):
         except (OSError, ValueError):
             return ToolResult(
                 status="error",
-                message="Geri alma kayıtları okunamadı.",
+                message=t("Geri alma kayıtları okunamadı."),
                 external=True,
                 content_kind="file",
             )
         return ToolResult(
             success=True,
             status="ok",
-            message=(
+            message=t(
                 "Kayıtlar yalnızca işletim sisteminin geri dönüşüm kutusuyla ilgili "
                 "durum bilgisidir. 'prepared' kayıtlar çözümlenmemiştir ve silme "
                 "başarıyla tamamlandı anlamına gelmez; tamamlanmış kayıtlar da "

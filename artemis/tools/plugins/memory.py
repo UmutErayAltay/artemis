@@ -12,6 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.memory.embedding import Embedder, EmbeddingIndex, EmbeddingUnavailable
 from artemis.memory.vault import (
     ExcludedNote,
@@ -58,7 +59,7 @@ def _vault(context: ToolContext) -> Path | None:
 
 
 def _disabled() -> ToolResult:
-    return ToolResult(status="error", message=_DISABLED)
+    return ToolResult(status="error", message=t(_DISABLED))
 
 
 def _hit_data(hit: SearchHit) -> dict[str, object]:
@@ -105,7 +106,9 @@ class VaultSearch(BaseTool):
                 except ValueError:
                     return ToolResult(
                         status="error",
-                        message="Embedding önbellek klasörü vault içinde olamaz; ayarı düzeltin.",
+                        message=t(
+                            "Embedding önbellek klasörü vault içinde olamaz; ayarı düzeltin."
+                        ),
                     )
                 try:
                     # Model yükleme ve indeksleme saniyeler sürebilir; olay döngüsünü tutmasın.
@@ -124,11 +127,15 @@ class VaultSearch(BaseTool):
                 )
         except (OSError, ValueError) as error:
             return failure(error)
-        message = f"{len(hits)} not bulundu." if hits else "Eşleşen not bulunamadı."
+        message = (
+            t("{count} not bulundu.").format(count=len(hits))
+            if hits
+            else t("Eşleşen not bulunamadı.")
+        )
         data: dict[str, object] = {"results": [_hit_data(hit) for hit in hits], "method": method}
         if notice is not None:
             data["notice"] = notice
-            message = f"{message} {notice}"
+            message = f"{message} {t(notice)}"
         return ToolResult(
             success=True,
             status="ok",
@@ -164,14 +171,14 @@ class VaultReadNote(BaseTool):
             with path.open("r", encoding="utf-8") as stream:
                 content = stream.read(memory.max_note_chars + 1)
         except ExcludedNote:
-            return ToolResult(status="error", message=_NOT_ALLOWED_READ)
+            return ToolResult(status="error", message=t(_NOT_ALLOWED_READ))
         except (OSError, ValueError, UnicodeError) as error:
             return failure(error)
         truncated = len(content) > memory.max_note_chars
         return ToolResult(
             success=True,
             status="ok",
-            message="Not okundu.",
+            message=t("Not okundu."),
             data={
                 "path": relative,
                 "content": content[: memory.max_note_chars],
@@ -207,7 +214,9 @@ class VaultAppend(BaseTool):
             if not path.parent.is_dir():
                 return ToolResult(
                     status="error",
-                    message="Üst klasör vault içinde yok; yazma sırasında klasör oluşturulmaz.",
+                    message=t(
+                        "Üst klasör vault içinde yok; yazma sırasında klasör oluşturulmaz."
+                    ),
                 )
             if path.exists():
                 created = False
@@ -216,18 +225,20 @@ class VaultAppend(BaseTool):
                 created = True
                 self._create_new(path, args.text)
         except ExcludedNote:
-            return ToolResult(status="error", message=_NOT_ALLOWED_WRITE)
+            return ToolResult(status="error", message=t(_NOT_ALLOWED_WRITE))
         except FileExistsError:
             return ToolResult(
                 status="error",
-                message="Not bu sırada başka bir yerde oluşturuldu; üzerine yazılmadı.",
+                message=t(
+                    "Not bu sırada başka bir yerde oluşturuldu; üzerine yazılmadı."
+                ),
             )
         except (OSError, ValueError, UnicodeError) as error:
             return failure(error)
         return ToolResult(
             success=True,
             status="ok",
-            message="Yeni not oluşturuldu." if created else "Nota eklendi.",
+            message=t("Yeni not oluşturuldu.") if created else t("Nota eklendi."),
             data={"path": relative, "created": created, "appended_chars": len(args.text)},
         )
 

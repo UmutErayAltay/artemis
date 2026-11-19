@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.tools import calendar_mail as core
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.registry import register_tool
@@ -50,7 +51,7 @@ class CalendarEvents(BaseTool):
     def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
         if context.settings.calendar.enabled:
             return None
-        return "Takvim kapalı: config içinde calendar.enabled: true gerekir."
+        return t("Takvim kapalı: config içinde calendar.enabled: true gerekir.")
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(CalendarArguments, arguments)
@@ -58,8 +59,10 @@ class CalendarEvents(BaseTool):
         url = core.resolve_secret(core.ICS_ENV, core.ICS_TARGET)
         if url is None:
             return ToolResult(
-                message="Takvim adresi yok: Ayarlar > Takvim ve posta'dan kaydedin "
-                f"ya da {core.ICS_ENV} ortam değişkenini tanımlayın."
+                message=t(
+                    "Takvim adresi yok: Ayarlar > Takvim ve posta'dan kaydedin "
+                    "ya da {env} ortam değişkenini tanımlayın."
+                ).format(env=core.ICS_ENV)
             )
         local: tzinfo = ZoneInfo(context.settings.proactive.timezone)
         days = min(args.days, config.lookahead_days)
@@ -69,16 +72,22 @@ class CalendarEvents(BaseTool):
             data = await run_blocking(fetch, url)
             events, warnings = core.parse_events(data, local, begin, end)
         except (core.SourceError, ValueError) as error:
-            text = str(error) if isinstance(error, core.SourceError) else "Geçersiz tarih."
+            text = str(error) if isinstance(error, core.SourceError) else t("Geçersiz tarih.")
             return ToolResult(message=text)
         shown = [core.event_data(e, local) for e in events[: core.MAX_EVENTS]]
-        note = f" {len(events) - len(shown)} olay daha var." if len(events) > len(shown) else ""
+        note = (
+            " " + t("{count} olay daha var.").format(count=len(events) - len(shown))
+            if len(events) > len(shown)
+            else ""
+        )
         if days < args.days:
             warnings.append(f"Gün sayısı calendar.lookahead_days ({days}) ile sınırlandı.")
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{begin.date()} ile {days} gün: {len(events)} olay.{note}",
+            message=t("{day} ile {days} gün: {count} olay.{note}").format(
+                day=begin.date(), days=days, count=len(events), note=note
+            ),
             data={"events": shown, "warnings": warnings},
             external=True,
             private=not config.allow_cloud,
@@ -101,7 +110,7 @@ class MailUnread(BaseTool):
     def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
         if context.settings.mail.enabled:
             return None
-        return "Posta kapalı: config içinde mail.enabled: true gerekir."
+        return t("Posta kapalı: config içinde mail.enabled: true gerekir.")
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(MailArguments, arguments)
@@ -109,8 +118,10 @@ class MailUnread(BaseTool):
         password = core.resolve_secret(core.MAIL_ENV, core.MAIL_TARGET)
         if not (config.host and config.username and password):
             return ToolResult(
-                message="Posta ayarı eksik: mail.host, mail.username ve parola "
-                f"(Ayarlar > Takvim ve posta ya da {core.MAIL_ENV}) gerekir."
+                message=t(
+                    "Posta ayarı eksik: mail.host, mail.username ve parola "
+                    "(Ayarlar > Takvim ve posta ya da {env}) gerekir."
+                ).format(env=core.MAIL_ENV)
             )
         secret: str = password
         limit = min(args.limit or config.max_messages, config.max_messages)
@@ -131,7 +142,9 @@ class MailUnread(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{total} okunmamış ileti var; en yeni {len(items)} tanesi listelendi.",
+            message=t("{total} okunmamış ileti var; en yeni {shown} tanesi listelendi.").format(
+                total=total, shown=len(items)
+            ),
             data={"messages": items, "unread_total": total},
             external=True,
             private=not config.allow_cloud,

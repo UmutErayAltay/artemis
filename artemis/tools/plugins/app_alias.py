@@ -16,6 +16,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.tools.app_resolver import (
     MAX_ALIAS_CHARS,
     UNINSTALL_WORDS,
@@ -40,7 +41,9 @@ class RememberAliasArguments(AliasArguments):
 
 
 def _error(error: AliasStoreError) -> ToolResult:
-    return ToolResult(status="error", message=f"Takma ad kaydı başarısız: {error}")
+    return ToolResult(
+        status="error", message=t("Takma ad kaydı başarısız: {error}").format(error=error)
+    )
 
 
 def _is_uninstaller_target(application: str, context: ToolContext) -> bool:
@@ -70,7 +73,7 @@ class RememberApplicationAlias(BaseTool):
             return None
         args = cast(RememberAliasArguments, arguments)
         if _is_uninstaller_target(args.application, context):
-            return (
+            return t(
                 "Kaldırıcı bir uygulamaya takma ad otomatik onayla öğrenilmez; "
                 "kullanıcı onayı gerekir."
             )
@@ -79,25 +82,31 @@ class RememberApplicationAlias(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(RememberAliasArguments, arguments)
         if not context.settings.persist_memory:
-            return ToolResult(status="error", message=_DISABLED)
+            return ToolResult(status="error", message=t(_DISABLED))
         applications = context.settings.applications
         key = normalize(args.spoken)
         if not key:
-            return ToolResult(status="error", message="Söylenen ad harf veya rakam içermeli.")
+            return ToolResult(
+                status="error", message=t("Söylenen ad harf veya rakam içermeli.")
+            )
         target = resolve_application(applications, {}, args.application, fuzzy=False)
         if target.name is None:
             return ToolResult(
-                status="error", message="Hedef uygulama izin listesinde tam adla bulunamadı."
+                status="error",
+                message=t("Hedef uygulama izin listesinde tam adla bulunamadı."),
             )
         shadowed = resolve_application(applications, {}, args.spoken, fuzzy=False)
         if shadowed.name is not None:
             if shadowed.name == target.name:
                 return ToolResult(
-                    status="error", message="Söylenen ad zaten bu uygulamanın kendi adı."
+                    status="error",
+                    message=t("Söylenen ad zaten bu uygulamanın kendi adı."),
                 )
             return ToolResult(
                 status="error",
-                message=f"'{args.spoken}' başka bir uygulamanın ({shadowed.name}) adı; bağlanmadı.",
+                message=t("'{spoken}' başka bir uygulamanın ({name}) adı; bağlanmadı.").format(
+                    spoken=args.spoken, name=shadowed.name
+                ),
             )
         store = alias_store(context.settings.state_dir)
         try:
@@ -108,11 +117,15 @@ class RememberApplicationAlias(BaseTool):
         except AliasStoreError as error:
             return _error(error)
         if saved != target.name:
-            return ToolResult(status="error", message="Takma ad yazıldıktan sonra doğrulanamadı.")
+            return ToolResult(
+                status="error", message=t("Takma ad yazıldıktan sonra doğrulanamadı.")
+            )
         return ToolResult(
             success=True,
             status="ok",
-            message=f"'{args.spoken}' artık {target.name} olarak anlaşılacak.",
+            message=t("'{spoken}' artık {application} olarak anlaşılacak.").format(
+                spoken=args.spoken, application=target.name
+            ),
             data={"spoken": args.spoken, "application": target.name},
         )
 
@@ -129,18 +142,24 @@ class ForgetApplicationAlias(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(AliasArguments, arguments)
         if not context.settings.persist_memory:
-            return ToolResult(status="error", message=_DISABLED)
+            return ToolResult(status="error", message=t(_DISABLED))
         key = normalize(args.spoken)
         store = alias_store(context.settings.state_dir)
         try:
             aliases = store.load()
             if key not in aliases:
-                return ToolResult(status="error", message="Böyle bir takma ad kayıtlı değil.")
+                return ToolResult(status="error", message=t("Böyle bir takma ad kayıtlı değil."))
             del aliases[key]
             store.save(aliases)
             still = key in store.load()
         except AliasStoreError as error:
             return _error(error)
         if still:
-            return ToolResult(status="error", message="Takma ad silindikten sonra doğrulanamadı.")
-        return ToolResult(success=True, status="ok", message=f"'{args.spoken}' unutuldu.")
+            return ToolResult(
+                status="error", message=t("Takma ad silindikten sonra doğrulanamadı.")
+            )
+        return ToolResult(
+            success=True,
+            status="ok",
+            message=t("'{spoken}' unutuldu.").format(spoken=args.spoken),
+        )

@@ -6,6 +6,7 @@ from typing import Literal, cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.memory.store import MemoryStore
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
@@ -39,10 +40,12 @@ class HistoryTool(BaseTool):
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         if not context.control_request:
-            return ToolResult(message="Geçmiş yönetimini panelden veya /hafıza komutuyla başlatın.")
+            return ToolResult(
+                message=t("Geçmiş yönetimini panelden veya /hafıza komutuyla başlatın.")
+            )
         store = context.services.get("memory_store")
         if not isinstance(store, MemoryStore):
-            return ToolResult(message="Kalıcı hafıza kapalı veya depo açılamadı.")
+            return ToolResult(message=t("Kalıcı hafıza kapalı veya depo açılamadı."))
         args = cast(HistoryArguments, arguments)
         try:
             removed = 0
@@ -63,14 +66,20 @@ class HistoryTool(BaseTool):
             if args.action == "list":
                 data["recent_turns"] = store.history_page()
         except (OSError, sqlite3.Error) as error:
-            return ToolResult(message=f"Geçmiş işlemi tamamlanamadı ({type(error).__name__}).")
-        if args.action == "status":
-            message = "Geçmiş durumu okundu."
-        elif args.action == "list":
-            message = f"{len(cast(list[object], data['recent_turns']))} tur listelendi."
-        else:
-            message = (
-                f"Geçmiş işlemi doğrulandı; {removed} tur silindi. Kalıcı öz notlar ve "
-                "denetim günlüğü korundu."
+            return ToolResult(
+                message=t("Geçmiş işlemi tamamlanamadı ({error_type}).").format(
+                    error_type=type(error).__name__
+                )
             )
+        if args.action == "status":
+            message = t("Geçmiş durumu okundu.")
+        elif args.action == "list":
+            message = t("{count} tur listelendi.").format(
+                count=len(cast(list[object], data["recent_turns"]))
+            )
+        else:
+            message = t(
+                "Geçmiş işlemi doğrulandı; {removed} tur silindi. Kalıcı öz notlar ve "
+                "denetim günlüğü korundu."
+            ).format(removed=removed)
         return ToolResult(success=True, status="ok", data=data, message=message)

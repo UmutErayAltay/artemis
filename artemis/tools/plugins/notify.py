@@ -5,6 +5,7 @@ from typing import cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.channels.telegram.api import TelegramClient, TelegramError, build_telegram_client
+from artemis.i18n import t
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.registry import register_tool
 from artemis.tools.toast import TOAST_BODY_LIMIT, TOAST_TITLE_LIMIT, show_toast
@@ -53,8 +54,9 @@ class NotifyTelegram(BaseTool):
                 client.close()
             return ToolResult(
                 status="error",
-                message="Telegram yapılandırılmamış: telegram.chat_id ve token ortam "
-                "değişkeni gerekli.",
+                message=t(
+                    "Telegram yapılandırılmamış: telegram.chat_id ve token ortam değişkeni gerekli."
+                ),
             )
         try:
             sent = await run_blocking(
@@ -63,17 +65,21 @@ class NotifyTelegram(BaseTool):
         except TelegramError as error:
             return ToolResult(
                 status="error",
-                message=f"Telegram mesajı gönderilemedi ({error.error_type}).",
+                message=t("Telegram mesajı gönderilemedi ({error_type}).").format(
+                    error_type=error.error_type
+                ),
             )
         except ValueError:
-            return ToolResult(status="error", message="Telegram mesajı gönderilemedi (metin).")
+            return ToolResult(
+                status="error", message=t("Telegram mesajı gönderilemedi (metin).")
+            )
         finally:
             if built:
                 client.close()
         return ToolResult(
             success=True,
             status="ok",
-            message="Telegram mesajı gönderildi.",
+            message=t("Telegram mesajı gönderildi."),
             data={"message_id": sent.message_id},
         )
 
