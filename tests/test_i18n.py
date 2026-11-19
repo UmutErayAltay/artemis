@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import artemis.i18n as i18n
-from artemis.i18n import catalog, current_language, set_language, t
+from artemis.i18n import catalog, current_language, retarget, set_language, t
 
 
 @pytest.fixture(autouse=True)
@@ -53,6 +53,40 @@ def test_catalog_loads_valid_non_empty_entries() -> None:
         assert isinstance(value, str) and value.strip()
 
 
+def test_retarget_directions_and_unknown() -> None:
+    assert retarget("Dil", "en") == "Language"
+    assert retarget("Language", "tr") == "Dil"
+    assert retarget("Dil", "tr") == "Dil"
+    assert retarget("Language", "en") == "Language"
+    assert retarget("bilinmeyen metin", "en") == "bilinmeyen metin"
+    assert retarget("bilinmeyen metin", "tr") == "bilinmeyen metin"
+    assert retarget(retarget("Arayüz dili", "en"), "tr") == "Arayüz dili"
+
+
+def test_retarget_with_placeholders() -> None:
+    entries = catalog()
+    chosen_key: str | None = None
+    chosen_names: set[str] = set()
+    for key, val in entries.items():
+        if "{" not in key:
+            continue
+        tr_names = _placeholders(key)
+        en_names = _placeholders(val)
+        if tr_names and tr_names == en_names and all(n.isidentifier() for n in tr_names):
+            chosen_key = key
+            chosen_names = tr_names
+            break
+    assert chosen_key is not None
+    sample_values: dict[str, object] = {name: 42 for name in chosen_names}
+    tr_formatted = chosen_key.format(**sample_values)
+    en_formatted = entries[chosen_key].format(**sample_values)
+
+    assert retarget(tr_formatted, "en") == en_formatted
+    assert retarget(en_formatted, "tr") == tr_formatted
+    assert retarget(tr_formatted, "tr") == tr_formatted
+    assert retarget(en_formatted, "en") == en_formatted
+
+
 def test_invalid_catalog_json_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -61,12 +95,16 @@ def test_invalid_catalog_json_raises(
     (en_dir / "broken.json").write_text("{bozuk", encoding="utf-8")
     monkeypatch.setattr(i18n, "__file__", str(tmp_path / "__init__.py"))
     i18n._load_en_catalog.cache_clear()
+    i18n._reverse_en_catalog.cache_clear()
+    i18n._template_patterns.cache_clear()
     try:
         with pytest.raises(ValueError):
             catalog()
     finally:
         monkeypatch.undo()
         i18n._load_en_catalog.cache_clear()
+        i18n._reverse_en_catalog.cache_clear()
+        i18n._template_patterns.cache_clear()
 
 
 def test_every_t_call_literal_is_in_catalog() -> None:

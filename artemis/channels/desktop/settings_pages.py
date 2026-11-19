@@ -587,7 +587,7 @@ def build_look_page(panel: SettingsPanel) -> None:
         lang,
         t("Arayüz dili"),
         panel.language_combo,
-        hint=t("Değişiklik Artemis yeniden başlatılınca geçerli olur."),
+        hint=t("Arayüz hemen değişir; bazı durum metinleri bir sonraki güncellemede değişir."),
     )
     look.addWidget(lang_box)
     look.addStretch(1)

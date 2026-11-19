@@ -10,12 +10,13 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from pydantic import ValidationError
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QLabel, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QLabel, QSystemTrayIcon
 
 from artemis.brain.providers import provider_problem
+from artemis.channels.desktop.retranslate import retranslate_widgets
 from artemis.channels.desktop.settings_io import save_choices
 from artemis.config.settings import load_settings, same_hotkey
-from artemis.i18n import t
+from artemis.i18n import current_language, set_language, t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.app import DesktopWindow
@@ -145,8 +146,11 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         panel.save_failed(t("Ayarları değiştirmek için işlemin bitmesini bekle."))
         return
     values = panel.values()
+    old_language = current_language()
     try:
-        voice_key = load_settings(window._config_path).voice.listening_hotkey
+        loaded = load_settings(window._config_path)
+        old_language = loaded.language
+        voice_key = loaded.voice.listening_hotkey
         dictation_key = str(values[("dictation", "hotkey")])
         selection_key = str(values[("selection_actions", "hotkey")])
         clash = same_hotkey(dictation_key, voice_key)
@@ -174,6 +178,13 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         panel.save_failed(t("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor."))
         return
     panel.mark_saved(written)
+    new = str(values.get(("language",), old_language))
+    if new != current_language():
+        set_language(new)
+        roots: list[Any] = list(QApplication.topLevelWidgets())
+        if window._tray is not None and window._tray.contextMenu() is not None:
+            roots.append(window._tray.contextMenu())
+        retranslate_widgets(roots, new)
 
 
 def restart_runtime(window: DesktopWindow) -> None:

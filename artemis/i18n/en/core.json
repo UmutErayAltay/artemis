@@ -2,6 +2,6 @@
   "Dil": "Language",
   "Arayüz dili": "Interface language",
   "Türkçe": "Turkish",
-  "Değişiklik Artemis yeniden başlatılınca geçerli olur.":
-    "Changes take effect after restarting Artemis."
+  "Arayüz hemen değişir; bazı durum metinleri bir sonraki güncellemede değişir.":
+    "The interface switches immediately; some status texts update on their next refresh."
 }
