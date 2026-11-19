@@ -325,7 +325,8 @@ class OperationLog:
 
 
 def _label(tool: str, labels: Mapping[str, tuple[str, str]]) -> str:
-    return labels.get(tool, ("", ""))[0] or tool or t("Araç")
+    label = labels.get(tool, ("", ""))[0]
+    return t(label) if label else (tool or t("Araç"))
 
 
 def _detail_line(event: str, fields: Mapping[str, Any]) -> str:
