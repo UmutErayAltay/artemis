@@ -14,6 +14,7 @@ from artemis.brain.conversation import ConversationContext
 from artemis.brain.providers import Provider, build_provider
 from artemis.channels.runner import CommandRunner
 from artemis.config.settings import Settings, load_settings
+from artemis.i18n import t
 from artemis.memory.companion import ensure_skeleton
 from artemis.memory.protect import protector_for
 from artemis.memory.store import MemoryStore
@@ -101,19 +102,40 @@ def create_runtime(
 
         tools = discover_mcp_tools(loaded, log, tools)
     if not loaded.routines.enabled:
-        tools = tools.without_prefix("routine_")  # ADR 0058: kapalıyken model araçları görmez
+        tools = tools.without_prefix(  # ADR 0058: kapalıyken model araçları görmez
+            "routine_",
+            t("Rutinler kapalı: config içinde routines.enabled: true gerekir."),
+        )
     if not loaded.calendar.enabled:
-        tools = tools.without_prefix("calendar_")  # ADR 0059
+        tools = tools.without_prefix(  # ADR 0059
+            "calendar_",
+            t("Takvim kapalı: config içinde calendar.enabled: true gerekir."),
+        )
     if not loaded.mail.enabled:
-        tools = tools.without_prefix("mail_")
+        tools = tools.without_prefix(
+            "mail_",
+            t("Posta kapalı: config içinde mail.enabled: true gerekir."),
+        )
     if not loaded.skills.enabled:
-        tools = tools.without_prefix("skill_")  # ADR 0060
+        tools = tools.without_prefix(  # ADR 0060
+            "skill_",
+            t("Beceriler kapalı: config içinde skills.enabled: true gerekir."),
+        )
     if not loaded.research.enabled:
-        tools = tools.without_prefix("research_")  # ADR 0063
+        tools = tools.without_prefix(  # ADR 0063
+            "research_",
+            t("Araştırma işi kapalı: config içinde research.enabled: true gerekir."),
+        )
     if not loaded.file_search.enabled:
-        tools = tools.without_prefix("file_search")  # ADR 0065
+        tools = tools.without_prefix(  # ADR 0065
+            "file_search",
+            t("Dosya araması kapalı: config içinde file_search.enabled: true gerekir."),
+        )
     if not loaded.daily_summary.enabled:
-        tools = tools.without_prefix("daily_summary_")  # ADR 0066
+        tools = tools.without_prefix(  # ADR 0066
+            "daily_summary_",
+            t("Gün özeti kapalı: config içinde daily_summary.enabled: true gerekir."),
+        )
     gate = SafetyGate(tools)
     context = ToolContext(workspace=loaded.workspace, settings=loaded, audit=log)
     # Runtime kurulamazsa sahibi dışarıya dönmez; callback kilidi kapatır.

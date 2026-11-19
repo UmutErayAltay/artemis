@@ -25,6 +25,7 @@ def decode_tool_name(name: str) -> str:
 class ToolRegistry:
     def __init__(self) -> None:
         self._tools: dict[str, BaseTool] = {}
+        self._disabled: dict[str, str] = {}
 
     def register(self, cls: type[BaseTool]) -> type[BaseTool]:
         name = encode_tool_name(cls.name)
@@ -37,19 +38,30 @@ class ToolRegistry:
         """Aynı araç örnekleriyle yeni registry: runtime'a özel eklemeler globali değiştirmez."""
         clone = ToolRegistry()
         clone._tools = dict(self._tools)
+        clone._disabled = dict(self._disabled)
         return clone
 
-    def without_prefix(self, prefix: str) -> ToolRegistry:
+    def without_prefix(self, prefix: str, reason: str | None = None) -> ToolRegistry:
         """Adı `prefix` ile başlayan araçlar olmadan kopya (kapalı özellik modele görünmez)."""
         clone = ToolRegistry()
         clone._tools = {n: t for n, t in self._tools.items() if not n.startswith(prefix)}
+        clone._disabled = (
+            {**self._disabled, prefix: reason} if reason is not None else dict(self._disabled)
+        )
         return clone
 
     def only(self, names: set[str]) -> ToolRegistry:
         """Yalnız `names` araçlarını taşıyan kopya (arka plan araştırma işi, ADR 0063)."""
         clone = ToolRegistry()
         clone._tools = {n: t for n, t in self._tools.items() if n in names}
+        clone._disabled = dict(self._disabled)
         return clone
+
+    def disabled_reason(self, name: str) -> str | None:
+        for prefix, reason in self._disabled.items():
+            if name.startswith(prefix):
+                return reason
+        return None
 
     def __contains__(self, name: object) -> bool:
         return name in self._tools

@@ -818,3 +818,35 @@ async def test_malformed_url_never_crashes_and_always_asks(
     )
     assert trusted_result.status == "denied"
     assert asked == ["http://[::1", "http://[::1"]
+
+
+async def test_disabled_feature_tool_returns_reason_without_approval(
+    setup_gate: tuple[SafetyGate, ToolContext, TurnState],
+) -> None:
+    _gate, context, state = setup_gate
+    reason = "Takvim kapalı: config içinde calendar.enabled: true gerekir."
+    registry = ToolRegistry().without_prefix("calendar_", reason=reason)
+    assert ToolRegistry().without_prefix("calendar_").disabled_reason("calendar_events") is None
+    gate = SafetyGate(registry)
+
+    def reject(name: str, arguments: dict[str, Any]) -> bool:
+        pytest.fail("Kapalı veya kayıtlı olmayan araç için onay istenmemeli.")
+        return False
+
+    disabled = await gate.dispatch(call("calendar_events"), context, state, reject)
+    unknown = await gate.dispatch(call("bilinmeyen_arac"), context, state, reject)
+
+    assert disabled.success is False
+    assert disabled.message == reason
+    assert unknown.message.startswith("Kayıtlı olmayan araç")
+
+    records = [
+        json.loads(line)
+        for line in context.audit.path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert any(
+        record["event"] == "tool_result"
+        and record["tool"] == "calendar_events"
+        and record["result"]["message"] == reason
+        for record in records
+    )
