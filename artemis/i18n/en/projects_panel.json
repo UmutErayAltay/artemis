@@ -20,7 +20,7 @@
   "Bilinmiyor": "Unknown",
   "Bir taslak veya iş seç; ayrıntısı burada görünür.": "Select a draft or job; its details appear here.",
   "Biten işleri temizle": "Clear finished jobs",
-  "Bitti": "Finished",
+  "Bitti": "Done",
   "Bitti (doğrulanmadı)": "Finished (unverified)",
   "Bitti, kontrol başarısız": "Finished, check failed",
   "Bu ajan için görünür kip tanımlı değil (Ayarlar > GitHub > Kod ajanları).": "Visible mode is not configured for this agent (Settings > GitHub > Code agents).",

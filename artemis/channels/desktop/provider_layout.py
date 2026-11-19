@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.form_kit import button_row, divider, field, group, meta_label
+from artemis.channels.desktop.retranslate import set_i18n_context
 from artemis.channels.desktop.widgets import with_help
 from artemis.i18n import t
 
@@ -98,9 +99,10 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
         (t("Tümü"), "all"),
         (t("Yazı"), "chat"),
         (t("Görsel"), "image"),
-        (t("Ses"), "speech"),
+        (t("Ses", context="provider"), "speech"),
     ):
         section.model_filter.addItem(label, key)
+    set_i18n_context(section.model_filter, "provider")
     saved_filter = section.model_filter.findData(section._test_settings.value("filter", "all"))
     section.model_filter.setCurrentIndex(max(saved_filter, 0))
     section.model_filter.currentIndexChanged.connect(section._filter_changed)
@@ -310,7 +312,8 @@ def build_add_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     section.kind.setAccessibleName(t("Model türü"))
     section.kind.addItem(t("Sohbet"), "chat")
     section.kind.addItem(t("Resim"), "image")
-    section.kind.addItem(t("Ses"), "speech")
+    section.kind.addItem(t("Ses", context="provider"), "speech")
+    set_i18n_context(section.kind, "provider")
     section.image_price = QLineEdit("0")
     section.image_price.setAccessibleName(t("Resim başına USD"))
     section.image_box = QWidget()
@@ -396,7 +399,7 @@ def build_connections_box(section: ProviderSection, layout: QVBoxLayout) -> None
     section.key = QLineEdit()
     section.key.setAccessibleName(t("API anahtarı"))
     section.key.setEchoMode(QLineEdit.EchoMode.Password)
-    field(conn, t("Şablon"), section.preset)
+    field(conn, t("Şablon", context="provider"), section.preset, label_context="provider")
     field(conn, t("Kimlik (kısa ad)"), section.endpoint_id)
     field(conn, t("Adres"), section.base_url)
     conn.addWidget(section.needs_key)

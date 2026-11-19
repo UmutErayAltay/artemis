@@ -285,8 +285,10 @@ class OperationLog:
         if op is None:
             return
         action = fields.get("action")
-        name = t(_ACTION_TEXT[str(action)]) if str(action) in _ACTION_TEXT else str(
-            action or t("Adım")
+        name = (
+            t(_ACTION_TEXT[str(action)], context="action")
+            if str(action) in _ACTION_TEXT
+            else str(action or t("Adım"))
         )
         head = t("Adım {step} · {name}").format(step=fields.get("step", "?"), name=name)
         if action == "type" and isinstance(fields.get("text_length"), int):

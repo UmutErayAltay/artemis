@@ -26,7 +26,7 @@
   "Gürültü engelleme açılamadı: {reason}. {fix} Ses işlenmeden sürüyor.": "Could not start noise suppression: {reason}. {fix} Voice continues unprocessed.",
   "Gürültü engelleme hata verdi ve bu oturumda kapatıldı; ses işlenmeden devam ediyor.": "Noise suppression encountered an error and was turned off for this session; voice continues unprocessed.",
   "Ham araç adı: {raw_tool}": "Raw tool name: {raw_tool}",
-  "Hatırlatma kur": "Set a reminder",
+  "Hatırlatma kur": "Set reminder",
   "Hazır": "Ready",
   "Hemen gönderir": "Sends immediately",
   "Kod işi · {project}: {status}": "Code job · {project}: {status}",

@@ -39,6 +39,7 @@ from artemis.channels.desktop.operations import (
     STATE_TONES,
     Card,
 )
+from artemis.channels.desktop.retranslate import set_i18n_context
 from artemis.channels.desktop.shell_assets import greeting_for_hour
 from artemis.channels.desktop.steps import StepLine
 from artemis.channels.desktop.widgets import PetFace
@@ -235,7 +236,8 @@ class OperationCard(QFrame):
         stamp = QLabel(card.started)
         stamp.setObjectName("meta")
         color = palette[CHIP_TONES[card.chip]]
-        chip = QLabel(t(card.chip))
+        chip = QLabel(t(card.chip, context="status"))
+        set_i18n_context(chip, "status")
         chip.setObjectName("opChip")
         # Rozet rengi durum jetonundan gelir; hex değer gömülmez.
         chip.setStyleSheet(

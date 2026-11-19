@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.dialog_shell import FormDialog
+from artemis.channels.desktop.retranslate import set_i18n_context
 from artemis.channels.desktop.tool_titles import arg_label, tool_display, tool_summary
 from artemis.channels.desktop.widgets import with_help
 from artemis.i18n import t
@@ -125,11 +126,13 @@ class _ArgField(QWidget):
             self._widget = edit
         label = arg_label(name)
         self._widget.setAccessibleName(label)
+        set_i18n_context(self._widget, "field")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
         caption = QLabel(f"{label} *" if required else label)
         caption.setObjectName("fieldLabel")
+        set_i18n_context(caption, "field")
         layout.addWidget(caption)
         layout.addWidget(self._widget)
 

@@ -6,7 +6,7 @@
   " Grok tanıma Türkçeyi resmi olarak doğrulamıyor; hata olursa yerel metne düşer.": " Grok recognition does not officially verify Turkish; it falls back to local transcription on error.",
   "'{name}' eklendi; kendiliğinden kaydedilir.": "'{name}' added; saved automatically.",
   "Anahtar saklanamadı; {failure}": "Could not store key; {failure}",
-  "Artemis listedeki uygulamaları açabilir.": "Artemis can open the applications in the list.",
+  "Artemis listedeki uygulamaları açabilir.": "Artemis can open the listed applications.",
   "Ayarlar okunamadı.": "Could not read settings.",
   "Bir uygulamanın .exe dosyasını seç.": "Select an application's .exe file.",
   "Bu ad listede kayıtlı; önce mevcut kaydı çıkar.": "This name is already in the list; remove the existing entry first.",

@@ -17,7 +17,6 @@
   "Argümanlar bir JSON nesnesi olmalı.": "Arguments must be a JSON object.",
   "Argümanlar geçerli JSON değil.": "Arguments are not valid JSON.",
   "Ayar dosyası okunamadı.": "Could not read settings file.",
-  "Bekleme": "Wait",
   "Bitiş": "Done",
   "Bu ad zaten kullanılıyor.": "This name is already in use.",
   "Bu aracın argümanı yok.": "This tool takes no arguments.",
@@ -74,7 +73,6 @@
   "Tıklama": "Click",
   "Vazgeç": "Cancel",
   "Yazma": "Type",
-  "Zaman": "Schedule",
   "Zaman kaydedildi.": "Schedule saved.",
   "Zaman kaldırıldı.": "Schedule cleared.",
   "Zamanlı bildirim için Zamanlı işler açık olmalı.": "Scheduled tasks must be enabled for scheduled notifications.",
@@ -98,7 +96,6 @@
   "Çalışıyor": "Running",
   "Çar": "Wed",
   "çalışıyor…": "running…",
-  "İptal": "Cancelled",
   "İstek": "Request",
   "Şemaya uymuyor: {place}. Dosya yazılmadı.": "Does not match schema: {place}. File was not written.",
   "{count} karakter": "{count} characters",
@@ -107,5 +104,8 @@
   "{seconds:.1f} sn": "{seconds:.1f} s",
   "↳ sonuç: {text}": "↳ result: {text}",
   "✓ tamamlandı": "✓ completed",
-  "“Rutin ekle” ile başla ya da sohbette “işe başla adında bir rutin kaydet: …” de.": "Start with “Add routine” or say “save a routine named start work: …” in chat."
+  "“Rutin ekle” ile başla ya da sohbette “işe başla adında bir rutin kaydet: …” de.": "Start with “Add routine” or say “save a routine named start work: …” in chat.",
+  "action::Bekleme": "Wait",
+  "routine::Zaman": "Schedule",
+  "status::İptal": "Cancelled"
 }

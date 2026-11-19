@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.channels.desktop.retranslate import set_i18n_context
 from artemis.channels.desktop.widgets import HelpTip, with_help
 
 
@@ -58,7 +59,12 @@ class _HeightForWidthBox(QWidget):
 
 
 def group(
-    title: str, hint: str | None = None, *, divided: bool = True, help: str = "",  # noqa: A002
+    title: str,
+    hint: str | None = None,
+    *,
+    divided: bool = True,
+    help: str = "",  # noqa: A002
+    title_context: str | None = None,
 ) -> tuple[QWidget, QVBoxLayout]:
     """Düz ayar grubu: ince çizgi + başlık + kısa ipucu. Kart içinde kart olmaması için çerçeve yok;
     çizgi grubun içinde olduğundan grup gizlenince çizgi de gider. `help` başlığa "?" ekler."""
@@ -74,6 +80,8 @@ def group(
     heading.setSpacing(4)
     head = QLabel(title)
     head.setObjectName("sectionTitle")
+    if title_context:
+        set_i18n_context(head, title_context)
     heading.addLayout(with_help(head, help)) if help else heading.addWidget(head)
     if hint:
         heading.addWidget(meta_label(hint))
@@ -120,6 +128,7 @@ def meta_label(text: str) -> QLabel:
 def field(
     parent: QVBoxLayout, label: str, control: QWidget | QLayout, hint: str | None = None,
     *, help: str = "",  # noqa: A002 - çağrı yerlerinde en okunur ad
+    label_context: str | None = None,
 ) -> None:
     """Etiket alanın üstünde (13px, 4px boşluk); ipucu altta 12px soluk.
 
@@ -129,6 +138,8 @@ def field(
     group.setSpacing(4)
     caption = QLabel(label)
     caption.setObjectName("fieldLabel")
+    if label_context:
+        set_i18n_context(caption, label_context)
     if help:
         group.addLayout(with_help(caption, help))
     else:

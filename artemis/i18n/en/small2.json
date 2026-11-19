@@ -4,7 +4,6 @@
   "Artemis'e mesaj": "Message to Artemis",
   "Artemis'e yaz ve Enter'a bas; Esc kapatır": "Write to Artemis and press Enter; Esc closes",
   "Artemis'e yaz…": "Write to Artemis…",
-  "Açık": "Light",
   "Açık ağırlıklı": "Mostly light",
   "Açık gezinme, açık çalışma alanı": "Light navigation, light workspace",
   "Açık gezinme, koyu çalışma alanı": "Light navigation, dark workspace",
@@ -70,10 +69,11 @@
   "Çalışıyor…": "Working…",
   "Önce token kaydet ve sohbeti eşleştir.": "Save the token and pair the chat first.",
   "Özel ({value})": "Custom ({value})",
-  "İnceleme": "Reviewing",
+  "İnceleme": "Inspecting",
   "İyi akşamlar": "Good evening",
   "İyi geceler": "Good night",
   "İyi günler": "Good afternoon",
   "Şu an alınamadı; metin korundu.": "Could not send right now; text was kept.",
-  "… (dosya çok uzun; baştaki 1 MB gösterildi)": "… (file is too long; showing the first 1 MB)"
+  "… (dosya çok uzun; baştaki 1 MB gösterildi)": "… (file is too long; showing the first 1 MB)",
+  "theme::Açık": "Light"
 }

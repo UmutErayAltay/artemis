@@ -1,8 +1,8 @@
 {
   "Aranacak klasörler": "Folders to search",
   "Aranacak klasörü seç": "Choose a folder to search",
-  "Ayar dosyası okunamadı.": "Could not read the settings file.",
-  "Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.": "Could not save settings; your existing settings are kept.",
+  "Ayar dosyası okunamadı.": "Could not read settings file.",
+  "Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.": "Could not save settings; keeping current settings.",
   "Ayarlar uygulanıyor…": "Applying settings…",
   "Ayarları değiştirmek için işlemin bitmesini bekle.": "Wait for the current operation to finish before changing settings.",
   "Bu SQLite sürümünde FTS5 yok; dosya araması kullanılamaz.": "This SQLite build lacks FTS5; file search is unavailable.",
