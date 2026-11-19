@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPlainTextEdit, QPushButton, 
 
 from artemis.channels.desktop import themes
 from artemis.channels.desktop.selection import ACTION_LABELS, ACTIONS
+from artemis.i18n import t
 
 WIDTH = 340
 _ICON = Path(__file__).with_name("artemis.ico")
@@ -41,10 +42,10 @@ class SelectionPopup(QWidget):
         self._on_write = on_write
         self._palette = themes.THEMES[themes.DEFAULT_THEME]
         self.setFixedWidth(WIDTH)
-        self.setAccessibleName("Artemis seçili metin eylemleri")
+        self.setAccessibleName(t("Artemis seçili metin eylemleri"))
         self.header_icon = QLabel(self)
         self.header_icon.setPixmap(QIcon(str(_ICON)).pixmap(20, 20))
-        self.title = QLabel("Seçili metin", self)
+        self.title = QLabel(t("Seçili metin"), self)
         self.title.setObjectName("title")
         self.info = QLabel(self)
         self.info.setObjectName("meta")
@@ -52,26 +53,27 @@ class SelectionPopup(QWidget):
         self.close_button = QPushButton("×", self)
         self.close_button.setObjectName("close")
         self.close_button.setFixedSize(24, 24)
-        self.close_button.setAccessibleName("Kapat")
-        self.close_button.setToolTip("Kapat")
+        self.close_button.setAccessibleName(t("Kapat"))
+        self.close_button.setToolTip(t("Kapat"))
         self.close_button.clicked.connect(self.hide)
         self.buttons: dict[str, QPushButton] = {}
         actions = QHBoxLayout()
         for action in ACTIONS:
-            button = QPushButton(ACTION_LABELS[action], self)
-            button.setAccessibleName(ACTION_LABELS[action])
+            label = t(ACTION_LABELS[action])
+            button = QPushButton(label, self)
+            button.setAccessibleName(label)
             button.setProperty("action", action)
             button.clicked.connect(self._action_clicked)
             self.buttons[action] = button
             actions.addWidget(button)
         self.result = QPlainTextEdit(self)
         self.result.setReadOnly(True)
-        self.result.setAccessibleName("Eylem sonucu")
+        self.result.setAccessibleName(t("Eylem sonucu"))
         self.result.setFixedHeight(120)
         self.result.hide()
-        self.copy_button = QPushButton("Kopyala", self)
+        self.copy_button = QPushButton(t("Kopyala"), self)
         self.copy_button.clicked.connect(self._copy)
-        self.write_button = QPushButton("Yerine yaz", self)
+        self.write_button = QPushButton(t("Yerine yaz"), self)
         self.write_button.clicked.connect(self._write)
         self.result_row = QWidget(self)
         row = QHBoxLayout(self.result_row)
@@ -116,7 +118,7 @@ class SelectionPopup(QWidget):
 
     def _copy(self) -> None:
         QGuiApplication.clipboard().setText(self.result.toPlainText())
-        self.info.setText("Kopyalandı.")
+        self.info.setText(t("Kopyalandı."))
 
     def _action_clicked(self) -> None:
         if (button := self.sender()) is not None:
@@ -144,14 +146,14 @@ class SelectionPopup(QWidget):
         self.result.clear()
         self.result.show()
         self.result_row.show()
-        self.info.setText("Çalışıyor…")
+        self.info.setText(t("Çalışıyor…"))
         self._busy(True)
 
     def show_result(self, text: str) -> None:
         self.result.setPlainText(text)
         self.result.show()
         self.result_row.show()
-        self.info.setText("Sonuç hazır.")
+        self.info.setText(t("Sonuç hazır."))
         self._busy(False)
         self._present()
 

@@ -33,6 +33,16 @@ _COMPRESSED_MIMES = (
 )
 _WAV_MIMES = ("audio/wav", "audio/x-wav")
 _COMPRESSED_ERROR = "Bulut konuşma sesi desteklenmeyen sıkıştırılmış biçimde geldi."
+
+
+def gemini_native_target(base_url: str, model: str) -> tuple[str, str]:
+    """Gemini yerel API kökü ve model adı.
+
+    Google bağlantısı çoğu zaman sohbet için OpenAI uyumlu `/v1beta/openai` köküyle kaydedilir;
+    `:streamGenerateContent` ve `/models` ise `/v1beta` altındadır. Model listesi adları
+    `models/` önekiyle verir; yol zaten `/models/` içerdiği için önek atılır (yoksa 404)."""
+    base = base_url.rstrip("/").removesuffix("/openai")
+    return base, model.strip().removeprefix("models/")
 _UNSUPPORTED_FORMAT_ERROR = "Bulut konuşma sesi desteklenmeyen ses biçiminde geldi."
 
 
@@ -182,17 +192,18 @@ class CloudSpeechSynthesizer:
         endpoint_id: str,
         endpoint: EndpointConfig,
         audit: AuditLog,
+        *,
+        paid: bool | None = None,
     ) -> None:
         if not config.allow_cloud_tts_text:
             raise ValueError("Bulut konuşma sesi için allow_cloud_tts_text açık olmalı.")
         if not config.tts_cloud_model.strip():
             raise ValueError("Bulut konuşma sesi için tts_cloud_model açıkça ayarlanmalı.")
         gemini = config.tts_cloud_protocol == "gemini"
-        if (
-            endpoint.api_key
-            and (gemini or not config.tts_cloud_model.endswith(":free"))
-            and not config.tts_cloud_allow_paid
-        ):
+        is_paid = paid if paid is not None else (
+            endpoint.api_key and (gemini or not config.tts_cloud_model.endswith(":free"))
+        )
+        if is_paid and not config.tts_cloud_allow_paid:
             note = " (Google bu anahtarı ücretlendirebilir)" if gemini else ""
             raise ValueError(
                 f"Ücretli ses modeli için tts_cloud_allow_paid açık olmalı{note}."
@@ -226,10 +237,10 @@ class CloudSpeechSynthesizer:
         )
 
         if gemini:
-            url = (
-                f"{self.endpoint.base_url}/models/"
-                f"{self.config.tts_cloud_model}:streamGenerateContent?alt=sse"
+            base, model = gemini_native_target(
+                self.endpoint.base_url, self.config.tts_cloud_model
             )
+            url = f"{base}/models/{model}:streamGenerateContent?alt=sse"
             generation_config: dict[str, Any] = {"responseModalities": ["AUDIO"]}
             if self.config.tts_cloud_voice:
                 generation_config["speechConfig"] = {
@@ -263,6 +274,13 @@ class CloudSpeechSynthesizer:
                 client.stream("POST", url, json=payload, headers=headers) as response,
             ):
                 if response.status_code != 200:
+                    # Sessizlik yerine iz kalsın: ses yalnız hata olarak düşer, nedeni denetimde.
+                    self.audit.emit(
+                        "cloud_tts_error",
+                        service=self.endpoint_id,
+                        model=self.config.tts_cloud_model,
+                        status=response.status_code,
+                    )
                     if response.status_code == 429:
                         raise RuntimeError(
                             "Bulut konuşma sesi hız/kota sınırına takıldı (HTTP 429)."

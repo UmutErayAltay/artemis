@@ -14,6 +14,7 @@ from PySide6.QtWidgets import QLineEdit, QPlainTextEdit, QWidget
 from artemis.channels.desktop import shell_assets, themes
 from artemis.channels.desktop.chat_widgets import StepBlock
 from artemis.channels.desktop.window_layout import _NAV_COMPACT_WIDTH
+from artemis.i18n import t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.app import DesktopWindow
@@ -63,10 +64,12 @@ def apply_theme(window: DesktopWindow, name: str) -> None:
     refresh_tones(window)
     refresh_icons(window)
     dark = window._theme.startswith("dark")
-    window._theme_toggle_text = "Açık tema" if dark else "Koyu tema"
+    window._theme_toggle_text = t("Açık tema") if dark else t("Koyu tema")
     compact = window.sidebar.width() == _NAV_COMPACT_WIDTH
     window.theme_toggle.setText("" if compact else window._theme_toggle_text)
-    window.theme_toggle.setAccessibleName("Açık temaya geç" if dark else "Koyu temaya geç")
+    window.theme_toggle.setAccessibleName(
+        t("Açık temaya geç") if dark else t("Koyu temaya geç")
+    )
     if not window._demo:
         window._appearance.setValue("theme", window._theme)
 

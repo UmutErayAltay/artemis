@@ -10,20 +10,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import yaml
-from PySide6.QtCore import (
-    QFileSystemWatcher,
-    QSettings,
-    QSize,
-    Qt,
-    QThread,
-    QTimer,
-    Signal,
-)
-from PySide6.QtGui import (
-    QCloseEvent,
-    QColor,
-    QFont,
-)
+from PySide6.QtCore import QFileSystemWatcher, QSettings, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtGui import QCloseEvent, QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractButton,
     QCheckBox,
@@ -49,10 +37,7 @@ from artemis.channels.desktop.code_agent_config import AgentDialog, command_stat
 from artemis.channels.desktop.file_search_section import FileSearchSection
 from artemis.channels.desktop.page_kit import PAGE_MAX_WIDTH, CurrentPageStack
 from artemis.channels.desktop.pet_section import PetSection
-from artemis.channels.desktop.provider_section import (
-    ProviderSection,
-    store_endpoint_key,
-)
+from artemis.channels.desktop.provider_section import ProviderSection, store_endpoint_key
 from artemis.channels.desktop.provider_workers import ConnectionTest
 from artemis.channels.desktop.routines_section import RoutinesSection
 from artemis.channels.desktop.settings_io import (
@@ -66,12 +51,8 @@ from artemis.channels.desktop.settings_io import (
 from artemis.channels.desktop.settings_io import (
     _write_validated as _write_validated,  # eski içe aktarma yolu
 )
-from artemis.channels.desktop.settings_io import (
-    save_choices as save_choices,
-)
-from artemis.channels.desktop.settings_io import (
-    save_computer_mode as save_computer_mode,
-)
+from artemis.channels.desktop.settings_io import save_choices as save_choices
+from artemis.channels.desktop.settings_io import save_computer_mode as save_computer_mode
 from artemis.channels.desktop.settings_pages import (
     build_about_page,
     build_apps_page,
@@ -121,6 +102,7 @@ from artemis.config.settings import (
     Settings,
     load_settings,
 )
+from artemis.i18n import t
 from artemis.tools.github_repos import GitHubError, Runner, SyncReport, run_command, sync_repos
 
 _BLOCK_MAX_WIDTH = PAGE_MAX_WIDTH  # liste + sayfa bloğu; geniş pencerede ortalanır
@@ -130,8 +112,6 @@ _BLOCK_MAX_WIDTH = PAGE_MAX_WIDTH  # liste + sayfa bloğu; geniş pencerede orta
 # ~500px kalır ve hiçbir sayfa taşmaz (2026-11-15 ölçüm).
 _COMPACT_PANEL_WIDTH = 760
 _GROUP_TARGET_ROLE = Qt.ItemDataRole.UserRole + 2  # seçicide grup başlığı -> ilk sayfa satırı
-_AUTOSAVE_MS = 800  # son düzenlemeden sonra bu kadar durulunca kaydedilir
-
 
 
 GitHubSyncFunction = Callable[[str, Path, Runner, Callable[[], bool]], SyncReport]
@@ -195,7 +175,7 @@ def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> b
 
 class SettingsPanel(QWidget):
     theme_changed = Signal(str)
-    # Otomatik kayıt isteği (düzenleme durulunca ya da flush): mikrofon aygıtı; model seçimi
+    # Kayıt isteği (Kaydet ya da çıkış onayı): mikrofon aygıtı; model seçimi
     # ProviderSection'da. Pencere yazar, sonra mark_saved()/save_failed() ile geri bildirir.
     apply_requested = Signal(object)
     save_requested = Signal()  # "Kaydet": yazıldı, beklemeden uygula
@@ -239,6 +219,7 @@ class SettingsPanel(QWidget):
     cloud_stt_hint: QLabel
     tts_combo: QComboBox
     tts_cloud_box: QWidget
+    tts_cloud_saved: QComboBox
     tts_cloud_server: QComboBox
     tts_cloud_protocol: QComboBox
     tts_cloud_model: QComboBox
@@ -270,6 +251,7 @@ class SettingsPanel(QWidget):
     providers: ProviderSection
     pet: PetSection
     theme_combo: QComboBox
+    language_combo: QComboBox
     theme_cards: dict[str, _ThemeCard]
     _theme_grid: QGridLayout
     _theme_columns: int
@@ -322,6 +304,7 @@ class SettingsPanel(QWidget):
     application_hint: QLabel
     advanced_box: QWidget
     update_section: UpdateSection
+    about_section: QWidget
 
     def __init__(
         self,
@@ -351,13 +334,10 @@ class SettingsPanel(QWidget):
         self.applications: dict[str, str] = {}
         self._dirty = False
         self._failed = False
+        self._loading = False
         self._baseline_bytes: bytes | None = None
         self._baseline_dump: dict[str, Any] | None = None
-        # Tek vuruşlu zamanlayıcılar bağlı yöntemle çalışır (lambda kendini yakalarsa GC çöker).
-        self._save_timer = QTimer(self)
-        self._save_timer.setSingleShot(True)
-        self._save_timer.setInterval(_AUTOSAVE_MS)
-        self._save_timer.timeout.connect(self._apply)
+        # Tek vuruşlu zamanlayıcı bağlı yöntemle çalışır (lambda kendini yakalarsa GC çöker).
         self._disk_timer = QTimer(self)
         self._disk_timer.setSingleShot(True)
         self._disk_timer.setInterval(200)
@@ -399,7 +379,7 @@ class SettingsPanel(QWidget):
 
         self.current_device.setTextFormat(Qt.TextFormat.PlainText)
         if demo:
-            self.notice.setText("Demo modunda ayarlar değiştirilmez.")
+            self.notice.setText(t("Demo modunda ayarlar değiştirilmez."))
             self.refresh_button.setEnabled(False)
             self.add_application_button.setEnabled(False)
             self.remove_application_button.setEnabled(False)
@@ -538,9 +518,9 @@ class SettingsPanel(QWidget):
             spoken = f"{item.text()}, {self._row_groups[row][0]}"
             item.setData(
                 Qt.ItemDataRole.AccessibleTextRole,
-                spoken + (f", {_DIRTY_A11Y}" if dirty else ""),
+                spoken + (f", {t(_DIRTY_A11Y)}" if dirty else ""),
             )
-            item.setToolTip(_DIRTY_A11Y if dirty else "")
+            item.setToolTip(t(_DIRTY_A11Y) if dirty else "")
         self.sections.viewport().update()
 
     def _on_section(self, row: int) -> None:
@@ -590,23 +570,25 @@ class SettingsPanel(QWidget):
         self.triggers_enabled.blockSignals(blocked)
 
     def _tick_proactive(self) -> None:
-        """Dosyaya yazmaz: kutuyu işaretler (toggled -> kirli), kaydı otomatik kayıt yapar."""
+        """Dosyaya yazmaz: kutuyu işaretler (toggled -> kirli), kaydı Kaydet yapar."""
         self.proactive_enabled.setChecked(True)
 
+    @property
+    def has_unsaved(self) -> bool:
+        """Kaydedilmemiş kullanıcı değişikliği var mı (demo modunda her zaman False)."""
+        return self._dirty and not self._demo
+
     def _mark_dirty(self, *_args: object) -> None:
-        if not self._demo:
+        if not self._demo and not self._loading:
             # ponytail: kirli bölüm = o an açık olan; değişiklik yalnız görünen sayfada olur.
             self._dirty_rows.add(self.stack.currentIndex())
             self._set_dirty(True)
-            # Her düzenleme sayacı yeniden başlatır: yazma duraksayınca tek kez olur.
-            self._save_timer.start()
 
     def _set_dirty(self, dirty: bool) -> None:
-        """Tema gibi anında uygulananlar buraya uğramaz. Temizlenince bekleyen otomatik kayıt da
-        düşer: kodla yenileme/geri alma sonradan eski değeri dosyaya yazmasın."""
+        """Tema gibi anında uygulananlar buraya uğramaz. Temizlenince hata ve kirli noktalar da
+        sıfırlanır."""
         self._dirty = dirty
         if not dirty:
-            self._save_timer.stop()
             self._failed = False
             self.retry_button.setVisible(False)
             self._dirty_rows.clear()
@@ -617,16 +599,23 @@ class SettingsPanel(QWidget):
         self.apply_requested.emit(self.device_combo.currentData())
 
     def flush(self) -> None:
-        """Bekleyen değişiklik varsa debounce'u beklemeden kaydettirir (sekme/pencere çıkışı)."""
+        """Bekleyen değişiklik varsa hemen kaydettirir (Kaydet düğmesi ve çıkış onayı)."""
         if self._dirty and not self._demo:
-            self._save_timer.stop()
             self._apply()
 
+    def discard_changes(self) -> None:
+        """Kaydedilmemiş düzenlemeleri atar ve tüm denetimleri kayıtlı config'ten yeniler."""
+        if self._demo:
+            return
+        self.refresh()
+        self._set_dirty(False)
+        self.notice.setText("")
+
     def mark_saved(self, written: bool = True) -> None:
-        """Pencere kaydı yazdı: temiz say. Yeniden kurulum sekmeden çıkınca yapılır."""
+        """Pencere kaydı yazdı: temiz say."""
         self._set_dirty(False)
         if written:
-            self.notice.setText("Kaydedildi · Ayarlar'dan çıkınca uygulanır")
+            self.notice.setText(t("Kaydedildi"))
 
     def save_failed(self, text: str) -> None:
         """Kayıt reddedildi: değişiklik kirli kalır (bölüm noktaları durur), hata kalıcıdır."""
@@ -653,7 +642,6 @@ class SettingsPanel(QWidget):
         Yalnız config dosyası alınır; kasadaki parolalar bilerek bellekte tutulmaz."""
         if self._demo:
             return
-        self.flush()  # bekleyen düzenleme yeni taban çizgisine karışmasın
         try:
             self._baseline_bytes = self.config_path.read_bytes()
             self._baseline_dump = load_settings(self.config_path).model_dump(mode="json")
@@ -695,7 +683,6 @@ class SettingsPanel(QWidget):
         baseline = self._baseline_bytes
         if baseline is None or self._demo:
             return
-        self._save_timer.stop()  # bekleyen otomatik kayıt geri almanın üstüne yazmasın
         temporary = ""
         try:
             descriptor, temporary = tempfile.mkstemp(
@@ -707,7 +694,7 @@ class SettingsPanel(QWidget):
             os.replace(temporary, self.config_path)
         except (OSError, ValueError, yaml.YAMLError):
             # Kirli kalır (düğme görünür, yeniden denenebilir); yarım yazılmış dosya yok.
-            self.notice.show_error("Değişiklikler geri alınamadı; mevcut ayarlar korunuyor.")
+            self.notice.show_error(t("Değişiklikler geri alınamadı; mevcut ayarlar korunuyor."))
             self._update_revert()
             return
         finally:
@@ -718,7 +705,7 @@ class SettingsPanel(QWidget):
         self.telegram.refresh()
         self._watch()
         self._update_revert()
-        self.notice.setText("Değişiklikler geri alındı")
+        self.notice.setText(t("Değişiklikler geri alındı"))
         self.reverted.emit()
 
     def _layout_theme_cards(self, columns: int) -> None:
@@ -768,34 +755,36 @@ class SettingsPanel(QWidget):
         self.cloud_fetch_button.setEnabled(live and not xai and bool(self._cloud_endpoint()[0]))
         edit = self.cloud_model.lineEdit()
         if edit is not None:
-            edit.setPlaceholderText("xAI için model gerekmez" if xai else "Örneğin: whisper-1")
+            edit.setPlaceholderText(
+                t("xAI için model gerekmez") if xai else t("Örneğin: whisper-1")
+            )
         name, endpoint = self._cloud_endpoint()
         needs_key = endpoint is not None and endpoint.api_key
         self.cloud_key.setEnabled(live and needs_key)
         self.cloud_key_button.setEnabled(live and needs_key)
         self.cloud_key.setPlaceholderText(
-            "" if not name else "Bu sunucu anahtar istemiyor" if not needs_key
-            else "kayıtlı" if stored_endpoint_key(name) else ""
+            "" if not name else t("Bu sunucu anahtar istemiyor") if not needs_key
+            else t("kayıtlı") if stored_endpoint_key(name) else ""
         )
         if not on:
             self.cloud_stt_hint.setText("")
             return
         if hybrid:
-            text = (
+            text = t(
                 "Komut sesi seçtiğin bulut sunucusuna gönderilir; kesintisiz kipte her söz gider. "
                 "Sunucu eklemek için Ayarlar > Model > Bağlantılar bölümünü kullan."
             )
         else:
-            text = (
+            text = t(
                 "Oyun modunda bulut hedefi seçili: tam ekran oyun açıldığında büyük yerel model "
                 "VRAM'den bırakılır ve tanıma seçtiğin bulut sunucusuna geçer."
             )
         if xai:
-            text += (
+            text += t(
                 " Grok tanıma Türkçeyi resmi olarak doğrulamıyor; hata olursa yerel metne düşer."
             )
         if needs_key and not stored_endpoint_key(name) and not self.cloud_key.text().strip():
-            text += (
+            text += t(
                 " Bu sunucu için API anahtarı kayıtlı değil; yukarıya yazıp "
                 "'Anahtarı kaydet'e bas, yoksa tanıma çalışmaz."
             )
@@ -816,13 +805,15 @@ class SettingsPanel(QWidget):
         name, endpoint = self._cloud_endpoint()
         typed = self.cloud_key.text().strip()
         if not name or endpoint is None or not endpoint.api_key or not typed:
-            self.cloud_stt_hint.setText("Önce bir sunucu seç ve anahtarı yaz.")
+            self.cloud_stt_hint.setText(t("Önce bir sunucu seç ve anahtarı yaz."))
             return
-        failure = store_endpoint_key(name, typed)
+        failure = store_endpoint_key(name, typed, provider_section.write_secret)
         self.cloud_key.clear()
         self._update_cloud_hint()
         self.cloud_stt_hint.setText(
-            f"Anahtar saklanamadı; {failure}" if failure else f"{name} için anahtar kaydedildi."
+            t("Anahtar saklanamadı; {failure}").format(failure=failure)
+            if failure
+            else t("{name} için anahtar kaydedildi.").format(name=name)
         )
 
     def _fetch_cloud_models(self) -> None:
@@ -833,7 +824,7 @@ class SettingsPanel(QWidget):
         key = None
         if endpoint.api_key:
             key = self.cloud_key.text().strip() or stored_endpoint_key(name)
-        self.cloud_stt_hint.setText("Model listesi alınıyor…")
+        self.cloud_stt_hint.setText(t("Model listesi alınıyor…"))
         self._cloud_fetch_for = name
         self._cloud_fetch = ConnectionTest(
             endpoint.base_url, key, self, provider_section.probe_models
@@ -866,7 +857,7 @@ class SettingsPanel(QWidget):
         current = self.cloud_server.currentData()
         self.cloud_server.blockSignals(True)
         self.cloud_server.clear()
-        self.cloud_server.addItem("Seçilmedi", "")
+        self.cloud_server.addItem(t("Seçilmedi"), "")
         for name in endpoints:
             self.cloud_server.addItem(name, name)
         self.cloud_server.setCurrentIndex(max(0, self.cloud_server.findData(current)))
@@ -902,17 +893,17 @@ class SettingsPanel(QWidget):
         try:
             self.stt_combo.clear()
             if selected_name is None:
-                self.stt_combo.addItem("Özel model (elle ayarlı)", None)
+                self.stt_combo.addItem(t("Özel model (elle ayarlı)"), None)
             for choice in stt_catalog.CATALOG:
-                text = f"{choice.label} · {self._stt_size_text(choice)}"
+                text = f"{t(choice.label)} · {self._stt_size_text(choice)}"
                 if choice.name == self._recommended_stt:
-                    text += " · önerilen"
+                    text += t(" · önerilen")
                 if stt_catalog.installed_path(choice.name) is not None:
-                    text += " · kurulu"
+                    text += t(" · kurulu")
                 self.stt_combo.addItem(text, choice.name)
                 index = self.stt_combo.count() - 1
                 self.stt_combo.setItemData(
-                    index, choice.note, Qt.ItemDataRole.ToolTipRole
+                    index, t(choice.note), Qt.ItemDataRole.ToolTipRole
                 )
             if selected_name is None:
                 self.stt_combo.setCurrentIndex(0)
@@ -937,10 +928,10 @@ class SettingsPanel(QWidget):
         choice = self._selected_stt_choice()
         if choice is None:
             self.stt_status.setText(
-                "Özel model (elle ayarlı): ayar dosyasındaki model yolu kullanılıyor."
+                t("Özel model (elle ayarlı): ayar dosyasındaki model yolu kullanılıyor.")
             )
         else:
-            self.stt_status.setText(choice.note)
+            self.stt_status.setText(t(choice.note))
         self._update_stt_download_button()
 
     def _update_stt_download_button(self) -> None:
@@ -982,18 +973,18 @@ class SettingsPanel(QWidget):
         self.stt_combo.setEnabled(False)
         self.stt_download.setEnabled(False)
         self.stt_status.setText(
-            f"İndiriliyor… ({self._stt_size_text(choice)})"
+            t("İndiriliyor… ({size})").format(size=self._stt_size_text(choice))
         )
         thread.start()
 
     def _stt_download_done(self, _path: Path) -> None:
         choice = self._selected_stt_choice()
         self._populate_stt_choices(choice.name if choice is not None else None)
-        self.stt_status.setText("İndirildi; kendiliğinden kaydedilir.")
+        self.stt_status.setText(t("İndirildi; Kaydet ile kaydedilir."))
         self._mark_dirty()
 
     def _stt_download_failed(self, error_type: str) -> None:
-        self.stt_status.setText(f"İndirilemedi: {error_type}")
+        self.stt_status.setText(t("İndirilemedi: {error_type}").format(error_type=error_type))
 
     def _stt_download_finished(self) -> None:
         self.stt_download_thread = None
@@ -1001,6 +992,7 @@ class SettingsPanel(QWidget):
         self._update_stt_download_button()
 
     def refresh(self) -> None:
+        self._loading = True
         try:
             settings = load_settings(self.config_path)
             self.providers.reload()
@@ -1044,17 +1036,19 @@ class SettingsPanel(QWidget):
             self._refresh_code_agents()
             self._set_dirty(False)
         except (OSError, ValueError, KeyError):
-            self.notice.setText("Ayarlar okunamadı.")
+            self.notice.setText(t("Ayarlar okunamadı."))
             return
+        finally:
+            self._loading = False
 
     def _no_device(self) -> None:
         """Giriş yoksa liste boş kalmaz: soluk, kapalı satır nedenini söyler."""
         self.device_combo.clear()
-        self.device_combo.addItem("Mikrofon bulunamadı", None)
+        self.device_combo.addItem(t("Mikrofon bulunamadı"), None)
         self.device_combo.setEnabled(False)
 
     def _set_current_device(self, text: str) -> None:
-        self.current_device.setText(text.strip() or "Seçilmedi")
+        self.current_device.setText(text.strip() or t("Seçilmedi"))
 
     def _refresh_devices(self, settings: Settings) -> None:
         refresh_device_combo(self, settings)
@@ -1066,13 +1060,13 @@ class SettingsPanel(QWidget):
         try:
             self._refresh_devices(load_settings(self.config_path))
         except (OSError, ValueError):
-            self.notice.setText("Mikrofon ayarı okunamadı.")
+            self.notice.setText(t("Mikrofon ayarı okunamadı."))
         # Listeyi yeniden kurmak kullanıcı değişikliği değildir.
         self._set_dirty(was_dirty)
 
     def _refresh_applications(self) -> None:
-        friendly = {"brave": "Brave", "notepad": "Not Defteri", "calculator": "Hesap Makinesi",
-                    "explorer": "Dosya Gezgini", "paint": "Paint"}
+        friendly = {"brave": "Brave", "notepad": t("Not Defteri"), "paint": "Paint",
+                    "calculator": t("Hesap Makinesi"), "explorer": t("Dosya Gezgini")}
         self.application_list.clear()
         for alias, executable in self.applications.items():
             self.application_list.addItem(f"{friendly.get(alias, alias)} ({alias})")
@@ -1089,27 +1083,29 @@ class SettingsPanel(QWidget):
         self.remove_application_button.setEnabled(manual)
         self.remove_application_button.setVisible(manual)
         self.application_hint.setText(
-            "Kurulu uygulamalar otomatik bulunur. Silme, kaldırma ve hassas işlemler onay ister."
+            t("Kurulu uygulamalar otomatik bulunur. Silme, kaldırma ve hassas işlemler onay ister.")
             if self.all_applications.isChecked()
-            else "Artemis listedeki uygulamaları açabilir."
+            else t("Artemis listedeki uygulamaları açabilir.")
         )
 
     def _add_application(self) -> None:
-        filename, _ = QFileDialog.getOpenFileName(self, "Uygulama seç", "", "Uygulamalar (*.exe)")
+        filename, _ = QFileDialog.getOpenFileName(
+            self, t("Uygulama seç"), "", t("Uygulamalar (*.exe)")
+        )
         if not filename:
             return
         path = Path(filename)
         if not path.is_file() or path.suffix.casefold() != ".exe":
-            self.notice.setText("Bir uygulamanın .exe dosyasını seç.")
+            self.notice.setText(t("Bir uygulamanın .exe dosyasını seç."))
             return
         alias = path.stem.casefold()
         if alias in self.applications and Path(self.applications[alias]) != path:
-            self.notice.setText("Bu ad listede kayıtlı; önce mevcut kaydı çıkar.")
+            self.notice.setText(t("Bu ad listede kayıtlı; önce mevcut kaydı çıkar."))
             return
         self.applications[alias] = str(path)
         self._refresh_applications()
         self._mark_dirty()
-        self.notice.setText("Uygulama eklendi; kendiliğinden kaydedilir.")
+        self.notice.setText(t("Uygulama eklendi; Kaydet ile kaydedilir."))
 
     def _remove_application(self) -> None:
         item = self.application_list.currentItem()
@@ -1117,7 +1113,7 @@ class SettingsPanel(QWidget):
             del self.applications[item.data(Qt.ItemDataRole.UserRole)]
             self._refresh_applications()
             self._mark_dirty()
-            self.notice.setText("Uygulama listeden çıkarıldı; kendiliğinden kaydedilir.")
+            self.notice.setText(t("Uygulama listeden çıkarıldı; Kaydet ile kaydedilir."))
 
     def values(self) -> dict[SettingPath, Any]:
         """PANEL_BINDINGS alanlarının panelde görünen değeri; save_choices(values=...) için."""
@@ -1158,7 +1154,11 @@ class SettingsPanel(QWidget):
         for name, kind, command in rows:
             # Yalnız PATH/önbellek bakılır; arayüz iş parçacığında süreç başlatılmaz.
             status = command_status(command)
-            note = " · yerleşik" if name in BUILTIN_AGENTS and name not in self.code_agents else ""
+            note = (
+                t(" · yerleşik")
+                if name in BUILTIN_AGENTS and name not in self.code_agents
+                else ""
+            )
             self.agent_list.addItem(f"{name} · {kind} · {command or '—'} · {status}{note}")
         blocked = self.default_agent_combo.blockSignals(True)
         self.default_agent_combo.clear()
@@ -1168,7 +1168,7 @@ class SettingsPanel(QWidget):
         self.default_agent_combo.setCurrentIndex(max(0, current))
         self.default_agent_combo.blockSignals(blocked)
         self.agent_hint.setText(
-            "Giriş her ajanın kendi CLI'sindedir (Claude/Codex login); Artemis sır saklamaz."
+            t("Giriş her ajanın kendi CLI'sindedir (Claude/Codex login); Artemis sır saklamaz.")
         )
 
     def _default_agent_picked(self, index: int) -> None:
@@ -1179,7 +1179,7 @@ class SettingsPanel(QWidget):
         self.code_agents[name] = profile
         self._refresh_code_agents()
         self._mark_dirty()
-        self.agent_hint.setText(f"'{name}' eklendi; kendiliğinden kaydedilir.")
+        self.agent_hint.setText(t("'{name}' eklendi; Kaydet ile kaydedilir.").format(name=name))
 
     def _add_custom_agent(self) -> None:
         dialog = AgentDialog((*BUILTIN_AGENTS, *self.code_agents), self)
@@ -1188,21 +1188,21 @@ class SettingsPanel(QWidget):
 
     def _browse_repos_dir(self) -> None:
         start = self.repos_dir.text().strip() or default_repos_dir()
-        chosen = QFileDialog.getExistingDirectory(self, "Repo klasörü seç", start)
+        chosen = QFileDialog.getExistingDirectory(self, t("Repo klasörü seç"), start)
         if chosen:
             self.repos_dir.setText(chosen)
 
     def _bind_github(self) -> None:
         owner = self.github_owner.text().strip()
         if not GITHUB_OWNER_RE.fullmatch(owner):
-            self.github_status.setText("Geçerli bir GitHub kullanıcı adı yaz.")
+            self.github_status.setText(t("Geçerli bir GitHub kullanıcı adı yaz."))
             return
         if not self.repos_dir.text().strip():
             self.repos_dir.setText(default_repos_dir())
         try:
             save_code_agent(self.config_path, self.github_values())
         except (OSError, ValueError, KeyError, TypeError):
-            self.github_status.setText("GitHub ayarları kaydedilemedi.")
+            self.github_status.setText(t("GitHub ayarları kaydedilemedi."))
             return
         self.saved_notes["GitHub"].flash()
         self.run_github_sync(auto=False)
@@ -1233,26 +1233,31 @@ class SettingsPanel(QWidget):
         self.github = thread
         self.github_button.setEnabled(False)
         self.github_list.clear()
-        self.github_status.setText(f"{owner} repoları eşitleniyor…")
+        self.github_status.setText(t("{owner} repoları eşitleniyor…").format(owner=owner))
         thread.start()
 
     def _github_finished(self) -> None:
         self.github_button.setEnabled(not self._demo)
 
     def _github_failed(self, message: str) -> None:
-        self.github_status.setText(f"Eşitleme başarısız: {message}")
+        self.github_status.setText(t("Eşitleme başarısız: {message}").format(message=message))
 
     def _github_done(self, report: SyncReport) -> None:
         self.github_list.clear()
-        for label, names in (("klonlandı", report.cloned), ("güncellendi", report.fetched)):
+        for label, names in ((t("klonlandı"), report.cloned), (t("güncellendi"), report.fetched)):
             for name in names:
                 self.github_list.addItem(f"{label}: {name}")
-        for label, pairs in (("atlandı", report.skipped), ("başarısız", report.failed)):
+        for label, pairs in ((t("atlandı"), report.skipped), (t("başarısız"), report.failed)):
             for name, reason in pairs:
                 self.github_list.addItem(f"{label}: {name} — {reason}")
+        summary = t(
+            "{cloned} klonlandı, {fetched} güncellendi, {skipped} atlandı, {failed} başarısız."
+        )
         self.github_status.setText(
-            f"{len(report.cloned)} klonlandı, {len(report.fetched)} güncellendi, "
-            f"{len(report.skipped)} atlandı, {len(report.failed)} başarısız."
+            summary.format(
+                cloned=len(report.cloned), fetched=len(report.fetched),
+                skipped=len(report.skipped), failed=len(report.failed),
+            )
         )
         # Yeniden başlatma yok: kod ajanı projeleri her çağrıda klasörden okur.
         self.github_synced.emit(report, self._github_auto)

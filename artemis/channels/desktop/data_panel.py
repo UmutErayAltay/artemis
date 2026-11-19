@@ -31,6 +31,7 @@ from artemis.channels.desktop.page_kit import (
     make_scroll_page,
 )
 from artemis.channels.desktop.widgets import HelpTip
+from artemis.i18n import t
 from artemis.text import search_fold
 from artemis.tools.base import ToolResult
 from artemis.tools.plugins.companion import ChangesArguments, RuleRemoveArguments
@@ -83,9 +84,11 @@ class DataPanel(QWidget):
         layout.setSpacing(16)
         layout.addWidget(
             make_page_header(
-                "Geçmiş",
-                "Konuşma geçmişini incele, saklama süresini ayarla, "
-                "hatırlatma teslimlerini izle.",
+                t("Geçmiş"),
+                t(
+                    "Konuşma geçmişini incele, saklama süresini ayarla, "
+                    "hatırlatma teslimlerini izle."
+                ),
             )
         )
 
@@ -93,27 +96,29 @@ class DataPanel(QWidget):
         history_card, hist = make_card()
         header = QHBoxLayout()
         header.setSpacing(8)
-        header.addWidget(make_label("Konuşma geçmişi", "sectionTitle"))
+        header.addWidget(make_label(t("Konuşma geçmişi"), "sectionTitle"))
         header.addStretch()
-        self.history = QPushButton("Yenile")
-        self.history.setAccessibleName("Konuşma geçmişini göster veya yenile")
+        self.history = QPushButton(t("Yenile"))
+        self.history.setAccessibleName(t("Konuşma geçmişini göster veya yenile"))
         self.history.clicked.connect(self._request_history)
         header.addWidget(self.history)
         hist.addLayout(header)
-        hist.addWidget(make_label("Yeni sohbet açmak geçmişi silmez.", "fieldLabel"))
+        hist.addWidget(make_label(t("Yeni sohbet açmak geçmişi silmez."), "fieldLabel"))
         # Arama yalnız yüklenmiş satırları süzer; yeni veri kaynağı ya da araç çağrısı yok.
         self.search = QLineEdit()
         self.search.setClearButtonEnabled(True)
-        self.search.setPlaceholderText("Konuşmalarda ara: bir kelime ya da tarih yaz")
-        self.search.setAccessibleName("Geçmişte ara")
+        self.search.setPlaceholderText(t("Konuşmalarda ara: bir kelime ya da tarih yaz"))
+        self.search.setAccessibleName(t("Geçmişte ara"))
         self.search.textChanged.connect(lambda _: self._render_history())
-        hist.addWidget(make_field("Geçmişte ara", self.search))
+        hist.addWidget(make_field(t("Geçmişte ara"), self.search))
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
-        self.preview.setAccessibleName("Konuşma geçmişi")
+        self.preview.setAccessibleName(t("Konuşma geçmişi"))
         # "Yüklenmedi" eylem sunar (Yükle); "yüklendi, boş" düz cümledir (_render_history).
         self.history_empty = EmptyState(
-            "Henüz yüklenmedi", "Konuşma geçmişini görmek için yükle.", "Geçmişi yükle"
+            t("Henüz yüklenmedi"),
+            t("Konuşma geçmişini görmek için yükle."),
+            t("Geçmişi yükle"),
         )
         if self.history_empty.action_button is not None:
             self.history_empty.action_button.clicked.connect(self._request_history)
@@ -126,16 +131,16 @@ class DataPanel(QWidget):
         # Saklama: etiket üstte, iki kısa satır yardım; Uygula değer değişene dek pasif.
         self.days = QSpinBox()
         self.days.setRange(0, 36500)
-        self.days.setSuffix(" gün")
-        self.days.setSpecialValueText("Otomatik silme kapalı")
-        self.days.setAccessibleName("Saklama süresi")
+        self.days.setSuffix(t(" gün"))
+        self.days.setSpecialValueText(t("Otomatik silme kapalı"))
+        self.days.setAccessibleName(t("Saklama süresi"))
         # Kutunun iç satırı çerçeveye bitişik başlar (QSS dolgusu ona işlemez): metin diğer
         # girişlerle aynı 8px içeriden başlasın (UX-10).
         self.days.lineEdit().setTextMargins(8, 0, 0, 0)  # type: ignore[union-attr]
         # Ok düğmeleri kutuyu ~39px'e uzatıyordu; tema ölçüsü: 26 + 2*4 dolgu + 2*1 çerçeve = 36.
         self.days.setFixedHeight(36)
         self.days.valueChanged.connect(lambda _: self.set_busy(self._busy))
-        self.retention = QPushButton("Uygula")
+        self.retention = QPushButton(t("Uygula"))
         self.retention.clicked.connect(
             lambda: self.tool_requested.emit(
                 "conversation_history",
@@ -144,15 +149,17 @@ class DataPanel(QWidget):
         )
         retention_row = QHBoxLayout()
         retention_row.setSpacing(8)
-        retention_row.addWidget(make_field("Saklama süresi", self.days))
+        retention_row.addWidget(make_field(t("Saklama süresi"), self.days))
         # Düğme alt kenara hizalı: alan etiketi üstte olsa da düğme kutuyla aynı çizgide durur.
         retention_row.addWidget(self.retention, 0, Qt.AlignmentFlag.AlignBottom)
-        retention_row.addWidget(HelpTip(_HELP_RETENTION), 0, Qt.AlignmentFlag.AlignBottom)
+        retention_row.addWidget(HelpTip(t(_HELP_RETENTION)), 0, Qt.AlignmentFlag.AlignBottom)
         retention_row.addStretch()
         hist.addLayout(retention_row)
         self.retention_hint = make_label(
-            "0 yazarsan otomatik silme kapalı kalır.\n"
-            "Pozitif süre, daha eski konuşmaları hemen siler; öz notlar kalır.",
+            t(
+                "0 yazarsan otomatik silme kapalı kalır.\n"
+                "Pozitif süre, daha eski konuşmaları hemen siler; öz notlar kalır."
+            ),
             "fieldLabel",
         )
         hist.addWidget(self.retention_hint)
@@ -160,29 +167,29 @@ class DataPanel(QWidget):
 
         # Kart 2: hatırlatma teslimleri.
         reminder_card, rem = make_card()
-        rem.addWidget(make_label("Hatırlatma teslimleri", "sectionTitle"))
+        rem.addWidget(make_label(t("Hatırlatma teslimleri"), "sectionTitle"))
         self.filter = QComboBox()
-        self.filter.addItem("Tüm teslim durumları", "all")
+        self.filter.addItem(t("Tüm teslim durumları"), "all")
         for state, label in _STATES.items():
-            self.filter.addItem(label, state)
-        self.refresh = QPushButton("Yenile")
+            self.filter.addItem(t(label), state)
+        self.refresh = QPushButton(t("Yenile"))
         self.refresh.clicked.connect(
             lambda: self.tool_requested.emit(
                 "reminder_list", ReminderListArguments(state=self.filter.currentData())
             )
         )
         # Kısa etiket + ayrı uyarı satırı: kullanıcı ne olacağını okur, düğme uzun cümle olmaz.
-        self.retry = QPushButton("Yeniden dene")
+        self.retry = QPushButton(t("Yeniden dene"))
         self.retry.setObjectName("amber")
         # Tek başına neyi yeniden denediği belli olmuyordu: ipucu ve ekran okuyucu adı söyler.
-        retry_tip = (
+        retry_tip = t(
             "Listede seçili hatırlatma teslimini yeniden dener. "
             "Yalnız başarısız, belirsiz veya kaçırılmış teslimlerde açılır."
         )
         self.retry.setToolTip(retry_tip)
-        self.retry.setAccessibleName("Seçili hatırlatma teslimini yeniden dene")
+        self.retry.setAccessibleName(t("Seçili hatırlatma teslimini yeniden dene"))
         self.retry.clicked.connect(self._retry)
-        self.retry_warning = make_label("Çift bildirim olabilir", "warnNote")
+        self.retry_warning = make_label(t("Çift bildirim olabilir"), "warnNote")
         self.retry_warning.setVisible(False)
         retry_col = QVBoxLayout()
         retry_col.setSpacing(4)
@@ -193,15 +200,15 @@ class DataPanel(QWidget):
         retry_col.addWidget(self.retry_warning, 0, Qt.AlignmentFlag.AlignRight)
         filter_row = QHBoxLayout()
         filter_row.setSpacing(8)
-        filter_row.addWidget(make_field("Teslim durumu", self.filter))
+        filter_row.addWidget(make_field(t("Teslim durumu"), self.filter))
         filter_row.addWidget(self.refresh, 0, Qt.AlignmentFlag.AlignBottom)
         filter_row.addStretch()
         filter_row.addLayout(retry_col)
         rem.addLayout(filter_row)
         self.items = QListWidget()
-        self.items.setAccessibleName("Hatırlatma teslimleri")
+        self.items.setAccessibleName(t("Hatırlatma teslimleri"))
         self.items.currentRowChanged.connect(lambda _: self.set_busy(self._busy))
-        self.items_empty = EmptyState("Henüz yüklenmedi", "Görmek için Yenile'ye bas.")
+        self.items_empty = EmptyState(t("Henüz yüklenmedi"), t("Görmek için Yenile'ye bas."))
         self.items_stack = QStackedWidget()
         self.items_stack.setMinimumHeight(160)
         self.items_stack.addWidget(self.items)
@@ -214,16 +221,16 @@ class DataPanel(QWidget):
         memory_card, mem = make_card()
         mem_header = QHBoxLayout()
         mem_header.setSpacing(8)
-        mem_header.addWidget(make_label("Kurallar", "sectionTitle"))
+        mem_header.addWidget(make_label(t("Kurallar"), "sectionTitle"))
         mem_header.addStretch()
-        self.memory_refresh = QPushButton("Yenile")
-        self.memory_refresh.setAccessibleName("Kuralları yenile")
+        self.memory_refresh = QPushButton(t("Yenile"))
+        self.memory_refresh.setAccessibleName(t("Kuralları yenile"))
         self.memory_refresh.clicked.connect(self._request_memory)
         mem_header.addWidget(self.memory_refresh)
         mem.addLayout(mem_header)
         mem.addWidget(
             make_label(
-                "Artemis'in şu an uyduğu kalıcı kurallar. Kaldır onay sorar ve kuralı siler.",
+                t("Artemis'in şu an uyduğu kalıcı kurallar. Kaldır onay sorar ve kuralı siler."),
                 "fieldLabel",
             )
         )
@@ -231,14 +238,16 @@ class DataPanel(QWidget):
         self.memory_rows.setSpacing(8)
         rows_box = QWidget()
         rows_box.setLayout(self.memory_rows)
-        self.memory_empty = EmptyState("Henüz yüklenmedi", "Görmek için Yenile'ye bas.")
+        self.memory_empty = EmptyState(t("Henüz yüklenmedi"), t("Görmek için Yenile'ye bas."))
         self.memory_stack = QStackedWidget()
         self.memory_stack.addWidget(rows_box)
         self.memory_stack.addWidget(self.memory_empty)
         self.memory_stack.setCurrentIndex(1)
         mem.addWidget(self.memory_stack)
         layout.addWidget(memory_card)
-        self.notice = make_label("Verileri görmek için ilgili yenileme düğmesini kullanın.", "meta")
+        self.notice = make_label(
+            t("Verileri görmek için ilgili yenileme düğmesini kullanın."), "meta"
+        )
         layout.addWidget(self.notice)
 
         # Yıkıcı eylem sayfanın en altında kendi bloğunda; onay akışı araç kapısında kalır.
@@ -251,15 +260,17 @@ class DataPanel(QWidget):
         danger = QVBoxLayout(self.danger_zone)
         danger.setContentsMargins(16, 16, 16, 16)
         danger.setSpacing(8)
-        danger.addWidget(make_label("Tehlikeli işlemler", "sectionTitle"))
+        danger.addWidget(make_label(t("Tehlikeli işlemler"), "sectionTitle"))
         danger.addWidget(
             make_label(
-                "Tüm konuşma geçmişini siler; öz notlar kalır. "
-                "Disk ve yedeklerden güvenli silme garantisi vermez.",
+                t(
+                    "Tüm konuşma geçmişini siler; öz notlar kalır. "
+                    "Disk ve yedeklerden güvenli silme garantisi vermez."
+                ),
                 "fieldLabel",
             )
         )
-        self.delete = QPushButton("Tüm konuşma geçmişini sil…")
+        self.delete = QPushButton(t("Tüm konuşma geçmişini sil…"))
         self.delete.setObjectName("danger")
         self.delete.clicked.connect(
             lambda: self.tool_requested.emit(
@@ -270,7 +281,7 @@ class DataPanel(QWidget):
         delete_row = QHBoxLayout()
         delete_row.setSpacing(12)
         delete_row.addWidget(self.delete, 0, Qt.AlignmentFlag.AlignLeft)
-        delete_row.addWidget(HelpTip(_HELP_DELETE), 0, Qt.AlignmentFlag.AlignVCenter)
+        delete_row.addWidget(HelpTip(t(_HELP_DELETE)), 0, Qt.AlignmentFlag.AlignVCenter)
         delete_row.addWidget(self.delete_reason, 1)
         danger.addLayout(delete_row)
         return self.danger_zone
@@ -305,8 +316,8 @@ class DataPanel(QWidget):
             text = make_label(rule, "fieldLabel")
             text.setWordWrap(True)
             lay.addWidget(text, 1)
-            remove = QPushButton("Kaldır")
-            remove.setAccessibleName(f"Kuralı kaldır: {rule}")
+            remove = QPushButton(t("Kaldır"))
+            remove.setAccessibleName(t("Kuralı kaldır: {rule}").format(rule=rule))
             remove.setProperty("rule", rule)
             remove.clicked.connect(self._remove_clicked)
             self._undo_buttons.append(remove)
@@ -315,7 +326,7 @@ class DataPanel(QWidget):
         if rules:
             self.memory_stack.setCurrentIndex(0)
         else:
-            self.memory_empty.set_text("Kural yok", "Artemis'e kalıcı bir kural söylemedin.")
+            self.memory_empty.set_text(t("Kural yok"), t("Artemis'e kalıcı bir kural söylemedin."))
             self.memory_stack.setCurrentIndex(1)
 
     def _flush_memory_request(self) -> None:
@@ -360,18 +371,26 @@ class DataPanel(QWidget):
         if not turns:
             if not self._history_loaded:
                 self.history_empty.set_text(
-                    "Henüz yüklenmedi", "Konuşma geçmişini görmek için yükle."
+                    t("Henüz yüklenmedi"), t("Konuşma geçmişini görmek için yükle.")
                 )
             elif needle:
-                self.history_empty.set_text("Eşleşme yok", "Aramayı değiştir veya temizle.")
+                self.history_empty.set_text(
+                    t("Eşleşme yok"), t("Aramayı değiştir veya temizle.")
+                )
             else:
-                self.history_empty.set_text("Kayıt yok", "Kayıtlı konuşma turu yok.")
+                self.history_empty.set_text(t("Kayıt yok"), t("Kayıtlı konuşma turu yok."))
             self.history_stack.setCurrentIndex(1)
             return
-        lines = [f"Toplam {self._turn_total} konuşma turu; en son 50 tur gösterilir."]
+        lines = [
+            t("Toplam {total} konuşma turu; en son 50 tur gösterilir.").format(
+                total=self._turn_total
+            )
+        ]
         for turn in turns:
             lines.append(
-                f"\n{turn['created_at']}\nSiz: {turn['user']}\nArtemis: {turn['answer']}"
+                t("\n{created_at}\nSiz: {user}\nArtemis: {answer}").format(
+                    created_at=turn["created_at"], user=turn["user"], answer=turn["answer"]
+                )
             )
         self.preview.setPlainText("\n".join(lines))
         self.history_stack.setCurrentIndex(0)
@@ -392,9 +411,9 @@ class DataPanel(QWidget):
         # Uygula yalnız değer yüklü değerden farklıyken anlamlıdır.
         self.retention.setEnabled(loaded and self.days.value() != self._loaded_days)
         if self._demo:
-            self.delete_reason.setText("Demo modunda kapalı.")
+            self.delete_reason.setText(t("Demo modunda kapalı."))
         elif not self._history_loaded:
-            self.delete_reason.setText("Önce geçmişi yükle.")
+            self.delete_reason.setText(t("Önce geçmişi yükle."))
         else:
             self.delete_reason.setText("")
         item = self.items.currentItem()

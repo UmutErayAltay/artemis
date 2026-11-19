@@ -81,3 +81,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0077 — `open_url` lekeli turda sorulur, otomatik onayda sorulmaz](0077-open-url-lekeli-turda-sorulur.md)
 - [0078 — Yıkıcı öğe kapısı ve sıkı istem kuralları](0078-yikici-oge-kapisi-ve-siki-kurallar.md)
 - [0079 — Tanıma hassasiyeti seçimi ve karma (yerel uyandırma + bulut komut) tanıma](0079-stt-precision-and-hybrid-cloud.md)
+- [0080 — Ses modeli türü ve model listesinden bulut konuşma sesi](0080-ses-modeli-turu.md)

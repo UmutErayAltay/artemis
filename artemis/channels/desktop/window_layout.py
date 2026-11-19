@@ -31,6 +31,7 @@ from artemis.channels.desktop.chat_widgets import (
 )
 from artemis.channels.desktop.page_kit import make_page_header
 from artemis.channels.desktop.widgets import HelpTip, PetFace
+from artemis.i18n import t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.app import DesktopWindow
@@ -77,25 +78,25 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     row.addWidget(window.brand_pet)
     title = QLabel("Artemis")
     title.setObjectName("sectionTitle")
-    title.setToolTip("Güvenli masaüstü asistanı")
+    title.setToolTip(t("Güvenli masaüstü asistanı"))
     row.addWidget(title)
     window.demo_chip = None
     if window._demo:
-        window.demo_chip = QLabel("Demo")
+        window.demo_chip = QLabel(t("Demo"))
         window.demo_chip.setObjectName("chipWarning")
-        window.demo_chip.setToolTip("Demo modu; gerçek işlem yapılmaz")
-        window.demo_chip.setAccessibleName("Demo modu; gerçek işlem yapılmaz")
+        window.demo_chip.setToolTip(t("Demo modu; gerçek işlem yapılmaz"))
+        window.demo_chip.setAccessibleName(t("Demo modu; gerçek işlem yapılmaz"))
         row.addWidget(window.demo_chip, 0, Qt.AlignmentFlag.AlignVCenter)
     row.addStretch(1)
 
     # Model: ortada tek çip; dar pencerede kısalır (bkz. _fit_shell).
     # Çip düğmedir: Ayarlar > Model'i açar, klavyeyle de erişilir.
-    window.model_caption = QLabel("Model")
+    window.model_caption = QLabel(t("Model"))
     window.model_caption.setObjectName("meta")
-    window.model_value = QPushButton("Yükleniyor…")
+    window.model_value = QPushButton(t("Yükleniyor…"))
     window.model_value.setObjectName("chip")
-    window.model_value.setAccessibleName("Kullanılan beyin modeli")
-    window.model_value.setToolTip("Kullanılan beyin modeli")
+    window.model_value.setAccessibleName(t("Kullanılan beyin modeli"))
+    window.model_value.setToolTip(t("Kullanılan beyin modeli"))
     window.model_value.setCursor(Qt.CursorShape.PointingHandCursor)
     window.model_value.clicked.connect(window._show_model_settings)
     value_font = window.model_value.font()
@@ -111,24 +112,24 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     window.voice_dot = QLabel("●", window)
     window.voice_dot.setObjectName("voiceDot")
     window.voice_dot.hide()
-    window.voice_state = QLabel(_VOICE_LABELS["off"], window)
-    window.voice_state.setAccessibleName("Ses durumu")
+    window.voice_state = QLabel(t(_VOICE_LABELS["off"]), window)
+    window.voice_state.setAccessibleName(t("Ses durumu"))
     window.voice_state.hide()
-    window.voice_button = icon_toggle("Sesi aç veya kapat")
+    window.voice_button = icon_toggle(t("Sesi aç veya kapat"))
     window.voice_button.clicked.connect(window._toggle_voice)
     row.addWidget(window.voice_button)
     window.auto_button = icon_toggle(
-        "Bilgisayar kullanımında otomatik onayı aç veya kapat"
+        t("Bilgisayar kullanımında otomatik onayı aç veya kapat")
     )
     window.auto_button.toggled.connect(window._toggle_auto_mode)
     row.addWidget(window.auto_button)
-    row.addWidget(HelpTip(_HELP_AUTO), 0, Qt.AlignmentFlag.AlignVCenter)
+    row.addWidget(HelpTip(t(_HELP_AUTO)), 0, Qt.AlignmentFlag.AlignVCenter)
     status_pill = QFrame()
     window.status_pill = status_pill
     status_pill.setObjectName("statusPill")
     # Düz durum çipi tıklanmaz (simge anahtarları tıklanır); ikisi de ipucu taşır.
-    status_pill.setToolTip("Çalışma durumu")
-    status_pill.setAccessibleName("Çalışma durumu")
+    status_pill.setToolTip(t("Çalışma durumu"))
+    status_pill.setAccessibleName(t("Çalışma durumu"))
     # Çip içeriğine sığar: genişlemez, metin değişince yeniden ölçülür.
     status_pill.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
     status_row = QHBoxLayout(status_pill)
@@ -141,7 +142,7 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     window.status_label.setObjectName("status")
     window.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     window.status_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
-    window._set_status("Başlatılıyor…", "running")
+    window._set_status(t("Başlatılıyor…"), "running")
     status_row.addWidget(window.status_dot)
     status_row.addWidget(window.status_label)
     row.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -160,15 +161,15 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
     column = QVBoxLayout(main_column)
     column.setContentsMargins(24, 0, 24, 24)
     column.setSpacing(16)
-    window.quick_action = QPushButton("Hızlı komut")
+    window.quick_action = QPushButton(t("Hızlı komut"))
     window.quick_action.clicked.connect(window._show_overlay)
-    window.new_chat_button = QPushButton("Yeni sohbet")
-    window.new_chat_button.setToolTip("Yeni bağlam açar; kalıcı konuşma arşivini silmez")
+    window.new_chat_button = QPushButton(t("Yeni sohbet"))
+    window.new_chat_button.setToolTip(t("Yeni bağlam açar; kalıcı konuşma arşivini silmez"))
     window.new_chat_button.clicked.connect(window._new_chat)
     # Dar pencerede son işlem kartları bu düğmeyle yandan açılan sayfada görünür.
-    window.operations_button = QPushButton("İşlemler")
-    window.operations_button.setToolTip("Mesaj başına işlem kartlarını açar")
-    window.operations_button.setAccessibleName("Mesaj işlemlerini aç")
+    window.operations_button = QPushButton(t("İşlemler"))
+    window.operations_button.setToolTip(t("Mesaj başına işlem kartlarını açar"))
+    window.operations_button.setAccessibleName(t("Mesaj işlemlerini aç"))
     window.operations_button.clicked.connect(window._open_operations)
     column.addWidget(
         make_page_header(
@@ -176,8 +177,8 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
             "",
             actions=(
                 window.operations_button,
-                (window.new_chat_button, _HELP_NEW_CHAT),
-                (window.quick_action, _HELP_QUICK),
+                (window.new_chat_button, t(_HELP_NEW_CHAT)),
+                (window.quick_action, t(_HELP_QUICK)),
             ),
         )
     )
@@ -195,7 +196,7 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
         pet_source=window._pet_pixmap,
     )
     window.chat.setObjectName("chatTranscript")
-    window.chat.setAccessibleName("Seçilebilir sohbet geçmişi")
+    window.chat.setAccessibleName(t("Seçilebilir sohbet geçmişi"))
     left.addWidget(window.chat, 1)
 
     # Zamanı gelen rutin için soru satırı (ADR 0058): Çalıştır tıklaması normal, onaylı tur.
@@ -211,11 +212,11 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
     window.routine_label = QLabel("")
     window.routine_label.setWordWrap(True)
     window.routine_label.setTextFormat(Qt.TextFormat.PlainText)
-    window.routine_run_button = QPushButton("Çalıştır")
+    window.routine_run_button = QPushButton(t("Çalıştır"))
     window.routine_run_button.setObjectName("primary")
-    window.routine_dismiss_button = QPushButton("Kapat")
+    window.routine_dismiss_button = QPushButton(t("Kapat"))
     # Yalnız gün özeti bildiriminde (ADR 0066) ve vault açıkken görünür.
-    window.summary_vault_button = QPushButton("Vault'a ekle")
+    window.summary_vault_button = QPushButton(t("Vault'a ekle"))
     window.summary_vault_button.hide()
     window.summary_vault_button.clicked.connect(window._append_summary_to_vault)
     window.routine_run_button.clicked.connect(window._run_routine_notice)
@@ -240,19 +241,19 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
     composer_row.setSpacing(8)
     window.prompt = PromptEdit(window._submit_main)
     window.prompt.setObjectName("mainPrompt")
-    window.prompt.setPlaceholderText("Artemis'e yaz…")
-    hint = "Enter gönderir, Shift+Enter yeni satır"
+    window.prompt.setPlaceholderText(t("Artemis'e yaz…"))
+    hint = t("Enter gönderir, Shift+Enter yeni satır")
     window.prompt.setToolTip(hint)
     window.prompt.setAccessibleDescription(hint)
     composer_row.addWidget(window.prompt, 1)
     # Üst çubuktaki ses anahtarıyla aynı yol; yalnız tıklama ona iletilir.
-    window.composer_voice = icon_toggle("Sesi aç veya kapat (yazma alanı)")
+    window.composer_voice = icon_toggle(t("Sesi aç veya kapat (yazma alanı)"))
     window.composer_voice.clicked.connect(window._composer_voice_clicked)
-    window.cancel_button = QPushButton("İptal")
+    window.cancel_button = QPushButton(t("İptal"))
     window.cancel_button.setMinimumWidth(72)
     window.cancel_button.setFixedHeight(36)
     window.cancel_button.hide()  # yalnız iş sürerken görünür (bkz. _set_controls)
-    window.send_button = QPushButton("Gönder")
+    window.send_button = QPushButton(t("Gönder"))
     window.send_button.setObjectName("primary")
     window.send_button.setMinimumWidth(88)
     window.send_button.setFixedHeight(36)
@@ -276,11 +277,11 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
     panel_layout = QVBoxLayout(window.activity_panel)
     panel_layout.setContentsMargins(16, 16, 16, 16)
     panel_layout.setSpacing(12)
-    activity_title = QLabel("Mesaj işlemleri")
+    activity_title = QLabel(t("Mesaj işlemleri"))
     activity_title.setObjectName("sectionTitle")
-    window.activity_close = QPushButton("Kapat")
+    window.activity_close = QPushButton(t("Kapat"))
     window.activity_close.setObjectName("ghost")
-    window.activity_close.setAccessibleName("Mesaj işlemleri sayfasını kapat")
+    window.activity_close.setAccessibleName(t("Mesaj işlemleri sayfasını kapat"))
     window.activity_close.clicked.connect(window._close_operations)
     window.activity_close.hide()
     title_row = QHBoxLayout()
@@ -290,7 +291,7 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
     title_row.addWidget(window.activity_close)
     # Her mesaj bir kart; en yeni üstte. Kartlar kaydırılır, yatay kaydırma yoktur.
     window.activity = QScrollArea()
-    window.activity.setAccessibleName("Mesaj başına işlemler")
+    window.activity.setAccessibleName(t("Mesaj başına işlemler"))
     window.activity.setWidgetResizable(True)
     window.activity.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     window.activity.setFocusPolicy(Qt.FocusPolicy.NoFocus)
@@ -311,7 +312,7 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
     window.activity_notice.setObjectName("meta")
     window.activity_notice.setWordWrap(True)
     window.activity_notice.hide()
-    window.activity_empty = QLabel("Henüz bir işlem yok")
+    window.activity_empty = QLabel(t("Henüz bir işlem yok"))
     window.activity_empty.setObjectName("meta")
     panel_layout.addLayout(title_row)
     # Boş durumda başlığın hemen altında kalır; satırlar üstten dizilir.
@@ -338,12 +339,13 @@ def build_sidebar(window: DesktopWindow, pages: list[tuple[str, QWidget]]) -> QF
     for label, page in pages:
         if label == "Ayarlar":
             navigation.addStretch(1)
-        button = QPushButton(label)
+        shown = t(label)
+        button = QPushButton(shown)
         button.setObjectName("navItem")
         button.setCheckable(True)
         button.setAutoExclusive(True)
-        button.setAccessibleName(label)
-        button.setToolTip(label)  # dar pencerede yalnız ikon kalır; ad ipucunda
+        button.setAccessibleName(shown)
+        button.setToolTip(shown)  # dar pencerede yalnız ikon kalır; ad ipucunda
         button.setIconSize(QSize(20, 20))
         button.clicked.connect(
             lambda _checked=False, target=page: window.tabs.setCurrentWidget(target)

@@ -17,6 +17,7 @@ from PySide6.QtGui import QColor, QKeyEvent, QPainter, QPen
 from PySide6.QtWidgets import QLabel, QLineEdit, QVBoxLayout, QWidget
 
 from artemis.channels.desktop import themes
+from artemis.i18n import t
 
 WIDTH = 280
 MAX_CHARS = 2000
@@ -36,14 +37,14 @@ class QuickBox(QWidget):
         self._submit = submit
         self._palette = themes.THEMES[themes.DEFAULT_THEME]
         self.setFixedWidth(WIDTH)
-        self.setAccessibleName("Artemis hızlı yazma kutusu")
-        self.setToolTip("Artemis'e yaz ve Enter'a bas; Esc kapatır")
+        self.setAccessibleName(t("Artemis hızlı yazma kutusu"))
+        self.setToolTip(t("Artemis'e yaz ve Enter'a bas; Esc kapatır"))
         self.input = QLineEdit(self)
         self.input.setMaxLength(MAX_CHARS)
-        self.input.setPlaceholderText("Artemis'e yaz…")
-        self.input.setAccessibleName("Artemis'e mesaj")
+        self.input.setPlaceholderText(t("Artemis'e yaz…"))
+        self.input.setAccessibleName(t("Artemis'e mesaj"))
         self.input.returnPressed.connect(self.send)
-        self.hint = QLabel(HINT, self)
+        self.hint = QLabel(t(HINT), self)
         self.hint.hide()
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 12, 16, 12)

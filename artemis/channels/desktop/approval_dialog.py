@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.bridge import Approval
+from artemis.i18n import t
 
 
 def _argument_text(value: Any) -> str:
@@ -52,7 +53,7 @@ class ApprovalDialog(QDialog):
         self.item = item
         self._on_decision = on_decision
         self._decided = False
-        self.setWindowTitle("Artemis · İşlem onayı")
+        self.setWindowTitle(t("Artemis · İşlem onayı"))
         self.setModal(True)
         self.setMinimumSize(560, 380)
         layout = QVBoxLayout(self)
@@ -94,7 +95,7 @@ class ApprovalDialog(QDialog):
                 self.approval_text_label = QLabel("\n".join(head))
                 self.approval_text_label.setTextFormat(Qt.TextFormat.PlainText)
                 self.approval_text_label.setWordWrap(True)
-                self.approval_text_label.setAccessibleName("Ajan ve başlangıç klasörü")
+                self.approval_text_label.setAccessibleName(t("Ajan ve başlangıç klasörü"))
                 body_layout.addWidget(self.approval_text_label)
             if warn:
                 self.workdir_warning_box = QLabel("\n".join(warn))
@@ -104,7 +105,7 @@ class ApprovalDialog(QDialog):
                 body_layout.addWidget(self.workdir_warning_box)
 
         # Özet: her argüman anahtarı görünür; uzun değer kısalır, tamamı ipucunda ve ayrıntıda.
-        intro = QLabel("Artemis bu aracı şu değerlerle çalıştırmak için izin istiyor:")
+        intro = QLabel(t("Artemis bu aracı şu değerlerle çalıştırmak için izin istiyor:"))
         intro.setWordWrap(True)
         body_layout.addWidget(intro)
         rows = QVBoxLayout()
@@ -115,18 +116,18 @@ class ApprovalDialog(QDialog):
             shown = " ".join(full.split())
             if len(shown) > _SUMMARY_LIMIT:
                 shown = shown[: _SUMMARY_LIMIT - 1] + "…"
-            row = QLabel(f"{key}: {shown}")
+            row = QLabel(t("{key}: {shown}").format(key=key, shown=shown))
             row.setTextFormat(Qt.TextFormat.PlainText)
             row.setWordWrap(True)
             row.setToolTip(f"<pre>{html.escape(f'{key}: {full}')}</pre>")
-            row.setAccessibleName(f"Argüman {key}")
+            row.setAccessibleName(t("Argüman {key}").format(key=key))
             rows.addWidget(row)
         if not item.arguments:
-            rows.addWidget(QLabel("Argüman yok."))
+            rows.addWidget(QLabel(t("Argüman yok.")))
 
         # Geçit iki ayrı iletiyi ". " ile birleştirir (dış içerik/onay notu + aracın açıklaması);
         # tek paragrafta okunmaz, bu yüzden uyarı kutusu ile açıklama ayrı satırlara bölünür.
-        warning, _sep, tool_note = (item.notice or "Bu işlem onay gerektirir.").partition(". ")
+        warning, _sep, tool_note = (item.notice or t("Bu işlem onay gerektirir.")).partition(". ")
         notice = QLabel(warning + ("." if tool_note else ""))
         notice.setObjectName("approvalNotice")
         notice.setTextFormat(Qt.TextFormat.PlainText)
@@ -139,24 +140,24 @@ class ApprovalDialog(QDialog):
             self.tool_note_label.setWordWrap(True)
             body_layout.addWidget(self.tool_note_label)
 
-        self.details_toggle = QPushButton("Teknik ayrıntılar")
+        self.details_toggle = QPushButton(t("Teknik ayrıntılar"))
         self.details_toggle.setObjectName("ghost")
         self.details_toggle.setCheckable(True)
-        self.details_toggle.setAccessibleName("Teknik ayrıntıları göster veya gizle")
+        self.details_toggle.setAccessibleName(t("Teknik ayrıntıları göster veya gizle"))
         body_layout.addWidget(self.details_toggle, 0, Qt.AlignmentFlag.AlignLeft)
-        self.raw_name = QLabel(f"Araç adı: {item.tool_name}")
+        self.raw_name = QLabel(t("Araç adı: {name}").format(name=item.tool_name))
         self.raw_name.setObjectName("rawToolName")
         self.raw_name.setTextFormat(Qt.TextFormat.PlainText)
-        self.raw_name.setAccessibleName("Ham araç adı")
+        self.raw_name.setAccessibleName(t("Ham araç adı"))
         body_layout.addWidget(self.raw_name)
-        label = QLabel("Doğrulanmış araç argümanları")
+        label = QLabel(t("Doğrulanmış araç argümanları"))
         label.setObjectName("fieldLabel")
         arguments = QPlainTextEdit()
         arguments.setObjectName("approvalArguments")
         arguments.setReadOnly(True)
         arguments.setLineWrapMode(QPlainTextEdit.LineWrapMode.NoWrap)
         arguments.setPlainText(json.dumps(item.arguments, ensure_ascii=False, indent=2))
-        arguments.setAccessibleName("Salt okunur doğrulanmış araç argümanları")
+        arguments.setAccessibleName(t("Salt okunur doğrulanmış araç argümanları"))
         arguments.setMinimumHeight(120)
         self.details_label = label
         self.arguments_view = arguments
@@ -170,11 +171,11 @@ class ApprovalDialog(QDialog):
         buttons = QHBoxLayout()
         buttons.setSpacing(8)
         buttons.addStretch(1)
-        self.no_button = QPushButton("Hayır")
+        self.no_button = QPushButton(t("Hayır"))
         self.no_button.setMinimumWidth(88)
         self.no_button.setDefault(True)
         self.no_button.setAutoDefault(True)
-        self.yes_button = QPushButton("Evet, onayla")
+        self.yes_button = QPushButton(t("Evet, onayla"))
         self.yes_button.setObjectName("primary")
         self.yes_button.setMinimumWidth(88)
         self.yes_button.setDefault(False)
@@ -182,7 +183,9 @@ class ApprovalDialog(QDialog):
         buttons.addWidget(self.no_button)
         self.site_button: QPushButton | None = None
         if item.site:
-            self.site_button = QPushButton(f"Evet, {item.site} için bir daha sorma")
+            self.site_button = QPushButton(
+                t("Evet, {site} için bir daha sorma").format(site=item.site)
+            )
             self.site_button.setAutoDefault(False)
             self.site_button.clicked.connect(lambda: self._choose(True, remember_site=True))
             buttons.addWidget(self.site_button)

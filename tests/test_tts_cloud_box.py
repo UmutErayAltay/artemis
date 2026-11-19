@@ -49,7 +49,63 @@ def test_tts_cloud_box_visibility_follows_tts_combo(tmp_path: Path, qt_app: QApp
     assert "kayıtlı değil" in panel.tts_cloud_hint.text()
     assert "Ücretli modele izin ver" in panel.tts_cloud_hint.text()
     assert "Metin gönderme izni kapalıyken" in panel.tts_cloud_hint.text()
+    assert "Ses modeli eklemek için" in panel.tts_cloud_hint.text()
     panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_tts_cloud_saved_lists_only_speech_and_fills_fields(
+    tmp_path: Path, qt_app: QApplication
+) -> None:
+    import yaml
+
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["models"]["resim-m"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gpt-image-1",
+        "kind": "image",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    raw["models"]["ses-gemini"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-flash-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    panel = SettingsPanel(path)
+    items = [panel.tts_cloud_saved.itemData(i) for i in range(panel.tts_cloud_saved.count())]
+    assert items == ["", "ses-gemini"]
+    panel.tts_combo.setCurrentIndex(panel.tts_combo.findData("cloud"))
+    assert "Ses modeli eklemek için" not in panel.tts_cloud_hint.text()
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-gemini"))
+    assert panel.tts_cloud_server.currentData() == "bulut"
+    assert panel.tts_cloud_protocol.currentData() == "gemini"
+    assert panel.tts_cloud_model.currentText() == "gemini-2.5-flash-preview-tts"
+    assert panel._dirty is True
+
+    # Alan elle değişince seçim "Elle ayarla"ya döner; sonra kayıtlı model yeniden seçilir.
+    panel.tts_cloud_protocol.setCurrentIndex(panel.tts_cloud_protocol.findData("openai"))
+    assert panel.tts_cloud_saved.currentData() == ""
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-gemini"))
+    assert panel.tts_cloud_protocol.currentData() == "gemini"
+
+    save_choices(path, None, values=panel.values())
+    reloaded = SettingsPanel(path)
+    reloaded.show()
+    assert reloaded.tts_cloud_saved.currentData() == "ses-gemini"
+    assert reloaded._dirty is False
+
+    panel.deleteLater()
+    reloaded.deleteLater()
     qt_app.processEvents()
 
 
@@ -174,3 +230,127 @@ def test_tts_cloud_box_close_detaches_running_fetch_thread(
     assert thread.wait(3000)
     qt_app.processEvents()
     assert thread not in mod._DETACHED
+
+
+def test_tts_cloud_saved_gemini_hides_manual_box_and_fills_voices(
+    tmp_path: Path, qt_app: QApplication
+) -> None:
+    import yaml
+
+    from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
+
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["models"]["ses-gemini"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-flash-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    panel = SettingsPanel(path)
+    box = panel.tts_cloud_box
+    assert isinstance(box, TtsCloudBox)
+    assert not box._manual_box.isHidden()
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-gemini"))
+    assert box._manual_box.isHidden()
+    assert panel.tts_cloud_voice.count() == len(GEMINI_TTS_VOICES)
+
+    panel.tts_cloud_saved.setCurrentIndex(0)
+    assert not box._manual_box.isHidden()
+
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_tts_cloud_saved_openai_triggers_fetch_and_fills_voices(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import yaml
+
+    from artemis.channels.desktop import tts_cloud_box as mod
+    from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
+
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["models"]["ses-openai"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "openai/tts-1",
+        "kind": "speech",
+        "speech_protocol": "openai",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    monkeypatch.setattr(
+        mod,
+        "fetch_tts_models",
+        lambda _url, _protocol, _key: ("ok", [("openai/tts-1", ["alloy", "nova"])]),
+    )
+
+    panel = SettingsPanel(path)
+    box = panel.tts_cloud_box
+    assert isinstance(box, TtsCloudBox)
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-openai"))
+    assert box._fetch is not None
+    assert box._fetch.wait(2000)
+    qt_app.processEvents()
+
+    voices = [
+        panel.tts_cloud_voice.itemText(i) for i in range(panel.tts_cloud_voice.count())
+    ]
+    assert voices == ["alloy", "nova"]
+
+    panel.deleteLater()
+    qt_app.processEvents()
+
+
+def test_tts_cloud_saved_free_hides_paid_and_paid_shows_estimate(
+    tmp_path: Path, qt_app: QApplication
+) -> None:
+    import yaml
+
+    path = config(tmp_path, cloud=True)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["models"]["ses-ucretsiz"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-flash-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    raw["models"]["ses-ucretli"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-pro-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0.5",
+        "output_per_million": "10",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    panel = SettingsPanel(path)
+    panel.tts_combo.setCurrentIndex(panel.tts_combo.findData("cloud"))
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-ucretsiz"))
+    assert panel.tts_cloud_paid.isHidden() is True
+    assert "ücretli olabilir" not in panel.tts_cloud_hint.text()
+
+    panel.tts_cloud_saved.setCurrentIndex(panel.tts_cloud_saved.findData("ses-ucretli"))
+    assert panel.tts_cloud_paid.isHidden() is False
+    assert "Tahmin" in panel.tts_cloud_hint.text()
+    assert "Ücretli modele izin ver" in panel.tts_cloud_hint.text()
+
+    panel.deleteLater()
+    qt_app.processEvents()

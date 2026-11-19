@@ -2,6 +2,7 @@
 workspace: ../desktop
 state_dir: ../.artemis
 audit_path: ../.artemis/audit.jsonl
+language: tr  # Arayüz ve yanıt dili: tr | en (Ayarlar > Görünüm; yeniden başlatınca geçerli)
 max_steps: 8
 max_seconds: 60
 provider_timeout_seconds: 15

@@ -346,3 +346,12 @@ def test_third_person_past_claims_are_detected(sentence):
 ])
 def test_non_claim_sentences_are_not_held(sentence):
     assert not claims_success(sentence)
+
+
+async def test_finish_ignores_emotion_tags_stripped_from_final_text() -> None:
+    stream = SpeechStream()
+    stream.step_start()
+    stream.text("Tamam, [laugh] şimdi ekledim.")
+    stream.step_end(False)
+    stream.finish("Tamam, şimdi ekledim.")
+    assert [sentence async for sentence in stream.sentences()] == ["Tamam, [laugh] şimdi ekledim."]

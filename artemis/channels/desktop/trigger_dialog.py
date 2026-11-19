@@ -29,6 +29,7 @@ from PySide6.QtWidgets import (
 from artemis.channels.desktop.dialog_shell import FormDialog
 from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import MAX_TRIGGERS, TriggerConfig
+from artemis.i18n import t
 
 DEFAULT_MESSAGE = "Yeni dosya geldi: {file}"
 DEFAULT_SUGGEST = "Şu dosyayı özetle: {path}"
@@ -79,20 +80,22 @@ def validate_trigger(
     errors: dict[str, str] = {}
     name, folder, pattern = name.strip(), folder.strip(), pattern.strip()
     if count >= MAX_TRIGGERS:
-        errors["name"] = f"En çok {MAX_TRIGGERS} tetikleyici olabilir."
+        errors["name"] = t("En çok {max_triggers} tetikleyici olabilir.").format(
+            max_triggers=MAX_TRIGGERS
+        )
     elif name.casefold() in {n.casefold() for n in taken}:
-        errors["name"] = "Bu ad zaten kullanılıyor."
+        errors["name"] = t("Bu ad zaten kullanılıyor.")
     if folder and not Path(folder).is_absolute():
-        errors["folder"] = "Klasör tam yol olmalı."
+        errors["folder"] = t("Klasör tam yol olmalı.")
     elif folder and not Path(folder).is_dir():
-        errors["folder"] = "Klasör bulunamadı."
+        errors["folder"] = t("Klasör bulunamadı.")
     if ";" in pattern or "/" in pattern or "\\" in pattern:
-        errors["pattern"] = (
+        errors["pattern"] = t(
             "Tek bir dosya adı deseni yaz; ; / \\ kullanılamaz. "
             "Başka tür için ayrı tetikleyici ekle."
         )
     if suggest is not None and routine is not None:
-        errors["routine"] = "Düğme ya öneri ya rutin olur, ikisi birden olmaz."
+        errors["routine"] = t("Düğme ya öneri ya rutin olur, ikisi birden olmaz.")
     if errors:
         return None, errors
     try:
@@ -104,7 +107,7 @@ def validate_trigger(
         for detail in error.errors():
             key = str(detail["loc"][0]) if detail["loc"] else "name"
             key = key if key in _FIELD_ERRORS else "name"
-            errors.setdefault(key, _FIELD_ERRORS[key])
+            errors.setdefault(key, t(_FIELD_ERRORS[key]))
         return None, errors
     return item, {}
 
@@ -118,33 +121,32 @@ class TriggerDialog(FormDialog):
         routines_hint: str,
         parent: QWidget | None = None,
     ) -> None:
-        super().__init__(
-            "Tetikleyiciyi düzenle" if existing else "Tetikleyici ekle", 500, parent
-        )
+        title = t("Tetikleyiciyi düzenle") if existing else t("Tetikleyici ekle")
+        super().__init__(title, 500, parent)
         self._others = others
         self.result_trigger: TriggerConfig | None = None
         self._name_touched = existing is not None
-        self.setWindowTitle("Tetikleyiciyi düzenle" if existing else "Tetikleyici ekle")
+        self.setWindowTitle(title)
         layout = self.form
         self._errors: dict[str, QLabel] = {}
 
         self.name = QLineEdit(existing.name if existing else "")
         self.name.setMaxLength(32)
-        self.name.setAccessibleName("Ad")
+        self.name.setAccessibleName(t("Ad"))
         self.name.textEdited.connect(self._name_edited)
-        self._add(layout, "Ad", self.name, "name", "Harf, rakam, _ ya da -")
+        self._add(layout, t("Ad"), self.name, "name", t("Harf, rakam, _ ya da -"))
 
         self.folder = QLineEdit(existing.folder if existing else "")
         self.folder.setReadOnly(True)
-        self.folder.setPlaceholderText("Bir klasör seç")
-        self.folder.setAccessibleName("Klasör")
-        self.browse = QPushButton("Seç…")
+        self.folder.setPlaceholderText(t("Bir klasör seç"))
+        self.folder.setAccessibleName(t("Klasör"))
+        self.browse = QPushButton(t("Seç…"))
         self.browse.clicked.connect(self._browse)
         row = QHBoxLayout()
         row.setSpacing(8)
         row.addWidget(self.folder, 1)
         row.addWidget(self.browse)
-        self._add(layout, "Klasör", row, "folder", help=(
+        self._add(layout, t("Klasör"), row, "folder", help=t(
             "İzlenecek klasör. Klasör yoklanır; ilk bakışta var olan dosyalar bildirilmez, yalnız "
             "sonradan gelenler bildirilir. Hızlı düğmeler sık klasörleri seçer."
         ))
@@ -152,9 +154,9 @@ class TriggerDialog(FormDialog):
         quick.setSpacing(8)
         self.quick_buttons: list[QPushButton] = []
         for caption, location in (
-            ("İndirilenler", QStandardPaths.StandardLocation.DownloadLocation),
-            ("Masaüstü", QStandardPaths.StandardLocation.DesktopLocation),
-            ("Belgeler", QStandardPaths.StandardLocation.DocumentsLocation),
+            (t("İndirilenler"), QStandardPaths.StandardLocation.DownloadLocation),
+            (t("Masaüstü"), QStandardPaths.StandardLocation.DesktopLocation),
+            (t("Belgeler"), QStandardPaths.StandardLocation.DocumentsLocation),
         ):
             path = QStandardPaths.writableLocation(location)
             button = QPushButton(caption)
@@ -167,13 +169,13 @@ class TriggerDialog(FormDialog):
         layout.addLayout(quick)
 
         self.kind = QComboBox()
-        self.kind.setAccessibleName("Dosya türü")
+        self.kind.setAccessibleName(t("Dosya türü"))
         for caption, glob in PATTERN_PRESETS:
-            self.kind.addItem(caption, glob)
-        self.kind.addItem("Özel", None)
+            self.kind.addItem(t(caption), glob)
+        self.kind.addItem(t("Özel"), None)
         self.pattern = QLineEdit()
-        self.pattern.setPlaceholderText("Örn. rapor*.pdf")
-        self.pattern.setAccessibleName("Özel dosya türü")
+        self.pattern.setPlaceholderText(t("Örn. rapor*.pdf"))
+        self.pattern.setAccessibleName(t("Özel dosya türü"))
         current = existing.pattern if existing else "*"
         preset = self.kind.findData(current)
         self.kind.setCurrentIndex(preset if preset >= 0 else self.kind.count() - 1)
@@ -185,40 +187,40 @@ class TriggerDialog(FormDialog):
         box.addWidget(self.kind)
         box.addWidget(self.pattern)
         self._add(
-            layout, "Dosya türü", box, "pattern",
-            "Özelde tek desen yazılır: * her şeyi, ? tek harfi tutar.",
+            layout, t("Dosya türü"), box, "pattern",
+            t("Özelde tek desen yazılır: * her şeyi, ? tek harfi tutar."),
         )
         self._kind_changed()
 
-        self.message = QLineEdit(existing.message if existing else DEFAULT_MESSAGE)
-        self.message.setAccessibleName("Bildirim metni")
+        self.message = QLineEdit(existing.message if existing else t(DEFAULT_MESSAGE))
+        self.message.setAccessibleName(t("Bildirim metni"))
         self._add(
-            layout, "Bildirim metni", self.message, "message", "{file} dosyanın adıdır.",
+            layout, t("Bildirim metni"), self.message, "message", t("{file} dosyanın adıdır."),
         )
 
-        label = QLabel("Düğme")
+        label = QLabel(t("Düğme"))
         label.setObjectName("fieldLabel")
-        layout.addLayout(with_help(label, (
+        layout.addLayout(with_help(label, t(
             "Bildirime eklenecek düğme. Yok: yalnız haber verir. Öneri yaz: metni sohbet kutusuna "
             "yazar, göndermez. Rutin çalıştır: düğmeye basınca seçilen rutini çalıştırır."
         )))
-        self.none_radio = QRadioButton("Yok")
-        self.suggest_radio = QRadioButton("Öneri yaz")
-        self.routine_radio = QRadioButton("Rutin çalıştır")
+        self.none_radio = QRadioButton(t("Yok"))
+        self.suggest_radio = QRadioButton(t("Öneri yaz"))
+        self.routine_radio = QRadioButton(t("Rutin çalıştır"))
         group = QButtonGroup(self)
         for radio in (self.none_radio, self.suggest_radio, self.routine_radio):
             group.addButton(radio)
             layout.addWidget(radio)
         self.suggest = QLineEdit(
-            existing.suggest if existing and existing.suggest else DEFAULT_SUGGEST
+            existing.suggest if existing and existing.suggest else t(DEFAULT_SUGGEST)
         )
-        self.suggest.setAccessibleName("Öneri metni")
+        self.suggest.setAccessibleName(t("Öneri metni"))
         self._add(
             layout, "", self.suggest, "suggest",
-            "{path} dosyanın tam yoludur. Sohbet kutusuna yazılır, gönderilmez.",
+            t("{path} dosyanın tam yoludur. Sohbet kutusuna yazılır, gönderilmez."),
         )
         self.routine = QComboBox()
-        self.routine.setAccessibleName("Rutin")
+        self.routine.setAccessibleName(t("Rutin"))
         names = list(routines)
         if existing and existing.routine and existing.routine not in names:
             names.append(existing.routine)  # kayıttan silinmiş olsa da sessizce düşmesin
@@ -232,7 +234,7 @@ class TriggerDialog(FormDialog):
          self.routine_radio if existing and existing.routine else self.none_radio).setChecked(True)
         self._button_changed()
 
-        self.add_buttons("Kaydet" if existing else "Ekle")
+        self.add_buttons(t("Kaydet") if existing else t("Ekle"))
 
     def _add(self, layout: QVBoxLayout, caption: str, control: QWidget | QHBoxLayout | QVBoxLayout,
              key: str, hint: str | None = None, help: str = "") -> None:  # noqa: A002
@@ -268,7 +270,7 @@ class TriggerDialog(FormDialog):
             self.name.setText(slug_name(Path(folder).name, self._taken()))
 
     def _browse(self) -> None:
-        chosen = QFileDialog.getExistingDirectory(self, "Klasör seç", self.folder.text())
+        chosen = QFileDialog.getExistingDirectory(self, t("Klasör seç"), self.folder.text())
         if chosen:
             self._set_folder(chosen)
 

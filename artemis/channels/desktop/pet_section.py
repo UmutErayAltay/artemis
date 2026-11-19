@@ -38,6 +38,7 @@ from artemis.channels.desktop.page_kit import (
 from artemis.channels.desktop.pet_creator_panel import CreatorPanel
 from artemis.channels.desktop.pet_sprite import PetError, PetExistsError, PetInfo
 from artemis.channels.desktop.widgets import HelpTip
+from artemis.i18n import t
 
 _SOURCE_LABEL = {"artemis": "Artemis", "codex": "Codex"}
 _HELP_NEW = (
@@ -109,7 +110,7 @@ class _PetCard(QFrame):
         self.image.setAlignment(Qt.AlignmentFlag.AlignCenter)
         if pixmap.isNull():
             self.image.setObjectName("meta")
-            self.image.setText("önizleme yok")
+            self.image.setText(t("önizleme yok"))
         else:
             self.image.setPixmap(pixmap)
         lay.addWidget(self.image)
@@ -127,7 +128,7 @@ class _PetCard(QFrame):
         footer.setSpacing(4)
         footer.addStretch(1)
         footer.addWidget(self.source)
-        self.chip = QLabel("Seçili")
+        self.chip = QLabel(t("Seçili"))
         self.chip.setObjectName("selectedChip")
         self.chip.hide()
         footer.addWidget(self.chip)
@@ -211,7 +212,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         layout.setContentsMargins(0, 0, 0, 24)  # sayfa altında tutarlı 24px nefes payı
         layout.setSpacing(16)
         layout.addWidget(
-            make_page_header("Petler", "Masaüstü arkadaşını seç ya da yenisini üret.")
+            make_page_header(t("Petler"), t("Masaüstü arkadaşını seç ya da yenisini üret."))
         )
         self.stack = CurrentPageStack()
         layout.addWidget(self.stack, 1)
@@ -223,7 +224,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         workshop.setContentsMargins(0, 0, 0, 0)
         workshop.setSpacing(8)
         back_row = QHBoxLayout()
-        self.back_button = QPushButton("‹ Petlerime dön")
+        self.back_button = QPushButton(t("‹ Petlerime dön"))
         self.back_button.setObjectName("ghost")
         self.back_button.clicked.connect(self.show_gallery)
         back_row.addWidget(self.back_button)
@@ -305,14 +306,14 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         actions = QVBoxLayout()
         actions.setSpacing(8)
         actions.addStretch(1)
-        self.hero_select_button = QPushButton("Masaüstüne al")
+        self.hero_select_button = QPushButton(t("Masaüstüne al"))
         self.hero_select_button.setObjectName("primary")
         self.hero_select_button.clicked.connect(self.select_current)
-        self.new_button = QPushButton("Yeni pet üret")
+        self.new_button = QPushButton(t("Yeni pet üret"))
         self.new_button.clicked.connect(self.show_workshop)
         self._tips: dict[QPushButton, HelpTip] = {}  # düğme gizlenince "?" de gizlenir
         for button, tip in (
-            (self.hero_select_button, ""), (self.new_button, _HELP_NEW),
+            (self.hero_select_button, ""), (self.new_button, t(_HELP_NEW)),
         ):
             button.setMinimumWidth(128)
             actions.addLayout(self._with_tip(button, tip))
@@ -327,24 +328,26 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         card.setSpacing(12)
         head = QHBoxLayout()
         head.setSpacing(8)
-        heading = QLabel("Yüklü petler")
+        heading = QLabel(t("Yüklü petler"))
         heading.setObjectName("sectionTitle")
         head.addWidget(heading)
         head.addStretch(1)
-        self.delete_button = QPushButton("Sil")
+        self.delete_button = QPushButton(t("Sil"))
         self.delete_button.setObjectName("danger")
         self.delete_button.clicked.connect(self.delete_selected)
         # Düz etiket + ok işareti: menü açtığı belli olsun (ok QSS'te menu-indicator).
-        self.import_button = QPushButton("Pet yükle…")
+        self.import_button = QPushButton(t("Pet yükle…"))
         self.import_button.setObjectName("importButton")
         menu = QMenu(self.import_button)
-        menu.addAction("Zip dosyası…").triggered.connect(self._pick_zip)
-        menu.addAction("Klasör…").triggered.connect(self._pick_folder)
+        menu.addAction(t("Zip dosyası…")).triggered.connect(self._pick_zip)
+        menu.addAction(t("Klasör…")).triggered.connect(self._pick_folder)
         self.import_button.setMenu(menu)
         self.import_button.setToolTip(
-            "Pet'ler Codex biçimindedir: klasörde pet.json ve spritesheet.webp/png. "
-            "Topluluk pet'lerinin lisansı ve içeriği senin sorumluluğundadır; Artemis "
-            "hiçbirini kendisi dağıtmaz."
+            t(
+                "Pet'ler Codex biçimindedir: klasörde pet.json ve spritesheet.webp/png. "
+                "Topluluk pet'lerinin lisansı ve içeriği senin sorumluluğundadır; Artemis "
+                "hiçbirini kendisi dağıtmaz."
+            )
         )
         for button, tip in (
             (self.delete_button, ""), (self.import_button, ""),
@@ -353,7 +356,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
             head.addLayout(self._with_tip(button, tip))
         card.addLayout(head)
         self.listing = _GalleryList()
-        self.listing.setAccessibleName("Kullanılabilir pet'ler")
+        self.listing.setAccessibleName(t("Kullanılabilir pet'ler"))
         self.listing.itemSelectionChanged.connect(self._update_buttons)
         self.listing.focus_changed.connect(self._sync_cards)
         self.listing.itemDoubleClicked.connect(lambda _item: self.select_current())
@@ -401,7 +404,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
     def refresh(self) -> None:
         self._pets = {p.id: p for p in pet_sprite.list_pets(self._pets_dir, self._codex_dir)}
         self.listing.clear()
-        self._add_item(_ORB_LABEL, pet_sprite.ORB, _ORB_NAME, "Artemis", None, "")
+        self._add_item(t(_ORB_LABEL), pet_sprite.ORB, t(_ORB_NAME), "Artemis", None, "")
         for info in self._pets.values():
             self._add_item(
                 f"{info.display_name} · {_SOURCE_LABEL[info.source]}", info.id,
@@ -422,13 +425,13 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         pixmap = _pet_pixmap(info, 64)
         chosen = pet_id == self._current
         # Metin ve simge sınama/erişilebilirlik için öğede kalır; kart widget'ı üstünü örter.
-        item = QListWidgetItem(label + ("\nseçili" if chosen else ""))
+        item = QListWidgetItem(label + ("\n" + t("seçili") if chosen else ""))
         item.setData(Qt.ItemDataRole.UserRole, pet_id)
         item.setForeground(QBrush(Qt.GlobalColor.transparent))
         item.setSizeHint(QSize(_CARD_W, _CARD_H))
         item.setToolTip(_plain_tip(tip or name))
         if pixmap.isNull():
-            item.setText(label + "\nönizleme yok")
+            item.setText(label + "\n" + t("önizleme yok"))
         else:
             item.setIcon(QIcon(pixmap))
         self.listing.addItem(item)
@@ -440,7 +443,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
 
     def _name_of(self, pet_id: str) -> str:
         info = self._pets.get(pet_id)
-        return _ORB_NAME if info is None else info.display_name
+        return t(_ORB_NAME) if info is None else info.display_name
 
     def _sync_cards(self) -> None:
         current_item = self.listing.currentItem()
@@ -457,26 +460,26 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
                 focused=is_current and self.listing.keyboard_focus,
             )
             name = self._name_of(pet_id)
-            spoken = f"{name}, seçili" if chosen else name
+            spoken = t("{name}, seçili").format(name=name) if chosen else name
             card.setAccessibleName(spoken)
             item.setData(Qt.ItemDataRole.AccessibleTextRole, spoken)
 
     def _update_hero(self) -> None:
         info = self._pets.get(self._current)
-        name = _ORB_NAME if info is None else info.display_name
+        name = t(_ORB_NAME) if info is None else info.display_name
         source = "Artemis" if info is None else _SOURCE_LABEL[info.source]
         pixmap = _pet_pixmap(info, 120)
         if pixmap.isNull():
-            self.hero_image.setText("önizleme yok")
+            self.hero_image.setText(t("önizleme yok"))
         else:
             self.hero_image.setPixmap(pixmap)
         self.hero_name.setText(name)
         self.hero_source.setText(source)
-        self.hero_image.setAccessibleName(f"Seçili pet: {name}")
+        self.hero_image.setAccessibleName(t("Seçili pet: {name}").format(name=name))
         self.hero_caption.setText(
-            "Klasik küre masaüstünde duruyor; bir pet seçersen yerini o alır."
+            t("Klasik küre masaüstünde duruyor; bir pet seçersen yerini o alır.")
             if info is None
-            else "Masaüstünde seninle duruyor."
+            else t("Masaüstünde seninle duruyor.")
         )
         self.hero_image.setToolTip("" if info is None else _plain_tip(info.description))
 
@@ -489,7 +492,9 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         self._show_button(self.hero_select_button, differs)
         self.hero_select_button.setEnabled(differs)
         if differs and pet_id is not None:
-            self.hero_select_button.setAccessibleName(f"{self._name_of(pet_id)} masaüstüne al")
+            self.hero_select_button.setAccessibleName(
+                t("{name} masaüstüne al").format(name=self._name_of(pet_id))
+            )
         self._show_button(self.delete_button, own)
         self.delete_button.setEnabled(own)
         self._sync_cards()
@@ -506,7 +511,7 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         self.refresh()
         # Sinyal dinleyicisi show_problem çağırdıysa hata iletisini ezme.
         if not self._problem_shown:
-            self.status.setText("Pet seçildi.")
+            self.status.setText(t("Pet seçildi."))
 
     def show_problem(self, message: str) -> None:
         """Pencere, pet yüklenemeyip küreye dönünce nedenini burada gösterir."""
@@ -516,16 +521,16 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
         self.status.setText(message)
 
     def _confirm(self, text: str) -> bool:
-        answer = QMessageBox.question(self, "Pet", text)
+        answer = QMessageBox.question(self, t("Pet"), text)
         return answer == QMessageBox.StandardButton.Yes
 
     def _pick_zip(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Pet zip dosyası", "", "Zip (*.zip)")
+        path, _ = QFileDialog.getOpenFileName(self, t("Pet zip dosyası"), "", "Zip (*.zip)")
         if path:
             self.import_path(Path(path))
 
     def _pick_folder(self) -> None:
-        path = QFileDialog.getExistingDirectory(self, "Pet klasörü")
+        path = QFileDialog.getExistingDirectory(self, t("Pet klasörü"))
         if path:
             self.import_path(Path(path))
 
@@ -535,17 +540,20 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
             try:
                 info = pet_sprite.import_pet(path, self._pets_dir, overwrite=overwrite)
             except PetExistsError as error:
-                if overwrite or not self._confirm(f"{error} Üzerine yazılsın mı?"):
+                msg = t("{error} Üzerine yazılsın mı?").format(error=error)
+                if overwrite or not self._confirm(msg):
                     self.status.setText(str(error))
                     return None
                 overwrite = True
                 continue
             except PetError as error:
-                self.status.setText(f"Pet yüklenemedi: {error}")
+                self.status.setText(t("Pet yüklenemedi: {error}").format(error=error))
                 return None
             break
         self.refresh()
-        self.status.setText(f"'{info.display_name}' yüklendi. Seçmek için listeden seç.")
+        self.status.setText(
+            t("'{name}' yüklendi. Seçmek için listeden seç.").format(name=info.display_name)
+        )
         if info.id == self._current:
             self.skin_selected.emit(info.id)  # ezilen pet açıksa yeniden yüklensin
         return info
@@ -553,9 +561,9 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
     def delete_selected(self) -> None:
         info = self._pets.get(self._selected_id() or "")
         if info is None or info.source != "artemis":
-            self.status.setText("Yalnız Artemis'e yüklenen pet'ler silinebilir.")
+            self.status.setText(t("Yalnız Artemis'e yüklenen pet'ler silinebilir."))
             return
-        if not self._confirm(f"'{info.display_name}' silinsin mi?"):
+        if not self._confirm(t("'{name}' silinsin mi?").format(name=info.display_name)):
             return
         try:
             pet_sprite.delete_pet(self._pets_dir, info.id)
@@ -566,4 +574,4 @@ class PetSection(PageBody):  # ortak sayfa kabuğu: en çok PAGE_MAX_WIDTH, app.
             self._current = pet_sprite.ORB
             self.skin_selected.emit(pet_sprite.ORB)
         self.refresh()
-        self.status.setText("Pet silindi.")
+        self.status.setText(t("Pet silindi."))

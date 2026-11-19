@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop import themes
+from artemis.i18n import t
 
 
 class PetFace(QWidget):
@@ -34,7 +35,7 @@ class PetFace(QWidget):
         self._palette = palette or themes.THEMES[themes.DEFAULT_THEME]
         self._pixmap: QPixmap | None = None
         self.setFixedSize(size, size)
-        self.setAccessibleName("Seçili pet")
+        self.setAccessibleName(t("Seçili pet"))
 
     def has_image(self) -> bool:
         return self._pixmap is not None
@@ -127,7 +128,7 @@ class HelpTip(QToolButton):
         self.setObjectName("helpTip")
         self.setText("?")
         self.setToolTip(text)  # metnin tek kaynağı; yerel ipucu event() içinde bastırılır
-        self.setAccessibleName("Yardım")
+        self.setAccessibleName(t("Yardım"))
         self.setAccessibleDescription(text)
         self.setCursor(Qt.CursorShape.WhatsThisCursor)
         self.setFocusPolicy(Qt.FocusPolicy.TabFocus)

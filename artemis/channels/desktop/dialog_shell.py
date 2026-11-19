@@ -20,6 +20,8 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from artemis.i18n import t
+
 _SCREEN_MARGIN = 48  # başlık çubuğu ve görev çubuğu payı
 
 
@@ -53,7 +55,7 @@ class FormDialog(QDialog):
         row = QHBoxLayout()
         row.setSpacing(8)
         row.addStretch(1)
-        self.cancel_button = QPushButton("Vazgeç")
+        self.cancel_button = QPushButton(t("Vazgeç"))
         self.cancel_button.setAutoDefault(False)
         self.cancel_button.clicked.connect(self.reject)
         self.ok_button = QPushButton(ok_text)

@@ -53,8 +53,11 @@ class ModelConfig(BaseModel):
     output_per_million: Decimal = Field(ge=0)
     context_window: int = Field(default=32768, ge=1024)
     endpoint: str | None = None
-    # "image": resim üretim modeli (pet üretici, ADR 0048 eki); sohbet modeli olarak kullanılamaz.
-    kind: Literal["chat", "image"] = "chat"
+    # "image": resim üretim modeli (ADR 0048 eki), "speech": konuşma sesi / TTS (ADR 0080);
+    # sohbet modeli olarak kullanılamazlar.
+    kind: Literal["chat", "image", "speech"] = "chat"
+    # Yalnız ses modelinde anlamlı; OpenAI uyumlu uç ya da Gemini API.
+    speech_protocol: Literal["openai", "gemini"] = "openai"
     # Resim çağrısı başına bütçeden ayrılan sabit üst tutar (USD); token fiyatı resimde anlamsız.
     image_cost_usd: Decimal = Field(default=Decimal(0), ge=0)
     # ADR 0078: sıkı istem kuralları. None = otomatik (Claude dışı modellerde açık); model testi
@@ -67,6 +70,8 @@ class ModelConfig(BaseModel):
             raise ValueError("endpoint yalnız ve her zaman openai_compatible modelde verilir")
         if self.kind == "image" and self.provider != "openai_compatible":
             raise ValueError("Resim modeli openai_compatible sağlayıcı ve uç gerektirir")
+        if self.kind == "speech" and self.provider != "openai_compatible":
+            raise ValueError("Ses modeli openai_compatible sağlayıcı ve uç gerektirir")
         return self
 
 
@@ -889,6 +894,8 @@ class FileSearchConfig(BaseModel):
 class Settings(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
+    # Arayüz ve yanıt dili; ADR yok, basit tercih.
+    language: Literal["tr", "en"] = "tr"
     workspace: Path = Path("desktop")
     state_dir: Path = Path(".artemis")
     audit_path: Path = Path(".artemis/audit.jsonl")
@@ -987,7 +994,7 @@ class Settings(BaseModel):
         if self.hard_model and self.hard_model not in self.models:
             raise ValueError("Zor işler modeli models içinde tanımlanmalı")
         if any(
-            self.models[name].kind == "image"
+            self.models[name].kind != "chat"
             for name in (
                 self.primary_model, self.hard_model or "", self.computer_use.model,
                 *self.computer_use.fallback_models,
@@ -995,7 +1002,8 @@ class Settings(BaseModel):
             if name in self.models
         ):
             raise ValueError(
-                "Resim modeli birincil, zor işler ya da bilgisayar kullanımı modeli olamaz"
+                "Resim ve ses modelleri birincil, zor işler ya da "
+                "bilgisayar kullanımı modeli olamaz"
             )
         if self.fallback_model:
             # Arıza yedeği herhangi bir sohbet modeli olabilir (ADR 0055): bulut modeline giden
@@ -1076,3 +1084,20 @@ def load_settings(path: Path) -> Settings:
         )
         updates["mcp"] = settings.mcp.model_copy(update={"servers": servers})
     return settings.model_copy(update=updates)
+
+
+def cloud_tts_model(settings: Settings) -> ModelConfig | None:
+    """Ses panelinde seçili bulut konuşma ayarına karşılık gelen kayıtlı ses modeli."""
+    voice = settings.voice
+    target = voice.tts_cloud_model.strip().removeprefix("models/")
+    if not target:
+        return None
+    for model in settings.models.values():
+        if (
+            model.kind == "speech"
+            and model.endpoint == voice.tts_cloud_endpoint
+            and model.speech_protocol == voice.tts_cloud_protocol
+            and model.model.removeprefix("models/") == target
+        ):
+            return model
+    return None

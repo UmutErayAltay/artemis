@@ -496,10 +496,89 @@ def test_make_primary_is_ignored_for_image_and_primary_button_refuses(
     section.select_model("resim-modeli")
     before = section.config_path.read_bytes()
     section._make_primary()
-    assert "Resim modeli beyin olamaz" in section.status.text()
+    assert "Resim ve ses modelleri beyin modeli olamaz" in section.status.text()
     assert section.config_path.read_bytes() == before
     section.kind.setCurrentIndex(0)
     assert section.make_primary.isEnabled()
+
+
+def _speech_section(tmp_path: Path) -> ProviderSection:
+    section = ProviderSection(config(tmp_path))
+    _fill(section, "yerel", "https://x.example/v1")
+    section._save()
+    section.kind.setCurrentIndex(section.kind.findData("speech"))
+    return section
+
+
+def test_speech_model_writes_kind_protocol_zero_prices_and_never_primary(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(section_module.shutil, "which", lambda name: "/bin/claude")
+    section = _speech_section(tmp_path)
+    assert not section.speech_box.isHidden()
+    assert section.price_box.isHidden() and section.image_box.isHidden()
+    assert not section.make_primary.isEnabled() and not section.make_primary.isChecked()
+    section.speech_protocol.setCurrentIndex(section.speech_protocol.findData("gemini"))
+    section.input_price.setText("9")
+    section.make_primary.setChecked(True)
+    section.model_name.setEditText("gemini-tts")
+    section._add_model()
+    settings = load_settings(section.config_path)
+    model = settings.models["gemini-tts"]
+    assert (model.kind, model.speech_protocol) == ("speech", "gemini")
+    assert (model.input_per_million, model.output_per_million) == (0, 0)
+    assert settings.primary_model == "first"
+    assert "· ses" in dict(section.model_rows())["gemini-tts"]
+    section.add_connection.setCurrentIndex(section.add_connection.findData(section_module.CLI_KEY))
+    assert not section.kind.model().item(2).isEnabled()  # type: ignore[attr-defined]
+    section.kind.setCurrentIndex(2)
+    section.model_name.setEditText("haiku")
+    before = section.config_path.read_bytes()
+    section._add_model()
+    assert "Ses modeli Claude aboneliğiyle" in section.status.text()
+    assert section.config_path.read_bytes() == before
+
+
+def test_model_filter_filters_kinds_and_persists(app: QApplication, tmp_path: Path) -> None:
+    from PySide6.QtCore import QSettings
+
+    QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(tmp_path / "qs"))
+    section = _speech_section(tmp_path)
+    section.model_name.setEditText("ses-1")
+    section._add_model()
+    assert not section.model_filter.isHidden()
+    assert [a for a, _ in section.model_rows()] == ["first", "ses-1"]
+    section.model_filter.setCurrentIndex(section.model_filter.findData("image"))
+    assert section.model_rows() == []
+    assert not section.model_empty.isHidden()
+    assert section.model_empty.text() == "Bu türde model yok."
+    assert not section.model_filter.isHidden()
+    section.model_filter.setCurrentIndex(section.model_filter.findData("chat"))
+    assert [a for a, _ in section.model_rows()] == ["first"]
+    assert section.model_empty.isHidden()
+    section.model_filter.setCurrentIndex(section.model_filter.findData("speech"))
+    assert [a for a, _ in section.model_rows()] == ["ses-1"]
+    again = ProviderSection(section.config_path)
+    assert again.model_filter.currentData() == "speech"
+    assert [a for a, _ in again.model_rows()] == ["ses-1"]
+    again.model_filter.setCurrentIndex(again.model_filter.findData("all"))
+    assert [a for a, _ in again.model_rows()] == ["first", "ses-1"]
+
+
+def test_model_test_and_roles_refuse_speech(app: QApplication, tmp_path: Path) -> None:
+    section = _speech_section(tmp_path)
+    section.model_name.setEditText("ses-1")
+    section._add_model()
+    section.select_model("ses-1")
+    assert not section.primary_button.isEnabled()
+    assert not section.hard_button.isEnabled()
+    assert not section.fallback_button.isEnabled()
+    assert not section.computer_button.isEnabled()
+    section._test_model()
+    assert section.status.text() == "Ses modeli sohbet senaryolarıyla test edilmez."
+    assert section._model_test is None
+    section._toggle_role("hard_model")
+    assert "Resim ve ses modelleri zor işler modeli olamaz" in section.status.text()
 
 
 def test_fetch_models_works_for_image_kind(
@@ -1150,3 +1229,68 @@ def test_raw_normalizes_null_sections(app: QApplication, tmp_path: Path) -> None
     assert "yerel" in settings.endpoints
     assert "m-null" in settings.models
     assert settings.computer_use.model == "m-null"
+
+
+def test_detail_card_shows_kind_info_for_image_and_speech(
+    app: QApplication, tmp_path: Path
+) -> None:
+    path = config(tmp_path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["endpoints"] = {"bulut": {"base_url": "https://x.example/v1", "api_key": False}}
+    raw["models"]["resim-m"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gpt-image-1",
+        "kind": "image",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    raw["models"]["ses-m"] = {
+        "provider": "openai_compatible",
+        "endpoint": "bulut",
+        "model": "gemini-2.5-flash-preview-tts",
+        "kind": "speech",
+        "speech_protocol": "gemini",
+        "input_per_million": "0",
+        "output_per_million": "0",
+    }
+    path.write_text(yaml.safe_dump(raw), encoding="utf-8")
+
+    section = ProviderSection(path)
+
+    section.select_model("first")
+    assert not section.chat_box.isHidden()
+    assert section.kind_info.isHidden()
+    assert section.kind_info.text() == ""
+
+    section.select_model("resim-m")
+    assert section.chat_box.isHidden()
+    assert not section.kind_info.isHidden()
+    assert "Görsel modeli" in section.kind_info.text()
+
+    section.select_model("ses-m")
+    assert section.chat_box.isHidden()
+    assert not section.kind_info.isHidden()
+    assert "Bulut konuşma modeli" in section.kind_info.text()
+    assert "Ücretsiz olarak eklendi." in section.kind_info.text()
+
+
+def test_paid_speech_model_shows_price_box_saves_prices_and_shows_note(
+    app: QApplication, tmp_path: Path
+) -> None:
+    section = _speech_section(tmp_path)
+    section.paid.setChecked(True)
+    assert not section.price_box.isHidden() and section.image_box.isHidden()
+    section.speech_protocol.setCurrentIndex(section.speech_protocol.findData("gemini"))
+    section.model_name.setEditText("gemini-2.5-flash-preview-tts")
+    section.input_price.setText("0.5")
+    section.output_price.setText("10")
+    assert "Tahmin:" in section.speech_cost.text()
+    section._add_model()
+    model = load_settings(section.config_path).models["gemini-2-5-flash-preview-tts"]
+    assert (model.kind, model.speech_protocol) == ("speech", "gemini")
+    assert (model.input_per_million, model.output_per_million) == (Decimal("0.5"), Decimal("10"))
+    assert "Ücretli modele izin ver" in section.status.text()
+    assert "bütçe korumasınca" not in section.status.text()
+    section.select_model("gemini-2-5-flash-preview-tts")
+    assert "Tahmin:" in section.kind_info.text()

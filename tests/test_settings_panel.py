@@ -288,11 +288,12 @@ def test_dirty_notice_shows_after_edit_and_clears_on_refresh(tmp_path: Path, qt_
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
-    assert not panel._dirty
+    assert not panel._dirty and not panel.has_unsaved
+    assert not hasattr(panel, "_save_timer")
     panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
-    assert panel._dirty and panel._save_timer.isActive()
+    assert panel._dirty and panel.has_unsaved
     panel.refresh()
-    assert not panel._dirty and not panel._save_timer.isActive()
+    assert not panel._dirty and not panel.has_unsaved
     panel.deleteLater()
     qt_app.processEvents()
 
@@ -361,6 +362,10 @@ _UNBOUND_WIDGETS = {
     "advanced_devices": "yalnız görünüm; config'e yazılmaz",
     "section_combo": "dar pencerede bölüm listesinin yerine geçen gezinme; config'e yazılmaz",
     "default_agent_combo": "code_agent.default_agent: code_agent_values ile ajanlarla yazılır",
+    "tts_cloud_saved": (
+        "Ses panelinin kayıtlı model seçicisi; config'e yazılmaz, "
+        "seçince tts_cloud_* alanları dolar"
+    ),
 }
 
 
@@ -1109,17 +1114,22 @@ def test_pages_have_no_title_duplicating_their_name_and_search_still_works(
     panel.deleteLater()
 
 
-def test_autosave_debounces_rapid_edits_into_one_write(tmp_path: Path, qt_app) -> None:
+def test_edits_do_not_write_until_explicit_save(tmp_path: Path, qt_app) -> None:
+    from PySide6.QtTest import QTest
+
     path = config(tmp_path)
     panel = _panel(path)
     writes: list[bool] = []
     _wire(panel, path, writes)
+    baseline = path.read_bytes()
     for value in ("Ali", "Veli", "Zeynep"):
         panel.wake_name.setText(value)
         panel._mark_dirty()
-    assert writes == [] and panel._save_timer.isActive()
-    assert _wait(lambda: bool(writes))
-    assert writes == [True] and not panel._dirty
+    QTest.qWait(100)
+    assert writes == [] and panel.has_unsaved
+    assert path.read_bytes() == baseline
+    panel._save_now()
+    assert writes == [True] and not panel._dirty and not panel.has_unsaved
     assert load_settings(path).voice.wake_word.casefold() == "zeynep"
     panel.deleteLater()
 
@@ -1178,21 +1188,20 @@ def test_revert_restores_every_kind_of_value_byte_for_byte(tmp_path: Path, qt_ap
     panel.deleteLater()
 
 
-def test_pending_autosave_never_fires_after_revert(tmp_path: Path, qt_app) -> None:
-    from PySide6.QtTest import QTest
-
+def test_revert_clears_unsaved_edits_without_writing_them(tmp_path: Path, qt_app) -> None:
     path = config(tmp_path)
     panel = _panel(path)
     writes: list[bool] = []
     _wire(panel, path, writes)
     baseline = path.read_bytes()
+    original_wake = panel.wake_name.text()
     panel.wake_name.setText("Veli")
     panel._mark_dirty()
-    assert panel._save_timer.isActive() and not panel.revert_button.isHidden()
+    assert panel.has_unsaved and not panel.revert_button.isHidden()
     panel.revert_button.click()
-    QTest.qWait(1200)  # debounce'u aşar
     assert writes == [] and path.read_bytes() == baseline
-    assert panel.revert_button.isHidden()
+    assert panel.wake_name.text() == original_wake
+    assert not panel.has_unsaved and panel.revert_button.isHidden()
     panel.deleteLater()
 
 
@@ -1278,8 +1287,9 @@ def test_save_button_beside_revert_writes_now_and_requests_apply(tmp_path: Path,
     panel.save_requested.connect(lambda: applied.append(True))
     assert panel.save_button.isHidden()
     panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
-    assert not panel.save_button.isHidden() and panel._save_timer.isActive()
-    panel.save_button.click()  # debounce beklenmez
+    assert not panel.save_button.isHidden() and panel.has_unsaved
+    assert writes == []
+    panel.save_button.click()
     assert writes == [True] and not panel._dirty and applied == [True]
     panel.deleteLater()
 
@@ -1391,10 +1401,8 @@ def test_stt_download_done_marks_current_page_dirty(tmp_path: Path, qt_app) -> N
     assert not panel._dirty
     row = panel.stack.currentIndex()
     panel._stt_download_done(tmp_path / "whisper-small")
-    assert panel._dirty
+    assert panel._dirty and panel.has_unsaved
     assert row in panel._dirty_rows
-    assert panel._save_timer.isActive()
     assert panel.sections.item(row).data(_DIRTY_ROLE)
-    panel._save_timer.stop()
     panel.deleteLater()
     qt_app.processEvents()

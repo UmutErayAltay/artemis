@@ -41,6 +41,7 @@ from artemis.channels.voice.adapters import SoundDeviceMicrophone
 from artemis.channels.voice.core import VoiceController
 from artemis.channels.voice.factory import build_dictation_recognizer, build_voice_controller
 from artemis.channels.voice.metrics import EventCollector, collector_report, write_report
+from artemis.i18n import t
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.scheduler import ProactiveScheduler
 from artemis.proactive.store import ProactiveStore
@@ -403,7 +404,7 @@ class DesktopBridge:
             dictation = self._dictation
             if dictation is not None and dictation.busy:
                 self._voice_starting = False
-                self._events.put(State("dictation_message", "Dikte sürerken ses açılamaz."))
+                self._events.put(State("dictation_message", t("Dikte sürerken ses açılamaz.")))
                 return False
         loop = self._loop
         try:
@@ -572,7 +573,7 @@ class DesktopBridge:
         self, request_id: str, name: str, arguments: BaseModel, quiet: bool = False
     ) -> None:
         if not quiet:
-            self._events.put(State("running", "Araç isteği çalışıyor.", request_id))
+            self._events.put(State("running", t("Araç isteği çalışıyor."), request_id))
         self._active_task = asyncio.create_task(self._run_tool(request_id, name, arguments))
 
     async def _run_tool(self, request_id: str, name: str, arguments: BaseModel) -> None:
@@ -580,19 +581,21 @@ class DesktopBridge:
         delivered = False
         try:
             if runtime is None or self._shutdown or self._broker.is_cancelled():
-                self._events.put(Failed(request_id, "Cancelled", "Araç başlamadan iptal edildi."))
+                self._events.put(
+                    Failed(request_id, "Cancelled", t("Araç başlamadan iptal edildi."))
+                )
                 delivered = True
                 return
             result = await runtime.runner.dispatch_tool(name, arguments)
             self._events.put(ToolFinished(request_id, name, result))
             delivered = True
         except (OSError, ValueError, RuntimeError, TypeError) as error:
-            self._events.put(Failed(request_id, type(error).__name__, "Araç tamamlanamadı."))
+            self._events.put(Failed(request_id, type(error).__name__, t("Araç tamamlanamadı.")))
             delivered = True
         finally:
             # Beklenmeyen hata yukarı çıkarken GUI'nin takılı kalmaması için olay üretilir.
             if not delivered:
-                self._events.put(Failed(request_id, "Interrupted", "Araç tamamlanamadı."))
+                self._events.put(Failed(request_id, "Interrupted", t("Araç tamamlanamadı.")))
             self._finish_request(request_id)
 
     def cancel(self, request_id: str) -> bool:
@@ -638,7 +641,7 @@ class DesktopBridge:
                 return
             self._shutdown = True
             request_id = self._active_request
-        self._events.put(State("stopping", "Temizleniyor."))
+        self._events.put(State("stopping", t("Temizleniyor.")))
         self._broker.invalidate()
         self._post(self._shutdown_on_worker, request_id)
 
@@ -666,7 +669,7 @@ class DesktopBridge:
         serialized = json.dumps(fields, ensure_ascii=False, separators=(",", ":"))
         if len(serialized.encode("utf-8")) > 16 * 1024:
             summary: dict[str, Any] = {
-                "summary": "Denetim olayı görünüm için kısaltıldı.",
+                "summary": t("Denetim olayı görünüm için kısaltıldı."),
                 "original_bytes": len(serialized.encode("utf-8")),
             }
             for key in ("turn_id", "tool"):
@@ -735,18 +738,18 @@ class DesktopBridge:
                 Failed(
                     "",
                     type(error).__name__,
-                    "Runtime başlatılamadı; ayarları kontrol edin.",
+                    t("Runtime başlatılamadı; ayarları kontrol edin."),
                 )
             )
             loop.close()
             self._stopped.set()
-            self._events.put(State("stopped", "İşçi durdu."))
+            self._events.put(State("stopped", t("İşçi durdu.")))
             return
         self._ready.set()
         configured = self._runtime.settings
         model = configured.models.get(configured.primary_model)
         display_model = model.model if model is not None else configured.primary_model
-        self._events.put(State("ready", f"Hazır · {display_model}"))
+        self._events.put(State("ready", t("Hazır · {model}").format(model=display_model)))
         loop.call_soon(self._start_proactive)
         if self._shutdown:
             loop.call_soon(loop.stop)
@@ -764,7 +767,7 @@ class DesktopBridge:
                 )
             loop.close()
             self._stopped.set()
-            self._events.put(State("stopped", "İşçi durdu."))
+            self._events.put(State("stopped", t("İşçi durdu.")))
 
     def _start_proactive(self) -> None:
         runtime = self._runtime
@@ -816,14 +819,14 @@ class DesktopBridge:
 
     def _start_turn(self, request_id: str, text: str) -> None:
         if self._shutdown or self._runtime is None or self._runtime.agent.cleanup_pending:
-            self._events.put(Failed(request_id, "CleanupPending", "Önceki işlem temizleniyor."))
+            self._events.put(Failed(request_id, "CleanupPending", t("Önceki işlem temizleniyor.")))
             self._finish_request(request_id)
             return
         if self._broker.is_cancelled():
-            self._events.put(State("cancelled", "İstek başlamadan iptal edildi.", request_id))
+            self._events.put(State("cancelled", t("İstek başlamadan iptal edildi."), request_id))
             self._finish_request(request_id)
             return
-        self._events.put(State("running", "İstek çalışıyor.", request_id))
+        self._events.put(State("running", t("İstek çalışıyor."), request_id))
         self._active_task = asyncio.create_task(self._run_turn(request_id, text))
 
     async def _run_turn(self, request_id: str, text: str) -> None:
@@ -839,7 +842,7 @@ class DesktopBridge:
         if runtime is None:
             return None
         if self._broker.is_cancelled():
-            self._events.put(State("cancelled", "İstek başlamadan iptal edildi.", request_id))
+            self._events.put(State("cancelled", t("İstek başlamadan iptal edildi."), request_id))
             self._finish_request(request_id)
             return None
         result: RunResult | None = None
@@ -852,15 +855,17 @@ class DesktopBridge:
                 self._turn_requests[result.turn_id] = request_id
             self._events.put(Finished(request_id, result))
         except Exception as error:  # İşçi sınırı: sır/traceback sızdırmadan GUI'ye bildirilir.
-            self._events.put(Failed(request_id, type(error).__name__, "İstek tamamlanamadı."))
+            self._events.put(Failed(request_id, type(error).__name__, t("İstek tamamlanamadı.")))
         except asyncio.CancelledError as error:
-            self._events.put(Failed(request_id, type(error).__name__, "İstek tamamlanamadı."))
+            self._events.put(Failed(request_id, type(error).__name__, t("İstek tamamlanamadı.")))
             raise
         finally:
             if runtime.agent.cleanup_pending:
                 with self._lock:
                     self._cleanup_pending = True
-                self._events.put(State("cleanup_pending", "Önceki işlem temizleniyor.", request_id))
+                self._events.put(
+                    State("cleanup_pending", t("Önceki işlem temizleniyor."), request_id)
+                )
                 self._cleanup_task = asyncio.create_task(self._finish_cleanup(request_id))
             else:
                 self._finish_request(request_id)
@@ -872,19 +877,19 @@ class DesktopBridge:
         """Sesli komut, yazılı istekle aynı anda yürümez; meşgulse runner'a hiç gitmez."""
         with self._lock:
             if self._active_request is not None or self._cleanup_pending or self._shutdown:
-                return RunResult(text=_BUSY_TEXT, stop_reason="busy", turn_id="")
+                return RunResult(text=t(_BUSY_TEXT), stop_reason="busy", turn_id="")
             request_id = str(uuid4())
             self._active_request = request_id
             self._broker.begin_request(request_id)
         self._events.put(VoiceCommand(request_id, text))
-        self._events.put(State("running", "Sesli istek çalışıyor.", request_id))
+        self._events.put(State("running", t("Sesli istek çalışıyor."), request_id))
         # Söz kesme bu görevi iptal eder; CancelledError temizlikten sonra yukarı çıkar.
         result = await self._execute_request(request_id, text, stream)
         if result is not None:
             return result
         if self._broker.is_cancelled():
             return RunResult(text="", stop_reason="cancelled", turn_id="")
-        return RunResult(text="İstek tamamlanamadı.", stop_reason="error", turn_id="")
+        return RunResult(text=t("İstek tamamlanamadı."), stop_reason="error", turn_id="")
 
     async def _finish_cleanup(self, request_id: str) -> None:
         runtime = self._runtime
@@ -904,7 +909,7 @@ class DesktopBridge:
         if self._shutdown:
             asyncio.get_running_loop().call_soon(self._stop_loop_when_clean)
         else:
-            self._events.put(State("ready", "Hazır.", request_id))
+            self._events.put(State("ready", t("Hazır."), request_id))
 
     def _cancel_on_worker(self, request_id: str) -> None:
         with self._lock:
@@ -915,7 +920,7 @@ class DesktopBridge:
         self._events.put(
             State(
                 "cancelling",
-                "İptal ediliyor; başlayan sistem işlemleri geri alınmaz.",
+                t("İptal ediliyor; başlayan sistem işlemleri geri alınmaz."),
                 request_id,
             )
         )
@@ -923,9 +928,9 @@ class DesktopBridge:
     def _reset_on_worker(self) -> None:
         runtime = self._runtime
         if runtime is None or not runtime.runner.reset_context():
-            self._events.put(State("ready", "Aktif işlem sürerken sohbet sıfırlanamaz."))
+            self._events.put(State("ready", t("Aktif işlem sürerken sohbet sıfırlanamaz.")))
         else:
-            self._events.put(State("context_reset", "Yeni sohbet başladı."))
+            self._events.put(State("context_reset", t("Yeni sohbet başladı.")))
 
     def _approve(self, tool_name: str, arguments: dict[str, Any]) -> bool:
         """Onay yalnız ekrandaki penceredir; ses açıksa onay boyunca mikrofon duraklar.
@@ -978,8 +983,15 @@ class DesktopBridge:
         if state != "off":
             self._emit_voice_state(state)
 
-    def _voice_failed(self) -> None:
-        self._events.put(State("voice_error", _VOICE_ERROR_TEXT))
+    def _voice_failed(self, detail: str = "") -> None:
+        # Ayar hatası (ValueError) kendi Türkçe nedenini taşır ve kullanıcının düzeltebileceği
+        # şeyi söyler (ör. ücretli ses izni); aygıt/dosya hatasının ayrıntısı gösterilmez.
+        text = (
+            t("Ses açılamadı: {detail}").format(detail=detail[:300])
+            if detail
+            else t(_VOICE_ERROR_TEXT)
+        )
+        self._events.put(State("voice_error", text))
 
     async def _start_voice_on_worker(self) -> None:
         runtime = self._runtime
@@ -994,7 +1006,10 @@ class DesktopBridge:
                 controller = await self._voice_factory(
                     runtime, self._run_voice_command, self._on_voice_state
                 )
-            except (OSError, RuntimeError, ValueError, ImportError):
+            except ValueError as error:
+                self._voice_failed(str(error))
+                return
+            except (OSError, RuntimeError, ImportError):
                 self._voice_failed()
                 return
             # Ölçüm isteğe bağlıdır; factory imzası değişmesin diye toplayıcı sonradan bağlanır.

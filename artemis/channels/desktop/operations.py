@@ -17,6 +17,8 @@ from dataclasses import dataclass, field
 from typing import Any
 from urllib.parse import urlsplit
 
+from artemis.i18n import t
+
 CARDS_KEPT = 20
 EVENTS_PER_CARD = 200
 _TITLE_LIMIT = 60
@@ -63,7 +65,7 @@ def _arg_text(key: str, value: Any, limit: int = _VALUE_LIMIT) -> str | None:
     if value is None or value == "" or isinstance(value, (dict, list, tuple)):
         return None
     if key in _LENGTH_ONLY:
-        return f"{len(str(value))} karakter"
+        return t("{count} karakter").format(count=len(str(value)))
     text = str(value)
     if key == "url":
         parts = urlsplit(text)
@@ -94,7 +96,9 @@ def summarize_arguments(arguments: Any) -> str:
 def _duration(seconds: Any) -> str:
     if not isinstance(seconds, (int, float)) or isinstance(seconds, bool) or seconds < 0:
         return ""
-    return f"{round(seconds * 1000)} ms" if seconds < 1 else f"{seconds:.1f} sn".replace(".", ",")
+    if seconds < 1:
+        return f"{round(seconds * 1000)} ms"
+    return t("{seconds:.1f} sn").format(seconds=seconds).replace(".", ",")
 
 
 @dataclass
@@ -110,7 +114,7 @@ class ToolOp:
     label: str
     summary: str = ""
     state: str = "running"  # running ok sent fail denied interrupted
-    state_text: str = "çalışıyor…"
+    state_text: str = field(default_factory=lambda: t("çalışıyor…"))
     message: str = ""
     duration: str = ""
     approval: str = ""
@@ -192,7 +196,7 @@ class OperationLog:
             return None
         card = self.begin(request_id, "")
         if not card.title:
-            card.title = "İstek"
+            card.title = t("İstek")
         if len(card.details) < EVENTS_PER_CARD:
             card.details.append(_detail_line(event, fields))
         raw = fields.get("tool")
@@ -204,7 +208,7 @@ class OperationLog:
             for op in card.ops:
                 if op.state == "running":
                     # Sonuçsuz biten tur "çalışıyor" kalamaz; tamamlandığı da iddia edilmez.
-                    op.state, op.state_text = "interrupted", "sonucu doğrulanamadı"
+                    op.state, op.state_text = "interrupted", t("sonucu doğrulanamadı")
         elif event == "tool_requested":
             summary = summarize_arguments(fields.get("arguments"))
             card.ops.append(ToolOp(tool, _label(tool, labels), summary))
@@ -214,7 +218,7 @@ class OperationLog:
             self._on_result(card, tool, fields, labels)
         elif event == "tool_interrupted":
             op = self._open_op(card, tool, labels)
-            op.state, op.state_text = "interrupted", "kesildi, sonucu doğrulanamadı"
+            op.state, op.state_text = "interrupted", t("kesildi, sonucu doğrulanamadı")
         elif event == "computer_step":
             self._on_computer_step(card, fields)
         elif event == "computer_verify":
@@ -241,13 +245,13 @@ class OperationLog:
         if not op.summary:
             op.summary = summarize_arguments(fields.get("arguments"))
         if event == "approval_skipped":
-            op.approval = "Otomatik onay"
+            op.approval = t("Otomatik onay")
         elif event == "approval":
             if fields.get("unattended") is True:
-                op.approval = "Gözetimsiz tur: otomatik reddedildi"
+                op.approval = t("Gözetimsiz tur: otomatik reddedildi")
             else:
                 granted = fields.get("approved") is True
-                op.approval = "Onay verildi" if granted else "Onay reddedildi"
+                op.approval = t("Onay verildi") if granted else t("Onay reddedildi")
 
     def _on_result(
         self, card: Card, tool: str, fields: Mapping[str, Any],
@@ -261,13 +265,13 @@ class OperationLog:
         status = result.get("status") if isinstance(result, Mapping) else None
         # ✓ yalnız status "ok" ve success True (steps.py sözleşmesi).
         if isinstance(result, Mapping) and status == "ok" and result.get("success") is True:
-            op.state, op.state_text = "ok", "✓ tamamlandı"
+            op.state, op.state_text = "ok", t("✓ tamamlandı")
         elif status == "sent":
-            op.state, op.state_text = "sent", "komut gönderildi, doğrulanamadı"
+            op.state, op.state_text = "sent", t("komut gönderildi, doğrulanamadı")
         elif status == "denied":
-            op.state, op.state_text = "denied", "reddedildi"
+            op.state, op.state_text = "denied", t("reddedildi")
         else:
-            op.state, op.state_text = "fail", "başarısız ✗"
+            op.state, op.state_text = "fail", t("başarısız ✗")
 
     @staticmethod
     def _computer_op(card: Card) -> ToolOp | None:
@@ -281,24 +285,28 @@ class OperationLog:
         if op is None:
             return
         action = fields.get("action")
-        name = _ACTION_TEXT.get(str(action), str(action or "Adım"))
-        head = f"Adım {fields.get('step', '?')} · {name}"
+        name = t(_ACTION_TEXT[str(action)]) if str(action) in _ACTION_TEXT else str(
+            action or t("Adım")
+        )
+        head = t("Adım {step} · {name}").format(step=fields.get("step", "?"), name=name)
         if action == "type" and isinstance(fields.get("text_length"), int):
-            head += f" ({fields['text_length']} karakter)"
+            head += " (" + t("{count} karakter").format(count=fields["text_length"]) + ")"
         reason = fields.get("reason")
         text = head
         if isinstance(reason, str) and reason:
             text += f" — {truncate(reason, _VALUE_LIMIT)}"
         if fields.get("sensitive") is True:
-            text += " · hassas"
+            text += " · " + t("hassas")
         if fields.get("auto_approved") is True:
-            text += " · otomatik onay"
+            text += " · " + t("otomatik onay")
         op.subrows.append(SubRow(text))
         # Sonuç ayrı satır: arayüz "info" türünü soluk çizer. `observed` modelin ekrandan
         # türettiği serbest metindir; yazılan `text` hiçbir yoldan buraya gelmez.
         observed = fields.get("observed")
         if isinstance(observed, str) and observed:
-            op.subrows.append(SubRow(f"↳ sonuç: {truncate(observed, 120)}"))
+            op.subrows.append(
+                SubRow(t("↳ sonuç: {text}").format(text=truncate(observed, 120)))
+            )
 
     def _on_computer_verify(self, card: Card, fields: Mapping[str, Any]) -> None:
         op = self._computer_op(card)
@@ -309,33 +317,35 @@ class OperationLog:
         if isinstance(evidence, str) and evidence:
             tail = " " + truncate(evidence, _VALUE_LIMIT)
         if fields.get("verified") is True:
-            op.subrows.append(SubRow("Ekranda doğrulandı:" + tail, "ok"))
+            op.subrows.append(SubRow(t("Ekranda doğrulandı:") + tail, "ok"))
         else:
-            op.subrows.append(SubRow("Ekranda doğrulanamadı:" + tail, "sent"))
+            op.subrows.append(SubRow(t("Ekranda doğrulanamadı:") + tail, "sent"))
 
 
 def _label(tool: str, labels: Mapping[str, tuple[str, str]]) -> str:
-    return labels.get(tool, ("", ""))[0] or tool or "Araç"
+    return labels.get(tool, ("", ""))[0] or tool or t("Araç")
 
 
 def _detail_line(event: str, fields: Mapping[str, Any]) -> str:
     """Ayrıntı satırı: olay, araç, kısaltılmış argüman anahtarları, durum, mesaj."""
     parts = [event]
     if isinstance(fields.get("tool"), str):
-        parts.append(f"araç={fields['tool']}")
+        parts.append(t("araç={tool}").format(tool=fields["tool"]))
     arguments = fields.get("arguments")
     if isinstance(arguments, Mapping):
         shown = []
         for key, value in arguments.items():
             text = _arg_text(str(key), value, 40)
             shown.append(f"{key}={text}" if text is not None else str(key))
-        parts.append("argümanlar: " + ", ".join(shown))
+        parts.append(t("argümanlar: {args}").format(args=", ".join(shown)))
     result = fields.get("result")
     if isinstance(result, Mapping):
         if "status" in result:
-            parts.append(f"durum={result['status']}")
+            parts.append(t("durum={status}").format(status=result["status"]))
         if isinstance(result.get("message"), str):
-            parts.append(f"mesaj={truncate(result['message'], _MESSAGE_LIMIT)}")
+            parts.append(
+                t("mesaj={message}").format(message=truncate(result["message"], _MESSAGE_LIMIT))
+            )
     for key in ("stop_reason", "approved", "step", "action", "verified"):
         if key in fields:
             parts.append(f"{key}={fields[key]}")

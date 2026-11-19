@@ -57,6 +57,7 @@ from artemis.config.settings import (
     Settings,
     load_settings,
 )
+from artemis.i18n import t
 from artemis.tools.base import ToolResult
 from artemis.tools.code_agent_backends import visible_supported
 from artemis.tools.code_agent_jobs import FINISHED
@@ -96,17 +97,21 @@ DONE_LABELS = {
 def status_label(record: dict[str, Any]) -> str:
     status = record.get("status", "")
     if status == "done":
-        return DONE_LABELS.get(record.get("verification", "unverified"), DONE_LABELS["unverified"])
-    return STATUS_LABELS.get(status, "Bilinmiyor")
+        ver = record.get("verification", "unverified")
+        return t(DONE_LABELS.get(ver, DONE_LABELS["unverified"]))
+    return t(STATUS_LABELS.get(status, "Bilinmiyor"))
 
 
 def checks_text(record: dict[str, Any]) -> str:
     rows = [
-        f"{'geçti' if c.get('passed') else 'BAŞARISIZ'}: {c.get('command', '')} "
-        f"(çıkış {c.get('exit_code')})"
+        t("{status}: {command} (çıkış {exit_code})").format(
+            status=t("geçti") if c.get("passed") else t("BAŞARISIZ"),
+            command=c.get("command", ""),
+            exit_code=c.get("exit_code"),
+        )
         for c in record.get("checks", [])
     ]
-    return "; ".join(rows) or "yok"
+    return "; ".join(rows) or t("yok")
 
 
 
@@ -134,8 +139,12 @@ DONE_CHIPS = {
 def status_chip(record: dict[str, Any]) -> tuple[str, str]:
     status = record.get("status", "")
     if status == "done":
-        return DONE_CHIPS.get(record.get("verification", "unverified"), DONE_CHIPS["unverified"])
-    return STATUS_CHIPS.get(status, ("Bilinmiyor", "neutral"))
+        label, tone = DONE_CHIPS.get(
+            record.get("verification", "unverified"), DONE_CHIPS["unverified"]
+        )
+        return t(label), tone
+    label, tone = STATUS_CHIPS.get(status, ("Bilinmiyor", "neutral"))
+    return t(label), tone
 
 
 # Yeniden kurulumun iptal edeceği, henüz bitmemiş işler.
@@ -197,23 +206,23 @@ def spec_to_html(kind: str, record: dict[str, Any]) -> str:
     keys = ("agent", "workdir", "workdir_path", "mode")
     where = {**spec, **{k: record[k] for k in keys if k in record}}
     parts = [
-        section("Ajan ve başlangıç klasörü", approval_text(where)),
-        section("Proje", str(spec.get("project", ""))),
-        section("Görev", str(spec.get("task", ""))),
-        bullets("Kapsam", list(spec.get("scope", []))),
-        bullets("Kabul ölçütleri", list(spec.get("acceptance", []))),
+        section(t("Ajan ve başlangıç klasörü"), approval_text(where)),
+        section(t("Proje"), str(spec.get("project", ""))),
+        section(t("Görev"), str(spec.get("task", ""))),
+        bullets(t("Kapsam"), list(spec.get("scope", []))),
+        bullets(t("Kabul ölçütleri"), list(spec.get("acceptance", []))),
     ]
     if kind == "job":
         commits = json.dumps(record.get("commits", []), ensure_ascii=False)
         parts += [
-            section("Durum", status_label(record)),
-            section("Özet", str(record.get("summary", ""))),
-            section("Soru", str(record.get("question") or "—")),
-            section("Commit'ler", commits),
-            section("Kalan değişiklikler", str(record.get("leftover_changes"))),
-            section("Değişiklik", str(record.get("changes", "none"))),
-            section("Bağımsız kontroller", checks_text(record)),
-            section("İş kimliği", str(record.get("job_id", ""))),
+            section(t("Durum"), status_label(record)),
+            section(t("Özet"), str(record.get("summary", ""))),
+            section(t("Soru"), str(record.get("question") or "—")),
+            section(t("Commit'ler"), commits),
+            section(t("Kalan değişiklikler"), str(record.get("leftover_changes"))),
+            section(t("Değişiklik"), str(record.get("changes", "none"))),
+            section(t("Bağımsız kontroller"), checks_text(record)),
+            section(t("İş kimliği"), str(record.get("job_id", ""))),
         ]
     return "".join(parts)
 
@@ -243,14 +252,17 @@ class ProjectsPanel(QWidget):
         layout = make_scroll_page(self)
         layout.addWidget(
             make_page_header(
-                "Projeler",
-                "Yerel bir depoda iş taslağı hazırla, kapsamını incele, onaylayıp başlat.",
+                t("Projeler"),
+                t("Yerel bir depoda iş taslağı hazırla, kapsamını incele, onaylayıp başlat."),
             )
         )
         # Demo notu sayfa başında bir kez verilir; her eylemin altında tekrarlanmaz (UX-11).
         self.demo_note = make_label(
-            "Demo modunda proje süreçleri kapalı: taslak hazırlama ve başlatma etkin sürümde "
-            "çalışır.", "meta",
+            t(
+                "Demo modunda proje süreçleri kapalı: taslak hazırlama ve başlatma etkin sürümde "
+                "çalışır."
+            ),
+            "meta",
         )
         self.demo_note.setVisible(demo)
         layout.addWidget(self.demo_note)
@@ -262,7 +274,7 @@ class ProjectsPanel(QWidget):
         flow_row.setSpacing(8)
         self._flow_labels: list[QLabel] = []
         for i, name in enumerate(FLOW_STEPS):
-            label = make_label(name, "stage")
+            label = make_label(t(name), "stage")
             label.setWordWrap(False)
             self._flow_labels.append(label)
             flow_row.addWidget(label)
@@ -271,8 +283,9 @@ class ProjectsPanel(QWidget):
 
         # Güvenlik metni silinmedi/yumuşatılmadı; yalnız varsayılan olarak katlı.
         self.rules = CollapsibleSection(
-            "Bu işler nasıl çalışır?",
-            "Taslağı hazırlayın, tam kapsamı inceleyin ve onayla başlatın. " + AUTHORITY_BOUNDARY,
+            t("Bu işler nasıl çalışır?"),
+            t("Taslağı hazırlayın, tam kapsamı inceleyin ve onayla başlatın. ")
+            + t(AUTHORITY_BOUNDARY),
             trailing=self.flow_bar,
         )
         self.rules_toggle = self.rules.toggle
@@ -281,14 +294,14 @@ class ProjectsPanel(QWidget):
 
         # Sol kart: yeni iş formu.
         left, left_lay = make_card()
-        left_lay.addWidget(make_label("Yeni iş", "sectionTitle"))
+        left_lay.addWidget(make_label(t("Yeni iş"), "sectionTitle"))
         self.project = QComboBox()
         self.task = QPlainTextEdit()
-        self.task.setPlaceholderText("Örn. Giriş formundaki doğrulamayı düzelt")
+        self.task.setPlaceholderText(t("Örn. Giriş formundaki doğrulamayı düzelt"))
         self.scope = QPlainTextEdit()
-        self.scope.setPlaceholderText("Örn. Her satır bir madde: yalnız login modülü")
+        self.scope.setPlaceholderText(t("Örn. Her satır bir madde: yalnız login modülü"))
         self.acceptance = QPlainTextEdit()
-        self.acceptance.setPlaceholderText("Örn. Her satır bir madde: testler geçiyor")
+        self.acceptance.setPlaceholderText(t("Örn. Her satır bir madde: testler geçiyor"))
         for editor in (self.task, self.scope, self.acceptance):
             # 1280x850'de "Taslak hazırla" kıvrımın altına düşmesin: 72px, içerikle 120px'e büyür.
             editor.setFixedHeight(EDITOR_MIN_HEIGHT)
@@ -296,18 +309,18 @@ class ProjectsPanel(QWidget):
             # gc döngüyü rastgele sırada çözünce Qt silinmiş çocuklara erişip çöküyordu.
             # Bağlı yöntem döngü kurmaz.
             editor.textChanged.connect(self._editor_text_changed)
-        self.project.setAccessibleName("Proje")
+        self.project.setAccessibleName(t("Proje"))
         self._set_projects([])
-        left_lay.addWidget(make_field("Proje", self.project, _HELP_PROJECT))
+        left_lay.addWidget(make_field(t("Proje"), self.project, t(_HELP_PROJECT)))
         left_lay.addWidget(self._build_agent_row())
         for caption, widget in (
-            ("Görev", self.task),
-            ("Kapsam", self.scope),
-            ("Kabul ölçütleri", self.acceptance),
+            (t("Görev"), self.task),
+            (t("Kapsam"), self.scope),
+            (t("Kabul ölçütleri"), self.acceptance),
         ):
             widget.setAccessibleName(caption)
             left_lay.addWidget(make_field(caption, widget))
-        self.prepare_button = QPushButton("Taslak hazırla")
+        self.prepare_button = QPushButton(t("Taslak hazırla"))
         # Pasif düğmenin nedeni düğmenin hemen yanında muted metindir: ayrı satır olsaydı
         # 1280x850'de yeni seçiciler yüzünden kıvrımın altına düşerdi.
         self.prepare_reason = AutoHideLabel()
@@ -322,7 +335,7 @@ class ProjectsPanel(QWidget):
         right, right_lay = make_card()
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
-        title_row.addWidget(make_label("Taslaklar ve işler", "sectionTitle"))
+        title_row.addWidget(make_label(t("Taslaklar ve işler"), "sectionTitle"))
         self.status_chip = QLabel()
         self.status_chip.setObjectName("statusChip")
         self.status_chip.setTextFormat(Qt.TextFormat.PlainText)
@@ -331,77 +344,58 @@ class ProjectsPanel(QWidget):
         title_row.addStretch()
         right_lay.addLayout(title_row)
         self.items = QListWidget()
-        self.items.setAccessibleName("Taslaklar ve işler")
+        self.items.setAccessibleName(t("Taslaklar ve işler"))
         self.items.currentRowChanged.connect(self._select)
         self.list_stack = QStackedWidget()
         self.list_stack.addWidget(self.items)
         self.list_stack.addWidget(
-            EmptyState("Henüz taslak yok", "Soldan bir görev yazıp taslak hazırla.")
+            EmptyState(t("Henüz taslak yok"), t("Soldan bir görev yazıp taslak hazırla."))
         )
         right_lay.addWidget(self.list_stack)
         self.preview = QTextBrowser()
         self.preview.setOpenLinks(False)
         self.preview.setOpenExternalLinks(False)
-        self.preview.setAccessibleName("Taslak ayrıntısı")
-        self.preview.setPlaceholderText("Bir taslak veya iş seç; ayrıntısı burada görünür.")
+        self.preview.setAccessibleName(t("Taslak ayrıntısı"))
+        self.preview.setPlaceholderText(t("Bir taslak veya iş seç; ayrıntısı burada görünür."))
         self.preview.setMinimumHeight(120)
         right_lay.addWidget(self.preview, 1)
-        # Bekleyen soru alanı yalnız seçili iş "waiting" iken görünür (set_busy).
-        self.question_box = QWidget()
-        q_lay = QVBoxLayout(self.question_box)
-        q_lay.setContentsMargins(0, 0, 0, 0)
-        q_lay.setSpacing(4)
-        self.answer = QPlainTextEdit()
-        self.answer.setPlaceholderText("Örn. Mavi olsun")
-        self.answer.setAccessibleName("Bekleyen soru")
-        self.answer.setMinimumHeight(72)
-        self.answer.setMaximumHeight(96)
-        q_lay.addWidget(make_label("Bekleyen soru", "fieldLabel"))
-        q_lay.addWidget(self.answer)
-        self.answer_button = QPushButton("Cevabı onayla ve devam et")
-        answer_row = QHBoxLayout()
-        answer_row.addStretch()
-        answer_row.addWidget(self.answer_button)
-        q_lay.addLayout(answer_row)
-        right_lay.addWidget(self.question_box)
-        self.refresh_button = QPushButton("Durumu yenile")
-        self.start_button = QPushButton("Taslağı onayla ve başlat")
+        right_lay.addWidget(self._build_question_box())
+        self.refresh_button = QPushButton(t("Durumu yenile"))
+        self.start_button = QPushButton(t("Taslağı onayla ve başlat"))
         self.start_button.setObjectName("primary")
         actions = QHBoxLayout()
         actions.setSpacing(8)
         actions.addStretch()
         actions.addWidget(self.refresh_button)
         actions.addWidget(self.start_button)
-        actions.addWidget(HelpTip(_HELP_START), 0, Qt.AlignmentFlag.AlignVCenter)
+        actions.addWidget(HelpTip(t(_HELP_START)), 0, Qt.AlignmentFlag.AlignVCenter)
         right_lay.addLayout(actions)
         self.start_reason = AutoHideLabel()
         self.start_reason.setAlignment(Qt.AlignmentFlag.AlignRight)
         right_lay.addWidget(self.start_reason)
         # Yıkıcı eylem birincil eylemden ayrı satırda ve yalnız iş seçiliyken görünür.
-        self.cancel_button = QPushButton("İşi durdur")
+        self.cancel_button = QPushButton(t("İşi durdur"))
         self.cancel_button.setObjectName("danger")
         # Taslağı sil: yalnız taslak seçiliyken görünür (iptal düğmesiyle aynı satır, ikisi
         # birlikte görünmez); yıkıcı olduğu için birincil eylemden ayrı satırdadır.
-        self.discard_button = QPushButton("Taslağı sil")
+        self.discard_button = QPushButton(t("Taslağı sil"))
         # Çökme sonrası kalan belirsiz depo kilidini (cleanup_pending) onayla bırakır.
-        self.release_button = QPushButton("Kilidi bırak")
+        self.release_button = QPushButton(t("Kilidi bırak"))
         self.release_button.setObjectName("danger")
         self.discard_button.setObjectName("danger")
         # Listeyi sadeleştirir; yalnız bitmiş ve kilidi serbest iş varken etkin.
-        self.clear_button = QPushButton("Biten işleri temizle")
+        self.clear_button = QPushButton(t("Biten işleri temizle"))
         cancel_row = QHBoxLayout()
         cancel_row.addWidget(self.cancel_button)
         cancel_row.addWidget(self.release_button)
         cancel_row.addWidget(self.discard_button)
         cancel_row.addWidget(self.clear_button)
         # Düğmeler seçime göre görünür/gizlenir; tek "?" satırın sonunda kalır ve hepsini anlatır.
-        cancel_row.addWidget(HelpTip(_HELP_ROW_ACTIONS), 0, Qt.AlignmentFlag.AlignVCenter)
+        cancel_row.addWidget(HelpTip(t(_HELP_ROW_ACTIONS)), 0, Qt.AlignmentFlag.AlignVCenter)
         cancel_row.addStretch()
         right_lay.addSpacing(8)
         right_lay.addLayout(cancel_row)
-        self.notice = make_label(
-            "" if demo else "Durum bekleniyor.", "meta"
-        )
+        self.notice = make_label("" if demo else t("Durum bekleniyor."), "meta")
         right_lay.addWidget(self.notice)
 
         self._columns = QBoxLayout(QBoxLayout.Direction.LeftToRight)
@@ -445,19 +439,39 @@ class ProjectsPanel(QWidget):
 
     # --- Kod ajanı ve başlangıç klasörü seçimi (ADR 0049) -------------------------------------
 
+    def _build_question_box(self) -> QWidget:
+        """Bekleyen soru alanı; yalnız seçili iş 'waiting' iken görünür (set_busy)."""
+        self.question_box = QWidget()
+        q_lay = QVBoxLayout(self.question_box)
+        q_lay.setContentsMargins(0, 0, 0, 0)
+        q_lay.setSpacing(4)
+        self.answer = QPlainTextEdit()
+        self.answer.setPlaceholderText(t("Örn. Mavi olsun"))
+        self.answer.setAccessibleName(t("Bekleyen soru"))
+        self.answer.setMinimumHeight(72)
+        self.answer.setMaximumHeight(96)
+        q_lay.addWidget(make_label(t("Bekleyen soru"), "fieldLabel"))
+        q_lay.addWidget(self.answer)
+        self.answer_button = QPushButton(t("Cevabı onayla ve devam et"))
+        answer_row = QHBoxLayout()
+        answer_row.addStretch()
+        answer_row.addWidget(self.answer_button)
+        q_lay.addLayout(answer_row)
+        return self.question_box
+
     def _build_agent_row(self) -> QWidget:
         host = QWidget()
         column = QVBoxLayout(host)
         column.setContentsMargins(0, 0, 0, 0)
         column.setSpacing(4)
         self.agent_combo = QComboBox()
-        self.agent_combo.setAccessibleName("Kod ajanı")
+        self.agent_combo.setAccessibleName(t("Kod ajanı"))
         self.workdir_combo = QComboBox()
-        self.workdir_combo.setAccessibleName("Başlangıç klasörü")
+        self.workdir_combo.setAccessibleName(t("Başlangıç klasörü"))
         self.mode_combo = QComboBox()
-        self.mode_combo.setAccessibleName("Çalışma kipi")
+        self.mode_combo.setAccessibleName(t("Çalışma kipi"))
         for label, value in MODE_LABELS:
-            self.mode_combo.addItem(label, value)
+            self.mode_combo.addItem(t(label), value)
         # Üç seçici 1280x850'de (~1000px sayfa) tek satıra sığmalı ve en uzun seçenek metni
         # ("Görünür pencerede", "Proje klasörü") kırpılmadan okunmalı. Karakter sayıları metinden
         # birkaç harf bol: 'x' ortalama harften geniştir, açılır ok ve dolgu da payı yer.
@@ -467,9 +481,9 @@ class ProjectsPanel(QWidget):
         for combo, chars in sizes:
             combo.setSizeAdjustPolicy(fit)
             combo.setMinimumContentsLength(chars)
-        self.add_folder_button = QPushButton("Ekle…")
-        self.add_folder_button.setToolTip("Yeni başlangıç klasörü ekle")
-        self.add_folder_button.setAccessibleName("Klasör ekle")
+        self.add_folder_button = QPushButton(t("Ekle…"))
+        self.add_folder_button.setToolTip(t("Yeni başlangıç klasörü ekle"))
+        self.add_folder_button.setAccessibleName(t("Klasör ekle"))
         folder_box = QWidget()
         folder_row = QHBoxLayout(folder_box)
         folder_row.setContentsMargins(0, 0, 0, 0)
@@ -478,10 +492,10 @@ class ProjectsPanel(QWidget):
         folder_row.addWidget(self.add_folder_button)
         self._agent_row = QBoxLayout(QBoxLayout.Direction.LeftToRight)
         self._agent_row.setSpacing(12)
-        self._agent_row.addWidget(make_field("Kod ajanı", self.agent_combo), 3)
-        self._agent_row.addWidget(make_field("Çalışma kipi", self.mode_combo, _HELP_MODE), 3)
+        self._agent_row.addWidget(make_field(t("Kod ajanı"), self.agent_combo), 3)
+        self._agent_row.addWidget(make_field(t("Çalışma kipi"), self.mode_combo, t(_HELP_MODE)), 3)
         self._agent_row.addWidget(
-            make_field("Başlangıç klasörü", folder_box), 4
+            make_field(t("Başlangıç klasörü"), folder_box), 4
         )
         column.addLayout(self._agent_row)
         # Çözülmüş yol 12px soluk ipucudur; uyarı yalnız proje dışı klasörde görünür.
@@ -491,7 +505,7 @@ class ProjectsPanel(QWidget):
         self.agent_reason = AutoHideLabel()
         # İkincil eylem yol ipucunun satırında (ince, düz düğme): ayrı satır olsaydı çipli durumda
         # 1280x850'de kıvrımın altına düşerdi. Yol dar kalırsa ortadan kısalır, tam yol ipucundadır.
-        self.default_button = QPushButton("Bunu bu proje için varsayılan yap")
+        self.default_button = QPushButton(t("Bunu bu proje için varsayılan yap"))
         self.default_button.setObjectName("ghost")
         # Genel düğme stili 32px asgari yükseklik verir; satır ipucu kadar ince kalsın.
         self.default_button.setStyleSheet("min-height: 0px; padding: 0px 8px;")
@@ -522,7 +536,7 @@ class ProjectsPanel(QWidget):
         self.workdir_combo.blockSignals(True)
         self.workdir_combo.clear()
         for name in config.workdir_choices(self._vault()):
-            self.workdir_combo.addItem("Proje klasörü" if name == OWN_REPO_ALIAS else name, name)
+            self.workdir_combo.addItem(t("Proje klasörü") if name == OWN_REPO_ALIAS else name, name)
         self.workdir_combo.blockSignals(False)
         # Yeniden kurulum kullanıcının seçimini bozmasın; yoksa projenin varsayılanı gelir.
         if agent is not None and workdir is not None:
@@ -545,15 +559,16 @@ class ProjectsPanel(QWidget):
         for index, name in enumerate(self._config().agent_names()):
             found = self._agent_found(name)
             label = AGENT_LABELS.get(name, name)
-            self.agent_combo.addItem(label if found else f"{label} (bulunamadı)", name)
-            tips = [CLAUDE_TIP] if name == "claude" else []
+            text = label if found else t("{label} (bulunamadı)").format(label=label)
+            self.agent_combo.addItem(text, name)
+            tips = [t(CLAUDE_TIP)] if name == "claude" else []
             if not found:
-                tips.append(AGENT_MISSING_TIP)
+                tips.append(t(AGENT_MISSING_TIP))
             self.agent_combo.setItemData(index, " ".join(tips), Qt.ItemDataRole.ToolTipRole)
             item = model.item(index)
             if item is not None:
                 item.setEnabled(found)
-        self.agent_combo.setToolTip(CLAUDE_TIP)
+        self.agent_combo.setToolTip(t(CLAUDE_TIP))
         if keep is not None:
             self._pick(self.agent_combo, str(keep))
         self.agent_combo.blockSignals(False)
@@ -578,7 +593,7 @@ class ProjectsPanel(QWidget):
         for name in projects:
             self.project.addItem(name, name)
         if not projects:
-            self.project.addItem(NO_PROJECT_TEXT)
+            self.project.addItem(t(NO_PROJECT_TEXT))
             item = cast(QStandardItemModel, self.project.model()).item(0)
             if item is not None:
                 item.setEnabled(False)
@@ -615,13 +630,13 @@ class ProjectsPanel(QWidget):
         try:
             _, profile = self._config().resolve_agent(agent)
         except ValueError:
-            return "Bilinmeyen ajan."
+            return t("Bilinmeyen ajan.")
         known = self._agent_status.get(agent, {}).get("visible")
         if known if known is not None else visible_supported(profile):
             return ""
         if profile.kind != "generic":
-            return "Görünür pencere kipi yalnız Windows'ta çalışır."
-        return "Bu ajan için görünür kip tanımlı değil (Ayarlar > GitHub > Kod ajanları)."
+            return t("Görünür pencere kipi yalnız Windows'ta çalışır.")
+        return t("Bu ajan için görünür kip tanımlı değil (Ayarlar > GitHub > Kod ajanları).")
 
     def _project_repo(self) -> Path | None:
         config, project = self._config(), self._project_name()
@@ -635,12 +650,14 @@ class ProjectsPanel(QWidget):
         agent, workdir = self.selected_choice()
         repo, folder = self._project_repo(), self._workdir_path(workdir)
         self.workdir_hint.set_full_text(
-            f"Başlangıç klasörü: {folder}" if folder else "Başlangıç klasörü henüz seçilmedi",
+            t("Başlangıç klasörü: {folder}").format(folder=folder)
+            if folder
+            else t("Başlangıç klasörü henüz seçilmedi"),
             str(folder or ""),
         )
         # Formda kısa uyarı: hedef repo zaten Proje seçicisinden bellidir. Tam backend
         # onay metni ön izleme bloğunda ve onay penceresinde durur (1280x850 sığma sözleşmesi).
-        self.workdir_warning.setText(WORKDIR_WARNING)
+        self.workdir_warning.setText(t(WORKDIR_WARNING))
         self.workdir_warning.setVisible(workdir != OWN_REPO_ALIAS)
         usable = self._config_path is not None and not self._demo
         # Ajanda görünür kip yoksa seçenek pasif, nedeni görünür; seçili kip arka plana düşer.
@@ -656,18 +673,21 @@ class ProjectsPanel(QWidget):
         mode = self.selected_mode()
         # Neden satırı yalnız eyleme engel olan durumlarda görünür (1280x850'de "Taslak hazırla"
         # kıvrımın altına düşmesin); açıklayıcı bilgi seçicilerin ipuçlarında durur.
-        reason = "Demo modunda ajan ve klasör seçimi kapalı." if self._demo else ""
+        reason = t("Demo modunda ajan ve klasör seçimi kapalı.") if self._demo else ""
         saved = self._saved_choice()
         changed = (agent, workdir) != saved or mode != self._saved_mode()
         can_default = usable and changed and bool(self._project_name()) and repo is not None
         if usable and changed and repo is None:
-            reason = "Bu projenin klasörü bulunamadı; varsayılan yazılamaz."
+            reason = t("Bu projenin klasörü bulunamadı; varsayılan yazılamaz.")
         elif visible_reason and not self._demo:
-            reason = "Görünür pencere kipi kapalı: " + visible_reason
+            reason = t("Görünür pencere kipi kapalı: {reason}").format(reason=visible_reason)
         self.agent_reason.setText(reason)
         self.mode_combo.setToolTip(
-            "Arka planda: pencere açılmaz, Artemis ajana soru-cevap yapabilir (Claude). "
-            "Görünür pencerede: ajan ayrı bir konsolda çalışır, pencereyi kapatırsan iş kesilir."
+            t(
+                "Arka planda: pencere açılmaz, Artemis ajana soru-cevap yapabilir (Claude). "
+                "Görünür pencerede: ajan ayrı bir konsolda çalışır, pencereyi kapatırsan "
+                "iş kesilir."
+            )
         )
         self.agent_combo.setEnabled(usable)
         self.mode_combo.setEnabled(usable)
@@ -700,24 +720,28 @@ class ProjectsPanel(QWidget):
                 default_workdir=self._config().default_workdir,
             )
         except (OSError, ValueError):
-            self.notice.setText("Varsayılan kaydedilemedi; mevcut ayarlar korunuyor.")
+            self.notice.setText(t("Varsayılan kaydedilemedi; mevcut ayarlar korunuyor."))
             return
         self._after_config_write(
-            f"{alias} için varsayılan kaydedildi: {agent}, {workdir}, {self.selected_mode()}."
+            t("{alias} için varsayılan kaydedildi: {agent}, {workdir}, {mode}.").format(
+                alias=alias, agent=agent, workdir=workdir, mode=self.selected_mode()
+            )
         )
 
     def _add_folder(self) -> None:
         if self._config_path is None or self._demo:
             return
         # Klasörü kullanıcı arayüzde seçer; model yol veremez (ADR 0049).
-        chosen = QFileDialog.getExistingDirectory(self, "Başlangıç klasörü seç", str(Path.home()))
+        chosen = QFileDialog.getExistingDirectory(
+            self, t("Başlangıç klasörü seç"), str(Path.home())
+        )
         if not chosen:
             return
         folder = Path(chosen)
         alias, accepted = QInputDialog.getText(
             self,
-            "Klasör takma adı",
-            "Takma ad (küçük harf, rakam, _ veya -):",
+            t("Klasör takma adı"),
+            t("Takma ad (küçük harf, rakam, _ veya -):"),
             text=slug_alias(folder.name),
         )
         if not accepted:
@@ -731,9 +755,9 @@ class ProjectsPanel(QWidget):
         try:
             add_workdir(self._config_path, alias, folder)
         except (OSError, ValueError):
-            self.notice.setText("Klasör kaydedilemedi; mevcut ayarlar korunuyor.")
+            self.notice.setText(t("Klasör kaydedilemedi; mevcut ayarlar korunuyor."))
             return
-        self._after_config_write(f"'{alias}' klasörü eklendi.")
+        self._after_config_write(t("'{alias}' klasörü eklendi.").format(alias=alias))
         self._pick(self.workdir_combo, alias)
 
     def _editor_text_changed(self) -> None:
@@ -767,7 +791,7 @@ class ProjectsPanel(QWidget):
         finished = kind == "job" and record.get("status") == "done"
         for i, label in enumerate(self._flow_labels):
             state = "done" if finished or i < current else "current" if i == current else "todo"
-            label.setText(("✓ " if state == "done" else "") + FLOW_STEPS[i])
+            label.setText(("✓ " if state == "done" else "") + t(FLOW_STEPS[i]))
             if label.property("state") != state:
                 label.setProperty("state", state)
                 repolish(label)
@@ -776,7 +800,7 @@ class ProjectsPanel(QWidget):
         if not kind:
             self.status_chip.setVisible(False)
             return
-        text, tone = ("Taslak", "neutral") if kind == "draft" else status_chip(record)
+        text, tone = (t("Taslak"), "neutral") if kind == "draft" else status_chip(record)
         self.status_chip.setText(text)
         if self.status_chip.property("tone") != tone:
             self.status_chip.setProperty("tone", tone)
@@ -808,19 +832,19 @@ class ProjectsPanel(QWidget):
     def _prepare_block(self) -> str:
         """Taslak düğmesi pasifse kullanıcıya gösterilecek tek satır neden ('' = açık)."""
         if self._demo:
-            return "Demo modunda taslak hazırlanamaz."
+            return t("Demo modunda taslak hazırlanamaz.")
         if self._busy:
-            return "Artemis meşgul; hazır olunca açılır."
+            return t("Artemis meşgul; hazır olunca açılır.")
         if not self._project_name():
-            return "Önce bir proje tanımla."
+            return t("Önce bir proje tanımla.")
         if not self._agent_found(str(self.agent_combo.currentData())):
-            return "Seçili ajan bulunamadı; Ayarlar > GitHub > Kod ajanları."
+            return t("Seçili ajan bulunamadı; Ayarlar > GitHub > Kod ajanları.")
         if not self.task.toPlainText().strip():
-            return "Önce görev yaz."
+            return t("Önce görev yaz.")
         if not self.scope.toPlainText().strip():
-            return "Kapsamı yaz (her satır bir madde)."
+            return t("Kapsamı yaz (her satır bir madde).")
         if not self.acceptance.toPlainText().strip():
-            return "Kabul ölçütünü yaz (her satır bir madde)."
+            return t("Kabul ölçütünü yaz (her satır bir madde).")
         return ""
 
     def _lock_block(self, draft: dict[str, Any]) -> str:
@@ -830,9 +854,9 @@ class ProjectsPanel(QWidget):
             if kind != "job" or job.get("project") != draft.get("project"):
                 continue
             if job.get("cleanup_pending"):
-                return "Bu projede kilitli/çalışan iş var; önce Kilidi bırak."
+                return t("Bu projede kilitli/çalışan iş var; önce Kilidi bırak.")
             if job.get("status") in ACTIVE_JOB_STATUSES:
-                return "Bu projede çalışan iş var; bitmesini bekleyin."
+                return t("Bu projede çalışan iş var; bitmesini bekleyin.")
         return ""
 
     def set_busy(self, busy: bool) -> None:
@@ -849,19 +873,19 @@ class ProjectsPanel(QWidget):
         if self._demo:
             start_reason = ""  # neden sayfa başındaki demo notunda
         elif busy:
-            start_reason = "Artemis meşgul; hazır olunca açılır."
+            start_reason = t("Artemis meşgul; hazır olunca açılır.")
         elif lock_reason:
             start_reason = lock_reason
         elif (
             kind == "job" and record.get("mode") == "visible" and record.get("status") == "running"
         ):
-            start_reason = (
+            start_reason = t(
                 "Ajan penceresi açık: iş bitince pencereyi kapatın, sonuç o zaman kaydedilir."
             )
         elif kind == "job":
-            start_reason = "Bu bir iş; yeni iş için bir taslak seç."
+            start_reason = t("Bu bir iş; yeni iş için bir taslak seç.")
         elif kind != "draft":
-            start_reason = "Önce bir taslak hazırla veya listeden seç."
+            start_reason = t("Önce bir taslak hazırla veya listeden seç.")
         else:
             start_reason = ""
         self.start_reason.setText(start_reason)
@@ -977,7 +1001,7 @@ class ProjectsPanel(QWidget):
         elif tool_name == "code_agent_prepare" and result.success:
             spec = result.data["spec"]
             self._items.append(("draft", spec))
-            self.items.addItem(spec["project"] + " · Taslak")
+            self.items.addItem(f"{spec['project']} · {t('Taslak')}")
             self.items.setCurrentRow(len(self._items) - 1)
             self._sync_list()
         elif tool_name == "code_agent_answer" and result.success:
@@ -990,7 +1014,7 @@ class ProjectsPanel(QWidget):
         row = fallback
         for i, (kind, item) in enumerate(self._items):
             self.items.addItem(
-                f"{item['project']} · " + ("Taslak" if kind == "draft" else status_label(item))
+                f"{item['project']} · " + (t("Taslak") if kind == "draft" else status_label(item))
             )
             if identity is not None and item.get("job_id", item.get("spec_id")) == identity:
                 row = i
@@ -1013,7 +1037,7 @@ class ProjectsPanel(QWidget):
                 mode=self.selected_mode(),  # type: ignore[arg-type]  # iki sabit değerden biri
             )
         except ValidationError:
-            self.notice.setText("Proje, görev, kapsam ve kabul ölçütleri gerekli.")
+            self.notice.setText(t("Proje, görev, kapsam ve kabul ölçütleri gerekli."))
             return
         self.tool_requested.emit("code_agent_prepare", arguments)
 
@@ -1035,7 +1059,7 @@ class ProjectsPanel(QWidget):
                     answer=self.answer.toPlainText(),
                 )
             except ValidationError:
-                self.notice.setText("Cevap 1-4000 karakter olmalı.")
+                self.notice.setText(t("Cevap 1-4000 karakter olmalı."))
                 return
             self.tool_requested.emit("code_agent_answer", arguments)
 

@@ -687,6 +687,24 @@ def test_voice_command_while_typed_request_is_busy_and_skips_runner(tmp_path):
         assert bridge._stopped.wait(2)
 
 
+def test_voice_factory_config_error_shows_its_reason(tmp_path):
+    async def paid_blocked(_runtime: Any, _run: Any, _on_state: Any) -> None:
+        raise ValueError("Ücretli ses modeli için tts_cloud_allow_paid açık olmalı")
+
+    bridge = _fixture(tmp_path, [], voice_factory=paid_blocked)
+    try:
+        assert bridge.start_voice()
+        events = _collect_until(bridge, lambda items: _has_state_message(items, "voice", "off"))
+        errors = [
+            event for event in events if isinstance(event, State) and event.state == "voice_error"
+        ]
+        assert len(errors) == 1
+        assert errors[0].message.startswith("Ses açılamadı: Ücretli ses modeli")
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
 def test_voice_factory_failure_reports_error_and_typed_requests_still_work(tmp_path):
     async def broken(_runtime: Any, _run: Any, _on_state: Any) -> None:
         raise OSError("synthetic-device-missing")

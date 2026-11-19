@@ -33,6 +33,7 @@ from artemis.channels.desktop.projects_panel import status_label
 from artemis.channels.desktop.steps import step_line
 from artemis.channels.desktop.text_viewer import open_text_file
 from artemis.config.settings import load_settings
+from artemis.i18n import t
 from artemis.proactive.daily_summary import VAULT_TEXT_LIMIT, parse_day, summary_path
 from artemis.tools.plugins.memory import AppendArguments
 from artemis.tools.plugins.routines import RoutineNameArguments
@@ -54,7 +55,7 @@ def handle_event(window: DesktopWindow, event: BridgeEvent) -> None:
         window._busy = True
         window._begin_card(event.request_id, event.text)
         window._append_chat("Siz (ses)", event.text)
-        window._set_status("Çalışıyor…", "running")
+        window._set_status(t("Çalışıyor…"), "running")
         window._set_controls()
         window.overlay.set_busy(True)
         return
@@ -91,11 +92,13 @@ def handle_event(window: DesktopWindow, event: BridgeEvent) -> None:
                 "Artemis", event.result.text, step_block_for(window, event.request_id)
             )
             window.pet.answer(event.result.text)
-            window.overlay.status.setText("Yanıt hazır")
+            window.overlay.status.setText(t("Yanıt hazır"))
         return
     if isinstance(event, Failed):
         if not event.request_id:
-            window._set_status(f"Başlatılamadı · {event.error_type}", "error")
+            window._set_status(
+                t("Başlatılamadı · {error_type}").format(error_type=event.error_type), "error"
+            )
             window._append_chat("Artemis", event.message)
         elif event.request_id == window._active_request:
             dismiss_approval_for(window, event.request_id)
@@ -103,7 +106,7 @@ def handle_event(window: DesktopWindow, event: BridgeEvent) -> None:
             window._render_card(event.request_id)
             window._append_chat(
                 "Artemis",
-                f"İstek tamamlanamadı ({event.error_type}).",
+                t("İstek tamamlanamadı ({error_type}).").format(error_type=event.error_type),
                 step_block_for(window, event.request_id),
             )
             window.pet.flash_error()
@@ -120,7 +123,9 @@ def handle_event(window: DesktopWindow, event: BridgeEvent) -> None:
     if isinstance(event, ActivityGap):
         window._ops.dropped += event.dropped_count
         window.activity_notice.setText(
-            f"{window._ops.dropped} eski etkinlik görünümden düştü; kartlar eksik olabilir."
+            t(
+                "{dropped} eski etkinlik görünümden düştü; kartlar eksik olabilir."
+            ).format(dropped=window._ops.dropped)
         )
         window.activity_notice.show()
         return
@@ -142,11 +147,11 @@ def handle_state(window: DesktopWindow, event: State) -> None:
             window._show_model(event.message.removeprefix("Hazır · "))
         if event.request_id is not None or not window._busy:
             window._worker_ready = True
-            window._set_status("Hazır", "ready")
+            window._set_status(t("Hazır"), "ready")
             window._busy = False
             window._active_request = None
             window._set_controls()
-            window.overlay.set_busy(False, "Hazır")
+            window.overlay.set_busy(False, t("Hazır"))
         if window._voice_on_ready and window._worker_ready:
             window._voice_on_ready = False
             window.bridge.start_voice()
@@ -154,29 +159,31 @@ def handle_state(window: DesktopWindow, event: State) -> None:
             dismiss_approval_for(window, event.request_id)
     elif event.state == "running":
         window._busy = True
-        window._set_status("Çalışıyor…", "running")
+        window._set_status(t("Çalışıyor…"), "running")
         window._set_controls()
         window.overlay.set_busy(True)
     elif event.state == "computer":
         # Bilgisayar kullanımı oturumu (ADR 0039): ne yaptığı ve nasıl durdurulacağı
         # hep görünür; boş metin oturum bitti demektir, normal duruma dönülür.
         if event.message:
-            line = f"Bilgisayarı kullanıyorum · {event.message} · durdurmak için Esc"
+            line = t(
+                "Bilgisayarı kullanıyorum · {message} · durdurmak için Esc"
+            ).format(message=event.message)
             window._set_status(line, "running")
             window.overlay.set_busy(True, line)
         elif window._busy:
-            window._set_status("Çalışıyor…", "running")
+            window._set_status(t("Çalışıyor…"), "running")
             window.overlay.set_busy(True)
         else:
-            window._set_status("Hazır", "ready")
+            window._set_status(t("Hazır"), "ready")
     elif event.state.startswith("selection_"):
         window._show_selection(event.state.removeprefix("selection_"), event.message)
     elif event.state.startswith("dictation_"):
         window._show_dictation(event.state.removeprefix("dictation_"), event.message)
     elif event.state == "cleanup_pending":
         window._busy = True
-        window._set_status("Önceki işlem temizleniyor…", "running")
-        window.overlay.set_busy(True, "Temizleniyor…")
+        window._set_status(t("Önceki işlem temizleniyor…"), "running")
+        window.overlay.set_busy(True, t("Temizleniyor…"))
         window._set_controls()
     elif event.state == "voice":
         window._show_voice_state(event.message)
@@ -200,70 +207,82 @@ def handle_state(window: DesktopWindow, event: State) -> None:
             # Çalışırken düşen canlı yazı bir yapılandırma sorunu değildir.
             window._append_chat(
                 "Artemis",
-                "Canlı yazı çalışırken hata verdi ve bu oturumda kapatıldı; "
-                "ses canlı yazısız sürüyor.",
+                t(
+                    "Canlı yazı çalışırken hata verdi ve bu oturumda kapatıldı; "
+                    "ses canlı yazısız sürüyor."
+                ),
             )
         else:
             fix = (
-                'Paketleri pip install -e ".[stream]" ile kurun.'
+                t('Paketleri pip install -e ".[stream]" ile kurun.')
                 if kind == "deps"
-                else "Ayarlar > Ses bölümündeki canlı yazı modelini kontrol et."
+                else t("Ayarlar > Ses bölümündeki canlı yazı modelini kontrol et.")
             )
             window._append_chat(
                 "Artemis",
-                f"Canlı yazı açılamadı: {reason}. {fix} Ses canlı yazısız sürüyor.",
+                t("Canlı yazı açılamadı: {reason}. {fix} Ses canlı yazısız sürüyor.").format(
+                    reason=reason, fix=fix
+                ),
             )
     elif event.state == "voice_denoise":
         if event.message.startswith("unavailable:"):
             kind, _, reason = event.message.removeprefix("unavailable:").partition(":")
             fix = (
-                'Paketleri pip install -e ".[voice]" ile kurun.'
+                t('Paketleri pip install -e ".[voice]" ile kurun.')
                 if kind == "deps"
-                else "Artemis'i yeniden kurun ya da Ayarlar > Ses bölümündeki "
-                "ses temizleme ayarlarını kontrol et."
+                else t(
+                    "Artemis'i yeniden kurun ya da Ayarlar > Ses bölümündeki "
+                    "ses temizleme ayarlarını kontrol et."
+                )
             )
             window._append_chat(
                 "Artemis",
-                f"Gürültü engelleme açılamadı: {reason}. {fix} Ses işlenmeden sürüyor.",
+                t("Gürültü engelleme açılamadı: {reason}. {fix} Ses işlenmeden sürüyor.").format(
+                    reason=reason, fix=fix
+                ),
             )
         elif event.message == "off":
             window._append_chat(
                 "Artemis",
-                "Gürültü engelleme hata verdi ve bu oturumda kapatıldı; "
-                "ses işlenmeden devam ediyor.",
+                t(
+                    "Gürültü engelleme hata verdi ve bu oturumda kapatıldı; "
+                    "ses işlenmeden devam ediyor."
+                ),
             )
     elif event.state == "voice_echo":
         if event.message == "off":
             window._append_chat(
                 "Artemis",
-                "Yankı engelleme hata verdi ve bu oturumda kapatıldı; "
-                "ses yankı gidermeden sürüyor.",
+                t(
+                    "Yankı engelleme hata verdi ve bu oturumda kapatıldı; "
+                    "ses yankı gidermeden sürüyor."
+                ),
             )
     elif event.state == "voice_game":
         raw = event.message
         msg: str | None
         if raw.startswith("on:") and len(raw) > 3:
             model = raw[3:]
-            msg = (
+            msg = t(
                 "Oyun modu: tam ekran uygulama algılandı; büyük tanıma modeli bırakıldı, "
-                f"aktif model: {model}."
-            )
+                "aktif model: {model}."
+            ).format(model=model)
         elif raw.startswith("off:") and len(raw) > 4:
             model = raw[4:]
-            msg = f"Oyun modu bitti; geri yüklenen model: {model}."
+            msg = t("Oyun modu bitti; geri yüklenen model: {model}.").format(model=model)
         else:
             game_messages = {
-                "on": (
+                "on": t(
                     "Oyun modu: tam ekran uygulama algılandı; büyük tanıma modeli bırakıldı, "
                     "hafif model dinliyor."
                 ),
-                "off": "Oyun modu bitti; büyük tanıma modeli geri yüklendi.",
-                "error": "Oyun modu model geçişi başarısız oldu; mevcut tanıma modeli sürüyor.",
-                "unavailable": (
+                "off": t("Oyun modu bitti; büyük tanıma modeli geri yüklendi."),
+                "error": t("Oyun modu model geçişi başarısız oldu; mevcut tanıma modeli sürüyor."),
+                "unavailable": t(
                     "Oyun modu açık ama hafif model (small) bulunamadı; "
                     "Ayarlar > Ses'ten Small modelini indirin."
                 ),
-                "cloud_unavailable": (
+                "cloud_unavailable": t(
                     "Oyun modu bulut hedefi seçili ama bulut tanıma sunucusu veya modeli "
                     "ayarlanmamış; Ayarlar > Ses'ten Karma / Bulut tanımayı yapılandırın."
                 ),
@@ -280,13 +299,13 @@ def handle_state(window: DesktopWindow, event: State) -> None:
         # Karşılama geri gelir; işlem kartları da sıfırlanır (denetim günlüğü değişmez).
         clear_chat_view(window)
     elif event.state == "cancelling":
-        window._set_status("İptal ediliyor…", "running")
+        window._set_status(t("İptal ediliyor…"), "running")
     elif event.state == "stopping":
-        window._set_status("Temizleniyor…", "running")
+        window._set_status(t("Temizleniyor…"), "running")
     elif event.state == "stopped":
         window._finish_exit()
     elif event.state == "cancelled":
-        window._set_status("İptal edildi", "ready")
+        window._set_status(t("İptal edildi"), "ready")
 
 
 def clear_chat_view(window: DesktopWindow) -> None:
@@ -294,7 +313,7 @@ def clear_chat_view(window: DesktopWindow) -> None:
     window._reset_cards()
     window.chat.clear()
     if not window._busy:
-        window._set_status("Hazır", "ready")
+        window._set_status(t("Hazır"), "ready")
     window._set_controls()
 
 
@@ -311,11 +330,13 @@ def notify_job(window: DesktopWindow, fields: dict[str, Any]) -> None:
     if status == "cancelled" or key in window._notified_jobs:
         return
     window._notified_jobs.add(key)
-    project = str(fields.get("project") or "kod ajanı")
+    project = str(fields.get("project") or t("kod ajanı"))
     summary = str(fields.get("summary") or "").strip()
-    text = f"Kod işi · {project}: {status_label(fields)}" + (f". {summary}" if summary else "")
+    text = t("Kod işi · {project}: {status}").format(
+        project=project, status=status_label(fields)
+    ) + (f". {summary}" if summary else "")
     # Makbuz ipucu yalnız sohbet satırında; toast metni değişmez.
-    hint = " Makbuz için: “bu işin makbuzunu yaz”." if status == "done" else ""
+    hint = " " + t("Makbuz için: “bu işin makbuzunu yaz”.") if status == "done" else ""
     window._append_chat("Artemis", text + hint)
     toast = window._toast
     if toast is None:
@@ -335,7 +356,9 @@ def notify_job(window: DesktopWindow, fields: dict[str, Any]) -> None:
 
 def show_toast_failure(window: DesktopWindow, message: str) -> None:
     # Sohbet satırı zaten gösterildi; bildirimin neden görünmediği dürüstçe eklenir.
-    window._append_chat("Sistem", f"(Windows bildirimi gösterilmedi: {message})")
+    window._append_chat(
+        "Sistem", t("(Windows bildirimi gösterilmedi: {message})").format(message=message)
+    )
 
 
 def show_approval(window: DesktopWindow, item: Approval) -> None:
@@ -482,7 +505,7 @@ def show_routine_notice(
     window._routine_suggest = suggest
     window._summary_day = summary_day
     window.routine_run_button.setText(
-        "Aç" if summary_day else "Yaz" if suggest else "Çalıştır"
+        t("Aç") if summary_day else t("Yaz") if suggest else t("Çalıştır")
     )
     window.summary_vault_button.setVisible(bool(summary_day) and vault_note(window) is not None)
     window.routine_label.setText(text)
@@ -519,7 +542,7 @@ def append_summary_to_vault(window: DesktopWindow) -> None:
     try:
         text = path.read_text(encoding="utf-8")[:VAULT_TEXT_LIMIT].strip()
     except (OSError, UnicodeError):
-        window._set_status("Özet dosyası okunamadı.", "running")
+        window._set_status(t("Özet dosyası okunamadı."), "running")
         return
     if text:
         window._submit_routine_tool("vault_append", AppendArguments(path=note, text=text))
@@ -530,7 +553,7 @@ def run_routine_notice(window: DesktopWindow) -> None:
     if window._summary_day:
         path = summary_file(window)
         if path is not None and path.is_file():
-            open_text_file(path, "Gün özeti", window)
+            open_text_file(path, t("Gün özeti"), window)
     elif window._routine_suggest:
         # Gönderilmez: metin yalnız sohbet kutusuna yazılır, kullanıcı okuyup kendisi yollar.
         window.prompt.setPlainText(window._routine_suggest)

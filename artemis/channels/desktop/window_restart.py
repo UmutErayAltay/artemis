@@ -5,16 +5,19 @@ Config değişince çalışma zamanını kurmanın tek girişi `request_restart`
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import ValidationError
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QLabel, QSystemTrayIcon
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QSystemTrayIcon
 
 from artemis.brain.providers import provider_problem
+from artemis.channels.desktop.retranslate import retranslate_widgets
 from artemis.channels.desktop.settings_io import save_choices
 from artemis.config.settings import load_settings, same_hotkey
+from artemis.i18n import current_language, set_language, t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.app import DesktopWindow
@@ -46,7 +49,7 @@ def providers_changed(window: DesktopWindow) -> None:
     window._check_provider(open_settings=False)
     if window._exiting or window._demo:
         window.settings_panel.providers.status.setText(
-            "Kaydedildi; işlem bitince yeni ayarlar devreye girer."
+            t("Kaydedildi; işlem bitince yeni ayarlar devreye girer.")
         )
         return
     window._request_restart(window.settings_panel.providers.status)
@@ -57,7 +60,9 @@ def telegram_changed(window: DesktopWindow) -> None:
     status = window.settings_panel.telegram.message
     if window._exiting or window._demo:
         window._sync_telegram_service()
-        status.setText("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
+        status.setText(
+            t("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
+        )
         return
     # Kanal servisi çalışma zamanından bağımsızdır: yeni sohbet/token hemen eşitlenir.
     # Yeniden kurulum hemen yapıldıysa o zaten eşitlemiştir (çift yeniden başlatma olmasın);
@@ -76,7 +81,7 @@ def code_agent_config_saved(window: DesktopWindow) -> None:
     """
     if window._exiting or window._demo:
         window.projects_panel.notice.setText(
-            "Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur."
+            t("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
         )
         return
     window._request_restart()
@@ -103,13 +108,13 @@ def request_restart(window: DesktopWindow, notice: QLabel | None = None) -> None
 def config_restart_blocker(window: DesktopWindow) -> str:
     """Yeniden kurulumu engelleyen neden ('' = boşta)."""
     if window._approval_dialog is not None:
-        return "Kaydedildi; bekleyen onay bitince uygulama yeniden başlayınca geçerli olur."
+        return t("Kaydedildi; bekleyen onay bitince uygulama yeniden başlayınca geçerli olur.")
     # Panel listesi bayat olabilir (sekme açık değilken yoklanmaz); sohbetten başlayan iş
     # için doğrudan kaynak olan işçi tarafı sayımına da bakılır.
     if window.projects_panel.active_job_count() or window.bridge.active_job_count():
-        return "Kaydedildi; çalışan iş bitince uygulama yeniden başlayınca geçerli olur."
+        return t("Kaydedildi; çalışan iş bitince uygulama yeniden başlayınca geçerli olur.")
     if window._busy:
-        return "Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur."
+        return t("Kaydedildi; işlem bitince uygulama yeniden başlayınca geçerli olur.")
     return ""
 
 
@@ -127,24 +132,64 @@ def maybe_restart_for_config(window: DesktopWindow) -> None:
 def github_synced(window: DesktopWindow, report: Any, auto: bool) -> None:
     if not (auto and report.cloned):
         return
-    text = (
-        f"{len(report.cloned)} yeni GitHub reposu çekildi; "
-        "Ayarlar'dan çıkınca kullanıma girer."
-    )
+    text = t(
+        "{count} yeni GitHub reposu çekildi; Ayarlar'dan çıkınca kullanıma girer."
+    ).format(count=len(report.cloned))
     window.pet.say(text, "job")
     if window._tray is not None:
         window._tray.showMessage("Artemis", text, QSystemTrayIcon.MessageIcon.Information, 6000)
 
 
+def _prompt_unsaved(window: DesktopWindow) -> str:
+    """Kaydedilmemiş değişiklik sorusu: 'save' | 'discard' | 'cancel' döndürür."""
+    box = QMessageBox(window)
+    box.setIcon(QMessageBox.Icon.Warning)
+    box.setWindowTitle(t("Kaydedilmemiş değişiklikler"))
+    box.setText(t("Ayarlarda kaydedilmemiş değişiklikler var. Ne yapılsın?"))
+    save_btn = box.addButton(t("Kaydet"), QMessageBox.ButtonRole.AcceptRole)
+    discard_btn = box.addButton(t("Değişiklikleri at"), QMessageBox.ButtonRole.DestructiveRole)
+    cancel_btn = box.addButton(t("Vazgeç"), QMessageBox.ButtonRole.RejectRole)
+    box.setDefaultButton(save_btn)
+    box.setEscapeButton(cancel_btn)
+    box.exec()
+    clicked = box.clickedButton()
+    if clicked is save_btn:
+        return "save"
+    if clicked is discard_btn:
+        return "discard"
+    return "cancel"
+
+
+_ask_unsaved: Callable[[DesktopWindow], str] = _prompt_unsaved
+
+
+def leave_settings(window: DesktopWindow) -> bool:
+    """Ayarlar'dan çıkarken ya da uygulamadan çıkarken kaydedilmemiş değişiklikleri çözer."""
+    panel = window.settings_panel
+    if not panel.has_unsaved:
+        return True
+    choice = _ask_unsaved(window)
+    if choice == "save":
+        panel.flush()
+        return not panel.has_unsaved
+    if choice == "discard":
+        panel.discard_changes()
+        return True
+    return False
+
+
 def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
-    """Otomatik kayıt: doğrular ve yazar, yeniden kurmaz (sekmeden çıkınca kurulur)."""
+    """Ayar kaydı: doğrular ve yazar, yeniden kurmaz (Kaydet ya da sekmeden çıkınca kurulur)."""
     panel = window.settings_panel
     if window._demo or window._exiting:
-        panel.save_failed("Ayarları değiştirmek için işlemin bitmesini bekle.")
+        panel.save_failed(t("Ayarları değiştirmek için işlemin bitmesini bekle."))
         return
     values = panel.values()
+    old_language = current_language()
     try:
-        voice_key = load_settings(window._config_path).voice.listening_hotkey
+        loaded = load_settings(window._config_path)
+        old_language = loaded.language
+        voice_key = loaded.voice.listening_hotkey
         dictation_key = str(values[("dictation", "hotkey")])
         selection_key = str(values[("selection_actions", "hotkey")])
         clash = same_hotkey(dictation_key, voice_key)
@@ -154,10 +199,10 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
     except (OSError, ValueError, KeyError, ValidationError, yaml.YAMLError):
         clash = selection_clash = False  # okunamayan config aşağıdaki kayıtta yakalanır
     if clash:
-        panel.save_failed("Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seç.")
+        panel.save_failed(t("Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seç."))
         return
     if selection_clash:
-        panel.save_failed("Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı.")
+        panel.save_failed(t("Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı."))
         return
     try:
         written = save_choices(
@@ -169,9 +214,16 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
             stt_model=panel.stt_model_path(),
         )
     except (OSError, ValueError, KeyError, TypeError):
-        panel.save_failed("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
+        panel.save_failed(t("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor."))
         return
     panel.mark_saved(written)
+    new = str(values.get(("language",), old_language))
+    if new != current_language():
+        set_language(new)
+        roots: list[Any] = list(QApplication.topLevelWidgets())
+        if window._tray is not None and window._tray.contextMenu() is not None:
+            roots.append(window._tray.contextMenu())
+        retranslate_widgets(roots, new)
 
 
 def restart_runtime(window: DesktopWindow) -> None:
@@ -187,5 +239,14 @@ def restart_runtime(window: DesktopWindow) -> None:
     window._worker_ready = False
     window._busy = True
     window.bridge.shutdown()
-    window._set_status("Ayarlar uygulanıyor…", "running")
+    window._set_status(t("Ayarlar uygulanıyor…"), "running")
     window._set_controls()
+
+
+def stay_in_settings(window: DesktopWindow) -> None:
+    """Çıkış iptal edildi: Ayarlar sekmesine, sekme değişimi işleyicisini tetiklemeden dönülür."""
+    blocked = window.tabs.blockSignals(True)
+    window.tabs.setCurrentWidget(window.settings_scroll)
+    window.tabs.blockSignals(blocked)
+    window._settings_open = True
+    window._sync_navigation()

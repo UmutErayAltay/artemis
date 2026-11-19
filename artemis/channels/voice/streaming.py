@@ -19,6 +19,15 @@ _SENTENCE_END = re.compile(r"[.!?…:;]+[\"'”’)\]]*\s+|\n+")
 # Uzun ve noktalamasız ilk cümle ilk sesi geciktirmesin: bu uzunlukta virgülde bölünür.
 _SOFT_LIMIT = 160
 _SOFT_BREAK = re.compile(r",\s+")
+# Duygu etiketi ([laugh] vb.) akışta kalır ama son metinden temizlenir; karşılaştırmada yok
+# sayılmazsa akmış yanıt tur sonunda etiketsiz hâliyle ikinci kez söylenir.
+_TAG = re.compile(r"\[[^\[\]\n]{1,40}\]")
+
+
+def _comparable(text: str) -> str:
+    return " ".join(_TAG.sub(" ", text).split())
+
+
 # Türkçe geçmiş zaman: 1. tekil/çoğul (-dım/-dık) ve 3. tekil (-dı/-di/-du/-dü/-tı/-ti/-tu/-tü);
 # yanlış pozitif yalnız cümleyi adım sonuna dek bekletir, kayıp oluşturmaz.
 _CLAIM_WORD = re.compile(r"[dt][ıiuü][mk]?$")
@@ -106,8 +115,8 @@ class SpeechStream:
         if not self._closed:
             # Boşluk farkı (sağlayıcının blokları satır sonuyla birleştirmesi) akan yanıtı
             # ikinci kez söyletmesin: karşılaştırma boşluk normalize edilerek yapılır.
-            streamed = " ".join((self._finished_step_text or "").split())
-            final = " ".join(final_text.split())
+            streamed = _comparable(self._finished_step_text or "")
+            final = _comparable(final_text)
             if not streamed:
                 remainder = final
             elif final.startswith(streamed):

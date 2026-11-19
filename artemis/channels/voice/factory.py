@@ -58,7 +58,7 @@ from artemis.channels.voice.silero import SileroVAD
 from artemis.channels.voice.smart_turn import SmartTurnDetector
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
-from artemis.config.settings import Settings, VoiceConfig
+from artemis.config.settings import Settings, VoiceConfig, cloud_tts_model
 from artemis.tools.app_resolver import AliasStoreError, alias_store
 
 logger = logging.getLogger(__name__)
@@ -359,11 +359,15 @@ async def build_voice_controller(
                 synthesizer = primary_tts
         elif settings.voice.tts_backend == "cloud":
             endpoint_id = settings.voice.tts_cloud_endpoint
+            saved = cloud_tts_model(settings)
             cloud_tts = CloudSpeechSynthesizer(
                 settings.voice,
                 endpoint_id,
                 settings.endpoints[endpoint_id],
                 runtime.audit,
+                paid=None if saved is None else (
+                    saved.input_per_million > 0 or saved.output_per_million > 0
+                ),
             )
             cleanup.push_async_callback(_close_optional, cloud_tts)
             # Gizli yanıtların buluta gitmemesi için piper_model varken yerel sentez hazırlanır.

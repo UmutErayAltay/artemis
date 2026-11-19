@@ -106,10 +106,12 @@ from artemis.channels.desktop.window_restart import (
     check_provider,
     code_agent_config_saved,
     github_synced,
+    leave_settings,
     maybe_restart_for_config,
     providers_changed,
     request_restart,
     restart_runtime,
+    stay_in_settings,
     telegram_changed,
 )
 from artemis.channels.desktop.window_theme import (
@@ -121,6 +123,7 @@ from artemis.channels.desktop.window_theme import (
 )
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings
+from artemis.i18n import set_language, t
 from artemis.safety.audit import AuditLog
 from artemis.tools.toast import ToastOutcome, show_toast
 
@@ -186,11 +189,7 @@ class DesktopWindow(QMainWindow):
     theme_toggle: QPushButton
 
     def __init__(
-        self,
-        config_path: Path,
-        *,
-        demo: bool = False,
-        voice: bool = False,
+        self, config_path: Path, *, demo: bool = False, voice: bool = False,
         app: QApplication | None = None,
     ) -> None:
         super().__init__()
@@ -258,8 +257,7 @@ class DesktopWindow(QMainWindow):
         self._selection_hotkey: GlobalHotkey | None = None
         # Seçili metin eylemleri (ADR 0062): pencere yalnız düğme basışlarını köprüye iletir.
         self.selection_popup = SelectionPopup(
-            self,
-            lambda action: self.bridge.selection_run(action),
+            self, lambda action: self.bridge.selection_run(action),
             lambda: self.bridge.selection_write_back(),
         )
         self.selection_popup.apply_theme(themes.THEMES[self._theme])
@@ -282,12 +280,9 @@ class DesktopWindow(QMainWindow):
     def _build_pet(self) -> None:
         # Pet yalnız durum alır; komut ve onay yolları panelinkiyle aynıdır.
         self.pet = PetWidget(
-            on_toggle_voice=self.voice_button_click,
-            on_show_panel=self._show_panel,
-            on_quick=self._show_overlay,
-            on_approval=self._focus_approval,
-            on_quit=self._request_exit,
-            on_submit=lambda text: self._submit_text(text),
+            on_toggle_voice=self.voice_button_click, on_show_panel=self._show_panel,
+            on_quick=self._show_overlay, on_approval=self._focus_approval,
+            on_quit=self._request_exit, on_submit=lambda text: self._submit_text(text),
             pets_dir=pets_dir_for(self._config_path),
         )
 
@@ -329,13 +324,15 @@ class DesktopWindow(QMainWindow):
         try:
             hotkey = GlobalHotkey(text, self._hotkey_pressed.emit)
         except ValueError:
-            self._hotkey_problem(f"Ses kısayolu tanınmadı: {text}")
+            self._hotkey_problem(t("Ses kısayolu tanınmadı: {text}").format(text=text))
             return
         self._hotkey_pressed.connect(self.voice_button_click)
         if hotkey.start():
             self._hotkey = hotkey
         elif sys.platform == "win32":
-            self._hotkey_problem(f"Ses kısayolu ({text}) başka bir programda kayıtlı.")
+            self._hotkey_problem(
+                t("Ses kısayolu ({text}) başka bir programda kayıtlı.").format(text=text)
+            )
 
     def _start_dictation_hotkey(self) -> None:
         """Dikte kısayolu (ADR 0057): kapalıyken hiç kaydedilmez; ayar uygulanınca yenilenir."""
@@ -352,12 +349,14 @@ class DesktopWindow(QMainWindow):
         try:
             hotkey = GlobalHotkey(text, self._dictation_pressed.emit)
         except ValueError:
-            self._hotkey_problem(f"Dikte kısayolu tanınmadı: {text}")
+            self._hotkey_problem(t("Dikte kısayolu tanınmadı: {text}").format(text=text))
             return
         if hotkey.start():
             self._dictation_hotkey = hotkey
         elif sys.platform == "win32":
-            self._hotkey_problem(f"Dikte kısayolu ({text}) başka bir programda kayıtlı.")
+            self._hotkey_problem(
+                t("Dikte kısayolu ({text}) başka bir programda kayıtlı.").format(text=text)
+            )
 
     def _start_selection_hotkey(self) -> None:
         """Seçili metin kısayolu (ADR 0062): kapalıyken kaydedilmez; ayar uygulanınca yenilenir."""
@@ -374,12 +373,14 @@ class DesktopWindow(QMainWindow):
         try:
             hotkey = GlobalHotkey(text, self._selection_pressed.emit)
         except ValueError:
-            self._hotkey_problem(f"Seçili metin kısayolu tanınmadı: {text}")
+            self._hotkey_problem(t("Seçili metin kısayolu tanınmadı: {text}").format(text=text))
             return
         if hotkey.start():
             self._selection_hotkey = hotkey
         elif sys.platform == "win32":
-            self._hotkey_problem(f"Seçili metin kısayolu ({text}) başka bir programda kayıtlı.")
+            self._hotkey_problem(
+                t("Seçili metin kısayolu ({text}) başka bir programda kayıtlı.").format(text=text)
+            )
 
     def _show_selection(self, kind: str, message: str) -> None:
         """Seçili metin eylemi durumu: pencere imleç yanında açılır, sonuç orada görünür."""
@@ -396,22 +397,22 @@ class DesktopWindow(QMainWindow):
     def _show_dictation(self, kind: str, message: str) -> None:
         """Dikte durumu (ADR 0057): kayıt sürerken görünür gösterge, bitince normal duruma dönüş."""
         if kind in {"listening", "working"}:
-            line = "Dikte dinliyor…" if kind == "listening" else "Dikte yazıya çevriliyor…"
+            line = t("Dikte dinliyor…") if kind == "listening" else t("Dikte yazıya çevriliyor…")
             self._set_status(line, "running")
             self.overlay.set_busy(True, line)
             self.pet.set_voice("listening" if kind == "listening" else "thinking")
         elif kind == "idle":
-            if self._busy:
-                self._set_status("Çalışıyor…", "running")
-            else:
-                self._set_status("Hazır", "ready")
+            self._set_status(t("Çalışıyor…") if self._busy else t("Hazır"),
+                             "running" if self._busy else "ready")
             self.overlay.set_busy(self._busy)
             self.pet.set_voice(self._voice_state)
         elif kind == "message" and message:
             self._set_status(message, "ready")
         elif kind == "text":
             # Yazılamayan metin kaybolmasın; pano değil panel (konuşma geçmişine girmez).
-            self._append_chat("Artemis", f"Dikte metni (yazılmadı ya da yarım kaldı): {message}")
+            self._append_chat("Artemis", t(
+                "Dikte metni (yazılmadı ya da yarım kaldı): {message}"
+            ).format(message=message))
 
     def _hotkey_problem(self, message: str) -> None:
         if self._tray is not None:
@@ -476,7 +477,7 @@ class DesktopWindow(QMainWindow):
 
         self.chat_page = build_chat_page(self)
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.chat_page, "Sohbet")
+        self.tabs.addTab(self.chat_page, t("Sohbet"))
         self.projects_panel = ProjectsPanel(demo=self._demo, config_path=self._config_path)
         self.projects_panel.tool_requested.connect(self._submit_project_tool)
         self.projects_panel.config_saved.connect(self._code_agent_config_saved)
@@ -489,8 +490,7 @@ class DesktopWindow(QMainWindow):
         self._projects_timer.timeout.connect(self._refresh_projects)
         self._projects_timer.start()
         self.settings_panel = SettingsPanel(
-            self._config_path,
-            demo=self._demo,
+            self._config_path, demo=self._demo,
             state=QSettings(QSettings.Format.IniFormat, QSettings.Scope.UserScope,
                             "Artemis", "appearance"),
         )
@@ -526,18 +526,18 @@ class DesktopWindow(QMainWindow):
         # Ctrl+, her yerden Ayarlar'ı açar (pencere kapsamlı).
         self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
         self._settings_shortcut.activated.connect(self._show_settings)
-        self.tabs.addTab(self.settings_scroll, "Ayarlar")
+        self.tabs.addTab(self.settings_scroll, t("Ayarlar"))
         self.projects_page = page_frame(self.projects_panel)
-        self.tabs.addTab(self.projects_page, "Projeler")
+        self.tabs.addTab(self.projects_page, t("Projeler"))
         self.data_panel = DataPanel(demo=self._demo)
         self.data_panel.tool_requested.connect(self._submit_project_tool)
         self.data_page = page_frame(self.data_panel)
-        self.tabs.addTab(self.data_page, "Geçmiş")
+        self.tabs.addTab(self.data_page, t("Geçmiş"))
         self.automation_panel = AutomationPanel(demo=self._demo, config_path=self._config_path)
         self.automation_panel.tool_requested.connect(self._submit_automation_tool)
         self.automation_panel.settings_requested.connect(self._open_settings_section)
         self.automation_page = page_frame(self.automation_panel)
-        self.tabs.addTab(self.automation_page, "Otomasyon")
+        self.tabs.addTab(self.automation_page, t("Otomasyon"))
         # Pet atölyesi günlük ayarlardan ayrı sayfadır; PetSection kendi başlığını taşır
         # ama kaydırıcısı yoktur.
         self.pet_scroll = QScrollArea()
@@ -546,7 +546,7 @@ class DesktopWindow(QMainWindow):
         center_page(self.pet_scroll)
         self.pet_scroll.setWidget(self.settings_panel.pet)
         self.pet_page = page_frame(self.pet_scroll)
-        self.tabs.addTab(self.pet_page, "Petler")
+        self.tabs.addTab(self.pet_page, t("Petler"))
         self.tabs.tabBar().hide()
         sidebar = build_sidebar(self, [
             ("Sohbet", self.chat_page), ("Projeler", self.projects_page),
@@ -573,7 +573,7 @@ class DesktopWindow(QMainWindow):
         self.settings_panel.set_theme(selected_theme)
         self.settings_panel.theme_changed.connect(self._apply_theme)
         self._apply_theme(selected_theme)
-        self._describe_voice(_VOICE_LABELS["off"], False)
+        self._describe_voice(t(_VOICE_LABELS["off"]), False)
         self._set_controls()
         self._fit_shell()
         QTimer.singleShot(0, self.prompt.setFocus)
@@ -599,8 +599,7 @@ class DesktopWindow(QMainWindow):
             button.setChecked(page is self.tabs.currentWidget())
 
     def _settings_tab_changed(self, *_args: object) -> None:
-        """Ayarlar'dan çıkış: bekleyen düzenleme yazılır, sonra tek yeniden kurulum. Girişte
-        "geri al" taban çizgisi o anki kayıtlı dosyadan yenilenir."""
+        """Ayarlar'dan çıkışta kaydedilmemiş değişiklik sorulur; girişte taban çizgisi alınır."""
         is_open = self.tabs.currentWidget() is self.settings_scroll
         if is_open == self._settings_open:
             return
@@ -608,7 +607,9 @@ class DesktopWindow(QMainWindow):
         if is_open:
             self.settings_panel.begin_session()
             return
-        self.settings_panel.flush()
+        if not leave_settings(self):
+            stay_in_settings(self)
+            return
         if self._settings_restart_pending:
             self._request_restart(self.settings_panel.notice)
 
@@ -681,17 +682,17 @@ class DesktopWindow(QMainWindow):
         self._tray = QSystemTrayIcon(app_icon(), self)
         self._tray.setToolTip("Artemis")
         menu = QMenu(self)
-        open_action = menu.addAction("Paneli aç")
-        quick_action = menu.addAction("Hızlı komut")
-        pet_action = menu.addAction("Peti göster/gizle")
+        open_action = menu.addAction(t("Paneli aç"))
+        quick_action = menu.addAction(t("Hızlı komut"))
+        pet_action = menu.addAction(t("Peti göster/gizle"))
         if sys.platform == "win32" and not self._demo:
             # ADR 0030: kayıt defteri değişikliği yalnız kullanıcının bu tıklamasıyla olur.
-            self._autostart_action = menu.addAction("Windows açılışında başlat")
+            self._autostart_action = menu.addAction(t("Windows açılışında başlat"))
             self._autostart_action.setCheckable(True)
             self._autostart_action.setChecked(self._autostart_state() == "on")
             self._autostart_action.toggled.connect(self._toggle_autostart)
         menu.addSeparator()
-        exit_action = menu.addAction("Çıkış")
+        exit_action = menu.addAction(t("Çıkış"))
         open_action.triggered.connect(self._show_panel)
         quick_action.triggered.connect(self._show_overlay)
         pet_action.triggered.connect(self.pet.toggle_pet)
@@ -802,8 +803,8 @@ class DesktopWindow(QMainWindow):
         shown = metrics.elidedText(text, Qt.TextElideMode.ElideRight, limit)
         self.model_value.setText(shown)
         self.model_value.setToolTip(
-            f"Kullanılan beyin modeli: {text}. Değiştirmek için Ayarlar'ı aç."
-            if text else "Kullanılan beyin modeli"
+            t("Kullanılan beyin modeli: {text}. Değiştirmek için Ayarlar'ı aç.").format(text=text)
+            if text else t("Kullanılan beyin modeli")
         )
         # Çipin 8px yan dolgusu iki yanda 16px ekler; 8px pay ölçü sapmasına karşıdır.
         self.model_value.setFixedWidth(max(60, metrics.horizontalAdvance(shown) + 24))
@@ -855,13 +856,13 @@ class DesktopWindow(QMainWindow):
     def _submit_text(self, text: str) -> bool:
         request_id = self.bridge.submit(text)
         if request_id is None:
-            self._set_status("Hazır değil veya önceki işlem temizleniyor.", "running")
+            self._set_status(t("Hazır değil veya önceki işlem temizleniyor."), "running")
             return False
         self._active_request = request_id
         self._busy = True
         self._begin_card(request_id, text)
         self._append_chat("Siz", text)
-        self._set_status("Çalışıyor…", "running")
+        self._set_status(t("Çalışıyor…"), "running")
         self._set_controls()
         self.overlay.set_busy(True)
         return True
@@ -885,8 +886,8 @@ class DesktopWindow(QMainWindow):
                 self.automation_panel.notice if from_automation
                 else self.settings_panel.routines.notice
             )
-            notice.setText("Başka işlem sürüyor; çalıştırılmadı.")
-            self._set_status("Başka işlem sürüyor; rutin çalıştırılmadı.", "running")
+            notice.setText(t("Başka işlem sürüyor; çalıştırılmadı."))
+            self._set_status(t("Başka işlem sürüyor; rutin çalıştırılmadı."), "running")
             return
         self._active_request = request_id
         self._busy = True
@@ -896,13 +897,13 @@ class DesktopWindow(QMainWindow):
     def _routine_tool_title(self, name: str, arguments: BaseModel) -> str:
         """İşlem kartı başlığı: ham araç adı yerine insan okur ad (kapı yolu değişmez)."""
         if name == "vault_append":
-            return "Gün özetini vault'a ekle"
+            return t("Gün özetini vault'a ekle")
         if name == "research_cancel":
-            return "Araştırmayı durdur"
+            return t("Araştırmayı durdur")
         if name == "routine_run":
-            label = self.bridge.labels().get(name, ("Rutin çalıştır", ""))[0]
+            label = t(self.bridge.labels().get(name, ("Rutin çalıştır", ""))[0])
             return f"{label}: {getattr(arguments, 'name', '')}".rstrip(": ")
-        return f"Rutin işlemi: {name}"
+        return t("Rutin işlemi: {name}").format(name=name)
 
     def _submit_project_tool(self, name: str, arguments: BaseModel) -> None:
         # Durum yoklaması salt okunur ve 2 sn'de bir gelir: kart, meşgul durumu ve pet
@@ -912,13 +913,13 @@ class DesktopWindow(QMainWindow):
         if request_id is None:
             if not quiet:
                 panel = self.projects_panel if name.startswith("code_agent_") else self.data_panel
-                panel.notice.setText("Başka işlem sürüyor; istek çalıştırılmadı.")
+                panel.notice.setText(t("Başka işlem sürüyor; istek çalıştırılmadı."))
             return
         self._active_request = request_id
         if quiet:
             return
         self._busy = True
-        self._begin_card(request_id, f"Proje işlemi: {name}")
+        self._begin_card(request_id, t("Proje işlemi: {name}").format(name=name))
         self._set_controls()
 
     def _refresh_projects(self) -> None:
@@ -937,11 +938,8 @@ class DesktopWindow(QMainWindow):
                     self._config_restart_serial = self.projects_panel.status_serial
                     self._maybe_restart_for_config()
             return
-        if (
-            self.tabs.currentWidget() is self.projects_page
-            and self._worker_ready
-            and not self._busy
-        ):
+        on_projects = self.tabs.currentWidget() is self.projects_page
+        if on_projects and self._worker_ready and not self._busy:
             self.projects_panel.refresh()
 
     def _new_chat(self) -> None:
@@ -992,37 +990,39 @@ class DesktopWindow(QMainWindow):
                     # Uygulanamayan auto diskte kalmasın; geri yazılamazsa durum yine hata gösterir.
                     with contextlib.suppress(OSError, ValueError):
                         save_computer_mode(self._config_path, "accept")
-                msg = "Kip kaydedilemedi" if not saved else "Otomatik onay uygulanamadı"
+                msg = t("Kip kaydedilemedi") if not saved else t("Otomatik onay uygulanamadı")
                 self._set_status(msg, "error")
                 shown = False
             elif not checked:
                 if not saved or not applied:
                     msg = (
-                        "Kip kapatıldı ama kaydedilemedi" if applied
-                        else "Kip çalışma zamanına uygulanamadı"
+                        t("Kip kapatıldı ama kaydedilemedi") if applied
+                        else t("Kip çalışma zamanına uygulanamadı")
                     )
                     self._set_status(msg, "error")
                 shown = not applied
             if saved and applied:
-                self._append_chat("Sistem", f"Bilgisayar kullanımı kipi: {mode}.")
+                self._append_chat(
+                    "Sistem", t("Bilgisayar kullanımı kipi: {mode}.").format(mode=mode)
+                )
         self._sync_auto_controls(shown)
 
     def _auto_mode_box(self) -> tuple[QMessageBox, QPushButton]:
         """Uyarı kutusu ve "aç" düğmesi; ayrı kurulur ki README görüntüsü bloklamadan alınsın."""
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle("Otomatik onayı aç?")
-        box.setText(
+        box.setWindowTitle(t("Otomatik onayı aç?"))
+        box.setText(t(
             "Otomatik onayda Artemis ekranı okur, tıklar ve yazar; hassas adımları da "
             "sana sormadan yapar. Esc her an durdurur."
-        )
-        box.setInformativeText(
+        ))
+        box.setInformativeText(t(
             "Yanlış anlaşılan bir komut ya da ekrandaki zararlı bir metin, istemediğin bir "
             "işlemi tetikleyebilir; web okuduktan sonra bağlantılar da sorulmadan açılır. "
             "Terminal, Artemis ve parola yöneticisi yine engelli."
-        )
-        yes = box.addButton("Riski anlıyorum, aç", QMessageBox.ButtonRole.AcceptRole)
-        no = box.addButton("Vazgeç", QMessageBox.ButtonRole.RejectRole)
+        ))
+        yes = box.addButton(t("Riski anlıyorum, aç"), QMessageBox.ButtonRole.AcceptRole)
+        no = box.addButton(t("Vazgeç"), QMessageBox.ButtonRole.RejectRole)
         box.setDefaultButton(no)
         box.setEscapeButton(no)
         return box, yes
@@ -1035,12 +1035,14 @@ class DesktopWindow(QMainWindow):
 
     def _show_auto_state(self, on: bool) -> None:
         """Simge anahtarı metin taşımaz; durum erişilebilir açıklamada ve ipucunda okunur."""
-        self.auto_button.setAccessibleDescription(f"Oto onay {'açık' if on else 'kapalı'}")
-        mode = "otomatik" if on else "her işlemde sor"
-        self.auto_button.setToolTip(
-            f"Onay: {mode}. Oto onay açıkken bilgisayar kullanımı adımları sormadan çalışır; "
-            "Esc yine durdurur. Değişiklik hemen geçerli, Uygula gerekmez."
+        self.auto_button.setAccessibleDescription(
+            t("Oto onay açık") if on else t("Oto onay kapalı")
         )
+        mode = t("otomatik") if on else t("her işlemde sor")
+        self.auto_button.setToolTip(t(
+            "Onay: {mode}. Oto onay açıkken bilgisayar kullanımı adımları sormadan çalışır; "
+            "Esc yine durdurur. Değişiklik hemen geçerli, Uygula gerekmez."
+        ).format(mode=mode))
 
     def _live_continuous(self, checked: bool) -> None:
         # Kayıt Uygula ile olur; ses açıksa kip hemen uygulanır.
@@ -1065,9 +1067,9 @@ class DesktopWindow(QMainWindow):
         self._voice_state = state
         if state == "off":
             self._continuous = False
-        text = _VOICE_LABELS.get(state, _VOICE_LABELS["off"])
+        text = t(_VOICE_LABELS.get(state, _VOICE_LABELS["off"]))
         if self._continuous:
-            text += " · Kesintisiz"
+            text += " · " + t("Kesintisiz")
         self.voice_state.setText(text)
         self.overlay.voice_state.setText(text)
         on = state in {"preparing", "listening", "awaiting_command", "thinking", "speaking"}
@@ -1080,11 +1082,11 @@ class DesktopWindow(QMainWindow):
     def _describe_voice(self, text: str, on: bool) -> None:
         """Üst çubuk ve yazma alanındaki ses anahtarı aynı durumu ve açıklamayı taşır."""
         if self._demo:
-            tip = "Demo modunda ses yok"
+            tip = t("Demo modunda ses yok")
         elif on:
-            tip = f"{text} · kapatmak için tıkla"
+            tip = t("{text} · kapatmak için tıkla").format(text=text)
         else:
-            tip = f"{text} · açmak için tıkla; mikrofonu yalnız sen açarsın"
+            tip = t("{text} · açmak için tıkla; mikrofonu yalnız sen açarsın").format(text=text)
         for button in (self.voice_button, self.composer_voice):
             button.setChecked(on)
             button.setAccessibleDescription(text)
@@ -1114,7 +1116,7 @@ class DesktopWindow(QMainWindow):
         self.cancel_button.setVisible(cancellable)
         self.pet.set_busy(self._busy and not self._exiting)
         if self._tray is not None:
-            status = "çalışıyor" if self._busy else "hazır"
+            status = t("çalışıyor") if self._busy else t("hazır")
             self._tray.setToolTip(f"Artemis · {status}")
 
     def _drain_bridge(self) -> None:
@@ -1128,7 +1130,7 @@ class DesktopWindow(QMainWindow):
                 self._turn_steps.clear()
                 self._reset_cards()
                 self.chat.clear()
-                self._append_chat("Sistem", "Ayarlar uygulandı; yeni sohbet başladı.")
+                self._append_chat("Sistem", t("Ayarlar uygulandı; yeni sohbet başladı."))
                 self._show_voice_state("off")
                 self.pet.set_busy(False)
                 # Demo kipi yeniden kurulumda da demo fabrikasını korur; gerçek runtime açılmaz.
@@ -1139,7 +1141,7 @@ class DesktopWindow(QMainWindow):
                     self._start_selection_hotkey()
                 self.settings_panel.refresh()
                 self.settings_panel.notice.setText(
-                    "Ayarlar uygulandı; seçilen model ve mikrofon kullanılıyor."
+                    t("Ayarlar uygulandı; seçilen model ve mikrofon kullanılıyor.")
                 )
             else:
                 self._finish_exit()
@@ -1180,15 +1182,16 @@ class DesktopWindow(QMainWindow):
         add_step(self, block, activity)
 
     def _request_exit(self) -> None:
-        # Bekleyen düzenleme kaybolmasın; _exiting kayıtları reddeder, o yüzden önce.
-        self.settings_panel.flush()
+        # Kaydedilmemiş düzenleme varsa kullanıcıya sorulur; Vazgeç veya hata çıkışı iptal eder.
+        if not leave_settings(self):
+            return
         self._exiting = True
         if self._approval_dialog is not None:
             self._approval_dialog.reject()
         self.bridge.shutdown()
-        self._set_status("Temizleniyor…", "running")
+        self._set_status(t("Temizleniyor…"), "running")
         self._set_controls()
-        self.overlay.set_busy(True, "Temizleniyor…")
+        self.overlay.set_busy(True, t("Temizleniyor…"))
 
     def _finish_exit(self) -> None:
         if not self._exiting:
@@ -1282,6 +1285,10 @@ def run_desktop(
     app.setWindowIcon(app_icon())
     app.setFont(QFont("Segoe UI", 10))
     app.setStyleSheet(_STYLE)
+    if not demo:
+        # Ayar okunamazsa arayüz Türkçe kalır.
+        with contextlib.suppress(OSError, ValueError, yaml.YAMLError):
+            set_language(load_settings(config_path).language)
     maybe_connect(config_path)
     window = build_window(config_path, demo=demo, voice=voice, app=app)
     if server is not None:

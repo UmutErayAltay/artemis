@@ -30,6 +30,7 @@ from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QImage, QImageReader, QPixmap
 
 from artemis.config.settings import load_settings
+from artemis.i18n import t
 from artemis.safety.paths import safe_join
 
 log = logging.getLogger(__name__)
@@ -102,9 +103,13 @@ def pets_dir_for(config_path: Path) -> Path:
 def _text(data: dict[str, object], key: str, limit: int, *, required: bool = True) -> str:
     value = data.get(key, None if required else "")
     if not isinstance(value, str) or (required and not value.strip()):
-        raise PetFormatError(f"pet.json: '{key}' alanı eksik ya da metin değil.")
+        raise PetFormatError(
+            t("pet.json: '{key}' alanı eksik ya da metin değil.").format(key=key)
+        )
     if len(value) > limit:
-        raise PetFormatError(f"pet.json: '{key}' alanı {limit} karakterden uzun.")
+        raise PetFormatError(
+            t("pet.json: '{key}' alanı {limit} karakterden uzun.").format(key=key, limit=limit)
+        )
     return value
 
 
@@ -121,38 +126,44 @@ def read_pet(folder: Path, source: Source) -> PetInfo:
     try:
         meta = safe_join(folder, "pet.json", allow_symlinks=links)
         if not meta.is_file() or meta.stat().st_size > MAX_JSON_BYTES:
-            raise PetFormatError("pet.json yok ya da 64 KB'tan büyük.")
+            raise PetFormatError(t("pet.json yok ya da 64 KB'tan büyük."))
         data = json.loads(meta.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:  # JSONDecodeError/UnicodeDecodeError ValueError'dır
         if isinstance(error, PetFormatError):
             raise
-        raise PetFormatError(f"pet.json okunamadı: {error}") from error
+        raise PetFormatError(t("pet.json okunamadı: {error}").format(error=error)) from error
     if not isinstance(data, dict):
-        raise PetFormatError("pet.json bir nesne olmalı.")
+        raise PetFormatError(t("pet.json bir nesne olmalı."))
     pet_id = _text(data, "id", 64)
     if not ID_RE.fullmatch(pet_id):
-        raise PetFormatError("Pet kimliği küçük harf, rakam ve '-' olmalı (en çok 64 karakter).")
+        raise PetFormatError(
+            t("Pet kimliği küçük harf, rakam ve '-' olmalı (en çok 64 karakter).")
+        )
     name = _text(data, "displayName", 80)
     description = _text(data, "description", 500, required=False)
     sheet_name = _text(data, "spritesheetPath", 120)
     if not sheet_name.lower().endswith(IMAGE_SUFFIXES):
-        raise PetFormatError("Spritesheet .webp ya da .png olmalı.")
+        raise PetFormatError(t("Spritesheet .webp ya da .png olmalı."))
     try:
         sheet = safe_join(folder, sheet_name, allow_symlinks=links)
         if not sheet.is_file():
-            raise PetFormatError("pet.json'daki spritesheet dosyası yok.")
+            raise PetFormatError(t("pet.json'daki spritesheet dosyası yok."))
         if sheet.stat().st_size > MAX_IMAGE_BYTES:
-            raise PetFormatError("Spritesheet 20 MB'tan büyük.")
+            raise PetFormatError(t("Spritesheet 20 MB'tan büyük."))
     except (OSError, ValueError) as error:
         if isinstance(error, PetFormatError):
             raise
-        raise PetFormatError(f"Spritesheet yolu geçersiz: {error}") from error
+        raise PetFormatError(
+            t("Spritesheet yolu geçersiz: {error}").format(error=error)
+        ) from error
     size = _header_size(sheet)
     if not size.isValid():
-        raise PetFormatError("Spritesheet görseli okunamadı (WebP/PNG değil ya da bozuk).")
+        raise PetFormatError(t("Spritesheet görseli okunamadı (WebP/PNG değil ya da bozuk)."))
     if (size.width(), size.height()) not in SHEET_SIZES:
         raise PetFormatError(
-            f"Spritesheet boyutu {size.width()}×{size.height()}; 1536×1872 ya da 1536×2288 olmalı."
+            t("Spritesheet boyutu {width}×{height}; 1536×1872 ya da 1536×2288 olmalı.").format(
+                width=size.width(), height=size.height()
+            )
         )
     return PetInfo(pet_id, name, description, folder, sheet, source)
 
@@ -160,9 +171,9 @@ def read_pet(folder: Path, source: Source) -> PetInfo:
 def load_sheet(info: PetInfo) -> QImage:
     image = QImage()
     if not image.load(str(info.sheet)) or image.isNull():
-        raise PetFormatError("Spritesheet görseli çözülemedi.")
+        raise PetFormatError(t("Spritesheet görseli çözülemedi."))
     if (image.width(), image.height()) not in SHEET_SIZES:
-        raise PetFormatError("Spritesheet boyutu beklenenden farklı.")
+        raise PetFormatError(t("Spritesheet boyutu beklenenden farklı."))
     return image.convertToFormat(QImage.Format.Format_ARGB32_Premultiplied)
 
 
@@ -261,9 +272,15 @@ def _folder_entries(src: Path) -> list[_Entry]:
     for path in sorted(src.iterdir()):
         mode = path.lstat().st_mode
         if stat.S_ISLNK(mode):
-            raise PetImportError(f"Sembolik bağlantı kabul edilmez: {path.name}")
+            raise PetImportError(
+                t("Sembolik bağlantı kabul edilmez: {name}").format(name=path.name)
+            )
         if not stat.S_ISREG(mode):
-            raise PetImportError(f"Klasör içinde alt klasör/özel dosya kabul edilmez: {path.name}")
+            raise PetImportError(
+                t("Klasör içinde alt klasör/özel dosya kabul edilmez: {name}").format(
+                    name=path.name
+                )
+            )
         entries.append((path.name, path.stat().st_size, file_opener(path)))
     return entries
 
@@ -272,9 +289,11 @@ def _zip_entries(archive: zipfile.ZipFile) -> list[_Entry]:
     entries: list[_Entry] = []
     for member in archive.infolist():
         if stat.S_ISLNK(member.external_attr >> 16):
-            raise PetImportError(f"Zip içinde sembolik bağlantı kabul edilmez: {member.filename}")
+            raise PetImportError(
+                t("Zip içinde sembolik bağlantı kabul edilmez: {name}").format(name=member.filename)
+            )
         if member.is_dir():
-            raise PetImportError("Zip içinde klasör kabul edilmez; dosyalar kökte olmalı.")
+            raise PetImportError(t("Zip içinde klasör kabul edilmez; dosyalar kökte olmalı."))
         entries.append(
             (member.filename, member.file_size, partial(archive.open, member))
         )
@@ -283,23 +302,25 @@ def _zip_entries(archive: zipfile.ZipFile) -> list[_Entry]:
 
 def _stage(entries: list[_Entry], staging: Path) -> None:
     if len(entries) != 2:
-        raise PetImportError("Yalnız pet.json ve tek bir spritesheet görseli kabul edilir.")
+        raise PetImportError(t("Yalnız pet.json ve tek bir spritesheet görseli kabul edilir."))
     if sum(size for _, size, _ in entries) > MAX_ZIP_BYTES:
-        raise PetImportError("Toplam boyut 25 MB sınırını aşıyor.")
+        raise PetImportError(t("Toplam boyut 25 MB sınırını aşıyor."))
     names = [name for name, _, _ in entries]
     if "pet.json" not in names or sum(n.lower().endswith(IMAGE_SUFFIXES) for n in names) != 1:
-        raise PetImportError("Yalnız pet.json ve tek bir .webp/.png görsel kabul edilir.")
+        raise PetImportError(t("Yalnız pet.json ve tek bir .webp/.png görsel kabul edilir."))
     total = 0
     for name, size, opener in entries:
         try:
             target = safe_join(staging, name, allow_symlinks=False)
         except ValueError as error:
-            raise PetImportError(f"Güvensiz dosya yolu ({name}): {error}") from error
+            raise PetImportError(
+                t("Güvensiz dosya yolu ({name}): {error}").format(name=name, error=error)
+            ) from error
         if target.parent != staging.resolve():
-            raise PetImportError(f"Alt klasör kabul edilmez: {name}")
+            raise PetImportError(t("Alt klasör kabul edilmez: {name}").format(name=name))
         limit = MAX_JSON_BYTES if name == "pet.json" else MAX_IMAGE_BYTES
         if size > limit:
-            raise PetImportError(f"{name} boyut sınırını aşıyor.")
+            raise PetImportError(t("{name} boyut sınırını aşıyor.").format(name=name))
         with opener() as source, target.open("xb") as out:
             written = 0
             while chunk := source.read(_CHUNK):
@@ -307,7 +328,9 @@ def _stage(entries: list[_Entry], staging: Path) -> None:
                 total += len(chunk)
                 # Bildirilen boyuta güvenilmez: gerçek okunan bayt sayılır (zip bombası).
                 if written > limit or total > MAX_ZIP_BYTES:
-                    raise PetImportError(f"{name} açılırken boyut sınırı aşıldı.")
+                    raise PetImportError(
+                        t("{name} açılırken boyut sınırı aşıldı.").format(name=name)
+                    )
                 out.write(chunk)
 
 
@@ -317,7 +340,7 @@ def import_pet(src: Path, pets_dir: Path, *, overwrite: bool = False) -> PetInfo
         pets_dir.mkdir(parents=True, exist_ok=True)
         staging = Path(tempfile.mkdtemp(prefix=".import-", dir=pets_dir))
     except OSError as error:
-        raise PetImportError(f"Pet klasörü hazırlanamadı: {error}") from error
+        raise PetImportError(t("Pet klasörü hazırlanamadı: {error}").format(error=error)) from error
     try:
         if src.is_dir():
             _stage(_folder_entries(src), staging)
@@ -331,14 +354,18 @@ def import_pet(src: Path, pets_dir: Path, *, overwrite: bool = False) -> PetInfo
             # akış zlib.error/EOFError verir; arayüz yalnız PetError bekler.
             except (zipfile.BadZipFile, RuntimeError, NotImplementedError, EOFError,
                     zlib.error) as error:
-                raise PetImportError("Dosya geçerli ya da desteklenen bir .zip değil.") from error
+                raise PetImportError(
+                    t("Dosya geçerli ya da desteklenen bir .zip değil.")
+                ) from error
         info = read_pet(staging, "artemis")
         load_sheet(info)  # bozuk gövde kurulumdan önce yakalanır
         target = pets_dir / info.id
         backup: Path | None = None
         if target.exists() or target.is_symlink():
             if not overwrite:
-                raise PetExistsError(f"'{info.id}' kimlikli pet zaten kurulu.")
+                raise PetExistsError(
+                    t("'{pet_id}' kimlikli pet zaten kurulu.").format(pet_id=info.id)
+                )
             if target.is_symlink() or target.is_file():
                 target.unlink()
             else:
@@ -356,7 +383,7 @@ def import_pet(src: Path, pets_dir: Path, *, overwrite: bool = False) -> PetInfo
             shutil.rmtree(backup, ignore_errors=True)
         return read_pet(target, "artemis")
     except OSError as error:
-        raise PetImportError(f"Pet kurulamadı: {error}") from error
+        raise PetImportError(t("Pet kurulamadı: {error}").format(error=error)) from error
     finally:
         shutil.rmtree(staging, ignore_errors=True)
 
@@ -364,12 +391,12 @@ def import_pet(src: Path, pets_dir: Path, *, overwrite: bool = False) -> PetInfo
 def delete_pet(pets_dir: Path, pet_id: str) -> None:
     """Yalnız Artemis'in kendi klasöründeki pet silinir; Codex pet'lerine hiç dokunulmaz."""
     if not ID_RE.fullmatch(pet_id):
-        raise PetError("Geçersiz pet kimliği.")
+        raise PetError(t("Geçersiz pet kimliği."))
     try:
         folder = safe_join(pets_dir, pet_id, allow_symlinks=False)
         if not folder.is_dir():
-            raise PetError("Pet bulunamadı.")
+            raise PetError(t("Pet bulunamadı."))
         shutil.rmtree(folder)
     except (OSError, ValueError) as error:
-        raise PetError(f"Pet silinemedi: {error}") from error
+        raise PetError(t("Pet silinemedi: {error}").format(error=error)) from error
 

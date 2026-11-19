@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
+from artemis.i18n import t
 from artemis.update_check import UpdateResult, check_latest, current_version
 
 _SHUTDOWN_WAIT_MS = 6000
@@ -64,18 +65,20 @@ class UpdateSection(QWidget):
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(8)
 
-        self.version_label = QLabel(f"Kurulu sürüm: {current_version()}", self)
+        self.version_label = QLabel(
+            t("Kurulu sürüm: {version}").format(version=current_version()), self
+        )
         layout.addWidget(self.version_label)
 
         btn_row = QHBoxLayout()
         btn_row.setSpacing(8)
-        self.check_button = QPushButton("Güncellemeyi denetle", self)
-        self.check_button.setToolTip("En son sürümü GitHub üzerinden denetler.")
+        self.check_button = QPushButton(t("Güncellemeyi denetle"), self)
+        self.check_button.setToolTip(t("En son sürümü GitHub üzerinden denetler."))
         self.check_button.clicked.connect(self._on_check_clicked)
         btn_row.addWidget(self.check_button)
 
-        self.open_button = QPushButton("Sürüm sayfasını aç", self)
-        self.open_button.setToolTip("En son sürüm sayfasını tarayıcıda açar.")
+        self.open_button = QPushButton(t("Sürüm sayfasını aç"), self)
+        self.open_button.setToolTip(t("En son sürüm sayfasını tarayıcıda açar."))
         self.open_button.setVisible(False)
         self.open_button.setEnabled(False)
         self.open_button.clicked.connect(self._on_open_clicked)
@@ -103,7 +106,7 @@ class UpdateSection(QWidget):
         if self._thread is not None and self._thread.isRunning():
             return
         self.check_button.setEnabled(False)
-        self.result_label.setText("Güncelleme denetleniyor…")
+        self.result_label.setText(t("Güncelleme denetleniyor…"))
         self.url_label.setVisible(False)
         self.open_button.setVisible(False)
         self.open_button.setEnabled(False)

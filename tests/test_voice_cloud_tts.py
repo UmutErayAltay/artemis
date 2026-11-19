@@ -333,6 +333,28 @@ def test_constructor_refusals_and_paid_guard() -> None:
             "bulut", paid_ep, audit,  # type: ignore[arg-type]
         )
 
+    # Açık paid=False sezgisel Gemini kontrolünü geçersiz kılar.
+    CloudSpeechSynthesizer(
+        VoiceConfig(
+            tts_cloud_protocol="gemini",
+            tts_cloud_model="gemini-2.5-flash-preview-tts",
+            allow_cloud_tts_text=True,
+            tts_cloud_allow_paid=False,
+        ),
+        "bulut", paid_ep, audit, paid=False,  # type: ignore[arg-type]
+    )
+
+    # Açık paid=True ücretsiz/yerel sezgiye rağmen tts_cloud_allow_paid ister.
+    with pytest.raises(ValueError, match="tts_cloud_allow_paid"):
+        CloudSpeechSynthesizer(
+            VoiceConfig(
+                tts_cloud_model="heygen/heygen-voice-1-turbo:free",
+                allow_cloud_tts_text=True,
+                tts_cloud_allow_paid=False,
+            ),
+            "yerel", local_ep, audit, paid=True,  # type: ignore[arg-type]
+        )
+
 
 def _sse_event(pcm: bytes, mime_type: str = "audio/l16; rate=24000; channels=1") -> bytes:
     payload = {
@@ -751,3 +773,25 @@ async def test_raw_pcm_starting_with_ff_sample_is_not_mistaken_for_mpeg(
         (chunk.sample_rate, chunk.channels) == (24000, 1) for chunk in openai_chunks
     )
     assert b"".join(chunk.pcm for chunk in openai_chunks) == openai_pcm
+
+
+@pytest.mark.parametrize(
+    ("base_url", "model", "expected"),
+    [
+        (
+            "https://generativelanguage.googleapis.com/v1beta/openai",
+            "models/gemini-tts",
+            ("https://generativelanguage.googleapis.com/v1beta", "gemini-tts"),
+        ),
+        (
+            "https://generativelanguage.googleapis.com/v1beta/openai/",
+            "gemini-tts",
+            ("https://generativelanguage.googleapis.com/v1beta", "gemini-tts"),
+        ),
+        ("http://127.0.0.1:9/v1", "gemini-tts", ("http://127.0.0.1:9/v1", "gemini-tts")),
+    ],
+)
+def test_gemini_native_target_strips_openai_suffix_and_models_prefix(
+    base_url: str, model: str, expected: tuple[str, str]
+) -> None:
+    assert cloud_tts.gemini_native_target(base_url, model) == expected

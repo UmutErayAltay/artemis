@@ -20,6 +20,7 @@ from PySide6.QtSvg import QSvgRenderer
 from artemis.channels.desktop import pet_sprite as ps
 from artemis.channels.desktop.pet_creator import SvgError
 from artemis.channels.desktop.pet_sprite import CELL_H, CELL_W, COLS, FRAMES, PetError, PetInfo
+from artemis.i18n import t
 
 SHEET_W, SHEET_H = COLS * CELL_W, 9 * CELL_H
 _FOOT = (CELL_W / 2, 200.0)  # tabandaki ayak noktası (temel hücre koordinatı)
@@ -36,7 +37,7 @@ def render_svg(svg: str) -> QImage:
     """Temizlenmiş SVG'yi 192×208 saydam hücreye çizer; geçersiz/boş çizimde SvgError."""
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
     if not renderer.isValid():
-        raise SvgError("SVG çizilemedi (geçersiz).")
+        raise SvgError(t("SVG çizilemedi (geçersiz)."))
     image = QImage(CELL_W, CELL_H, _ARGB)
     image.fill(0)
     painter = QPainter(image)
@@ -44,7 +45,7 @@ def render_svg(svg: str) -> QImage:
     painter.end()
     alpha = bytes(image.constBits())[3::4]
     if not any(alpha):
-        raise SvgError("SVG boş çizildi: görünür bir şey yok.")
+        raise SvgError(t("SVG boş çizildi: görünür bir şey yok."))
     return image
 
 
@@ -186,7 +187,7 @@ def install(
         folder = Path(tmp)
         out = sheet.convertToFormat(QImage.Format.Format_ARGB32)
         if not out.save(str(folder / "spritesheet.webp"), None, 100):
-            raise PetError("Spritesheet WebP olarak yazılamadı.")
+            raise PetError(t("Spritesheet WebP olarak yazılamadı."))
         (folder / "pet.json").write_text(
             json.dumps(
                 {"id": pet_id, "displayName": name, "description": description,

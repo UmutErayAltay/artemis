@@ -11,6 +11,8 @@ import sys
 import threading
 from collections.abc import Callable
 
+from artemis.i18n import t
+
 _MODIFIERS = {"alt": 0x0001, "ctrl": 0x0002, "shift": 0x0004, "win": 0x0008}
 _MOD_NOREPEAT = 0x4000  # Basılı tutmak art arda aç/kapa yapmasın.
 _KEYS = {
@@ -28,15 +30,19 @@ def parse_hotkey(text: str) -> tuple[int, int]:
     # Tek başına harf/rakam/boşluk yazmayı ele geçirir; yazı üretmeyen tuşlar (F1-F24, Pause,
     # Esc) tek başına kalabilir: Esc, computer_use'un durdurma kısayoludur (ADR 0039).
     if not modifiers and (key == "space" or (len(key) == 1 and key.isalnum())):
-        raise ValueError(f"Kısayolda en az bir değiştirici olmalı: {text!r}")
+        raise ValueError(
+            t("Kısayolda en az bir değiştirici olmalı: {text}").format(text=repr(text))
+        )
     if len(set(modifiers)) != len(modifiers) or any(m not in _MODIFIERS for m in modifiers):
-        raise ValueError(f"Kısayolda bilinmeyen ya da yinelenen değiştirici: {text!r}")
+        raise ValueError(
+            t("Kısayolda bilinmeyen ya da yinelenen değiştirici: {text}").format(text=repr(text))
+        )
     if len(key) == 1 and key.isascii() and key.isalnum():
         virtual_key = ord(key.upper())
     elif key in _KEYS:
         virtual_key = _KEYS[key]
     else:
-        raise ValueError(f"Kısayolda bilinmeyen tuş: {text!r}")
+        raise ValueError(t("Kısayolda bilinmeyen tuş: {text}").format(text=repr(text)))
     return sum(_MODIFIERS[m] for m in modifiers) | _MOD_NOREPEAT, virtual_key
 
 

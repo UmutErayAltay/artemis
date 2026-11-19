@@ -28,7 +28,7 @@ def _panel(tmp_path: Path, *, demo: bool = False) -> SettingsPanel:
 def test_demo_never_autosaves_and_has_no_revert(tmp_path: Path, qt_app) -> None:
     panel = _panel(tmp_path, demo=True)
     panel.barge_in_box.setChecked(not panel.barge_in_box.isChecked())
-    assert not panel._dirty and not panel._save_timer.isActive()
+    assert not panel._dirty and not panel.has_unsaved
     assert panel.revert_button.isHidden()
     panel.deleteLater()
 

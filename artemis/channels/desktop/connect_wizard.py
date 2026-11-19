@@ -41,13 +41,14 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.providers import stored_endpoint_key
-from artemis.channels.desktop import themes
+from artemis.channels.desktop import provider_section, themes
 from artemis.channels.desktop.provider_helpers import _slug
 from artemis.channels.desktop.provider_layout import PRESETS
 from artemis.channels.desktop.provider_section import store_endpoint_key
 from artemis.channels.desktop.settings_io import _write_validated
 from artemis.channels.desktop.thread_shutdown import shutdown_thread
 from artemis.config.settings import Settings, load_settings
+from artemis.i18n import t
 
 KEY_PAGES: dict[str, str] = {
     "openrouter": "https://openrouter.ai/keys",
@@ -219,13 +220,13 @@ class OpenRouterPkce:
         """Tarayıcı geri dönüşünden gelen yetkilendirme kodunu bekler."""
         server = self._server
         if server is None:
-            raise ValueError("Giriş başlatılmadı.")
+            raise ValueError(t("Giriş başlatılmadı."))
         finished = server.got_request.wait(timeout=timeout)
         self.close()
         if not finished:
-            raise TimeoutError("OpenRouter giriş süresi doldu.")
+            raise TimeoutError(t("OpenRouter giriş süresi doldu."))
         if not server.code:
-            raise ValueError("OpenRouter yetkilendirme kodu alınamadı.")
+            raise ValueError(t("OpenRouter yetkilendirme kodu alınamadı."))
         return server.code
 
     def close(self) -> None:
@@ -250,10 +251,12 @@ class OpenRouterPkce:
                 follow_redirects=False,
             )
         except httpx.HTTPError:
-            raise ValueError("OpenRouter sunucusuna ulaşılamadı.") from None
+            raise ValueError(t("OpenRouter sunucusuna ulaşılamadı.")) from None
         if not (200 <= response.status_code < 300):
             raise ValueError(
-                f"OpenRouter anahtar değişimi başarısız oldu (HTTP {response.status_code})."
+                t("OpenRouter anahtar değişimi başarısız oldu (HTTP {code}).").format(
+                    code=response.status_code
+                )
             )
         try:
             data = response.json()
@@ -261,7 +264,7 @@ class OpenRouterPkce:
             data = None
         key = data.get("key") if isinstance(data, Mapping) else None
         if not isinstance(key, str) or not key.strip():
-            raise ValueError("OpenRouter yanıtında API anahtarı bulunamadı.")
+            raise ValueError(t("OpenRouter yanıtında API anahtarı bulunamadı."))
         return key.strip()
 
     def fetch_free_models(self) -> list[str]:
@@ -273,15 +276,17 @@ class OpenRouterPkce:
                 follow_redirects=False,
             )
         except httpx.HTTPError:
-            raise ValueError("OpenRouter model listesi alınamadı.") from None
+            raise ValueError(t("OpenRouter model listesi alınamadı.")) from None
         if not (200 <= response.status_code < 300):
             raise ValueError(
-                f"OpenRouter model listesi alınamadı (HTTP {response.status_code})."
+                t("OpenRouter model listesi alınamadı (HTTP {code}).").format(
+                    code=response.status_code
+                )
             )
         try:
             catalog = response.json()
         except ValueError:
-            raise ValueError("OpenRouter model listesi okunamadı.") from None
+            raise ValueError(t("OpenRouter model listesi okunamadı.")) from None
         return free_tool_models(catalog)
 
 
@@ -516,7 +521,9 @@ class ConnectWizard(QDialog):
         self._open_url: Callable[[str], object] = open_url or _default_open_url
         self._oauth: OpenRouterPkce = oauth or OpenRouterPkce()
         self._which: Callable[[str], str | None] = run_cli or shutil.which
-        self._store_key: Callable[[str, str], str | None] = store_key or store_endpoint_key
+        self._store_key: Callable[[str, str], str | None] = store_key or (
+            lambda name, typed: store_endpoint_key(name, typed, provider_section.write_secret)
+        )
         self._clipboard: Any = clipboard
         self._gemini_validator: Callable[[str], int] = gemini_validator or validate_gemini_key
         self._local_probe = local_probe or probe_local_services
@@ -527,7 +534,7 @@ class ConnectWizard(QDialog):
         self._found: dict[str, tuple[str, bool, list[str]]] = {}
         self._local: tuple[str, str, bool] | None = None  # seçilen yerel servis: ad, adres, anahtar
 
-        self.setWindowTitle("Artemis'i bir beyne bağla")
+        self.setWindowTitle(t("Artemis'i bir beyne bağla"))
         self.setMinimumWidth(_DIALOG_WIDTH)
         # Kullanıcının seçtiği tema (ana pencere); ilk açılışta pencere yoksa varsayılan (koyu).
         self.setStyleSheet(themes.stylesheet(str(getattr(parent, "_theme", themes.DEFAULT_THEME))))
@@ -535,11 +542,13 @@ class ConnectWizard(QDialog):
         root.setContentsMargins(28, 24, 28, 20)
         root.setSpacing(14)
 
-        title = QLabel("Artemis'i bir beyne bağla")
+        title = QLabel(t("Artemis'i bir beyne bağla"))
         title.setObjectName("pageTitle")
         intro = QLabel(
-            "Artemis düşünmek için bir dil modeline bağlanır. Sana uyan yolu seç; "
-            "sonra Ayarlar > Modeller'den istediğin kadar model ekleyebilirsin."
+            t(
+                "Artemis düşünmek için bir dil modeline bağlanır. Sana uyan yolu seç; "
+                "sonra Ayarlar > Modeller'den istediğin kadar model ekleyebilirsin."
+            )
         )
         intro.setObjectName("muted")
         intro.setWordWrap(True)
@@ -547,17 +556,21 @@ class ConnectWizard(QDialog):
         root.addWidget(intro)
 
         self.openrouter_button = ChoiceCard(
-            "Ücretsiz hesapla giriş",
-            "OpenRouter · anahtar kopyalamadan, tarayıcıda tek giriş", "Önerilen",
+            t("Ücretsiz hesapla giriş"),
+            t("OpenRouter · anahtar kopyalamadan, tarayıcıda tek giriş"),
+            t("Önerilen"),
         )
         self.gemini_button = ChoiceCard(
-            "Google hesabımla", "Gemini · AI Studio'dan ücretsiz anahtar, Artemis panodan alır"
+            t("Google hesabımla"),
+            t("Gemini · AI Studio'dan ücretsiz anahtar, Artemis panodan alır"),
         )
         self.subscription_button = ChoiceCard(
-            "Aboneliğimle bağlan", "Claude · bilgisayarındaki Claude Code girişini kullanır"
+            t("Aboneliğimle bağlan"),
+            t("Claude · bilgisayarındaki Claude Code girişini kullanır"),
         )
         self.apikey_button = ChoiceCard(
-            "API, yerel model ya da proxy", "Ollama · LM Studio · Groq · kendi proxy'n…"
+            t("API, yerel model ya da proxy"),
+            t("Ollama · LM Studio · Groq · kendi proxy'n…"),
         )
         self.choice_buttons = (
             self.openrouter_button, self.gemini_button, self.subscription_button,
@@ -575,9 +588,11 @@ class ConnectWizard(QDialog):
 
         self.stack = QStackedWidget()
         self._empty_page, empty_layout, _info = _page(
-            "Bir yol seç",
-            "Kararsızsan 'Ücretsiz hesapla giriş' en kısa yol: kart, fatura ya da anahtar "
-            "kopyalama yok.",
+            t("Bir yol seç"),
+            t(
+                "Kararsızsan 'Ücretsiz hesapla giriş' en kısa yol: kart, fatura ya da anahtar "
+                "kopyalama yok."
+            ),
         )
         empty_layout.addStretch(1)
         self._openrouter_page = self._build_openrouter_page()
@@ -595,7 +610,7 @@ class ConnectWizard(QDialog):
         self.status.setWordWrap(True)
         self.status.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         bottom.addWidget(self.status, 1)
-        self.later_button = QPushButton("Sonra")
+        self.later_button = QPushButton(t("Sonra"))
         self.later_button.setAutoDefault(False)
         self.later_button.clicked.connect(self.reject)
         bottom.addWidget(self.later_button)
@@ -620,23 +635,25 @@ class ConnectWizard(QDialog):
 
     def _build_openrouter_page(self) -> QWidget:
         page, layout, self.openrouter_info = _page(
-            "OpenRouter ile ücretsiz giriş",
-            "Tarayıcıda OpenRouter hesabınla giriş yap (Google ile de olur). Artemis anahtarı "
-            "kendisi alır ve Windows Kimlik Bilgisi Yöneticisi'ne kaydeder. Ücretsiz modeller "
-            "günlük kotayla çalışır, kart istemez.",
+            t("OpenRouter ile ücretsiz giriş"),
+            t(
+                "Tarayıcıda OpenRouter hesabınla giriş yap (Google ile de olur). Artemis anahtarı "
+                "kendisi alır ve Windows Kimlik Bilgisi Yöneticisi'ne kaydeder. Ücretsiz modeller "
+                "günlük kotayla çalışır, kart istemez."
+            ),
         )
-        self.openrouter_login_button = QPushButton("Tarayıcıda giriş yap")
+        self.openrouter_login_button = QPushButton(t("Tarayıcıda giriş yap"))
         self.openrouter_login_button.setObjectName("primary")
         self.openrouter_login_button.setAutoDefault(False)
         self.openrouter_login_button.clicked.connect(self._start_openrouter_flow)
         layout.addWidget(self.openrouter_login_button, 0, Qt.AlignmentFlag.AlignLeft)
 
         self.openrouter_models = QComboBox()
-        self.openrouter_models.setAccessibleName("OpenRouter ücretsiz modelleri")
+        self.openrouter_models.setAccessibleName(t("OpenRouter ücretsiz modelleri"))
         self.openrouter_models.setVisible(False)
         layout.addWidget(self.openrouter_models)
 
-        self.openrouter_bind_button = QPushButton("Seçili modeli bağla")
+        self.openrouter_bind_button = QPushButton(t("Seçili modeli bağla"))
         self.openrouter_bind_button.setObjectName("primary")
         self.openrouter_bind_button.setAutoDefault(False)
         self.openrouter_bind_button.setEnabled(False)
@@ -648,9 +665,11 @@ class ConnectWizard(QDialog):
 
     def _build_subscription_page(self) -> QWidget:
         page, layout, _info = _page(
-            "Abonelikle bağlan",
-            "Bilgisayarında Claude Code kuruluysa Artemis onu çalıştırır; giriş ve kota senin "
-            "aboneliğinde kalır, Artemis kimlik bilgilerine dokunmaz.",
+            t("Abonelikle bağlan"),
+            t(
+                "Bilgisayarında Claude Code kuruluysa Artemis onu çalıştırır; giriş ve kota senin "
+                "aboneliğinde kalır, Artemis kimlik bilgilerine dokunmaz."
+            ),
         )
         choice_row = QHBoxLayout()
         self.claude_choice_button = QPushButton("Claude")
@@ -669,14 +688,14 @@ class ConnectWizard(QDialog):
         self.cli_hint.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         layout.addWidget(self.cli_hint)
 
-        self.claude_add_button = QPushButton("Claude modelini ekle")
+        self.claude_add_button = QPushButton(t("Claude modelini ekle"))
         self.claude_add_button.setObjectName("primary")
         self.claude_add_button.setAutoDefault(False)
         self.claude_add_button.setVisible(False)
         self.claude_add_button.clicked.connect(self._add_claude_cli_model)
         layout.addWidget(self.claude_add_button, 0, Qt.AlignmentFlag.AlignLeft)
 
-        self.codex_add_button = QPushButton("ChatGPT modelini ekle (yakında)")
+        self.codex_add_button = QPushButton(t("ChatGPT modelini ekle (yakında)"))
         self.codex_add_button.setEnabled(False)
         self.codex_add_button.setVisible(False)
         layout.addWidget(self.codex_add_button, 0, Qt.AlignmentFlag.AlignLeft)
@@ -685,17 +704,19 @@ class ConnectWizard(QDialog):
 
     def _build_gemini_page(self) -> QWidget:
         page, layout, self.gemini_steps = _page(
-            "Google hesabınla Gemini",
-            "1) Açılan AI Studio sayfasında Google hesabınla gir.  2) 'Create API key' de.  "
-            "3) Anahtarı kopyala; Artemis panodan kendisi alır.",
+            t("Google hesabınla Gemini"),
+            t(
+                "1) Açılan AI Studio sayfasında Google hesabınla gir.  2) 'Create API key' de.  "
+                "3) Anahtarı kopyala; Artemis panodan kendisi alır."
+            ),
         )
         key_row = QHBoxLayout()
         self.gemini_key_edit = QLineEdit()
-        self.gemini_key_edit.setAccessibleName("Gemini API anahtarı")
-        self.gemini_key_edit.setPlaceholderText("Anahtarı buraya da yapıştırabilirsin")
+        self.gemini_key_edit.setAccessibleName(t("Gemini API anahtarı"))
+        self.gemini_key_edit.setPlaceholderText(t("Anahtarı buraya da yapıştırabilirsin"))
         self.gemini_key_edit.setEchoMode(QLineEdit.EchoMode.Password)
         key_row.addWidget(self.gemini_key_edit, 1)
-        self.gemini_bind_button = QPushButton("Bağla")
+        self.gemini_bind_button = QPushButton(t("Bağla"))
         self.gemini_bind_button.setObjectName("primary")
         # Varsayılan düğme değil: Enter tuşu bağlamayı tetiklemesin, yalnız açık tıklama.
         self.gemini_bind_button.setAutoDefault(False)
@@ -703,7 +724,7 @@ class ConnectWizard(QDialog):
         self.gemini_bind_button.clicked.connect(self._bind_gemini_manual)
         key_row.addWidget(self.gemini_bind_button)
         layout.addLayout(key_row)
-        reopen = QPushButton("AI Studio sayfasını yeniden aç")
+        reopen = QPushButton(t("AI Studio sayfasını yeniden aç"))
         reopen.setObjectName("ghost")
         reopen.setAutoDefault(False)
         reopen.clicked.connect(self._open_gemini_page)
@@ -713,14 +734,17 @@ class ConnectWizard(QDialog):
 
     def _build_apikey_page(self) -> QWidget:
         page, layout, _info = _page(
-            "API anahtarı, yerel model ya da proxy",
-            "Sağlayıcıyı seç, anahtarını ve model kimliğini yaz. Yerel servisler anahtar istemez.",
+            t("API anahtarı, yerel model ya da proxy"),
+            t(
+                "Sağlayıcıyı seç, anahtarını ve model kimliğini yaz. "
+                "Yerel servisler anahtar istemez."
+            ),
         )
         self.local_box = QFrame()
         self.local_box.setObjectName("localFound")
         local_layout = QVBoxLayout(self.local_box)
         local_layout.setContentsMargins(12, 10, 12, 10)
-        local_title = QLabel("Bu bilgisayarda çalışan servis bulundu:")
+        local_title = QLabel(t("Bu bilgisayarda çalışan servis bulundu:"))
         local_title.setObjectName("choiceTitle")
         local_layout.addWidget(local_title)
         self.local_row = QHBoxLayout()
@@ -730,20 +754,20 @@ class ConnectWizard(QDialog):
         self.local_buttons: list[QPushButton] = []
 
         self.preset_combo = QComboBox()
-        self.preset_combo.setAccessibleName("Sağlayıcı")
+        self.preset_combo.setAccessibleName(t("Sağlayıcı"))
         for index, (label, slug, _url, _needs_key) in enumerate(PRESETS):
             if not slug or slug == "gemini":
                 continue
-            self.preset_combo.addItem(label, index)
+            self.preset_combo.addItem(t(label), index)
         self.preset_combo.currentIndexChanged.connect(self._apply_preset_choice)
         layout.addWidget(self.preset_combo)
 
         key_row = QHBoxLayout()
         self.key_edit = QLineEdit()
-        self.key_edit.setAccessibleName("API anahtarı")
-        self.key_edit.setPlaceholderText("API anahtarı")
+        self.key_edit.setAccessibleName(t("API anahtarı"))
+        self.key_edit.setPlaceholderText(t("API anahtarı"))
         self.key_edit.setEchoMode(QLineEdit.EchoMode.Password)
-        self.get_key_button = QPushButton("Anahtar al")
+        self.get_key_button = QPushButton(t("Anahtar al"))
         self.get_key_button.setAutoDefault(False)
         self.get_key_button.clicked.connect(self._open_key_page)
         key_row.addWidget(self.key_edit, 1)
@@ -752,17 +776,17 @@ class ConnectWizard(QDialog):
 
         model_row = QHBoxLayout()
         self.model_edit = QLineEdit()
-        self.model_edit.setAccessibleName("Model kimliği")
-        self.model_edit.setPlaceholderText("Model kimliği (ör. llama-3.3-70b, qwen2.5:7b)")
+        self.model_edit.setAccessibleName(t("Model kimliği"))
+        self.model_edit.setPlaceholderText(t("Model kimliği (ör. llama-3.3-70b, qwen2.5:7b)"))
         self.model_pick = QComboBox()
-        self.model_pick.setAccessibleName("Servisteki modeller")
+        self.model_pick.setAccessibleName(t("Servisteki modeller"))
         self.model_pick.setVisible(False)
         self.model_pick.currentTextChanged.connect(self.model_edit.setText)
         model_row.addWidget(self.model_edit, 1)
         model_row.addWidget(self.model_pick, 1)
         layout.addLayout(model_row)
 
-        self.bind_button = QPushButton("Bağla")
+        self.bind_button = QPushButton(t("Bağla"))
         self.bind_button.setObjectName("primary")
         self.bind_button.setAutoDefault(False)
         self.bind_button.clicked.connect(self._bind_preset_model)
@@ -786,8 +810,12 @@ class ConnectWizard(QDialog):
         _retire_thread(thread, self._on_local_found)
         self._found = {base: (name, needs_key, models) for name, base, needs_key, models in found}
         for base_url, (name, needs_key, models) in self._found.items():
-            note = "anahtar ister" if needs_key else f"{len(models)} model"
-            button = QPushButton(f"{name} · :{urlsplit(base_url).port} · {note}")
+            note = (
+                t("anahtar ister")
+                if needs_key
+                else t("{count} model").format(count=len(models))
+            )
+            button = QPushButton(f"{t(name)} · :{urlsplit(base_url).port} · {note}")
             button.setObjectName("chip")
             button.setAutoDefault(False)
             button.setProperty("base_url", base_url)
@@ -813,10 +841,12 @@ class ConnectWizard(QDialog):
         self.model_pick.addItems(models)
         self.model_pick.setVisible(bool(models))
         self.model_edit.setVisible(not models)
-        self.status.setText(
-            f"{name} ({base_url}) seçildi"
-            + ("; proxy'nin API anahtarını yaz." if needs_key else "; bir model seç ve bağla.")
+        msg = (
+            t("{name} ({base_url}) seçildi; proxy'nin API anahtarını yaz.")
+            if needs_key
+            else t("{name} ({base_url}) seçildi; bir model seç ve bağla.")
         )
+        self.status.setText(msg.format(name=t(name), base_url=base_url))
 
     # --- 1. OpenRouter PKCE ---------------------------------------------------------------
 
@@ -841,7 +871,7 @@ class ConnectWizard(QDialog):
         self._login_thread = thread
         thread.finished_with.connect(self._on_openrouter_done)
         self.openrouter_login_button.setEnabled(False)
-        self.status.setText("Tarayıcıda girişi tamamla; Artemis bekliyor…")
+        self.status.setText(t("Tarayıcıda girişi tamamla; Artemis bekliyor…"))
         thread.start()
 
     def _on_openrouter_done(self, key: str, models: list[str], error: str) -> None:
@@ -854,22 +884,22 @@ class ConnectWizard(QDialog):
                 self.status.setText(failure)
                 return
         if error or not key:
-            self.status.setText(error or "OpenRouter girişi tamamlanamadı.")
+            self.status.setText(error or t("OpenRouter girişi tamamlanamadı."))
             return
         if not models:
-            self.status.setText("OpenRouter üzerinde uygun ücretsiz model bulunamadı.")
+            self.status.setText(t("OpenRouter üzerinde uygun ücretsiz model bulunamadı."))
             return
         self.openrouter_models.addItems(models)
         self.openrouter_models.setVisible(True)
         self.openrouter_bind_button.setVisible(True)
         self.openrouter_bind_button.setEnabled(True)
         self.openrouter_login_button.setVisible(False)
-        self.status.setText("OpenRouter bağlandı; bir ücretsiz model seç.")
+        self.status.setText(t("OpenRouter bağlandı; bir ücretsiz model seç."))
 
     def _bind_openrouter_model(self) -> None:
         model_id = self.openrouter_models.currentText().strip()
         if not model_id:
-            self.status.setText("Önce bir model seçin.")
+            self.status.setText(t("Önce bir model seçin."))
             return
         if self._write_endpoint_and_model(
             endpoint_id="openrouter",
@@ -948,14 +978,16 @@ class ConnectWizard(QDialog):
         if clip.text().strip() == candidate:
             clip.clear()
         self.status.setText(
-            f"Panoda bir anahtar algılandı (…{candidate[-4:]}); bağlamak için 'Bağla'ya bas."
+            t("Panoda bir anahtar algılandı (…{tail}); bağlamak için 'Bağla'ya bas.").format(
+                tail=candidate[-4:]
+            )
         )
 
     def _bind_gemini_manual(self) -> None:
         candidate = self.gemini_key_edit.text().strip()
         self.gemini_key_edit.clear()
         if not GEMINI_KEY_RE.fullmatch(candidate):
-            self.status.setText("Anahtar geçersiz görünüyor.")
+            self.status.setText(t("Anahtar geçersiz görünüyor."))
             return
         self._validate_and_bind_gemini(candidate)
 
@@ -966,7 +998,7 @@ class ConnectWizard(QDialog):
         self._gemini_thread = thread
         thread.finished_with.connect(self._on_gemini_validated)
         # Bekleme yok: doğrulama arka planda, sonuç sinyalle gelir (arayüz donmaz).
-        self.status.setText("Anahtar doğrulanıyor…")
+        self.status.setText(t("Anahtar doğrulanıyor…"))
         thread.start()
 
     def _on_gemini_validated(self, key: str, status_code: int) -> None:
@@ -989,11 +1021,11 @@ class ConnectWizard(QDialog):
             clip = self._get_clipboard()
             if clip is not None and clip.text() == key:
                 clip.clear()
-            self.status.setText("Gemini bağlandı.")
+            self.status.setText(t("Gemini bağlandı."))
             self.accept()
             return
         if status_code in {400, 401, 403}:
-            self.status.setText("Anahtar geçersiz görünüyor.")
+            self.status.setText(t("Anahtar geçersiz görünüyor."))
             return
         self.status.setText(f"HTTP {status_code}")
 
@@ -1012,14 +1044,18 @@ class ConnectWizard(QDialog):
         if not found:
             self.claude_add_button.setVisible(False)
             self.cli_hint.setText(
-                f"Claude Code CLI bulunamadı. Kurulum için resmi sayfa: {CLAUDE_DOC_URL}"
+                t(
+                    "Claude Code CLI bulunamadı. Kurulum için resmi sayfa: {url}"
+                ).format(url=CLAUDE_DOC_URL)
             )
             self.status.setText(self.cli_hint.text())
             return
         self.claude_add_button.setVisible(True)
         self.cli_hint.setText(
-            "Giriş için terminalde `claude` çalıştırın, sonra `/login` yazın. "
-            "Artemis bu kimlik bilgilerine dokunmaz."
+            t(
+                "Giriş için terminalde `claude` çalıştırın, sonra `/login` yazın. "
+                "Artemis bu kimlik bilgilerine dokunmaz."
+            )
         )
         self.status.setText("")
 
@@ -1031,13 +1067,18 @@ class ConnectWizard(QDialog):
         found = self._which("codex")
         if not found:
             self.cli_hint.setText(
-                f"Codex CLI bulunamadı ({CODEX_DOC_URL}). Giriş komutu: `codex login` — yakında."
+                t(
+                    "Codex CLI bulunamadı ({url}). Giriş komutu: `codex login` — yakında."
+                ).format(url=CODEX_DOC_URL)
             )
         else:
             self.cli_hint.setText(
-                "Giriş için terminalde `codex login` çalıştırın. ChatGPT abonelik desteği yakında."
+                t(
+                    "Giriş için terminalde `codex login` çalıştırın. "
+                    "ChatGPT abonelik desteği yakında."
+                )
             )
-        self.status.setText("yakında")
+        self.status.setText(t("yakında"))
 
     def _add_claude_cli_model(self) -> None:
         if not self._which("claude"):
@@ -1055,7 +1096,7 @@ class ConnectWizard(QDialog):
             raw["primary_model"] = "claude"
             _write_validated(self.config_path, raw)
         except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            self.status.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
+            self.status.setText(t("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor."))
             return
         self.accept()
 
@@ -1099,12 +1140,12 @@ class ConnectWizard(QDialog):
             endpoint_id = f"yerel-{urlsplit(base_url).port}"
         model_id = self.model_edit.text().strip()
         if not model_id:
-            self.status.setText("Model kimliği yazın.")
+            self.status.setText(t("Model kimliği yazın."))
             return
         if key_required:
             typed_key = self.key_edit.text().strip()
             if not typed_key:
-                self.status.setText("API anahtarı gerekli.")
+                self.status.setText(t("API anahtarı gerekli."))
                 return
             failure = self._store_key(endpoint_id, typed_key)
             self.key_edit.clear()
@@ -1144,7 +1185,7 @@ class ConnectWizard(QDialog):
             raw["primary_model"] = alias
             _write_validated(self.config_path, raw)
         except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            self.status.setText("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor.")
+            self.status.setText(t("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor."))
             return False
         return True
 

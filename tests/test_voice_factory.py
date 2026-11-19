@@ -1,10 +1,12 @@
+from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from artemis.channels.voice import factory
-from artemis.config.settings import EndpointConfig, VoiceConfig
+from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
+from artemis.config.settings import EndpointConfig, ModelConfig, Settings, VoiceConfig
 
 
 async def test_edge_without_fallback_does_not_load_local_male_voice(monkeypatch):
@@ -39,15 +41,16 @@ async def test_cloud_without_fallback_builds_cloud_synthesizer(monkeypatch):
         tts_cloud_model="heygen/heygen-voice-1-turbo:free",
     )
     runtime = SimpleNamespace(
-        settings=SimpleNamespace(voice=config, endpoints={"bulut": endpoint}),
+        settings=SimpleNamespace(voice=config, endpoints={"bulut": endpoint}, models={}),
         audit=object(),
         runner=object(),
     )
     primary = object()
     seen: list[tuple] = []
 
-    def make_cloud(*args):
+    def make_cloud(*args, **kwargs):
         seen.append(args)
+        assert kwargs == {"paid": None}
         return primary
 
     def forbidden(*_args):
@@ -63,6 +66,38 @@ async def test_cloud_without_fallback_builds_cloud_synthesizer(monkeypatch):
     controller = await factory.build_voice_controller(runtime, lambda _: None, lambda _: None)
     assert controller.synthesizer is primary
     assert seen == [(config, "bulut", endpoint, runtime.audit)]
+
+
+async def test_cloud_free_saved_gemini_builds_without_allow_paid(monkeypatch):
+    endpoint = EndpointConfig(base_url="https://api.example.com/v1", api_key=True)
+    voice = VoiceConfig(
+        tts_backend="cloud",
+        tts_local_fallback=False,
+        allow_cloud_tts_text=True,
+        tts_cloud_endpoint="bulut",
+        tts_cloud_protocol="gemini",
+        tts_cloud_model="gemini-2.5-flash-preview-tts",
+        tts_cloud_allow_paid=False,
+    )
+    settings = Settings(
+        endpoints={"bulut": endpoint},
+        models={
+            "ses-gemini": ModelConfig(
+                provider="openai_compatible",
+                endpoint="bulut",
+                model="gemini-2.5-flash-preview-tts",
+                kind="speech",
+                speech_protocol="gemini",
+                input_per_million=Decimal(0),
+                output_per_million=Decimal(0),
+            )
+        },
+        voice=voice,
+    )
+    runtime = SimpleNamespace(settings=settings, audit=object(), runner=object())
+    _patch_voice_deps(monkeypatch, object())
+    controller = await factory.build_voice_controller(runtime, lambda _: None, lambda _: None)
+    assert isinstance(controller.synthesizer, CloudSpeechSynthesizer)
 
 
 async def test_edge_with_default_fallback_but_no_piper_model_still_builds(monkeypatch):
