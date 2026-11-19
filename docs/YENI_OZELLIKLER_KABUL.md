@@ -174,18 +174,18 @@ Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sa
 
 - [ ] Ayarlar > Dosya araması: durum satırında "dizinleniyor", bitince dosya sayısı ve son dizinleme saati görünüyor; Artemis o sırada sohbete yanıt vermeye devam ediyor.
 - [ ] "Belgelerimde 'bilinen ifade' geçen dosya hangisi" de: yol, tarih ve en çok 200 karakterlik alıntı geliyor; dosyanın tamamı gelmiyor.
-- [ ] Aynı ifadeyi BÜYÜK harflerle ve ş/ğ/ı/ö yerine s/g/i/o yazarak sor: yine buluyor.
-- [ ] Bir dosya adından ara ("fatura" gibi): ad eşleşmesi geliyor.
-- [ ] `.env` dosyasındaki bir sözcüğü ara: bulunamadı.
-- [ ] Yeni bir dosya ekle, "Yeniden dizinle"ye bas: yeni dosya bulunuyor; bir dosyayı silip yeniden dizinle: artık bulunmuyor.
+- [x] Aynı ifadeyi BÜYÜK harflerle ve ş/ğ/ı/ö yerine s/g/i/o yazarak sor: yine buluyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
+- [x] Bir dosya adından ara ("fatura" gibi): ad eşleşmesi geliyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
+- [x] `.env` dosyasındaki bir sözcüğü ara: bulunamadı. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
+- [x] Yeni bir dosya ekle, "Yeniden dizinle"ye bas: yeni dosya bulunuyor; bir dosyayı silip yeniden dizinle: artık bulunmuyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
 - [ ] Sonuç geldikten sonra Artemis'ten yan etkili bir iş iste (örneğin uygulama kapat): dış içerik uyarısıyla onay soruyor.
 - [ ] `allow_cloud_file_content` kapalıyken bulut modelle sorulunca sonucun yerel modele gittiğini ya da gizli sayıldığını denetim dosyasında doğrula.
-- [ ] "Dizini sil": durum "0 dosya", `state_dir/dosya_arama.sqlite3` yok; aramada "bulunamadı".
-- [ ] Listeden klasörü çıkarıp Uygula, yeniden dizinle: o klasördeki dosyalar bulunmuyor.
-- [ ] Kutuyu kapatıp Uygula + yeniden başlat: "dosya ara" isteğinde araç yok.
-- [ ] Belgeler altında `.ssh` adlı bir klasöre ve `Cookies` adlı bir dosyaya bilinen bir ifade yaz: yeniden dizinleyince bulunmuyor.
-- [ ] Dizinleme sürerken "Dizini sil": arayüz donmuyor, indeks siliniyor ve kendiliğinden geri gelmiyor; "Yeniden dizinle" ile yeniden oluşuyor.
-- [ ] Dizinleme sürerken "Yeniden dizinle"ye tekrar bas: ikinci koşu başlamıyor.
+- [x] "Dizini sil": durum "0 dosya", `state_dir/dosya_arama.sqlite3` yok; aramada "bulunamadı". *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
+- [x] Listeden klasörü çıkarıp Uygula, yeniden dizinle: o klasördeki dosyalar bulunmuyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
+- [x] Kutuyu kapatıp Uygula + yeniden başlat: "dosya ara" isteğinde araç yok. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
+- [x] Belgeler altında `.ssh` adlı bir klasöre ve `Cookies` adlı bir dosyaya bilinen bir ifade yaz: yeniden dizinleyince bulunmuyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
+- [x] Dizinleme sürerken "Dizini sil": arayüz donmuyor, indeks siliniyor ve kendiliğinden geri gelmiyor; "Yeniden dizinle" ile yeniden oluşuyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
+- [x] Dizinleme sürerken "Yeniden dizinle"ye tekrar bas: ikinci koşu başlamıyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
 
 ## Gün sonu özeti (ADR 0066)
 
