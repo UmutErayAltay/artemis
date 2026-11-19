@@ -165,8 +165,13 @@ def test_catalog_has_no_conflicting_duplicates() -> None:
     seen: dict[str, tuple[str, str]] = {}
     conflicts: list[str] = []
     for path in sorted(en_dir.glob("*.json")):
-        data = json.loads(path.read_text(encoding="utf-8"))
-        for key, value in data.items():
+        # json.loads aynı dosyadaki tekrar anahtarı sessizce yutar; çiftleri koruyup
+        # dosya içi tekrarları da yakalamak için object_pairs_hook kullanılır.
+        pairs = json.loads(path.read_text(encoding="utf-8"), object_pairs_hook=list)
+        in_file = [key for key, _ in pairs]
+        dupes = {key for key in in_file if in_file.count(key) > 1}
+        conflicts.extend(f"{path.name}: {key!r} dosya içinde tekrar" for key in sorted(dupes))
+        for key, value in pairs:
             if key in seen and seen[key][1] != value:
                 prev_file, prev_val = seen[key]
                 conflicts.append(
