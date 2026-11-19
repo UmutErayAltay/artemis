@@ -76,7 +76,7 @@ https://github.com/user-attachments/assets/8b360cd1-dbf7-4849-a8b9-85d3b9a67601
 
 **Kurulum rehberi (≈35 sn)**
 
-https://github.com/user-attachments/assets/16b5b915-855e-401c-b378-0a021449c0c4
+https://github.com/user-attachments/assets/128ab8b5-8de0-44db-a152-582a5348aa72
 
 ## Masaüstü arayüzleri
 
