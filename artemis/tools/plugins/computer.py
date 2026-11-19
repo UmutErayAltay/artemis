@@ -178,7 +178,9 @@ class ComputerUse(BaseTool):
             # İptal asyncio.Event'tir, durdurma threading.Event: küçük bir görev köprüler.
             watcher = asyncio.create_task(_relay_cancel(context.cancelled, stop))
             try:
-                result = await session.run(args.goal, context.turn_id, context.deadline)
+                result = await session.run(
+                    args.goal, context.turn_id, context.deadline, user_text=context.user_text
+                )
             finally:
                 watcher.cancel()
         return _to_tool_result(result)

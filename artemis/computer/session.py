@@ -328,6 +328,8 @@ class ComputerSession:
         self._layout: _Layout | None = None
         self._strict = strict
         self._goal = ""
+        # Kullanıcının kendi mesajı (ADR 0078); None: eski davranış, aile izni hedeften.
+        self._user_text: str | None = None
         # ADR 0073: o adımın UI Automation öğeleri (id -> UiElement); her adım başında sıfırlanır.
         self._elements: dict[int, UiElement] = {}
         self._step_has_image = False
@@ -336,12 +338,19 @@ class ComputerSession:
         self._os_issues: dict[tuple[Any, ...], str] = {}  # imza → sorun
         self._last_typed: tuple[str, int | None] | None = None
 
-    async def run(self, goal: str, turn_id: str, deadline: float | None) -> SessionResult:
+    async def run(
+        self,
+        goal: str,
+        turn_id: str,
+        deadline: float | None,
+        *,
+        user_text: str | None = None,
+    ) -> SessionResult:
         limit = self._clock() + self._config.max_minutes * 60
         if deadline is not None:
             limit = min(limit, deadline - _DEADLINE_MARGIN)
         try:
-            result = await self._loop(goal, turn_id, limit)
+            result = await self._loop(goal, turn_id, limit, user_text)
         except asyncio.CancelledError:
             self._end(turn_id, "stopped")
             raise
@@ -354,8 +363,11 @@ class ComputerSession:
     def _result(self, reason: Reason, summary: str) -> SessionResult:
         return SessionResult(reason, summary, self._steps)
 
-    async def _loop(self, goal: str, turn_id: str, limit: float) -> SessionResult:
+    async def _loop(
+        self, goal: str, turn_id: str, limit: float, user_text: str | None = None
+    ) -> SessionResult:
         self._goal = goal
+        self._user_text = user_text
         memory = self._memory
         blocks = 0
         observation = self._config.observation
@@ -599,7 +611,7 @@ class ComputerSession:
         if element is None:
             return None
         safe_name = mask_screen_secrets(_LIST_SYNTAX.sub(" ", element.name))
-        reason = destructive_unrequested(safe_name, self._goal)
+        reason = destructive_unrequested(safe_name, self._goal, self._user_text)
         if reason is not None:
             self._audit.emit(
                 "computer_destructive_blocked", turn_id=turn_id, element_kind=element.kind

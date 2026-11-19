@@ -732,6 +732,7 @@ class AgentLoop:
                 "bu turda yeni işlem yapılmadı.",
             )
         self.context.turn_id = state.turn_id
+        self.context.user_text = text
         self.context.deadline = state.deadline
         try:
             for _ in range(settings.max_steps):

@@ -3,6 +3,7 @@
 - **Durum:** Kabul edildi
 - **Tarih:** 2026-11-17
 - **Güncelleme:** 2026-11-18 — screen kipinde odak adı denetimi
+- **Güncelleme:** 2026-11-19 — yıkıcı aile izni kullanıcı mesajından (`user_text`) alınır; hedef eşleşmesi `goal` üzerinde kalır.
 
 ## Bağlam
 
@@ -19,7 +20,7 @@ Model testleri, Claude dışı modellerin kısa ve ilkesel istem kurallarını a
 
 ## Sonuçlar
 
-- **Bilinen tavanlar:** hedef metni (`goal`) modelin yazdığı araç argümanıdır; kullanıcı mesajına bağlı değildir, enjeksiyona uğramış bir model hedefe silme sözcüğü yazabilir (onay ve leke kuralları ayrıca geçerlidir). `screen` kipinde (ve öğe listesinin boş olduğu adımlarda) yalnız odaktaki öğenin adı (`focused_name`) okunur (koordinatlı piksel tıklamalarında öğe adı yoktur); ad okunamazsa (`computer_focus_unreadable` denetimi) adım önceki gibi engellenmeden ilerler. Adsız ikon düğmelerde ve odak bildirmeyen öğelerde (`focused=False`) `enter`/`space` denetlenmeden kalır.
+- **Bilinen tavanlar:** hedef metni (`goal`) hâlâ modelin yazdığı araç argümanıdır ve yalnız hedef eşleşmesinde (öğe adının içeriği hedef nesneyle uyuşuyor mu) kullanılır; yıkıcı aile izni artık kullanıcının kendi mesajından (`ToolContext.user_text`) alınır, bu yüzden enjeksiyona uğramış bir model `goal`'a yazarak yıkıcı bir aileyi açamaz. `user_text` `None` ise (kapıyı doğrudan çağıranlar, eski davranış) yalnız `goal` esas alınır; boş `user_text` hiçbir aileyi kapsamaz ve engeller. Kalan tavan: kullanıcı aileyi gerçekten söylemişse (ör. "hesabı sil") enjeksiyona uğramış bir model, adı `goal`'daki hedef sözcüklerle uyuşan başka bir öğeyi yine seçebilir (onay ve leke kuralları ayrıca geçerlidir). `screen` kipinde (ve öğe listesinin boş olduğu adımlarda) yalnız odaktaki öğenin adı (`focused_name`) okunur (koordinatlı piksel tıklamalarında öğe adı yoktur); ad okunamazsa (`computer_focus_unreadable` denetimi) adım önceki gibi engellenmeden ilerler. Adsız ikon düğmelerde ve odak bildirmeyen öğelerde (`focused=False`) `enter`/`space` denetlenmeden kalır.
 
 - "Sil" gibi yıkıcı bir öğeye meşru tıklama yapılabilmesi için hedefte ilgili sözcüğün geçmesi ya da modelin `ask_user` ile kullanıcıya sorması gerekir.
 - Yanlış pozitifler (ör. "Silver" gibi kelime başı eşleşmeleri) oturumu durdurmaz, yalnızca modelin `ask_user` ile doğrulamasını gerektirir.

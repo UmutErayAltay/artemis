@@ -128,6 +128,8 @@ class ToolContext:
     # Turda veya geçmişte buluta verilmeyecek (dosya/pano) içerik görüldü; kalıcı kayıt
     # bunu taşır ki sonradan Telegram'a gönderilmesin (ADR 0016/0027). Döngü doldurur.
     turn_private: bool = False
+    # Bu turdaki kullanıcının kendi yazdığı mesaj (ADR 0078); boş: hiçbir yıkıcı izin verilmedi.
+    user_text: str = ""
     services: dict[str, Any] = field(default_factory=dict, repr=False)
     # Yalnız runner.dispatch_tool süresince True; paylaşılan servis sözlüğünde tutulmaz.
     control_request: bool = False

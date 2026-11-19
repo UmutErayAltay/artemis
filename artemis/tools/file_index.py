@@ -6,10 +6,10 @@ engel olmaz. Bir dosya ya da klasör okunamıyorsa tüm koşu durmaz. Bağlantı
 kökün dışına çıkabileceği için ne izlenir ne dizinlenir. Dosya adları dış metindir: sonuçta
 `sanitize_name` ile temizlenir.
 
-Türkçe: metin ve sorgu önce `turkish_fold` (I→ı, İ→i) ile küçültülür, sonra FTS5 `unicode61`
-ayrıştırıcısı noktalı/şapkalı harfleri sadeleştirir (ş→s, ğ→g, ö→o, ü→u, ç→c). Böylece
-"SÖZLEŞME", "sözleşme" ve "sozlesme" eşleşir. Eşleşmeyen: noktasız ı ile i ayrı kalır
-("ısparta" ile "isparta"); kök ekleri yalnız önek olarak eşleşir ("kira" → "kirası", tersi değil).
+Türkçe: metin ve sorgu önce `search_fold` ile küçültülür; i/ı/İ/I ayrımı yok sayılır ("ısparta",
+"isparta", "ISPARTA" eşleşir). Sonra FTS5 `unicode61` ayrıştırıcısı noktalı/şapkalı harfleri
+sadeleştirir (ş→s, ğ→g, ö→o, ü→u, ç→c), böylece "SÖZLEŞME", "sözleşme" ve "sozlesme" eşleşir.
+Kök ekleri yalnız önek olarak eşleşir ("kira" → "kirası", tersi değil).
 """
 
 from __future__ import annotations
@@ -32,9 +32,10 @@ from artemis.config.settings import Settings
 from artemis.proactive.triggers import sanitize_name
 from artemis.safety.audit import AuditLog
 from artemis.skills import skills_dir
-from artemis.text import turkish_fold
+from artemis.text import search_fold
 
 DB_NAME = "dosya_arama.sqlite3"
+INDEX_VERSION = 2
 # Bir koşuda en çok bu kadar dosya görülür; dev klasör (örn. tüm disk) süresiz sürmesin.
 MAX_FILES = 50_000
 # docx içindeki document.xml'in açılmış boyut sınırı (zip bombası): beyan ve gerçek okuma ikisi de.
@@ -208,7 +209,7 @@ def extract_text(path: Path, max_bytes: int) -> str:
 
 
 def _fold(text: str) -> str:
-    return turkish_fold(text)
+    return search_fold(text)
 
 
 def build_match(query: str) -> str | None:
@@ -296,8 +297,22 @@ class FileIndex:
     def _connect(self) -> sqlite3.Connection:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         db = sqlite3.connect(self.path, timeout=BUSY_SECONDS)
-        for statement in SCHEMA:
-            db.execute(statement)
+        try:
+            version = db.execute("PRAGMA user_version").fetchone()[0]
+            if version != INDEX_VERSION:
+                with db:
+                    db.execute("DROP TABLE IF EXISTS files_fts")
+                    db.execute("DROP TABLE IF EXISTS files")
+                    db.execute("DROP TABLE IF EXISTS meta")
+                    for statement in SCHEMA:
+                        db.execute(statement)
+                    db.execute(f"PRAGMA user_version = {INDEX_VERSION}")
+            else:
+                for statement in SCHEMA:
+                    db.execute(statement)
+        except Exception:
+            db.close()
+            raise
         return db
 
     @property
