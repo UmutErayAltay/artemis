@@ -71,8 +71,8 @@ def step_line(
     raw_tool = fields.get("tool")
     tool = raw_tool if isinstance(raw_tool, str) else ""
     label, done_label = labels.get(tool, ("", ""))
-    display = label or tool or t("Araç")
-    done = done_label or t("{display} tamamlandı").format(display=display)
+    display = t(label) if label else (tool or t("Araç"))
+    done = t(done_label) if done_label else t("{display} tamamlandı").format(display=display)
 
     if event == "tool_result":
         return _tool_result_line(fields, display, done)

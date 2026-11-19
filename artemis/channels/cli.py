@@ -15,6 +15,7 @@ from pydantic import ValidationError
 from artemis.brain.errors import ProviderError
 from artemis.brain.providers import build_provider
 from artemis.channels.autostart import Autostart
+from artemis.channels.notice import format_approval_notice
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.paths import default_config_path, ensure_config
 from artemis.config.settings import load_settings
@@ -61,7 +62,7 @@ async def chat(config_path: Path) -> None:
             return request_approval(
                 name,
                 arguments,
-                runtime_ref[0].gate.pending_notice,
+                format_approval_notice(runtime_ref[0].gate.pending_notice),
                 on_interrupt=runtime_ref[0].runner.cancel_current,
             )
         finally:

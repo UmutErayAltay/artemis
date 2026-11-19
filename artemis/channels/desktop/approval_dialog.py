@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.bridge import Approval
+from artemis.channels.notice import split_approval_notice
 from artemis.i18n import t
 
 
@@ -75,7 +76,7 @@ class ApprovalDialog(QDialog):
 
         # Okunur ad büyük başlıktır; snake_case ham ad gündelik kullanıcıya gürültüdür, bu yüzden
         # "Teknik ayrıntılar" alanında durur (ADR 0014); etiketsiz araçta başlık ham ada düşer.
-        title = QLabel(item.tool_label or item.tool_name)
+        title = QLabel(t(item.tool_label) if item.tool_label else item.tool_name)
         title.setObjectName("title")
         title.setTextFormat(Qt.TextFormat.PlainText)
         title.setWordWrap(True)
@@ -127,8 +128,8 @@ class ApprovalDialog(QDialog):
 
         # Geçit iki ayrı iletiyi ". " ile birleştirir (dış içerik/onay notu + aracın açıklaması);
         # tek paragrafta okunmaz, bu yüzden uyarı kutusu ile açıklama ayrı satırlara bölünür.
-        warning, _sep, tool_note = (item.notice or t("Bu işlem onay gerektirir.")).partition(". ")
-        notice = QLabel(warning + ("." if tool_note else ""))
+        warning_text, tool_note = split_approval_notice(item.notice)
+        notice = QLabel(warning_text)
         notice.setObjectName("approvalNotice")
         notice.setTextFormat(Qt.TextFormat.PlainText)
         notice.setWordWrap(True)

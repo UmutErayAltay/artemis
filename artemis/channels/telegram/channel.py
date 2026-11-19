@@ -26,6 +26,7 @@ from artemis.brain.conversation import ToolExchange, TurnRecord
 from artemis.brain.models import Message
 from artemis.channels.desktop.computer_host import ComputerHost
 from artemis.channels.desktop.dictation import clean_transcript
+from artemis.channels.notice import format_approval_notice
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.channels.telegram.api import (
     TELEGRAM_TEXT_LIMIT,
@@ -42,6 +43,7 @@ from artemis.channels.telegram.media import (
 from artemis.channels.voice.core import SpeechRecognizer
 from artemis.channels.voice.factory import build_dictation_recognizer
 from artemis.config.settings import load_settings
+from artemis.i18n import t
 from artemis.perception.screen import ScreenOutcome, read_image
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import Risk, ToolResult, normalize_risk
@@ -402,8 +404,8 @@ class TelegramChannel:
                 return False
             wait_limit = min(wait_limit, turn_remaining)
         tool = runtime.registry.get(tool_name)
-        label = (tool.label if tool is not None else "") or tool_name
-        notice = runtime.gate.pending_notice
+        label = (t(tool.label) if tool is not None and tool.label else "") or tool_name
+        notice = format_approval_notice(runtime.gate.pending_notice)
         text = (
             f"Onay gerekiyor: {label}\nAraç: {tool_name}\n{notice}\n\n"
             f"Argümanlar:\n{json.dumps(arguments, ensure_ascii=False, indent=2)}\n\n"

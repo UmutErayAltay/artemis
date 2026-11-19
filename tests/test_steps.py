@@ -239,3 +239,60 @@ def test_steps_module_does_not_import_pyside6() -> None:
         timeout=60,
     )
     assert completed.returncode == 0, completed.stderr.decode("utf-8", errors="replace")
+
+
+def test_step_line_translates_tool_labels_for_english_and_keeps_turkish() -> None:
+    from artemis.i18n import set_language
+
+    demo_labels: dict[str, tuple[str, str]] = {
+        "demo_read_sample": ("Demo örnek okuma", "Demo örneği okundu"),
+        "demo_write_memory": ("Demo belleğe yazma", "Demo belleğe yazıldı"),
+    }
+    try:
+        set_language("en")
+        read_ok = step_line(
+            "tool_result",
+            {"tool": "demo_read_sample", "result": {"status": "ok", "success": True}},
+            demo_labels,
+        )
+        write_ok = step_line(
+            "tool_result",
+            {"tool": "demo_write_memory", "result": {"status": "ok", "success": True}},
+            demo_labels,
+        )
+        write_denied = step_line(
+            "tool_result",
+            {"tool": "demo_write_memory", "result": {"status": "denied", "success": False}},
+            demo_labels,
+        )
+        requested = step_line("tool_requested", {"tool": "demo_read_sample"}, demo_labels)
+        approved = step_line(
+            "approval", {"tool": "demo_write_memory", "approved": True}, demo_labels
+        )
+        assert read_ok == StepLine("Demo sample read ✓", "ok", False)
+        assert write_ok == StepLine("Wrote to demo memory ✓", "ok", False)
+        assert write_denied == StepLine("Demo write memory: approval not granted", "denied", False)
+        assert requested == StepLine("Demo read sample requested", "info", True)
+        assert approved == StepLine("Approval granted: Demo write memory", "info", True)
+
+        set_language("tr")
+        tr_read = step_line(
+            "tool_result",
+            {"tool": "demo_read_sample", "result": {"status": "ok", "success": True}},
+            demo_labels,
+        )
+        tr_write = step_line(
+            "tool_result",
+            {"tool": "demo_write_memory", "result": {"status": "ok", "success": True}},
+            demo_labels,
+        )
+        tr_denied = step_line(
+            "tool_result",
+            {"tool": "demo_write_memory", "result": {"status": "denied", "success": False}},
+            demo_labels,
+        )
+        assert tr_read == StepLine("Demo örneği okundu ✓", "ok", False)
+        assert tr_write == StepLine("Demo belleğe yazıldı ✓", "ok", False)
+        assert tr_denied == StepLine("Demo belleğe yazma: onay verilmedi", "denied", False)
+    finally:
+        set_language("tr")
