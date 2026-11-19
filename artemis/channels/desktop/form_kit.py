@@ -28,12 +28,41 @@ def divider() -> QFrame:
     return line
 
 
+class _HeightForWidthBox(QWidget):
+    """Sarılan alt etiketlerin `heightForWidth` değerini `minimumSizeHint` içine yansıtan kutu.
+
+    Neden: `QVBoxLayout` bir çocuk QWidget'a yer ayırırken `minimumSize()` ile `heightForWidth`
+    değerini karşılaştırmaz; çocuk kutunun içinde dinamik olarak büyüyen/gösterilen alanlar ve
+    sarılan `QLabel` varsa üst yerleşim kutuyu `minimumSizeHint` altında bırakabiliyordu.
+    Ayrıca üst yerleşim `heightForWidth(w)` sorduğunda içteki daraltılmış (ör. maxWidth=640)
+    etiketlerin `minimumSizeHint` yüksekliğinin altına inmemesi için `heightForWidth` de
+    en az `minimumSizeHint().height()` döndürür.
+    """
+
+    def heightForWidth(self, width: int) -> int:
+        hfw = super().heightForWidth(width)
+        min_h = super().minimumSizeHint().height()
+        return max(hfw, min_h)
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        if self.hasHeightForWidth() and self.width() > 0:
+            hfw = super().heightForWidth(self.width())
+            if hfw > hint.height():
+                hint.setHeight(hfw)
+        return hint
+
+    def sizeHint(self) -> QSize:
+        hint = super().sizeHint().expandedTo(self.minimumSizeHint())
+        return hint
+
+
 def group(
     title: str, hint: str | None = None, *, divided: bool = True, help: str = "",  # noqa: A002
 ) -> tuple[QWidget, QVBoxLayout]:
     """Düz ayar grubu: ince çizgi + başlık + kısa ipucu. Kart içinde kart olmaması için çerçeve yok;
     çizgi grubun içinde olduğundan grup gizlenince çizgi de gider. `help` başlığa "?" ekler."""
-    box = QWidget()
+    box = _HeightForWidthBox()
     box.setObjectName("group")
     outer = QVBoxLayout(box)
     outer.setContentsMargins(0, 0, 0, 0)
@@ -52,8 +81,36 @@ def group(
     return box, outer
 
 
+class _WrapLabel(QLabel):
+    """Genişliği belli olduğunda `heightForWidth` değerini asgari boyuta taşıyan sarma etiketi.
+
+    Neden: Qt'nin `QLabel.minimumSizeHint()` metodu kelime sarmalı etiketlerde mevcut genişlikteki
+    satır sayısını hesaba katmaz; ayrıca `QBoxLayout.totalHeightForWidth(w)` çağrısı çocuğun
+    `maximumWidth()` sınırını (ör. `_check_hint` için 640px) dikkate almadan `w` genişliğini
+    doğrudan `heightForWidth(w)`'ye iletir. Etiket `heightForWidth` içinde kendi `maximumWidth`
+    ve mevcut genişlik sınırını uygularsa üst yerleşim her zaman gerçek sarma yüksekliğini alır.
+    """
+
+    def heightForWidth(self, width: int) -> int:
+        eff_w = min(width, self.maximumWidth())
+        if self.width() > 0:
+            eff_w = min(eff_w, self.width())
+        return super().heightForWidth(max(1, eff_w))
+
+    def minimumSizeHint(self) -> QSize:
+        hint = super().minimumSizeHint()
+        if self.wordWrap() and self.width() > 0:
+            hfw = self.heightForWidth(self.width())
+            if hfw > hint.height():
+                hint.setHeight(hfw)
+        return hint
+
+    def sizeHint(self) -> QSize:
+        return super().sizeHint().expandedTo(self.minimumSizeHint())
+
+
 def meta_label(text: str) -> QLabel:
-    label = QLabel(text)
+    label = _WrapLabel(text)
     label.setObjectName("meta")
     label.setWordWrap(True)
     label.setTextFormat(Qt.TextFormat.PlainText)

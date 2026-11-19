@@ -48,7 +48,7 @@ def test_voice_stt_defaults_and_bounds() -> None:
         {"stt_beam_size": 0},
         {"stt_beam_size": 11},
         {"stt_partial_beam_size": 0},
-        {"stt_language": "en"},
+        {"stt_language": "de"},
         {"stt_hotwords": ["bad\nword"]},
         {"stt_hotwords": ["x" * 65]},
         {"stt_hotwords": ["ok"] * 101},

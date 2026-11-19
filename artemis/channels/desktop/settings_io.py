@@ -107,6 +107,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
     _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
+    _combo(("voice", "stt_language"), "stt_language_combo", fallback_first=False),
     PanelBinding(
         ("voice", "tts_cloud_endpoint"), "tts_cloud_server",
         lambda combo: str(combo.currentData() or ""),
@@ -329,6 +330,22 @@ def _write_validated(path: Path, raw: dict[str, Any]) -> None:
         Path(temporary).unlink(missing_ok=True)
 
 
+def restore_baseline(config_path: Path, baseline: bytes) -> None:
+    """Kaydedilmiş başlangıç baytlarını doğrulayıp config_path üzerine atomik olarak yazar."""
+    temporary = ""
+    try:
+        descriptor, temporary = tempfile.mkstemp(
+            prefix=".settings-", suffix=".yaml", dir=config_path.parent
+        )
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(baseline)
+        load_settings(Path(temporary))
+        os.replace(temporary, config_path)
+    finally:
+        if temporary:
+            Path(temporary).unlink(missing_ok=True)
+
+
 def microphone_choices(
     devices: list[Any], hosts: list[Any], active: int | str,
     *, advanced: bool = False,
@@ -420,3 +437,25 @@ def refresh_device_combo(panel: Any, settings: Settings) -> None:
     except audio_errors:
         panel._no_device()
         panel.current_device.setText(t("Seçilmedi (mikrofon aygıtları okunamadı)"))
+
+
+def apply_github_report(panel: Any, report: Any) -> None:
+    """GitHub eşitleme sonucunu panele yazar (SettingsPanel'den taşındı: dosya boyutu sınırı)."""
+    panel.github_list.clear()
+    for label, names in ((t("klonlandı"), report.cloned), (t("güncellendi"), report.fetched)):
+        for name in names:
+            panel.github_list.addItem(f"{label}: {name}")
+    for label, pairs in ((t("atlandı"), report.skipped), (t("başarısız"), report.failed)):
+        for name, reason in pairs:
+            panel.github_list.addItem(f"{label}: {name} — {reason}")
+    summary = t(
+        "{cloned} klonlandı, {fetched} güncellendi, {skipped} atlandı, {failed} başarısız."
+    )
+    panel.github_status.setText(
+        summary.format(
+            cloned=len(report.cloned), fetched=len(report.fetched),
+            skipped=len(report.skipped), failed=len(report.failed),
+        )
+    )
+    # Yeniden başlatma yok: kod ajanı projeleri her çağrıda klasörden okur.
+    panel.github_synced.emit(report, panel._github_auto)

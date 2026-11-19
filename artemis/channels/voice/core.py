@@ -66,6 +66,7 @@ from artemis.channels.voice.wake import _edit_distance, _fold
 from artemis.channels.voice.wake import find_wake_word as find_wake_word
 from artemis.channels.voice.wake import is_ghost_transcript as is_ghost_transcript
 from artemis.config.settings import VoiceConfig
+from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 from artemis.text import turkish_fold
 
@@ -521,7 +522,7 @@ class VoiceController:
         gid = self._generation_sequence
         if toggle is not None:
             self.set_continuous(toggle)
-            text = "Kesintisiz mod açık." if toggle else "Kesintisiz mod kapalı."
+            text = t("Kesintisiz mod açık.") if toggle else t("Kesintisiz mod kapalı.")
             self._active = asyncio.create_task(self._acknowledge_wake(text, uid=uid, gid=gid))
         elif not command:
             self._active = asyncio.create_task(self._acknowledge_wake(uid=uid, gid=gid))
@@ -674,7 +675,7 @@ class VoiceController:
         "Dinliyorum" sırasında kayboluyordu. Kendi sesimiz yankı filtresiyle (_is_spoken_echo)
         elenir, başa yapışırsa _strip_spoken_prefix ayıklar.
         """
-        text = self.config.wake_ack_text if text is None else text
+        text = t(self.config.wake_ack_text if text is None else text)
         cancelled = asyncio.Event()
         self._emit_state("awaiting_command")
         played = False

@@ -7,6 +7,7 @@ seçilir. Anahtar YAML'a, loga ve mesajlara girmez; yalnız Kimlik Bilgisi Yöne
 from __future__ import annotations
 
 import contextlib
+import copy
 import html
 import json
 import os
@@ -51,7 +52,7 @@ from artemis.brain.providers import (
     provider_problem,
     stored_endpoint_key,
 )
-from artemis.channels.desktop import themes
+from artemis.channels.desktop import provider_staging, themes
 from artemis.channels.desktop.provider_helpers import (
     CLI_NAME,
     ModelRow,
@@ -77,7 +78,6 @@ from artemis.channels.desktop.provider_layout import (
     PARALLEL_CHOICES,
     PARALLEL_TEST,
     PRESETS,
-    ROLE_TEXTS,
     build_add_box,
     build_connections_box,
     build_models_box,
@@ -86,7 +86,7 @@ from artemis.channels.desktop.provider_workers import CliTest, ConnectionTest
 from artemis.channels.desktop.settings_io import _write_validated
 from artemis.channels.desktop.thread_shutdown import shutdown_thread
 from artemis.channels.desktop.widgets import with_help
-from artemis.config.settings import ENDPOINT_ID_RE, EndpointConfig, load_settings
+from artemis.config.settings import ENDPOINT_ID_RE, EndpointConfig, Settings, load_settings
 from artemis.i18n import t
 from artemis.tools.credentials import delete_secret
 from artemis.tools.credentials import write_secret as write_secret
@@ -112,6 +112,7 @@ _STATE_TEXT = {"bekliyor": "○", "geçti": "✓", "kaldı": "✗", "tehlikeli":
 
 class ProviderSection(QWidget):
     changed = Signal()  # YAML değişti; pencere çalışma zamanını yeniden başlatır
+    staged = Signal()  # Rol/düzen seçimi bekletildi; Kaydet ile diske yazılır
     # Alanları provider_layout kurar; burada yalnız tipleri bildirilir.
     banner: QLabel
     _test_settings: QSettings
@@ -199,6 +200,7 @@ class ProviderSection(QWidget):
         self._retrying = False
         self._last: tuple[Path, dict[str, object]] | None = None  # (rapor yolu, gösterilen rapor)
         self._suggested: tuple[str | None, str | None, str | None] = (None, None, None)
+        self._pending: dict[str, object] | None = None
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
@@ -256,9 +258,30 @@ class ProviderSection(QWidget):
         self._style_roles()
         self._render_models()
 
+    @property
+    def has_pending(self) -> bool:
+        """Kaydet düğmesine basılana dek bekletilen rol/düzen değişikliği var mı."""
+        return self._pending is not None
+
+    def _stage(self, raw: dict[str, object]) -> None:
+        """Rol değişikliğini diske yazmadan bekletir ve üst paneli kirli işaretler."""
+        provider_staging.stage(self, raw)
+
+    def commit_pending(self) -> bool:
+        """Bekleyen rol seçimlerini doğrulanmış olarak diske yazar ve çalışma zamanını uyarır."""
+        return provider_staging.commit_pending(self)
+
+    def drop_pending(self) -> None:
+        """Bekleyen rol seçimlerini atar ve görünümü kayıtlı ayardan yeniler."""
+        provider_staging.drop_pending(self)
+
+    def _loaded_settings(self) -> Settings:
+        """Kayıtlı ayarları okur; bekleyen rol seçimleri varsa görünüme uygular."""
+        return provider_staging.loaded_settings(self)
+
     def _render_banner(self) -> None:
         try:
-            settings = load_settings(self.config_path)
+            settings = self._loaded_settings()
         except (OSError, ValueError):
             return
         model = settings.models.get(settings.primary_model)
@@ -281,7 +304,7 @@ class ProviderSection(QWidget):
 
     def reload(self) -> None:
         try:
-            settings = load_settings(self.config_path)
+            settings = self._loaded_settings()
         except (OSError, ValueError):
             self.status.setText(t("Ayarlar okunamadı."))
             return
@@ -566,7 +589,10 @@ class ProviderSection(QWidget):
         self.status.setText(message)
 
     def _raw(self) -> dict[str, object]:
-        loaded = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
+        if self._pending is not None:
+            loaded: object = copy.deepcopy(self._pending)
+        else:
+            loaded = yaml.safe_load(self.config_path.read_text(encoding="utf-8"))
         raw: dict[str, object] = loaded if isinstance(loaded, dict) else {}
         # `endpoints:`/`models:` null ise setdefault None dönerdi; boş sözlük yapılır.
         for key in ("endpoints", "models"):
@@ -582,6 +608,9 @@ class ProviderSection(QWidget):
         except (OSError, ValueError, yaml.YAMLError):
             self.status.setText(t("Kaydedilemedi; mevcut ayarlar korunuyor."))
             return False
+        # ponytail: doğrudan yazan işlemler (_save, _delete, _add_model, _remove_model)
+        # _raw() üzerinden bekleyen rol seçimlerini de dosyaya katıp _pending'i temizler.
+        self._pending = None
         return True
 
     def _save(self) -> None:
@@ -749,34 +778,14 @@ class ProviderSection(QWidget):
         return str(item.data(Qt.ItemDataRole.UserRole))
 
     def _make_primary(self) -> None:
-        alias = self._selected_alias()
-        if alias is None:
-            return
-        try:
-            raw = self._raw()
-        except (OSError, yaml.YAMLError):
-            self.status.setText(t("Ayarlar okunamadı."))
-            return
-        if any(row[0] == alias and row[5] != "chat" for row in self._model_data):
-            msg = t("Resim ve ses modelleri beyin modeli olamaz; sohbet modeli seçin.")
-            self.status.setText(msg)
-            return
-        # Takma ada göre yazılır: aynı model kimliğini paylaşan modeller karışmaz.
-        raw["primary_model"] = alias
-        if raw.get("fallback_model") == alias:
-            raw.pop("fallback_model")  # beyin olan model kendi arıza yedeği olamaz
-        if not self._write(raw):
-            return
-        self.reload()
-        self.status.setText(t("Beyin modeli: {alias}.").format(alias=alias))
-        self.changed.emit()
+        provider_staging.make_primary(self)
 
     def _remove_model(self) -> None:
         alias = self._selected_alias()
         if alias is None:
             return
         try:
-            settings = load_settings(self.config_path)
+            settings = self._loaded_settings()
         except (OSError, ValueError):
             self.status.setText(t("Ayarlar okunamadı."))
             return
@@ -1005,47 +1014,7 @@ class ProviderSection(QWidget):
 
     def _toggle_role(self, key: str) -> None:
         """Seçili modele zor işler/yedek/bilgisayar (computer_use.model) rolü; 2. tık kapatır."""
-        alias = self._selected_alias()
-        if alias is None:
-            return
-        name, off, on = ROLE_TEXTS[key]
-        try:
-            settings = load_settings(self.config_path)
-            raw = self._raw()
-        except (OSError, ValueError, yaml.YAMLError):
-            self.status.setText(t("Ayarlar okunamadı."))
-            return
-        model = settings.models.get(alias)
-        if model is None or model.kind != "chat":
-            self.status.setText(
-                t("Resim ve ses modelleri {role} modeli olamaz; sohbet modeli seçin.").format(
-                    role=t(name).lower()
-                )
-            )
-            return
-        if key == "fallback_model" and alias == settings.primary_model:
-            self.status.setText(
-                t("Bu model zaten beyin; {role} için başka bir model seçin.").format(
-                    role=t(name).lower()
-                )
-            )
-            return
-        # computer_use.model iç içe alandır; diğer roller kök anahtardır.
-        section = raw.setdefault("computer_use", {}) if key == "computer_use" else raw
-        field = "model" if key == "computer_use" else key
-        if not isinstance(section, dict):
-            self.status.setText(t("Ayarlar okunamadı."))
-            return
-        removing = section.get(field) == alias
-        if removing:
-            section.pop(field, None)
-        else:
-            section[field] = alias
-        if not self._write(raw):
-            return
-        self.reload()
-        self.status.setText(t(off) if removing else t(on).format(alias=alias))
-        self.changed.emit()
+        provider_staging.toggle_role(self, key)
 
     def _confirm_paid(self, alias: str, cost: Decimal) -> bool:
         """Ücretli modelde testten önce bir kez sorulur (varsayılan Hayır)."""
@@ -1272,29 +1241,4 @@ class ProviderSection(QWidget):
         self.status.setText(f"{alias}: {report_summary(report)}. {report.get('summary', '')}")
 
     def _apply_layout(self) -> None:
-        ana, zor, pc = self._suggested
-        if not ana:
-            return
-        try:
-            raw = self._raw()
-        except (OSError, yaml.YAMLError):
-            self.status.setText(t("Ayarlar okunamadı."))
-            return
-        raw["primary_model"] = ana
-        if zor:
-            raw["hard_model"] = zor
-        else:
-            raw.pop("hard_model", None)
-        # Boş computer_use.model ana modeli kullanır; öneri ana modelse boş bırakılır.
-        computer = raw.setdefault("computer_use", {})
-        if isinstance(computer, dict):
-            computer["model"] = pc or ""
-        if not self._write(raw):
-            return
-        self.reload()
-        self.status.setText(
-            t("Düzen uygulandı. Beyin: {ana}").format(ana=ana)
-            + (t(", zor işler: {zor}").format(zor=zor) if zor else "")
-            + (t(", bilgisayar kullanımı: {pc}").format(pc=pc) if pc else "") + "."
-        )
-        self.changed.emit()
+        provider_staging.apply_layout(self)

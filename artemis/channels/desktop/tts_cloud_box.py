@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.brain.providers import stored_endpoint_key
-from artemis.channels.desktop.form_kit import field, meta_label
+from artemis.channels.desktop.form_kit import _HeightForWidthBox, field, meta_label
 from artemis.channels.desktop.provider_helpers import speech_cost_text
 from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.channels.voice.cloud_tts import gemini_native_target
@@ -157,7 +157,7 @@ class TtsModelFetch(QThread):
         self.done.emit(message, models)
 
 
-class TtsCloudBox(QWidget):
+class TtsCloudBox(_HeightForWidthBox):
     """Bulut TTS ayar kutusu; panel üzerindeki ilgili alanları kurar ve yönetir."""
 
     def __init__(self, panel: SettingsPanel) -> None:
@@ -178,7 +178,7 @@ class TtsCloudBox(QWidget):
         panel.tts_cloud_saved.addItem(t("Elle ayarla"), "")
         field(layout, t("Bulut konuşma modeli"), panel.tts_cloud_saved)
 
-        self._manual_box = QWidget()
+        self._manual_box = _HeightForWidthBox()
         manual_layout = QVBoxLayout(self._manual_box)
         manual_layout.setContentsMargins(0, 0, 0, 0)
 
@@ -502,6 +502,24 @@ class TtsCloudBox(QWidget):
                 t("Ses modeli eklemek için Ayarlar > Model > Model ekle'de türü Ses seç.")
             )
         panel.tts_cloud_hint.setText(" ".join(parts))
+        self._relayout_ancestors()
+
+    def _relayout_ancestors(self) -> None:
+        # Alt kutuların görünürlüğü veya ipucu metninin sarma yüksekliği değiştiğinde
+        # kaydırma alanındaki sayfa zincirinin boyutu hemen yeniden hesaplanmalıdır.
+        chain: list[QWidget] = []
+        node: QWidget | None = self
+        while node is not None:
+            chain.append(node)
+            lay = node.layout()
+            if lay is not None:
+                lay.invalidate()
+            node.updateGeometry()
+            node = node.parentWidget()
+        for w in reversed(chain):
+            lay = w.layout()
+            if lay is not None:
+                lay.activate()
 
     def _drop_diverged_saved(self) -> None:
         # Kayıtlı model seçildikten sonra alanlar elle değişirse seçim "Elle ayarla"ya döner;

@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 from pydantic import ValidationError
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QProcess, QTimer
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QSystemTrayIcon
 
 from artemis.brain.providers import provider_problem
@@ -226,6 +226,20 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         retranslate_widgets(roots, new)
 
 
+def install_update(window: DesktopWindow, path: object) -> None:
+    """İndirilmiş ve SHA-256 ile doğrulanmış kurucuyu başlatır; önce kaydedilmemiş ayar sorulur.
+
+    Neden: kurucu ayrı süreçte açılır ve uygulama kapanır; kaydedilmemiş ayarlar kaybolmasın
+    diye Ayarlar'dan çıkış kontrolü önce yapılır.
+    """
+    if not leave_settings(window):
+        return
+    if not QProcess.startDetached(str(path), []):
+        window.settings_panel.update_section.result_label.setText(t("Kurucu başlatılamadı."))
+        return
+    window._request_exit()
+
+
 def restart_runtime(window: DesktopWindow) -> None:
     """Config değişince çalışma zamanını yeniden kurar (Uygula ve sağlayıcı kaydı)."""
     if window.settings_panel.pet.creator is not None:
@@ -250,3 +264,34 @@ def stay_in_settings(window: DesktopWindow) -> None:
     window.tabs.blockSignals(blocked)
     window._settings_open = True
     window._sync_navigation()
+
+
+def finish_exit(window: DesktopWindow) -> None:
+    """Çıkış onaylandıktan ve köprü durduktan sonra tüm pencere kaynaklarını kapatır."""
+    if not window._exiting:
+        return
+    # Kanal kendi runtime'ını kapatır; iş parçacığı çıkıştan sonra kalmasın.
+    window._telegram_service.stop()
+    window._timer.stop()
+    if window._hotkey is not None:
+        window._hotkey.stop()
+        window._hotkey = None
+    if window._dictation_hotkey is not None:
+        window._dictation_hotkey.stop()
+        window._dictation_hotkey = None
+    if window._selection_hotkey is not None:
+        window._selection_hotkey.stop()
+        window._selection_hotkey = None
+    window.selection_popup.close()
+    window.settings_panel.finish_inventory()
+    window.settings_panel.providers.shutdown()
+    if window._tray is not None:
+        window._tray.hide()
+    window.overlay.close()
+    window.pet.close()
+    if window._temporary is not None:
+        window._temporary.cleanup()
+        window._temporary = None
+    window._allow_close = True
+    window.close()
+    window._app.quit()

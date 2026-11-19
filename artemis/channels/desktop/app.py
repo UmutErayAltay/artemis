@@ -105,7 +105,9 @@ from artemis.channels.desktop.window_restart import (
     apply_settings,
     check_provider,
     code_agent_config_saved,
+    finish_exit,
     github_synced,
+    install_update,
     leave_settings,
     maybe_restart_for_config,
     providers_changed,
@@ -522,6 +524,7 @@ class DesktopWindow(QMainWindow):
         self._sync_telegram_service()
         self.settings_panel.pet.skin_selected.connect(self._select_skin)
         self.settings_panel.pet.model_settings_requested.connect(self._open_model_settings)
+        self.settings_panel.update_section.install_ready.connect(self._install_update)
         self.settings_scroll = self.settings_panel
         # Ctrl+, her yerden Ayarlar'ı açar (pencere kapsamlı).
         self._settings_shortcut = QShortcut(QKeySequence("Ctrl+,"), self)
@@ -617,6 +620,9 @@ class DesktopWindow(QMainWindow):
         """Kaydet: sekmeden çıkmayı beklemeden uygular (meşgulse yeniden kurulum ertelenir)."""
         if self._settings_restart_pending:
             self._request_restart(self.settings_panel.notice)
+
+    def _install_update(self, path: object) -> None:
+        install_update(self, path)
 
     @property
     def _settings_restart_pending(self) -> bool:
@@ -1194,33 +1200,7 @@ class DesktopWindow(QMainWindow):
         self.overlay.set_busy(True, t("Temizleniyor…"))
 
     def _finish_exit(self) -> None:
-        if not self._exiting:
-            return
-        # Kanal kendi runtime'ını kapatır; iş parçacığı çıkıştan sonra kalmasın.
-        self._telegram_service.stop()
-        self._timer.stop()
-        if self._hotkey is not None:
-            self._hotkey.stop()
-            self._hotkey = None
-        if self._dictation_hotkey is not None:
-            self._dictation_hotkey.stop()
-            self._dictation_hotkey = None
-        if self._selection_hotkey is not None:
-            self._selection_hotkey.stop()
-            self._selection_hotkey = None
-        self.selection_popup.close()
-        self.settings_panel.finish_inventory()
-        self.settings_panel.providers.shutdown()
-        if self._tray is not None:
-            self._tray.hide()
-        self.overlay.close()
-        self.pet.close()
-        if self._temporary is not None:
-            self._temporary.cleanup()
-            self._temporary = None
-        self._allow_close = True
-        self.close()
-        self._app.quit()
+        finish_exit(self)
 
     def closeEvent(self, event: QCloseEvent) -> None:
         if self._allow_close:

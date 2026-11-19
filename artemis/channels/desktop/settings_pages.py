@@ -33,7 +33,14 @@ from PySide6.QtWidgets import (
 from artemis.channels.desktop.about_section import AboutSection
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.file_search_section import FileSearchSection
-from artemis.channels.desktop.form_kit import button_row, divider, field, group, meta_label
+from artemis.channels.desktop.form_kit import (
+    _HeightForWidthBox,
+    button_row,
+    divider,
+    field,
+    group,
+    meta_label,
+)
 from artemis.channels.desktop.page_kit import CurrentPageStack
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
@@ -58,7 +65,7 @@ from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
 from artemis.channels.desktop.update_section import UpdateSection
 from artemis.channels.desktop.widgets import HelpTip, with_help
 from artemis.config.settings import BUILTIN_AGENT
-from artemis.i18n import t
+from artemis.i18n import current_language, t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.settings_panel import SettingsPanel
@@ -184,17 +191,20 @@ def add_page(
     """Bölüm sayfası: 880px'i aşmayan sütun, solda; tek satır açıklama. Sayfa adı
     bölüm listesinde zaten seçili görünür, sayfada tekrarlanmaz. `group_title`
     grubun ilk sayfasında grup başlığını açar."""
-    outer = QWidget()
-    row = QHBoxLayout(outer)
+    # `QHBoxLayout` çocuklarının `heightForWidth` değerini kendi `minimumSize` hesabına katmaz;
+    # 880px sınırlı sütunu doğrudan `QVBoxLayout` içine koymak sarılan etiketlerin ve dinamik
+    # gizlenen/gösterilen kutuların yüksekliğini kaydırma alanına eksiksiz iletir.
+    outer = _HeightForWidthBox()
+    row = QVBoxLayout(outer)
     row.setContentsMargins(0, 0, 0, 0)
-    column = QWidget()
+    row.setSpacing(0)
+    column = _HeightForWidthBox()
     # Model sayfası liste + ayrıntıyı yan yana koyar; bloğun bütün sayfa alanını kullanır.
     column.setMaximumWidth(16777215 if wide else 880)
+    row.addWidget(column)
     content = QVBoxLayout(column)
     content.setContentsMargins(0, 0, 0, 0)
     content.setSpacing(24)
-    row.addWidget(column, 1)
-    row.addStretch(0)
     # Anında kaydedilen sayfalar açıklamanın sağında kısa "Kaydedildi" gösterir.
     saved = _SavedNote()
     panel.saved_notes[name] = saved
@@ -296,6 +306,20 @@ def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     ))
     panel.stt_status = meta_label("")
     stt_layout.addWidget(panel.stt_status)
+    panel.stt_language_combo = QComboBox()
+    panel.stt_language_combo.setAccessibleName(t("Tanıma dili"))
+    panel.stt_language_combo.addItem(t("Türkçe"), "tr")
+    panel.stt_language_combo.addItem(t("Türkçe + İngilizce terimler"), "tr_en")
+    panel.stt_language_combo.addItem("English", "en")
+    panel.stt_language_combo.addItem(t("Otomatik algıla"), "auto")
+    field(
+        stt_layout,
+        t("Tanıma dili"),
+        panel.stt_language_combo,
+        help=t(
+            "Konuştuğun dil. İngilizce arayüzde İngilizce konuşacaksan English seç."
+        ),
+    )
     panel.precision_combo = QComboBox()
     panel.precision_combo.setAccessibleName(t("Tanıma hassasiyeti"))
     panel.precision_combo.setToolTip(t(
@@ -384,6 +408,19 @@ def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         "gider. Piper ve EMA bu bilgisayarda çalışır, metin dışarı çıkmaz. Ses yeniden "
         "başlayınca uygulanır."
     ))
+    panel.tts_piper_hint = meta_label("")
+    speech.addWidget(panel.tts_piper_hint)
+
+    def _update_piper_hint(*_args: object) -> None:
+        panel.tts_piper_hint.setText(
+            t("Piper sesi Türkçe; İngilizce yanıtlar için Edge ya da bulut ses seç.")
+        )
+        panel.tts_piper_hint.setVisible(
+            current_language() == "en" and panel.tts_combo.currentData() == "piper"
+        )
+
+    _update_piper_hint()
+    panel.tts_combo.currentIndexChanged.connect(_update_piper_hint)
     build_tts_cloud_box(panel, speech)
     panel.continuous_mode = QCheckBox(t("Kesintisiz sohbet"))
     speech.addLayout(with_help(panel.continuous_mode, t(
@@ -539,6 +576,7 @@ def build_model_page(
     panel.providers = ProviderSection(config_path, demo=demo)
     panel.providers.changed.connect(panel._load_cloud_servers)
     panel.providers.changed.connect(panel.saved_notes[t("Model")].flash)
+    panel.providers.staged.connect(panel._mark_dirty)
     model_page.addWidget(panel.providers)
     model_page.addStretch(1)
 
