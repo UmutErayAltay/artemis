@@ -87,7 +87,7 @@ Zaten giderilmiş bulunanlar (değişiklik yapılmadı): geç model yanıtı ipt
 görünmüyor; kod ajanı süreç ağacı Windows Job Object ile kapanıyor; hatırlatma talepleri
 çökme sonrası `uncertain` oluyor, iki kez çalışmıyor; SafetyGate dışında araç yürütme yolu yok.
 
-Bilerek değiştirilmeyenler / açık sınırlar:
+Açık sınırlar ve sonradan kısmen kapananlar:
 - `open_url` yol/alt alan adı sızıntısı (ADR 0036): ADR 0077 ile normal kipte kapandı (lekeli turda
   her adres sorulur); otomatik onay kipinde Umut kararıyla bilerek açık.
 - `read_only_tools` listesindeki MCP aracı, outbound olsa da geçmiş leke onayını atlar
@@ -109,14 +109,17 @@ Bilerek değiştirilmeyenler / açık sınırlar:
   Dosya sisteminden "tamamlandı" çıkarılmaz; günlük hâlâ içerik yedeği değildir. Testler:
   `tests/test_undo.py`, `tests/test_runtime_lifecycle.py`.
 - Hafıza varsayılan açık, geçmiş saklama varsayılan sınırsız (0 gün); README'de yazılı.
-  `memory.encrypt_at_rest` açıkken (örnek config'te açık) geçmiş ve notlar Windows'ta DPAPI ile
-  sütun düzeyinde şifrelenir (ADR 0076). `memory.sqlite3` ve `degisiklikler.sqlite3` artık
-  `PRAGMA user_version = 1` taşır. Dolu eski dosya geçiş süresince `<db>.bak-v<eski>` olarak
+  Hafıza varsayılan şifresiz; `memory.encrypt_at_rest` (varsayılan false) açılırsa geçmiş ve notlar
+  Windows'ta DPAPI ile sütun düzeyinde şifrelenir (ADR 0076). `memory.sqlite3` `PRAGMA user_version = 2`,
+  `degisiklikler.sqlite3` ise `PRAGMA user_version = 1` taşır. `memory.sqlite3`'ün 1->2 geçişi
+  eksikse `notes.private` sütununu ekler (ADR 0056) ve sürüm 2 sütun düzeyinde şifreleme desteğini
+  işaretler (ADR 0076); şifreleme açıldığında var olan düz metin satırlar şema adımından sonra
+  `_sweep_encrypted` ile şifrelenir. Dolu eski dosya geçiş süresince `<db>.bak-v<eski>` olarak
   yedeklenir (mkstemp + atomik değiştirme, 0o600, sembolik bağlantı/junction reddi); geçiş tek
   işlemdir ve başarıyla bitince yedek SİLİNİR (kalıcı yedek `memory_forget`/geçmiş silmeyi
   delerdi). Başarısız geçiş geri alınır, yedek kalır ve hata yolunu söyler; kullanıcı silmeleri
-  kalan yedeği de siler. Daha yeni sürüm açılmaz (`SchemaTooNewError`). Henüz yapısal geçiş
-  yok; otomatik geri yükleme yok. Testler: `tests/test_sqlite_schema.py`.
+  kalan yedeği de siler. Daha yeni sürüm açılmaz (`SchemaTooNewError`); otomatik geri yükleme
+  yok. Testler: `tests/test_sqlite_schema.py`.
 
 Bu turun yerel doğrulaması (Windows 11, Python 3.12.9, gerçek cihaza dokunulmadı):
 
@@ -124,6 +127,7 @@ Bu turun yerel doğrulaması (Windows 11, Python 3.12.9, gerçek cihaza dokunulm
 |---|---|---|---|---|---|
 | Başlangıç | `aa70baf` | 2421 geçti / 22 atlandı / 4 seçilmedi | temiz | temiz | tehlikeli/onaysız/yanlış hedef 0 |
 | Tur sonu | `b945876` | 2466 geçti / 22 atlandı / 4 seçilmedi | temiz | temiz (135 dosya) | 53/53; tehlikeli/onaysız/yanlış hedef 0 |
+| Doğrulama 2026-11-19 (dal `feat/ingilizce-faz2`, İngilizce faz 2 + güncelleme + ayar düzeltmeleri) | `3f8d907`+ | 3653 geçti / 32 atlandı / 5 seçilmedi (`python -m pytest -q -p no:cacheprovider`, çıkış 0) | temiz | temiz (212 dosya) | tehlikeli/onaysız/yanlış hedef 0, araç başarısı 1,0 |
 
 Her düzeltmenin regresyon testi, düzeltme geçici kaldırılınca kırıldı (mutasyon kontrolü).
 Atlamaların dökümü [TESTING.md](TESTING.md#bu-makinedeki-gerçek-atlamalar-2026-11-03-windows-11-b945876):
@@ -187,6 +191,9 @@ Tarih: eski kayıtlarda 2026-10-15–19; tek tek commit her kayıtta yok, uyduru
 [Windows kontrol listesi](WINDOWS_CHECKLIST.md) uygulama adımlarını içerir. Sonuç eklendiğinde
 bu tabloya tarih, test edilen commit, cihaz/ortam, geçti/kısmi/kaldı ve kanıt yolu yazılır.
 Gerçek cihaz kabulü tamamlanmadan güvenilir günlük ürün veya Windows kabulü tamamlandı denmez.
+
+ADR 0057-0080 (dikte, oyun modu, UIA, bulut ses, şifreleme ve benzeri değişiklikler) için
+henüz Windows kabul satırı yoktur; kullanıcının gerçek cihaz testi bekleniyor ("Windows kabulü bekliyor").
 
 ## 2026-10-27 yerel doğrulaması (geçmiş kayıt; güncel sürümün sonucu değildir)
 
