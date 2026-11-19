@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "artemis-tr"
-version = "0.2.1"
+version = "0.2.2"
 description = "Türkçe, güvenlik kapılı kişisel masaüstü asistanı"
 requires-python = ">=3.12"
 license = "Apache-2.0"
