@@ -125,8 +125,14 @@ class SafetyGate:
         )
         tool = self.registry.get(call.name)
         if tool is None:
+            reason = self.registry.disabled_reason(call.name)
+            message = (
+                reason
+                if reason is not None
+                else f"Kayıtlı olmayan araç çalıştırılmadı: {call.name}"
+            )
             return self._finish(
-                ToolResult(message=f"Kayıtlı olmayan araç çalıştırılmadı: {call.name}"),
+                ToolResult(message=message),
                 call,
                 context,
                 state,

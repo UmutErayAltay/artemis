@@ -148,12 +148,21 @@ def _target_matches(element_name: str, goal: str) -> bool:
     return False
 
 
-def destructive_unrequested(element_name: str, goal: str) -> str | None:
-    """Öğe yıkıcıysa ve hedef o eylemi istemiyorsa engel nedeni; değilse None."""
+def destructive_unrequested(
+    element_name: str, goal: str, user_text: str | None = None
+) -> str | None:
+    """Öğe yıkıcıysa ve istenmediyse engel nedeni; değilse None.
+
+    `user_text` verilmişse yıkıcı aile izni kullanıcının kendi mesajından gelir (ADR 0078);
+    `goal` modelin yazdığı argümandır ve yalnız hedef eşleşmesinde kullanılır. Boş `user_text`
+    hiçbir aileyi kapsamaz, yani engeller. `None` eski davranıştır (aile izni `goal`'dan)."""
     families = _families(element_name)
     if not families:
         return None
-    if families <= _families(goal, strong_only=True) and _target_matches(element_name, goal):
+    permission = goal if user_text is None else user_text
+    if families <= _families(permission, strong_only=True) and _target_matches(
+        element_name, goal
+    ):
         return None
     return (
         f'"{element_name[:60]}" yıkıcı bir öğe ve hedefte istenmedi; tıklanmadı. '

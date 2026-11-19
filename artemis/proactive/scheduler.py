@@ -441,6 +441,7 @@ class ProactiveScheduler:
             settings=runtime.settings,
             audit=runtime.audit,
             services=runtime.context.services,
+            user_text=briefing.prompt,
         )
         agent = AgentLoop(runtime.provider, SafetyGate(runtime.registry), context, _refuse)
         runner = CommandRunner(

@@ -10,7 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.brain.models import Completion, Message, ToolCall
 from artemis.config.settings import ModelConfig, Settings
-from artemis.i18n import t
+from artemis.i18n import current_language, t
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import ToolRegistry
@@ -97,7 +97,16 @@ class DemoProvider:
             "",
         )
         normalized = user_text.casefold()
-        if "örnek akış" in normalized or "ornek akis" in normalized:
+        if (
+            "örnek akış" in normalized
+            or "ornek akis" in normalized
+            or "sample flow" in normalized
+        ):
+            write_args = (
+                {"key": "last_sample", "value": "temporary demo record"}
+                if current_language() == "en"
+                else {"key": "son_örnek", "value": "geçici demo kaydı"}
+            )
             return Completion(
                 tool_calls=[
                     ToolCall(
@@ -108,7 +117,7 @@ class DemoProvider:
                     ToolCall(
                         id="demo-write",
                         name="demo_write_memory",
-                        arguments={"key": "son_örnek", "value": "geçici demo kaydı"},
+                        arguments=write_args,
                     ),
                 ],
                 provider="demo",

@@ -175,6 +175,28 @@ def test_destructive_unrequested_cases() -> None:
     assert upper_reason is not None
 
 
+def test_destructive_unrequested_family_permission_comes_from_user_text() -> None:
+    # (a) goal'da sözcük var, kullanıcı söylememiş: engellenir.
+    assert (
+        destructive_unrequested("Hesabı sil", "hesabımı sil", user_text="duyuruyu oku")
+        is not None
+    )
+    # (b) ikisi de söylüyor: açılır.
+    assert destructive_unrequested("Hesabı sil", "hesabımı sil", user_text="hesabımı sil") is None
+    # (c) user_text None: eski davranış.
+    assert destructive_unrequested("Hesabı sil", "hesabımı sil") is None
+    assert destructive_unrequested("Hesabı sil", "duyuruyu oku") is not None
+    # (d) boş user_text kapalı başarısız olur.
+    assert destructive_unrequested("Hesabı sil", "hesabımı sil", user_text="") is not None
+    # Olumsuz biçim izin değildir.
+    assert (
+        destructive_unrequested(
+            "Hesabı sil", "hesabımı sil", user_text="hesabımı silmeden kapat"
+        )
+        is not None
+    )
+
+
 def _model(**fields: object) -> ModelConfig:
     return ModelConfig.model_validate(
         {"input_per_million": 0, "output_per_million": 0, **fields}

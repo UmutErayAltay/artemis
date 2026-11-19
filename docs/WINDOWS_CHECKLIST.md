@@ -146,9 +146,9 @@ koşmak içindir; araçlar main'de.
 - [ ] Onay sırasında/sesi kapatınca sıradaki eski sözler sonradan komut olmuyor.
 - [ ] Soğuk/sıcak GPU profillerinde ≥30 tur, A6/A7 gürültü setleri ve söz kesme tekrar ölçüldü.
 - [ ] Hafıza panelinde gerçek süre okunuyor; test verisiyle 0/30 gün ve reddedilen/onaylanan silme denendi.
-- [ ] /yeni arşivi koruyor; açık geçmiş silme arşivi ve bağlamı siliyor, öz notları koruyor.
-- [ ] Hatırlatma teslim geçmişi failed/uncertain gösteriyor; tekrar çift bildirim uyarısıyla yeni kayıt açıyor.
-- [ ] Ses/scheduler/kod işi açıkken kapatıp açma sonrası yetim süreç veya kalmış sahiplik kilidi yok.
+- [x] /yeni arşivi koruyor; açık geçmiş silme arşivi ve bağlamı siliyor, öz notları koruyor. *(2026-11-19, betik: scripts/kabul_guvenilirlik.py, arayüzsüz)*
+- [ ] Hatırlatma teslim geçmişi failed/uncertain gösteriyor; tekrar çift bildirim uyarısıyla yeni kayıt açıyor. *(2026-11-19: arka uç betikle geçti — scripts/kabul_guvenilirlik.py; arayüz kısmı bekliyor)*
+- [ ] Ses/scheduler/kod işi açıkken kapatıp açma sonrası yetim süreç veya kalmış sahiplik kilidi yok. *(2026-11-19: kod ajanı süreç ağacı ve kilit betikle geçti — scripts/kabul_guvenilirlik.py; ses ve zamanlayıcı bekliyor)*
 
 ## E. Güvenilirlik turu (dal `fix/guvenilirlik-turu`, 2026-11-03)
 
@@ -176,12 +176,12 @@ adımlarda (mesaj, kapatma) yalnız zararsız hedef kullanın.
 - [ ] **Kod ajanı kilidi:** Bir proje işi çalışırken Görev Yöneticisi'nden Artemis'i öldür,
   yeniden aç → iş "kesildi", depo kilitli; Projeler → "Kilidi bırak" onay sorup kilidi
   kaldırıyor, yeni iş başlıyor. Ajan penceresi/süreci kalmadığını Görev Yöneticisi'nde doğrula.
-- [ ] **Kod ajanı bağımsız kontrol:** `code_agent.projects.<ad>.checks: [["python","-m","pytest","-q"]]`
+- [ ] **Kod ajanı bağımsız kontrol:** `code_agent.projects.<ad>.checks: [["python","-m","pytest","-q"]]` *(2026-11-19: arka uç betikle geçti — scripts/kabul_guvenilirlik.py; arayüz kısmı bekliyor)*
   tanımla; iş bitince durum "Doğrulandı" (geçerse) ya da "Bitti, kontrol başarısız"; tanımsız
   projede "Bitti (doğrulanmadı)".
-- [ ] **Geçmiş silme:** Hafıza → geçmişi sil; `state_dir/memory.sqlite3` içinde silinen bir
+- [ ] **Geçmiş silme:** Hafıza → geçmişi sil; `state_dir/memory.sqlite3` içinde silinen bir *(2026-11-19: arka uç betikle geçti — scripts/kabul_guvenilirlik.py; arayüz kısmı bekliyor)*
   cümle aranınca (`Select-String`) bulunmuyor; öz notlar duruyor.
-- [ ] **Audit döndürme:** `audit.jsonl` 20 MB'ı geçince `audit-<zaman>-<pid>.jsonl` oluşuyor,
+- [x] **Audit döndürme:** `audit.jsonl` 20 MB'ı geçince `audit-<zaman>-<pid>.jsonl` oluşuyor, *(2026-11-19, betik: scripts/kabul_guvenilirlik.py, arayüzsüz)*
   eski dosya silinmiyor.
 
 ## F. Gizlilik kökeni ve hedef pencere (ADR 0056, dal `fix/gizlilik-ve-hedef-pencere`)

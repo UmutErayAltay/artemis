@@ -1,5 +1,8 @@
 # ADR 0065 — Yerel dosya araması
 
+**Güncelleme: 2026-11-19:** Dosya araması artık i/ı ayrımı yapmaz (`search_fold`); sürüm
+değişikliğinde (`INDEX_VERSION`) indeks otomatik olarak bir kez yeniden kurulur.
+
 **Bağlam:** "Geçen ayki fatura nerede", "içinde 'kira sözleşmesi' geçen belge" gibi istekler,
 kullanıcının seçtiği klasörlerde tam metin arama ister. Gömme (embedding) gerekmez; vault'un
 sözcük araması dosya başına bellekte tarar, binlerce dosyada yetmez.

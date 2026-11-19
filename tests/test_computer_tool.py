@@ -588,6 +588,34 @@ async def test_memory_is_shared_within_same_turn_and_reset_for_new_turn(tmp_path
     assert "Aynı mesajdaki önceki" not in fresh and "Adım 1" not in fresh
 
 
+async def test_context_user_text_reaches_the_session(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.computer.session import SessionResult
+    from artemis.tools.plugins import computer as module
+
+    recorded: dict[str, Any] = {}
+
+    class RecordingSession:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        async def run(
+            self, goal: str, turn_id: str, deadline: float | None, **kwargs: Any
+        ) -> SessionResult:
+            recorded.update(kwargs)
+            return SessionResult("done", "ok", 0, True, "kanıt")
+
+    monkeypatch.setattr(module, "ComputerSession", RecordingSession)
+    gate, context, *_ = env(tmp_path)
+    context.user_text = "dosyayı sil"
+    tool = gate.registry.get("computer_use")
+    assert tool is not None
+    await tool.execute(tool.args_model(goal="dosyayı sil"), context)
+    assert recorded == {"user_text": context.user_text}
+    assert recorded["user_text"] == "dosyayı sil"
+
+
 def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
     """ADR 0039 + 0077: onay atlaması yalnız bu araçlarda; yenisi ADR'siz eklenirse kırılır."""
     from artemis.tools.registry import discover_tools

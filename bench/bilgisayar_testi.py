@@ -628,7 +628,9 @@ async def run_computer_scenario(
             strict=strict_rules_on(settings.models.get(alias)),
         )
         started = time.monotonic()
-        result = await session.run(scenario.goal, "model-testi", None)
+        result = await session.run(
+            scenario.goal, "model-testi", None, user_text=scenario.goal
+        )
         elapsed = time.monotonic() - started
 
     done_text = result.summary if result.reason == "done" else ""

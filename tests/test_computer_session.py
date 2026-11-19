@@ -1586,6 +1586,63 @@ async def test_reason_and_ask_user_secrets_are_masked() -> None:
     assert "abc123def" not in ask_result.summary and "[GİZLENDİ]" in ask_result.summary
 
 
+class _DeleteButtonBackend(FakeBackend):
+    """UIA listesinde tek bir yıkıcı düğme bulunan geniş ekranlı sahte arka uç."""
+
+    def __init__(self) -> None:
+        super().__init__(size=(800, 600))
+
+    def ui_elements(self, hwnd: int) -> list[Any]:
+        from artemis.computer.windows import UiElement
+
+        return [UiElement(1, "Button", "Hesabı sil", (10, 10, 80, 30), interactive=True,
+                          focused=False)]
+
+    def vision_elements(self, hwnd: int, start_id: int) -> list[Any]:
+        return []
+
+
+async def _run_delete_click(goal: str, **run_kwargs: Any) -> tuple[FakeBackend, Audit]:
+    backend = _DeleteButtonBackend()
+    audit = Audit()
+    clock = Clock()
+    session = ComputerSession(
+        provider=ScriptedVision(act(type="click_element", element=1), DONE, YES),
+        backend=backend,
+        approve=lambda _name, _args: True,
+        audit=audit,
+        config=ComputerUseConfig(
+            enabled=True, model="m", mode="auto", observation="uia", step_delay_seconds=0
+        ),
+        own_pid=OWN_PID,
+        stop=threading.Event(),
+        on_step=lambda _text: None,
+        provider_timeout=15.0,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    await session.run(goal, "t1", None, **run_kwargs)
+    return backend, audit
+
+
+async def test_destructive_gate_permission_comes_from_user_text() -> None:
+    # goal'da "sil" var ama kullanıcı söylememiş (ya da boş): tıklama engellenir.
+    for user_text in ("duyuruyu oku", ""):
+        backend, audit = await _run_delete_click("hesabımı sil", user_text=user_text)
+        assert backend.calls == []
+        assert len(audit.named("computer_destructive_blocked")) == 1
+
+    # İkisi de söylüyor: engellenmez.
+    backend, audit = await _run_delete_click("hesabımı sil", user_text="hesabımı sil")
+    assert backend.calls == [("click", 50, 25, "left", False)]
+    assert audit.named("computer_destructive_blocked") == []
+
+    # user_text verilmezse (None) eski davranış: izin goal'dan gelir.
+    backend, audit = await _run_delete_click("hesabımı sil", user_text=None)
+    assert backend.calls == [("click", 50, 25, "left", False)]
+    assert audit.named("computer_destructive_blocked") == []
+
+
 async def test_approved_click_aborts_when_same_window_moved_or_resized() -> None:
     env = Env(click(sensitive=True), click(sensitive=True), click(sensitive=True), DONE, YES)
     shift = {"n": 0}

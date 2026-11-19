@@ -13,7 +13,7 @@
   "Bekleme": "Idle",
   "Claude Code aboneliği çalışıyor.": "Claude Code subscription is working.",
   "Claude Code boş yanıt verdi.": "Claude Code returned an empty response.",
-  "DEMO · Bu girdi yalnız çevrimdışı demo sağlayıcısına ulaştı; gerçek bir iş yapılmadı. Güvenli onay örneği için ‘örnek akış’ yazın.": "DEMO · This input only reached the offline demo provider; no real action was taken. Type ‘örnek akış’ for a safe approval example.",
+  "DEMO · Bu girdi yalnız çevrimdışı demo sağlayıcısına ulaştı; gerçek bir iş yapılmadı. Güvenli onay örneği için ‘örnek akış’ yazın.": "DEMO · This input only reached the offline demo provider; no real action was taken. Type ‘sample flow’ for a safe approval example.",
   "DEMO · Onay verilmedi; geçici demo belleği değiştirilmedi.": "DEMO · Approval was not granted; temporary demo memory was not modified.",
   "DEMO · Örnek veri işlendi ve yalnız geçici demo belleği güncellendi.": "DEMO · Sample data was processed and only temporary demo memory was updated.",
   "DEMO · Örnek veri okundu; dışarıda hiçbir işlem yapılmadı.": "DEMO · Sample data was read; no external action was taken.",

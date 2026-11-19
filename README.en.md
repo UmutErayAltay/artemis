@@ -26,7 +26,7 @@ Made with Remotion from real screenshots of the demo UI; English narration.
 
 **Product tour (≈100 s)**
 
-https://github.com/user-attachments/assets/08f74545-0265-4266-8279-aed56c2791c6
+https://github.com/user-attachments/assets/a1c41f39-473a-4953-ab1b-045b1ec48f74
 
 **Setup guide (≈50 s)**
 

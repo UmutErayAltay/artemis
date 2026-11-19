@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import json
+import queue
 import sys
 import threading
 from collections.abc import Callable
 from time import monotonic
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -108,6 +108,64 @@ def test_group_ocr_lines_splits_spaced_buttons_and_joins_phrase() -> None:
     assert all(e.kind == "VisualText" and e.interactive for e in elements)
 
 
+class _FakeStdin:
+    def __init__(self, on_write: Callable[[str], None]) -> None:
+        self._on_write = on_write
+        self.written: list[str] = []
+
+    def write(self, data: str) -> int:
+        self.written.append(data)
+        self._on_write(data)
+        return len(data)
+
+    def flush(self) -> None:
+        return None
+
+
+class _FakeStdout:
+    def __init__(self, out_q: queue.Queue[str | None]) -> None:
+        self._out_q = out_q
+
+    def readline(self) -> str:
+        item = self._out_q.get()
+        return "" if item is None else item
+
+
+class _FakeWorkerProc:
+    """Sahte kalıcı PowerShell OCR süreci: her yazılan satır için yanıt kuyruğuna üretim yapar."""
+
+    def __init__(self, responder: Callable[[str, int], str | None]) -> None:
+        self._responder = responder
+        self._out_q: queue.Queue[str | None] = queue.Queue()
+        self.stdin = _FakeStdin(self._handle_write)
+        self.stdout = _FakeStdout(self._out_q)
+        self.killed = False
+        self.call_count = 0
+
+    def _handle_write(self, data: str) -> None:
+        self.call_count += 1
+        reply = self._responder(data, self.call_count)
+        if reply != "__HANG__":
+            self._out_q.put(reply)
+
+    def poll(self) -> int | None:
+        return -9 if self.killed else None
+
+    def kill(self) -> None:
+        self.killed = True
+        self._out_q.put(None)
+
+    def wait(self, timeout: float | None = None) -> int:
+        return -9 if self.killed else 0
+
+
+@pytest.fixture(autouse=True)
+def _reset_vision_worker() -> Any:
+    ve._shutdown_worker()
+    yield
+    ve._shutdown_worker()
+
+
 def test_vision_elements_parses_runner_output_and_handles_bad_json(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -118,18 +176,125 @@ def test_vision_elements_parses_runner_output_and_handles_bad_json(
         "lines": [[{"t": "Deadlock", "x": 50, "y": 80, "w": 90, "h": 22}]],
     }
 
-    def ok_runner(*_args: object, **_kwargs: object) -> SimpleNamespace:
-        return SimpleNamespace(returncode=0, stdout=json.dumps(payload))
-
-    els = ve.vision_elements(999, runner=ok_runner)
+    ok_proc = _FakeWorkerProc(lambda _req, _n: json.dumps(payload) + "\n")
+    els = ve.vision_elements(999, runner=lambda: ok_proc)
     assert len(els) == 1
     assert els[0].name == "Deadlock"
     assert els[0].rect == (60, 100, 90, 22)
 
-    def bad_runner(*_args: object, **_kwargs: object) -> SimpleNamespace:
-        return SimpleNamespace(returncode=0, stdout="not-json")
+    bad_proc = _FakeWorkerProc(lambda _req, _n: "not-json\n")
+    assert ve.vision_elements(999, runner=lambda: bad_proc) == []
+    assert bad_proc.killed is True
 
-    assert ve.vision_elements(999, runner=bad_runner) == []
+
+def test_vision_worker_reused_across_multiple_calls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    starts: list[_FakeWorkerProc] = []
+
+    def respond(req_line: str, call_idx: int) -> str:
+        req = json.loads(req_line)
+        word = f"Item{call_idx}_{req['hwnd']}"
+        return (
+            json.dumps(
+                {
+                    "left": 0,
+                    "top": 0,
+                    "lines": [[{"t": word, "x": 10, "y": 10, "w": 40, "h": 18}]],
+                }
+            )
+            + "\n"
+        )
+
+    def factory() -> _FakeWorkerProc:
+        proc = _FakeWorkerProc(respond)
+        starts.append(proc)
+        return proc
+
+    first = ve.vision_elements(101, runner=factory)
+    second = ve.vision_elements(202, runner=factory)
+    assert len(starts) == 1
+    assert len(starts[0].stdin.written) == 2
+    assert [e.name for e in first] == ["Item1_101"]
+    assert [e.name for e in second] == ["Item2_202"]
+    assert starts[0].killed is False
+
+
+def test_vision_worker_restarts_after_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    starts: list[_FakeWorkerProc] = []
+    good_line = (
+        json.dumps(
+            {
+                "left": 5,
+                "top": 5,
+                "lines": [[{"t": "Kurtuldu", "x": 10, "y": 10, "w": 60, "h": 20}]],
+            }
+        )
+        + "\n"
+    )
+
+    def factory() -> _FakeWorkerProc:
+        idx = len(starts)
+        if idx == 0:
+            proc = _FakeWorkerProc(lambda _req, _n: "__HANG__")
+        else:
+            proc = _FakeWorkerProc(lambda _req, _n: good_line)
+        starts.append(proc)
+        return proc
+
+    assert ve.vision_elements(101, timeout=0.05, runner=factory) == []
+    assert len(starts) == 1
+    assert starts[0].killed is True
+
+    recovered = ve.vision_elements(101, timeout=0.5, runner=factory)
+    assert len(starts) == 2
+    assert [e.name for e in recovered] == ["Kurtuldu"]
+
+
+def test_vision_worker_restarts_after_eof_and_maintains_health_on_error_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
+    starts: list[_FakeWorkerProc] = []
+    good_line = (
+        json.dumps(
+            {
+                "left": 0,
+                "top": 0,
+                "lines": [[{"t": "Tamam", "x": 10, "y": 10, "w": 50, "h": 20}]],
+            }
+        )
+        + "\n"
+    )
+
+    def factory() -> _FakeWorkerProc:
+        if not starts:
+            # İlk işçi EOF döner (çökmüş süreç).
+            proc = _FakeWorkerProc(lambda _req, _n: None)
+        else:
+            # İkinci işçi ilk istekte {"error": ...}, ikincide geçerli yanıt döner.
+            proc = _FakeWorkerProc(
+                lambda _req, n: '{"error":"gecici"}\n' if n == 1 else good_line
+            )
+        starts.append(proc)
+        return proc
+
+    assert ve.vision_elements(101, runner=factory) == []
+    assert len(starts) == 1
+    assert starts[0].killed is True
+
+    # {"error": ...} işçiyi öldürmemeli
+    assert ve.vision_elements(101, runner=factory) == []
+    assert len(starts) == 2
+    assert starts[1].killed is False
+
+    els = ve.vision_elements(101, runner=factory)
+    assert len(starts) == 2
+    assert [e.name for e in els] == ["Tamam"]
 
 
 @pytest.mark.asyncio
@@ -203,20 +368,14 @@ async def test_dual_monitor_scales_primary_screenshot_coords_and_maps_secondary(
     assert backend.clicks == [(600, 450, "left", False), (2200, 400, "left", False)]
 
 
-def test_vision_elements_survives_null_coordinates() -> None:
-    import json as _json
-    import sys as _sys
-    from types import SimpleNamespace
-
-    from artemis.computer import vision_elements as ve
-
-    if _sys.platform != "win32":
-        return
+def test_vision_elements_survives_null_coordinates(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys, "platform", "win32")
     word = {"t": "Oyna", "x": None, "y": 1, "w": 5, "h": 5}
-    bad = _json.dumps({"left": 0, "top": 0, "lines": [[word]]})
-    out = ve.vision_elements(
-        5, runner=lambda *_a, **_k: SimpleNamespace(returncode=0, stdout=bad)
-    )
+    bad = json.dumps({"left": 0, "top": 0, "lines": [[word]]}) + "\n"
+    proc = _FakeWorkerProc(lambda _req, _n: bad)
+    out = ve.vision_elements(5, runner=lambda: proc)
     assert out == []
 
 

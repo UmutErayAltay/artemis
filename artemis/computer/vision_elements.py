@@ -1,145 +1,247 @@
-"""UIA öğeleri boş veya yetersiz olduğunda Windows OCR tabanlı görsel öğe çıkarıcı.
+"""Görsel (Windows.Media.Ocr) öğe çıkarıcı: UIA'nın kör kaldığı pencereler için (ADR 0073).
 
-Pencere görüntüsü yalnız bellekte (`MemoryStream`) işlenir; diske yazılmaz ve
-dış servise gönderilmez. Çıktı `UiElement` listesi olarak döner ve `ADR 0078`
-yıkıcı öğe kapısından aynı şekilde geçer.
+Steam (CEF), oyun başlatıcıları ve tuval tabanlı arayüzler UI Automation ağacına yalnızca
+dış çerçeveyi verir; içerideki düğme ve sekme metinleri ağaçta yoktur. Bu modül ön plan
+penceresinin görüntüsünü bellekte (diske yazmadan) yakalar, Windows'un yerleşik OCR
+motoruyla satır/sözcük kutularını çıkarır ve `UiElement` listesine dönüştürür.
+
+PowerShell işçisi ilk çağrıda bir kez başlatılır (Add-Type C# derlemesi + WinRT OCR hazırlığı)
+ve sonraki çağrılarda stdin/stdout üzerinden tek satırlık JSON istek/yanıt protokolüyle
+yeniden kullanılır; zaman aşımı veya protokol hatasında işçi öldürülüp bir sonraki çağrıda
+temiz başlatılır.
+
+Ham görüntü hiçbir zaman diske veya günlüğe yazılmaz (ADR 0039/3).
 """
 
 from __future__ import annotations
 
+import atexit
+import contextlib
 import ctypes
 import json
 import logging
+import queue
 import subprocess
 import sys
+import threading
 from collections.abc import Callable
 from typing import Any
 
 from artemis.computer.windows import UiElement
 from artemis.tools.platform import child_environment
 
-_logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 _DEFAULT_MAX_ITEMS = 200
 
-_VISION_OCR_SCRIPT = "\n".join(
-    [
-        "$ErrorActionPreference = 'Stop'",
-        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8",
-        "$hwnd = [IntPtr][long]$env:ARTEMIS_VISION_HWND",
-        "if ($hwnd -eq [IntPtr]::Zero) { '{\"words\":[]}'; exit 0 }",
-        "Add-Type -AssemblyName System.Windows.Forms",
-        "Add-Type -AssemblyName System.Drawing",
-        "Add-Type -AssemblyName System.Runtime.WindowsRuntime",
-        "Add-Type -TypeDefinition @'",
-        "using System;",
-        "using System.Runtime.InteropServices;",
-        "public static class ArtemisVisionNative {",
-        "  [StructLayout(LayoutKind.Sequential)]",
-        "  public struct RECT { public int Left; public int Top; "
-        "public int Right; public int Bottom; }",
-        '  [DllImport("user32.dll")] public static extern bool '
-        "SetProcessDpiAwarenessContext(IntPtr value);",
-        '  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();',
-        '  [DllImport("user32.dll")] public static extern bool GetWindowRect('
-        "IntPtr h, out RECT r);",
-        '  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute('
-        "IntPtr h, int attr, out RECT r, int size);",
-        "}",
-        "'@",
-        "try { if (-not [ArtemisVisionNative]::SetProcessDpiAwarenessContext([IntPtr](-4))) "
-        "{ [void][ArtemisVisionNative]::SetProcessDPIAware() } } "
-        "catch { [void][ArtemisVisionNative]::SetProcessDPIAware() }",
-        "$rect = New-Object ArtemisVisionNative+RECT",
-        "$sz = [System.Runtime.InteropServices.Marshal]::SizeOf([type][ArtemisVisionNative+RECT])",
-        "if ([ArtemisVisionNative]::DwmGetWindowAttribute($hwnd, 9, [ref]$rect, $sz) -ne 0) {",
-        "  if (-not [ArtemisVisionNative]::GetWindowRect($hwnd, [ref]$rect)) "
-        "{ '{\"words\":[]}'; exit 0 }",
-        "}",
-        "$left = $rect.Left; $top = $rect.Top",
-        "$width = $rect.Right - $rect.Left; $height = $rect.Bottom - $rect.Top",
-        "if ($width -le 4 -or $height -le 4) { '{\"words\":[]}'; exit 0 }",
-        "$null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]",
-        "$null = [Windows.Globalization.Language, Windows.Globalization, "
-        "ContentType = WindowsRuntime]",
-        "$null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, "
-        "ContentType = WindowsRuntime]",
-        "$null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics, "
-        "ContentType = WindowsRuntime]",
-        "$null = [Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType = WindowsRuntime]",
-        "$asTask = [System.WindowsRuntimeSystemExtensions].GetMethods() | "
-        "Where-Object { $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and "
-        "$_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1' } | "
-        "Select-Object -First 1",
-        "function Wait-WinRT($op, [Type]$rt) {",
-        "  $t = $asTask.MakeGenericMethod($rt).Invoke($null, @($op))",
-        "  $t.Wait(-1) | Out-Null",
-        "  return $t.Result",
-        "}",
-        "$engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage("
-        "(New-Object Windows.Globalization.Language 'tr-TR'))",
-        "if ($null -eq $engine) { $engine = "
-        "[Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }",
-        "if ($null -eq $engine) { '{\"words\":[]}'; exit 0 }",
-        "$bitmap = $null; $scaled = $null; $graphics = $null; $stream = $null; $ras = $null",
-        "try {",
-        "  $bitmap = New-Object System.Drawing.Bitmap $width, $height",
-        "  $graphics = [System.Drawing.Graphics]::FromImage($bitmap)",
-        "  $graphics.CopyFromScreen($left, $top, 0, 0, $bitmap.Size)",
-        "  $image = $bitmap",
-        "  $invScale = 1.0",
-        "  $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension",
-        "  $ratio = 1.0",
-        "  if ($width -gt $maxDim -or $height -gt $maxDim) {",
-        "    $ratio = [Math]::Min($maxDim / $width, $maxDim / $height)",
-        "  } elseif ($width * 1.5 -le $maxDim -and $height * 1.5 -le $maxDim) {",
-        "    $ratio = 1.5",
-        "  }",
-        "  if ($ratio -ne 1.0) {",
-        "    $invScale = 1.0 / $ratio",
-        "    $nw = [Math]::Max(1, [int][Math]::Floor($width * $ratio))",
-        "    $nh = [Math]::Max(1, [int][Math]::Floor($height * $ratio))",
-        "    $scaled = New-Object System.Drawing.Bitmap $nw, $nh",
-        "    $sg = [System.Drawing.Graphics]::FromImage($scaled)",
-        "    try {",
-        "      $sg.InterpolationMode = "
-        "[System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic",
-        "      $sg.DrawImage($bitmap, 0, 0, $nw, $nh)",
-        "    } finally { $sg.Dispose() }",
-        "    $image = $scaled",
-        "  }",
-        "  $stream = New-Object System.IO.MemoryStream",
-        "  $image.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)",
-        "  $stream.Position = 0",
-        "  $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($stream)",
-        "  $dec = Wait-WinRT ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) "
-        "([Windows.Graphics.Imaging.BitmapDecoder])",
-        "  $sw = Wait-WinRT ($dec.GetSoftwareBitmapAsync()) "
-        "([Windows.Graphics.Imaging.SoftwareBitmap])",
-        "  try { $res = Wait-WinRT ($engine.RecognizeAsync($sw)) ([Windows.Media.Ocr.OcrResult]) } "
-        "finally { $sw.Dispose() }",
-        "  $linesOut = New-Object System.Collections.Generic.List[object]",
-        "  foreach ($line in $res.Lines) {",
-        "    $wordsOut = New-Object System.Collections.Generic.List[object]",
-        "    foreach ($w in $line.Words) {",
-        "      $b = $w.BoundingRect",
-        "      $wordsOut.Add([pscustomobject]@{ t = [string]$w.Text; "
-        "x = [int][math]::Round($b.X * $invScale); y = [int][math]::Round($b.Y * $invScale); "
-        "w = [int][math]::Round($b.Width * $invScale); "
-        "h = [int][math]::Round($b.Height * $invScale) })",
-        "    }",
-        "    if ($wordsOut.Count -gt 0) { $linesOut.Add($wordsOut) }",
-        "  }",
-        "  $payload = [pscustomobject]@{ left = $left; top = $top; lines = $linesOut }",
-        "  Write-Output ($payload | ConvertTo-Json -Compress -Depth 6)",
-        "} finally {",
-        "  if ($null -ne $ras) { $ras.Dispose() }",
-        "  if ($null -ne $stream) { $stream.Dispose() }",
-        "  if ($null -ne $graphics) { $graphics.Dispose() }",
-        "  if ($null -ne $scaled) { $scaled.Dispose() }",
-        "  if ($null -ne $bitmap) { $bitmap.Dispose() }",
-        "}",
-    ]
-)
+# Kalıcı PowerShell OCR işçisi: başlangıçta bir kez DPI farkındalığı, C# P/Invoke ve WinRT OCR
+# türlerini yükler; ardından stdin'den gelen her `{"hwnd": <int>}` satırı için pencereyi
+# yalnızca bellekte (MemoryStream) yakalayıp tek satır JSON yanıtı yazar ve stdout'u boşaltır.
+_VISION_OCR_SCRIPT = r"""
+$ErrorActionPreference = 'Stop'
+[Console]::InputEncoding = [System.Text.Encoding]::UTF8
+[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+Add-Type -AssemblyName System.Drawing
+Add-Type -AssemblyName System.Windows.Forms
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class ArtemisVisionNative {
+    [StructLayout(LayoutKind.Sequential)]
+    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr value);
+    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr h, out RECT r);
+    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(
+        IntPtr h, int attr, out RECT r, int size);
+}
+"@
+try {
+    if (-not [ArtemisVisionNative]::SetProcessDpiAwarenessContext([IntPtr](-4))) {
+        [void][ArtemisVisionNative]::SetProcessDPIAware()
+    }
+} catch {
+    [void][ArtemisVisionNative]::SetProcessDPIAware()
+}
+
+$null = [Windows.Media.Ocr.OcrEngine, Windows.Foundation, ContentType = WindowsRuntime]
+$null = [Windows.Globalization.Language, Windows.Globalization, ContentType = WindowsRuntime]
+$null = [Windows.Graphics.Imaging.BitmapDecoder, Windows.Graphics, ContentType = WindowsRuntime]
+$null = [Windows.Graphics.Imaging.SoftwareBitmap, Windows.Graphics, ContentType = WindowsRuntime]
+$null = [Windows.Media.Ocr.OcrResult, Windows.Foundation, ContentType = WindowsRuntime]
+
+$asTask = ([System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.GetParameters().Count -eq 1 -and
+    $_.GetParameters()[0].ParameterType.Name -eq 'IAsyncOperation`1'
+})[0]
+function Wait-WinRT($op, [Type]$t) {
+    $task = $asTask.MakeGenericMethod($t).Invoke($null, @($op))
+    $task.Wait()
+    return $task.Result
+}
+
+function Invoke-OcrRequest([long]$hwndVal) {
+    if ($hwndVal -le 0) { return '{"words":[]}' }
+    $hwnd = [IntPtr]$hwndVal
+    $rect = New-Object ArtemisVisionNative+RECT
+    $hr = [ArtemisVisionNative]::DwmGetWindowAttribute(
+        $hwnd, 9, [ref]$rect, [System.Runtime.InteropServices.Marshal]::SizeOf($rect))
+    if ($hr -ne 0 -or ($rect.Right - $rect.Left) -lt 40) {
+        if (-not [ArtemisVisionNative]::GetWindowRect($hwnd, [ref]$rect)) {
+            return '{"words":[]}'
+        }
+    }
+    $left = $rect.Left; $top = $rect.Top
+    $width = $rect.Right - $rect.Left; $height = $rect.Bottom - $rect.Top
+    if ($width -le 4 -or $height -le 4) { return '{"words":[]}' }
+
+    $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromLanguage((New-Object Windows.Globalization.Language 'tr-TR'))
+    if ($null -eq $engine) { $engine = [Windows.Media.Ocr.OcrEngine]::TryCreateFromUserProfileLanguages() }
+    if ($null -eq $engine) { return '{"words":[]}' }
+
+    $bitmap = $null; $scaled = $null; $graphics = $null; $stream = $null; $ras = $null
+    try {
+        $bitmap = New-Object System.Drawing.Bitmap $width, $height
+        $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
+        $graphics.CopyFromScreen($left, $top, 0, 0, $bitmap.Size)
+        $image = $bitmap
+        $invScale = 1.0
+        $maxDim = [Windows.Media.Ocr.OcrEngine]::MaxImageDimension
+        $ratio = 1.0
+        if ($width -gt $maxDim -or $height -gt $maxDim) {
+            $ratio = [Math]::Min($maxDim / $width, $maxDim / $height)
+        } elseif ($width * 1.5 -le $maxDim -and $height * 1.5 -le $maxDim) {
+            $ratio = 1.5
+        }
+        if ($ratio -ne 1.0) {
+            $invScale = 1.0 / $ratio
+            $nw = [Math]::Max(1, [int][Math]::Floor($width * $ratio))
+            $nh = [Math]::Max(1, [int][Math]::Floor($height * $ratio))
+            $scaled = New-Object System.Drawing.Bitmap $nw, $nh
+            $sg = [System.Drawing.Graphics]::FromImage($scaled)
+            try {
+                $sg.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
+                $sg.DrawImage($bitmap, 0, 0, $nw, $nh)
+            } finally { $sg.Dispose() }
+            $image = $scaled
+        }
+        $stream = New-Object System.IO.MemoryStream
+        $image.Save($stream, [System.Drawing.Imaging.ImageFormat]::Png)
+        $stream.Position = 0
+        $ras = [System.IO.WindowsRuntimeStreamExtensions]::AsRandomAccessStream($stream)
+        $dec = Wait-WinRT ([Windows.Graphics.Imaging.BitmapDecoder]::CreateAsync($ras)) ([Windows.Graphics.Imaging.BitmapDecoder])
+        $sw = Wait-WinRT ($dec.GetSoftwareBitmapAsync()) ([Windows.Graphics.Imaging.SoftwareBitmap])
+        try { $res = Wait-WinRT ($engine.RecognizeAsync($sw)) ([Windows.Media.Ocr.OcrResult]) } finally { $sw.Dispose() }
+        $linesOut = New-Object System.Collections.Generic.List[object]
+        foreach ($line in $res.Lines) {
+            $wordsOut = New-Object System.Collections.Generic.List[object]
+            foreach ($w in $line.Words) {
+                $b = $w.BoundingRect
+                $wordsOut.Add([pscustomobject]@{
+                    t = [string]$w.Text
+                    x = [int][math]::Round($b.X * $invScale)
+                    y = [int][math]::Round($b.Y * $invScale)
+                    w = [int][math]::Round($b.Width * $invScale)
+                    h = [int][math]::Round($b.Height * $invScale)
+                })
+            }
+            if ($wordsOut.Count -gt 0) { $linesOut.Add($wordsOut) }
+        }
+        $payload = [pscustomobject]@{ left = $left; top = $top; lines = $linesOut }
+        return ($payload | ConvertTo-Json -Compress -Depth 6)
+    } finally {
+        if ($null -ne $ras) { $ras.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+        if ($null -ne $graphics) { $graphics.Dispose() }
+        if ($null -ne $scaled) { $scaled.Dispose() }
+        if ($null -ne $bitmap) { $bitmap.Dispose() }
+    }
+}
+
+while ($null -ne ($rawLine = [Console]::In.ReadLine())) {
+    $trimmed = $rawLine.Trim()
+    if (-not $trimmed) { continue }
+    try {
+        $req = $trimmed | ConvertFrom-Json
+        $out = Invoke-OcrRequest ([long]$req.hwnd)
+    } catch {
+        $msg = [string]$_.Exception.Message
+        $out = (@{ error = $msg } | ConvertTo-Json -Compress)
+    }
+    [Console]::Out.WriteLine($out)
+    [Console]::Out.Flush()
+}
+"""  # noqa: E501
+
+
+class _OcrWorker:
+    """Tek bir kalıcı PowerShell OCR alt süreci ve satır okuma kuyruğu."""
+
+    def __init__(self, proc: Any) -> None:
+        self.proc = proc
+        self.lines: queue.Queue[str | None] = queue.Queue()
+        self._thread = threading.Thread(
+            target=self._reader, name="artemis-vision-ocr-reader", daemon=True
+        )
+        self._thread.start()
+
+    def _reader(self) -> None:
+        stdout = self.proc.stdout
+        try:
+            while stdout is not None:
+                line = stdout.readline()
+                if not line:
+                    break
+                self.lines.put(line)
+        except Exception:
+            pass
+        finally:
+            self.lines.put(None)
+
+    def kill(self) -> None:
+        with contextlib.suppress(Exception):
+            self.proc.kill()
+        with contextlib.suppress(Exception):
+            self.proc.wait(timeout=1.0)
+
+
+# ponytail: global lock, tek OCR isteği aynı anda çalışır; paralel oturumda havuza geçilir.
+_WORKER_LOCK = threading.Lock()
+_WORKER: _OcrWorker | None = None
+_WORKER_FACTORY: Callable[..., Any] | None = None
+
+
+def _spawn_default_process() -> subprocess.Popen[str]:
+    flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    return subprocess.Popen(
+        ["powershell.exe", "-NoProfile", "-Command", _VISION_OCR_SCRIPT],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        bufsize=1,
+        env=child_environment(),
+        creationflags=flags,
+    )
+
+
+def _kill_locked_worker() -> None:
+    global _WORKER
+    worker = _WORKER
+    _WORKER = None
+    if worker is not None:
+        worker.kill()
+
+
+def _shutdown_worker() -> None:
+    """Canlı OCR işçisini sonlandırır ve tutucuyu sıfırlar (atexit ve testler için)."""
+    with _WORKER_LOCK:
+        _kill_locked_worker()
+
+
+atexit.register(_shutdown_worker)
 
 
 def _clean_text(text: str) -> str:
@@ -202,67 +304,106 @@ def group_ocr_lines_to_elements(
     return elements
 
 
+def _request_ocr_line(
+    hwnd: int,
+    timeout: float,
+    runner: Callable[..., Any] | None,
+) -> str | None:
+    """Kalıcı işçiye tek bir `hwnd` isteği gönderir ve yanıt satırını döndürür.
+
+    Zaman aşımı, EOF, süreç çıkışı veya G/Ç hatasında işçi öldürülür ve `None` döner.
+    """
+    global _WORKER, _WORKER_FACTORY
+    with _WORKER_LOCK:
+        factory = runner if runner is not None else _spawn_default_process
+        if _WORKER is None or _WORKER.proc.poll() is not None or _WORKER_FACTORY is not factory:
+            _kill_locked_worker()
+            try:
+                proc = factory()
+            except OSError as exc:
+                logger.warning("Görsel OCR işçisi başlatılamadı: %s", exc)
+                return None
+            _WORKER = _OcrWorker(proc)
+            _WORKER_FACTORY = factory
+
+        worker = _WORKER
+        payload = json.dumps({"hwnd": int(hwnd)}) + "\n"
+        try:
+            if worker.proc.stdin is None:
+                raise OSError("OCR işçisi stdin kapalı.")
+            worker.proc.stdin.write(payload)
+            worker.proc.stdin.flush()
+        except Exception as exc:
+            logger.warning("Görsel OCR işçisine yazılamadı: %s", exc)
+            _kill_locked_worker()
+            return None
+
+        try:
+            line = worker.lines.get(timeout=timeout)
+        except queue.Empty:
+            logger.warning("Görsel OCR zaman aşımı (%.1f sn).", timeout)
+            _kill_locked_worker()
+            return None
+
+        if not line:
+            logger.warning("Görsel OCR işçisi beklenmedik şekilde kapandı (EOF).")
+            _kill_locked_worker()
+            return None
+        return line
+
+
 def vision_elements(
     hwnd: int,
     *,
-    # Soğuk ilk çağrı (Add-Type derleme + WinRT yükleme) ölçümde ~6 sn, sıcak ~1 sn.
     timeout: float = 12.0,
-    max_items: int = _DEFAULT_MAX_ITEMS,
+    max_items: int = 200,
     start_id: int = 1,
     runner: Callable[..., Any] | None = None,
 ) -> list[UiElement]:
-    """Pencere görüntüsünden Windows OCR ile tıklanabilir öğe listesi çıkarır."""
+    """Pencere görüntüsünden Windows.Media.Ocr ile tıklanabilir metin kutularını çıkarır."""
     if sys.platform != "win32" or hwnd <= 0 or max_items <= 0:
         return []
     if runner is None:
         from ctypes import wintypes
 
-        # 64-bit tanıtıcılar işaretçi boyutunda aktarılmalı; aksi halde C int taşar.
         user32 = ctypes.windll.user32
         user32.IsWindow.argtypes = [wintypes.HWND]
         user32.IsWindow.restype = wintypes.BOOL
         if not user32.IsWindow(hwnd):
             return []
-    env = child_environment()
-    env["ARTEMIS_VISION_HWND"] = str(hwnd)
-    run = runner or subprocess.run
-    kwargs: dict[str, Any] = {
-        "capture_output": True,
-        "text": True,
-        "encoding": "utf-8",
-        "errors": "replace",
-        "timeout": timeout,
-        "env": env,
-    }
-    if runner is None and hasattr(subprocess, "CREATE_NO_WINDOW"):
-        kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    try:
-        completed = run(["powershell.exe", "-NoProfile", "-Command", _VISION_OCR_SCRIPT], **kwargs)
-    except (OSError, subprocess.TimeoutExpired) as error:
-        _logger.warning("vision_elements başarısız (hwnd=%s): %s", hwnd, error)
+
+    raw_line = _request_ocr_line(hwnd, timeout, runner)
+    if raw_line is None:
         return []
-    if getattr(completed, "returncode", 1) != 0:
-        return []
-    raw = (getattr(completed, "stdout", "") or "").strip()
+    raw = raw_line.strip()
     if not raw:
+        with _WORKER_LOCK:
+            _kill_locked_worker()
         return []
     try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError:
+        data = json.loads(raw)
+    except ValueError:
+        logger.warning("Görsel OCR geçersiz JSON döndürdü.")
+        with _WORKER_LOCK:
+            _kill_locked_worker()
         return []
-    if not isinstance(parsed, dict):
+    if not isinstance(data, dict):
+        with _WORKER_LOCK:
+            _kill_locked_worker()
         return []
-    lines = parsed.get("lines")
+    if "error" in data:
+        logger.warning("Görsel OCR istek hatası: %s", data.get("error"))
+        return []
+    lines = data.get("lines")
     if not isinstance(lines, list):
         return []
     try:
         return group_ocr_lines_to_elements(
             lines,
-            offset_x=int(parsed.get("left", 0)),
-            offset_y=int(parsed.get("top", 0)),
+            offset_x=int(data.get("left", 0)),
+            offset_y=int(data.get("top", 0)),
             start_id=start_id,
             max_items=max_items,
         )
     except (TypeError, ValueError, KeyError):
-        # Alt süreç çıktısı güvenilmez veridir: null/eksik koordinat oturumu çökertmez.
         return []

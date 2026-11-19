@@ -204,8 +204,48 @@ def test_turkish_case_and_diacritics(tmp_path: Path) -> None:
     assert env.find("SOZLESME") == ["a.txt"]
     assert env.find("ısparta") == ["a.txt"]
     assert env.find("Isparta") == ["a.txt"]
-    assert env.find("isparta") == []  # belgelenmiş sınır: ı ile i ayrı
+    assert env.find("isparta") == ["a.txt"]  # i/ı ayrımı yok
     assert env.find("sozles") == ["a.txt"]  # önek
+
+
+def test_ascii_uppercase_query_finds_turkish_uppercase_doc(tmp_path: Path) -> None:
+    env = Env(tmp_path)
+    env.write("sube.txt", "ŞUBE GÖKÇE İSTANBUL")
+    env.run()
+    assert env.find("SUBE GOKCE ISTANBUL") == ["sube.txt"]
+    assert env.find("sube gokce istanbul") == ["sube.txt"]
+
+
+def test_old_index_version_rebuilt_on_open(tmp_path: Path) -> None:
+    import sqlite3
+    from contextlib import closing
+
+    env = Env(tmp_path)
+    doc = env.write("belge.txt", "İSTANBUL ISPARTA")
+    stat_info = doc.stat()
+    env.state.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(env.index.path)) as db, db:
+        for stmt in fi.SCHEMA:
+            db.execute(stmt)
+        # Eski sürüm (user_version=1) ve eski turkish_fold çıktısı:
+        # "İSTANBUL ISPARTA" -> "istanbul ısparta" (boyut/mtime disktekiyle aynı).
+        cur = db.execute(
+            "INSERT INTO files (path, size, mtime_ns) VALUES (?, ?, ?)",
+            (str(doc), stat_info.st_size, stat_info.st_mtime_ns),
+        )
+        db.execute(
+            "INSERT INTO files_fts (rowid, name, body) VALUES (?, ?, ?)",
+            (cur.lastrowid, "belge.txt", "istanbul ısparta"),
+        )
+        db.execute("INSERT INTO meta VALUES ('last_run', '2026-01-01 00:00')")
+        db.execute("PRAGMA user_version = 1")
+
+    env.run()
+    assert env.find("ISTANBUL") == ["belge.txt"]
+    assert env.find("isparta") == ["belge.txt"]
+    with closing(sqlite3.connect(env.index.path)) as db:
+        version = db.execute("PRAGMA user_version").fetchone()[0]
+    assert version == fi.INDEX_VERSION
 
 
 def test_result_names_are_sanitised(tmp_path: Path) -> None:
