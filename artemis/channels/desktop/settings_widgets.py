@@ -44,6 +44,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.form_kit import meta_label
+from artemis.channels.desktop.retranslate import set_i18n_context
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEMES
 from artemis.i18n import t
 from artemis.text import search_fold
@@ -189,6 +190,7 @@ class _ThemeCard(QFrame):
         swatch.setPixmap(_swatch(key))
         swatch.setAccessibleName(t("{label} önizleme").format(label=label))
         self.radio = QRadioButton(label)
+        set_i18n_context(self.radio, "theme")
         self.radio.toggled.connect(self._selected)
         text = QVBoxLayout()
         text.setSpacing(4)

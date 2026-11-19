@@ -94,7 +94,11 @@ class RoutinesSection(QWidget):
             "Rutini burada yazarsın; adımların kendi onayları çalışırken yine geçerlidir. "
             "Silme onay ister."
         )))
-        when_box, when = group(t("Zaman"), t("Zamanı gelince Artemis çalıştırmaz, yalnız sorar."))
+        when_box, when = group(
+            t("Zaman", context="routine"),
+            t("Zamanı gelince Artemis çalıştırmaz, yalnız sorar."),
+            title_context="routine",
+        )
         layout.addWidget(when_box)
         self.time_edit = QLineEdit()
         self.time_edit.setMaxLength(5)

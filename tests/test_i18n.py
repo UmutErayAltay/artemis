@@ -107,6 +107,23 @@ def test_invalid_catalog_json_raises(
         i18n._template_patterns.cache_clear()
 
 
+def _call_context_arg(node: ast.Call) -> str | None:
+    if (
+        len(node.args) >= 2
+        and isinstance(node.args[1], ast.Constant)
+        and isinstance(node.args[1].value, str)
+    ):
+        return node.args[1].value
+    for kw in node.keywords:
+        if (
+            kw.arg == "context"
+            and isinstance(kw.value, ast.Constant)
+            and isinstance(kw.value.value, str)
+        ):
+            return kw.value.value
+    return None
+
+
 def test_every_t_call_literal_is_in_catalog() -> None:
     entries = catalog()
     artemis_root = Path(__file__).resolve().parent.parent / "artemis"
@@ -123,9 +140,13 @@ def test_every_t_call_literal_is_in_catalog() -> None:
                 and isinstance(node.args[0].value, str)
             ):
                 literal = node.args[0].value
-                if literal not in entries:
+                ctx = _call_context_arg(node)
+                found = literal in entries or (
+                    ctx is not None and f"{ctx}::{literal}" in entries
+                )
+                if not found:
                     rel = py_file.relative_to(artemis_root.parent)
-                    missing.append(f"{rel}:{node.lineno}: {literal!r}")
+                    missing.append(f"{rel}:{node.lineno}: {literal!r} (context={ctx!r})")
     assert not missing, "Sözlükte eksik t(...) anahtarları:\n" + "\n".join(missing)
 
 
@@ -135,3 +156,86 @@ def test_catalog_placeholders_match() -> None:
         if _placeholders(key) != _placeholders(value):
             mismatched.append(f"{key!r} -> {value!r}")
     assert not mismatched, "Yer tutucuları uyuşmayan girdiler:\n" + "\n".join(mismatched)
+
+
+def test_catalog_has_no_conflicting_duplicates() -> None:
+    import json
+
+    en_dir = Path(i18n.__file__).parent / "en"
+    seen: dict[str, tuple[str, str]] = {}
+    conflicts: list[str] = []
+    for path in sorted(en_dir.glob("*.json")):
+        data = json.loads(path.read_text(encoding="utf-8"))
+        for key, value in data.items():
+            if key in seen and seen[key][1] != value:
+                prev_file, prev_val = seen[key]
+                conflicts.append(
+                    f"{key!r}: {prev_file}={prev_val!r} != {path.name}={value!r}"
+                )
+            else:
+                seen[key] = (path.name, value)
+    assert not conflicts, "Sözlük dosyalarında çakışan anahtarlar:\n" + "\n".join(conflicts)
+
+
+def test_conflicting_duplicate_key_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    en_dir = tmp_path / "en"
+    en_dir.mkdir()
+    (en_dir / "a.json").write_text('{"Durum": "Status"}', encoding="utf-8")
+    (en_dir / "b.json").write_text('{"Durum": "State"}', encoding="utf-8")
+    monkeypatch.setattr(i18n, "__file__", str(tmp_path / "__init__.py"))
+    i18n._load_en_catalog.cache_clear()
+    i18n._reverse_en_catalog.cache_clear()
+    i18n._template_patterns.cache_clear()
+    try:
+        with pytest.raises(ValueError, match="Çakışan çeviri anahtarı"):
+            catalog()
+    finally:
+        monkeypatch.undo()
+        i18n._load_en_catalog.cache_clear()
+        i18n._reverse_en_catalog.cache_clear()
+        i18n._template_patterns.cache_clear()
+
+
+def test_context_lookup_and_fallback() -> None:
+    from artemis.channels.desktop.themes import THEME_LABELS
+    from artemis.channels.desktop.tool_titles import arg_label
+
+    set_language("tr")
+    assert t("Açık", context="theme") == "Açık"
+    assert t("Açık", context="field") == "Açık"
+    assert t("Koyu", context="theme") == "Koyu"
+    assert arg_label("enabled") == "Açık"
+
+    set_language("en")
+    assert t("Açık", context="theme") == "Light"
+    assert t("Açık", context="field") == "Enabled"
+    assert t(THEME_LABELS["light"], context="theme") == "Light"
+    assert t(THEME_LABELS["dark"], context="theme") == "Dark"
+    assert arg_label("enabled") == "Enabled"
+    assert arg_label("state") == "State"
+    assert arg_label("spec") == "Spec"
+    assert arg_label("name") == "Name"
+    assert t("Durum") == "Status"
+    assert t("Taslak") == "Draft"
+    assert t("Ses", context="provider") == "Speech"
+    assert t("Ses") == "Voice"
+    assert t("Şablon", context="provider") == "Preset"
+    assert t("Şablon") == "Template"
+    assert t("Zaman", context="routine") == "Schedule"
+    assert t("Zaman") == "Time"
+    assert t("İptal", context="status") == "Cancelled"
+    assert t("İptal") == "Cancel"
+    assert t("Bekleme", context="action") == "Wait"
+    assert t("Bekleme") == "Idle"
+    assert t("bilinmeyen metin", context="theme") == "bilinmeyen metin"
+
+
+def test_retarget_with_context() -> None:
+    assert retarget("Açık", "en", context="theme") == "Light"
+    assert retarget("Light", "tr", context="theme") == "Açık"
+    assert retarget("Açık", "en", context="field") == "Enabled"
+    assert retarget("Enabled", "tr", context="field") == "Açık"
+    assert retarget("Koyu", "en", context="theme") == "Dark"
+    assert retarget("Dark", "tr", context="theme") == "Koyu"

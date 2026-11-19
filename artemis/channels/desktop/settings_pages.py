@@ -45,6 +45,7 @@ from artemis.channels.desktop.page_kit import CurrentPageStack
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.provider_section import ProviderSection
+from artemis.channels.desktop.retranslate import set_i18n_context
 from artemis.channels.desktop.routines_section import RoutinesSection
 from artemis.channels.desktop.settings_widgets import (
     _GROUP_ROLE,
@@ -598,14 +599,15 @@ def build_look_page(panel: SettingsPanel) -> None:
     panel.theme_combo.setAccessibleName(t("Arayüz teması"))
     panel.theme_combo.setVisible(False)
     for key, label in THEME_LABELS.items():
-        panel.theme_combo.addItem(t(label), key)
+        panel.theme_combo.addItem(t(label, context="theme"), key)
+    set_i18n_context(panel.theme_combo, "theme")
     panel.theme_combo.setCurrentIndex(panel.theme_combo.findData(DEFAULT_THEME))
     panel.theme_cards: dict[str, _ThemeCard] = {}
     theme_group = QButtonGroup(panel)
     panel._theme_grid = QGridLayout()
     panel._theme_grid.setSpacing(12)
     for key, label in THEME_LABELS.items():
-        theme_card = _ThemeCard(key, t(label))
+        theme_card = _ThemeCard(key, t(label, context="theme"))
         theme_card.radio.setProperty("theme", key)
         theme_card.radio.toggled.connect(panel._theme_picked)
         theme_group.addButton(theme_card.radio)

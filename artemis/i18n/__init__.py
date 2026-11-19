@@ -1,6 +1,8 @@
 """Basit yerelleştirme katmanı: kaynak metin anahtardır, eksik çeviri Türkçe kalır.
 
 Dil açılışta ayarlanır ve Ayarlar'dan değiştirildiğinde arayüzde canlı olarak güncellenir.
+Bağlama bağlı çeviriler sözlükte ``"<bağlam>::<Türkçe metin>"`` anahtarıyla saklanır;
+arama önce bağlamlı anahtara, yoksa düz anahtara bakar.
 """
 
 from __future__ import annotations
@@ -13,6 +15,7 @@ from pathlib import Path
 
 _language: str = "tr"
 _SUPPORTED = frozenset({"tr", "en"})
+_CONTEXT_SEP = "::"
 
 
 def set_language(code: str) -> None:
@@ -39,6 +42,11 @@ def _load_en_catalog() -> dict[str, str]:
         for key, value in data.items():
             if not isinstance(key, str) or not isinstance(value, str):
                 raise ValueError(f"Çeviri anahtarı ve değeri metin olmalı: {path.name}")
+            if key in merged and merged[key] != value:
+                raise ValueError(
+                    f"Çakışan çeviri anahtarı ({path.name}): "
+                    f"{key!r} -> {merged[key]!r} != {value!r}"
+                )
             merged[key] = value
     return merged
 
@@ -50,9 +58,34 @@ def catalog() -> dict[str, str]:
 
 @functools.cache
 def _reverse_en_catalog() -> dict[str, str]:
+    entries = _load_en_catalog()
     reverse: dict[str, str] = {}
-    for tr_text, en_text in catalog().items():
-        reverse.setdefault(en_text, tr_text)
+    # Düz anahtarlar önce eklenir; bağlamsız ters arama genel anlamı tercih eder.
+    for key, en_text in entries.items():
+        if _CONTEXT_SEP not in key:
+            reverse.setdefault(en_text, key)
+    for key, en_text in entries.items():
+        if _CONTEXT_SEP in key:
+            _, tr_text = key.split(_CONTEXT_SEP, 1)
+            reverse.setdefault(en_text, tr_text)
+    return reverse
+
+
+_reverse_context_cache: tuple[dict[str, str], dict[tuple[str, str], str]] | None = None
+
+
+def _reverse_context_catalog() -> dict[tuple[str, str], str]:
+    """(bağlam, İngilizce) -> Türkçe eşlemesi; ana katalog yenilenince kendini tazeler."""
+    global _reverse_context_cache
+    entries = _load_en_catalog()
+    if _reverse_context_cache is not None and _reverse_context_cache[0] is entries:
+        return _reverse_context_cache[1]
+    reverse: dict[tuple[str, str], str] = {}
+    for key, en_text in entries.items():
+        if _CONTEXT_SEP in key:
+            ctx, tr_text = key.split(_CONTEXT_SEP, 1)
+            reverse.setdefault((ctx, en_text), tr_text)
+    _reverse_context_cache = (entries, reverse)
     return reverse
 
 
@@ -87,13 +120,22 @@ def _compile_template(template: str) -> tuple[re.Pattern[str], str, set[str]] | 
     )
 
 
+_TemplateEntry = tuple[str | None, re.Pattern[str], re.Pattern[str], str, str, str]
+
+
 @functools.cache
-def _template_patterns() -> list[tuple[re.Pattern[str], re.Pattern[str], str, str, str]]:
-    patterns: list[tuple[re.Pattern[str], re.Pattern[str], str, str, str]] = []
+def _template_patterns() -> list[_TemplateEntry]:
+    patterns: list[_TemplateEntry] = []
     for key, val in _load_en_catalog().items():
-        if "{" not in key:
+        if _CONTEXT_SEP in key:
+            ctx: str | None
+            raw_key: str
+            ctx, raw_key = key.split(_CONTEXT_SEP, 1)
+        else:
+            ctx, raw_key = None, key
+        if "{" not in raw_key:
             continue
-        tr_comp = _compile_template(key)
+        tr_comp = _compile_template(raw_key)
         en_comp = _compile_template(val)
         if tr_comp is None or en_comp is None:
             continue
@@ -101,41 +143,101 @@ def _template_patterns() -> list[tuple[re.Pattern[str], re.Pattern[str], str, st
         en_re, en_clean, en_names = en_comp
         if tr_names != en_names:
             continue
-        patterns.append((tr_re, en_re, key, tr_clean, en_clean))
+        patterns.append((ctx, tr_re, en_re, raw_key, tr_clean, en_clean))
     return patterns
 
 
-def _retarget_templated(text: str, language: str) -> str:
-    for tr_re, en_re, _key, tr_clean, en_clean in _template_patterns():
-        match = tr_re.fullmatch(text) or en_re.fullmatch(text)
+def _ordered_templates(context: str | None) -> list[_TemplateEntry]:
+    all_patterns = _template_patterns()
+    if context:
+        return [p for p in all_patterns if p[0] == context] + [
+            p for p in all_patterns if p[0] is None
+        ]
+    return [p for p in all_patterns if p[0] is None] + [
+        p for p in all_patterns if p[0] is not None
+    ]
+
+
+def _resolve_templated_source(text: str, context: str | None = None) -> str | None:
+    for _ctx, tr_re, en_re, _raw_key, tr_clean, _en_clean in _ordered_templates(context):
+        if tr_re.fullmatch(text) is not None:
+            return text
+        match = en_re.fullmatch(text)
+        if match is not None:
+            try:
+                return tr_clean.format(**match.groupdict())
+            except (KeyError, ValueError, IndexError):
+                continue
+    return None
+
+
+def _translate_templated_source(
+    source: str, language: str, context: str | None = None
+) -> str:
+    if language != "en":
+        return source
+    for _ctx, tr_re, _en_re, _raw_key, _tr_clean, en_clean in _ordered_templates(context):
+        match = tr_re.fullmatch(source)
         if match is None:
             continue
-        groups = match.groupdict()
-        target = en_clean if language == "en" else tr_clean
         try:
-            return target.format(**groups)
+            return en_clean.format(**match.groupdict())
         except (KeyError, ValueError, IndexError):
             continue
-    return text
-
-
-def retarget(text: str, language: str) -> str:
-    """Görünen bir arayüz metnini kaynağını bularak hedef dile çevirir."""
-    entries = _load_en_catalog()
-    if text in entries:
-        source = text
-    else:
-        found = _reverse_en_catalog().get(text)
-        if found is None:
-            return _retarget_templated(text, language)
-        source = found
-    if language == "en":
-        return entries.get(source, source)
     return source
 
 
-def t(text: str) -> str:
-    """Türkçe kaynak metni etkin dile çevirir; eksik çeviri Türkçe kalır."""
+def resolve_source(text: str, context: str | None = None) -> str | None:
+    """Görünen bir arayüz metninin Türkçe kaynağını çözer; katalogda yoksa None döndürür."""
+    entries = _load_en_catalog()
+    if context and f"{context}{_CONTEXT_SEP}{text}" in entries:
+        return text
+    if _CONTEXT_SEP not in text and text in entries:
+        return text
+    if context:
+        found_ctx = _reverse_context_catalog().get((context, text))
+        if found_ctx is not None:
+            return found_ctx
+    found = _reverse_en_catalog().get(text)
+    if found is not None:
+        return found
+    return _resolve_templated_source(text, context=context)
+
+
+def translate_source(source: str, language: str, context: str | None = None) -> str:
+    """Bilinen Türkçe kaynak metni hedef dile çevirir; Türkçe için kaynağı aynen korur."""
+    if language != "en":
+        return source
+    entries = _load_en_catalog()
+    if context:
+        ctx_key = f"{context}{_CONTEXT_SEP}{source}"
+        if ctx_key in entries:
+            return entries[ctx_key]
+    if _CONTEXT_SEP not in source and source in entries:
+        return entries[source]
+    return _translate_templated_source(source, language, context=context)
+
+
+def retarget(text: str, language: str, context: str | None = None) -> str:
+    """Görünen bir arayüz metnini kaynağını bularak hedef dile çevirir."""
+    source = resolve_source(text, context=context)
+    if source is None:
+        return text
+    return translate_source(source, language, context=context)
+
+
+def t(text: str, context: str | None = None) -> str:
+    """Türkçe kaynak metni etkin dile çevirir; eksik çeviri Türkçe kalır.
+
+    Bağlam verilirse önce ``"<bağlam>::<metin>"`` anahtarı, yoksa düz anahtar aranır.
+    """
     if _language != "en":
         return text
-    return _load_en_catalog().get(text, text)
+    entries = _load_en_catalog()
+    if context:
+        ctx_key = f"{context}{_CONTEXT_SEP}{text}"
+        if ctx_key in entries:
+            return entries[ctx_key]
+    if _CONTEXT_SEP not in text:
+        return entries.get(text, text)
+    return text

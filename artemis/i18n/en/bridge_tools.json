@@ -14,7 +14,6 @@
   "Araştırma işinin durumunu gösterir.": "Shows the status of a research job.",
   "Araştırma sonucu": "Research result",
   "Araştırmayı iptal et": "Cancel research",
-  "Açık": "Enabled",
   "Açık işleri oku": "Read open work",
   "Açık pencereleri gösterir.": "Shows open windows.",
   "Başlangıç günü": "Start day",
@@ -53,7 +52,6 @@
   "Dosyayı sil": "Delete file",
   "Dosyayı taşı": "Move file",
   "Dosyayı yeniden adlandır": "Rename file",
-  "Durum": "State",
   "Düzey": "Level",
   "Ekran": "Screen",
   "Ekran parlaklığını verilen düzeye getirir.": "Sets screen brightness to the given level.",
@@ -159,7 +157,6 @@
   "Sürekli dinleme": "Continuous listening",
   "Sürekli ses dinlemeyi açar ya da kapatır.": "Turns continuous voice listening on or off.",
   "Takvim olayları": "Calendar events",
-  "Taslak": "Spec",
   "Taslak kimliği": "Spec ID",
   "Telegram'a bildir": "Notify on Telegram",
   "Temizleniyor.": "Cleaning up.",
@@ -170,7 +167,7 @@
   "Uygulamayı kapat": "Close application",
   "Vault notlarında arar.": "Searches Vault notes.",
   "Vault notunu oku": "Read Vault note",
-  "Vault'a ekle": "Append to Vault",
+  "Vault'a ekle": "Add to Vault",
   "Vault'ta ara": "Search Vault",
   "Vault'taki bir nota metin ekler.": "Appends text to a note in the Vault.",
   "Vault'tan bir not okur.": "Reads a note from the Vault.",
@@ -206,5 +203,8 @@
   "İşler": "Work items",
   "İşçi durdu.": "Worker stopped.",
   "Şu an başka bir işlem sürüyor; komut çalıştırılmadı.": "Another operation is in progress; command was not run.",
-  "Şu anki tarih ve saati verir.": "Returns the current date and time."
+  "Şu anki tarih ve saati verir.": "Returns the current date and time.",
+  "field::Açık": "Enabled",
+  "field::Durum": "State",
+  "field::Taslak": "Spec"
 }

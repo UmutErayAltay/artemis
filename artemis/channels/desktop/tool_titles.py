@@ -150,7 +150,7 @@ def tool_summary(name: str) -> str | None:
 
 
 def arg_label(arg: str) -> str:
-    return t(_ARGS[arg]) if arg in _ARGS else arg
+    return t(_ARGS[arg], context="field") if arg in _ARGS else arg
 
 
 def tool_display(name: str) -> str:
