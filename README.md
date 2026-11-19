@@ -72,7 +72,7 @@ Videolar demo arayüzünün gerçek ekran görüntüleriyle hazırlandı (Remoti
 
 **Tanıtım (≈100 sn)**
 
-https://github.com/user-attachments/assets/8b360cd1-dbf7-4849-a8b9-85d3b9a67601
+https://github.com/user-attachments/assets/0a565160-bc9e-42b3-8a23-72dca6e57c52
 
 **Kurulum rehberi (≈35 sn)**
 
