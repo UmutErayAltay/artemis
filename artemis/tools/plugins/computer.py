@@ -33,6 +33,7 @@ from artemis.computer.session import (
     SessionResult,
 )
 from artemis.config.settings import Settings
+from artemis.i18n import t
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
 
@@ -94,13 +95,15 @@ class ComputerUse(BaseTool):
         config = settings.computer_use
         if not config.enabled:
             return ToolResult(
-                message="Bilgisayar kullanımı kapalı: computer_use.enabled: true gerekir."
+                message=t("Bilgisayar kullanımı kapalı: computer_use.enabled: true gerekir.")
             )
         host = context.services.get("computer_host")
         if host is None:
             return ToolResult(
-                message="Bilgisayar kullanımı yalnız masaüstü uygulamasında (ve içinde çalışan "
-                "Telegram kanalında) çalışır; durdurma ve adım onayı burada yok."
+                message=t(
+                    "Bilgisayar kullanımı yalnız masaüstü uygulamasında (ve içinde çalışan "
+                    "Telegram kanalında) çalışır; durdurma ve adım onayı burada yok."
+                )
             )
         names = vision_models(settings)
         # Görüntüyü yakalamadan ÖNCE reddedilir: ekran buluta yalnız açık izinle gider. Yedek
@@ -109,8 +112,10 @@ class ComputerUse(BaseTool):
             names = tuple(name for name in names if settings.models[name].provider == "ollama")
         if not names:
             return ToolResult(
-                message="Ekran görüntüsü bulut modele gönderilemez: yerel (ollama) model seçin "
-                "ya da perception.allow_cloud_screen: true yapın."
+                message=t(
+                    "Ekran görüntüsü bulut modele gönderilemez: yerel (ollama) model seçin "
+                    "ya da perception.allow_cloud_screen: true yapın."
+                )
             )
         provider = context.services.get("computer_provider")
         if provider is None:
@@ -147,8 +152,10 @@ class ComputerUse(BaseTool):
             stop, on_step, approve = stack.enter_context(host.session())
         except ScreenBusyError:
             return ToolResult(
-                message="Başka bir bilgisayar kullanımı oturumu (masaüstü ya da Telegram) "
-                "ekranı kullanıyor; o bitince yeniden deneyin."
+                message=t(
+                    "Başka bir bilgisayar kullanımı oturumu (masaüstü ya da Telegram) "
+                    "ekranı kullanıyor; o bitince yeniden deneyin."
+                )
             )
         with stack:
             session = ComputerSession(
@@ -237,14 +244,18 @@ def _to_tool_result(result: SessionResult) -> ToolResult:
     if result.reason == "done":
         verified = result.verified is True
         head = (
-            f"Ekranda doğrulandı: {result.evidence}"
+            t("Ekranda doğrulandı: {evidence}").format(evidence=result.evidence)
             if verified
-            else f"Model bitirdi ama ekranda doğrulanamadı: {result.evidence}"
+            else t("Model bitirdi ama ekranda doğrulanamadı: {evidence}").format(
+                evidence=result.evidence
+            )
         )
         return ToolResult(
             success=verified,
             status="ok" if verified else "sent",
-            message=f"{head} ({result.steps} adım).{detail}",
+            message=t("{text} ({steps} adım).{detail}").format(
+                text=head, steps=result.steps, detail=detail
+            ),
             data={"reason": "done", "steps": result.steps, "verified": verified},
             external=True,
             content_kind="screen",
@@ -252,7 +263,9 @@ def _to_tool_result(result: SessionResult) -> ToolResult:
     return ToolResult(
         success=False,
         status="sent",
-        message=f"{_REASON_TEXT[result.reason]} ({result.steps} adım).{detail}",
+        message=t("{text} ({steps} adım).{detail}").format(
+            text=t(_REASON_TEXT[result.reason]), steps=result.steps, detail=detail
+        ),
         data={"reason": result.reason, "steps": result.steps},
         external=True,
         content_kind="screen",

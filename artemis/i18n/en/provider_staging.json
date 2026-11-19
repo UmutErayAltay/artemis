@@ -1,0 +1,6 @@
+{
+  " · Kaydet ile uygulanır.": " · Applied when you click Save.",
+  "Beyin modeli: {alias} · Kaydet ile uygulanır.": "Brain model: {alias} · Applied when you click Save.",
+  "Düzen seçildi. Beyin: {ana}": "Layout staged. Brain: {ana}",
+  "Model seçimi kaydedilemedi; mevcut ayarlar korunuyor.": "Could not save model selection; current settings were kept."
+}

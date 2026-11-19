@@ -7,6 +7,7 @@ from typing import Literal, Self, cast
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from artemis.config.settings import OWN_REPO_ALIAS, CodeAgentConfig, ConfigChoiceError
+from artemis.i18n import t
 from artemis.safety.paths import safe_join
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.code_agent_backends import resolve_executable, visible_supported
@@ -140,7 +141,7 @@ class CodeAgentPrepare(BaseTool):
             **available_projects(context.settings.code_agent),
         }
         if jobs is None or args.project not in known:
-            return ToolResult(message="İzinli proje bulunamadı; taslak hazırlanmadı.")
+            return ToolResult(message=t("İzinli proje bulunamadı; taslak hazırlanmadı."))
         config = context.settings.code_agent
         agent = args.agent or config.project_agent(args.project)
         workdir = args.workdir or config.project_workdir(args.project)
@@ -151,11 +152,13 @@ class CodeAgentPrepare(BaseTool):
             _, profile = config.resolve_agent(agent)
             workdir_path = _resolve_workdir(context, workdir, repo)
         except ConfigChoiceError as error:
-            return ToolResult(message=f"{error} Taslak hazırlanmadı.")
+            return ToolResult(message=t("{error} Taslak hazırlanmadı.").format(error=error))
         if mode == "visible" and not visible_supported(profile):
             return ToolResult(
-                message=f"'{agent}' ajanı görünür pencere kipini desteklemiyor "
-                "(Windows ve ajan desteği gerekir). Taslak hazırlanmadı."
+                message=t(
+                    "'{agent}' ajanı görünür pencere kipini desteklemiyor "
+                    "(Windows ve ajan desteği gerekir). Taslak hazırlanmadı."
+                ).format(agent=agent)
             )
         try:
             spec = jobs.prepare(
@@ -171,12 +174,12 @@ class CodeAgentPrepare(BaseTool):
             )
         except (CodeAgentError, ValueError):
             return ToolResult(
-                message="Taslak kaydedilemedi; kapsam ve kabul ölçütlerini kontrol edin."
+                message=t("Taslak kaydedilemedi; kapsam ve kabul ölçütlerini kontrol edin.")
             )
         return ToolResult(
             success=True,
             status="ok",
-            message="Taslak hazır; kod ajanı başlamadı.",
+            message=t("Taslak hazır; kod ajanı başlamadı."),
             data={"spec": spec.model_dump(mode="json")},
         )
 
@@ -208,7 +211,9 @@ class CodeAgentProjectContext(BaseTool):
         repo = known.get(args.project)
         if repo is None:
             return ToolResult(
-                message="İzinli proje bulunamadı; code_agent_status ile proje adlarına bakın."
+                message=t(
+                    "İzinli proje bulunamadı; code_agent_status ile proje adlarına bakın."
+                )
             )
         heads: dict[str, str] = {}
         for name in ("CLAUDE.md", "README.md"):
@@ -221,17 +226,17 @@ class CodeAgentProjectContext(BaseTool):
             except (OSError, ValueError, UnicodeError):
                 continue
         if not heads:
-            return ToolResult(message="Projede okunabilir CLAUDE.md veya README.md yok.")
+            return ToolResult(message=t("Projede okunabilir CLAUDE.md veya README.md yok."))
         return ToolResult(
             success=True,
             status="ok",
             # Sabit yönlendirme dosyadan değil araçtan gelir: Haiku açıklamadaki "tek tek sor"u
             # atlayıp üç soruyu birden soruyordu (2026-11-07 gerçek deneme); sonuç anında hatırlat.
-            message=(
-                f"{', '.join(heads)} okundu. Sıradaki adım: bu mesajda YALNIZ bir soru sor "
+            message=t(
+                "{files} okundu. Sıradaki adım: bu mesajda YALNIZ bir soru sor "
                 "(önce görev; kullanıcı verdiyse kapsam, o da varsa kabul ölçütü). Liste yapma, "
                 "diğer soruları sonraki mesajlara bırak."
-            ),
+            ).format(files=", ".join(heads)),
             data={"project": args.project, "files": heads},
             external=True,
             content_kind="file",
@@ -260,7 +265,11 @@ class CodeAgentStart(BaseTool):
         path = projects.get(alias or "")
         if path is None or jobs is None or alias is None or task is None:
             allowed = ", ".join(sorted(projects)) or "(hiçbiri; özellik kapalı)"
-            return ToolResult(message=f"Bilinmeyen proje '{alias}'. İzinli projeler: {allowed}.")
+            return ToolResult(
+                message=t("Bilinmeyen proje '{alias}'. İzinli projeler: {allowed}.").format(
+                    alias=alias, allowed=allowed
+                )
+            )
         agent_alias = args.spec.agent if args.spec else "claude"
         workdir_alias = args.spec.workdir if args.spec else OWN_REPO_ALIAS
         try:
@@ -276,7 +285,9 @@ class CodeAgentStart(BaseTool):
         ):
             # Onaylanan yollar ayar değişince eskir; kullanıcı eski yolu onaylamıştı.
             return ToolResult(
-                message="Ayarlar değişti; onaylanan yollar geçersiz. Yeni taslak hazırlayın."
+                message=t(
+                    "Ayarlar değişti; onaylanan yollar geçersiz. Yeni taslak hazırlayın."
+                )
             )
         entry = config.project_entries.get(alias)
         try:
@@ -302,7 +313,9 @@ class CodeAgentStart(BaseTool):
         base = next(j["base"] for j in jobs.status() if j["job_id"] == job_id)
         return ToolResult(
             status="sent",
-            message=f"Görev gönderildi (iş {job_id}); sonuç bekleniyor.",
+            message=t("Görev gönderildi (iş {job_id}); sonuç bekleniyor.").format(
+                job_id=job_id
+            ),
             data={"job_id": job_id, "base": base},
         )
 
@@ -336,7 +349,7 @@ class CodeAgentStatus(BaseTool):
             message=(
                 str(context.services.get("code_agent_unavailable"))
                 if context.services.get("code_agent_unavailable")
-                else f"{len(listed)} kod ajanı işi."
+                else t("{count} kod ajanı işi.").format(count=len(listed))
             ),
             data={
                 "projects": projects,
@@ -373,8 +386,11 @@ class CodeAgentAnswer(BaseTool):
             or not args.answer.strip()
             or not jobs.answer(args.job_id, args.question_id, args.answer)
         ):
-            return ToolResult(message="Soru artık geçerli değil; cevap gönderilmedi.")
-        return ToolResult(status="sent", message="Cevap aynı oturuma gönderildi; sonuç bekleniyor.")
+            return ToolResult(message=t("Soru artık geçerli değil; cevap gönderilmedi."))
+        return ToolResult(
+            status="sent",
+            message=t("Cevap aynı oturuma gönderildi; sonuç bekleniyor."),
+        )
 
 
 @register_tool
@@ -390,11 +406,15 @@ class CodeAgentCancel(BaseTool):
         args = cast(CancelArguments, arguments)
         jobs = _jobs(context)
         if jobs is None or not jobs.cancel(args.job_id):
-            return ToolResult(message=f"Çalışan iş bulunamadı: {args.job_id}.")
+            return ToolResult(
+                message=t("Çalışan iş bulunamadı: {job_id}.").format(job_id=args.job_id)
+            )
         return ToolResult(
             status="sent",
-            message=f"İş {args.job_id} için durdurma gönderildi. "
-            "Yarım değişiklikler diskte kalır; süreç temizliği doğrulanacak.",
+            message=t(
+                "İş {job_id} için durdurma gönderildi. "
+                "Yarım değişiklikler diskte kalır; süreç temizliği doğrulanacak."
+            ).format(job_id=args.job_id),
         )
 
 
@@ -419,13 +439,19 @@ class CodeAgentRelease(BaseTool):
         jobs = _jobs(context)
         released = None if jobs is None else jobs.release(args.job_id)
         if released is None:
-            return ToolResult(message=f"Kilidi bırakılabilir iş bulunamadı: {args.job_id}.")
+            return ToolResult(
+                message=t("Kilidi bırakılabilir iş bulunamadı: {job_id}.").format(
+                    job_id=args.job_id
+                )
+            )
         leftover = {True: "var", False: "yok", None: "bilinmiyor"}[released["leftover_changes"]]
         return ToolResult(
             success=True,
             status="ok",
-            message=f"İş {args.job_id} için depo kilidi bırakıldı; "
-            f"commitlenmemiş değişiklik {leftover}.",
+            message=t(
+                "İş {job_id} için depo kilidi bırakıldı; "
+                "commitlenmemiş değişiklik {leftover}."
+            ).format(job_id=args.job_id, leftover=leftover),
             data={"job_id": args.job_id, "leftover_changes": released["leftover_changes"]},
         )
 
@@ -452,11 +478,15 @@ class CodeAgentDiscard(BaseTool):
         except CodeAgentError as error:
             return ToolResult(message=str(error))
         if not removed:
-            return ToolResult(message=f"Silinebilir taslak bulunamadı: {args.spec_id}.")
+            return ToolResult(
+                message=t("Silinebilir taslak bulunamadı: {spec_id}.").format(
+                    spec_id=args.spec_id
+                )
+            )
         return ToolResult(
             success=True,
             status="ok",
-            message="Taslak silindi.",
+            message=t("Taslak silindi."),
             data={"spec_id": args.spec_id},
         )
 
@@ -481,10 +511,10 @@ class CodeAgentClearFinished(BaseTool):
         except CodeAgentError as error:
             return ToolResult(message=str(error))
         if not removed:
-            return ToolResult(message="Temizlenecek bitmiş iş yok.")
+            return ToolResult(message=t("Temizlenecek bitmiş iş yok."))
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{len(removed)} bitmiş iş kaydı silindi.",
+            message=t("{count} bitmiş iş kaydı silindi.").format(count=len(removed)),
             data={"job_ids": removed},
         )

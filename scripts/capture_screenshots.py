@@ -29,6 +29,7 @@ from PySide6.QtWidgets import QApplication, QScrollArea, QTabWidget  # noqa: E40
 from artemis.channels.desktop.app import _STYLE, ApprovalDialog, build_window  # noqa: E402
 from artemis.channels.desktop.pet import BODY, PetWidget  # noqa: E402
 from artemis.channels.desktop.projects_panel import ProjectsPanel  # noqa: E402
+from artemis.i18n import t  # noqa: E402
 from artemis.tools.base import ToolResult  # noqa: E402
 
 OUT = Path(__file__).resolve().parents[1] / "docs" / "assets" / "desktop"
@@ -138,7 +139,7 @@ def capture_settings(app: QApplication, window: object) -> None:
     window.tabs.setCurrentWidget(window.settings_scroll)  # type: ignore[attr-defined]
     for title, name in (("Ses", "settings-ses.png"), ("Telegram", "settings-telegram.png")):
         row = next(
-            i for i in range(panel.sections.count()) if panel.sections.item(i).text() == title
+            i for i in range(panel.sections.count()) if panel.sections.item(i).text() == t(title)
         )
         panel.sections.setCurrentRow(row)
         if title == "Ses":
@@ -188,7 +189,7 @@ def main() -> int:
         # 1180 px'te başlık çubuğu (Oto onay düğmesi eklendi) "DEMO" rozetini kırpıyor.
         window.resize(1280, 780)
         window.show()
-        wait(app, lambda: window.status_label.text() == "Hazır")
+        wait(app, lambda: window.status_label.text() == t("Hazır"))
         window.pet.hide()
         app.processEvents()
         save(window, "welcome.png")

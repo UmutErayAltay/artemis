@@ -12,6 +12,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.file_index import FileIndex, FileIndexError, usable_roots
 from artemis.tools.registry import register_tool
@@ -43,27 +44,36 @@ class FileSearch(BaseTool):
     content_kind = "file"
 
     def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
-        return None if context.settings.file_search.enabled else _DISABLED
+        return None if context.settings.file_search.enabled else t(_DISABLED)
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(Arguments, arguments)
         index = context.services.get("file_index")
         if not isinstance(index, FileIndex):
-            return ToolResult(message=_UNAVAILABLE)
+            return ToolResult(message=t(_UNAVAILABLE))
         if not index.available:
-            return ToolResult(message=_UNAVAILABLE)
+            return ToolResult(message=t(_UNAVAILABLE))
         if not usable_roots(context.settings)[0]:
-            return ToolResult(message=_NO_ROOTS)
+            return ToolResult(message=t(_NO_ROOTS))
         try:
             hits = await asyncio.to_thread(index.search, args.query, args.limit)
         except FileIndexError as error:
             return ToolResult(message=str(error))
         status = index.status()
-        note = " İndeksleme sürüyor, sonuç eksik olabilir." if status["running"] else ""
+        note = (
+            " " + t("İndeksleme sürüyor, sonuç eksik olabilir.")
+            if status["running"]
+            else ""
+        )
+        message = (
+            t("{count} dosya bulundu.").format(count=len(hits))
+            if hits
+            else t("Eşleşen dosya bulunamadı.")
+        ) + note
         return ToolResult(
             success=True,
             status="ok",
-            message=(f"{len(hits)} dosya bulundu." if hits else "Eşleşen dosya bulunamadı.") + note,
+            message=message,
             data={"results": [
                 {"path": h.path, "modified": h.modified, "snippet": h.snippet} for h in hits
             ]},

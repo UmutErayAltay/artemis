@@ -30,6 +30,7 @@ from artemis.channels.voice.core import (
     is_ghost_transcript,
 )
 from artemis.config.settings import EndpointConfig, VoiceConfig
+from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 from artemis.tools.platform import child_environment
 
@@ -336,7 +337,11 @@ class FasterWhisperRecognizer:
                 if partial and self._final_waiting.is_set():
                     return ""
                 model = self._load()
-                language = None if self.config.stt_language == "auto" else "tr"
+                language = (
+                    None
+                    if self.config.stt_language == "auto"
+                    else ("en" if self.config.stt_language == "en" else "tr")
+                )
                 if self.config.stt_language == "tr_en":
                     # Kısa Türkçe komutta tüm diller arasında yanlış tahmin yapma.
                     # İngilizceye yalnız güçlü ses kanıtı olduğunda geçilir.
@@ -423,8 +428,8 @@ class OpenAICompatibleTranscriber:
             headers["Authorization"] = f"Bearer {key}"
         xai = self.config.stt_cloud_protocol == "xai"
         data = {} if xai else {"model": self.config.stt_cloud_model, "response_format": "json"}
-        if self.config.stt_language == "tr":
-            data["language"] = "tr"
+        if self.config.stt_language in ("tr", "en"):
+            data["language"] = self.config.stt_language
         path = "/stt" if xai else "/audio/transcriptions"
         # prompt yok: Whisper gürültüde prompt metnini yankılıyor (ADR 0079 eki).
         # Gizlilik denetimi sesi göndermeden önce yazılır; ses ve metin kaydedilmez.
@@ -753,7 +758,7 @@ class EmaSynthesizer:
         """EMA modelini yükler; ilk gerçek yanıt hızlansın diye bir kez ısınır."""
         self._load()
         with self._inference_lock:
-            self._tts.say("Merhaba.")
+            self._tts.say(t("Merhaba."))
 
     async def stream(self, text: str, cancelled: asyncio.Event) -> AsyncIterator[PCMChunk]:
         if not text.strip():

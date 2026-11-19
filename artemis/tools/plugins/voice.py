@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
+from artemis.i18n import t
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
 
@@ -35,15 +36,15 @@ class VoiceContinuousTool(BaseTool):
         # Denetleyiciyi masaüstü köprüsü yalnız ses çalışırken kaydeder (rule 10: global yok).
         controller: Any = context.services.get("voice_controller")
         if controller is None:
-            return ToolResult(message="Ses kapalı; önce Ses düğmesiyle açın.")
+            return ToolResult(message=t("Ses kapalı; önce Ses düğmesiyle açın."))
         controller.set_continuous(args.enabled)
         # Başarı yalnız durum gerçekten değiştiyse söylenir (kural 5).
         if bool(controller.continuous) != args.enabled:
-            return ToolResult(status="error", message="Dinleme kipi değiştirilemedi.")
-        state = "açıldı" if args.enabled else "kapatıldı"
+            return ToolResult(status="error", message=t("Dinleme kipi değiştirilemedi."))
+        state = t("açıldı") if args.enabled else t("kapatıldı")
         return ToolResult(
             success=True,
             status="ok",
-            message=f"Kesintisiz dinleme {state}.",
+            message=t("Kesintisiz dinleme {state}.").format(state=state),
             data={"continuous": args.enabled},
         )

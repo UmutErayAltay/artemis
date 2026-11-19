@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from artemis.i18n import t
 from artemis.proactive.schedule import format_local, parse_local
 from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
@@ -85,20 +86,22 @@ class ReminderCreate(BaseTool):
         args = cast(ReminderCreateArguments, arguments)
         store = _store(context)
         if store is None:
-            return ToolResult(message=_DISABLED)
+            return ToolResult(
+                message=t("Hatırlatmalar kapalı: config içinde proactive.enabled: true gerekir.")
+            )
         tz = ZoneInfo(context.settings.proactive.timezone)
         now = _now(context)
         if args.at is not None:
             try:
                 due = parse_local(args.at, tz)
             except ValueError:
-                return ToolResult(message="Saat 'YYYY-MM-DD HH:MM' biçiminde olmalı.")
+                return ToolResult(message=t("Saat 'YYYY-MM-DD HH:MM' biçiminde olmalı."))
         else:
             due = now + timedelta(minutes=args.in_minutes or 0)
         if due <= now:
-            return ToolResult(message="Hatırlatma zamanı geçmişte; kurulmadı.")
+            return ToolResult(message=t("Hatırlatma zamanı geçmişte; kurulmadı."))
         if due - now > MAX_AHEAD:
-            return ToolResult(message="Hatırlatma en çok bir yıl sonrasına kurulabilir.")
+            return ToolResult(message=t("Hatırlatma en çok bir yıl sonrasına kurulabilir."))
         try:
             created = store.add_reminder(
                 args.text,
@@ -109,14 +112,14 @@ class ReminderCreate(BaseTool):
             )
             stored = store.get_reminder(created.id)
         except ProactiveStoreError:
-            return ToolResult(message="Hatırlatma kaydedilemedi (yerel depo hatası).")
+            return ToolResult(message=t("Hatırlatma kaydedilemedi (yerel depo hatası)."))
         if stored is None or stored.cancelled or stored.text != args.text:
-            return ToolResult(message="Hatırlatma kaydı doğrulanamadı.")
+            return ToolResult(message=t("Hatırlatma kaydı doğrulanamadı."))
         local = format_local(stored.due_at, tz)
         return ToolResult(
             success=True,
             status="ok",
-            message=f"Hatırlatma {local} için kuruldu.",
+            message=t("Hatırlatma {local} için kuruldu.").format(local=local),
             data={"reminder_id": stored.id, "due_local": local},
         )
 
@@ -135,12 +138,14 @@ class ReminderList(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         store = _store(context)
         if store is None:
-            return ToolResult(message=_DISABLED)
+            return ToolResult(
+                message=t("Hatırlatmalar kapalı: config içinde proactive.enabled: true gerekir.")
+            )
         tz = ZoneInfo(context.settings.proactive.timezone)
         try:
             pending = store.list_reminders(cast(ReminderListArguments, arguments).state)
         except ProactiveStoreError:
-            return ToolResult(message="Hatırlatmalar okunamadı (yerel depo hatası).")
+            return ToolResult(message=t("Hatırlatmalar okunamadı (yerel depo hatası)."))
         items: list[dict[str, Any]] = [
             {
                 "state": "cancelled" if item.cancelled else item.state or "pending",
@@ -162,7 +167,7 @@ class ReminderList(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{len(items)} hatırlatma kaydı var (en fazla son 100).",
+            message=t("{count} hatırlatma kaydı var (en fazla son 100).").format(count=len(items)),
             data={"reminders": items},
             external=any(item.created_tainted for item in pending),
             content_kind="file" if any(item.created_private for item in pending) else "text",
@@ -182,16 +187,18 @@ class ReminderCancel(BaseTool):
         args = cast(ReminderCancelArguments, arguments)
         store = _store(context)
         if store is None:
-            return ToolResult(message=_DISABLED)
+            return ToolResult(
+                message=t("Hatırlatmalar kapalı: config içinde proactive.enabled: true gerekir.")
+            )
         try:
             cancelled = store.cancel_reminder(args.reminder_id, _now(context))
         except ProactiveStoreError:
-            return ToolResult(message="Hatırlatma iptal edilemedi (yerel depo hatası).")
+            return ToolResult(message=t("Hatırlatma iptal edilemedi (yerel depo hatası)."))
         if not cancelled:
             return ToolResult(
-                message="Hatırlatma bulunamadı ya da zaten teslim edildi veya iptal edildi."
+                message=t("Hatırlatma bulunamadı ya da zaten teslim edildi veya iptal edildi.")
             )
-        return ToolResult(success=True, status="ok", message="Hatırlatma iptal edildi.")
+        return ToolResult(success=True, status="ok", message=t("Hatırlatma iptal edildi."))
 
 
 @register_tool
@@ -209,11 +216,13 @@ class ReminderRetry(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         store = _store(context)
         if store is None:
-            return ToolResult(message=_DISABLED)
+            return ToolResult(
+                message=t("Hatırlatmalar kapalı: config içinde proactive.enabled: true gerekir.")
+            )
         try:
             old = store.get_reminder(cast(ReminderCancelArguments, arguments).reminder_id)
             if old is None:
-                return ToolResult(message="Hatırlatma bulunamadı.")
+                return ToolResult(message=t("Hatırlatma bulunamadı."))
             # Eski gizlilik/taint düşürülmez; aynı içerik yeni kimlikle teslim edilir.
             new = store.retry_reminder(old.id, _now(context))
         except ProactiveStoreError as error:
@@ -221,6 +230,6 @@ class ReminderRetry(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message="Yeni teslim girişimi kuruldu; henüz teslim edilmedi.",
+            message=t("Yeni teslim girişimi kuruldu; henüz teslim edilmedi."),
             data={"reminder_id": new.id, "retry_of": old.id},
         )

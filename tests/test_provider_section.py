@@ -354,10 +354,12 @@ def test_primary_is_chosen_by_alias_when_model_ids_collide(
     section = ProviderSection(path)
     section.select_model("haiku 5-5")
     section._make_primary()
-    assert load_settings(path).primary_model == "haiku 5-5"
     assert "Beyin: haiku 5-5 (proxy_cli)" in section.banner.text()
+    assert section.commit_pending()
+    assert load_settings(path).primary_model == "haiku 5-5"
     section.select_model("first")
     section._make_primary()
+    assert section.commit_pending()
     assert load_settings(path).primary_model == "first"
 
 
@@ -658,18 +660,22 @@ def test_hard_role_toggles_and_shows_in_rows_and_banner(app: QApplication, tmp_p
     section = ProviderSection(path)
     section.select_model("haiku 5-5")
     section._toggle_role("hard_model")  # beyin aynı zamanda zor işler seçilebilir
+    assert section.commit_pending()
     assert load_settings(path).hard_model == "haiku 5-5"
     section._toggle_role("hard_model")
+    assert section.commit_pending()
     assert load_settings(path).hard_model is None
     section.select_model("sonnet 5-5")
     section._toggle_role("hard_model")
-    assert load_settings(path).hard_model == "sonnet 5-5"
     assert "Zor işler" in dict(section.model_rows())["sonnet 5-5"]
     assert "Zor işler: sonnet 5-5" in section.banner.text()
     assert section.hard_button.isChecked() and section.hard_button.text() == "✓ Zor işler"
+    assert section.commit_pending()
+    assert load_settings(path).hard_model == "sonnet 5-5"
     section._remove_model()  # zor işler modeli kaldırılamaz
     assert "sonnet 5-5" in load_settings(path).models
     section._toggle_role("hard_model")
+    assert section.commit_pending()
     assert load_settings(path).hard_model is None
 
 
@@ -686,9 +692,10 @@ def test_test_results_and_suggested_layout_apply(app: QApplication, tmp_path: Pa
     assert "Ana: haiku 5-5 · Zor işler: sonnet 5-5" in section.layout_label.text()
     assert not section.apply_layout_button.isHidden()
     section._apply_layout()
+    assert section.apply_layout_button.isHidden()
+    assert section.commit_pending()
     settings = load_settings(path)
     assert (settings.primary_model, settings.hard_model) == ("haiku 5-5", "sonnet 5-5")
-    assert section.apply_layout_button.isHidden()
     # Bozuk rapor ekranı çökertmez, yalnız yok sayılır.
     (tmp_path / "state" / "model_testleri" / "haiku-5-5.json").write_text("{", encoding="utf-8")
     section.reload()
@@ -726,13 +733,15 @@ def test_fallback_role_from_ui(app: QApplication, tmp_path: Path) -> None:
     section = ProviderSection(path)
     section.select_model("sonnet 5-5")
     section._toggle_role("fallback_model")
-    assert load_settings(path).fallback_model == "sonnet 5-5"
     assert "Yedek" in dict(section.model_rows())["sonnet 5-5"]
     assert "Yedek: sonnet 5-5" in section.banner.text()
     assert section.fallback_button.isChecked() and section.fallback_button.text() == "✓ Yedek"
+    assert section.commit_pending()
+    assert load_settings(path).fallback_model == "sonnet 5-5"
     section._remove_model()
     assert "sonnet 5-5" in load_settings(path).models  # yedek kaldırılamaz
     section._make_primary()  # beyin olunca yedek rolü düşer
+    assert section.commit_pending()
     settings = load_settings(path)
     assert (settings.primary_model, settings.fallback_model) == ("sonnet 5-5", None)
 
@@ -893,6 +902,7 @@ def test_role_buttons_use_existing_actions_and_reflect_state(
     assert not section.fallback_button.isEnabled()
     section.hard_button.click()
     section.computer_button.click()
+    assert section.commit_pending()
     s_same = load_settings(path)
     assert (s_same.primary_model, s_same.hard_model, s_same.computer_use.model) == (
         "haiku 5-5", "haiku 5-5", "haiku 5-5"
@@ -901,15 +911,22 @@ def test_role_buttons_use_existing_actions_and_reflect_state(
     section.computer_button.click()
     section.select_model("sonnet 5-5")
     section.hard_button.click()
+    assert section.hard_button.isChecked()
+    assert section.commit_pending()
     assert load_settings(path).hard_model == "sonnet 5-5" and section.hard_button.isChecked()
     section.fallback_button.click()
+    assert section.commit_pending()
     assert load_settings(path).fallback_model == "sonnet 5-5"
     section.hard_button.click()  # ikinci tık rolü kapatır
+    assert not section.hard_button.isChecked()
+    assert section.commit_pending()
     assert load_settings(path).hard_model is None and not section.hard_button.isChecked()
     section.primary_button.click()
+    assert section.commit_pending()
     settings = load_settings(path)
     assert (settings.primary_model, settings.fallback_model) == ("sonnet 5-5", None)
     section.primary_button.click()  # beyin kendi kendine kapatılamaz
+    assert section.commit_pending()
     assert load_settings(path).primary_model == "sonnet 5-5" and section.primary_button.isChecked()
 
 
@@ -922,15 +939,18 @@ def test_computer_role_sets_alias_and_is_cleared_on_second_click(
     assert section.computer_button.isEnabled()
     section.select_model("sonnet 5-5")
     section.computer_button.click()
-    assert load_settings(path).computer_use.model == "sonnet 5-5"
     assert section.computer_button.text() == "✓ Bilgisayar"
+    assert section.commit_pending()
+    assert load_settings(path).computer_use.model == "sonnet 5-5"
     section.computer_button.click()
+    assert section.commit_pending()
     assert load_settings(path).computer_use.model == ""
     section.computer_button.click()
     section._remove_model()
     assert "sonnet 5-5" in load_settings(path).models
     assert "Bilgisayar kullanımı modeli kaldırılamaz" in section.status.text()
     section.computer_button.click()
+    assert section.commit_pending()
     assert load_settings(path).computer_use.model == ""
 
 
@@ -1224,6 +1244,7 @@ def test_raw_normalizes_null_sections(app: QApplication, tmp_path: Path) -> None
     section._add_model()
     section.select_model("m-null")
     section._toggle_role("computer_use")
+    assert section.commit_pending()
 
     settings = load_settings(path)
     assert "yerel" in settings.endpoints

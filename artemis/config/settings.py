@@ -144,7 +144,7 @@ class VoiceConfig(BaseModel):
     stt_device: Literal["cuda", "cpu"] = "cuda"
     stt_compute_type: str = "float16"
     cuda_library_dirs: list[Path] = Field(default_factory=list)
-    stt_language: Literal["tr", "tr_en", "auto"] = "tr"
+    stt_language: Literal["tr", "en", "tr_en", "auto"] = "tr"
     stt_beam_size: int = Field(default=5, ge=1, le=10)
     stt_partial_beam_size: int = Field(default=1, ge=1, le=10)
     stt_partial_enabled: bool = True

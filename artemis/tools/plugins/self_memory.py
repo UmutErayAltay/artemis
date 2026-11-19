@@ -11,6 +11,7 @@ from typing import cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from artemis.i18n import t
 from artemis.memory.store import MemoryStore
 from artemis.memory.vault import make_excerpt
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
@@ -56,7 +57,10 @@ def _store(context: ToolContext) -> MemoryStore | None:
 
 
 def _error(error: Exception) -> ToolResult:
-    return ToolResult(status="error", message=f"Hafıza deposu hatası: {error}")
+    return ToolResult(
+        status="error",
+        message=t("Hafıza deposu hatası: {error}").format(error=error),
+    )
 
 
 @register_tool
@@ -76,7 +80,10 @@ class MemoryRemember(BaseTool):
         args = cast(RememberArguments, arguments)
         store = _store(context)
         if store is None:
-            return ToolResult(status="error", message=_DISABLED)
+            return ToolResult(
+                status="error",
+                message=t("Kalıcı hafıza kapalı (persist_memory=false veya depo açılamadı)."),
+            )
         try:
             outcome, note_id = await run_blocking(
                 # Gizli turda yazılan not buluta maskeli gider (ADR 0056); onay yerel yazmanındır.
@@ -87,10 +94,16 @@ class MemoryRemember(BaseTool):
         if outcome == "full":
             return ToolResult(
                 status="error",
-                message=f"Hafıza dolu ({MAX_NOTES} not); önce memory_list ile bakıp "
-                "memory_forget ile bir not sil.",
+                message=t(
+                    "Hafıza dolu ({max_notes} not); önce memory_list ile bakıp "
+                    "memory_forget ile bir not sil."
+                ).format(max_notes=MAX_NOTES),
             )
-        message = "Bu not zaten kayıtlı." if outcome == "duplicate" else "Hafızaya yazıldı."
+        message = (
+            t("Bu not zaten kayıtlı.")
+            if outcome == "duplicate"
+            else t("Hafızaya yazıldı.")
+        )
         return ToolResult(
             success=True, status="ok", message=message, data={"id": note_id, "result": outcome}
         )
@@ -109,14 +122,20 @@ class MemoryForget(BaseTool):
         args = cast(ForgetArguments, arguments)
         store = _store(context)
         if store is None:
-            return ToolResult(status="error", message=_DISABLED)
+            return ToolResult(
+                status="error",
+                message=t("Kalıcı hafıza kapalı (persist_memory=false veya depo açılamadı)."),
+            )
         try:
             deleted = await run_blocking(store.delete_note, args.note_id)
         except (OSError, sqlite3.Error) as error:
             return _error(error)
         if not deleted:
-            return ToolResult(status="error", message=f"{args.note_id} numaralı not yok.")
-        return ToolResult(success=True, status="ok", message="Not silindi.")
+            return ToolResult(
+                status="error",
+                message=t("{note_id} numaralı not yok.").format(note_id=args.note_id),
+            )
+        return ToolResult(success=True, status="ok", message=t("Not silindi."))
 
 
 @register_tool
@@ -131,14 +150,20 @@ class MemoryList(BaseTool):
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         store = _store(context)
         if store is None:
-            return ToolResult(status="error", message=_DISABLED)
+            return ToolResult(
+                status="error",
+                message=t("Kalıcı hafıza kapalı (persist_memory=false veya depo açılamadı)."),
+            )
         try:
             notes = await run_blocking(store.list_notes)
         except (OSError, sqlite3.Error) as error:
             return _error(error)
         items = [{"id": n.id, "text": n.text, "created_at": n.created_at} for n in notes]
         return ToolResult(
-            success=True, status="ok", message=f"{len(notes)} not var.", data={"notes": items},
+            success=True,
+            status="ok",
+            message=t("{count} not var.").format(count=len(notes)),
+            data={"notes": items},
             private=any(note.private for note in notes),
         )
 
@@ -161,7 +186,10 @@ class ConversationSearch(BaseTool):
         args = cast(ConversationSearchArguments, arguments)
         store = _store(context)
         if store is None:
-            return ToolResult(status="error", message=_DISABLED)
+            return ToolResult(
+                status="error",
+                message=t("Kalıcı hafıza kapalı (persist_memory=false veya depo açılamadı)."),
+            )
         try:
             hits = await run_blocking(store.search_turns, args.query, args.limit)
         except (OSError, sqlite3.Error) as error:
@@ -174,10 +202,15 @@ class ConversationSearch(BaseTool):
             }
             for hit in hits
         ]
+        message = (
+            t("{count} eşleşen tur bulundu.").format(count=len(hits))
+            if hits
+            else t("Eşleşen tur bulunamadı.")
+        )
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{len(hits)} eşleşen tur bulundu." if hits else "Eşleşen tur bulunamadı.",
+            message=message,
             data={"results": results},
             # Lekeli turun alıntısı dış içerik taşıyabilir: taint bu turda da sürer.
             external=any(hit.tainted for hit in hits),

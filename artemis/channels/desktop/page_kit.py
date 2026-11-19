@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import QEvent, Qt, Signal
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLayout,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -138,6 +139,57 @@ class CurrentPageStack(QWidget):
         self._current = -1
         self._box = QVBoxLayout(self)
         self._box.setContentsMargins(0, 0, 0, 0)
+        # İçteki sayfalarda görünürlük veya sarılan etiket metni değiştiğinde yığın en az
+        # aktif sayfanın anlık minimum/heightForWidth yüksekliği kadar büyümeli; aksi hâlde
+        # QScrollArea eski boyutu korur ve alt widget'lar minimumSizeHint'in altına sıkışır.
+        self._box.setSizeConstraint(QLayout.SizeConstraint.SetMinAndMaxSize)
+
+    def hasHeightForWidth(self) -> bool:
+        page = self.currentWidget()
+        return page.hasHeightForWidth() if page is not None else super().hasHeightForWidth()
+
+    def heightForWidth(self, width: int) -> int:
+        page = self.currentWidget()
+        if page is not None:
+            # QScrollArea.setWidgetResizable(True) içerik yüksekliğini seçerken `heightForWidth`
+            # değerini `minimumSizeHint` yerine kullanır. İçteki bazı çocuklarda (ör. `_WrapLabel`
+            # veya maximumWidth=640 olan ipuçları) gerçek sarma yüksekliği `minimumSizeHint`'e
+            # yansırken, üst `QBoxLayout.totalHeightForWidth(width)` çocuklara 880/640 yerine
+            # tam kaydırma genişliğini geçirip daha küçük bir sarma yüksekliği hesaplayabilir.
+            # Bu yüzden `heightForWidth` asla `minimumSizeHint` yüksekliğinin altına düşmemelidir.
+            min_h = page.minimumSizeHint().height()
+            if page.hasHeightForWidth():
+                return max(min_h, page.heightForWidth(width))
+            return min_h
+        return super().heightForWidth(width)
+
+    def sizeHint(self) -> QSize:
+        page = self.currentWidget()
+        if page is not None:
+            hint = page.sizeHint().expandedTo(page.minimumSizeHint())
+            if page.hasHeightForWidth() and self.width() > 0:
+                hfw = page.heightForWidth(self.width())
+                if hfw > 0:
+                    hint.setHeight(max(hint.height(), hfw))
+            return hint
+        return super().sizeHint()
+
+    def minimumSizeHint(self) -> QSize:
+        page = self.currentWidget()
+        if page is not None:
+            hint = page.minimumSizeHint()
+            if page.hasHeightForWidth() and self.width() > 0:
+                hfw = page.heightForWidth(self.width())
+                if hfw > 0:
+                    hint.setHeight(max(hint.height(), hfw))
+            return hint
+        return super().minimumSizeHint()
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.LayoutRequest:
+            self._box.invalidate()
+            self.updateGeometry()
+        return super().event(event)
 
     def addWidget(self, page: QWidget) -> int:
         self._pages.append(page)
@@ -168,6 +220,8 @@ class CurrentPageStack(QWidget):
         self._pages[self._current].hide()
         self._current = index
         self._pages[index].show()
+        self._box.invalidate()
+        self.updateGeometry()
         self.currentChanged.emit(index)
 
 

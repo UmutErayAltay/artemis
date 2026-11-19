@@ -17,6 +17,16 @@ Artemis is a Turkish, single-user personal desktop assistant for Windows 11. The
 - **Read-only calendar and mail** (ADR 0059); local file search (ADR 0065).
 - **Reminders and a morning briefing** (ADR 0027); screen reading with local OCR, images not stored (ADR 0029); window and system control (ADR 0031); start on Windows sign-in (ADR 0030).
 - **Providers:** OpenRouter, Anthropic, Ollama, OpenAI-compatible endpoints (ADR 0033), Claude Code CLI subscription (ADR 0035).
+- **Interface language:** Turkish or English (Settings > Appearance); with English selected, replies, tool messages and the wake acknowledgement are English and speech recognition can be set to English (ADR 0082).
+- **In-app updates:** Settings > About checks GitHub releases and can download the installer, verify its SHA-256 against the release metadata and start it (ADR 0081).
+
+## Videos
+
+Made with Remotion from real screenshots of the demo UI; English narration.
+
+| Product tour (≈100 s) | Setup guide (≈50 s) |
+| --- | --- |
+| [![Artemis product tour](docs/assets/video/artemis-promo-en.jpg)](docs/assets/video/artemis-promo-en.mp4) | [![Artemis setup guide](docs/assets/video/artemis-setup-en.jpg)](docs/assets/video/artemis-setup-en.mp4) |
 
 ## Windows package and first run
 

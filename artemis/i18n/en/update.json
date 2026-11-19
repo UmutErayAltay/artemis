@@ -1,0 +1,13 @@
+{
+  "İndir ve kur": "Download and install",
+  "İndiriliyor…": "Downloading…",
+  "İndiriliyor: {done} MB / {total} MB": "Downloading: {done} MB / {total} MB",
+  "İndirildi ve doğrulandı (SHA-256). Kurulum için Artemis kapanacak.": "Downloaded and verified (SHA-256). Artemis will close to start the installer.",
+  "Kurulum dosyası bilgisi eksik.": "Installer information is missing.",
+  "İndirme iptal edildi.": "Download cancelled.",
+  "Kurulum dosyası doğrulanamadı (SHA-256 uyuşmuyor).": "The installer could not be verified (SHA-256 mismatch).",
+  "İndirme başarısız: bağlantı hatası.": "Download failed: connection error.",
+  "İndirme başarısız: dosya boyutu beklenenden farklı.": "Download failed: file size differs from the expected size.",
+  "İndirme başarısız: dosya yazılamadı.": "Download failed: could not write the file.",
+  "Kurucu başlatılamadı.": "Could not start the installer."
+}

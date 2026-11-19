@@ -14,6 +14,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from artemis.i18n import t
 from artemis.proactive.daily_summary import parse_day, summary_path
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
@@ -44,7 +45,7 @@ class DailySummaryRead(BaseTool):
     content_kind = "file"
 
     def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
-        return None if context.settings.daily_summary.enabled else _DISABLED
+        return None if context.settings.daily_summary.enabled else t(_DISABLED)
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(ReadArguments, arguments)
@@ -54,20 +55,22 @@ class DailySummaryRead(BaseTool):
         else:
             parsed = parse_day(args.day)
             if parsed is None:
-                return ToolResult(message="Gün YYYY-MM-DD biçiminde olmalı.")
+                return ToolResult(message=t("Gün YYYY-MM-DD biçiminde olmalı."))
             day = parsed
         path = summary_path(settings.state_dir, day)
         try:
             if path.is_symlink() or not path.is_file():
-                return ToolResult(message=f"{day.isoformat()} için kayıtlı özet yok.")
+                return ToolResult(
+                    message=t("{day} için kayıtlı özet yok.").format(day=day.isoformat())
+                )
             with path.open(encoding="utf-8") as stream:
                 text = stream.read(_READ_LIMIT)
         except (OSError, UnicodeError):
-            return ToolResult(message="Özet dosyası okunamadı.")
+            return ToolResult(message=t("Özet dosyası okunamadı."))
         return ToolResult(
             success=True,
             status="ok",
-            message=f"{day.isoformat()} özeti okundu.",
+            message=t("{day} özeti okundu.").format(day=day.isoformat()),
             data={"day": day.isoformat(), "summary": text},
             content_kind="file",
             private=True,

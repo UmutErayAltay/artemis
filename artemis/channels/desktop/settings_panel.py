@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -44,7 +42,9 @@ from artemis.channels.desktop.settings_io import (
     PANEL_BINDINGS,
     SettingPath,
     _same,
+    apply_github_report,
     refresh_device_combo,
+    restore_baseline,
     save_code_agent,
     setting_value,
 )
@@ -205,6 +205,7 @@ class SettingsPanel(QWidget):
     stt_combo: QComboBox
     stt_download: QPushButton
     stt_status: QLabel
+    stt_language_combo: QComboBox
     precision_combo: QComboBox
     hybrid_stt: QCheckBox
     cloud_box: QWidget
@@ -218,6 +219,7 @@ class SettingsPanel(QWidget):
     _cloud_fetch_for: str
     cloud_stt_hint: QLabel
     tts_combo: QComboBox
+    tts_piper_hint: QLabel
     tts_cloud_box: QWidget
     tts_cloud_saved: QComboBox
     tts_cloud_server: QComboBox
@@ -600,13 +602,24 @@ class SettingsPanel(QWidget):
 
     def flush(self) -> None:
         """Bekleyen değişiklik varsa hemen kaydettirir (Kaydet düğmesi ve çıkış onayı)."""
-        if self._dirty and not self._demo:
+        if self._demo:
+            return
+        had_pending = self.providers.has_pending
+        if had_pending and not self.providers.commit_pending():
+            self.save_failed(t("Model seçimi kaydedilemedi; mevcut ayarlar korunuyor."))
+            return
+        if self._dirty:
+            # Yalnız model rolleri değiştiyse ve apply_requested dinleyicisi yoksa
+            # (veya diğer alanlar zaten kayıtlıysa) _apply sonrası kirli kalmasın.
             self._apply()
+            if had_pending and self._dirty and not self._failed:
+                self.mark_saved()
 
     def discard_changes(self) -> None:
         """Kaydedilmemiş düzenlemeleri atar ve tüm denetimleri kayıtlı config'ten yeniler."""
         if self._demo:
             return
+        self.providers.drop_pending()
         self.refresh()
         self._set_dirty(False)
         self.notice.setText("")
@@ -683,23 +696,14 @@ class SettingsPanel(QWidget):
         baseline = self._baseline_bytes
         if baseline is None or self._demo:
             return
-        temporary = ""
         try:
-            descriptor, temporary = tempfile.mkstemp(
-                prefix=".settings-", suffix=".yaml", dir=self.config_path.parent
-            )
-            with os.fdopen(descriptor, "wb") as stream:
-                stream.write(baseline)
-            load_settings(Path(temporary))
-            os.replace(temporary, self.config_path)
+            restore_baseline(self.config_path, baseline)
         except (OSError, ValueError, yaml.YAMLError):
             # Kirli kalır (düğme görünür, yeniden denenebilir); yarım yazılmış dosya yok.
             self.notice.show_error(t("Değişiklikler geri alınamadı; mevcut ayarlar korunuyor."))
             self._update_revert()
             return
-        finally:
-            if temporary:
-                Path(temporary).unlink(missing_ok=True)
+        self.providers.drop_pending()
         self._set_dirty(False)
         self.refresh()
         self.telegram.refresh()
@@ -1243,24 +1247,7 @@ class SettingsPanel(QWidget):
         self.github_status.setText(t("Eşitleme başarısız: {message}").format(message=message))
 
     def _github_done(self, report: SyncReport) -> None:
-        self.github_list.clear()
-        for label, names in ((t("klonlandı"), report.cloned), (t("güncellendi"), report.fetched)):
-            for name in names:
-                self.github_list.addItem(f"{label}: {name}")
-        for label, pairs in ((t("atlandı"), report.skipped), (t("başarısız"), report.failed)):
-            for name, reason in pairs:
-                self.github_list.addItem(f"{label}: {name} — {reason}")
-        summary = t(
-            "{cloned} klonlandı, {fetched} güncellendi, {skipped} atlandı, {failed} başarısız."
-        )
-        self.github_status.setText(
-            summary.format(
-                cloned=len(report.cloned), fetched=len(report.fetched),
-                skipped=len(report.skipped), failed=len(report.failed),
-            )
-        )
-        # Yeniden başlatma yok: kod ajanı projeleri her çağrıda klasörden okur.
-        self.github_synced.emit(report, self._github_auto)
+        apply_github_report(self, report)
 
     def finish_inventory(self) -> None:
         if _shutdown_thread(

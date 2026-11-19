@@ -9,6 +9,7 @@ from urllib.parse import parse_qs, urlsplit
 import httpx
 from pydantic import BaseModel, Field
 
+from artemis.i18n import t
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.plugins.desktop import EmptyArguments
 from artemis.tools.registry import register_tool
@@ -106,7 +107,7 @@ class WebSearch(BaseTool):
             return ToolResult(
                 success=True,
                 status="ok",
-                message=f"{len(results)} arama sonucu alındı.",
+                message=t("{count} arama sonucu alındı.").format(count=len(results)),
                 data={"results": results},
                 external=True,
                 content_kind="web",
@@ -114,16 +115,21 @@ class WebSearch(BaseTool):
         except (httpx.HTTPError, ValueError, OSError) as error:
             # HTTP exception metni URL/query içerip ortam sırlarını yansıtabilir.
             if isinstance(error, httpx.TimeoutException):
-                reason = "istek zaman aşımına uğradı."
+                reason = t("istek zaman aşımına uğradı.")
             elif isinstance(error, httpx.ConnectError):
-                reason = "bağlantı kurulamadı."
+                reason = t("bağlantı kurulamadı.")
             elif isinstance(error, httpx.HTTPStatusError):
-                reason = f"servis HTTP {error.response.status_code} yanıtı verdi."
+                reason = t("servis HTTP {status_code} yanıtı verdi.").format(
+                    status_code=error.response.status_code
+                )
             elif isinstance(error, ValueError):
-                reason = "arama sonuçları okunamadı."
+                reason = t("arama sonuçları okunamadı.")
             else:
-                reason = "ağ işlemi başarısız oldu."
-            return ToolResult(status="error", message=f"Web araması başarısız: {reason}")
+                reason = t("ağ işlemi başarısız oldu.")
+            return ToolResult(
+                status="error",
+                message=t("Web araması başarısız: {reason}").format(reason=reason),
+            )
 
 
 @register_tool
@@ -139,7 +145,7 @@ class SystemInfo(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message="Sistem bilgisi alındı.",
+            message=t("Sistem bilgisi alındı."),
             data={
                 "system": platform.system(),
                 "release": platform.release(),
@@ -163,7 +169,7 @@ class CurrentTime(BaseTool):
         return ToolResult(
             success=True,
             status="ok",
-            message="Tarih ve saat okundu.",
+            message=t("Tarih ve saat okundu."),
             data={
                 "iso": now.isoformat(),
                 "date": now.date().isoformat(),
