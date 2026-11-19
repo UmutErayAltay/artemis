@@ -55,7 +55,7 @@ Bilinen sınırlar: eski öz notların gizlilik kökeni bilinmez (gizli sayılma
 | Bulgu (sınıf) | Kodlandı | Otomatik test | Gerçek cihaz |
 |---|---|---|---|
 | Çökme sonrası kod ajanı depo kilidi hiç kalkmıyordu (doğrulanmış hata) | `13b994d` | geçti | geçti 2026-11-04, betik¹: servis süreci zorla öldürüldü → ajan süreci de kapandı (Job Object); yeniden açılışta `interrupted` + kilitli, yeni iş reddedildi; `release` sonrası yeni iş `done`. Panel düğmesi elle denenmedi |
-| Bozuk `code_agent.sqlite3` tüm asistanı açtırmıyordu (doğrulanmış hata) | `13b994d` | geçti | bekliyor |
+| Bozuk `code_agent.sqlite3` tüm asistanı açtırmıyordu (doğrulanmış hata) | `13b994d` | geçti | betik geçti 2026-11-19 (`scripts/kabul_guvenilirlik.py`, arayüzsüz) |
 | İş başlarken audit hatası işi sonsuza dek `queued` bırakıyordu (doğrulanmış hata) | `13b994d` | geçti | — |
 | Sonuç audit'i yazılamazsa gerçekleşmiş işlem "tamamlanamadı" görünüyordu (doğrulanmış hata) | `9975083` | geçti | — |
 | İptalde thread'deki PowerShell/OS işi sürerken yeni tur başlıyordu (doğrulanmış hata) | `9975083` | geçti | geçti 2026-11-04. Umut (turn `367cfe`): İptal düğmesi model çağrısını 0,56 sn'de kesti. Betik¹ (gerçek model + gerçek PowerShell `window_list`, iptal `tool_dispatch` anında): tur `3b5915cb` `cancelled` + "temizleme süresi içinde sonlanmadı" (+0,52 sn); hemen gelen tur `671c629b` `cleanup_pending` ile modelsiz reddedildi; PowerShell +0,55 sn'de bitti (`tool_interrupted`, `completion: unknown`); sonraki tur `a8d72836` normal `completed`. Panel "temizleniyor" görünümü elle bakılmadı. (İlk üç Esc denemesi geçersizdi.) |
@@ -67,7 +67,7 @@ Bilinen sınırlar: eski öz notların gizlilik kökeni bilinmez (gizli sayılma
 | Kod ajanı "Doğrulandı" = çıkış kodu/öz beyan (doğrulanmış hata) | `01df2f5`, `7732ba5` | geçti | geçti 2026-11-04, betik¹ (generic ajan, gerçek git): kontrol geçti → `accepted`, çıkış 3 → `failed`, kontrolsüz → `unverified`. Claude/Codex ile ve panelde bekliyor |
 | Audit dosyası sınırsız büyüyordu (bakım) | `31f3887` | geçti | geçti 2026-11-04: gerçek 21,25 MB `audit.jsonl` ilk yazımda `audit-20261103T213402271373-5224.jsonl` oldu, boyutu aynı, silinmedi |
 | Geçmiş silme WAL/boş sayfada metin bırakıyordu; kapsam belirsizdi (doğrulanmış hata) | `df090a0` | geçti | geçti 2026-11-04, gerçek `memory.sqlite3`'ün **kopyasında**¹: 23 tur silindi, 3 not kaldı, 130 karakterlik silinen cümle dosya baytlarında yok. Panel düğmesi elle denenmedi |
-| Kapanış temizliği süresiz bekleyebiliyordu (doğrulanmış hata) | `c274f5a` | geçti | bekliyor |
+| Kapanış temizliği süresiz bekleyebiliyordu (doğrulanmış hata) | `c274f5a` | geçti | betik geçti 2026-11-19 (`scripts/kabul_guvenilirlik.py`, arayüzsüz) |
 | Kod ajanı işi bitince hiç bildirim yoktu; görünür kip pencere kapanana dek "çalışıyor" (doğrulanmış hata, 2026-11-05 canlıda) | bu tur | geçti | bekliyor |
 | Geçmiş silme sohbet ekranını temizlemiyordu; kullanıcı iki kez sildi (doğrulanmış hata, 2026-11-05 canlıda) | bu tur | geçti | silme geçti 2026-11-05 (Umut: 9 tur silindi, 3 not kaldı, metin dosya baytlarında yok); ekran temizliği bekliyor |
 | Kilitli depoda önce onay sorulup sonra reddediliyordu (2026-11-05 canlıda) | bu tur | geçti | kilit + Kilidi bırak geçti 2026-11-05 (Umut, gerçek çökme: iş `8ed35ad` interrupted, başlatma 3 kez reddedildi, bırakınca iş `5bed53b` başladı); düğme pasifliği bekliyor |
