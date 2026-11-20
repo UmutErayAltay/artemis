@@ -79,6 +79,7 @@ def test_parse_args_explicit(tmp_path: Path) -> None:
 
 def test_capture_screenshots_2x_en_extra(tmp_path: Path) -> None:
     """Alt süreçte --scale 2 --lang en --extra tüm 15 PNG'yi ve 2560x1560 welcome.png'yi üretir."""
+    pytest.importorskip("PySide6")  # betik alt süreçte Qt ister; Qt'siz CI işinde atlanır
     result = subprocess.run(
         [
             sys.executable,
