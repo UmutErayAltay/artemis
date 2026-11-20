@@ -126,10 +126,21 @@ def main(argv: list[str] | None = None) -> int:
 
     from artemis.channels.desktop.app import _STYLE
     from artemis.i18n import set_language
+    from scripts.kabul_masaustu_checks.daily_summary_offline import (
+        run_daily_summary_offline_checks,
+    )
+    from scripts.kabul_masaustu_checks.dictation_panel import run_dictation_panel_checks
     from scripts.kabul_masaustu_checks.panels import run_panel_checks
     from scripts.kabul_masaustu_checks.processes import (
         run_process_checks,
         terminate_tracked_processes,
+    )
+    from scripts.kabul_masaustu_checks.reminders_live import run_reminders_live_checks
+    from scripts.kabul_masaustu_checks.routines_triggers_live import (
+        run_routines_triggers_live_checks,
+    )
+    from scripts.kabul_masaustu_checks.search_research_memory import (
+        run_search_research_memory_checks,
     )
     from scripts.kabul_masaustu_checks.triggers_files import run_triggers_and_files_checks
 
@@ -191,6 +202,28 @@ def main(argv: list[str] | None = None) -> int:
         assert_no_leaked_windows(
             app, "tetikleyici/dosya grubu sonrası", max_visible=2, max_desktop=0
         )
+        results.extend(run_dictation_panel_checks(app, tmp_root, out_dir, deadline=deadline))
+        assert_no_leaked_windows(
+            app, "dikte paneli grubu sonrası", max_visible=2, max_desktop=0
+        )
+        results.extend(
+            run_routines_triggers_live_checks(app, tmp_root, out_dir, deadline=deadline)
+        )
+        assert_no_leaked_windows(
+            app, "canlı rutin/tetikleyici grubu sonrası", max_visible=2, max_desktop=0
+        )
+        results.extend(
+            run_search_research_memory_checks(app, tmp_root, out_dir, deadline=deadline)
+        )
+        assert_no_leaked_windows(
+            app, "arama/araştırma/hafıza grubu sonrası", max_visible=2, max_desktop=0
+        )
+        results.extend(run_reminders_live_checks(app, tmp_root, out_dir, deadline=deadline))
+        assert_no_leaked_windows(app, "hatırlatma grubu sonrası", max_visible=2, max_desktop=0)
+        results.extend(
+            run_daily_summary_offline_checks(app, tmp_root, out_dir, deadline=deadline)
+        )
+        assert_no_leaked_windows(app, "gün özeti grubu sonrası", max_visible=2, max_desktop=0)
         results.extend(
             run_process_checks(
                 tmp_root,

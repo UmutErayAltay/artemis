@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import contextlib
+import json
 import os
 import re
 import shutil
 import sys
 import tempfile
+import threading
 import time
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -37,6 +40,7 @@ DEMO_REPOS_DIR = r"C:\Users\demo\Desktop\Projeler"
 DEMO_SKILLS_DIR = r"C:\Users\demo\AppData\Roaming\Artemis\beceriler"
 DEMO_DOWNLOADS_DIR = r"C:\Users\demo\Downloads"
 DEMO_DOCS_DIR = r"C:\Users\demo\Documents\Belgeler"
+DEMO_VAULT_DIR = r"C:\Users\demo\Documents\Vault"
 DEMO_PROJECT_DIR = r"C:\Users\demo\Desktop\Projeler\ornek"
 DEMO_TEMP_DIR = r"C:\Users\demo\Temp"
 
@@ -196,8 +200,150 @@ def make_temp_config(
     return cfg_path, workspace_dir, state_dir
 
 
+@dataclass(frozen=True)
+class ToastCapture:
+    """Kabul denetimleri sırasında yakalanan Windows toast bildirimi yükü."""
+
+    title: str
+    body: str
+
+
+@dataclass
+class HotkeyRecorder:
+    """Sahte küresel kısayol kaydı: RegisterHotKey çağrısı olmadan başlatılan/durdurulan tuşlar."""
+
+    started: list[str]
+    stopped: list[str]
+
+
+_TOAST_LOCK = threading.Lock()
+_TOAST_SINK: list[ToastCapture] | None = None
+_TOAST_STATUS: Literal["ok", "disabled", "error"] = "disabled"
+_REAL_SHOW_TOAST: Callable[..., ToastOutcome] | None = None
+_DELIVERER_PATCHED = False
+
+
+def _intercept_toast(title: str, body: str, *_args: Any, **_kwargs: Any) -> ToastOutcome:
+    with _TOAST_LOCK:
+        sink = _TOAST_SINK
+        status = _TOAST_STATUS
+        if sink is not None:
+            sink.append(ToastCapture(title=title, body=body))
+            return ToastOutcome(status=status, message="kabul-intercepted")
+    return ToastOutcome(status="skipped", message="kabul-test")  # type: ignore[arg-type]
+
+
+@contextlib.contextmanager
+def intercept_toasts(
+    status: Literal["ok", "disabled", "error"] = "ok",
+) -> Iterator[list[ToastCapture]]:
+    """Gerçek Action Center yerine toast yüklerini yakalar ve test sonunda geri yükler."""
+    global _TOAST_SINK, _TOAST_STATUS
+    captured: list[ToastCapture] = []
+    with _TOAST_LOCK:
+        prev_sink = _TOAST_SINK
+        prev_status = _TOAST_STATUS
+        _TOAST_SINK = captured
+        _TOAST_STATUS = status
+    try:
+        yield captured
+    finally:
+        with _TOAST_LOCK:
+            _TOAST_SINK = prev_sink
+            _TOAST_STATUS = prev_status
+
+
+class MutableClock:
+    """Proaktif zamanlayıcı testleri için iş parçacığı güvenli, ilerletilebilir UTC saat."""
+
+    def __init__(self, initial: datetime) -> None:
+        if initial.tzinfo is None or initial.tzinfo.utcoffset(initial) is None:
+            raise ValueError("Başlangıç saati timezone-aware olmalıdır.")
+        self._lock = threading.Lock()
+        self._now = initial.astimezone(UTC)
+
+    def __call__(self) -> datetime:
+        with self._lock:
+            return self._now
+
+    def set(self, moment: datetime) -> None:
+        if moment.tzinfo is None or moment.tzinfo.utcoffset(moment) is None:
+            raise ValueError("Saat timezone-aware olmalıdır.")
+        with self._lock:
+            self._now = moment.astimezone(UTC)
+
+    def advance(self, **delta: float) -> datetime:
+        with self._lock:
+            self._now = self._now + timedelta(**delta)
+            return self._now
+
+
+@contextlib.contextmanager
+def injected_proactive_clock(clock: Callable[[], datetime]) -> Iterator[None]:
+    """Masaüstü köprüsündeki `ProactiveScheduler` örneğine enjekte saat verir."""
+    import artemis.channels.desktop.bridge as bridge_mod
+    from artemis.proactive.scheduler import ProactiveScheduler as RealScheduler
+
+    original = bridge_mod.ProactiveScheduler
+    injected = clock
+
+    def _factory(
+        runtime: Any,
+        store: Any,
+        deliverer: Any,
+        *,
+        clock: Callable[[], datetime] | None = None,
+        owner: str | None = None,
+    ) -> RealScheduler:
+        return RealScheduler(
+            runtime,
+            store,
+            deliverer,
+            clock=injected if clock is None else clock,
+            owner=owner,
+        )
+
+    bridge_mod.ProactiveScheduler = _factory  # type: ignore[assignment,misc]
+    try:
+        yield
+    finally:
+        bridge_mod.ProactiveScheduler = original
+
+
+@contextlib.contextmanager
+def fake_global_hotkeys() -> Iterator[HotkeyRecorder]:
+    """Win32 RegisterHotKey çağırmadan `GlobalHotkey` doğrulamasını ve kaydını dener."""
+    import artemis.channels.desktop.app as app_mod
+    from artemis.channels.desktop.hotkey import GlobalHotkey as RealGlobalHotkey
+
+    recorder = HotkeyRecorder(started=[], stopped=[])
+    original = app_mod.GlobalHotkey
+
+    class _FakeGlobalHotkey(RealGlobalHotkey):
+        def __init__(self, text: str, on_press: Callable[[], None]) -> None:
+            super().__init__(text, on_press)
+            self._text = text
+
+        def start(self) -> bool:
+            recorder.started.append(self._text)
+            self._registered = True
+            return True
+
+        def stop(self) -> None:
+            if self._registered:
+                self._registered = False
+                recorder.stopped.append(self._text)
+
+    app_mod.GlobalHotkey = _FakeGlobalHotkey  # type: ignore[misc]
+    try:
+        yield recorder
+    finally:
+        app_mod.GlobalHotkey = original
+
+
 def install_safety_guards(qsettings_dir: Path) -> None:
     """Gerçek kasa, kayıt defteri, QSettings ve Windows toast erişimini geçersiz kılar."""
+    global _DELIVERER_PATCHED, _REAL_SHOW_TOAST
     from PySide6.QtCore import QSettings
 
     import artemis.brain.providers as providers
@@ -205,8 +351,11 @@ def install_safety_guards(qsettings_dir: Path) -> None:
     import artemis.channels.desktop.app as app_mod
     import artemis.channels.desktop.window_events as window_events_mod
     import artemis.channels.telegram.api as telegram_api
+    import artemis.proactive.delivery as delivery_mod
     import artemis.tools.credentials as credentials
     import artemis.tools.plugins.code_agent as code_agent_mod
+    import artemis.tools.research_jobs as research_jobs_mod
+    import artemis.tools.toast as toast_mod
 
     qsettings_dir.mkdir(parents=True, exist_ok=True)
     QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, str(qsettings_dir))
@@ -225,15 +374,32 @@ def install_safety_guards(qsettings_dir: Path) -> None:
     autostart_mod.WindowsRunKeyStore.write = _forbid_registry  # type: ignore[method-assign]
     autostart_mod.WindowsRunKeyStore.delete = _forbid_registry  # type: ignore[method-assign]
 
-    def _noop_toast(_title: str, _body: str) -> ToastOutcome:
-        return ToastOutcome(status="skipped", message="kabul-test")
+    if _REAL_SHOW_TOAST is None and toast_mod.show_toast is not _intercept_toast:
+        _REAL_SHOW_TOAST = toast_mod.show_toast
+    toast_mod.show_toast = _intercept_toast  # type: ignore[assignment]
+    app_mod.show_toast = _intercept_toast  # type: ignore[assignment]
+    window_events_mod.show_toast = _intercept_toast  # type: ignore[attr-defined]
+    delivery_mod.show_toast = _intercept_toast  # type: ignore[assignment]
+    research_jobs_mod.show_toast = _intercept_toast  # type: ignore[assignment]
 
-    app_mod.show_toast = _noop_toast  # type: ignore[assignment]
-    window_events_mod.show_toast = _noop_toast  # type: ignore[attr-defined]
+    if not _DELIVERER_PATCHED:
+        orig_init = delivery_mod.Deliverer.__init__
+
+        def _guarded_init(self: Any, settings: Any, audit: Any, **kwargs: Any) -> None:
+            if "toast" not in kwargs or kwargs["toast"] is _REAL_SHOW_TOAST:
+                kwargs["toast"] = _intercept_toast
+            orig_init(self, settings, audit, **kwargs)
+
+        delivery_mod.Deliverer.__init__ = _guarded_init  # type: ignore[method-assign]
+        _DELIVERER_PATCHED = True
 
 
 @contextlib.contextmanager
-def fake_provider_bridge(provider_factory: Callable[[], RecordingProvider]):
+def fake_provider_bridge(
+    provider_factory: Callable[[], RecordingProvider],
+    *,
+    on_runtime: Callable[[Any], None] | None = None,
+) -> Iterator[None]:
     """Masaüstü köprüsünün gerçek runtime'ı sahte sağlayıcıyla kurmasını sağlar."""
     import artemis.channels.desktop.bridge as bridge_mod
     from artemis.channels.runtime import create_runtime as real_create_runtime
@@ -244,7 +410,10 @@ def fake_provider_bridge(provider_factory: Callable[[], RecordingProvider]):
         config_path: Path, approve: Any, *, on_record: Any = None, **kwargs: Any
     ) -> Any:
         kwargs.setdefault("provider", provider_factory())
-        return real_create_runtime(config_path, approve, on_record=on_record, **kwargs)
+        runtime = real_create_runtime(config_path, approve, on_record=on_record, **kwargs)
+        if on_runtime is not None:
+            on_runtime(runtime)
+        return runtime
 
     bridge_mod.create_runtime = _patched_create_runtime  # type: ignore[assignment]
     try:
@@ -791,3 +960,54 @@ def remove_tree(root: Path) -> None:
             last_error = error
             time.sleep(0.1 * (attempt + 1))
     raise OSError(f"Geçici klasör silinemedi ({root}): {last_error}")
+
+
+def drive_modal(
+    app: QApplication,
+    trigger_click: Callable[[], None],
+    handler: Callable[[Any], None],
+    *,
+    delay_ms: int = 80,
+) -> None:
+    """Modal QDialog veya QMessageBox exec() akışını QTimer ile yönetir; kilitlenmeyi önler."""
+    from PySide6.QtCore import QTimer
+    from PySide6.QtWidgets import QDialog, QMessageBox
+
+    modal_errors: list[BaseException] = []
+
+    def _on_modal() -> None:
+        modal = app.activeModalWidget()
+        try:
+            if not isinstance(modal, (QDialog, QMessageBox)):
+                raise AssertionError(f"Beklenen modal pencere açılmadı: {modal!r}")
+            handler(modal)
+        except (AssertionError, OSError, RuntimeError, TimeoutError, ValueError) as error:
+            modal_errors.append(error)
+        finally:
+            app.processEvents()
+            if isinstance(modal, (QDialog, QMessageBox)) and modal.isVisible():
+                modal.reject()
+
+    QTimer.singleShot(delay_ms, _on_modal)
+    trigger_click()
+    app.processEvents()
+    if modal_errors:
+        raise modal_errors[0]
+
+
+def read_audit_events(audit_path: Path, event_name: str | None = None) -> list[dict[str, Any]]:
+    """UTF-8 JSONL denetim günlüğünden olayları okur; istenirse olay adına göre süzer."""
+    if not audit_path.is_file():
+        return []
+    events: list[dict[str, Any]] = []
+    for raw in audit_path.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(row, dict) and (event_name is None or row.get("event") == event_name):
+            events.append(row)
+    return events
