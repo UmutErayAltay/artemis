@@ -1,41 +1,103 @@
 """README ekran görüntülerini gerçek demo penceresinden yeniden üretir.
 
-Kullanım: python scripts/capture_screenshots.py
+Kullanım:
+    python scripts/capture_screenshots.py [--scale 2] [--lang en] [--out DİZİN] [--extra]
 
 Qt offscreen çalışır; sahte sağlayıcı, geçici bellek, ağ/mikrofon/kayıt defteri yok.
-Pet ayarları (QSettings) geçici dizine yönlendirilir; çıktı docs/assets/desktop/ altına yazılır.
+Pet ayarları (QSettings) geçici dizine yönlendirilir; varsayılan çıktı docs/assets/desktop/
+altına yazılır.
 """
 
 from __future__ import annotations
 
+import argparse
 import os
+import shutil
 import sys
 import tempfile
 import time
 import uuid
 from collections.abc import Callable
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-# Qt içe aktarılmadan önce: ekran/pencere sistemi gerekmez.
-os.environ["QT_QPA_PLATFORM"] = "offscreen"
-# Offscreen eklentisi sistem yazı tiplerini kendiliğinden görmez (Türkçe harfler kutu çıkar).
-if sys.platform == "win32":
-    os.environ.setdefault("QT_QPA_FONTDIR", os.environ.get("SYSTEMROOT", r"C:\Windows") + r"\Fonts")
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QApplication
 
-from PySide6.QtCore import QPoint, QRect, QSettings, Qt  # noqa: E402
-from PySide6.QtGui import QColor, QFont, QGuiApplication, QPainter, QPixmap  # noqa: E402
-from PySide6.QtWidgets import QApplication, QScrollArea, QTabWidget  # noqa: E402
+    from artemis.channels.desktop.app import DesktopWindow
+    from artemis.channels.desktop.pet import PetWidget
 
-from artemis.channels.desktop.app import _STYLE, ApprovalDialog, build_window  # noqa: E402
-from artemis.channels.desktop.pet import BODY, PetWidget  # noqa: E402
-from artemis.channels.desktop.projects_panel import ProjectsPanel  # noqa: E402
-from artemis.i18n import t  # noqa: E402
-from artemis.tools.base import ToolResult  # noqa: E402
+REPO = Path(__file__).resolve().parents[1]
+OUT = REPO / "docs" / "assets" / "desktop"
 
-OUT = Path(__file__).resolve().parents[1] / "docs" / "assets" / "desktop"
+_EXTRA_SECTIONS: tuple[tuple[str, str], ...] = (
+    ("Model", "settings-model.png"),
+    ("Rutinler", "settings-routines.png"),
+    ("Takvim ve posta", "settings-calendar.png"),
+    ("Görünüm", "settings-look.png"),
+    ("Hakkında", "settings-about.png"),
+)
+
+
+def _positive_scale(raw: str) -> float:
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(f"Geçersiz ölçek değeri: {raw!r}") from error
+    if value <= 0:
+        raise argparse.ArgumentTypeError(f"Ölçek sıfırdan büyük olmalı: {raw!r}")
+    return value
+
+
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
+    """Komut satırı seçeneklerini ayrıştırır."""
+    parser = argparse.ArgumentParser(
+        description="Artemis masaüstü ekran görüntülerini yakalar.",
+    )
+    parser.add_argument(
+        "--scale",
+        type=_positive_scale,
+        default=1,
+        help="Qt ölçek katsayısı (QT_SCALE_FACTOR, varsayılan: 1).",
+    )
+    parser.add_argument(
+        "--lang",
+        choices=("tr", "en"),
+        default="tr",
+        help="Arayüz dili (varsayılan: tr).",
+    )
+    parser.add_argument(
+        "--out",
+        type=Path,
+        default=OUT,
+        help="PNG çıktılarının yazılacağı dizin (varsayılan: docs/assets/desktop).",
+    )
+    parser.add_argument(
+        "--extra",
+        action="store_true",
+        help="Ek ayar sayfalarını ve ConnectWizard sihirbazını da yakalar.",
+    )
+    return parser.parse_args(argv)
+
+
+def _format_scale(scale: float) -> str:
+    return str(int(scale)) if scale == int(scale) else str(scale)
+
+
+def _configure_qt_env(scale: float) -> None:
+    """PySide6 içe aktarılmadan önce offscreen, yazı tipi ve HiDPI ayarlarını uygular."""
+    os.environ["QT_QPA_PLATFORM"] = "offscreen"
+    # Offscreen eklentisi sistem yazı tiplerini kendiliğinden görmez (Türkçe harfler kutu çıkar).
+    if sys.platform == "win32":
+        os.environ.setdefault(
+            "QT_QPA_FONTDIR",
+            os.environ.get("SYSTEMROOT", r"C:\Windows") + r"\Fonts",
+        )
+    os.environ["QT_SCALE_FACTOR"] = _format_scale(scale)
 
 
 def wait(app: QApplication, condition: Callable[[], bool], timeout: float = 5.0) -> None:
+    """Koşul sağlanana dek Qt olay döngüsünü ilerletir."""
     end = time.monotonic() + timeout
     while time.monotonic() < end:
         app.processEvents()
@@ -45,15 +107,29 @@ def wait(app: QApplication, condition: Callable[[], bool], timeout: float = 5.0)
     raise TimeoutError("GUI durumu zamanında oluşmadı")
 
 
-def save(widget_or_pixmap: object, name: str) -> None:
-    pixmap = widget_or_pixmap if isinstance(widget_or_pixmap, QPixmap) else widget_or_pixmap.grab()  # type: ignore[attr-defined]
-    if not pixmap.save(str(OUT / name), "PNG"):
+def save(widget_or_pixmap: object, name: str, out_dir: Path | None = None) -> None:
+    """Bileşeni veya QPixmap nesnesini hedef dizine PNG olarak kaydeder."""
+    from PySide6.QtGui import QPixmap
+
+    target_dir = out_dir if out_dir is not None else OUT
+    pixmap = (
+        widget_or_pixmap
+        if isinstance(widget_or_pixmap, QPixmap)
+        else widget_or_pixmap.grab()  # type: ignore[attr-defined]
+    )
+    if not pixmap.save(str(target_dir / name), "PNG"):
         raise OSError(f"{name} yazılamadı")
     print(f"{name}: {pixmap.width()}x{pixmap.height()}")
 
 
 def make_pet(app: QApplication, ini: Path, **state: object) -> PetWidget:
     """Tek durumlu pet; animasyon, sabit adımlarla yakınsayana dek ilerletilir."""
+    del app
+    from PySide6.QtCore import QPoint, QSettings
+    from PySide6.QtGui import QGuiApplication
+
+    from artemis.channels.desktop.pet import BODY, PetWidget
+
     pet = PetWidget(
         on_toggle_voice=lambda: None,
         on_show_panel=lambda: None,
@@ -78,13 +154,31 @@ def make_pet(app: QApplication, ini: Path, **state: object) -> PetWidget:
     return pet
 
 
-def capture_pet(app: QApplication, tmp: Path) -> None:
-    cells = [
-        ("Hazır", {"voice": "idle"}),
-        ("Dinliyor", {"voice": "listening"}),
-        ("Düşünüyor", {"busy": True}),
-        ("Onay bekliyor", {"approval": True}),
-        ("Yanıt balonu", {"voice": "idle", "say": "Masaüstünde notlar.txt oluşturdum."}),
+def capture_pet(
+    app: QApplication,
+    tmp: Path,
+    *,
+    lang: str = "tr",
+    out_dir: Path | None = None,
+) -> None:
+    """Pet durum şeridini (Hazır, Dinliyor, Düşünüyor, Onay, Yanıt balonu) yakalar."""
+    from PySide6.QtCore import QRect, Qt
+    from PySide6.QtGui import QColor, QFont, QPainter, QPixmap
+
+    from artemis.i18n import t
+
+    reply_label = "Reply bubble" if lang == "en" else "Yanıt balonu"
+    say_text = (
+        "Created notes.txt on the desktop."
+        if lang == "en"
+        else "Masaüstünde notlar.txt oluşturdum."
+    )
+    cells: list[tuple[str, dict[str, object]]] = [
+        (t("Hazır"), {"voice": "idle"}),
+        (t("Dinliyor"), {"voice": "listening"}),
+        (t("Düşünüyor"), {"busy": True}),
+        (t("Onay bekliyor"), {"approval": True}),
+        (reply_label, {"voice": "idle", "say": say_text}),
     ]
     canvas = QPixmap(960, 198)
     canvas.fill(QColor("#0B1220"))
@@ -100,48 +194,93 @@ def capture_pet(app: QApplication, tmp: Path) -> None:
         x += 144
         pet.close()
     painter.end()
-    save(canvas, "pet.png")
+    save(canvas, "pet.png", out_dir=out_dir)
 
 
-def capture_projects(app: QApplication) -> None:
+def capture_projects(
+    app: QApplication,
+    *,
+    lang: str = "tr",
+    out_dir: Path | None = None,
+) -> None:
+    """Projeler sekmesini sahte taslak ve proje durumuyla yakalar."""
+    from PySide6.QtWidgets import QTabWidget
+
+    from artemis.channels.desktop.app import _STYLE
+    from artemis.channels.desktop.projects_panel import ProjectsPanel
+    from artemis.i18n import t
+    from artemis.tools.base import ToolResult
+
     panel = ProjectsPanel(demo=True)
-    spec = {
-        "spec_id": str(uuid.UUID(int=1)),
-        "project": "ornek-notlar",
-        "task": "README için kısa bir kullanım bölümü ekle",
-        "scope": ["Kurulum adımlarını açıkla", "Mevcut başlık düzenini koru"],
-        "acceptance": ["Türkçe anlatım", "Markdown bağlantıları geçerli"],
-    }
+    if lang == "en":
+        project_name = "sample-notes"
+        spec = {
+            "spec_id": str(uuid.UUID(int=1)),
+            "project": project_name,
+            "task": "Add a short usage section to the README",
+            "scope": ["Explain installation steps", "Keep existing heading structure"],
+            "acceptance": ["Clear English wording", "Valid Markdown links"],
+        }
+        status_message = "Mock sample status; no real job was queried."
+    else:
+        project_name = "ornek-notlar"
+        spec = {
+            "spec_id": str(uuid.UUID(int=1)),
+            "project": project_name,
+            "task": "README için kısa bir kullanım bölümü ekle",
+            "scope": ["Kurulum adımlarını açıkla", "Mevcut başlık düzenini koru"],
+            "acceptance": ["Türkçe anlatım", "Markdown bağlantıları geçerli"],
+        }
+        status_message = "Sahte örnek durum; gerçek iş sorgulanmadı."
     panel.set_busy(False)
     panel.accept_result(
         "code_agent_status",
         ToolResult(
             success=True,
             status="ok",
-            message="Sahte örnek durum; gerçek iş sorgulanmadı.",
-            data={"projects": ["ornek-notlar"], "drafts": [spec], "jobs": []},
+            message=status_message,
+            data={"projects": [project_name], "drafts": [spec], "jobs": []},
         ),
     )
     panel.set_busy(False)
     tabs = QTabWidget()
-    tabs.addTab(panel, "Projeler")
+    tabs.addTab(panel, t("Projeler"))
     tabs.setStyleSheet(_STYLE)
     tabs.resize(1080, 920)
     tabs.show()
     app.processEvents()
-    save(tabs, "projects.png")
+    save(tabs, "projects.png", out_dir=out_dir)
     tabs.close()
 
 
-def capture_settings(app: QApplication, window: object) -> None:
-    """Ayarlar'ın Ses (karma tanıma) ve Telegram sayfaları ile Oto onay risk uyarısı."""
-    panel = window.settings_panel  # type: ignore[attr-defined]
-    window.tabs.setCurrentWidget(window.settings_scroll)  # type: ignore[attr-defined]
+def _select_settings_section(panel: object, title: str) -> int:
+    from artemis.i18n import t
+
+    sections = panel.sections  # type: ignore[attr-defined]
+    rows = [i for i in range(sections.count()) if sections.item(i).text() == t(title)]
+    if not rows:
+        raise RuntimeError(f"Ayar bölümü bulunamadı: {title}")
+    sections.setCurrentRow(rows[0])
+    return rows[0]
+
+
+def capture_settings(
+    app: QApplication,
+    window: DesktopWindow,
+    *,
+    extra: bool = False,
+    tmp: Path | None = None,
+    out_dir: Path | None = None,
+) -> None:
+    """Ayarlar sayfalarını, Oto onay risk uyarısını ve istenirse ConnectWizard'ı yakalar."""
+    from PySide6.QtWidgets import QScrollArea
+
+    from artemis.channels.desktop.connect_wizard import ConnectWizard
+
+    panel = window.settings_panel
+    window.tabs.setCurrentWidget(window.settings_scroll)
     for title, name in (("Ses", "settings-ses.png"), ("Telegram", "settings-telegram.png")):
-        row = next(
-            i for i in range(panel.sections.count()) if panel.sections.item(i).text() == t(title)
-        )
-        panel.sections.setCurrentRow(row)
+        _select_settings_section(panel, title)
         if title == "Ses":
             # Karma tanıma alanları kutu işaretlenince açılır; sayfa o bölüme kaydırılır.
             panel.hybrid_stt.setChecked(True)
@@ -152,13 +291,31 @@ def capture_settings(app: QApplication, window: object) -> None:
             if area is not None:
                 area.ensureWidgetVisible(panel.cloud_box, 0, 120)
         app.processEvents()
-        save(window, name)
-    window.tabs.setCurrentIndex(0)  # type: ignore[attr-defined]
-    box, _yes = window._auto_mode_box()  # type: ignore[attr-defined]
+        save(window, name, out_dir=out_dir)
+
+    if extra:
+        for title, name in _EXTRA_SECTIONS:
+            _select_settings_section(panel, title)
+            app.processEvents()
+            save(window, name, out_dir=out_dir)
+
+    window.tabs.setCurrentIndex(0)
+    box, _yes = window._auto_mode_box()
     box.show()
     app.processEvents()
-    save(box, "auto-warning.png")
+    save(box, "auto-warning.png", out_dir=out_dir)
     box.close()
+
+    if extra:
+        with tempfile.TemporaryDirectory(prefix="artemis-wiz-", dir=tmp) as wiz_dir:
+            cfg = Path(wiz_dir) / "config.yaml"
+            shutil.copy(REPO / "config" / "config.example.yaml", cfg)
+            wiz = ConnectWizard(cfg, local_probe=lambda: [], open_url=lambda _u: None)
+            wiz.resize(760, 640)
+            wiz.show()
+            app.processEvents()
+            save(wiz, "connect-wizard.png", out_dir=out_dir)
+            wiz.close()
 
 
 def hide_real_credentials() -> None:
@@ -170,7 +327,24 @@ def hide_real_credentials() -> None:
     telegram_api.read_secret = lambda *_args, **_kw: None  # type: ignore[assignment]
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    """Ekran görüntülerini belirtilen ölçek, dil ve çıktı dizinine göre üretir."""
+    if str(REPO) not in sys.path:
+        sys.path.insert(0, str(REPO))
+    args = parse_args(argv)
+    _configure_qt_env(args.scale)
+
+    from PySide6.QtCore import QSettings
+    from PySide6.QtGui import QFont
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop.app import _STYLE, ApprovalDialog, build_window
+    from artemis.i18n import set_language, t
+
+    set_language(args.lang)
+    out_dir = args.out.resolve()
+    out_dir.mkdir(parents=True, exist_ok=True)
+
     hide_real_credentials()
     app = QApplication.instance() or QApplication([])
     assert isinstance(app, QApplication)
@@ -180,11 +354,10 @@ def main() -> int:
         tmp = Path(name)
         # Pet konumu/görünürlüğü gerçek kullanıcı ayarlarına bakmasın ya da yazmasın.
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, name)
-        OUT.mkdir(parents=True, exist_ok=True)
 
         # Telegram sayfası config'i okur; örnek config yoksa "Ayarlar okunamadı" görünür.
         demo_config = tmp / "demo.yaml"
-        demo_config.write_bytes((OUT.parents[2] / "config" / "config.example.yaml").read_bytes())
+        demo_config.write_bytes((REPO / "config" / "config.example.yaml").read_bytes())
         window = build_window(demo_config, demo=True, app=app)
         # 1180 px'te başlık çubuğu (Oto onay düğmesi eklendi) "DEMO" rozetini kırpıyor.
         window.resize(1280, 780)
@@ -192,29 +365,30 @@ def main() -> int:
         wait(app, lambda: window.status_label.text() == t("Hazır"))
         window.pet.hide()
         app.processEvents()
-        save(window, "welcome.png")
+        save(window, "welcome.png", out_dir=out_dir)
 
-        assert window._submit_text("örnek akış")
+        demo_prompt = "Sample flow" if args.lang == "en" else "örnek akış"
+        assert window._submit_text(demo_prompt)
         wait(app, lambda: isinstance(window._approval_dialog, ApprovalDialog))
         dialog = window._approval_dialog
         assert dialog is not None
         app.processEvents()
-        save(dialog, "approval.png")
+        save(dialog, "approval.png", out_dir=out_dir)
         dialog.yes_button.click()
         wait(app, lambda: not window._busy)
         window.pet.hide()
         app.processEvents()
-        save(window, "panel.png")
+        save(window, "panel.png", out_dir=out_dir)
 
-        window.overlay.set_busy(False, "Hazır")
+        window.overlay.set_busy(False, t("Hazır"))
         window.overlay.show()
         app.processEvents()
-        save(window.overlay, "overlay.png")
+        save(window.overlay, "overlay.png", out_dir=out_dir)
         window.overlay.hide()
 
-        capture_settings(app, window)
-        capture_pet(app, tmp)
-        capture_projects(app)
+        capture_settings(app, window, extra=args.extra, tmp=tmp, out_dir=out_dir)
+        capture_pet(app, tmp, lang=args.lang, out_dir=out_dir)
+        capture_projects(app, lang=args.lang, out_dir=out_dir)
 
         window._request_exit()
         wait(app, lambda: window.bridge.stopped)
