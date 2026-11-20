@@ -6,7 +6,7 @@
 
 Artemis is a practical native Windows workspace with warm Turkish companion language. Slate and blue establish clear surfaces, compact controls and readable task areas. The selected existing pet sits beside the Artemis brand; the configurable wake name never replaces the app identity.
 
-The system uses PySide6 widgets and semantic Qt styles. Four selectable palettes recolor the same structure. The current default is Açık ağırlıklı (light-mixed).
+The system uses PySide6 widgets and semantic Qt styles. Four selectable palettes recolor the same structure. The current default is Koyu (dark).
 
 **Key Characteristics:**
 - Native Qt controls and Segoe UI
@@ -21,8 +21,8 @@ Source authority: [PRODUCT.md](PRODUCT.md), [surface contract](.impeccable/surfa
 Warm neutrals (cream/bone, warm ink) with a turquoise accent provide calm structure; `accent_soft` is the gentle accent tint for user bubbles and soft selected fills. Primary uses `accent` and `accent_text` for actions and selection. Neutral roles are `bg`, `surface`, `soft`, `text`, `muted`, and `border`. Navigation has its own `nav`, `nav_text`, `nav_muted`, and `nav_selected` roles. `warning`, `error`, and `success` carry status meaning. All four complete source palettes follow; no synthetic tonal ramps are shipped.
 
 - **Açık / light:** pale workspace and a slightly deeper cream navigation (≥1.15:1 against the workspace).
-- **Koyu / dark:** dark workspace and a slightly lighter warm navigation (≥1.15:1 against the workspace).
-- **Açık ağırlıklı / light-mixed:** light workspace and slate navigation; current default.
+- **Koyu / dark:** dark workspace and a slightly lighter warm navigation (≥1.15:1 against the workspace); current default.
+- **Açık ağırlıklı / light-mixed:** light workspace and slate navigation.
 - **Koyu ağırlıklı / dark-mixed:** dark workspace and pale navigation.
 
 **The Semantic Pair Rule.** Switch foregrounds and backgrounds together; navigation uses its own paired roles.
@@ -140,33 +140,33 @@ Warm neutrals (cream/bone, warm ink) with a turquoise accent provide calm struct
   },
   "components": {
     "button-primary": {
-      "backgroundColor": "{colors.light-mixed-accent}",
-      "textColor": "{colors.light-mixed-accent-text}",
+      "backgroundColor": "{colors.dark-accent}",
+      "textColor": "{colors.dark-accent-text}",
       "rounded": "{rounded.control}",
       "padding": "8px 13px"
     },
     "button-secondary": {
-      "backgroundColor": "{colors.light-mixed-soft}",
-      "textColor": "{colors.light-mixed-text}",
+      "backgroundColor": "{colors.dark-soft}",
+      "textColor": "{colors.dark-text}",
       "rounded": "{rounded.control}",
       "padding": "8px 13px"
     },
     "input": {
-      "backgroundColor": "{colors.light-mixed-surface}",
-      "textColor": "{colors.light-mixed-text}",
+      "backgroundColor": "{colors.dark-surface}",
+      "textColor": "{colors.dark-text}",
       "rounded": "{rounded.control}",
       "padding": "8px"
     },
     "navigation": {
-      "backgroundColor": "{colors.light-mixed-nav}",
-      "textColor": "{colors.light-mixed-nav-text}",
+      "backgroundColor": "{colors.dark-nav}",
+      "textColor": "{colors.dark-nav-text}",
       "rounded": "{rounded.control}",
       "padding": "10px 12px",
       "width": "166px"
     },
     "surface": {
-      "backgroundColor": "{colors.light-mixed-surface}",
-      "textColor": "{colors.light-mixed-text}",
+      "backgroundColor": "{colors.dark-surface}",
+      "textColor": "{colors.dark-text}",
       "rounded": "{rounded.surface}"
     }
   }

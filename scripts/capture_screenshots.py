@@ -11,6 +11,7 @@ altına yazılır.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import os
 import shutil
 import sys
@@ -29,6 +30,8 @@ if TYPE_CHECKING:
 
 REPO = Path(__file__).resolve().parents[1]
 OUT = REPO / "docs" / "assets" / "desktop"
+DEMO_CONFIG_DIR = r"C:\Users\demo\AppData\Roaming\Artemis"
+DEMO_REPOS_DIR = r"C:\Users\demo\Desktop\Projeler"
 
 _EXTRA_SECTIONS: tuple[tuple[str, str], ...] = (
     ("Model", "settings-model.png"),
@@ -264,6 +267,20 @@ def _select_settings_section(panel: object, title: str) -> int:
     return rows[0]
 
 
+def neutralize_captured_paths(panel: object) -> None:
+    """Görüntülerde gerçek kullanıcı/geçici yol görünmesin diye kurmaca yol yazar."""
+    from artemis.i18n import t
+
+    about = getattr(panel, "about_section", None)
+    if about is not None and hasattr(about, "config_label"):
+        about.config_label.setText(
+            t("Ayar klasörü: {path}").format(path=DEMO_CONFIG_DIR)
+        )
+    repos_dir = getattr(panel, "repos_dir", None)
+    if repos_dir is not None and hasattr(repos_dir, "setPlaceholderText"):
+        repos_dir.setPlaceholderText(DEMO_REPOS_DIR)
+
+
 def capture_settings(
     app: QApplication,
     window: DesktopWindow,
@@ -278,6 +295,7 @@ def capture_settings(
     from artemis.channels.desktop.connect_wizard import ConnectWizard
 
     panel = window.settings_panel
+    neutralize_captured_paths(panel)
     window.tabs.setCurrentWidget(window.settings_scroll)
     for title, name in (("Ses", "settings-ses.png"), ("Telegram", "settings-telegram.png")):
         _select_settings_section(panel, title)
@@ -308,14 +326,18 @@ def capture_settings(
 
     if extra:
         with tempfile.TemporaryDirectory(prefix="artemis-wiz-", dir=tmp) as wiz_dir:
-            cfg = Path(wiz_dir) / "config.yaml"
+            cfg_dir = Path(wiz_dir) / "cfg"
+            cfg_dir.mkdir(parents=True, exist_ok=True)
+            cfg = cfg_dir / "config.yaml"
             shutil.copy(REPO / "config" / "config.example.yaml", cfg)
             wiz = ConnectWizard(cfg, local_probe=lambda: [], open_url=lambda _u: None)
-            wiz.resize(760, 640)
-            wiz.show()
-            app.processEvents()
-            save(wiz, "connect-wizard.png", out_dir=out_dir)
-            wiz.close()
+            try:
+                wiz.resize(760, 640)
+                wiz.show()
+                app.processEvents()
+                save(wiz, "connect-wizard.png", out_dir=out_dir)
+            finally:
+                wiz.close()
 
 
 def hide_real_credentials() -> None:
@@ -356,43 +378,51 @@ def main(argv: list[str] | None = None) -> int:
         QSettings.setPath(QSettings.Format.IniFormat, QSettings.Scope.UserScope, name)
 
         # Telegram sayfası config'i okur; örnek config yoksa "Ayarlar okunamadı" görünür.
-        demo_config = tmp / "demo.yaml"
+        # Alt klasöre konur ki örnek config'teki ../desktop ve ../.artemis tmp içinde kalsın.
+        cfg_dir = tmp / "cfg"
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        demo_config = cfg_dir / "demo.yaml"
         demo_config.write_bytes((REPO / "config" / "config.example.yaml").read_bytes())
         window = build_window(demo_config, demo=True, app=app)
-        # 1180 px'te başlık çubuğu (Oto onay düğmesi eklendi) "DEMO" rozetini kırpıyor.
-        window.resize(1280, 780)
-        window.show()
-        wait(app, lambda: window.status_label.text() == t("Hazır"))
-        window.pet.hide()
-        app.processEvents()
-        save(window, "welcome.png", out_dir=out_dir)
+        try:
+            # 1180 px'te başlık çubuğu (Oto onay düğmesi eklendi) "DEMO" rozetini kırpıyor.
+            window.resize(1280, 780)
+            window.show()
+            wait(app, lambda: window.status_label.text() == t("Hazır"))
+            window.pet.hide()
+            app.processEvents()
+            save(window, "welcome.png", out_dir=out_dir)
 
-        demo_prompt = "Sample flow" if args.lang == "en" else "örnek akış"
-        assert window._submit_text(demo_prompt)
-        wait(app, lambda: isinstance(window._approval_dialog, ApprovalDialog))
-        dialog = window._approval_dialog
-        assert dialog is not None
-        app.processEvents()
-        save(dialog, "approval.png", out_dir=out_dir)
-        dialog.yes_button.click()
-        wait(app, lambda: not window._busy)
-        window.pet.hide()
-        app.processEvents()
-        save(window, "panel.png", out_dir=out_dir)
+            demo_prompt = "Sample flow" if args.lang == "en" else "örnek akış"
+            assert window._submit_text(demo_prompt)
+            wait(app, lambda: isinstance(window._approval_dialog, ApprovalDialog))
+            dialog = window._approval_dialog
+            assert dialog is not None
+            app.processEvents()
+            save(dialog, "approval.png", out_dir=out_dir)
+            dialog.yes_button.click()
+            wait(app, lambda: not window._busy)
+            window.pet.hide()
+            app.processEvents()
+            save(window, "panel.png", out_dir=out_dir)
 
-        window.overlay.set_busy(False, t("Hazır"))
-        window.overlay.show()
-        app.processEvents()
-        save(window.overlay, "overlay.png", out_dir=out_dir)
-        window.overlay.hide()
+            window.overlay.set_busy(False, t("Hazır"))
+            window.overlay.show()
+            app.processEvents()
+            save(window.overlay, "overlay.png", out_dir=out_dir)
+            window.overlay.hide()
 
-        capture_settings(app, window, extra=args.extra, tmp=tmp, out_dir=out_dir)
-        capture_pet(app, tmp, lang=args.lang, out_dir=out_dir)
-        capture_projects(app, lang=args.lang, out_dir=out_dir)
-
-        window._request_exit()
-        wait(app, lambda: window.bridge.stopped)
-        wait(app, lambda: window._temporary is None)
+            capture_settings(app, window, extra=args.extra, tmp=tmp, out_dir=out_dir)
+            capture_pet(app, tmp, lang=args.lang, out_dir=out_dir)
+            capture_projects(app, lang=args.lang, out_dir=out_dir)
+        finally:
+            window._request_exit()
+            with contextlib.suppress(TimeoutError):
+                wait(app, lambda: window.bridge.stopped)
+                wait(app, lambda: window._temporary is None)
+            if window._temporary is not None:
+                window._temporary.cleanup()
+                window._temporary = None
     return 0
 
 

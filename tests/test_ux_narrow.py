@@ -61,12 +61,12 @@ def narrow_problems(window: object, app: object) -> list[str]:
         problems.extend(_section_problems(panel, scroll, app, name))
     # Güncelleme bölümünde tüm düğmeler (denetle/aç/indir/iptal) açıkken de sarma taşmamalı.
     about_idx = next((i for i, n in enumerate(names) if n in ("Hakkında", "About")), None)
-    if about_idx is not None:
-        panel.show_section(about_idx)
-        upd = panel.update_section
-        for btn in (upd.open_button, upd.install_button, upd.cancel_button):
-            btn.setVisible(True)
-        problems.extend(_section_problems(panel, scroll, app, f"{names[about_idx]} (tüm düğmeler)"))
+    assert about_idx is not None, f"Hakkında/About bölümü bulunamadı: {names}"
+    panel.show_section(about_idx)
+    upd = panel.update_section
+    for btn in (upd.open_button, upd.install_button, upd.cancel_button):
+        btn.setVisible(True)
+    problems.extend(_section_problems(panel, scroll, app, f"{names[about_idx]} (tüm düğmeler)"))
     return problems
 
 

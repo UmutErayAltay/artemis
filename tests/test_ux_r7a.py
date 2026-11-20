@@ -11,7 +11,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QRect
+from PySide6.QtCore import QRect, QSize, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -292,6 +292,87 @@ def test_flow_row_ignores_hidden_widgets(app: QApplication) -> None:
     hidden.show()
     _settle(app)
     assert row.sizeHint().width() > expected.width()
+    host.deleteLater()
+
+
+def test_flow_row_hidden_middle_wraps_after_show(app: QApplication) -> None:
+    """İki görünür düğme arasındaki gizli öğe açılınca satır üst üste binmeden sarılır."""
+    host = QWidget()
+    first = QPushButton("Bir", host)
+    middle = QPushButton("Orta", host)
+    last = QPushButton("Son", host)
+    first.setMinimumWidth(100)
+    middle.setMinimumWidth(140)
+    last.setMinimumWidth(100)
+    middle.hide()
+
+    row = button_row(first, middle, last)
+    host.setLayout(row)
+    host.resize(260, 120)
+    host.show()
+    _settle(app)
+
+    assert first.y() == last.y()
+    assert first.geometry().right() < last.geometry().left()
+
+    middle.show()
+    _settle(app)
+
+    shown = (first, middle, last)
+    for button in shown:
+        assert button.isVisible()
+        assert host.rect().contains(button.geometry()), button.geometry()
+    for i, left in enumerate(shown):
+        for right in shown[i + 1 :]:
+            assert not left.geometry().intersects(right.geometry())
+    assert first.y() == middle.y() < last.y()
+    assert row.heightForWidth(260) >= last.geometry().bottom() + 1
+    host.deleteLater()
+
+
+def test_flow_row_all_hidden_has_zero_size_hint(app: QApplication) -> None:
+    """Tüm çocukları gizli `_FlowRow` kenar boşluğu olsa bile sıfır boyut ipucu döner."""
+    host = QWidget()
+    first = QPushButton("Bir", host)
+    second = QPushButton("İki", host)
+    first.hide()
+    second.hide()
+
+    row = button_row(first, second)
+    row.setContentsMargins(10, 6, 14, 8)
+    host.setLayout(row)
+
+    assert row.sizeHint() == QSize(0, 0)
+    assert row.minimumSize() == QSize(0, 0)
+    assert row.heightForWidth(240) == 0
+    host.deleteLater()
+
+
+def test_flow_row_contents_margins_and_no_vertical_expand(app: QApplication) -> None:
+    """`_FlowRow` contentsMargins değerlerini hesaba katar ve dikey büyümez."""
+    host = QWidget()
+    first = QPushButton("Tamam", host)
+    second = QPushButton("İptal", host)
+    row = button_row(first, second)
+
+    base_hint = row.sizeHint()
+    base_min = row.minimumSize()
+    base_hfw = row.heightForWidth(base_hint.width())
+
+    row.setContentsMargins(10, 6, 14, 8)
+    assert row.expandingDirections() == Qt.Orientation(0)
+    assert row.sizeHint() == QSize(base_hint.width() + 24, base_hint.height() + 14)
+    assert row.minimumSize() == QSize(base_min.width() + 24, base_min.height() + 14)
+    assert row.heightForWidth(base_hint.width() + 24) == base_hfw + 14
+    assert row.heightForWidth(base_hint.width() + 23) > base_hfw + 14
+
+    host.setLayout(row)
+    host.resize(base_hint.width() + 24, base_hfw + 14)
+    host.show()
+    _settle(app)
+    assert second.geometry().right() == host.rect().right() - 14
+    assert first.geometry().top() >= 6
+    assert first.geometry().left() >= 10
     host.deleteLater()
 
 

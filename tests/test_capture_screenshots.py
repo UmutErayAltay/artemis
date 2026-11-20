@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 import struct
 import subprocess
 import sys
 from pathlib import Path
 from types import ModuleType
+
+import pytest
 
 REPO = Path(__file__).resolve().parents[1]
 SCRIPT = REPO / "scripts" / "capture_screenshots.py"
@@ -101,4 +104,63 @@ def test_capture_screenshots_2x_en_extra(tmp_path: Path) -> None:
 
     produced = {path.name for path in tmp_path.glob("*.png")}
     assert produced == CORE_PNGS | EXTRA_PNGS
-    assert _read_png_dimensions(tmp_path / "welcome.png") == (2560, 1560)
+
+    # Her üretilen PNG çift boyutlu ve pozitif olmalı; pencere/diyalog çekimleri tam 2x boyuttadır.
+    for png_name in produced:
+        width, height = _read_png_dimensions(tmp_path / png_name)
+        assert width > 0 and height > 0, png_name
+        assert width % 2 == 0 and height % 2 == 0, (png_name, width, height)
+
+    expected_2x = {
+        "welcome.png": (2560, 1560),
+        "panel.png": (2560, 1560),
+        "approval.png": (1120, 760),
+        "overlay.png": (1040, 520),
+        "projects.png": (2160, 1840),
+        "connect-wizard.png": (1520, 1280),
+        "settings-ses.png": (2560, 1560),
+        "settings-telegram.png": (2560, 1560),
+        "settings-model.png": (2560, 1560),
+        "settings-routines.png": (2560, 1560),
+        "settings-calendar.png": (2560, 1560),
+        "settings-look.png": (2560, 1560),
+        "settings-about.png": (2560, 1560),
+    }
+    for png_name, size in expected_2x.items():
+        assert _read_png_dimensions(tmp_path / png_name) == size, png_name
+
+    auto_w, auto_h = _read_png_dimensions(tmp_path / "auto-warning.png")
+    assert auto_w > 400 and auto_h > 300, (auto_w, auto_h)
+
+
+def test_about_screenshot_label_has_no_real_user_path(tmp_path: Path) -> None:
+    """Hakkında ekran görüntüsü için ayarlanan klasör metni gerçek kullanıcı yolunu içermez."""
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    pytest.importorskip("PySide6")
+
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+    from artemis.i18n import set_language
+
+    cs = _load_script_module()
+    app = QApplication.instance() or QApplication([])
+    del app
+    cfg_dir = tmp_path / "cfg"
+    cfg_dir.mkdir(parents=True, exist_ok=True)
+    demo_cfg = cfg_dir / "demo.yaml"
+    demo_cfg.write_bytes((REPO / "config" / "config.example.yaml").read_bytes())
+
+    panel = SettingsPanel(demo_cfg, demo=True)
+    try:
+        for lang in ("tr", "en"):
+            set_language(lang)
+            cs.neutralize_captured_paths(panel)
+            text = panel.about_section.config_label.text()
+            assert cs.DEMO_CONFIG_DIR in text
+            assert str(tmp_path) not in text
+            assert str(Path.home()) not in text
+            assert panel.repos_dir.placeholderText() == cs.DEMO_REPOS_DIR
+    finally:
+        set_language("tr")
+        panel.deleteLater()

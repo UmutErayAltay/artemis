@@ -166,6 +166,7 @@ class _FlowRow(QLayout):
         super().__init__()
         self._items: list[Any] = []
         self._gap = 8
+        self.setContentsMargins(0, 0, 0, 0)
 
     def addItem(self, arg__1: Any) -> None:
         self._items.append(arg__1)
@@ -178,6 +179,10 @@ class _FlowRow(QLayout):
 
     def takeAt(self, index: int) -> Any:
         return self._items.pop(index) if 0 <= index < len(self._items) else None
+
+    def expandingDirections(self) -> Qt.Orientation:
+        # Dikey büyümesin: arkaşsız QVBoxLayout içinde düğme satırı boşluğu yemesin.
+        return Qt.Orientation(0)
 
     def hasHeightForWidth(self) -> bool:
         return True
@@ -202,38 +207,58 @@ class _FlowRow(QLayout):
 
     def sizeHint(self) -> QSize:
         hints = [item.sizeHint() for item in self._visible_items()]
-        width = sum(h.width() for h in hints) + self._gap * max(0, len(hints) - 1)
-        return QSize(width, max((h.height() for h in hints), default=0))
+        if not hints:
+            return QSize(0, 0)
+        margins = self.contentsMargins()
+        width = (
+            sum(h.width() for h in hints)
+            + self._gap * max(0, len(hints) - 1)
+            + margins.left()
+            + margins.right()
+        )
+        height = max(h.height() for h in hints) + margins.top() + margins.bottom()
+        return QSize(width, height)
 
     def minimumSize(self) -> QSize:
         sizes = [item.minimumSize() for item in self._visible_items()]
-        return QSize(max((s.width() for s in sizes), default=0),
-                     max((s.height() for s in sizes), default=0))
+        if not sizes:
+            return QSize(0, 0)
+        margins = self.contentsMargins()
+        return QSize(
+            max(s.width() for s in sizes) + margins.left() + margins.right(),
+            max(s.height() for s in sizes) + margins.top() + margins.bottom(),
+        )
 
     def _arrange(self, rect: QRect, *, apply: bool) -> int:
+        visible = self._visible_items()
+        if not visible:
+            return 0
+        margins = self.contentsMargins()
+        area = self.contentsRect() if apply else rect.marginsRemoved(margins)
         lines: list[list[Any]] = [[]]
         used = 0
-        for item in self._visible_items():
+        for item in visible:
             width = item.sizeHint().width()
-            if lines[-1] and used + self._gap + width > rect.width():
+            if lines[-1] and used + self._gap + width > area.width():
                 lines.append([])
                 used = 0
             used += (self._gap if lines[-1] else 0) + width
             lines[-1].append(item)
-        y = rect.y()
+        y = area.y()
         for line in lines:
             height = max((item.sizeHint().height() for item in line), default=0)
-            x = rect.right() + 1 - sum(i.sizeHint().width() for i in line) - self._gap * (
+            x = area.right() + 1 - sum(i.sizeHint().width() for i in line) - self._gap * (
                 len(line) - 1
             )
             for item in line:
                 size = item.sizeHint()
                 if apply:
                     top = y + (height - size.height()) // 2  # düğme yanındaki küçük "?" ortalanır
-                    item.setGeometry(QRect(max(x, rect.x()), top, size.width(), size.height()))
+                    item.setGeometry(QRect(max(x, area.x()), top, size.width(), size.height()))
                 x += size.width() + self._gap
             y += height + self._gap
-        return max(0, y - self._gap - rect.y())
+        content_height = max(0, y - self._gap - area.y())
+        return content_height + margins.top() + margins.bottom()
 
 
 def button_row(*buttons: QPushButton, help: str = "") -> QLayout:  # noqa: A002
