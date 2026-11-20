@@ -54,8 +54,8 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 - Not Defteri açık ve boş; mikrofon ve hoparlör hazır (kulaklıksız test için hoparlör, `W:42`).
 
 ### Dikte (Y:40–53)
-- [ ] Ayarlar > Ses'te "Dikte kısayolu" ve "Dikte tuşu" görünür; kaydedince kısayol çalışır. `Y:40`
-- [ ] `dictation.hotkey` ile `voice.listening_hotkey` aynı yazılıp kaydedilince reddedilir ve ileti gösterilir. `Y:41`
+- [ ] Ayarlar > Ses'te "Dikte kısayolu" ve "Dikte tuşu" görünür; kaydedince kısayol çalışır. `Y:40` — 2026-11-20 betik (offscreen, sahte saat/bildirim): alanlar ve kayıt geçti; kısayola basınca dikte çalışması insan adımı (gerçek kısayol kaydı taklit). Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] `dictation.hotkey` ile `voice.listening_hotkey` aynı yazılıp kaydedilince reddedilir ve ileti gösterilir. `Y:41` — 2026-11-20 betik (offscreen, sahte saat/bildirim): çakışma reddi ve ileti geçti. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
 - [ ] Not Defteri'nde kısayol → "Günaydın, çalışkan öğrenci şişe" → tekrar bas: metin Türkçe karakterlerle (ğ ü ş ı ö ç) doğru yazılır. `Y:42`
 - [ ] Kayıt sürerken durum satırı ve pet "Dikte dinliyor…" gösterir; bitince "Hazır"a döner. `Y:43`
 - [ ] Yazım sürerken başka pencereye geç → yazım durur, "yarım kaldı … geri alınmadı" iletisi, tam metin panelde. `Y:44`
@@ -180,9 +180,9 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 ### Rutin paneli (Y:59–69)
 - [ ] Ayarlar > Rutinler: kutu kapalıyken liste boş, "Rutinler kapalı" yazar, düğmeler pasif. `Y:59` — 2026-11-20 betik (`scripts/kabul_masaustu.py --offscreen`): geçti; gerçek ekranda tek tekrar bekliyor.
 - [ ] Rutin listesinde "işe başla · 3 adım: ..." görünür; "Dosyayı aç" `routines.json`'u açar. `Y:61` — 2026-11-20 betik (offscreen): liste geçti; "Dosyayı aç" düğmesi artık yok (ADR 0058 ek kararı, uygulama içi düzenleme), o kısım eskimiş.
-- [ ] Saati 2 dakika sonraya ve bugünün gününe kur, "Zamanı kaydet" → zamanı gelince sohbette "işe başla rutininin zamanı. Çalıştırılsın mı?" ve "Çalıştır" düğmesi çıkar; rutin kendiliğinden başlamaz. `Y:67`
-- [ ] Bildirimdeki "Çalıştır"a bas → normal onaylı çalıştırma başlar; "Kapat" satırı kaldırır, rutin çalışmaz. `Y:68`
-- [ ] Artemis kapalıyken zamanlı saat geçer, sonra açılır → grace süresi içindeyse bildirim gelir, dışındaysa gelmez ve rutin çalışmaz. `Y:69`
+- [ ] Saati 2 dakika sonraya ve bugünün gününe kur, "Zamanı kaydet" → zamanı gelince sohbette "işe başla rutininin zamanı. Çalıştırılsın mı?" ve "Çalıştır" düğmesi çıkar; rutin kendiliğinden başlamaz. `Y:67` — 2026-11-20 betik (offscreen, sahte saat/bildirim): zaman gelince bildirim ve 'Çalıştır' çubuğu geçti, rutin kendiliğinden başlamadı; Windows bildirimi taklit. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] Bildirimdeki "Çalıştır"a bas → normal onaylı çalıştırma başlar; "Kapat" satırı kaldırır, rutin çalışmaz. `Y:68` — 2026-11-20 betik (offscreen, sahte saat/bildirim): 'Kapat' çalıştırmadı, 'Çalıştır' normal onaya kadar gitti (onay Esc ile kapatıldı). Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] Artemis kapalıyken zamanlı saat geçer, sonra açılır → grace süresi içindeyse bildirim gelir, dışındaysa gelmez ve rutin çalışmaz. `Y:69` — 2026-11-20 betik (offscreen, sahte saat/bildirim): süre içi/dışı geçti; 'Artemis kapalıyken' kısmı enjekte saatle benzetildi. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
 
 ### Beceri paneli (Y:93–100)
 - [ ] "Klasörü göster" (kaynakta "Klasörü aç") → `state_dir\beceriler\` açılır; içinde `ornek-gunluk-ozet.md` var. `Y:94` — 2026-11-20 betik (`scripts/kabul_masaustu.py --offscreen`): geçti; gerçek ekranda tek tekrar bekliyor.
@@ -192,9 +192,9 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 ### Tetikleyici paneli (Y:106–115)
 - [ ] "Tetikleyici ekle": klasör seç (İndirilenler), ad otomatik gelir, PDF, Ekle → liste güncellenir; kutu kapalıysa açıldığı yazar; zamanlı işler kapalıysa "Zamanlı işleri aç" düğmesi kutuyu işaretler ve Uygula'ya kadar dosyaya yazılmaz. `Y:106` — 2026-11-20 betik (`scripts/kabul_masaustu.py --offscreen`): geçti; gerçek ekranda tek tekrar bekliyor.
 - [ ] "Düzenle" ile bildirim metni değişir; "Sil" (onay sorar) tetikleyiciyi kaldırır; olmayan klasör, aynı ad ve 10'dan fazla tetikleyici düz Türkçe hatayla reddedilir. `Y:107` — 2026-11-20 betik (offscreen): düzenleme, hatalar ve 10 sınırı geçti; "Sil" onayı insan adımı.
-- [ ] Tarayıcıdan PDF indir → bir dakika içinde (poll_seconds) tek bildirim "Tetikleyici · indirilenler / Yeni dosya geldi: ..."; panelde "Yaz" düğmesi var. `Y:109`
-- [ ] "Yaz"a bas → istem sohbet kutusuna dolar, GÖNDERİLMEZ; Enter'a basana dek hiçbir şey çalışmaz. `Y:110`
-- [ ] `suggest` yerine `routine: <rutin adı>` (routines.enabled) → düğme "Çalıştır"; basınca rutin normal onaylı tur olarak çalışır. `Y:115`
+- [ ] Tarayıcıdan PDF indir → bir dakika içinde (poll_seconds) tek bildirim "Tetikleyici · indirilenler / Yeni dosya geldi: ..."; panelde "Yaz" düğmesi var. `Y:109` — 2026-11-20 betik (offscreen, sahte saat/bildirim): tek bildirim ve 'Yaz' çubuğu geçti; tarayıcı indirmesi yerine dosya bırakıldı. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] "Yaz"a bas → istem sohbet kutusuna dolar, GÖNDERİLMEZ; Enter'a basana dek hiçbir şey çalışmaz. `Y:110` — 2026-11-20 betik (offscreen, sahte saat/bildirim): istem kutuya doldu, gönderilmedi (istek sayısı 0). Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] `suggest` yerine `routine: <rutin adı>` (routines.enabled) → düğme "Çalıştır"; basınca rutin normal onaylı tur olarak çalışır. `Y:115` — 2026-11-20 betik (offscreen, sahte saat/bildirim): rutin düğmesi onay penceresine kadar çalıştı (onay Esc); sonrası insan adımı. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
 
 ### Seçili metin eylemleri (Y:124–134)
 - [ ] Tarayıcıda paragraf seç, `ctrl+alt+s` → imlecin yanında "N karakter seçildi" penceresi açılır; Ctrl+Alt+C gibi bir tuş tetiklenmez. `Y:124`
@@ -205,8 +205,8 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 
 ### Dosya araması ve araştırma bildirimi
 - [ ] Ayarlar > Dosya araması: durum satırında "dizinleniyor", bitince dosya sayısı ve son dizinleme saati; Artemis bu sırada yanıt vermeye devam eder. `Y:175` — 2026-11-20 betik (`scripts/kabul_masaustu.py --offscreen`): geçti; gerçek ekranda tek tekrar bekliyor.
-- [ ] "Belgelerimde 'bilinen ifade' geçen dosya hangisi" → yol, tarih ve en çok 200 karakterlik alıntı; dosyanın tamamı gelmez. `Y:176`
-- [ ] Araştırma bitince "Araştırma bitti: <konu>" bildirimi gelir. `Y:144`
+- [ ] "Belgelerimde 'bilinen ifade' geçen dosya hangisi" → yol, tarih ve en çok 200 karakterlik alıntı; dosyanın tamamı gelmez. `Y:176` — 2026-11-20 betik (offscreen, sahte saat/bildirim): yol, tarih ve en çok 200 karakterlik alıntı, 'VERİDİR' çerçevesi geçti; aracı modelin seçmesi senaryolu. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] Araştırma bitince "Araştırma bitti: <konu>" bildirimi gelir. `Y:144` — 2026-11-20 betik (offscreen, sahte saat/bildirim): bildirim, rapor dosyası ve denetim kaydı gerçek iş çalıştırıcıdan geçti; arama taklit, onay adımı atlandı. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
 
 ### Hafıza, teslim ve kilit (panel)
 - [ ] Hafıza panelinde gerçek süre okunur; test verisiyle 0/30 gün ve reddedilen/onaylanan silme denenir; "geçmişi sil" düğmesi (betik + tık): silinen cümle `memory.sqlite3` içinde bulunmaz, öz notlar durur. `W:148` (birleşik: `R:69`, `R:152`)
@@ -218,8 +218,8 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 - [ ] Kod ajanı kilidi (betik + tık): proje işi çalışırken Görev Yöneticisi'nden Artemis'i öldür, yeniden aç → iş "kesildi", depo kilitli; Projeler → "Kilidi bırak" onay sorar, kilidi kaldırır, yeni iş başlar; ajan süreci kalmaz. (Betik geçti: `R:57`.) `W:176`
 
 ### Bildirim ve kapanış (F6/F7)
-- [ ] Hatırlatma 2 dk sonra panelde ve toast'ta görünür (Windows bildirimleri bu uygulama için açık). `F:91` (#1; birleşik: `R:166`)
-- [ ] Artemis kapalıyken hatırlatma zamanı geçer; yeniden açılınca bir kez teslim edilir, iki kez değil. `F:92` (#2; birleşik: `W:124`)
+- [ ] Hatırlatma 2 dk sonra panelde ve toast'ta görünür (Windows bildirimleri bu uygulama için açık). `F:91` (#1; birleşik: `R:166`) — 2026-11-20 betik (offscreen, sahte saat/bildirim): panel ve bildirim yükü geçti; gerçek Windows bildirimi (Action Center) insan adımı. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] Artemis kapalıyken hatırlatma zamanı geçer; yeniden açılınca bir kez teslim edilir, iki kez değil. `F:92` (#2; birleşik: `W:124`) — 2026-11-20 betik (offscreen, sahte saat/bildirim): yeniden açılışta bir kez teslim, tekrar yok geçti (gerçek kapat-aç döngüsü). Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
 
 ---
 
@@ -243,11 +243,11 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 
 ### Gün sonu özeti (Y:194–200)
 - [ ] Gün içinde Artemis'i kullan: birkaç sohbet, bir dosya oluştur/sil, bir hatırlatma kur. `Y:194`
-- [ ] Ayarlanan saatte "Günün özeti hazır" bildirimi (panel + toast) gelir; Telegram'a hiçbir şey gitmez. `Y:195`
-- [ ] "Aç" düğmesi `state_dir\gunluk\YYYY-MM-DD.md` dosyasını açar: sayılar doğru, dosya yolları görünür, konuşma metni ve araç sonuçları yok. `Y:196`
+- [ ] Ayarlanan saatte "Günün özeti hazır" bildirimi (panel + toast) gelir; Telegram'a hiçbir şey gitmez. `Y:195` — 2026-11-20 betik (offscreen, sahte saat/bildirim): panelde bildirim geçti, Telegram'a hiçbir şey gitmedi; toast taklit. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] "Aç" düğmesi `state_dir\gunluk\YYYY-MM-DD.md` dosyasını açar: sayılar doğru, dosya yolları görünür, konuşma metni ve araç sonuçları yok. `Y:196` — 2026-11-20 betik (offscreen, sahte saat/bildirim): dosya ve görüntüleyici yalnız sayıları gösterdi, konuşma metni yok. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
 - [ ] "Vault'a ekle" onay penceresi açar ve eklenecek metni gösterir; Hayır → vault'a yazılmaz; Evet → not `vault_note` dosyasının sonuna eklenir. `Y:197`
-- [ ] `memory.vault_path` boşken bildirimde "Vault'a ekle" düğmesi görünmez. `Y:198`
-- [ ] Artemis özet saatinde kapalı tutulur, `briefing_grace_hours` içinde açılır → özet "gecikmeli" diye üretilir. `Y:200`
+- [ ] `memory.vault_path` boşken bildirimde "Vault'a ekle" düğmesi görünmez. `Y:198` — 2026-11-20 betik (offscreen, sahte saat/bildirim): vault yolu boşken 'Vault'a ekle' düğmesi görünmedi. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
+- [ ] Artemis özet saatinde kapalı tutulur, `briefing_grace_hours` içinde açılır → özet "gecikmeli" diye üretilir. `Y:200` — 2026-11-20 betik (offscreen, sahte saat/bildirim): süre içinde 'gecikmeli' özet üretildi, dışında üretilmedi; 'kapalıyken' kısmı benzetildi. Kutu, gerçek ekran/insan adımı tamamlanana dek açık.
 
 ### Model, kod ajanı ve canlı ölçüm
 - [x] Canlı niyet seti (ücretsiz OpenRouter modeli, `OPENROUTER_API_KEY` ortamda): `python -m bench.run --canli --model <model> --rapor reports/intent-live.json` → `wrong_target_actions` ve `dangerous_errors` 0. (yalnız betik) `W:66` — 2026-11-20 geçti (`baidu/ernie-5.5-flash-preview:free`, 57 senaryo): `dangerous_errors` 0, `wrong_target_actions` 0, `unapproved_side_effects` 0; başarı 7/57 (model zayıf, ölçüt dışı).
