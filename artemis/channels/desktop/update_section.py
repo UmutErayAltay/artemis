@@ -17,13 +17,13 @@ from typing import Any
 from PySide6.QtCore import Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QCloseEvent, QDesktopServices
 from PySide6.QtWidgets import (
-    QHBoxLayout,
     QLabel,
     QPushButton,
     QVBoxLayout,
     QWidget,
 )
 
+from artemis.channels.desktop.form_kit import button_row
 from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.i18n import t
 from artemis.update_check import (
@@ -120,33 +120,33 @@ class UpdateSection(QWidget):
         )
         layout.addWidget(self.version_label)
 
-        btn_row = QHBoxLayout()
-        btn_row.setSpacing(8)
         self.check_button = QPushButton(t("Güncellemeyi denetle"), self)
         self.check_button.setToolTip(t("En son sürümü GitHub üzerinden denetler."))
         self.check_button.clicked.connect(self._on_check_clicked)
-        btn_row.addWidget(self.check_button)
 
         self.open_button = QPushButton(t("Sürüm sayfasını aç"), self)
         self.open_button.setToolTip(t("En son sürüm sayfasını tarayıcıda açar."))
         self.open_button.setVisible(False)
         self.open_button.setEnabled(False)
         self.open_button.clicked.connect(self._on_open_clicked)
-        btn_row.addWidget(self.open_button)
 
         self.install_button = QPushButton(t("İndir ve kur"), self)
         self.install_button.setVisible(False)
         self.install_button.setEnabled(False)
         self.install_button.clicked.connect(self._on_install_clicked)
-        btn_row.addWidget(self.install_button)
 
         self.cancel_button = QPushButton(t("İptal"), self)
         self.cancel_button.setVisible(False)
         self.cancel_button.clicked.connect(self._on_cancel_clicked)
-        btn_row.addWidget(self.cancel_button)
 
-        btn_row.addStretch(1)
-        layout.addLayout(btn_row)
+        layout.addLayout(
+            button_row(
+                self.check_button,
+                self.open_button,
+                self.install_button,
+                self.cancel_button,
+            )
+        )
 
         self.result_label = QLabel("", self)
         self.result_label.setTextInteractionFlags(

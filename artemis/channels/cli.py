@@ -2,6 +2,7 @@
 
 import argparse
 import asyncio
+import contextlib
 import json
 import signal
 import sys
@@ -19,8 +20,15 @@ from artemis.channels.notice import format_approval_notice
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.paths import default_config_path, ensure_config
 from artemis.config.settings import load_settings
+from artemis.i18n import set_language, t
 from artemis.safety.audit import AuditLog
 from artemis.tools.registry import discover_tools
+
+
+def _apply_config_language(config_path: Path) -> None:
+    """Config geçerliyse arayüz dilini yükler; okunamazsa mevcut dil korunur."""
+    with contextlib.suppress(OSError, ValueError, ValidationError, yaml.YAMLError):
+        set_language(load_settings(config_path).language)
 
 
 def request_approval(
@@ -32,15 +40,15 @@ def request_approval(
 ) -> bool:
     if notice:
         print(notice)
-    print(f"Onay isteniyor: {tool_name}")
+    print(t("Onay isteniyor: {tool_name}").format(tool_name=tool_name))
     print(json.dumps(arguments, ensure_ascii=False, indent=2))
     try:
-        answer = input("Onaylıyor musunuz? [evet/Hayır]: ")
+        answer = input(t("Onaylıyor musunuz? [evet/Hayır]: "))
     except EOFError:
-        print("\nOnay verilmedi.")
+        print("\n" + t("Onay verilmedi."))
         return False
     except KeyboardInterrupt:
-        print("\nOnay verilmedi; tur iptal ediliyor.")
+        print("\n" + t("Onay verilmedi; tur iptal ediliyor."))
         if on_interrupt is not None:
             on_interrupt()
         return False
@@ -50,7 +58,7 @@ def request_approval(
 async def chat(config_path: Path) -> None:
     settings = load_settings(config_path)
     if not settings.primary_model:
-        print("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.")
+        print(t("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın."))
         return
     approval_active = False
     runtime_ref: list[Runtime] = []
@@ -94,12 +102,14 @@ async def chat(config_path: Path) -> None:
     signal.signal(signal.SIGINT, handle_sigint)
     try:
         print(
-            "Artemis hazır. Çıkmak için /çık, yeni sohbet için /yeni yazın. "
-            "Onaylarda varsayılan Hayır."
+            t(
+                "Artemis hazır. Çıkmak için /çık, yeni sohbet için /yeni yazın. "
+                "Onaylarda varsayılan Hayır."
+            )
         )
         while True:
             try:
-                text = input("Siz: ")
+                text = input(t("Siz: "))
             except EOFError:
                 break
             if text.strip().casefold() in {"/çık", "/cik", "/exit"}:
@@ -107,9 +117,9 @@ async def chat(config_path: Path) -> None:
             if text.strip().casefold() == "/yeni":
                 # Komut tur çalıştırmaz ve modele gitmez; yalnız geçmişi unutturur.
                 if runner.reset_context():
-                    print("Yeni sohbet başladı; kalıcı konuşma arşivi silinmedi.")
+                    print(t("Yeni sohbet başladı; kalıcı konuşma arşivi silinmedi."))
                 else:
-                    print("Aktif işlem sürerken sohbet sıfırlanamaz.")
+                    print(t("Aktif işlem sürerken sohbet sıfırlanamaz."))
                 continue
             if text.strip().casefold().startswith("/hafıza"):
                 from artemis.tools.plugins.history import HistoryArguments
@@ -126,7 +136,12 @@ async def chat(config_path: Path) -> None:
                     action == "sakla"
                     and (len(parts) != 3 or not parts[2].isdigit() or int(parts[2]) > 36500)
                 ):
-                    print("/hafıza durum | göster | sil | sakla <gün>; 0 otomatik silmeyi kapatır.")
+                    print(
+                        t(
+                            "/hafıza durum | göster | sil | sakla <gün>; "
+                            "0 otomatik silmeyi kapatır."
+                        )
+                    )
                     continue
                 arguments = HistoryArguments.model_validate(
                     {
@@ -200,10 +215,14 @@ def main() -> None:
     load_into_environment()
     try:
         config = args.config or default_config_path()
-        if args.config is None and ensure_config(config):
+        created = args.config is None and ensure_config(config)
+        _apply_config_language(config)
+        if created:
             print(
-                f"İlk açılış: ayarlar {config} konumunda oluşturuldu; "
-                "modeli Ayarlar > Model > Bağlantılar'dan ekleyin.",
+                t(
+                    "İlk açılış: ayarlar {config} konumunda oluşturuldu; "
+                    "modeli Ayarlar > Model > Bağlantılar'dan ekleyin."
+                ).format(config=config),
                 file=sys.stderr,
             )
         if args.command in {"voice", "desktop"}:
@@ -211,8 +230,10 @@ def main() -> None:
                 from artemis.channels.desktop.app import run_desktop
             except ImportError:
                 print(
-                    "Masaüstü bileşeni kurulu değil. `pip install 'artemis-tr[desktop]'` "
-                    "komutuyla isteğe bağlı GUI paketini kurun. Ses de masaüstü içinde çalışır."
+                    t(
+                        "Masaüstü bileşeni kurulu değil. `pip install 'artemis-tr[desktop]'` "
+                        "komutuyla isteğe bağlı GUI paketini kurun. Ses de masaüstü içinde çalışır."
+                    )
                 )
                 raise SystemExit(2) from None
             # Ses artık ayrı terminal döngüsü değil; onay yalnız ekrandaki pencereden gelir
@@ -235,8 +256,10 @@ def main() -> None:
     except (OSError, ValueError, ValidationError, yaml.YAMLError, ProviderError) as error:
         # Config doğrulama hatasının ham metni kullanıcı yanlışlıkla sır yazmış olabilir.
         print(
-            f"Başlatma/çalıştırma başarısız ({type(error).__name__}). Ayar ve erişimi kontrol edin."
+            t(
+                "Başlatma/çalıştırma başarısız ({error_type}). Ayar ve erişimi kontrol edin."
+            ).format(error_type=type(error).__name__)
         )
         raise SystemExit(1) from None
     except KeyboardInterrupt:
-        print("\nArtemis durduruldu.")
+        print("\n" + t("Artemis durduruldu."))

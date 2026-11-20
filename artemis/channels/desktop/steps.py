@@ -101,7 +101,7 @@ def step_line(
     if event == "model_choice":
         # Görünür ama sessiz etiket: kullanıcıya soru sorulmaz, yalnız neyin seçildiği yazılır.
         reason = REASONS.get(str(fields.get("reason", "")), "")
-        suffix = f" ({reason})" if reason else ""
+        suffix = f" ({t(reason)})" if reason else ""
         model = fields.get("model", "")
         return StepLine(
             t("Zor işler modeli: {model}{suffix}").format(model=model, suffix=suffix),

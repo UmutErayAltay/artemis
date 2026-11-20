@@ -225,7 +225,9 @@ class DesktopWindow(QMainWindow):
                     path, approve, settings=settings,
                     provider=provider, registry=registry, audit=audit,
                 )
-                runtime.context.services["demo_records"] = {"sample": "Demo kitaplığı: örnek metin"}
+                runtime.context.services["demo_records"] = {
+                    "sample": t("Demo kitaplığı: örnek metin")
+                }
                 return runtime
 
             self._runtime_factory = factory
@@ -593,8 +595,9 @@ class DesktopWindow(QMainWindow):
 
     def _open_settings_section(self, name: str) -> None:
         names = self.settings_panel.section_names()
-        if name in names:
-            self.settings_panel.show_section(names.index(name))
+        target = t(name) if t(name) in names else name
+        if target in names:
+            self.settings_panel.show_section(names.index(target))
         self.tabs.setCurrentWidget(self.settings_scroll)
 
     def _sync_navigation(self, *_args: object) -> None:
@@ -1257,10 +1260,10 @@ def run_desktop(
         server = claim_instance(instance_name(_instance_key(config_path)), show=not background)
         if server is None:
             if not background:
-                print("Artemis zaten açık; panel öne getirildi.")
+                print(t("Artemis zaten açık; panel öne getirildi."))
             return 0
         if not server.is_listening():
-            print("Uyarı: tek örnek koruması kurulamadı; ikinci Artemis açılırsa çakışabilir.")
+            print(t("Uyarı: tek örnek koruması kurulamadı; ikinci Artemis açılırsa çakışabilir."))
     app.setApplicationName("Artemis")
     app.setWindowIcon(app_icon())
     app.setFont(QFont("Segoe UI", 10))

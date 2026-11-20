@@ -471,16 +471,21 @@ class DataPanel(QWidget):
             self.items.clear()
             for reminder in result.data.get("reminders", []):
                 row: dict[str, Any] = reminder
+                raw_state = _STATES.get(row["state"], row["state"])
+                state_text = t(raw_state) if isinstance(raw_state, str) else str(raw_state)
                 item = QListWidgetItem(
-                    f"{_STATES.get(row['state'], row['state'])} · "
-                    f"{row['due_local']} · {row['text']}"
+                    t("{state} · {due_local} · {text}").format(
+                        state=state_text, due_local=row["due_local"], text=row["text"]
+                    )
                 )
                 item.setData(Qt.ItemDataRole.UserRole, row)
                 self.items.addItem(item)
             if self.items.count():
                 self.items_stack.setCurrentIndex(0)
             else:
-                self.items_empty.set_text("Kayıt yok", "Bu filtreye uyan hatırlatma yok.")
+                self.items_empty.set_text(
+                    t("Kayıt yok"), t("Bu filtreye uyan hatırlatma yok.")
+                )
                 self.items_stack.setCurrentIndex(1)
         elif tool_name == "memory_changes":
             self._render_memory(list(result.data.get("rules", [])))

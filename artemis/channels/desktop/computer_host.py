@@ -15,6 +15,7 @@ from typing import Any
 
 from artemis.channels.desktop.hotkey import GlobalHotkey
 from artemis.computer.session import SCREEN_LOCK, ScreenBusyError
+from artemis.i18n import t
 
 # (durdurma olayı, adım bildirimi, onay) — oturum boyunca araca verilen üçlü.
 SessionHandles = tuple[
@@ -61,14 +62,14 @@ class ComputerHost:
     def session(self) -> Iterator[SessionHandles]:
         # Ekran süreç genelinde tek oturumludur (masaüstü + Telegram); ikincisi reddedilir.
         if not SCREEN_LOCK.acquire(blocking=False):
-            raise ScreenBusyError("Zaten bir bilgisayar kullanımı oturumu sürüyor.")
+            raise ScreenBusyError(t("Zaten bir bilgisayar kullanımı oturumu sürüyor."))
         stop = threading.Event()
         self._stop = stop
         hotkey = GlobalHotkey("escape", self._escape)
         try:
             # Kayıt başarısızsa oturum yine çalışır ama kullanıcı bunu bilmelidir.
             if not hotkey.start():
-                self._emit_status(_ESC_UNAVAILABLE)
+                self._emit_status(t(_ESC_UNAVAILABLE))
             yield stop, self._emit_status, self._approve
         finally:
             hotkey.stop()

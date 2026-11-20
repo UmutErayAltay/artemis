@@ -239,6 +239,10 @@ class TelegramSection(QWidget):
         if not enabled:
             return t("Kapalı.")
         # Durum Türkçe sabit olarak gelir (mantık onunla karşılaştırır); yalnız gösterimde çevrilir.
+        if self._channel_text == f"{STATUS_ERROR} (token yok)":
+            return t("Telegram hatası (token yok)")
+        if self._channel_text == f"{STATUS_ERROR} (model yok)":
+            return t("Telegram hatası (model yok)")
         if self._channel_text.startswith(STATUS_ERROR):
             return t(STATUS_ERROR) + self._channel_text[len(STATUS_ERROR):]
         return {

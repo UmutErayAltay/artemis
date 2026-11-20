@@ -135,16 +135,25 @@ def handle_event(window: DesktopWindow, event: BridgeEvent) -> None:
         collect_step(window, event)
 
 
+def _ready_model(message: str) -> str | None:
+    """Açılış hazır mesajından (TR ya da etkin dil) model adını ayıklar."""
+    if message.startswith("Hazır · "):
+        return message.removeprefix("Hazır · ")
+    prefix, sep, suffix = t("Hazır · {model}").partition("{model}")
+    if sep and message.startswith(prefix) and (not suffix or message.endswith(suffix)):
+        end = len(message) - len(suffix) if suffix else len(message)
+        return message[len(prefix) : end]
+    return None
+
+
 def handle_state(window: DesktopWindow, event: State) -> None:
     if event.request_id is not None and event.request_id != window._active_request:
         return
     if event.state == "ready":
-        if (
-            event.request_id is None
-            and not window._busy
-            and event.message.startswith("Hazır · ")
-        ):
-            window._show_model(event.message.removeprefix("Hazır · "))
+        if event.request_id is None and not window._busy:
+            model_name = _ready_model(event.message)
+            if model_name is not None:
+                window._show_model(model_name)
         if event.request_id is not None or not window._busy:
             window._worker_ready = True
             window._set_status(t("Hazır"), "ready")

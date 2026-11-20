@@ -14,6 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Protocol
 
+from artemis.i18n import t
+
 RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 VALUE_NAME = "Artemis"
 
@@ -146,63 +148,69 @@ class Autostart:
             self._emit("autostart", action=action, success=result.success, state=result.state)
         except OSError:
             # Kayıt değişti ama denetime yazılamadı: sonuç bozulmaz, kullanıcıya söylenir.
+            suffix = t("(Denetim kaydı yazılamadı.)")
             return AutostartResult(
-                result.success, result.state, result.message + " (Denetim kaydı yazılamadı.)"
+                result.success, result.state, f"{result.message} {suffix}"
             )
         return result
 
     def status(self) -> AutostartResult:
         store = self._windows_store()
         if store is None:
-            return AutostartResult(False, "off", "Açılışta başlama yalnız Windows'ta var.")
+            return AutostartResult(False, "off", t("Açılışta başlama yalnız Windows'ta var."))
         try:
             current = store.read()
         except OSError:
-            return AutostartResult(False, "off", "Kayıt defteri okunamadı.")
+            return AutostartResult(False, "off", t("Kayıt defteri okunamadı."))
         if current is None:
-            return AutostartResult(True, "off", "Açılışta başlama kapalı.")
+            return AutostartResult(True, "off", t("Açılışta başlama kapalı."))
         if current == self.expected and not Path(self.python).is_file():
             return AutostartResult(
-                True, "stale", "Açılış kaydındaki Python bulunamadı; ortamı kontrol edin."
+                True, "stale", t("Açılış kaydındaki Python bulunamadı; ortamı kontrol edin.")
             )
         if current != self.expected:
             # Ortam taşınmış ya da elle değiştirilmiş: kayıt artık bu kurulumu başlatmıyor.
             return AutostartResult(
-                True, "stale", "Açılış kaydı bu kurulumla eşleşmiyor; yeniden açın."
+                True, "stale", t("Açılış kaydı bu kurulumla eşleşmiyor; yeniden açın.")
             )
-        return AutostartResult(True, "on", "Açılışta başlama açık.")
+        return AutostartResult(True, "on", t("Açılışta başlama açık."))
 
     def enable(self) -> AutostartResult:
         store = self._windows_store()
         if store is None:
-            return AutostartResult(False, "off", "Açılışta başlama yalnız Windows'ta var.")
+            return AutostartResult(False, "off", t("Açılışta başlama yalnız Windows'ta var."))
         try:
             store.write(self.expected)
             written = store.read()
         except OSError:
             return self._audit(
-                "enable", AutostartResult(False, "off", "Kayıt defterine yazılamadı.")
+                "enable", AutostartResult(False, "off", t("Kayıt defterine yazılamadı."))
             )
         if written != self.expected:
             return self._audit(
                 "enable",
-                AutostartResult(False, "stale", "Yazılan açılış kaydı doğrulanamadı."),
+                AutostartResult(False, "stale", t("Yazılan açılış kaydı doğrulanamadı.")),
             )
         return self._audit(
-            "enable", AutostartResult(True, "on", "Artemis Windows açılışında tepside başlayacak.")
+            "enable",
+            AutostartResult(True, "on", t("Artemis Windows açılışında tepside başlayacak.")),
         )
 
     def disable(self) -> AutostartResult:
         store = self._windows_store()
         if store is None:
-            return AutostartResult(False, "off", "Açılışta başlama yalnız Windows'ta var.")
+            return AutostartResult(False, "off", t("Açılışta başlama yalnız Windows'ta var."))
         try:
             store.delete()
             remaining = store.read()
         except OSError:
             return self._audit(
-                "disable", AutostartResult(False, "on", "Kayıt defterinden silinemedi.")
+                "disable", AutostartResult(False, "on", t("Kayıt defterinden silinemedi."))
             )
         if remaining is not None:
-            return self._audit("disable", AutostartResult(False, "on", "Açılış kaydı silinemedi."))
-        return self._audit("disable", AutostartResult(True, "off", "Açılışta başlama kapatıldı."))
+            return self._audit(
+                "disable", AutostartResult(False, "on", t("Açılış kaydı silinemedi."))
+            )
+        return self._audit(
+            "disable", AutostartResult(True, "off", t("Açılışta başlama kapatıldı."))
+        )

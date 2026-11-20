@@ -240,7 +240,9 @@ class VoiceController:
                 drops = int(getattr(self.microphone, "dropped_frames", 0))
                 if drops > self._seen_drops:
                     self.on_transcript(
-                        f"Mikrofon yoğun: {drops - self._seen_drops} ses karesi kayboldu."
+                        t("Mikrofon yoğun: {dropped} ses karesi kayboldu.").format(
+                            dropped=drops - self._seen_drops
+                        )
                     )
                     self._seen_drops = drops
                     self.on_timing("audio_dropped_frames", float(drops))
@@ -339,7 +341,7 @@ class VoiceController:
         try:
             self._segments.put_nowait((segment, uid, self._capture_epoch, self.clock()))
         except asyncio.QueueFull:
-            self.on_transcript("Ses tanıma yoğun; son söz alınamadı. Lütfen tekrar söyle.")
+            self.on_transcript(t("Ses tanıma yoğun; son söz alınamadı. Lütfen tekrar söyle."))
             self._event(uid, "terminal", outcome="rejected", reason="stt_queue_full")
             self._forget_spec(uid)
         self.on_timing("stt_queue_depth", float(self._segments.qsize()))
@@ -460,11 +462,11 @@ class VoiceController:
             return
         self._event(uid, "stt_final")
         if not transcript:
-            self.on_transcript("Net konuşma algılanmadı; bu ses komut olarak kullanılmadı.")
+            self.on_transcript(t("Net konuşma algılanmadı; bu ses komut olarak kullanılmadı."))
             self._event(uid, "terminal", outcome="rejected", reason="empty_transcript")
             return
         if self._is_spoken_echo(transcript, segment.speech_start):
-            self.on_transcript("Asistan sesinin yankısı yok sayıldı.")
+            self.on_transcript(t("Asistan sesinin yankısı yok sayıldı."))
             self._event(uid, "terminal", outcome="rejected", reason="echo")
             return
         transcript = self._strip_spoken_prefix(transcript, segment.speech_start)
@@ -483,7 +485,7 @@ class VoiceController:
                 and self._output_active
                 and (segment.speech_end - segment.speech_start) * 1000 >= self.config.barge_in_ms
             ):
-                self.on_transcript("Söz kesildi; dinliyorum.")
+                self.on_transcript(t("Söz kesildi; dinliyorum."))
                 await self._interrupt_output(uid)
                 # Kullanıcı bilerek susturdu: takip sözü wake istemez. Yankı filtresi
                 # (_is_spoken_echo) son yanıt metniyle çalışmaya devam eder.
@@ -496,7 +498,7 @@ class VoiceController:
                     self._emit_state("listening")
                 self._event(uid, "terminal", outcome="interrupted", reason="barge_in")
                 return
-            self.on_transcript("Ses yok sayıldı; söz kesmek için Artemis diyerek başla.")
+            self.on_transcript(t("Ses yok sayıldı; söz kesmek için Artemis diyerek başla."))
             self._event(uid, "terminal", outcome="rejected", reason="output_requires_wake")
             return
         self.on_transcript(transcript)
@@ -918,7 +920,7 @@ class VoiceController:
                 self._emit_private_tts_blocked()
             if self._local_synthesizer is None:
                 if record_block:
-                    self.on_transcript(_PRIVATE_REMOTE_TTS_NOTICE)
+                    self.on_transcript(t(_PRIVATE_REMOTE_TTS_NOTICE))
                 return
             synth = self._local_synthesizer
             text = strip_emotion_tags(text, emotion_tags_active(self.config))

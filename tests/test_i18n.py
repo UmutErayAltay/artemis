@@ -244,3 +244,36 @@ def test_retarget_with_context() -> None:
     assert retarget("Enabled", "tr", context="field") == "Açık"
     assert retarget("Koyu", "en", context="theme") == "Dark"
     assert retarget("Dark", "tr", context="theme") == "Koyu"
+
+
+def test_every_plugin_tool_metadata_is_in_catalog() -> None:
+    """Kayıtlı her eklenti aracının label, done_label ve description alanları sözlükte olmalı."""
+    from artemis.tools.registry import discover_tools
+
+    entries = catalog()
+    registry = discover_tools()
+    definitions = registry.definitions()
+    assert definitions
+
+    missing: list[str] = []
+    mismatched: list[str] = []
+    for definition in definitions:
+        tool = registry.get(definition.name)
+        assert tool is not None
+        for field_name in ("label", "done_label", "description"):
+            value = getattr(tool, field_name, "")
+            if not isinstance(value, str) or not value.strip():
+                missing.append(f"{definition.name}.{field_name}: boş")
+                continue
+            if value not in entries:
+                missing.append(f"{definition.name}.{field_name}: {value!r}")
+                continue
+            if _placeholders(value) != _placeholders(entries[value]):
+                mismatched.append(
+                    f"{definition.name}.{field_name}: {value!r} -> {entries[value]!r}"
+                )
+
+    assert not missing, "Sözlükte eksik eklenti aracı metinleri:\n" + "\n".join(missing)
+    assert not mismatched, "Eklenti aracı metinlerinde yer tutucu uyuşmazlığı:\n" + "\n".join(
+        mismatched
+    )
