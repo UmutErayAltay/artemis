@@ -12,6 +12,7 @@ from artemis.brain.conversation import ConversationContext
 from artemis.brain.emotion import emotion_tags_active, strip_emotion_tags
 from artemis.brain.models import ToolCall
 from artemis.brain.streaming import ResponseStream
+from artemis.i18n import t
 from artemis.safety.gate import TurnState
 from artemis.tools.base import ToolResult
 
@@ -93,7 +94,7 @@ class CommandRunner:
     async def dispatch_tool(self, name: str, arguments: BaseModel) -> ToolResult:
         """UI'nin tipli çağrısı: LLM olmadan, aynı kilit ve SafetyGate ile yeni tur."""
         if self._lock.locked() or self.loop.cleanup_pending:
-            return ToolResult(message="Başka bir işlem sürüyor; araç çalıştırılmadı.")
+            return ToolResult(message=t("Başka bir işlem sürüyor; araç çalıştırılmadı."))
         async with self._lock:
             context = self.loop.context
             context.cancelled.clear()

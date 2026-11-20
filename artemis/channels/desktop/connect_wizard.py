@@ -10,6 +10,7 @@ import base64
 import contextlib
 import hashlib
 import hmac
+import html
 import http.server
 import re
 import secrets
@@ -74,10 +75,14 @@ GEMINI_MODEL_ALIAS = "gemini-3-flash"
 GEMINI_MODEL_ID = "gemini-3-flash-preview"
 GEMINI_KEY_RE = re.compile(r"^(AIza[0-9A-Za-z_-]{35}|AQ\.[0-9A-Za-z_-]{30,})$")
 
-_CALLBACK_HTML = (
-    "<!doctype html><html><head><meta charset='utf-8'><title>Artemis</title></head>"
-    "<body><p>Artemis'e dönebilirsin</p></body></html>"
-).encode()
+def _callback_html() -> bytes:
+    """Tarayıcı OAuth geri dönüş sayfasını etkin dilde üretir."""
+    # quote=False kesme işaretini korur; metin çeviri kataloğundan gelir.
+    body = html.escape(t("Artemis'e dönebilirsin"), quote=False)
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'><title>Artemis</title></head>"
+        f"<body><p>{body}</p></body></html>"
+    ).encode()
 
 _CHOICE_BUTTON_WIDTH = 280
 _CHOICE_BUTTON_HEIGHT = 84
@@ -155,11 +160,12 @@ def _default_server_factory() -> _CallbackServer:
             values = params.get("code")
             if values and values[0]:
                 server.code = values[0]
+            body = _callback_html()
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.send_header("Content-Length", str(len(_CALLBACK_HTML)))
+            self.send_header("Content-Length", str(len(body)))
             self.end_headers()
-            self.wfile.write(_CALLBACK_HTML)
+            self.wfile.write(body)
             server.got_request.set()
 
         def log_message(self, format: str, *args: object) -> None:

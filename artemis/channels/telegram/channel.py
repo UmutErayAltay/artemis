@@ -65,8 +65,8 @@ _PRIVATE_APPROVAL_NOTICE = (
     "ve işlem yapılmadı. Masaüstünden yapın ya da /yeni ile yeni sohbet başlatın."
 )
 _TURN_EXPIRED_NOTICE = "Turun süresi doldu; onay sorulmadı."
-_EXPIRED_SUFFIX = "\n\nKarar: Süre doldu, reddedildi"
-_CLOSING_SUFFIX = "\n\nKarar: Kanal kapanıyor, reddedildi"
+_EXPIRED_SUFFIX = "Karar: Süre doldu, reddedildi"
+_CLOSING_SUFFIX = "Karar: Kanal kapanıyor, reddedildi"
 _APPROVAL_POLL_CAP = 2  # sn; onay beklerken durdurma bayrağı en geç bu sürede fark edilir
 _STOP_GRACE_SECONDS = 3.0  # durdurmada yürüyen turun normal iptal yoluyla bitmesi için süre
 _PRIVATE_WITHHELD = "Bu yanıt gizli içerik (dosya/pano) kullandığı için Telegram'a gönderilmedi."
@@ -388,7 +388,7 @@ class TelegramChannel:
         if reason is not None:
             # Argümanlar yazılmaz; yalnız araç adı ve neden denetlenir.
             self.audit.emit("approval_withheld", tool=tool_name, reason=reason)
-            self._notify(_PRIVATE_APPROVAL_NOTICE)
+            self._notify(t(_PRIVATE_APPROVAL_NOTICE))
             return False
         # Kapı, tur süresi dolduktan sonra onaylansa bile aracı çalıştırmaz; telefondaki
         # kullanıcıya "Onaylandı" deyip hiçbir şey yapmamak yerine bekleme turla sınırlanır.
@@ -400,28 +400,37 @@ class TelegramChannel:
             turn_remaining = turn_deadline - time.monotonic()
             # Yalnız turun kalan süresi sınanır; kısa ayarlanmış onay süresi soruyu engellemez.
             if turn_remaining <= 1:
-                self._notify(_TURN_EXPIRED_NOTICE)
+                self._notify(t(_TURN_EXPIRED_NOTICE))
                 return False
             wait_limit = min(wait_limit, turn_remaining)
         tool = runtime.registry.get(tool_name)
         label = (t(tool.label) if tool is not None and tool.label else "") or tool_name
         notice = format_approval_notice(runtime.gate.pending_notice)
-        text = (
-            f"Onay gerekiyor: {label}\nAraç: {tool_name}\n{notice}\n\n"
-            f"Argümanlar:\n{json.dumps(arguments, ensure_ascii=False, indent=2)}\n\n"
-            f"Bu onay {int(wait_limit)} sn içinde yanıtlanmazsa reddedilir.\n"
+        args_json = json.dumps(arguments, ensure_ascii=False, indent=2)
+        text = t(
+            "Onay gerekiyor: {label}\nAraç: {tool_name}\n{notice}\n\n"
+            "Argümanlar:\n{args_json}\n\n"
+            "Bu onay {seconds} sn içinde yanıtlanmazsa reddedilir.\n"
             "Varsayılan cevap hayırdır."
+        ).format(
+            label=label,
+            tool_name=tool_name,
+            notice=notice,
+            args_json=args_json,
+            seconds=int(wait_limit),
         )
         if len(text) > TELEGRAM_TEXT_LIMIT:
             # Argümanların bir kısmını gizleyen onay, onay değildir; sığmıyorsa reddedilir.
-            self._notify("Argümanlar tek mesaja sığmadığı için onay sorulmadı; işlem yapılmadı.")
+            self._notify(
+                t("Argümanlar tek mesaja sığmadığı için onay sorulmadı; işlem yapılmadı.")
+            )
             return False
         approval_id = secrets.token_hex(8)
         markup = {
             "inline_keyboard": [
                 [
-                    {"text": "Onayla", "callback_data": f"ok:{approval_id}"},
-                    {"text": "Reddet", "callback_data": f"no:{approval_id}"},
+                    {"text": t("Onayla"), "callback_data": f"ok:{approval_id}"},
+                    {"text": t("Reddet"), "callback_data": f"no:{approval_id}"},
                 ]
             ]
         }
@@ -434,11 +443,11 @@ class TelegramChannel:
         deadline = self.monotonic() + wait_limit
         while True:
             if self.stop_flag.is_set():
-                self._finish_approval(sent.message_id, text, _CLOSING_SUFFIX)
+                self._finish_approval(sent.message_id, text, "\n\n" + t(_CLOSING_SUFFIX))
                 return False
             remaining = deadline - self.monotonic()
             if remaining <= 0:
-                self._finish_approval(sent.message_id, text, _EXPIRED_SUFFIX)
+                self._finish_approval(sent.message_id, text, "\n\n" + t(_EXPIRED_SUFFIX))
                 return False
             # Uzun yoklama durdurma bayrağını geciktirmesin: her bekleme en çok birkaç sn.
             wait = max(0, min(self.poll_timeout, _APPROVAL_POLL_CAP, int(remaining)))
@@ -468,12 +477,12 @@ class TelegramChannel:
                 return None
             data = callback.get("data")
             if data not in (f"ok:{approval_id}", f"no:{approval_id}"):
-                self._answer(callback.get("id"), _STALE_CALLBACK_TEXT)
+                self._answer(callback.get("id"), t(_STALE_CALLBACK_TEXT))
                 return None
             approved = bool(data == f"ok:{approval_id}")
-            word = _APPROVED if approved else _DENIED
+            word = t(_APPROVED) if approved else t(_DENIED)
             self._answer(callback.get("id"), word)
-            self._finish_approval(message_id, text, f"\n\nKarar: {word}")
+            self._finish_approval(message_id, text, "\n\n" + t("Karar: {word}").format(word=word))
             return approved
         message = update.get("message")
         if isinstance(message, Mapping):
@@ -483,10 +492,10 @@ class TelegramChannel:
             elif rejection is None and _command(message) == "/dur":
                 # Onay beklerken durdurma: bekleyen adım reddedilir, oturum da durur.
                 self._stop_session()
-                self._finish_approval(message_id, text, "\n\nKarar: Durduruldu")
+                self._finish_approval(message_id, text, "\n\n" + t("Karar: Durduruldu"))
                 return False
             else:
-                self._notify("Önce bekleyen onayı yanıtlayın; bu mesaj çalıştırılmadı.")
+                self._notify(t("Önce bekleyen onayı yanıtlayın; bu mesaj çalıştırılmadı."))
         return None
 
     def _finish_approval(self, message_id: int, text: str, suffix: str) -> None:
@@ -507,7 +516,7 @@ class TelegramChannel:
 
     def _stop_session(self) -> None:
         host = self.computer_host
-        self._notify(_STOPPING if host is not None and host.stop_active() else _NO_SESSION)
+        self._notify(t(_STOPPING if host is not None and host.stop_active() else _NO_SESSION))
 
     def _peek_stop(self) -> list[int]:
         """Onaylamadan (offset ilerletmeden) bekleyen yetkili `/dur` güncellemelerinin kimlikleri.
@@ -557,7 +566,7 @@ class TelegramChannel:
         if isinstance(callback, Mapping):
             # Bekleyen onay yoksa düğme eskidir; yalnız izinli kullanıcıya cevap verilir.
             if _nested_id(callback, "from") == self.chat_id:
-                self._answer(callback.get("id"), _STALE_CALLBACK_TEXT)
+                self._answer(callback.get("id"), t(_STALE_CALLBACK_TEXT))
             else:
                 self._audit_unauthorized_callback(callback)
             return
@@ -571,7 +580,7 @@ class TelegramChannel:
         if rejection is not None:
             self._audit_rejected(message, rejection.reason)
             if rejection.reason in _REJECTION_NOTICES:
-                self._notify(_REJECTION_NOTICES[rejection.reason])
+                self._notify(t(_REJECTION_NOTICES[rejection.reason]))
             return
         kind = message_kind(message)
         if kind != "text":
@@ -581,15 +590,15 @@ class TelegramChannel:
         text = raw.strip() if isinstance(raw, str) else ""
         command = _command(message)
         if command in {"/start", "/yardim", "/yardım"}:
-            self._notify(_HELP_TEXT)
+            self._notify(t(_HELP_TEXT))
             return
         if runtime is None:
             return
         if command == "/yeni":
             if runtime.runner.reset_context():
-                self._notify("Yeni sohbet başladı.")
+                self._notify(t("Yeni sohbet başladı."))
             else:
-                self._notify("Aktif işlem sürerken sıfırlanamaz.")
+                self._notify(t("Aktif işlem sürerken sıfırlanamaz."))
             return
         if command == "/dur":
             self._stop_session()
@@ -639,22 +648,22 @@ class TelegramChannel:
         """Boyutu indirmeden ÖNCE sınar, okurken yine sınar. Hata/ret yanıtı burada verilir."""
         known = reported if isinstance(reported, int) and not isinstance(reported, bool) else None
         if not isinstance(file_id, str) or not file_id:
-            self._refuse_media(kind, known, "bad_message", _DOWNLOAD_FAILED)
+            self._refuse_media(kind, known, "bad_message", t(_DOWNLOAD_FAILED))
             return None
         if known is not None and known > limit:
-            self._refuse_media(kind, known, "too_large", _TOO_BIG)
+            self._refuse_media(kind, known, "too_large", t(_TOO_BIG))
             return None
         try:
             path, size = await asyncio.to_thread(self.client.get_file, file_id)
             if size is not None and size > limit:
-                self._refuse_media(kind, size, "too_large", _TOO_BIG)
+                self._refuse_media(kind, size, "too_large", t(_TOO_BIG))
                 return None
             return await asyncio.to_thread(self.client.download_file, path, limit)
         except TelegramError as error:
             if error.error_type == "TooLarge":
-                self._refuse_media(kind, None, "too_large", _TOO_BIG)
+                self._refuse_media(kind, None, "too_large", t(_TOO_BIG))
             else:
-                self._refuse_media(kind, known, "download_failed", _DOWNLOAD_FAILED)
+                self._refuse_media(kind, known, "download_failed", t(_DOWNLOAD_FAILED))
             return None
 
     async def _handle_media(self, kind: str, message: Mapping[str, Any]) -> None:
@@ -669,7 +678,7 @@ class TelegramChannel:
         }
         if not enabled[kind]:
             self._audit_rejected(message, f"{kind}_disabled")
-            self._notify(_MEDIA_OFF[kind])
+            self._notify(t(_MEDIA_OFF[kind]))
             return
         if kind == "voice":
             await self._handle_voice(runtime, message)
@@ -688,7 +697,7 @@ class TelegramChannel:
             and not isinstance(duration, bool)
             and duration > _VOICE_MAX_SECONDS
         ):
-            self._refuse_media("voice", None, "too_long", "Ses 60 saniyeden uzun; işlenmedi.")
+            self._refuse_media("voice", None, "too_long", t("Ses 60 saniyeden uzun; işlenmedi."))
             return
         data = await self._fetch(
             "voice", voice.get("file_id"), voice.get("file_size"), _VOICE_MAX_BYTES
@@ -701,11 +710,11 @@ class TelegramChannel:
         except ImportError:
             self._refuse_media(
                 "voice", len(data), "no_decoder",
-                "Bu kurulumda ses çözücü yok (voice ekini kurun); ses işlenmedi.",
+                t("Bu kurulumda ses çözücü yok (voice ekini kurun); ses işlenmedi."),
             )
             return
         except ValueError:
-            self._refuse_media("voice", len(data), "decode_failed", "Ses çözülemedi.")
+            self._refuse_media("voice", len(data), "decode_failed", t("Ses çözülemedi."))
             return
         try:
             if self._recognizer is None:
@@ -714,17 +723,17 @@ class TelegramChannel:
         except (OSError, RuntimeError, ValueError, ImportError):
             # İstisna metni sır/yol taşıyabilir; sabit ileti.
             self._refuse_media(
-                "voice", len(data), "stt_failed", "Ses yazıya çevrilemedi; komut çalıştırılmadı."
+                "voice", len(data), "stt_failed", t("Ses yazıya çevrilemedi; komut çalıştırılmadı.")
             )
             return
         if not transcript:
             self._refuse_media(
-                "voice", len(data), "empty", "Ses anlaşılamadı; komut çalıştırılmadı."
+                "voice", len(data), "empty", t("Ses anlaşılamadı; komut çalıştırılmadı.")
             )
             return
         transcript = transcript[:_TRANSCRIPT_LIMIT]
         self._audit_download("voice", len(data), "ok")
-        self._notify(f"Şunu duydum: {transcript}")
+        self._notify(t("Şunu duydum: {transcript}").format(transcript=transcript))
         # Yazıya çevrilen ses sıradan bir metin komutudur: onay yine yalnız düğmeyle, ve "/..."
         # kanal komutu sayılmaz (yalnız gerçek metin mesajında komut çözümlenir).
         await self._run_turn(runtime, transcript)
@@ -744,7 +753,7 @@ class TelegramChannel:
 
         candidates = [item for item in photos if small_enough(item)]
         if not candidates:
-            self._refuse_media("photo", None, "too_large", _TOO_BIG)
+            self._refuse_media("photo", None, "too_large", t(_TOO_BIG))
             return
         best = max(candidates, key=area)
         data = await self._fetch(
@@ -753,7 +762,7 @@ class TelegramChannel:
         if data is None:
             return
         if not data.startswith(b"\xff\xd8"):  # Telegram fotoğrafı her zaman JPEG'dir
-            self._refuse_media("photo", len(data), "not_image", "Fotoğraf okunamadı.")
+            self._refuse_media("photo", len(data), "not_image", t("Fotoğraf okunamadı."))
             return
         # OCR yol ister: geçici dosya HER yolda silinir (başarı, hata, iptal).
         handle, name = tempfile.mkstemp(prefix="artemis-tg-", suffix=".jpg")
@@ -767,7 +776,7 @@ class TelegramChannel:
                     timeout=runtime.context.settings.perception.timeout_seconds,
                 )
             except OSError:
-                self._refuse_media("photo", len(data), "error", "Fotoğraf işlenemedi.")
+                self._refuse_media("photo", len(data), "error", t("Fotoğraf işlenemedi."))
                 return
         finally:
             with contextlib.suppress(OSError):
@@ -802,10 +811,12 @@ class TelegramChannel:
         config = runtime.context.settings.telegram
         name = sanitize_filename(document.get("file_name"))
         if name is None:
-            self._refuse_media("document", None, "bad_name", "Dosya adı kabul edilmedi.")
+            self._refuse_media("document", None, "bad_name", t("Dosya adı kabul edilmedi."))
             return
         if not extension_allowed(name, config.file_extensions):
-            self._refuse_media("document", None, "bad_extension", "Bu dosya türü kabul edilmiyor.")
+            self._refuse_media(
+                "document", None, "bad_extension", t("Bu dosya türü kabul edilmiyor.")
+            )
             return
         data = await self._fetch(
             "document", document.get("file_id"), document.get("file_size"), _FILE_MAX_BYTES
@@ -815,11 +826,11 @@ class TelegramChannel:
         try:
             saved = save_document(runtime.context.workspace, name, data)
         except (ValueError, OSError):
-            self._refuse_media("document", len(data), "save_failed", "Dosya kaydedilemedi.")
+            self._refuse_media("document", len(data), "save_failed", t("Dosya kaydedilemedi."))
             return
         self._audit_download("document", len(data), "ok")
         # Başlık (caption) bilerek komut sayılmaz (ADR 0064): dosya + talimat ayrı bir adımdır.
-        self._notify(f"Kaydedildi: {saved}")
+        self._notify(t("Kaydedildi: {saved}").format(saved=saved))
 
     def _status_footer(self, record: TurnRecord) -> str:
         """Yan etkili araçların gerçek sonucunu modelin anlatısından bağımsız bildirir.
@@ -845,8 +856,12 @@ class TelegramChannel:
             if tool is not None and normalize_risk(tool.risk) is Risk.READ_ONLY:
                 continue
             # Kayıtsız ad modelin ürettiği denetimsiz dizedir; Telegram'a yazılmaz.
-            label = (tool.label or name) if tool is not None else "bilinmeyen araç"
-            labels = groups.setdefault(_FOOTER_TITLES[step.result.status], [])
+            label = (
+                (t(tool.label) if tool.label else name)
+                if tool is not None
+                else t("bilinmeyen araç")
+            )
+            labels = groups.setdefault(t(_FOOTER_TITLES[step.result.status]), [])
             if label not in labels:
                 labels.append(label)
         if not groups:
@@ -856,11 +871,13 @@ class TelegramChannel:
 
     def _reply(self, result: Any, withheld: str = _PRIVATE_WITHHELD) -> None:
         if result.record is None:
-            self._notify(f"Tur tamamlanmadı ({result.stop_reason}).")
+            self._notify(
+                t("Tur tamamlanmadı ({stop_reason}).").format(stop_reason=result.stop_reason)
+            )
         elif result.record.answer_private:
-            self._notify(withheld)
+            self._notify(t(withheld))
         else:
-            body = (result.text or "(boş yanıt)") + self._status_footer(result.record)
+            body = (result.text or t("(boş yanıt)")) + self._status_footer(result.record)
             for chunk in split_text(body):
                 try:
                     self.client.send_message(self.chat_id, chunk, kind="reply")
@@ -1011,20 +1028,25 @@ async def serve_telegram(
     settings = load_settings(config_path)
     config = settings.telegram
     if config.chat_id is None:
-        say("Telegram kapalı: config içinde telegram.chat_id tanımlayın.", STATUS_ERROR)
+        say(
+            t("Telegram kapalı: config içinde telegram.chat_id tanımlayın."),
+            STATUS_ERROR,
+        )
         return 2
     audit = AuditLog(settings.audit_path)
     client = build_telegram_client(settings, audit)
     if client is None:
         say(
-            f"Telegram token'ı bulunamadı: {config.token_env} ortam değişkenini ayarlayın.",
+            t("Telegram token'ı bulunamadı: {token_env} ortam değişkenini ayarlayın.").format(
+                token_env=config.token_env
+            ),
             f"{STATUS_ERROR} (token yok)",
         )
         return 2
     if not settings.primary_model and runtime_factory is None:
         client.close()
         say(
-            "Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın.",
+            t("Config içinde resmi katalogdan doğrulanmış bir primary_model tanımlayın."),
             f"{STATUS_ERROR} (model yok)",
         )
         return 2
@@ -1059,17 +1081,19 @@ async def serve_telegram(
         runtime.context.services["telegram_client"] = client
         try:
             channel.skip_backlog()
-            client.send_message(config.chat_id, _NOTICE_TEXT, kind="notice")
+            client.send_message(config.chat_id, t(_NOTICE_TEXT), kind="notice")
         except TelegramError as error:
             if embedded and error.error_type == CONFLICT_ERROR:
                 status(STATUS_CONFLICT)
             else:
                 say(
-                    f"Telegram'a bağlanılamadı ({error.error_type}).",
+                    t("Telegram'a bağlanılamadı ({error_type}).").format(
+                        error_type=error.error_type
+                    ),
                     f"{STATUS_ERROR} ({error.error_type})",
                 )
             return 1
-        say("Artemis Telegram kanalı açık. Durdurmak için Ctrl+C.", STATUS_RUNNING)
+        say(t("Artemis Telegram kanalı açık. Durdurmak için Ctrl+C."), STATUS_RUNNING)
         # Gömülü kipte masaüstünün kendi zamanlayıcısı vardır; ikincisi çift teslim riskidir.
         proactive = None if embedded else _start_proactive(runtime, client, stop)
         try:

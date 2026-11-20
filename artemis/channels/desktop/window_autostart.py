@@ -10,6 +10,8 @@ from typing import TYPE_CHECKING
 
 from PySide6.QtWidgets import QSystemTrayIcon
 
+from artemis.i18n import t
+
 if TYPE_CHECKING:
     from artemis.channels.desktop.app import DesktopWindow
 
@@ -22,7 +24,7 @@ def autostart_state(window: DesktopWindow) -> str:
 def toggle_autostart(window: DesktopWindow, enabled: bool) -> None:
     autostart = window._autostart()
     if autostart is None:
-        message, success = "Ayarlar okunamadı; açılış kaydı değiştirilmedi.", False
+        message, success = t("Ayarlar okunamadı; açılış kaydı değiştirilmedi."), False
     else:
         result = autostart.enable() if enabled else autostart.disable()
         message, success = result.message, result.success

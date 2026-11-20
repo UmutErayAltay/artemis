@@ -225,7 +225,9 @@ class DesktopWindow(QMainWindow):
                     path, approve, settings=settings,
                     provider=provider, registry=registry, audit=audit,
                 )
-                runtime.context.services["demo_records"] = {"sample": "Demo kitaplığı: örnek metin"}
+                runtime.context.services["demo_records"] = {
+                    "sample": t("Demo kitaplığı: örnek metin")
+                }
                 return runtime
 
             self._runtime_factory = factory
@@ -1257,10 +1259,10 @@ def run_desktop(
         server = claim_instance(instance_name(_instance_key(config_path)), show=not background)
         if server is None:
             if not background:
-                print("Artemis zaten açık; panel öne getirildi.")
+                print(t("Artemis zaten açık; panel öne getirildi."))
             return 0
         if not server.is_listening():
-            print("Uyarı: tek örnek koruması kurulamadı; ikinci Artemis açılırsa çakışabilir.")
+            print(t("Uyarı: tek örnek koruması kurulamadı; ikinci Artemis açılırsa çakışabilir."))
     app.setApplicationName("Artemis")
     app.setWindowIcon(app_icon())
     app.setFont(QFont("Segoe UI", 10))
