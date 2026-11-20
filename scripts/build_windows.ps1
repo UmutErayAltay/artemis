@@ -13,6 +13,17 @@ if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller kurulumu başarısız oldu."
 }
 
+# Uygulama sürümü kurulu paket meta verisinden okunur (update_check.current_version).
+# Yeniden kaydedilmezse eski sürüm pakete girer ve kurulan uygulama hep "güncelleme var" der.
+uv pip install --python .venv\Scripts\python.exe --no-deps -e .
+if ($LASTEXITCODE -ne 0) {
+    throw "Artemis paket kaydı yenilenemedi."
+}
+$installed = & .venv\Scripts\python.exe -c "import importlib.metadata as m; print(m.version('artemis-tr'))"
+if ($installed.Trim() -ne $version) {
+    throw "Kurulu paket sürümü ($installed) pyproject sürümüyle ($version) aynı değil."
+}
+
 .venv\Scripts\python.exe -m PyInstaller packaging\artemis.spec --noconfirm --clean --distpath dist --workpath build\pyinstaller
 if ($LASTEXITCODE -ne 0) {
     throw "PyInstaller derlemesi başarısız oldu."
