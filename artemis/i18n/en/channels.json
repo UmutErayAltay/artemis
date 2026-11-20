@@ -61,7 +61,7 @@
   "Onay verilmedi; tur iptal ediliyor.": "Approval not granted; cancelling turn.",
   "Onayla": "Approve",
   "Onaylandı": "Approved",
-  "Onaylıyor musunuz? [evet/Hayır]: ": "Do you approve? [evet/No]: ",
+  "Onaylıyor musunuz? [evet/Hayır]: ": "Do you approve? [yes/No]: ",
   "Reddet": "Deny",
   "Ses 60 saniyeden uzun; işlenmedi.": "Voice message is longer than 60 seconds; not processed.",
   "Ses anlaşılamadı; komut çalıştırılmadı.": "Could not understand voice message; command was not executed.",
