@@ -84,25 +84,32 @@ def _ensure_app() -> Any:
 def test_cli_approval_prompt_and_evet_acceptance(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """CLI onay istemi EN/TR çevrilir; onay sözcüğü her iki dilde de `evet` kalır."""
+    """CLI onay istemi çevrilir; EN: "yes" ve "evet" onaylar, TR: yalnız "evet"."""
     prompts: list[str] = []
-    answers = iter(["evet", "yes", "evet"])
+    answers = iter(["yes", " YES ", "evet", "y", "", "no", "evet", "yes", "Evet"])
     monkeypatch.setattr("builtins.input", lambda prompt: prompts.append(prompt) or next(answers))
 
     set_language("en")
     assert cli.request_approval("write_file", {"path": "a.txt"}) is True
     out_en = capsys.readouterr().out
     assert "Approval requested: write_file" in out_en
-    assert prompts[-1] == "Do you approve? [evet/No]: "
-    # İngilizcede "yes" yazmak onay sayılmaz; sözleşme yalnız "evet" kabul eder.
-    assert cli.request_approval("write_file", {"path": "a.txt"}) is False
+    assert prompts[-1] == "Do you approve? [yes/No]: "
+    assert cli.request_approval("write_file", {"path": "a.txt"}) is True  # " YES "
+    assert cli.request_approval("write_file", {"path": "a.txt"}) is True  # evet
+    # Kısaltma, boş ve "no" onay değildir; varsayılan hayır.
+    assert cli.request_approval("write_file", {"path": "a.txt"}) is False  # y
+    assert cli.request_approval("write_file", {"path": "a.txt"}) is False  # boş
+    assert cli.request_approval("write_file", {"path": "a.txt"}) is False  # no
     capsys.readouterr()
 
     set_language("tr")
-    assert cli.request_approval("write_file", {"path": "a.txt"}) is True
+    assert cli.request_approval("write_file", {"path": "a.txt"}) is True  # evet
     out_tr = capsys.readouterr().out
     assert "Onay isteniyor: write_file" in out_tr
     assert prompts[-1] == "Onaylıyor musunuz? [evet/Hayır]: "
+    # Türkçe arayüzde "yes" onay sayılmaz.
+    assert cli.request_approval("write_file", {"path": "a.txt"}) is False  # yes
+    assert cli.request_approval("write_file", {"path": "a.txt"}) is True  # Evet
 
 
 def test_cli_main_applies_config_language_before_commands(
