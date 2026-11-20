@@ -20,7 +20,7 @@ from artemis.channels.notice import format_approval_notice
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.paths import default_config_path, ensure_config
 from artemis.config.settings import load_settings
-from artemis.i18n import set_language, t
+from artemis.i18n import current_language, set_language, t
 from artemis.safety.audit import AuditLog
 from artemis.tools.registry import discover_tools
 
@@ -52,7 +52,10 @@ def request_approval(
         if on_interrupt is not None:
             on_interrupt()
         return False
-    return answer.strip().casefold() == "evet"
+    # Onay sözcüğü: Türkçede yalnız "evet"; İngilizce arayüzde "yes" de (Umut, 2026-11-20).
+    # Boş, başka bir sözcük ya da "y" gibi kısaltma her dilde hayırdır.
+    accepted = {"evet", "yes"} if current_language() == "en" else {"evet"}
+    return answer.strip().casefold() in accepted
 
 
 async def chat(config_path: Path) -> None:
