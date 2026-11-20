@@ -14,6 +14,10 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 
 import pytest
+
+# Masaüstü modülleri PySide6 ister; Qt'siz CI işinde dosya atlanır (desktop-ui işi koşar).
+pytest.importorskip("PySide6")
+
 import yaml
 from telegram_fake import CHAT_ID, FAKE_TOKEN, build_harness, method_bodies, sent_bodies
 from test_telegram import (
