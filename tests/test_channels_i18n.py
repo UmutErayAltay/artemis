@@ -278,7 +278,7 @@ def test_telegram_section_displays_translated_statuses(
     [
         ("deep", "derin düşünme istendi", "deep thinking requested"),
         ("multi_step", "çok adımlı istek", "multi-step request"),
-        ("code_job", "kod işi taslağı", "code job spec"),
+        ("code_job", "kod işi taslağı", "code job draft"),
     ],
 )
 def test_steps_model_choice_translates_reasons(
