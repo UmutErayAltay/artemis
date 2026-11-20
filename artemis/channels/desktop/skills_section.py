@@ -62,6 +62,7 @@ class SkillsSection(QWidget):
             self.valid_list, t("Henüz beceri yok"), "", t("Yeni beceri…"),
         )
         if self.valid_area.empty.action_button is not None:
+            self.valid_area.empty.action_button.setObjectName("primary")
             self.valid_area.empty.action_button.setEnabled(not demo)
             self.valid_area.empty.action_button.clicked.connect(self._new_skill)
         valid.addWidget(self.valid_area)
@@ -163,6 +164,9 @@ class SkillsSection(QWidget):
                     self.invalid_area.show_empty(t("Geçersiz dosya yok"))
         enabled = self._settings is not None and self._settings.skills.enabled
         self.open_button.setEnabled(enabled and not self._demo)
+        # Boş-etkin durumda tek birincil eylem boş durumdaki düğmedir; üstteki yalnız liste
+        # doluyken ya da özellik kapalıyken görünür (UX-09).
+        self.new_button.setVisible(not enabled or bool(self.valid_list.count()))
         self.new_button.setEnabled(enabled and not self._demo)
         self._selection_changed()
         self.choose_button.setEnabled(self._settings is not None and not self._demo)

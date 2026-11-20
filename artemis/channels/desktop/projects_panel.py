@@ -865,6 +865,9 @@ class ProjectsPanel(QWidget):
         prepare_reason = self._prepare_block()
         self.prepare_button.setEnabled(not prepare_reason)
         self.prepare_reason.setText("" if self._demo else prepare_reason)
+        self.prepare_button.setToolTip(
+            t("Demo modunda kapalı.") if self._demo else prepare_reason
+        )
         self.refresh_button.setEnabled(enabled)
         selected = self._selected()
         kind, record = selected if selected else ("", {})
@@ -889,6 +892,9 @@ class ProjectsPanel(QWidget):
         else:
             start_reason = ""
         self.start_reason.setText(start_reason)
+        self.start_button.setToolTip(
+            t("Demo modunda kapalı.") if self._demo else start_reason
+        )
         self._set_prepare_primary(kind != "draft")
         self.question_box.setVisible(record.get("status") == "waiting")
         self.answer_button.setEnabled(enabled and record.get("status") == "waiting")

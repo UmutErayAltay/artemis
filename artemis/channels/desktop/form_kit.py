@@ -189,20 +189,31 @@ class _FlowRow(QLayout):
         super().setGeometry(arg__1)
         self._arrange(arg__1, apply=True)
 
+    def _visible_items(self) -> list[Any]:
+        """Gizli (`.isHidden()`) çocukları dışlar; üst widget gösterilmeden `isVisible()` False
+        kaldığı için özellikle `not widget.isHidden()` denetlenir."""
+        visible: list[Any] = []
+        for item in self._items:
+            widget = item.widget()
+            if widget is not None and widget.isHidden():
+                continue
+            visible.append(item)
+        return visible
+
     def sizeHint(self) -> QSize:
-        hints = [item.sizeHint() for item in self._items]
+        hints = [item.sizeHint() for item in self._visible_items()]
         width = sum(h.width() for h in hints) + self._gap * max(0, len(hints) - 1)
         return QSize(width, max((h.height() for h in hints), default=0))
 
     def minimumSize(self) -> QSize:
-        sizes = [item.minimumSize() for item in self._items]
+        sizes = [item.minimumSize() for item in self._visible_items()]
         return QSize(max((s.width() for s in sizes), default=0),
                      max((s.height() for s in sizes), default=0))
 
     def _arrange(self, rect: QRect, *, apply: bool) -> int:
         lines: list[list[Any]] = [[]]
         used = 0
-        for item in self._items:
+        for item in self._visible_items():
             width = item.sizeHint().width()
             if lines[-1] and used + self._gap + width > rect.width():
                 lines.append([])

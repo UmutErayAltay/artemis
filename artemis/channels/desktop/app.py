@@ -595,8 +595,9 @@ class DesktopWindow(QMainWindow):
 
     def _open_settings_section(self, name: str) -> None:
         names = self.settings_panel.section_names()
-        if name in names:
-            self.settings_panel.show_section(names.index(name))
+        target = t(name) if t(name) in names else name
+        if target in names:
+            self.settings_panel.show_section(names.index(target))
         self.tabs.setCurrentWidget(self.settings_scroll)
 
     def _sync_navigation(self, *_args: object) -> None:
