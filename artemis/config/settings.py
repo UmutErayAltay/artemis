@@ -830,7 +830,7 @@ class TriggersConfig(BaseModel):
 
 
 class CalendarConfig(BaseModel):
-    """Takvim, salt okunur (ADR 0059). ICS adresi sırdır: ortam/kasa, YAML'a yazılmaz."""
+    """Takvim (ADR 0059, 0084). ICS adresi ve CalDAV parolası YAML'a yazılmaz."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -838,10 +838,22 @@ class CalendarConfig(BaseModel):
     lookahead_days: int = Field(default=7, ge=1, le=60)
     # Takvim içeriği kişiseldir: bu açılmadıkça bulut modele ve Telegram'a gitmez.
     allow_cloud: bool = False
+    # İki yönlü yazma (ADR 0084): kapalı gelir; açıkken bile her etkinlik onay ister.
+    allow_write: bool = False
+    caldav_url: str = Field(default="", max_length=500)
+    caldav_username: str = Field(default="", max_length=255)
+
+    @field_validator("caldav_url")
+    @classmethod
+    def validate_caldav_url(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            return ""
+        return _validate_base_url(stripped)
 
 
 class MailConfig(BaseModel):
-    """Posta, salt okunur IMAP/TLS (ADR 0059). Parola sırdır: ortam/kasa, YAML'a yazılmaz."""
+    """Posta (ADR 0059, 0084): IMAP okuma + isteğe bağlı onaylı SMTP gönderimi."""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -852,6 +864,11 @@ class MailConfig(BaseModel):
     folder: str = Field(default="INBOX", min_length=1, max_length=100)
     max_messages: int = Field(default=10, ge=1, le=50)
     allow_cloud: bool = False
+    # İki yönlü gönderme (ADR 0084): kapalı gelir; açıkken bile her gönderim onay ister.
+    allow_send: bool = False
+    smtp_host: str = Field(default="", max_length=255, pattern=r"^[A-Za-z0-9.-]*$")
+    smtp_port: int = Field(default=465, ge=1, le=65535)
+    smtp_username: str = Field(default="", max_length=255)
 
 
 class SkillsConfig(BaseModel):

@@ -400,8 +400,10 @@ def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     if isinstance(widget, QLineEdit):
         name = widget.accessibleName()
         # Kısayol alanları birbirinden farklı olmalı (config çakışmayı reddeder).
-        if name == "IMAP portu":
+        if name in {"IMAP portu", "SMTP portu"}:
             widget.setText("587")
+        elif name == "CalDAV adresi":
+            widget.setText("https://caldav.example.com/calendars/user/default")
         elif name == "Özet saati":
             widget.setText("07:15")
         elif "Bas-konuş" in name:

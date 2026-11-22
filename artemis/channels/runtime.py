@@ -112,10 +112,20 @@ def create_runtime(
             "calendar_",
             t("Takvim kapalı: config içinde calendar.enabled: true gerekir."),
         )
+    elif not loaded.calendar.allow_write:
+        tools = tools.without_prefix(  # ADR 0084
+            "calendar_create_event",
+            t("Takvim yazma kapalı: config içinde calendar.allow_write: true gerekir."),
+        )
     if not loaded.mail.enabled:
         tools = tools.without_prefix(
             "mail_",
             t("Posta kapalı: config içinde mail.enabled: true gerekir."),
+        )
+    elif not loaded.mail.allow_send:
+        tools = tools.without_prefix(  # ADR 0084
+            "mail_send",
+            t("E-posta gönderme kapalı: config içinde mail.allow_send: true gerekir."),
         )
     if not loaded.skills.enabled:
         tools = tools.without_prefix(  # ADR 0060

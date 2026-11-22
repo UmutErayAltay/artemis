@@ -327,6 +327,33 @@ def _build_calendar_mail_tab(panel: SettingsPanel, tabs: QTabWidget) -> None:
     )
     panel.calendar_enabled.toggled.connect(panel.calendar_cloud.setEnabled)
     panel.calendar_cloud.setEnabled(panel.calendar_enabled.isChecked())
+    panel.calendar_allow_write = QCheckBox(t("Takvim etkinliği oluşturmaya izin ver"))
+    panel.calendar_allow_write.setToolTip(
+        t(
+            "Kapalıyken Artemis takviminize etkinlik yazamaz. Açıkken bile her etkinlik "
+            "onay penceresiyle sorulur."
+        )
+    )
+    takvim.addLayout(_indent(panel.calendar_allow_write))
+    takvim.addWidget(
+        _check_hint(
+            t(
+                "Kapalıyken yalnız takvim okunur. Açıkken yeni etkinlikler her seferinde "
+                "ayrıntılı önizlemeyle onay ister."
+            )
+        )
+    )
+    panel.calendar_enabled.toggled.connect(panel.calendar_allow_write.setEnabled)
+    panel.calendar_allow_write.setEnabled(panel.calendar_enabled.isChecked())
+    panel.calendar_caldav_url = QLineEdit()
+    panel.calendar_caldav_url.setAccessibleName(t("CalDAV adresi"))
+    panel.calendar_caldav_url.setPlaceholderText("https://caldav.example.com/calendars/user/default/")
+    panel.calendar_caldav_url.textEdited.connect(panel._mark_dirty)
+    field(takvim, t("CalDAV adresi"), panel.calendar_caldav_url)
+    panel.calendar_caldav_username = QLineEdit()
+    panel.calendar_caldav_username.setAccessibleName(t("CalDAV kullanıcı adı"))
+    panel.calendar_caldav_username.textEdited.connect(panel._mark_dirty)
+    field(takvim, t("CalDAV kullanıcı adı"), panel.calendar_caldav_username)
     posta_box, posta = group(t("Posta"))
     cal_tab.addWidget(posta_box)
     panel.mail_enabled = QCheckBox(t("Postayı kullan"))
@@ -343,11 +370,22 @@ def _build_calendar_mail_tab(panel: SettingsPanel, tabs: QTabWidget) -> None:
     )
     panel.mail_enabled.toggled.connect(panel.mail_cloud.setEnabled)
     panel.mail_cloud.setEnabled(panel.mail_enabled.isChecked())
+    panel.mail_allow_send = QCheckBox(t("E-posta göndermeye izin ver"))
+    panel.mail_allow_send.setToolTip(
+        t(
+            "Kapalıyken Artemis e-posta gönderemez. Açıkken bile her gönderim tam "
+            "gövdesiyle onay penceresinde sorulur."
+        )
+    )
+    posta.addLayout(_indent(panel.mail_allow_send))
+    panel.mail_enabled.toggled.connect(panel.mail_allow_send.setEnabled)
+    panel.mail_allow_send.setEnabled(panel.mail_enabled.isChecked())
     posta.addWidget(
         _check_hint(
             t(
                 "Kapalıyken içerik yalnız yerel modele gider. Posta okundu işaretlenmez, hiçbir "
-                "ileti silinmez ya da taşınmaz. Eki indirilmez."
+                "ileti silinmez ya da taşınmaz. Eki indirilmez. Gönderme yalnız açıkken ve "
+                "onayla çalışır."
             )
         )
     )
@@ -364,6 +402,19 @@ def _build_calendar_mail_tab(panel: SettingsPanel, tabs: QTabWidget) -> None:
     panel.mail_folder = QLineEdit()
     panel.mail_folder.setAccessibleName(t("Posta klasörü"))
     field(posta, t("Klasör"), panel.mail_folder)
+    panel.mail_smtp_host = QLineEdit()
+    panel.mail_smtp_host.setAccessibleName(t("SMTP sunucusu"))
+    panel.mail_smtp_host.setPlaceholderText("smtp.gmail.com")
+    panel.mail_smtp_host.textEdited.connect(panel._mark_dirty)
+    field(posta, t("SMTP sunucusu"), panel.mail_smtp_host)
+    panel.mail_smtp_port = QLineEdit()
+    panel.mail_smtp_port.setAccessibleName(t("SMTP portu"))
+    panel.mail_smtp_port.textEdited.connect(panel._mark_dirty)
+    field(posta, t("SMTP portu"), panel.mail_smtp_port)
+    panel.mail_smtp_username = QLineEdit()
+    panel.mail_smtp_username.setAccessibleName(t("SMTP kullanıcı adı"))
+    panel.mail_smtp_username.textEdited.connect(panel._mark_dirty)
+    field(posta, t("SMTP kullanıcı adı"), panel.mail_smtp_username)
     panel.calendar_mail = CalendarMailSection(
         panel.config_path, demo=panel._demo, calendar=takvim, mail=posta
     )

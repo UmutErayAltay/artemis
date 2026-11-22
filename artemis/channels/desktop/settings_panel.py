@@ -11,21 +11,18 @@ from PySide6.QtCore import (
     QFileSystemWatcher,
     QObject,
     QSettings,
-    QSize,
     Qt,
     QThread,
     QTimer,
     Signal,
 )
-from PySide6.QtGui import QCloseEvent, QColor, QFont
+from PySide6.QtGui import QCloseEvent, QColor
 from PySide6.QtWidgets import (
-    QAbstractButton,
     QCheckBox,
     QComboBox,
     QDialog,
     QFileDialog,
     QGridLayout,
-    QGroupBox,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -33,7 +30,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSpinBox,
-    QTabBar,
     QTabWidget,
     QToolButton,
     QWidget,
@@ -42,6 +38,7 @@ from PySide6.QtWidgets import (
 from artemis.channels.desktop import (
     mic_wizard,
     security_settings_section,
+    settings_nav,
     voice_preview,
     voice_settings_section,
 )
@@ -68,6 +65,9 @@ from artemis.channels.desktop.settings_io import (
 )
 from artemis.channels.desktop.settings_io import save_choices as save_choices
 from artemis.channels.desktop.settings_io import save_computer_mode as save_computer_mode
+from artemis.channels.desktop.settings_nav import (
+    _GROUP_TARGET_ROLE as _GROUP_TARGET_ROLE,
+)
 from artemis.channels.desktop.settings_pages import (
     build_look_page,
     build_model_page,
@@ -84,11 +84,12 @@ from artemis.channels.desktop.settings_pages_extra import (
     build_knowledge_page,
 )
 from artemis.channels.desktop.settings_widgets import (
-    _DIRTY_A11Y,
-    _DIRTY_ROLE,
-    _GROUP_ROLE,
-    _HEADER_HEIGHT,
-    _ITEM_HEIGHT,
+    _DIRTY_ROLE as _DIRTY_ROLE,
+)
+from artemis.channels.desktop.settings_widgets import (
+    _GROUP_ROLE as _GROUP_ROLE,
+)
+from artemis.channels.desktop.settings_widgets import (
     _fold,
     _install_wheel_guard,
     _Notice,
@@ -126,7 +127,6 @@ _BLOCK_MAX_WIDTH = PAGE_MAX_WIDTH  # liste + sayfa bloğu; geniş pencerede orta
 # 1000 iken varsayılan 1180px pencere (panel 956) bile seçiciye düşüyordu; 760'ta sayfa sütunu
 # ~500px kalır ve hiçbir sayfa taşmaz (2026-11-15 ölçüm).
 _COMPACT_PANEL_WIDTH = 760
-_GROUP_TARGET_ROLE = Qt.ItemDataRole.UserRole + 2  # seçicide grup başlığı -> ilk sayfa satırı
 
 
 GitHubSyncFunction = Callable[[str, Path, Runner, Callable[[], bool]], SyncReport]
@@ -371,12 +371,19 @@ class SettingsPanel(QWidget):
     telegram_files: QCheckBox
     calendar_enabled: QCheckBox
     calendar_cloud: QCheckBox
+    calendar_allow_write: QCheckBox
+    calendar_caldav_url: QLineEdit
+    calendar_caldav_username: QLineEdit
     mail_enabled: QCheckBox
     mail_cloud: QCheckBox
+    mail_allow_send: QCheckBox
     mail_host: QLineEdit
     mail_port: QLineEdit
     mail_username: QLineEdit
     mail_folder: QLineEdit
+    mail_smtp_host: QLineEdit
+    mail_smtp_port: QLineEdit
+    mail_smtp_username: QLineEdit
     calendar_mail: CalendarMailSection
     github_owner: QLineEdit
     repos_dir: QLineEdit
@@ -580,92 +587,28 @@ class SettingsPanel(QWidget):
         return True
 
     def _build_section_combo(self) -> None:
-        """Bölüm listesinin açılır kopyası: sayfa satırı veri=satır. Grup başlığı kalın görünür;
-        tıklanınca ölü kalmaz, grubun ilk sayfasına gider (Umut 2026-11-15: "bir şey olmuyor")."""
-        bold = QFont(self.section_combo.font())
-        bold.setBold(True)
-        for row, (group_name, first) in enumerate(self._row_groups):
-            if first:
-                self.section_combo.addItem(group_name)
-                index = self.section_combo.count() - 1
-                self.section_combo.setItemData(index, row, _GROUP_TARGET_ROLE)
-                self.section_combo.setItemData(index, bold, Qt.ItemDataRole.FontRole)
-            self.section_combo.addItem(self.sections.item(row).text(), row)
+        settings_nav.build_section_combo(self)
 
     def _combo_picked(self, index: int) -> None:
-        row = self.section_combo.itemData(index)
-        if not isinstance(row, int):
-            row = self.section_combo.itemData(index, _GROUP_TARGET_ROLE)
-        if isinstance(row, int):
-            self.sections.setCurrentRow(row)
-            self._sync_combo(row)  # başlık seçildiyse kutuda sayfa adı görünsün
+        settings_nav.combo_picked(self, index)
 
     def _sync_combo(self, row: int) -> None:
-        self.section_combo.setCurrentIndex(self.section_combo.findData(row))
+        settings_nav.sync_combo(self, row)
 
     def _set_compact(self, compact: bool) -> None:
-        """Dar panelde liste ve arama gizlenir, yerine "Bölüm" seçici gelir; arama süzgeci
-        temizlenir ki gizli kutu görünmeyen bir süzgeci sürdürmesin."""
-        if compact == self._compact:
-            return
-        self._compact = compact
-        if compact:
-            self.search.clear()
-        self.nav.setVisible(not compact)
-        self.section_combo.setVisible(compact)
+        settings_nav.set_compact(self, compact)
 
     def _page_text(self, row: int) -> str:
-        """Sayfada görünen metinler: başlık, alt sekmeler, etiketler, kutu ve grup adları."""
-        page = self.stack.widget(row)
-        assert page is not None
-        parts = [self.sections.item(row).text()]
-        for bar in page.findChildren(QTabBar):
-            parts.extend(bar.tabText(i) for i in range(bar.count()))
-        parts += [label.text() for label in page.findChildren(QLabel)]
-        parts += [button.text() for button in page.findChildren(QAbstractButton)]
-        parts += [box.title() for box in page.findChildren(QGroupBox)]
-        return _fold("\n".join(parts))
+        return settings_nav.page_text(self, row)
 
     def _filter_sections(self, text: str) -> None:
-        needle = _fold(text.strip())
-        shown = [
-            row for row in range(self.sections.count())
-            if not needle or needle in self._page_text(row)
-        ]
-        seen: set[str] = set()
-        for row in range(self.sections.count()):
-            item = self.sections.item(row)
-            item.setHidden(row not in shown)
-            group = self._row_groups[row][0]
-            header = row in shown and group not in seen  # boş grubun başlığı da gizlenir
-            if row in shown:
-                seen.add(group)
-            item.setData(_GROUP_ROLE, group if header else None)
-            item.setSizeHint(QSize(0, _ITEM_HEIGHT + (_HEADER_HEIGHT if header else 0)))
-        self.no_results.setVisible(bool(needle) and not shown)
-        if shown and self.sections.currentRow() not in shown:
-            self.sections.setCurrentRow(shown[0])
-        if needle and len(shown) == 1:
-            self.sections.setCurrentRow(shown[0])
+        settings_nav.filter_sections(self, text)
 
     def _pick_first_match(self) -> None:
-        for row in range(self.sections.count()):
-            if not self.sections.item(row).isHidden():
-                self.sections.setCurrentRow(row)
-                return
+        settings_nav.pick_first_match(self)
 
     def _refresh_dirty_dots(self) -> None:
-        for row in range(self.sections.count()):
-            item = self.sections.item(row)
-            dirty = row in self._dirty_rows
-            item.setData(_DIRTY_ROLE, dirty)
-            spoken = f"{item.text()}, {self._row_groups[row][0]}"
-            item.setData(
-                Qt.ItemDataRole.AccessibleTextRole,
-                spoken + (f", {t(_DIRTY_A11Y)}" if dirty else ""),
-            )
-            item.setToolTip(t(_DIRTY_A11Y) if dirty else "")
-        self.sections.viewport().update()
+        settings_nav.refresh_dirty_dots(self)
 
     def _on_section(self, row: int) -> None:
         if row < 0:

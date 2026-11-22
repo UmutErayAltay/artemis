@@ -258,15 +258,21 @@ memory:
 #       prompt: >-
 #         Bekleyen hatırlatmalarımı ve kod ajanı işlerinin durumunu kısaca özetle.
 
-# Takvim ve posta, salt okunur (ADR 0059). KAPALI gelir. Takvim: Google/Outlook'un gizli ICS adresi
-# (https zorunlu). Posta: IMAP/TLS (Gmail için uygulama parolası). Adres ve parola YAML'a YAZILMAZ:
-# Ayarlar > Bağlantılar > Takvim ve posta (kimlik kasası) ya da ARTEMIS_CALENDAR_ICS_TOKEN / ARTEMIS_MAIL_PASSWORD
-# ortam değişkeni. Posta okundu işaretlenmez, silinmez, eki indirilmez. İçerik kişiseldir: allow_cloud
-# false iken bulut modele ve Telegram'a gitmez (yalnız yerel model görür).
+# Takvim ve posta (ADR 0059 okuma, ADR 0084 onaylı yazma). KAPALI gelir.
+# Takvim okuma: Google/Outlook'un gizli ICS adresi (https zorunlu). Takvim yazma (CalDAV):
+# allow_write: true ve caldav_url (https) gerekir; parola ARTEMIS_CALENDAR_CALDAV_PASSWORD ya da
+# kimlik kasasındadır. Posta okuma: IMAP/TLS. Gönderme (SMTP): allow_send: true, smtp_host,
+# smtp_port (465 SSL veya 587 STARTTLS) gerekir; parola ARTEMIS_MAIL_SMTP_PASSWORD (yoksa
+# ARTEMIS_MAIL_PASSWORD) ya da kimlik kasasındadır. Sırlar YAML'a YAZILMAZ. allow_write ve
+# allow_send açıkken bile her etkinlik/gönderim tam içerik önizlemesiyle onay ister ve
+# gözetimsiz turda çalışmaz. İçerik kişiseldir: allow_cloud false iken bulut modele gitmez.
 # calendar:
 #   enabled: true
 #   lookahead_days: 7        # 1-60; calendar_events en çok bu kadar gün bakar
 #   allow_cloud: false
+#   allow_write: false       # true iken calendar_create_event açılır (her zaman onaylı)
+#   caldav_url: ""           # ör. https://caldav.example.com/calendars/user/default/
+#   caldav_username: ""
 # mail:
 #   enabled: true
 #   host: imap.gmail.com
@@ -275,6 +281,10 @@ memory:
 #   folder: INBOX
 #   max_messages: 10         # 1-50
 #   allow_cloud: false
+#   allow_send: false        # true iken mail_send açılır (her zaman onaylı)
+#   smtp_host: smtp.gmail.com
+#   smtp_port: 465           # 465: SSL | 587: STARTTLS
+#   smtp_username: ben@example.com
 # Sabah brifingine takvim ve posta eklemek için proactive.briefings[].prompt örneği (gözetimsiz
 # turda yalnız READ_ONLY araçlar çalışır; ikisi de öyledir):
 #   prompt: >-

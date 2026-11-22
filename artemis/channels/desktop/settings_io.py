@@ -239,8 +239,19 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     _checkbox(("routines", "enabled"), "routines_enabled"),
     _checkbox(("calendar", "enabled"), "calendar_enabled"),
     _checkbox(("calendar", "allow_cloud"), "calendar_cloud"),
+    _checkbox(("calendar", "allow_write"), "calendar_allow_write"),
+    PanelBinding(
+        ("calendar", "caldav_url"), "calendar_caldav_url",
+        lambda edit: edit.text().strip().rstrip("/"),
+        lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("calendar", "caldav_username"), "calendar_caldav_username",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
     _checkbox(("mail", "enabled"), "mail_enabled"),
     _checkbox(("mail", "allow_cloud"), "mail_cloud"),
+    _checkbox(("mail", "allow_send"), "mail_allow_send"),
     _checkbox(("skills", "enabled"), "skills_enabled"),
     _checkbox(("triggers", "enabled"), "triggers_enabled"),
     _checkbox(("research", "enabled"), "research_enabled"),
@@ -274,6 +285,19 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     PanelBinding(
         ("mail", "folder"), "mail_folder",
         lambda edit: edit.text().strip() or "INBOX", lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("mail", "smtp_host"), "mail_smtp_host",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("mail", "smtp_port"), "mail_smtp_port",
+        lambda edit: int(edit.text()) if edit.text().strip().isdecimal() else 465,
+        lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("mail", "smtp_username"), "mail_smtp_username",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
     _checkbox(("allow_all_applications",), "all_applications"),
     PanelBinding(

@@ -18,11 +18,13 @@
   "Evet, onayla": "Yes, approve",
   "Evet, {site} için bir daha sorma": "Yes, don't ask again for {site}",
   "Gizlilik kontrolü": "Privacy check",
+  "Gönderilecek e-posta önizlemesi": "Outgoing email preview",
   "Gözetimsiz turda yan etkili işlem yapılmaz": "Side-effect actions are not allowed in an unattended turn",
   "Ham araç adı": "Raw tool name",
   "Hayır": "No",
   "Model yanıt veremedi": "Model could not respond",
   "Model yanıtı alındı": "Model response received",
+  "Oluşturulacak etkinlik önizlemesi": "Event to create preview",
   "Onay {verdict}: {display}": "Approval {verdict}: {display}",
   "Reddedilen işlem tekrar istendi; durduruldu": "Denied operation requested again; stopped",
   "Salt okunur doğrulanmış araç argümanları": "Read-only validated tool arguments",
@@ -48,5 +50,6 @@
   "{key}: {shown}": "{key}: {shown}",
   "Önceki işlem temizleniyor": "Cleaning up previous operation",
   "İstek alındı": "Request received",
-  "İşlem iptal edildi": "Operation cancelled"
+  "İşlem iptal edildi": "Operation cancelled",
+  "mail::Konu": "Subject"
 }

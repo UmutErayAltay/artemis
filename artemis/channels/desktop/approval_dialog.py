@@ -82,28 +82,12 @@ class ApprovalDialog(QDialog):
         title.setWordWrap(True)
         body_layout.addWidget(title)
 
-        # Kod ajanı: hangi ajanın nerede başlayacağı ilk düz dil bloğudur (ADR 0049). Metin
-        # arka uçtan gelir; proje dışı klasörde uyarı satırı uyarı tonlu kutuda ayrılır.
         self.approval_text_label: QLabel | None = None
         self.workdir_warning_box: QLabel | None = None
-        spec = item.arguments.get("spec")
-        if item.tool_name == "code_agent_start" and isinstance(spec, dict):
-            lines = str(spec.get("approval_text", "")).split("\n")
-            # İlk 4 satır sabit (ajan, klasör, repo, kip); sonrakiler uyarıdır (proje dışı
-            # klasör, görünür pencere kipi) ve uyarı tonlu kutuda ayrı gösterilir.
-            head, warn = lines[:4], lines[4:]
-            if head and any(head):
-                self.approval_text_label = QLabel("\n".join(head))
-                self.approval_text_label.setTextFormat(Qt.TextFormat.PlainText)
-                self.approval_text_label.setWordWrap(True)
-                self.approval_text_label.setAccessibleName(t("Ajan ve başlangıç klasörü"))
-                body_layout.addWidget(self.approval_text_label)
-            if warn:
-                self.workdir_warning_box = QLabel("\n".join(warn))
-                self.workdir_warning_box.setObjectName("approvalNotice")
-                self.workdir_warning_box.setTextFormat(Qt.TextFormat.PlainText)
-                self.workdir_warning_box.setWordWrap(True)
-                body_layout.addWidget(self.workdir_warning_box)
+        self._add_code_agent_preview(item, body_layout)
+        self.outbound_preview_box: QFrame | None = None
+        self.outbound_preview_text: QPlainTextEdit | None = None
+        self._add_outbound_preview(item, body_layout)
 
         # Özet: her argüman anahtarı görünür; uzun değer kısalır, tamamı ipucunda ve ayrıntıda.
         intro = QLabel(t("Artemis bu aracı şu değerlerle çalıştırmak için izin istiyor:"))
@@ -195,6 +179,71 @@ class ApprovalDialog(QDialog):
         self.no_button.clicked.connect(lambda: self._choose(False))
         self.yes_button.clicked.connect(lambda: self._choose(True))
         self.no_button.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _add_code_agent_preview(self, item: Approval, body_layout: QVBoxLayout) -> None:
+        """Kod ajanı: hangi ajanın nerede başlayacağı ilk düz dil bloğudur (ADR 0049)."""
+        spec = item.arguments.get("spec")
+        if item.tool_name != "code_agent_start" or not isinstance(spec, dict):
+            return
+        lines = str(spec.get("approval_text", "")).split("\n")
+        head, warn = lines[:4], lines[4:]
+        if head and any(head):
+            self.approval_text_label = QLabel("\n".join(head))
+            self.approval_text_label.setTextFormat(Qt.TextFormat.PlainText)
+            self.approval_text_label.setWordWrap(True)
+            self.approval_text_label.setAccessibleName(t("Ajan ve başlangıç klasörü"))
+            body_layout.addWidget(self.approval_text_label)
+        if warn:
+            self.workdir_warning_box = QLabel("\n".join(warn))
+            self.workdir_warning_box.setObjectName("approvalNotice")
+            self.workdir_warning_box.setTextFormat(Qt.TextFormat.PlainText)
+            self.workdir_warning_box.setWordWrap(True)
+            body_layout.addWidget(self.workdir_warning_box)
+
+    def _add_outbound_preview(self, item: Approval, body_layout: QVBoxLayout) -> None:
+        """Dışa giden e-posta ve takvim yazımlarında gövdeyi kesintisiz gösterir (ADR 0084)."""
+        if item.tool_name == "mail_send":
+            heading_text = t("Gönderilecek e-posta önizlemesi")
+            lines = [f"{t('Alıcı')}: {item.arguments.get('to', '')}"]
+            cc = str(item.arguments.get("cc") or "").strip()
+            if cc:
+                lines.append(f"{t('Bilgi (Cc)')}: {cc}")
+            lines.append(f"{t('Konu', context='mail')}: {item.arguments.get('subject', '')}")
+            lines.extend(["", str(item.arguments.get("body", ""))])
+        elif item.tool_name == "calendar_create_event":
+            heading_text = t("Oluşturulacak etkinlik önizlemesi")
+            lines = [
+                f"{t('Başlık')}: {item.arguments.get('title', '')}",
+                f"{t('Başlangıç', context='field')}: {item.arguments.get('start', '')}",
+                f"{t('Bitiş', context='field')}: {item.arguments.get('end', '')}",
+            ]
+            location = str(item.arguments.get("location") or "").strip()
+            if location:
+                lines.append(f"{t('Konum')}: {location}")
+            description = str(item.arguments.get("description", ""))
+            if description:
+                lines.extend(["", description])
+        else:
+            return
+        box = QFrame()
+        box.setObjectName("previewWell")
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(12, 10, 12, 10)
+        box_layout.setSpacing(6)
+        heading = QLabel(heading_text)
+        heading.setObjectName("fieldLabel")
+        box_layout.addWidget(heading)
+        preview = QPlainTextEdit()
+        preview.setObjectName("outboundPreview")
+        preview.setReadOnly(True)
+        preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        preview.setPlainText("\n".join(lines))
+        preview.setAccessibleName(heading_text)
+        preview.setMinimumHeight(130)
+        box_layout.addWidget(preview)
+        body_layout.addWidget(box)
+        self.outbound_preview_box = box
+        self.outbound_preview_text = preview
 
     def _show_details(self, on: bool) -> None:
         self.raw_name.setVisible(on)

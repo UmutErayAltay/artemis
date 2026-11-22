@@ -7,8 +7,10 @@ kutular ana panelin otomatik kaydındadır; deneme KAYITLI ayarları okur. Ağ �
 
 from __future__ import annotations
 
+import contextlib
 import http.client
 import imaplib
+import smtplib
 import urllib.error
 from collections.abc import Callable
 from pathlib import Path
@@ -21,6 +23,7 @@ from artemis.channels.desktop.form_kit import button_row, field, meta_label
 from artemis.config.settings import load_settings
 from artemis.i18n import t
 from artemis.tools import calendar_mail as core
+from artemis.tools import calendar_mail_write as core_write
 from artemis.tools.credentials import delete_secret, write_secret
 
 
@@ -50,6 +53,27 @@ def check_mail(host: str, port: int, username: str, password: str, folder: str) 
     except (imaplib.IMAP4.error, OSError, ValueError):
         return t("Posta okunamadı.")
     return None
+
+
+def check_smtp(host: str, port: int, username: str, password: str) -> str | None:
+    """SMTP bağlantısını ve kimlik doğrulamasını dener; ileti göndermeden kapatır."""
+    try:
+        smtp = core_write.connect_smtp(host, port)
+        try:
+            smtp.login(username, password)
+        finally:
+            with contextlib.suppress(smtplib.SMTPException, OSError):
+                smtp.quit()
+    except smtplib.SMTPAuthenticationError:
+        return t("SMTP girişi reddedildi; kullanıcı adı ve uygulama parolasını kontrol edin.")
+    except (smtplib.SMTPException, OSError, ValueError):
+        return t("SMTP sunucusuna bağlanılamadı.")
+    return None
+
+
+def check_caldav(url: str, username: str, password: str) -> str | None:
+    """CalDAV ucunu OPTIONS ile yoklar; uygunsa None döndürür."""
+    return core_write.check_caldav(url, username, password)
 
 
 class _Job(QThread):
@@ -114,6 +138,18 @@ class CalendarMailSection(QWidget):
         self.calendar_delete = QPushButton(t("Kaydı sil"))
         self.calendar_delete.clicked.connect(self._delete_calendar)
         calendar.addLayout(button_row(self.calendar_delete, self.calendar_save))
+        self.caldav_password = QLineEdit()
+        self.caldav_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.caldav_password.setAccessibleName(t("CalDAV parolası"))
+        field(
+            calendar, t("CalDAV parolası"), self.caldav_password,
+            t("İsteğe bağlı; yalnız kimlik kasasına yazılır."),
+        )
+        self.caldav_save = QPushButton(t("CalDAV parolasını kaydet ve dene"))
+        self.caldav_save.clicked.connect(self._save_caldav)
+        self.caldav_delete = QPushButton(t("CalDAV kaydını sil"))
+        self.caldav_delete.clicked.connect(self._delete_caldav)
+        calendar.addLayout(button_row(self.caldav_delete, self.caldav_save))
         self.mail_password = QLineEdit()
         self.mail_password.setEchoMode(QLineEdit.EchoMode.Password)
         self.mail_password.setAccessibleName(t("Posta uygulama parolası"))
@@ -129,6 +165,21 @@ class CalendarMailSection(QWidget):
         self.mail_delete = QPushButton(t("Kaydı sil"))
         self.mail_delete.clicked.connect(self._delete_mail)
         mail.addLayout(button_row(self.mail_delete, self.mail_save))
+        self.smtp_password = QLineEdit()
+        self.smtp_password.setEchoMode(QLineEdit.EchoMode.Password)
+        self.smtp_password.setAccessibleName(t("SMTP parolası"))
+        field(
+            mail, t("SMTP parolası"), self.smtp_password,
+            t(
+                "Boş bırakılırsa yukarıdaki uygulama parolası kullanılır; "
+                "yalnız kimlik kasasına yazılır."
+            ),
+        )
+        self.smtp_save = QPushButton(t("SMTP parolasını kaydet ve dene"))
+        self.smtp_save.clicked.connect(self._save_smtp)
+        self.smtp_delete = QPushButton(t("SMTP kaydını sil"))
+        self.smtp_delete.clicked.connect(self._delete_smtp)
+        mail.addLayout(button_row(self.smtp_delete, self.smtp_save))
         self.message = meta_label("")
         self.message.setAccessibleName(t("Takvim ve posta işlem sonucu"))
         layout.addWidget(self.message)
@@ -136,7 +187,9 @@ class CalendarMailSection(QWidget):
         if demo:
             for widget in (
                 self.calendar_url, self.calendar_save, self.calendar_delete,
+                self.caldav_password, self.caldav_save, self.caldav_delete,
                 self.mail_password, self.mail_save, self.mail_delete,
+                self.smtp_password, self.smtp_save, self.smtp_delete,
             ):
                 widget.setEnabled(False)
 
@@ -201,13 +254,62 @@ class CalendarMailSection(QWidget):
             password, core.MAIL_TARGET, t("Posta"),
         )
 
+    def _save_caldav(self) -> None:
+        password = self.caldav_password.text().strip()
+        self.caldav_password.clear()
+        if not password:
+            self.message.setText(t("Önce CalDAV parolasını yaz."))
+            return
+        try:
+            calendar = load_settings(self.config_path).calendar
+        except (OSError, ValueError):
+            self.message.setText(t("Ayarlar okunamadı."))
+            return
+        if not calendar.caldav_url:
+            self.message.setText(
+                t("Önce CalDAV adresini yazıp “Kaydedildi” yazısını bekle.")
+            )
+            return
+        self._start(
+            lambda: check_caldav(calendar.caldav_url, calendar.caldav_username, password),
+            password, core_write.CALDAV_PASSWORD_TARGET, t("CalDAV"),
+        )
+
+    def _save_smtp(self) -> None:
+        password = self.smtp_password.text().strip()
+        self.smtp_password.clear()
+        if not password:
+            self.message.setText(t("Önce SMTP parolasını yaz."))
+            return
+        try:
+            mail = load_settings(self.config_path).mail
+        except (OSError, ValueError):
+            self.message.setText(t("Ayarlar okunamadı."))
+            return
+        username = (mail.smtp_username or mail.username).strip()
+        if not (mail.smtp_host and username):
+            self.message.setText(
+                t("Önce SMTP sunucusu ve kullanıcı adını yazıp “Kaydedildi” yazısını bekle.")
+            )
+            return
+        self._start(
+            lambda: check_smtp(mail.smtp_host, mail.smtp_port, username, password),
+            password, core_write.SMTP_PASSWORD_TARGET, t("SMTP"),
+        )
+
     # Bağlı yöntem: self'i yakalayan lambda Qt bağlantısında referans döngüsü kurar ve gc başka
     # iş parçacığında toplarsa uygulama çöker (bkz. tests/test_no_signal_cycles.py).
     def _delete_calendar(self) -> None:
         self._delete(core.ICS_TARGET, t("Takvim adresi"))
 
+    def _delete_caldav(self) -> None:
+        self._delete(core_write.CALDAV_PASSWORD_TARGET, t("CalDAV parolası"))
+
     def _delete_mail(self) -> None:
         self._delete(core.MAIL_TARGET, t("Posta parolası"))
+
+    def _delete_smtp(self) -> None:
+        self._delete(core_write.SMTP_PASSWORD_TARGET, t("SMTP parolası"))
 
     def _delete(self, target: str, label: str) -> None:
         delete_secret(target)
