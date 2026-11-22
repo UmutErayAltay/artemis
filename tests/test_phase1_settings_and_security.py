@@ -20,7 +20,9 @@ from artemis.brain.fake import ScriptedProvider
 from artemis.channels.desktop import app as app_module
 from artemis.channels.desktop import bridge as bridge_module
 from artemis.channels.desktop import hotkey_manager, window_restart
+from artemis.channels.desktop import settings_panel as sp_module
 from artemis.channels.desktop.app import build_window
+from artemis.channels.desktop.retranslate import retranslate_widgets
 from artemis.channels.desktop.settings_io import PANEL_BINDINGS, save_choices
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.settings_widgets import _DIRTY_ROLE
@@ -327,6 +329,58 @@ def test_privacy_encryption_and_close_without_confirmation_app_sync(
             ("memory", "encrypt_at_rest"),
             ("close_without_confirmation",),
         }
+    finally:
+        panel.deleteLater()
+        qt_app.processEvents()
+
+
+def test_live_retranslate_github_saved_note_and_en_routes(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = config(tmp_path)
+    panel = SettingsPanel(path)
+    try:
+        monkeypatch.setattr(sp_module, "save_code_agent", lambda *_a, **_kw: None)
+        monkeypatch.setattr(panel, "run_github_sync", lambda **_kw: None)
+        panel.github_owner.setText("octocat")
+        panel.repos_dir.setText(str(tmp_path))
+
+        set_language("en")
+        retranslate_widgets([panel], "en")
+        panel._bind_github()
+        assert not panel.saved_notes["Bağlantılar"].isHidden()
+
+        set_language("tr")
+        retranslate_widgets([panel], "tr")
+        panel._bind_github()
+        assert not panel.saved_notes["Bağlantılar"].isHidden()
+
+        expected_routes = (
+            ("Applications", 7, None),
+            ("Automation", 4, None),
+            ("Automation & routines", 4, None),
+            ("Automation and routines", 4, None),
+            ("Listening", 0, 0),
+            ("Response", 0, 1),
+            ("Dictation", 1, None),
+            ("Shortcuts", 1, None),
+            ("Models", 2, 0),
+            ("Security", 7, None),
+            ("Updates", 8, None),
+            ("Calendar", 6, 1),
+            ("Mail", 6, 1),
+        )
+        for lang in ("tr", "en"):
+            set_language(lang)
+            for route_name, row, subtab in expected_routes:
+                assert panel.select_section(route_name), (lang, route_name)
+                assert panel.sections.currentRow() == row, (lang, route_name)
+                if row == 0 and subtab is not None:
+                    assert panel.voice_tabs.currentIndex() == subtab
+                elif row == 2 and subtab is not None:
+                    assert panel.providers.tabs.currentIndex() == subtab
+                elif row == 6 and subtab is not None:
+                    assert panel.connections_tabs.currentIndex() == subtab
     finally:
         panel.deleteLater()
         qt_app.processEvents()

@@ -8,6 +8,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+import yaml
+from pydantic import ValidationError
 from PySide6.QtGui import QShowEvent
 from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
@@ -319,7 +321,7 @@ class VoiceTelemetryCard(QFrame):
             return self._telemetry_dir
         try:
             return load_settings(self._config_path).state_dir / "voice-telemetry"
-        except (OSError, ValueError):
+        except (OSError, ValueError, ValidationError, yaml.YAMLError):
             return None
 
     def showEvent(self, event: QShowEvent) -> None:

@@ -9,6 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+import yaml
+from pydantic import ValidationError
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
@@ -28,7 +30,13 @@ from artemis.channels.voice.adapters import (
     SoundDeviceSink,
 )
 from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
-from artemis.config.settings import EndpointConfig, VoiceConfig, load_settings
+from artemis.config.settings import (
+    EndpointConfig,
+    Settings,
+    VoiceConfig,
+    cloud_tts_model,
+    load_settings,
+)
 from artemis.i18n import current_language, t
 from artemis.safety.audit import AuditLog
 
@@ -134,6 +142,7 @@ class VoicePreviewRequest:
     allow_cloud_tts_text: bool
     ffmpeg: str
     sample_text: str
+    paid_override: bool | None = None
 
 
 SynthesizerFactory = Callable[[VoiceConfig, EndpointConfig | None, AuditLog], Any]
@@ -141,7 +150,11 @@ SinkFactory = Callable[[], Any]
 
 
 def _default_synthesizer(
-    config: VoiceConfig, endpoint: EndpointConfig | None, audit: AuditLog
+    config: VoiceConfig,
+    endpoint: EndpointConfig | None,
+    audit: AuditLog,
+    *,
+    paid: bool | None = None,
 ) -> Any:
     if config.tts_backend == "piper":
         return PiperSynthesizer(config)
@@ -152,7 +165,9 @@ def _default_synthesizer(
     if config.tts_backend == "cloud":
         if endpoint is None:
             raise ValueError("Bulut konuşma sesi için sunucu seçilmeli.")
-        return CloudSpeechSynthesizer(config, config.tts_cloud_endpoint, endpoint, audit)
+        return CloudSpeechSynthesizer(
+            config, config.tts_cloud_endpoint, endpoint, audit, paid=paid
+        )
     raise ValueError(f"Desteklenmeyen konuşma motoru: {config.tts_backend}")
 
 
@@ -186,7 +201,11 @@ async def run_voice_preview(
         ffmpeg=request.ffmpeg,
     )
     audit = AuditLog(audit_path)
-    synthesizer = (synthesizer_factory or _default_synthesizer)(voice_cfg, endpoint, audit)
+    synthesizer = (
+        synthesizer_factory(voice_cfg, endpoint, audit)
+        if synthesizer_factory is not None
+        else _default_synthesizer(voice_cfg, endpoint, audit, paid=request.paid_override)
+    )
     sink = (sink_factory or SoundDeviceSink)()
     cancelled = asyncio.Event()
 
@@ -256,13 +275,47 @@ class VoicePreviewThread(QThread):
                 self.done.emit(t("Önizleme tamamlandı."))
 
 
+def _resolve_cloud_paid_override(
+    loaded: Settings,
+    *,
+    endpoint_name: str,
+    protocol: str,
+    cloud_model: str,
+    saved_alias: str,
+) -> bool | None:
+    """Seçili bulut konuşma modelinin kayıtlı ücret durumunu güncel UI değerleriyle çözer."""
+    target_model = cloud_model.strip().removeprefix("models/")
+    saved = loaded.models.get(saved_alias) if saved_alias else None
+    if saved is not None:
+        matches = (
+            saved.kind == "speech"
+            and (saved.endpoint or "") == endpoint_name
+            and saved.speech_protocol == protocol
+            and saved.model.removeprefix("models/") == target_model
+        )
+        if not matches:
+            saved = None
+    if saved is None and protocol in ("openai", "gemini"):
+        effective_voice = loaded.voice.model_copy(
+            update={
+                "tts_cloud_endpoint": endpoint_name,
+                "tts_cloud_protocol": protocol,
+                "tts_cloud_model": cloud_model,
+            }
+        )
+        saved = cloud_tts_model(loaded.model_copy(update={"voice": effective_voice}))
+    if saved is None:
+        return None
+    return saved.input_per_million > 0 or saved.output_per_million > 0
+
+
 def validate_preview_request(
     panel: SettingsPanel,
 ) -> tuple[VoicePreviewRequest | None, EndpointConfig | None, Path | None, str | None]:
     """Paneldeki güncel widget değerlerinden güvenli bir önizleme isteği kurar."""
     try:
         loaded = load_settings(panel.config_path)
-    except (OSError, ValueError):
+    except (OSError, ValueError, ValidationError, yaml.YAMLError):
         return None, None, None, t("Ayar dosyası okunamadı.")
 
     backend = str(panel.tts_combo.currentData() or "piper")
@@ -295,12 +348,28 @@ def validate_preview_request(
         if piper_model is None or not piper_model.is_file():
             return None, None, None, t("Piper ses dosyası (.onnx) bulunamadı.")
 
+    paid_override: bool | None = None
     if backend == "cloud":
         if not endpoint_name or endpoint is None:
             return None, None, None, t("Önce bir konuşma sunucusu seç.")
         if not cloud_model:
             return None, None, None, t("Önce bir bulut konuşma modeli seç veya yaz.")
-        is_paid = endpoint.api_key and (protocol == "gemini" or not cloud_model.endswith(":free"))
+        saved_alias = str(panel.tts_cloud_saved.currentData() or "")
+        paid_override = _resolve_cloud_paid_override(
+            loaded,
+            endpoint_name=endpoint_name,
+            protocol=protocol,
+            cloud_model=cloud_model,
+            saved_alias=saved_alias,
+        )
+        is_paid = (
+            paid_override
+            if paid_override is not None
+            else bool(
+                endpoint.api_key
+                and (protocol == "gemini" or not cloud_model.endswith(":free"))
+            )
+        )
         if is_paid and not allow_paid:
             return (
                 None,
@@ -325,6 +394,7 @@ def validate_preview_request(
         allow_cloud_tts_text=consent,
         ffmpeg=loaded.voice.ffmpeg,
         sample_text=sample,
+        paid_override=paid_override,
     )
     return req, endpoint, loaded.audit_path, None
 

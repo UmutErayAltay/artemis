@@ -51,6 +51,7 @@ def test_tts_cloud_box_visibility_follows_tts_combo(tmp_path: Path, qt_app: QApp
     assert "Ücretli modele izin ver" in panel.tts_cloud_hint.text()
     assert "Metin gönderme izni kapalıyken" in panel.tts_cloud_hint.text()
     assert "Ses modeli eklemek için" in panel.tts_cloud_hint.text()
+    assert "Model ve Bağlantılar > Model Ekle ve Bağlantılar" in panel.tts_cloud_hint.text()
     panel.deleteLater()
     qt_app.processEvents()
 

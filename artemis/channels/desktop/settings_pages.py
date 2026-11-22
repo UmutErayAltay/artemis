@@ -22,7 +22,6 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
-    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -30,6 +29,7 @@ from PySide6.QtWidgets import (
 
 from artemis.channels.desktop.form_kit import (
     _HeightForWidthBox,
+    _SpinBox,
     button_row,
     divider,
     field,
@@ -60,7 +60,7 @@ from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
 from artemis.channels.desktop.voice_preview import build_voice_output_controls
 from artemis.channels.desktop.voice_telemetry_card import VoiceTelemetryCard
 from artemis.channels.desktop.widgets import with_help
-from artemis.i18n import current_language, t
+from artemis.i18n import current_language, resolve_source, t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.settings_panel import SettingsPanel
@@ -171,6 +171,8 @@ def add_page(
     content.setSpacing(24)
     saved = _SavedNote()
     panel.saved_notes[name] = saved
+    canonical = resolve_source(name) or name
+    panel._canonical_saved_notes[canonical] = saved
     heading = QHBoxLayout()
     heading.addWidget(meta_label(description), 1)
     heading.addWidget(saved, 0, Qt.AlignmentFlag.AlignVCenter)
@@ -556,7 +558,7 @@ def build_shortcuts_page(panel: SettingsPanel) -> None:
     panel.dictation_hotkey.setAccessibleName(t("Dikte kısayolu"))
     panel.dictation_hotkey.setPlaceholderText(t("Örneğin: ctrl+alt+d"))
     field(dict_layout, t("Dikte tuşu"), panel.dictation_hotkey)
-    panel.dictation_max_seconds = QSpinBox()
+    panel.dictation_max_seconds = _SpinBox()
     panel.dictation_max_seconds.setRange(1, 600)
     panel.dictation_max_seconds.setValue(120)
     panel.dictation_max_seconds.setAccessibleName(t("Dikte üst süresi"))

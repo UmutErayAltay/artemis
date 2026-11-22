@@ -100,6 +100,7 @@ from artemis.channels.desktop.window_layout import (
     build_chat_page,
     build_sidebar,
     build_topbar,
+    fit_topbar,
     page_frame,
 )
 from artemis.channels.desktop.window_restart import (
@@ -148,6 +149,7 @@ class DesktopWindow(QMainWindow):
     _selection_pressed = Signal()
     _toast_failed = Signal(str)
     # Alanları window_layout kurar; burada yalnız tipleri bildirilir.
+    _topbar: QFrame
     brand_pet: PetFace
     _theme_toggle_text: str
     demo_chip: QLabel | None
@@ -731,10 +733,8 @@ class DesktopWindow(QMainWindow):
         width = self.width()
         self._compact_nav(width < _COMPACT_NAV_WINDOW)
         wide = width >= _STEP_PANEL_MIN_WINDOW
-        self.model_box.setVisible(width >= 800)
-        self.model_caption.setVisible(width >= 800)
-        self.budget_chip.setVisible(width >= 800)
         self._show_model(self._model_full)
+        fit_topbar(self)
         self.operations_button.setVisible(not wide)
         self._dock_operations(not wide)
         self._sync_activity_panel()
@@ -755,7 +755,13 @@ class DesktopWindow(QMainWindow):
 
     def _show_model(self, text: str) -> None:
         self._model_full = text
-        limit = 120 if self.width() < _COMPACT_HEADER_WINDOW else 240
+        win_w = self.width()
+        if win_w < _COMPACT_HEADER_WINDOW:
+            limit = 120
+        elif win_w < _STEP_PANEL_MIN_WINDOW:
+            limit = 180
+        else:
+            limit = 240
         metrics = QFontMetrics(self.model_value.font())
         shown = metrics.elidedText(text, Qt.TextElideMode.ElideRight, limit)
         self.model_value.setText(shown)
@@ -765,6 +771,7 @@ class DesktopWindow(QMainWindow):
         )
         # Çipin 8px yan dolgusu iki yanda 16px ekler; 8px pay ölçü sapmasına karşıdır.
         self.model_value.setFixedWidth(max(60, metrics.horizontalAdvance(shown) + 24))
+        fit_topbar(self)
 
     def _submit_main(self) -> None:
         text = self.prompt.toPlainText().strip()
@@ -1019,6 +1026,7 @@ class DesktopWindow(QMainWindow):
         self._status_tone = tone
         self.status_dot.setStyleSheet(dot_style(self._token(STATUS_TONES[tone])))
         self.status_pill.adjustSize()
+        fit_topbar(self)
 
     def _show_voice_state(self, state: str) -> None:
         self._voice_state = state

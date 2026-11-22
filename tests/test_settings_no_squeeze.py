@@ -15,13 +15,15 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 from PySide6.QtCore import Qt  # noqa: E402
-from PySide6.QtGui import QFont  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
+from PySide6.QtGui import QFont, QFontDatabase  # noqa: E402
+from PySide6.QtWidgets import QApplication, QLabel, QScrollArea, QTabWidget, QWidget  # noqa: E402
 
 from artemis.brain import providers  # noqa: E402
 from artemis.channels.desktop import tts_cloud_box  # noqa: E402
 from artemis.channels.desktop.app import _STYLE, build_window  # noqa: E402
+from artemis.channels.desktop.retranslate import retranslate_widgets  # noqa: E402
 from artemis.i18n import set_language  # noqa: E402
+from tests.test_desktop_gui import _close_cleanly  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -225,3 +227,87 @@ def test_voice_cloud_tts_page_not_squeezed(lang: str, tmp_path: Path) -> None:
         _assert_no_squeeze(page, f"{lang}:5-saved-paid-again")
     finally:
         set_language("tr")
+
+
+def test_all_pages_and_subtabs_no_squeeze_across_sizes_and_languages(
+    tmp_path: Path,
+) -> None:
+    """9 sayfa x tum alt sekmeler x 5 pencere boyutu (TR, EN ve canli retranslate) sıkışmaz."""
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+    font_path = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "Fonts" / "segoeui.ttf"
+    font_id = QFontDatabase.addApplicationFont(str(font_path)) if font_path.is_file() else -1
+    prev_font = app.font()
+    prev_style = app.styleSheet()
+    if font_id >= 0:
+        app.setFont(QFont("Segoe UI", 10))
+    app.setStyleSheet(_STYLE)
+
+    sizes = ((720, 560), (768, 1024), (800, 600), (1000, 700), (1280, 850))
+    cfg = _write_demo_config(tmp_path)
+
+    def _scan(window: Any, label: str) -> None:
+        panel = window.settings_panel
+        scroll = panel.findChild(QScrollArea)
+        assert scroll is not None
+        for width, height in sizes:
+            window.resize(width, height)
+            _pump(app, 20)
+            for row in range(panel.sections.count()):
+                panel.show_section(row)
+                _pump(app, 15)
+                page = panel.stack.currentWidget()
+                assert page is not None
+                tabs = page.findChildren(QTabWidget)
+                if tabs:
+                    tab_w = tabs[0]
+                    for tab_idx in range(tab_w.count()):
+                        tab_w.setCurrentIndex(tab_idx)
+                        _pump(app, 15)
+                        _assert_no_squeeze(page, f"{label}:{width}x{height}:r{row}:t{tab_idx}")
+                        assert scroll.horizontalScrollBar().maximum() == 0
+                else:
+                    _assert_no_squeeze(page, f"{label}:{width}x{height}:r{row}")
+                    assert scroll.horizontalScrollBar().maximum() == 0
+
+    try:
+        for lang in ("tr", "en"):
+            set_language(lang)
+            win = build_window(cfg, demo=True, app=app)
+            try:
+                win.resize(1280, 850)
+                win.show()
+                win.pet.hide()
+                win.tabs.setCurrentWidget(win.settings_scroll)
+                _pump(app, 30)
+                _scan(win, lang)
+            finally:
+                _close_cleanly(app, win)
+                _pump(app, 20)
+
+        # Canlı TR -> EN -> TR geçişi
+        set_language("tr")
+        win_live = build_window(cfg, demo=True, app=app)
+        try:
+            win_live.resize(1280, 850)
+            win_live.show()
+            win_live.pet.hide()
+            win_live.tabs.setCurrentWidget(win_live.settings_scroll)
+            _pump(app, 30)
+            set_language("en")
+            retranslate_widgets([win_live], "en")
+            _pump(app, 20)
+            _scan(win_live, "live-tr-en")
+            set_language("tr")
+            retranslate_widgets([win_live], "tr")
+            _pump(app, 20)
+            _scan(win_live, "live-en-tr")
+        finally:
+            _close_cleanly(app, win_live)
+            _pump(app, 20)
+    finally:
+        set_language("tr")
+        app.setFont(prev_font)
+        app.setStyleSheet(prev_style)
+        if font_id >= 0:
+            QFontDatabase.removeApplicationFont(font_id)

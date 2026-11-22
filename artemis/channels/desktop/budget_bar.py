@@ -16,6 +16,7 @@ from pydantic import ValidationError
 from artemis.brain.budget import BudgetLedger, _sum_exact
 from artemis.brain.errors import ProviderError
 from artemis.channels.desktop.page_kit import repolish
+from artemis.channels.desktop.window_layout import fit_topbar
 from artemis.config.settings import load_settings
 from artemis.i18n import t
 
@@ -45,7 +46,7 @@ def read_budget_snapshot(db_path: Path, daily_limit: Decimal) -> BudgetSnapshot:
     day = datetime.now(UTC).date().isoformat()
     connection: sqlite3.Connection | None = None
     try:
-        uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
+        uri = f"{db_path.resolve().as_uri()}?mode=ro"
         connection = sqlite3.connect(uri, uri=True, timeout=0.1)
         rows = connection.execute(
             "SELECT spent, reserved FROM budget_reservations WHERE day = ?",
@@ -140,3 +141,4 @@ def refresh_budget(window: DesktopWindow) -> None:
     if chip.objectName() != wanted_name:
         chip.setObjectName(wanted_name)
         repolish(chip)
+    fit_topbar(window)

@@ -72,7 +72,7 @@
   "Saklanamadı; ilgili ortam değişkenini tanımlayın.": "Could not be stored; set the corresponding environment variable.",
   "Satır başına bir argüman. {prompt} kısa yönerge, {prompt_file} tam istemdir.": "One argument per line. {prompt} is the short instruction, {prompt_file} is the full prompt.",
   "Ses": "Voice",
-  "Ses modeli eklemek için Ayarlar > Model > Model ekle'de türü Ses seç.": "To add a speech model, choose Speech as the type under Settings > Model > Add model.",
+  "Ses modeli eklemek için Ayarlar > Model ve Bağlantılar > Model Ekle ve Bağlantılar'da türü Ses seç.": "To add a speech model, choose Speech as the type under Settings > Models & Connections > Add Model & Connections.",
   "Ses modelleri alınıyor…": "Fetching speech models…",
   "Ses modellerini getir": "Fetch speech models",
   "Seçili metin alınamadı; pano kullanılamıyor.": "Could not capture selected text; clipboard is unavailable.",

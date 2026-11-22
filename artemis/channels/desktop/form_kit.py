@@ -5,15 +5,18 @@ from __future__ import annotations
 from typing import Any
 
 from PySide6.QtCore import (
+    QEvent,
     QRect,
     QSize,
     Qt,
 )
+from PySide6.QtGui import QResizeEvent, QShowEvent
 from PySide6.QtWidgets import (
     QFrame,
     QLabel,
     QLayout,
     QPushButton,
+    QSpinBox,
     QVBoxLayout,
     QWidget,
 )
@@ -115,6 +118,33 @@ class _WrapLabel(QLabel):
 
     def sizeHint(self) -> QSize:
         return super().sizeHint().expandedTo(self.minimumSizeHint())
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        if self.wordWrap() and event.size().width() != event.oldSize().width():
+            self.updateGeometry()
+
+
+class _SpinBox(QSpinBox):
+    """QSS min-height (36px) ile Segoe UI minimumSizeHint (39px) farkında sıkışmayı önler."""
+
+    def _sync_min_height(self) -> None:
+        hint_h = self.minimumSizeHint().height()
+        if hint_h > self.minimumHeight():
+            self.setMinimumHeight(hint_h)
+
+    def changeEvent(self, event: QEvent) -> None:
+        super().changeEvent(event)
+        if event.type() in (
+            QEvent.Type.StyleChange,
+            QEvent.Type.FontChange,
+            QEvent.Type.Polish,
+        ):
+            self._sync_min_height()
+
+    def showEvent(self, event: QShowEvent) -> None:
+        self._sync_min_height()
+        super().showEvent(event)
 
 
 def meta_label(text: str) -> QLabel:

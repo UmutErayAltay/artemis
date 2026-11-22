@@ -71,9 +71,10 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     header = QFrame()
     header.setObjectName("topbar")
     header.setFixedHeight(56)
+    window._topbar = header
     row = QHBoxLayout(header)
-    row.setContentsMargins(16, 8, 16, 8)
-    row.setSpacing(12)
+    row.setContentsMargins(12, 8, 12, 8)
+    row.setSpacing(8)
     window.brand_pet = PetFace(32, themes.THEMES[window._theme])
     row.addWidget(window.brand_pet)
     title = QLabel("Artemis")
@@ -151,6 +152,54 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     status_row.addWidget(window.status_label)
     row.addWidget(status_pill, 0, Qt.AlignmentFlag.AlignVCenter)
     return header
+
+
+def _topbar_item_width(widget: QWidget) -> int:
+    if widget.minimumWidth() == widget.maximumWidth() and widget.minimumWidth() > 0:
+        return widget.minimumWidth()
+    return max(widget.minimumWidth(), widget.sizeHint().width(), 0)
+
+
+def fit_topbar(window: DesktopWindow) -> None:
+    """Üst çubukta durum hapının kırpılmaması için ikincil etiketleri sığdırır."""
+    header = getattr(window, "_topbar", None)
+    if header is None:
+        pill = getattr(window, "status_pill", None)
+        header = pill.parentWidget() if pill is not None else None
+    layout = header.layout() if header is not None else None
+    if header is None or layout is None:
+        return
+    width = window.width()
+    window.model_box.setVisible(width >= 800)
+    window.model_caption.setVisible(width >= 800)
+    window.budget_chip.setVisible(width >= 1000)
+
+    central = window.centralWidget()
+    outer_layout = central.layout() if central is not None else None
+    outer = outer_layout.contentsMargins() if outer_layout is not None else None
+    outer_x = (outer.left() + outer.right()) if outer is not None else 32
+    margins = layout.contentsMargins()
+    available = max(
+        0,
+        (width - outer_x) - margins.left() - margins.right() - 2 * header.frameWidth(),
+    )
+    spacing = max(0, layout.spacing())
+    widgets = [
+        w
+        for i in range(layout.count())
+        if (item := layout.itemAt(i)) is not None
+        and (w := item.widget()) is not None
+        and not w.isHidden()
+    ]
+    if not widgets:
+        return
+    needed = sum(_topbar_item_width(w) for w in widgets) + spacing * (len(widgets) - 1)
+    for optional in (window.model_caption, window.budget_chip):
+        if needed <= available:
+            break
+        if not optional.isHidden():
+            needed -= _topbar_item_width(optional) + spacing
+            optional.setVisible(False)
 
 
 def build_chat_page(window: DesktopWindow) -> QWidget:

@@ -170,13 +170,17 @@ _SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
         "ses": ("Ses", None),
         "voice": ("Ses", None),
         "dinleme": ("Ses", 0),
+        "listening": ("Ses", 0),
         "dinleme (giriş)": ("Ses", 0),
         "listening (input)": ("Ses", 0),
         "yanıt": ("Ses", 1),
+        "response": ("Ses", 1),
         "yanıt (çıkış)": ("Ses", 1),
         "response (output)": ("Ses", 1),
         "dikte": ("Dikte ve Kısayollar", None),
+        "dictation": ("Dikte ve Kısayollar", None),
         "kısayollar": ("Dikte ve Kısayollar", None),
+        "shortcuts": ("Dikte ve Kısayollar", None),
         "hızlı açılış": ("Dikte ve Kısayollar", None),
         "quick launch": ("Dikte ve Kısayollar", None),
         "dikte ve kısayollar": ("Dikte ve Kısayollar", None),
@@ -185,6 +189,7 @@ _SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
         "model ve bağlantılar": ("Model ve Bağlantılar", None),
         "models & connections": ("Model ve Bağlantılar", None),
         "modeller": ("Model ve Bağlantılar", 0),
+        "models": ("Model ve Bağlantılar", 0),
         "modeller ve roller": ("Model ve Bağlantılar", 0),
         "models & roles": ("Model ve Bağlantılar", 0),
         "model ekle ve bağlantılar": ("Model ve Bağlantılar", 1),
@@ -192,7 +197,10 @@ _SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
         "görünüm": ("Görünüm", None),
         "appearance": ("Görünüm", None),
         "otomasyon": ("Otomasyon Kuralları", None),
+        "automation": ("Otomasyon Kuralları", None),
         "otomasyon ve rutinler": ("Otomasyon Kuralları", None),
+        "automation & routines": ("Otomasyon Kuralları", None),
+        "automation and routines": ("Otomasyon Kuralları", None),
         "otomasyon kuralları": ("Otomasyon Kuralları", None),
         "automation rules": ("Otomasyon Kuralları", None),
         "rutinler": ("Otomasyon Kuralları", 0),
@@ -212,16 +220,28 @@ _SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
         "bağlantılar": ("Bağlantılar", None),
         "connections": ("Bağlantılar", None),
         "telegram": ("Bağlantılar", 0),
+        "takvim": ("Bağlantılar", 1),
+        "calendar": ("Bağlantılar", 1),
+        "posta": ("Bağlantılar", 1),
+        "mail": ("Bağlantılar", 1),
         "takvim ve posta": ("Bağlantılar", 1),
         "calendar & mail": ("Bağlantılar", 1),
+        "calendar and mail": ("Bağlantılar", 1),
         "github": ("Bağlantılar", 2),
         "github ve kod ajanları": ("Bağlantılar", 2),
         "github & code agents": ("Bağlantılar", 2),
         "uygulamalar": ("Uygulamalar ve Güvenlik", None),
+        "applications": ("Uygulamalar ve Güvenlik", None),
+        "güvenlik": ("Uygulamalar ve Güvenlik", None),
+        "security": ("Uygulamalar ve Güvenlik", None),
+        "gizlilik ve güvenlik": ("Uygulamalar ve Güvenlik", None),
+        "privacy & security": ("Uygulamalar ve Güvenlik", None),
         "uygulamalar ve güvenlik": ("Uygulamalar ve Güvenlik", None),
         "applications & security": ("Uygulamalar ve Güvenlik", None),
         "hakkında": ("Hakkında ve Güncelleme", None),
         "about": ("Hakkında ve Güncelleme", None),
+        "güncelleme": ("Hakkında ve Güncelleme", None),
+        "updates": ("Hakkında ve Güncelleme", None),
         "hakkında ve güncelleme": ("Hakkında ve Güncelleme", None),
         "about & updates": ("Hakkında ve Güncelleme", None),
     }.items()
@@ -426,6 +446,7 @@ class SettingsPanel(QWidget):
         build_shell(self)
         self._current_group = ""
         self.saved_notes: dict[str, _SavedNote] = {}
+        self._canonical_saved_notes: dict[str, _SavedNote] = {}
         self._page_tabs: dict[str, QTabWidget] = {}
         build_voice_page(self)
         build_shortcuts_page(self)
@@ -1120,6 +1141,16 @@ class SettingsPanel(QWidget):
         if chosen:
             self.repos_dir.setText(chosen)
 
+    def flash_saved_note(self, canonical_name: str) -> None:
+        """Sayfanın 'Kaydedildi' etiketini etkin dile bağlı olmadan yanıp söndürür."""
+        note = (
+            self._canonical_saved_notes.get(canonical_name)
+            or self.saved_notes.get(t(canonical_name))
+            or self.saved_notes.get(canonical_name)
+        )
+        if note is not None:
+            note.flash()
+
     def _bind_github(self) -> None:
         owner = self.github_owner.text().strip()
         if not GITHUB_OWNER_RE.fullmatch(owner):
@@ -1132,7 +1163,7 @@ class SettingsPanel(QWidget):
         except (OSError, ValueError, KeyError, TypeError):
             self.github_status.setText(t("GitHub ayarları kaydedilemedi."))
             return
-        self.saved_notes[t("Bağlantılar")].flash()
+        self.flash_saved_note("Bağlantılar")
         self.run_github_sync(auto=False)
 
     def start_auto_sync(self) -> None:

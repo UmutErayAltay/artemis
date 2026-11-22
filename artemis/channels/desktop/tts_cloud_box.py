@@ -504,7 +504,10 @@ class TtsCloudBox(_HeightForWidthBox):
             parts.append(t("Metin gönderme izni kapalıyken bulut sesi başlamaz."))
         if panel.tts_cloud_saved.count() <= 1:
             parts.append(
-                t("Ses modeli eklemek için Ayarlar > Model > Model ekle'de türü Ses seç.")
+                t(
+                    "Ses modeli eklemek için "
+                    "Ayarlar > Model ve Bağlantılar > Model Ekle ve Bağlantılar'da türü Ses seç."
+                )
             )
         panel.tts_cloud_hint.setText(" ".join(parts))
         self._relayout_ancestors()
