@@ -12,6 +12,7 @@ pytest.importorskip("PySide6")
 from PySide6.QtWidgets import QApplication, QWidget
 
 from artemis.channels.desktop.code_agent_config import AgentDialog
+from artemis.channels.desktop.mcp_dialog import MCPServerDialog
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.skill_dialog import SkillDialog
 from artemis.channels.desktop.trigger_dialog import TriggerDialog
@@ -79,7 +80,8 @@ def test_dialogs_stay_within_caps(tmp_path: Path, qt_app: QApplication, env) -> 
     settings, _config, _folder = env
     skill = SkillDialog(settings)
     trigger = TriggerDialog(None, [], [], "Rutinler kapalı.")
-    for dialog in (trigger, AgentDialog(("claude",)), skill):
+    mcp_dialog = MCPServerDialog(None, [])
+    for dialog in (trigger, AgentDialog(("claude",)), skill, mcp_dialog):
         _assert_texts(dialog)
         assert 1 <= len(_tips(dialog)) <= 3
     assert any("bulut modele" in tip.toolTip() for tip in _tips(skill))

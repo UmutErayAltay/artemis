@@ -208,6 +208,7 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         panel.save_failed(hotkey_error)
         return
     try:
+        mcp_getter = getattr(panel, "mcp_values", None)
         written = save_choices(
             window._config_path,
             device,
@@ -215,6 +216,7 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
             applications=panel.applications,
             code_agent=panel.code_agent_values(),
             stt_model=panel.stt_model_path(),
+            mcp_servers=mcp_getter() if callable(mcp_getter) else None,
         )
     except (OSError, ValueError, KeyError, TypeError):
         panel.save_failed(t("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor."))

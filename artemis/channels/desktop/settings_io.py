@@ -14,6 +14,7 @@ from typing import Any
 import yaml
 
 from artemis.config.settings import (
+    MCPServerConfig,
     Settings,
     load_settings,
 )
@@ -295,12 +296,18 @@ def setting_value(settings: Settings, path: SettingPath) -> Any:
     return value
 
 
+def dump_mcp_server(server: MCPServerConfig) -> dict[str, Any]:
+    """MCP sunucusunu YAML doğrulamasından geçebilecek JSON uyumlu sözlüğe çevirir."""
+    return server.model_dump(mode="json", exclude_none=True)
+
+
 def save_choices(
     path: Path, device: int | str | None,
     *, values: Mapping[SettingPath, Any] | None = None,
     applications: dict[str, str] | None = None,
     code_agent: dict[str, Any] | None = None,
     stt_model: Path | None = None,
+    mcp_servers: list[dict[str, Any]] | None = None,
 ) -> bool:
     """Diğer alanları (model seçimi dahil) korur; doğrulayıp aynı dizinde atomik değiştirir.
 
@@ -334,6 +341,8 @@ def save_choices(
         ]
     if code_agent is not None:
         _merge_code_agent(raw, code_agent)
+    if mcp_servers is not None and (mcp_servers or "mcp" in raw):
+        raw["mcp"] = {"servers": mcp_servers}
     if _same(before, raw):
         return False
     _write_validated(path, raw)

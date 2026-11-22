@@ -27,6 +27,7 @@ from artemis.channels.desktop.automation_panel import AutomationPanel
 from artemis.channels.desktop.code_agent_config import AgentDialog
 from artemis.channels.desktop.data_panel import DataPanel
 from artemis.channels.desktop.form_kit import button_row
+from artemis.channels.desktop.mcp_dialog import MCPServerDialog
 from artemis.channels.desktop.pet_section import _PetCard
 from artemis.channels.desktop.projects_panel import PAGE_MAX_WIDTH, ProjectsPanel
 from artemis.channels.desktop.skills_section import SkillsSection
@@ -206,7 +207,11 @@ def _agent_dialog() -> QDialog:
     return AgentDialog(("claude",))
 
 
-@pytest.mark.parametrize("factory", [_trigger_dialog, _agent_dialog])
+def _mcp_dialog() -> QDialog:
+    return MCPServerDialog(None, [])
+
+
+@pytest.mark.parametrize("factory", [_trigger_dialog, _agent_dialog, _mcp_dialog])
 def test_dialogs_have_primary_action_and_fit_small_screens(
     app: QApplication, factory: Callable[[], QDialog]
 ) -> None:

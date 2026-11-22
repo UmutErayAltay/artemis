@@ -344,6 +344,7 @@ memory:
 #     - name: notlar
 #       command: npx                     # Windows'ta npx.cmd otomatik çözülür; shell yok
 #       args: ["-y", "@modelcontextprotocol/server-filesystem", "C:/Users/siz/Notlar"]
+#       cwd: null
 #       content: file
 #       timeout_seconds: 20
 #       read_only_tools: [read_text_file, list_directory, search_files]

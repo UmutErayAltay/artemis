@@ -86,7 +86,12 @@ def test_legacy_and_subtab_routing_in_tr_and_en(
             assert panel.sections.currentRow() == 5
             assert panel.knowledge_tabs.currentIndex() == idx
 
-        for key, idx in (("Telegram", 0), ("Takvim ve posta", 1), ("GitHub", 2)):
+        for key, idx in (
+            ("Telegram", 0),
+            ("Takvim ve posta", 1),
+            ("GitHub", 2),
+            ("MCP Sunucuları", 3),
+        ):
             assert panel.select_section(key)
             assert panel.sections.currentRow() == 6
             assert panel.connections_tabs.currentIndex() == idx
@@ -369,6 +374,9 @@ def test_live_retranslate_github_saved_note_and_en_routes(
             ("Updates", 8, None),
             ("Calendar", 6, 1),
             ("Mail", 6, 1),
+            ("MCP", 6, 3),
+            ("MCP sunucuları", 6, 3),
+            ("MCP Servers", 6, 3),
         )
         for lang in ("tr", "en"):
             set_language(lang)

@@ -47,6 +47,7 @@ from artemis.channels.desktop import (
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.file_search_section import FileSearchSection
+from artemis.channels.desktop.mcp_section import MCPSection
 from artemis.channels.desktop.page_kit import PAGE_MAX_WIDTH, CurrentPageStack
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.provider_section import ProviderSection
@@ -230,6 +231,9 @@ _SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
         "github": ("Bağlantılar", 2),
         "github ve kod ajanları": ("Bağlantılar", 2),
         "github & code agents": ("Bağlantılar", 2),
+        "mcp": ("Bağlantılar", 3),
+        "mcp sunucuları": ("Bağlantılar", 3),
+        "mcp servers": ("Bağlantılar", 3),
         "uygulamalar": ("Uygulamalar ve Güvenlik", None),
         "applications": ("Uygulamalar ve Güvenlik", None),
         "güvenlik": ("Uygulamalar ve Güvenlik", None),
@@ -384,6 +388,8 @@ class SettingsPanel(QWidget):
     code_agents: dict[str, dict[str, Any]]
     default_agent: str
     _builtin_command: str
+    mcp: MCPSection
+    mcp_servers: MCPSection
     skills_enabled: QCheckBox
     skills: SkillsSection
     file_search_enabled: QCheckBox
@@ -974,6 +980,7 @@ class SettingsPanel(QWidget):
             self.skills.refresh()
             self.triggers.refresh()
             self.file_search.refresh()
+            self.mcp.refresh()
             # faster-whisper CPU'da zaten int8 kullanır; seçici orada anlamsız olur.
             self.precision_combo.setEnabled(
                 settings.voice.stt_device != "cpu" and not self._demo
@@ -1063,6 +1070,9 @@ class SettingsPanel(QWidget):
             self._refresh_applications()
             self._mark_dirty()
             self.notice.setText(t("Uygulama listeden çıkarıldı; Kaydet ile kaydedilir."))
+
+    def mcp_values(self) -> list[dict[str, Any]]:
+        return self.mcp.values()
 
     def values(self) -> dict[SettingPath, Any]:
         """PANEL_BINDINGS alanlarının panelde görünen değeri; save_choices(values=...) için."""
@@ -1250,6 +1260,7 @@ class SettingsPanel(QWidget):
         if isinstance(self.tts_cloud_box, TtsCloudBox):
             self.tts_cloud_box.finish()
         self.file_search.finish()
+        self.mcp.finish()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.finish_inventory()

@@ -343,9 +343,9 @@ class StdioMCPClient:
         self.timeout = timeout
         self.max_message_bytes = max_message_bytes
 
-    def list_tools(self) -> list[MCPToolSpec]:
+    def list_tools(self, *, cancel: threading.Event | None = None) -> list[MCPToolSpec]:
         deadline = time.monotonic() + self.timeout
-        session = self._open(deadline)
+        session = self._open(deadline, cancel)
         graceful = False
         try:
             self._handshake(session)

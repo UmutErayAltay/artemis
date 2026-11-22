@@ -29,6 +29,7 @@ from artemis.channels.desktop.form_kit import (
     group,
     meta_label,
 )
+from artemis.channels.desktop.mcp_section import MCPSection
 from artemis.channels.desktop.page_kit import SettingsTabWidget
 from artemis.channels.desktop.routines_section import RoutinesSection
 from artemis.channels.desktop.security_settings_section import build_privacy_security_group
@@ -438,14 +439,23 @@ def _build_github_agents_tab(panel: SettingsPanel, tabs: QTabWidget) -> None:
     github.addStretch(1)
 
 
+def _build_mcp_tab(panel: SettingsPanel, tabs: QTabWidget) -> None:
+    mcp_tab = _make_subtab(tabs, t("MCP Sunucuları"))
+    panel.mcp = MCPSection(panel.config_path, demo=panel._demo)
+    panel.mcp_servers = panel.mcp
+    panel.mcp.changed.connect(panel._mark_dirty)
+    mcp_tab.addWidget(panel.mcp)
+    mcp_tab.addStretch(1)
+
+
 def build_connections_page(panel: SettingsPanel) -> None:
-    """7. sayfa: Bağlantılar (Telegram | Takvim ve posta | GitHub ve kod ajanları)."""
+    """7. sayfa: Bağlantılar (Telegram | Takvim ve posta | GitHub ve kod ajanları | MCP)."""
     from artemis.channels.desktop.settings_pages import add_page
 
     page = add_page(
         panel,
         t("Bağlantılar"),
-        t("Telegram botu, takvim/posta erişimi ve GitHub kod ajanları."),
+        t("Telegram botu, takvim/posta erişimi, GitHub kod ajanları ve MCP sunucuları."),
         t("Dış Bağlantılar ve Sistem"),
     )
     tabs = SettingsTabWidget()
@@ -455,6 +465,7 @@ def build_connections_page(panel: SettingsPanel) -> None:
     _build_telegram_tab(panel, tabs)
     _build_calendar_mail_tab(panel, tabs)
     _build_github_agents_tab(panel, tabs)
+    _build_mcp_tab(panel, tabs)
     page.addStretch(1)
 
 
