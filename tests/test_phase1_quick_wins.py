@@ -18,7 +18,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
 from PySide6.QtGui import QFont, QFontDatabase
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QWidget
 
 from artemis.brain.budget import BudgetLedger
 from artemis.brain.fake import ScriptedProvider
@@ -47,7 +47,7 @@ from artemis.channels.voice.adapters import PCMChunk
 from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
 from artemis.channels.voice.metrics import MIN_TARGET_SAMPLES
 from artemis.config.settings import EndpointConfig, VoiceConfig, load_settings
-from tests.test_desktop_gui import _close_cleanly
+from tests.test_desktop_gui import _close_cleanly, _wait
 from tests.test_settings_panel import config
 
 
@@ -455,6 +455,103 @@ def test_topbar_status_pill_unclipped_with_budget_and_long_model(
                 child = item.widget() if item is not None else None
                 if child is not None and child.isVisibleTo(header):
                     assert header.rect().contains(child.geometry()), (width, child.objectName())
+    finally:
+        _close_cleanly(qt_app, window)
+        qt_app.setFont(prev_font)
+        if font_id >= 0:
+            QFontDatabase.removeApplicationFont(font_id)
+
+
+def _assert_topbar_geometry_clean(window: Any) -> None:
+    assert window.status_pill.width() >= window.status_pill.sizeHint().width()
+    header = window._topbar
+    layout = header.layout()
+    assert layout is not None
+    visible_children: list[QWidget] = []
+    for i in range(layout.count()):
+        item = layout.itemAt(i)
+        child = item.widget() if item is not None else None
+        if child is not None and child.isVisibleTo(header):
+            assert header.rect().contains(child.geometry()), (
+                window.width(),
+                child.objectName(),
+                child.geometry(),
+                header.rect(),
+            )
+            visible_children.append(child)
+    for idx, first in enumerate(visible_children):
+        for second in visible_children[idx + 1 :]:
+            assert not first.geometry().intersects(second.geometry()), (
+                window.width(),
+                first.objectName(),
+                first.geometry(),
+                second.objectName(),
+                second.geometry(),
+            )
+
+
+@pytest.mark.parametrize("demo", [False, True])
+def test_topbar_computer_use_status_unclipped_and_restores_on_resize(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch, demo: bool
+) -> None:
+    cfg = config(tmp_path)
+
+    def factory(config_path: Path, approve: Any, **kwargs: Any) -> Any:
+        return create_runtime(
+            config_path,
+            approve,
+            settings=load_settings(config_path),
+            provider=ScriptedProvider([]),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(bridge_module, "create_runtime", factory)
+    monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
+
+    font_path = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "Fonts" / "segoeui.ttf"
+    font_id = QFontDatabase.addApplicationFont(str(font_path)) if font_path.is_file() else -1
+    prev_font = qt_app.font()
+    if font_id >= 0:
+        qt_app.setFont(QFont("Segoe UI", 10))
+
+    window = build_window(cfg, demo=demo, app=qt_app)
+    try:
+        window.show()
+        _wait(qt_app, lambda: window._worker_ready)
+        window.budget_chip.setText("$12.34 / $25.00")
+        window._show_model("claude-sonnet-4-5-20250929-very-long-name")
+        window._set_status(
+            "Bilgisayarı kullanıyorum · düğmeye tıkla · durdurmak için Esc",
+            "running",
+        )
+        for width in (720, 760, 800, 900, 1000, 1180, 1280):
+            window.resize(width, 720)
+            qt_app.processEvents()
+            _assert_topbar_geometry_clean(window)
+
+        # Daraltıp tekrar genişletince ikincil çipler temiz biçimde geri gelir.
+        window.resize(1280, 720)
+        qt_app.processEvents()
+        assert window.model_box.isVisibleTo(window)
+        assert window.budget_chip.isVisibleTo(window)
+        if demo:
+            assert window.demo_chip is not None and window.demo_chip.isVisibleTo(window)
+
+        window.resize(720, 720)
+        qt_app.processEvents()
+        assert not window.model_box.isVisibleTo(window)
+        assert not window.budget_chip.isVisibleTo(window)
+        if demo:
+            assert window.demo_chip is not None and not window.demo_chip.isVisibleTo(window)
+        _assert_topbar_geometry_clean(window)
+
+        window.resize(1280, 720)
+        qt_app.processEvents()
+        assert window.model_box.isVisibleTo(window)
+        assert window.budget_chip.isVisibleTo(window)
+        if demo:
+            assert window.demo_chip is not None and window.demo_chip.isVisibleTo(window)
+        _assert_topbar_geometry_clean(window)
     finally:
         _close_cleanly(qt_app, window)
         qt_app.setFont(prev_font)

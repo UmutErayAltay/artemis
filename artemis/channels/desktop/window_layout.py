@@ -170,6 +170,8 @@ def fit_topbar(window: DesktopWindow) -> None:
     if header is None or layout is None:
         return
     width = window.width()
+    if window.demo_chip is not None:
+        window.demo_chip.setVisible(True)
     window.model_box.setVisible(width >= 800)
     window.model_caption.setVisible(width >= 800)
     window.budget_chip.setVisible(width >= 1000)
@@ -194,7 +196,10 @@ def fit_topbar(window: DesktopWindow) -> None:
     if not widgets:
         return
     needed = sum(_topbar_item_width(w) for w in widgets) + spacing * (len(widgets) - 1)
-    for optional in (window.model_caption, window.budget_chip):
+    optional_items: list[QWidget] = [window.model_caption, window.budget_chip, window.model_box]
+    if window.demo_chip is not None:
+        optional_items.append(window.demo_chip)
+    for optional in optional_items:
         if needed <= available:
             break
         if not optional.isHidden():
