@@ -210,9 +210,14 @@ class TtsCloudBox(_HeightForWidthBox):
         panel.tts_cloud_voice.setAccessibleName(t("Bulut konuşma sesi"))
         field(layout, t("Ses"), panel.tts_cloud_voice)
 
-        panel.tts_cloud_consent = QCheckBox(t("Yanıt metni bu bulut sunucusuna gönderilsin"))
-        panel.tts_cloud_consent.setAccessibleName(t("Yanıt metni bu bulut sunucusuna gönderilsin"))
-        layout.addWidget(panel.tts_cloud_consent)
+        if not hasattr(panel, "tts_cloud_consent"):
+            panel.tts_cloud_consent = QCheckBox(
+                t("Yanıt metni bu bulut sunucusuna gönderilsin")
+            )
+            panel.tts_cloud_consent.setAccessibleName(
+                t("Yanıt metni bu bulut sunucusuna gönderilsin")
+            )
+            layout.addWidget(panel.tts_cloud_consent)
 
         panel.tts_cloud_paid = QCheckBox(t("Ücretli modele izin ver"))
         panel.tts_cloud_paid.setAccessibleName(t("Ücretli modele izin ver"))
@@ -465,7 +470,7 @@ class TtsCloudBox(_HeightForWidthBox):
             parts.append(
                 t(
                     "Bu sunucu için anahtar kayıtlı değil; "
-                    "Ayarlar > Model > Bağlantılar bölümünden kaydet."
+                    "Ayarlar > Model ve Bağlantılar bölümünden kaydet."
                 )
             )
         saved_alias = str(panel.tts_cloud_saved.currentData() or "")

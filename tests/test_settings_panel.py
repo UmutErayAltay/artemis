@@ -218,16 +218,16 @@ def test_settings_panel_sections_are_grouped_by_topic(tmp_path: Path, qt_app) ->
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
     assert panel.section_names() == [
-        "Ses", "Model", "Görünüm",
-        "Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma",
-        "Telegram", "Takvim ve posta", "GitHub",
-        "Beceriler", "Dosya araması", "Uygulamalar", "Hakkında",
+        "Ses", "Dikte ve Kısayollar", "Model ve Bağlantılar", "Görünüm",
+        "Otomasyon Kuralları", "Bilgi ve Beceriler",
+        "Bağlantılar", "Uygulamalar ve Güvenlik", "Hakkında ve Güncelleme",
     ]
     assert panel.section_groups() == {
-        "Temel": ["Ses", "Model", "Görünüm"],
-        "Otomasyon": ["Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma"],
-        "Bağlantılar": ["Telegram", "Takvim ve posta", "GitHub"],
-        "Bilgi": ["Beceriler", "Dosya araması", "Uygulamalar", "Hakkında"],
+        "Temel": ["Ses", "Dikte ve Kısayollar", "Model ve Bağlantılar", "Görünüm"],
+        "Otomasyon ve Bilgi": ["Otomasyon Kuralları", "Bilgi ve Beceriler"],
+        "Dış Bağlantılar ve Sistem": [
+            "Bağlantılar", "Uygulamalar ve Güvenlik", "Hakkında ve Güncelleme",
+        ],
     }
     assert panel.sections.objectName() == "sectionList"
     assert panel.sections.currentRow() == 0
@@ -380,21 +380,38 @@ def _panel(path: Path):  # type: ignore[no-untyped-def]
 
 def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     """Widget'ı varsayılandan farklı, seçilebilir bir değere getirir."""
+    from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit, QListWidget, QSpinBox
 
     if isinstance(widget, QSpinBox):
         widget.setValue(5 if widget.value() != 5 else 15)
         return
-    if isinstance(widget, QListWidget):  # file_search.roots: mutlak yol yeter, varlığı aranmaz
+    if isinstance(widget, QListWidget):
+        if widget.count() and (widget.item(0).flags() & Qt.ItemFlag.ItemIsUserCheckable):
+            item = widget.item(0)
+            item.setCheckState(
+                Qt.CheckState.Unchecked
+                if item.checkState() == Qt.CheckState.Checked
+                else Qt.CheckState.Checked
+            )
+            return
         widget.addItem(str(Path(widget.accessibleName() or "x").resolve() / "belgeler"))
         return
     if isinstance(widget, QLineEdit):
         name = widget.accessibleName()
         # Kısayol alanları birbirinden farklı olmalı (config çakışmayı reddeder).
-        widget.setText(
-            "587" if name == "IMAP portu" else "07:15" if name == "Özet saati"
-            else "Veli2" if "Seçili" in name else "Veli"
-        )
+        if name == "IMAP portu":
+            widget.setText("587")
+        elif name == "Özet saati":
+            widget.setText("07:15")
+        elif "Ses" in name:
+            widget.setText("ctrl+shift+v")
+        elif "Dikte" in name:
+            widget.setText("ctrl+shift+d")
+        elif "Seçili" in name:
+            widget.setText("ctrl+shift+s")
+        else:
+            widget.setText("Veli")
         return
     if isinstance(widget, QComboBox) and widget.isEditable():
         widget.setEditText("Veli")
@@ -789,20 +806,21 @@ def test_group_headers_are_not_selectable_rows(tmp_path: Path, qt_app) -> None:
     panel.resize(900, 700)
     panel.show()
     qt_app.processEvents()
-    assert panel.sections.count() == 14  # başlıklar satır değil: satır = sayfa
+    assert panel.sections.count() == 9  # başlıklar satır değil: satır = sayfa
     panel.show_section(1)
-    first_of_group = panel.sections.item(3)  # Rutinler, "Otomasyon" başlığının altında
+    first_of_group = panel.sections.item(4)  # Otomasyon Kuralları, "Otomasyon ve Bilgi" altında
     rect = panel.sections.visualItemRect(first_of_group)
     viewport = panel.sections.viewport()
     click = Qt.MouseButton.LeftButton
     QTest.mouseClick(viewport, click, pos=QPoint(20, rect.top() + 4))
     assert panel.sections.currentRow() == 1  # başlık alanı seçim yapmaz
     QTest.mouseClick(viewport, click, pos=QPoint(20, rect.bottom() - 4))
-    assert panel.sections.currentRow() == 3
-    panel.show_section(2)
+    assert panel.sections.currentRow() == 4
+    panel.show_section(3)
     panel.sections.setFocus()
-    QTest.keyClick(panel.sections, Qt.Key.Key_Down)  # Görünüm -> Rutinler, başlık atlanır
-    assert panel.section_names()[panel.sections.currentRow()] == "Rutinler"
+    # Görünüm -> Otomasyon Kuralları, başlık atlanır
+    QTest.keyClick(panel.sections, Qt.Key.Key_Down)
+    assert panel.section_names()[panel.sections.currentRow()] == "Otomasyon Kuralları"
     panel.deleteLater()
 
 
@@ -845,7 +863,7 @@ def test_dirty_state_follows_edits_and_refresh(tmp_path: Path, qt_app) -> None:
 def test_scheduled_jobs_checkbox_is_bound_and_saved(tmp_path: Path, qt_app) -> None:
     path = config(tmp_path)
     panel = _panel(path)
-    assert panel.section_names()[3] == "Rutinler"
+    assert panel.section_names()[4] == "Otomasyon Kuralları"
     assert panel.proactive_enabled.text() == "Zamanlı işler"
     assert panel.values()[("proactive", "enabled")] is False
     panel.proactive_enabled.setChecked(True)
@@ -964,11 +982,11 @@ def _visible(panel) -> list[str]:  # type: ignore[no-untyped-def]
 
 def test_search_filters_by_title_and_page_text_turkish_insensitive(tmp_path: Path, qt_app) -> None:
     panel = _panel(config(tmp_path))
-    panel.search.setText("RUTİN")  # başlık; İ/i farkı yok
-    assert _visible(panel) == ["Rutinler"]
-    assert panel.sections.currentRow() == panel.section_names().index("Rutinler")  # tek eşleşme
+    panel.search.setText("RUTİN")  # alt sekme başlığı; İ/i farkı yok
+    assert _visible(panel) == ["Otomasyon Kuralları"]
+    assert panel.sections.currentRow() == panel.section_names().index("Otomasyon Kuralları")
     panel.search.setText("bütün kurulu uygulamalara")  # sayfadaki onay kutusu metni
-    assert _visible(panel) == ["Uygulamalar"]
+    assert _visible(panel) == ["Uygulamalar ve Güvenlik"]
     panel.search.setText("UYANDIRMA ADI")
     assert "Ses" in _visible(panel)
     panel.search.setText("zzzyok")
@@ -997,7 +1015,7 @@ def test_search_hides_empty_group_headers_and_enter_selects(tmp_path: Path, qt_a
     panel.search.setText("Rutinler")
     panel.show_section(0)
     QTest.keyClick(panel.search, Qt.Key.Key_Return)
-    assert panel.sections.currentRow() == names.index("Rutinler")
+    assert panel.sections.currentRow() == names.index("Otomasyon Kuralları")
     panel.deleteLater()
 
 
@@ -1111,7 +1129,7 @@ def test_pages_have_no_title_duplicating_their_name_and_search_still_works(
     shown = [
         n for r, n in enumerate(panel.section_names()) if not panel.sections.item(r).isHidden()
     ]
-    assert "Telegram" in shown and "Ses" not in shown
+    assert "Bağlantılar" in shown and "Ses" not in shown
     panel.search.setText("")
     assert all(not panel.sections.item(r).isHidden() for r in range(panel.sections.count()))
     panel.deleteLater()

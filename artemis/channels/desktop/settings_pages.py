@@ -1,15 +1,13 @@
-"""Ayarlar paneli sayfaları (SettingsPanel'den ayrıldı): kabuk, çerçeve ve sayfa kurulumları.
+"""Ayarlar paneli sayfaları (SettingsPanel'den ayrıldı): kabuk, çerçeve ve 1. grup sayfaları.
 
-Davranış SettingsPanel'dedir; burası yalnız widget'ları kurar ve `panel` üzerindeki alanlara
-bağlar.
+Davranış SettingsPanel'dedir; 2. ve 3. grup sayfaları `settings_pages_extra.py` içindedir.
 """
 
 from __future__ import annotations
 
 import importlib.util
-import os
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSize, Qt
 from PySide6.QtWidgets import (
@@ -21,7 +19,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QProgressBar,
     QPushButton,
     QScrollArea,
@@ -31,9 +28,6 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.channels.desktop.about_section import AboutSection
-from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
-from artemis.channels.desktop.file_search_section import FileSearchSection
 from artemis.channels.desktop.form_kit import (
     _HeightForWidthBox,
     button_row,
@@ -42,12 +36,14 @@ from artemis.channels.desktop.form_kit import (
     group,
     meta_label,
 )
-from artemis.channels.desktop.page_kit import CurrentPageStack
+from artemis.channels.desktop.page_kit import CurrentPageStack, SettingsTabWidget
 from artemis.channels.desktop.pet_section import PetSection
 from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.provider_section import ProviderSection
 from artemis.channels.desktop.retranslate import set_i18n_context
-from artemis.channels.desktop.routines_section import RoutinesSection
+from artemis.channels.desktop.settings_pages_extra import (
+    default_repos_dir as default_repos_dir,
+)
 from artemis.channels.desktop.settings_widgets import (
     _GROUP_ROLE,
     _HEADER_HEIGHT,
@@ -59,49 +55,27 @@ from artemis.channels.desktop.settings_widgets import (
     _SectionList,
     _ThemeCard,
 )
-from artemis.channels.desktop.skills_section import SkillsSection
-from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS
-from artemis.channels.desktop.triggers_section import TriggersSection
 from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
-from artemis.channels.desktop.update_section import UpdateSection
-from artemis.channels.desktop.widgets import HelpTip, with_help
-from artemis.config.settings import BUILTIN_AGENT
+from artemis.channels.desktop.voice_preview import build_voice_output_controls
+from artemis.channels.desktop.voice_telemetry_card import VoiceTelemetryCard
+from artemis.channels.desktop.widgets import with_help
 from artemis.i18n import current_language, t
 
 if TYPE_CHECKING:
     from artemis.channels.desktop.settings_panel import SettingsPanel
 
-_HINT_MAX_WIDTH = 640  # onay kutusu açıklaması bundan geniş satıra uzamaz
+_HINT_MAX_WIDTH = 640
 _REVERT_TOOLTIP = (
     "Ayarlar açıldığındaki kayıtlı hâline döner. "
     "API anahtarları ve kasadaki parolalar geri alınmaz."
 )
 
 
-def default_repos_dir() -> str:
-    return str(Path(os.environ.get("USERPROFILE") or Path.home()) / "Desktop" / "Projeler")
-
-
-def _indent(box: QCheckBox, help: str = "") -> QHBoxLayout:  # noqa: A002
-    """Bağlı seçenek: ana kutunun altında, gösterge genişliği kadar girintili; `help` kutunun
-    hemen sağına "?" koyar."""
-    row = QHBoxLayout()
-    row.setContentsMargins(24, 0, 0, 0)
-    row.setSpacing(6)
-    row.addWidget(box)
-    if help:
-        row.addWidget(HelpTip(help), 0, Qt.AlignmentFlag.AlignVCenter)
-        row.addStretch(1)
-    return row
-
-
 def _check_hint(text: str) -> QLabel:
-    """Onay kutusunun altındaki 12px soluk açıklama; kutu metni uzayıp satırı taşırmasın diye
-    ayrıntı buraya (sarılabilir) konur. Girinti = gösterge 16px + boşluk 8px."""
     label = meta_label(text)
     label.setContentsMargins(24, 0, 0, 0)
-    label.setMaximumWidth(_HINT_MAX_WIDTH)  # tek satırda 850px uzamasın; okunur genişlikte sarılır
+    label.setMaximumWidth(_HINT_MAX_WIDTH)
     return label
 
 
@@ -112,7 +86,6 @@ def build_shell(panel: SettingsPanel) -> None:
     title = QLabel(t("Ayarlar"))
     title.setObjectName("pageTitle")
     title.setFixedHeight(40)
-    # Durum yazısı ve geri alma düğmesi başlıkla aynı satırda, sağda: alt çubuk yok.
     panel.notice = _Notice()
     panel.retry_button = QPushButton(t("Tekrar dene"))
     panel.retry_button.setToolTip(t("Kaydedilemeyen değişiklikleri yeniden yazmayı dener."))
@@ -136,8 +109,6 @@ def build_shell(panel: SettingsPanel) -> None:
     title_row.addWidget(panel.save_button)
     panel.title_row = title_row
     layout.addLayout(title_row)
-    # Bölüm listesi kaydırma alanının dışında: uzun sayfayı kaydırınca liste yerinde kalır.
-    # Yalnız sayfa kaydırılır; liste kendi kaydırıcısını yalnız pencere kısaysa gösterir.
     panel.sections = _SectionList()
     panel.sections.setObjectName("sectionList")
     panel.sections.setFixedWidth(200)
@@ -149,12 +120,9 @@ def build_shell(panel: SettingsPanel) -> None:
     scroll = QScrollArea()
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QFrame.Shape.NoFrame)
-    # Dar panelde bölüm seçici listenin yerini alır ve sayfalar 720px pencerede sığar
-    # (tests/test_ux_narrow.py); yatay çubuk yalnız kırpılan içeriği saklardı, o yüzden kapalı.
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
     scroll.setWidget(panel.stack)
     panel.sections.scroll_area = scroll
-    # Dar panelde listenin yerini alan seçici; yapı (grup başlıkları) listeyle aynıdır.
     panel.section_combo = QComboBox()
     panel.section_combo.setAccessibleName(t("Bölüm"))
     panel.section_combo.setVisible(False)
@@ -190,24 +158,17 @@ def add_page(
     panel: SettingsPanel, name: str, description: str, group_title: str = "", *,
     wide: bool = False,
 ) -> QVBoxLayout:
-    """Bölüm sayfası: 880px'i aşmayan sütun, solda; tek satır açıklama. Sayfa adı
-    bölüm listesinde zaten seçili görünür, sayfada tekrarlanmaz. `group_title`
-    grubun ilk sayfasında grup başlığını açar."""
-    # `QHBoxLayout` çocuklarının `heightForWidth` değerini kendi `minimumSize` hesabına katmaz;
-    # 880px sınırlı sütunu doğrudan `QVBoxLayout` içine koymak sarılan etiketlerin ve dinamik
-    # gizlenen/gösterilen kutuların yüksekliğini kaydırma alanına eksiksiz iletir.
+    """Bölüm sayfası: 880px'i aşmayan sütun, solda; tek satır açıklama."""
     outer = _HeightForWidthBox()
     row = QVBoxLayout(outer)
     row.setContentsMargins(0, 0, 0, 0)
     row.setSpacing(0)
     column = _HeightForWidthBox()
-    # Model sayfası liste + ayrıntıyı yan yana koyar; bloğun bütün sayfa alanını kullanır.
     column.setMaximumWidth(16777215 if wide else 880)
     row.addWidget(column)
     content = QVBoxLayout(column)
     content.setContentsMargins(0, 0, 0, 0)
     content.setSpacing(24)
-    # Anında kaydedilen sayfalar açıklamanın sağında kısa "Kaydedildi" gösterir.
     saved = _SavedNote()
     panel.saved_notes[name] = saved
     heading = QHBoxLayout()
@@ -228,15 +189,36 @@ def add_page(
 
 
 def build_voice_page(panel: SettingsPanel) -> None:
-    voice = add_page(panel, t("Ses"), t("Uyandırma, tanıma ve konuşma."), t("Temel"))
-    _wake_group(panel, voice)
-    _stt_group(panel, voice)
-    _speech_group(panel, voice)
-    _cleanup_group(panel, voice)
+    """1. sayfa: Ses (Dinleme (Giriş) | Yanıt (Çıkış))."""
+    voice = add_page(panel, t("Ses"), t("Uyandırma, tanıma, konuşma sesi ve ölçüm."), t("Temel"))
+    tabs = SettingsTabWidget()
+    panel.voice_tabs = tabs
+    panel._page_tabs["Ses"] = tabs
+    voice.addWidget(tabs)
+
+    listen_page = _HeightForWidthBox()
+    listen_layout = QVBoxLayout(listen_page)
+    listen_layout.setContentsMargins(0, 16, 0, 0)
+    listen_layout.setSpacing(24)
+    _wake_group(panel, listen_layout)
+    _stt_group(panel, listen_layout)
+    _cleanup_group(panel, listen_layout)
+    panel.voice_telemetry_card = VoiceTelemetryCard(panel.config_path)
+    listen_layout.addWidget(panel.voice_telemetry_card)
+    listen_layout.addStretch(1)
+    tabs.addTab(listen_page, t("Dinleme (Giriş)"))
+
+    reply_page = _HeightForWidthBox()
+    reply_layout = QVBoxLayout(reply_page)
+    reply_layout.setContentsMargins(0, 16, 0, 0)
+    reply_layout.setSpacing(24)
+    _speech_group(panel, reply_layout)
+    reply_layout.addStretch(1)
+    tabs.addTab(reply_page, t("Yanıt (Çıkış)"))
+    voice.addStretch(1)
 
 
 def _wake_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
-    # Uyandırma ve mikrofon
     wake_box, wake = group(t("Uyandırma ve mikrofon"), divided=False)
     voice.addWidget(wake_box)
     panel.wake_name = QLineEdit()
@@ -256,12 +238,11 @@ def _wake_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     )
     panel.device_combo = QComboBox()
     panel.device_combo.setAccessibleName(t("Mikrofon girişi"))
-    panel._no_device()  # demo'da ve yenilemeden önce boş açılır liste görünmesin
+    panel._no_device()
     field(wake, t("Mikrofon girişi"), panel.device_combo)
     panel.current_device = QLabel(t("Seçilmedi"))
     panel.current_device.setWordWrap(True)
     field(wake, t("Kullanılan mikrofon"), panel.current_device)
-    # Etiketli seviye ölçeri: düğmeye benzeyen ortalı yazı yerine ince çubuk + değer.
     panel.input_level = QProgressBar()
     panel.input_level.setObjectName("levelMeter")
     panel.input_level.setRange(0, 100)
@@ -271,7 +252,6 @@ def _wake_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     panel.input_level.setAccessibleName(t("Ses girişi seviyesi"))
     panel.level_value = QLabel(t("%{value}").format(value=0))
     panel.level_value.setObjectName("meta")
-    # "%100" sığmalı: sabit genişlik satırın içinde kalır, dar pencerede kırpılmaz.
     max_pct = t("%{value}").format(value=100)
     panel.level_value.setFixedWidth(panel.level_value.fontMetrics().horizontalAdvance(max_pct) + 8)
     panel.level_value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
@@ -287,10 +267,15 @@ def _wake_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     panel.last_heard.setTextFormat(Qt.TextFormat.PlainText)
     panel.last_heard.setWordWrap(True)
     field(wake, t("Son duyulan"), panel.last_heard)
+    panel.continuous_mode = QCheckBox(t("Kesintisiz sohbet"))
+    wake.addLayout(with_help(panel.continuous_mode, t(
+        "Uyandırma adı söylemeden sürekli dinler. Karma tanıma açıksa kesintisiz kipte her söz "
+        "bulut sunucusuna gider."
+    )))
+    wake.addWidget(_check_hint(t("Uyandırma adı söylemeden sürekli dinler.")))
 
 
 def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
-    # Tanıma
     stt_card, stt_layout = group(t("Tanıma"))
     voice.addWidget(stt_card)
     stt_controls = QHBoxLayout()
@@ -397,8 +382,7 @@ def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
 
 
 def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
-    # Konuşma
-    speech_card, speech = group(t("Konuşma"))
+    speech_card, speech = group(t("Konuşma"), divided=False)
     voice.addWidget(speech_card)
     panel.tts_combo = QComboBox()
     panel.tts_combo.setAccessibleName(t("Konuşma sesi"))
@@ -432,50 +416,8 @@ def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
 
     _update_piper_hint()
     panel.tts_combo.currentIndexChanged.connect(_update_piper_hint)
+    build_voice_output_controls(panel, speech)
     build_tts_cloud_box(panel, speech)
-    panel.continuous_mode = QCheckBox(t("Kesintisiz sohbet"))
-    speech.addLayout(with_help(panel.continuous_mode, t(
-        "Uyandırma adı söylemeden sürekli dinler. Karma tanıma açıksa kesintisiz kipte her söz "
-        "bulut sunucusuna gider."
-    )))
-    speech.addWidget(_check_hint(t("Uyandırma adı söylemeden sürekli dinler.")))
-    panel.dictation_enabled = QCheckBox(t("Dikteyi kullan"))
-    speech.addWidget(panel.dictation_enabled)
-    speech.addWidget(_check_hint(t(
-        "Kısayola basıp konuşun, tekrar basın: metin odaktaki uygulamaya yazılır. "
-        "Komut değildir, Artemis'e gitmez. Ses açıkken çalışmaz. Esc yazımı durdurur."
-    )))
-    panel.dictation_hotkey = QLineEdit()
-    panel.dictation_hotkey.setMaxLength(40)
-    panel.dictation_hotkey.setAccessibleName(t("Dikte kısayolu"))
-    panel.dictation_hotkey.setPlaceholderText(t("Örneğin: ctrl+alt+d"))
-    field(speech, t("Dikte tuşu"), panel.dictation_hotkey)
-    panel.dictation_max_seconds = QSpinBox()
-    panel.dictation_max_seconds.setRange(1, 600)
-    panel.dictation_max_seconds.setValue(120)
-    panel.dictation_max_seconds.setAccessibleName(t("Dikte üst süresi"))
-    panel.dictation_max_seconds.setToolTip(t(
-        "İkinci kez kısayola basmadan kaydın kendiliğinden duracağı üst süre (1–600 sn)."
-    ))
-    field(speech, t("Dikte üst süresi (sn)"), panel.dictation_max_seconds)
-    panel.selection_enabled = QCheckBox(t("Seçili metin eylemlerini kullan"))
-    speech.addWidget(panel.selection_enabled)
-    speech.addWidget(_check_hint(t(
-        "Bir uygulamada metin seçip kısayola basın: Çevir, Düzelt, Özetle ya da Açıkla. "
-        "Seçimi almak için pano geçici kullanılır ve eski metin geri konur; metin dışı pano "
-        "içeriği (resim, dosya) geri konamaz. Metin modele araçsız gider, geçmişe girmez. "
-        "Pano için bulut izni yoksa yalnız yerel model kullanılır."
-    )))
-    panel.selection_hotkey = QLineEdit()
-    panel.selection_hotkey.setMaxLength(40)
-    panel.selection_hotkey.setAccessibleName(t("Seçili metin kısayolu"))
-    panel.selection_hotkey.setPlaceholderText(t("Örneğin: ctrl+alt+s"))
-    field(speech, t("Seçili metin tuşu"), panel.selection_hotkey)
-    panel.selection_translate_to = QLineEdit()
-    panel.selection_translate_to.setMaxLength(40)
-    panel.selection_translate_to.setAccessibleName(t("Çeviri dili"))
-    panel.selection_translate_to.setPlaceholderText(t("Örneğin: en"))
-    field(speech, t("Çeviri dili"), panel.selection_translate_to)
     panel.barge_in_box = QCheckBox(t("Konuşurken sesimle sustur"))
     speech.addWidget(panel.barge_in_box)
     panel.followup_box = QCheckBox(t("Yanıttan sonra adsız dinle"))
@@ -483,10 +425,18 @@ def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     speech.addWidget(_check_hint(t(
         "Cevap bitince ya da sesinle susturunca, bir süre uyandırma adı söylemeden dinler."
     )))
+    panel.echo_cancellation = QCheckBox(t("Yankı engelleme"))
+    panel.echo_cancellation.setToolTip(t(
+        "WebRTC yankı giderici; Artemis'in hoparlörden çıkan kendi sesini mikrofondan "
+        "siler, böylece konuşurken araya girmek ve kendi sesini komut sanmamak güvenilir "
+        "olur. Yerelde çalışır. Kulaklıkla gerekmez. Değişiklik ses yeniden başlayınca "
+        "uygulanır."
+    ))
+    speech.addWidget(panel.echo_cancellation)
+    speech.addWidget(_check_hint(t("Hoparlörle kullanırken aç; kulaklıkta gerekmez.")))
 
 
 def _cleanup_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
-    # Ses temizleme ve canlı yazı
     clean_card, clean = group(t("Canlı yazı ve ses temizleme"))
     voice.addWidget(clean_card)
     panel.live_transcript = QCheckBox(t("Canlı yazı (konuşurken)"))
@@ -495,7 +445,6 @@ def _cleanup_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         "Ek bir bileşen kurulumu ister. Değişiklik ses yeniden başlayınca uygulanır."
     ))
     clean.addWidget(panel.live_transcript)
-    # Lisans atfı (mihu Community License): "Powered by mihu" arayüzde görünür kalmalı.
     clean.addWidget(
         meta_label(t("Yerel, işlemcide çalışır. Powered by mihu · mihu Community License"))
     )
@@ -529,22 +478,11 @@ def _cleanup_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     panel.game_mode.toggled.connect(panel._update_cloud_hint)
     panel.game_mode_target.currentIndexChanged.connect(panel._update_cloud_hint)
     panel._update_cloud_hint()
-    panel.echo_cancellation = QCheckBox(t("Yankı engelleme"))
-    panel.echo_cancellation.setToolTip(t(
-        "WebRTC yankı giderici; Artemis'in hoparlörden çıkan kendi sesini mikrofondan "
-        "siler, böylece konuşurken araya girmek ve kendi sesini komut sanmamak güvenilir "
-        "olur. Yerelde çalışır. Kulaklıkla gerekmez. Değişiklik ses yeniden başlayınca "
-        "uygulanır."
-    ))
-    clean.addWidget(panel.echo_cancellation)
-    clean.addWidget(_check_hint(t("Hoparlörle kullanırken aç; kulaklıkta gerekmez.")))
     panel.advanced_toggle = QToolButton()
     panel.advanced_toggle.setText(t("Gelişmiş ses ayarları"))
     panel.advanced_toggle.setCheckable(True)
     panel.advanced_toggle.setChecked(False)
-    panel.advanced_toggle.setToolButtonStyle(
-        Qt.ToolButtonStyle.ToolButtonTextBesideIcon
-    )
+    panel.advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
     panel.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
     voice.addWidget(divider())
     voice.addWidget(panel.advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
@@ -576,30 +514,97 @@ def _cleanup_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     advanced_layout.addLayout(button_row(panel.refresh_button))
     voice.addWidget(panel.advanced_box)
     panel.advanced_box.setVisible(False)
-    voice.addStretch(1)
     panel.stt_combo.currentIndexChanged.connect(panel._stt_selection_changed)
     panel.stt_download.clicked.connect(panel._download_stt)
     panel._populate_stt_choices(None)
     panel.advanced_toggle.toggled.connect(panel._toggle_advanced)
 
 
+def build_shortcuts_page(panel: SettingsPanel) -> None:
+    """2. sayfa: Dikte ve Kısayollar."""
+    page = add_page(
+        panel,
+        t("Dikte ve Kısayollar"),
+        t("Genel ses kısayolu, dikte ve seçili metin eylemleri."),
+    )
+    voice_box, voice_hk = group(t("Genel ses kısayolu"), divided=False)
+    page.addWidget(voice_box)
+    panel.listening_hotkey = QLineEdit()
+    panel.listening_hotkey.setMaxLength(40)
+    panel.listening_hotkey.setAccessibleName(t("Ses kısayolu"))
+    panel.listening_hotkey.setPlaceholderText("ctrl+space")
+    field(
+        voice_hk,
+        t("Ses kısayolu"),
+        panel.listening_hotkey,
+        t(
+            "Mikrofonu açıp kapatır (boş bırakılırsa kapalı). Dikte ve seçili metin "
+            "kısayolundan farklı olmalı."
+        ),
+    )
+
+    dict_box, dict_layout = group(t("Dikte"))
+    page.addWidget(dict_box)
+    panel.dictation_enabled = QCheckBox(t("Dikteyi kullan"))
+    dict_layout.addWidget(panel.dictation_enabled)
+    dict_layout.addWidget(_check_hint(t(
+        "Kısayola basıp konuşun, tekrar basın: metin odaktaki uygulamaya yazılır. "
+        "Komut değildir, Artemis'e gitmez. Ses açıkken çalışmaz. Esc yazımı durdurur."
+    )))
+    panel.dictation_hotkey = QLineEdit()
+    panel.dictation_hotkey.setMaxLength(40)
+    panel.dictation_hotkey.setAccessibleName(t("Dikte kısayolu"))
+    panel.dictation_hotkey.setPlaceholderText(t("Örneğin: ctrl+alt+d"))
+    field(dict_layout, t("Dikte tuşu"), panel.dictation_hotkey)
+    panel.dictation_max_seconds = QSpinBox()
+    panel.dictation_max_seconds.setRange(1, 600)
+    panel.dictation_max_seconds.setValue(120)
+    panel.dictation_max_seconds.setAccessibleName(t("Dikte üst süresi"))
+    panel.dictation_max_seconds.setToolTip(t(
+        "İkinci kez kısayola basmadan kaydın kendiliğinden duracağı üst süre (1–600 sn)."
+    ))
+    field(dict_layout, t("Dikte üst süresi (sn)"), panel.dictation_max_seconds)
+
+    sel_box, sel_layout = group(t("Seçili metin eylemleri"))
+    page.addWidget(sel_box)
+    panel.selection_enabled = QCheckBox(t("Seçili metin eylemlerini kullan"))
+    sel_layout.addWidget(panel.selection_enabled)
+    sel_layout.addWidget(_check_hint(t(
+        "Bir uygulamada metin seçip kısayola basın: Çevir, Düzelt, Özetle ya da Açıkla. "
+        "Seçimi almak için pano geçici kullanılır ve eski metin geri konur; metin dışı pano "
+        "içeriği (resim, dosya) geri konamaz. Metin modele araçsız gider, geçmişe girmez. "
+        "Pano için bulut izni yoksa yalnız yerel model kullanılır."
+    )))
+    panel.selection_hotkey = QLineEdit()
+    panel.selection_hotkey.setMaxLength(40)
+    panel.selection_hotkey.setAccessibleName(t("Seçili metin kısayolu"))
+    panel.selection_hotkey.setPlaceholderText(t("Örneğin: ctrl+alt+s"))
+    field(sel_layout, t("Seçili metin tuşu"), panel.selection_hotkey)
+    panel.selection_translate_to = QLineEdit()
+    panel.selection_translate_to.setMaxLength(40)
+    panel.selection_translate_to.setAccessibleName(t("Çeviri dili"))
+    panel.selection_translate_to.setPlaceholderText(t("Örneğin: en"))
+    field(sel_layout, t("Çeviri dili"), panel.selection_translate_to)
+    page.addStretch(1)
+
+
 def build_model_page(
     panel: SettingsPanel, pets_dir: Path | None, codex_pets_dir: Path | None
 ) -> None:
+    """3. sayfa: Model ve Bağlantılar (wide=True; PetSection ayrı sekmede)."""
     config_path = panel.config_path
     demo = panel._demo
-    # Model: bağlantılar ve modeller ProviderSection'dadır.
     model_page = add_page(
-        panel, t("Model"), t("Beyin modelini seç ve bağlantıları yönet."), wide=True
+        panel, t("Model ve Bağlantılar"), t("Beyin modelini seç ve bağlantıları yönet."), wide=True
     )
     panel.providers = ProviderSection(config_path, demo=demo)
     panel.providers.changed.connect(panel._load_cloud_servers)
-    panel.providers.changed.connect(panel.saved_notes[t("Model")].flash)
+    panel.providers.changed.connect(panel.saved_notes[t("Model ve Bağlantılar")].flash)
     panel.providers.staged.connect(panel._mark_dirty)
+    panel._page_tabs["Model ve Bağlantılar"] = panel.providers.tabs
     model_page.addWidget(panel.providers)
     model_page.addStretch(1)
 
-    # Pet bölümü ayarlarda gösterilmez; app.py kendi sayfasında barındırır.
     panel.pet = PetSection(
         pets_dir if pets_dir is not None else pets_dir_for(config_path),
         codex_pets_dir,
@@ -609,10 +614,10 @@ def build_model_page(
 
 
 def build_look_page(panel: SettingsPanel) -> None:
+    """4. sayfa: Görünüm."""
     look = add_page(panel, t("Görünüm"), t("Arayüz renkleri."))
     theme_box, theme = group(t("Tema"), divided=False)
     look.addWidget(theme_box)
-    # app.py ve testler bu seçiciyi okur/yazar; kartlar ona bağlı, kendisi görünmez.
     panel.theme_combo = QComboBox(panel)
     panel.theme_combo.setAccessibleName(t("Arayüz teması"))
     panel.theme_combo.setVisible(False)
@@ -650,383 +655,3 @@ def build_look_page(panel: SettingsPanel) -> None:
     )
     look.addWidget(lang_box)
     look.addStretch(1)
-
-
-def build_routines_page(panel: SettingsPanel) -> None:
-    config_path = panel.config_path
-    demo = panel._demo
-    routines_page = add_page(
-        panel,
-        t("Rutinler"),
-        t("Adlandırılmış, sabit adımlı işler (örn. “işe başla”)."),
-        t("Otomasyon"),
-    )
-    panel.proactive_enabled = QCheckBox(t("Zamanlı işler"))
-    routines_page.addWidget(panel.proactive_enabled)
-    routines_page.addWidget(_check_hint(t(
-        "Hatırlatmalar, rutin saatleri, tetikleyiciler ve gün özeti bunun açık olmasını ister."
-    )))
-    panel.routines_enabled = QCheckBox(t("Rutinleri kullan"))
-    routines_page.addWidget(panel.routines_enabled)
-    routines_page.addWidget(_check_hint(t(
-        "Sesle, yazıyla veya Otomasyon sayfasından çalıştırılır. Her adım kendi onay "
-        "kurallarıyla yürür; onaylanmayan ya da başarısız ilk adımda durur."
-    )))
-    panel.routines = RoutinesSection(config_path, demo=demo)
-    routines_page.addWidget(panel.routines)
-    routines_page.addStretch(1)
-
-
-def build_triggers_page(panel: SettingsPanel) -> None:
-    config_path = panel.config_path
-    demo = panel._demo
-    triggers_page = add_page(
-        panel,
-        t("Tetikleyiciler"),
-        t("Bir klasöre yeni dosya gelince Artemis haber verir."),
-    )
-    panel.triggers_enabled = QCheckBox(t("Tetikleyicileri kullan"))
-    triggers_page.addWidget(panel.triggers_enabled)
-    triggers_page.addWidget(_check_hint(t(
-        "Klasör yoklanır; ilk bakışta var olan dosyalar bildirilmez. Dosya yazılması bitince "
-        "bir kez haber verilir. Dosya adları Telegram'a gönderilmez. Zamanlı işler açık olmalı."
-    )))
-    panel.triggers = TriggersSection(config_path, demo=demo)
-    triggers_page.addWidget(panel.triggers)
-    triggers_page.addStretch(1)
-    panel.triggers.saved.connect(panel._triggers_saved)
-    panel.triggers.proactive_requested.connect(panel._tick_proactive)
-
-
-def build_summary_page(panel: SettingsPanel) -> None:
-    summary_page = add_page(
-        panel,
-        t("Gün özeti"),
-        t("Belirlenen saatte günün kısa bir kaydını yazar."),
-    )
-    panel.daily_summary_enabled = QCheckBox(t("Gün özetini kullan"))
-    summary_page.addLayout(with_help(panel.daily_summary_enabled, t(
-        "Belirlenen saatte yalnız sayılardan (araç, dosya, iş, hatırlatma) kısa bir özet "
-        "yazar; model çağrılmaz, konuşma okunmaz, Telegram'a gitmez. Vault'a yalnız "
-        "bildirimdeki düğmeyle, onayla eklenir."
-    )))
-    summary_page.addWidget(_check_hint(t(
-        "Konuşma metni okunmaz; yalnız bugünün araç, dosya, iş ve hatırlatma sayıları "
-        "Artemis'in veri klasöründeki günlük klasörüne yazılır. Telegram'a gitmez. Vault'a "
-        "ekleme yalnız bildirimdeki düğmeyle ve onayla olur. Zamanlı işler açık olmalı."
-    )))
-    panel.daily_summary_at = QLineEdit()
-    panel.daily_summary_at.setMaxLength(5)
-    panel.daily_summary_at.setAccessibleName(t("Özet saati"))
-    panel.daily_summary_at.setPlaceholderText("22:30")
-    field(summary_page, t("Özet saati (SS:DD)"), panel.daily_summary_at)
-    summary_page.addStretch(1)
-
-
-def build_research_page(panel: SettingsPanel) -> None:
-    research_page = add_page(
-        panel,
-        t("Araştırma"),
-        t("Bir konuyu arka planda web aramasıyla araştırıp kaynaklı rapor yazdırır."),
-    )
-    panel.research_enabled = QCheckBox(t("Araştırma işlerini kullan"))
-    research_page.addLayout(with_help(panel.research_enabled, t(
-        "Konuyu yalnız web aramasıyla araştırıp kaynaklı rapor yazar. Her araştırma başlamadan "
-        "onay sorulur (varsayılan en çok 12 arama). İş sohbet geçmişini, hafızayı ve notlarını "
-        "görmez."
-    )))
-    research_page.addWidget(_check_hint(t(
-        "Her araştırma başlamadan önce onay sorulur; onay en fazla 12 web araması içindir. "
-        "İş sohbet geçmişini, hafızayı ve notlarını görmez. Rapor Artemis'in veri "
-        "klasöründeki araştırma klasörüne yazılır, kasaya kendiliğinden eklenmez."
-    )))
-    research_page.addStretch(1)
-
-
-def build_telegram_page(panel: SettingsPanel) -> None:
-    config_path = panel.config_path
-    demo = panel._demo
-    telegram_page = add_page(
-        panel,
-        "Telegram",
-        t("Bot token'ı ve sohbet eşleştirme."),
-        t("Bağlantılar"),
-    )
-    panel.telegram = TelegramSection(config_path, demo=demo)
-    panel.telegram.changed.connect(panel.saved_notes["Telegram"].flash)
-    panel.telegram.channel_changed.connect(panel.saved_notes["Telegram"].flash)
-    telegram_page.addWidget(panel.telegram)
-    panel.telegram_voice = QCheckBox(t("Ses mesajlarını kabul et"))
-    panel.telegram_photo = QCheckBox(t("Fotoğrafları kabul et"))
-    panel.telegram_files = QCheckBox(t("Dosyaları kabul et"))
-    telegram_page.addLayout(with_help(panel.telegram_voice, t(
-        "Ses, fotoğraf ve dosya kabulü varsayılan kapalıdır; açınca bu içerik bu bilgisayarda "
-        "işlenir (ses yazıya, fotoğraf yerel OCR ile okunur, dosya çalışma alanına kaydedilir, "
-        "açılmaz). Ses onay yerine geçmez; onay yalnız düğmeyle verilir."
-    )))
-    telegram_page.addWidget(panel.telegram_photo)
-    telegram_page.addWidget(panel.telegram_files)
-    telegram_page.addWidget(_check_hint(t(
-        "Ses yazıya çevrilir ve komut olarak çalışır "
-        "(en çok 1 MB, 60 sn); fotoğraftaki metin yerel OCR ile okunur ve gizli sayılır; "
-        "dosyalar çalışma alanındaki Telegram klasörüne kaydedilir, açılmaz. İletilmiş "
-        "mesajlar yine çalışmaz."
-    )))
-    telegram_page.addStretch(1)
-
-
-def build_calendar_mail_page(panel: SettingsPanel) -> None:
-    config_path = panel.config_path
-    demo = panel._demo
-    cal_page = add_page(
-        panel,
-        t("Takvim ve posta"),
-        t("Takvimi ve okunmamış postayı salt okunur oku (sorular ve sabah brifingi için)."),
-    )
-    takvim_box, takvim = group(t("Takvim"), divided=False)
-    cal_page.addWidget(takvim_box)
-    panel.calendar_enabled = QCheckBox(t("Takvimi kullan"))
-    takvim.addWidget(panel.calendar_enabled)
-    panel.calendar_cloud = QCheckBox(t("Takvim içeriği bulut modele ve Telegram'a gidebilsin"))
-    takvim.addLayout(_indent(panel.calendar_cloud, t(
-        "Kapalıyken takvim içeriği yalnız yerel modele gider. Açıkken bulut modele ve "
-        "Telegram'a da gidebilir; dışarı çıkan veri artar."
-    )))
-    panel.calendar_enabled.toggled.connect(panel.calendar_cloud.setEnabled)
-    panel.calendar_cloud.setEnabled(panel.calendar_enabled.isChecked())
-    posta_box, posta = group(t("Posta"))
-    cal_page.addWidget(posta_box)
-    panel.mail_enabled = QCheckBox(t("Postayı kullan"))
-    posta.addWidget(panel.mail_enabled)
-    panel.mail_cloud = QCheckBox(t("Posta içeriği bulut modele ve Telegram'a gidebilsin"))
-    posta.addLayout(_indent(panel.mail_cloud, t(
-        "Kapalıyken posta içeriği yalnız yerel modele gider. Açıkken bulut modele ve "
-        "Telegram'a da gidebilir; dışarı çıkan veri artar."
-    )))
-    panel.mail_enabled.toggled.connect(panel.mail_cloud.setEnabled)
-    panel.mail_cloud.setEnabled(panel.mail_enabled.isChecked())
-    posta.addWidget(_check_hint(t(
-        "Kapalıyken içerik yalnız yerel modele gider. Posta okundu işaretlenmez, hiçbir "
-        "ileti silinmez ya da taşınmaz. Eki indirilmez."
-    )))
-    panel.mail_host = QLineEdit()
-    panel.mail_host.setAccessibleName(t("IMAP sunucusu"))
-    panel.mail_host.setPlaceholderText("imap.gmail.com")
-    field(posta, t("IMAP sunucusu"), panel.mail_host)
-    panel.mail_port = QLineEdit()
-    panel.mail_port.setAccessibleName(t("IMAP portu"))
-    field(posta, t("Port"), panel.mail_port)
-    panel.mail_username = QLineEdit()
-    panel.mail_username.setAccessibleName(t("Posta kullanıcı adı"))
-    field(posta, t("Kullanıcı adı"), panel.mail_username)
-    panel.mail_folder = QLineEdit()
-    panel.mail_folder.setAccessibleName(t("Posta klasörü"))
-    field(posta, t("Klasör"), panel.mail_folder)
-    # Takvim adresi ve posta parolası kendi kutularına (yukarıdaki iki grup) eklenir.
-    panel.calendar_mail = CalendarMailSection(
-        config_path, demo=demo, calendar=takvim, mail=posta
-    )
-    cal_page.addWidget(panel.calendar_mail)
-    cal_page.addStretch(1)
-
-
-def build_github_page(panel: SettingsPanel) -> None:
-    github = add_page(
-        panel,
-        "GitHub",
-        t("Kendi repolarını kod ajanının erişimine bağla ve hangi ajanın çalışacağını seç."),
-    )
-    account_box, account = group(t("Hesap"), divided=False)
-    github.addWidget(account_box)
-    panel.github_owner = QLineEdit()
-    panel.github_owner.setAccessibleName(t("GitHub kullanıcı adı"))
-    panel.github_owner.setPlaceholderText(t("kullanıcı-adı"))
-    panel.repos_dir = QLineEdit()
-    panel.repos_dir.setAccessibleName(t("Repo klasörü"))
-    panel.repos_dir.setPlaceholderText(default_repos_dir())
-    panel.repos_browse = QPushButton(t("Klasör seç"))
-    panel.repos_browse.setMinimumWidth(88)
-    panel.repos_browse.clicked.connect(panel._browse_repos_dir)
-    folder_row = QHBoxLayout()
-    folder_row.setSpacing(8)
-    folder_row.addWidget(panel.repos_dir, 1)
-    folder_row.addWidget(panel.repos_browse)
-    field(account, t("Kullanıcı adı"), panel.github_owner)
-    field(account, t("Repo klasörü"), folder_row)
-    panel.github_auto = QCheckBox(t("Otomatik eşitle"))
-    panel.github_auto.setChecked(True)
-    account.addWidget(panel.github_auto)
-    panel.github_button = QPushButton(t("Bağla ve repoları çek"))
-    panel.github_button.clicked.connect(panel._bind_github)
-    account.addLayout(button_row(panel.github_button))
-    result_box, result = group(t("Eşitleme"))
-    github.addWidget(result_box)
-    panel.github_status = meta_label(t(
-        "Kendi repoların (fork ve arşivlenmişler hariç) kod ajanının erişimine girer. "
-        "Giriş GitHub CLI (gh) ile yapılır; Artemis anahtarını görmez."
-    ))
-    result.addWidget(panel.github_status)
-    panel.github_list = QListWidget()
-    panel.github_list.setMaximumHeight(144)
-    panel.github_list.setAccessibleName(t("GitHub eşitleme sonuçları"))
-    result.addWidget(panel.github_list)
-    # Kod ajanları GitHub sayfasında: aynı `code_agent` config bölümü ve aynı "kod ajanı"
-    # bağlamı; Uygulamalar sayfası açılacak masaüstü uygulamalarını yönetir. Düz grup,
-    # Uygulamalar listesiyle aynı kirli-durum/Uygula akışı (ikinci kaydetme yolu yok).
-    agents_box, agents = group(
-        t("Kod ajanları"),
-        t("Arka plan proje işinde çalışacak ajanlar."),
-    )
-    github.addWidget(agents_box)
-    panel.agent_list = QListWidget()
-    panel.agent_list.setMaximumHeight(144)
-    panel.agent_list.setAccessibleName(t("Kod ajanları"))
-    agents.addWidget(panel.agent_list)
-    panel.default_agent_combo = QComboBox()
-    panel.default_agent_combo.setAccessibleName(t("Varsayılan kod ajanı"))
-    field(
-        agents,
-        t("Varsayılan ajan"),
-        panel.default_agent_combo,
-        t("Projede ayrıca seçilmediyse bu ajan çalışır."),
-    )
-    panel.add_custom_agent_button = QPushButton(t("Özel ajan ekle…"))
-    panel.add_custom_agent_button.clicked.connect(panel._add_custom_agent)
-    agents.addLayout(button_row(panel.add_custom_agent_button))
-    panel.agent_hint = meta_label("")
-    agents.addWidget(panel.agent_hint)
-    panel.code_agents: dict[str, dict[str, Any]] = {}
-    panel.default_agent = BUILTIN_AGENT
-    panel._builtin_command = "claude"
-    panel._refresh_code_agents()
-    panel.default_agent_combo.activated.connect(panel._default_agent_picked)
-    github.addStretch(1)
-
-
-def build_skills_page(panel: SettingsPanel) -> None:
-    config_path = panel.config_path
-    demo = panel._demo
-    skills_page = add_page(
-        panel,
-        t("Beceriler"),
-        t("Elle yazdığın .md dosyalarıyla Artemis'e yeni çalışma yöntemleri öğret."),
-        t("Bilgi"),
-    )
-    panel.skills_enabled = QCheckBox(t("Becerileri kullan"))
-    skills_page.addLayout(with_help(panel.skills_enabled, t(
-        "Elle yazdığın .md becerileri Artemis'e çalışma yöntemi olarak öğretir. Artemis kendi "
-        "başına beceri yazamaz; beceri izin vermez. Beceri metni bulut modele gidebilir, "
-        "kişisel veri yazma."
-    )))
-    skills_page.addWidget(_check_hint(t(
-        "Dosyalar varsayılan olarak Artemis'in kullanıcı verisi klasöründeki beceriler "
-        "klasöründe durur; Klasör seç ile başka bir klasör seçebilirsin. Açılışta ve "
-        "Yenile'de okunur. Beceriler Artemis içinde eklenir, düzenlenir ve silinir; "
-        "dosyayı başka bir düzenleyicide açmana gerek yok. Artemis kendi başına beceri "
-        "yazamaz; beceri izin de vermez, her adım normal onaydan geçer. Beceri metni bulut "
-        "modele gidebilir, kişisel veri yazma. Mesajı /beceri-adı ile başlatarak da "
-        "çağırabilirsin."
-    )))
-    panel.skills = SkillsSection(config_path, demo=demo)
-    skills_page.addWidget(panel.skills)
-    skills_page.addStretch(1)
-
-
-def build_files_page(panel: SettingsPanel) -> None:
-    config_path = panel.config_path
-    demo = panel._demo
-    files_page = add_page(
-        panel,
-        t("Dosya araması"),
-        t("Seçtiğin klasörlerde dosya adı ve içeriğiyle arama."),
-    )
-    panel.file_search_enabled = QCheckBox(t("Dosya aramasını kullan"))
-    files_page.addLayout(with_help(panel.file_search_enabled, t(
-        "Seçtiğin klasörlerde dosya adı ve içeriğiyle arama yapar. Gizli görünen dosyalar "
-        "(.env, anahtar, parola adları) ve bağlantılar asla dizinlenmez. Varsayılan kapalı; "
-        "sonuçta yol ve kısa alıntı gelir."
-    )))
-    files_page.addWidget(_check_hint(t(
-        "Metin, kod ve docx dosyalarının içeriği; PDF'lerin yalnız adı aranır. Sonuçta yol "
-        "ve kısa alıntı gelir, dosyanın tamamı gelmez. Bulut izni verilmediği sürece dosya "
-        "içeriği yalnız yerel modele gider; bu izin henüz panelde yok, ayar dosyasından "
-        "verilir."
-    )))
-    panel.file_search = FileSearchSection(config_path, demo=demo)
-    panel.file_search_roots = panel.file_search.roots_list
-    files_page.addWidget(panel.file_search)
-    files_page.addStretch(1)
-
-
-def build_apps_page(panel: SettingsPanel) -> None:
-    apps = add_page(
-        panel,
-        t("Uygulamalar"),
-        t("Artemis'in açabileceği uygulamalar ve bilgisayar kullanımı."),
-    )
-    access_box, access = group(t("Erişim"), divided=False)
-    apps.addWidget(access_box)
-    panel.all_applications = QCheckBox(t("Bütün kurulu uygulamalara erişim"))
-    panel.all_applications.toggled.connect(panel._sync_application_access)
-    access.addWidget(panel.all_applications)
-    panel.computer_auto = QCheckBox(t("Otomatik bilgisayar kullanımı"))
-    panel.computer_auto.setToolTip(t(
-        "Hassas adımlar ve temiz turda başlangıç sorulmaz; Esc her an durdurur. Terminal, "
-        "Artemis ve parola yöneticisi engeli ile dış içerikten sonraki onay yine geçerlidir."
-    ))
-    access.addLayout(with_help(panel.computer_auto, t(
-        "Adımları sormadan yapar; Esc her an durdurur. Terminal, Artemis ve parola yöneticisi "
-        "engeli ile dış içerikten sonraki onay yine geçerlidir. Üst çubuktaki düğmeyle aynı "
-        "ayar."
-    )))
-    access.addWidget(_check_hint(t(
-        "Adımları sormadan yapar; Esc her an durdurur. Üst çubuktaki otomatik onay "
-        "düğmesiyle aynı ayardır."
-    )))
-    panel.computer_observation = QComboBox()
-    panel.computer_observation.setAccessibleName(t("Bilgisayar kullanımı gözlemi"))
-    for label, key in (
-        (t("Ekran öğeleri (UIA) · hızlı, metin modeli de çalışır"), "uia"),
-        (t("Karma (UIA, takılınca görüntü) · hızlı ve esnek"), "hybrid"),
-        (t("Ekran görüntüsü · görsel model gerekir"), "screen"),
-        (t("İkisi birden · en sağlam, en yavaş"), "both"),
-    ):
-        panel.computer_observation.addItem(label, key)
-    field(access, t("Gözlem"), panel.computer_observation, help=t(
-        "UIA pencerenin düğme ve alanlarını adlarıyla okur; Karma normalde UIA kullanır, "
-        "liste boşsa veya takılırsa tek adımlık ekran görüntüsü alır."
-    ))
-    list_box, listing = group(t("İzinli uygulamalar"), help=t(
-        "Artemis yalnız bu listedeki uygulamaları açabilir. Uygulama ekle bir .exe seçtirir, "
-        "Listeden çıkar seçili kaydı siler. Onaysız kapatma izni panelde yok, ayar "
-        "dosyasından verilir."
-    ))
-    apps.addWidget(list_box)
-    panel.application_list = QListWidget()
-    panel.application_list.setMaximumHeight(144)
-    panel.application_list.setAccessibleName(t("İzinli uygulamalar"))
-    listing.addWidget(panel.application_list)
-    panel.add_application_button = QPushButton(t("Uygulama ekle"))
-    panel.add_application_button.setObjectName("primary")
-    panel.add_application_button.clicked.connect(panel._add_application)
-    panel.remove_application_button = QPushButton(t("Listeden çıkar"))
-    panel.remove_application_button.clicked.connect(panel._remove_application)
-    listing.addLayout(button_row(panel.remove_application_button, panel.add_application_button))
-    panel.application_hint = meta_label(t("Artemis listedeki uygulamaları açabilir."))
-    listing.addWidget(panel.application_hint)
-    apps.addStretch(1)
-
-
-def build_about_page(panel: SettingsPanel) -> None:
-    about = add_page(
-        panel,
-        t("Hakkında"),
-        t("Sürüm, lisans, bağlantılar ve güncelleme."),
-    )
-    panel.about_section = AboutSection(panel.config_path, parent=panel)
-    about.addWidget(panel.about_section)
-    box, body = group(t("Güncelleme"))
-    panel.update_section = UpdateSection(panel)
-    body.addWidget(panel.update_section)
-    about.addWidget(box)
-    about.addStretch(1)

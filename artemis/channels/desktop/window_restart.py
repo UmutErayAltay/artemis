@@ -15,9 +15,11 @@ from PySide6.QtCore import QProcess, QTimer
 from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QSystemTrayIcon
 
 from artemis.brain.providers import provider_problem
+from artemis.channels.desktop.budget_bar import refresh_budget
+from artemis.channels.desktop.hotkey_manager import validate_hotkeys
 from artemis.channels.desktop.retranslate import retranslate_widgets
 from artemis.channels.desktop.settings_io import save_choices
-from artemis.config.settings import load_settings, same_hotkey
+from artemis.config.settings import load_settings
 from artemis.i18n import current_language, set_language, t
 
 if TYPE_CHECKING:
@@ -34,8 +36,7 @@ def check_provider(window: DesktopWindow, *, open_settings: bool) -> None:
     if reason and open_settings:
         window.tabs.setCurrentWidget(window.settings_scroll)
         # Sağlayıcı eksikse Ayarlar doğrudan Model bölümünde açılır.
-        names = window.settings_panel.section_names()
-        window.settings_panel.show_section(names.index("Model") if "Model" in names else 1)
+        window.settings_panel.select_section("Model")
         QTimer.singleShot(
             0,
             lambda: window.settings_panel.sections.scroll_area.ensureWidgetVisible(
@@ -187,23 +188,24 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         return
     values = panel.values()
     old_language = current_language()
+    hotkey_error: str | None = None
     try:
         loaded = load_settings(window._config_path)
         old_language = loaded.language
-        voice_key = loaded.voice.listening_hotkey
-        dictation_key = str(values[("dictation", "hotkey")])
-        selection_key = str(values[("selection_actions", "hotkey")])
-        clash = same_hotkey(dictation_key, voice_key)
-        selection_clash = same_hotkey(selection_key, voice_key) or same_hotkey(
-            selection_key, dictation_key
+        voice_key = str(values.get(("voice", "listening_hotkey"), loaded.voice.listening_hotkey))
+        dictation_key = str(values.get(("dictation", "hotkey"), loaded.dictation.hotkey))
+        selection_key = str(
+            values.get(("selection_actions", "hotkey"), loaded.selection_actions.hotkey)
+        )
+        hotkey_error = validate_hotkeys(
+            listening=voice_key,
+            dictation=dictation_key,
+            selection=selection_key,
         )
     except (OSError, ValueError, KeyError, ValidationError, yaml.YAMLError):
-        clash = selection_clash = False  # okunamayan config aşağıdaki kayıtta yakalanır
-    if clash:
-        panel.save_failed(t("Dikte kısayolu ses kısayoluyla aynı olamaz; başka bir tuş seç."))
-        return
-    if selection_clash:
-        panel.save_failed(t("Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı."))
+        hotkey_error = None  # okunamayan config aşağıdaki kayıtta yakalanır
+    if hotkey_error:
+        panel.save_failed(hotkey_error)
         return
     try:
         written = save_choices(
@@ -224,6 +226,9 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
     if written and callable(reload_dictation):
         with contextlib.suppress(OSError, ValueError, ValidationError, yaml.YAMLError):
             reload_dictation(load_settings(window._config_path).dictation)
+    reload_hotkeys = getattr(window, "_reload_hotkeys", None)
+    if written and not window._demo and callable(reload_hotkeys):
+        reload_hotkeys()
     new = str(values.get(("language",), old_language))
     if new != current_language():
         set_language(new)
@@ -231,6 +236,7 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         if window._tray is not None and window._tray.contextMenu() is not None:
             roots.append(window._tray.contextMenu())
         retranslate_widgets(roots, new)
+    refresh_budget(window)
 
 
 def install_update(window: DesktopWindow, path: object) -> None:

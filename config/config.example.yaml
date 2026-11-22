@@ -228,7 +228,7 @@ memory:
 #   manager_model: opus                      # örnek CLI takma adı; isteğe bağlı
 #   coder_model: sonnet                      # örnek CLI takma adı; isteğe bağlı
 #   tester_model: haiku                      # örnek CLI takma adı; isteğe bağlı
-#   github_owner: null                       # Ayarlar > GitHub ile de yazılır
+#   github_owner: null                       # Ayarlar > Bağlantılar > GitHub ve kod ajanları ile de yazılır
 #   repos_dir: null                          # kendi repolarınızın klonlandığı klasör
 #   auto_sync: true                          # açılışta klonla/fetch et
 
@@ -257,7 +257,7 @@ memory:
 
 # Takvim ve posta, salt okunur (ADR 0059). KAPALI gelir. Takvim: Google/Outlook'un gizli ICS adresi
 # (https zorunlu). Posta: IMAP/TLS (Gmail için uygulama parolası). Adres ve parola YAML'a YAZILMAZ:
-# Ayarlar > Takvim ve posta (kimlik kasası) ya da ARTEMIS_CALENDAR_ICS_TOKEN / ARTEMIS_MAIL_PASSWORD
+# Ayarlar > Bağlantılar > Takvim ve posta (kimlik kasası) ya da ARTEMIS_CALENDAR_ICS_TOKEN / ARTEMIS_MAIL_PASSWORD
 # ortam değişkeni. Posta okundu işaretlenmez, silinmez, eki indirilmez. İçerik kişiseldir: allow_cloud
 # false iken bulut modele ve Telegram'a gitmez (yalnız yerel model görür).
 # calendar:
@@ -413,7 +413,7 @@ memory:
 # Rutinler (ADR 0058): adlandırılmış, sabit adımlı işler ("işe başla": VS Code aç, Spotify aç,
 # sesi 30 yap). Adımlar `state_dir/routines.json` dosyasındadır; sohbetle (onaylı routine_save)
 # ya da dosyayı elle düzenleyerek oluşur. Çalışırken model yoktur, her adım kendi onay kurallarıyla
-# SafetyGate'ten geçer. Zaman yalnız Ayarlar > Rutinler'den kurulur; zamanı gelince Artemis
+# SafetyGate'ten geçer. Zaman yalnız Ayarlar > Otomasyon Kuralları'ndan kurulur; zamanı gelince Artemis
 # çalıştırmaz, panelde "Çalıştırılsın mı?" diye sorar (proactive.enabled gerekir).
 # routines:
 #   enabled: true            # varsayılan false

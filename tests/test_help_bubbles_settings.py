@@ -22,20 +22,24 @@ from tests.test_skill_dialog import env  # noqa: F401 - fixture
 MAX_HELP = 260
 # Sayfa adı -> en çok bu kadar baloncuk.
 MAX_PER_PAGE = {
-    "Ses": 6, "Model": 6, "Görünüm": 5, "Rutinler": 5, "Tetikleyiciler": 5, "Gün özeti": 5,
-    "Araştırma": 5, "Telegram": 5, "Takvim ve posta": 5, "GitHub": 5, "Beceriler": 5,
-    "Dosya araması": 5, "Uygulamalar": 5,
+    "Ses": 6,
+    "Dikte ve Kısayollar": 5,
+    "Model ve Bağlantılar": 6,
+    "Görünüm": 5,
+    "Otomasyon Kuralları": 5,
+    "Bilgi ve Beceriler": 5,
+    "Bağlantılar": 5,
+    "Uygulamalar ve Güvenlik": 5,
+    "Hakkında ve Güncelleme": 5,
 }
 # Sayfa adı -> metinlerinde bulunması gereken ayırt edici sözcükler (her biri ayrı bir baloncukta).
 MUST_KEEP = {
     "Ses": ["VRAM", "float16", "gizlilik bedeli", "Edge", "Karma tanıma açıksa"],
-    "Model": ["Beyin:", "tahmini tutarı", "aynı anda", "kimlik kasasına"],
-    "Gün özeti": ["Telegram'a gitmez"],
-    "Araştırma": ["onay sorulur"],
-    "Telegram": ["kimlik kasasına", "fotoğraf"],
-    "Beceriler": ["bulut modele"],
-    "Dosya araması": ["dizinlenmez"],
-    "Uygulamalar": ["Onaysız kapatma", "sormadan"],
+    "Model ve Bağlantılar": ["Beyin:", "tahmini tutarı", "aynı anda", "kimlik kasasına"],
+    "Otomasyon Kuralları": ["Telegram'a gitmez", "onay sorulur"],
+    "Bilgi ve Beceriler": ["bulut modele", "dizinlenmez"],
+    "Bağlantılar": ["kimlik kasasına", "fotoğraf"],
+    "Uygulamalar ve Güvenlik": ["Onaysız kapatma", "sormadan"],
 }
 
 

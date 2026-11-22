@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -223,6 +224,88 @@ class CurrentPageStack(QWidget):
         self._box.invalidate()
         self.updateGeometry()
         self.currentChanged.emit(index)
+
+
+class SettingsTabWidget(QTabWidget):
+    """Yalnız etkin sekmenin minimum/heightForWidth yüksekliğini yansıtan QTabWidget."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setUsesScrollButtons(True)
+        self.currentChanged.connect(self._on_tab_changed)
+
+    def _bar_height(self) -> int:
+        bar = self.tabBar()
+        if bar is None or bar.isHidden():
+            return 0
+        return bar.sizeHint().height()
+
+    def _on_tab_changed(self, index: int) -> None:
+        for i in range(self.count()):
+            page = self.widget(i)
+            if page is not None:
+                policy = (
+                    QSizePolicy.Policy.Preferred
+                    if i == index
+                    else QSizePolicy.Policy.Ignored
+                )
+                page.setSizePolicy(QSizePolicy.Policy.Preferred, policy)
+        self.updateGeometry()
+
+    def addTab(self, widget: QWidget, label: str) -> int:  # type: ignore[override]
+        idx = super().addTab(widget, label)
+        self._on_tab_changed(self.currentIndex())
+        return idx
+
+    def hasHeightForWidth(self) -> bool:
+        page = self.currentWidget()
+        return page.hasHeightForWidth() if page is not None else super().hasHeightForWidth()
+
+    def heightForWidth(self, width: int) -> int:
+        page = self.currentWidget()
+        if page is not None:
+            bar_h = self._bar_height()
+            min_h = page.minimumSizeHint().height()
+            page_h = max(min_h, page.heightForWidth(width)) if page.hasHeightForWidth() else min_h
+            return bar_h + page_h
+        return super().heightForWidth(width)
+
+    def minimumSizeHint(self) -> QSize:
+        page = self.currentWidget()
+        if page is not None:
+            bar_h = self._bar_height()
+            hint = page.minimumSizeHint()
+            width = page.width() if page.width() > 0 else self.width()
+            if page.hasHeightForWidth() and width > 0:
+                hfw = page.heightForWidth(width)
+                if hfw > hint.height():
+                    hint.setHeight(hfw)
+            return QSize(
+                max(super().minimumSizeHint().width(), hint.width()),
+                bar_h + hint.height(),
+            )
+        return super().minimumSizeHint()
+
+    def sizeHint(self) -> QSize:
+        page = self.currentWidget()
+        if page is not None:
+            bar_h = self._bar_height()
+            hint = page.sizeHint().expandedTo(page.minimumSizeHint())
+            width = page.width() if page.width() > 0 else self.width()
+            if page.hasHeightForWidth() and width > 0:
+                hfw = page.heightForWidth(width)
+                if hfw > hint.height():
+                    hint.setHeight(hfw)
+            return QSize(
+                max(super().sizeHint().width(), hint.width()),
+                bar_h + hint.height(),
+            )
+        return super().sizeHint()
+
+    def event(self, event: QEvent) -> bool:
+        if event.type() == QEvent.Type.LayoutRequest:
+            self.updateGeometry()
+        return super().event(event)
 
 
 # Tüm ana sekmelerin (Projeler, Otomasyon, Geçmiş, Petler, Ayarlar) ortak sayfa kabuğu: içerik en

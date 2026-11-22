@@ -51,16 +51,30 @@ def _section_problems(panel: object, scroll: object, app: object, label: str) ->
 
 
 def narrow_problems(window: object, app: object) -> list[str]:
-    """Her Ayarlar bölümü için taşma ve kırpılan düğme bildirir."""
+    """Her Ayarlar bölümü (ve alt sekmeleri) için taşma ve kırpılan düğme bildirir."""
+    from PySide6.QtWidgets import QTabWidget
+
     panel = window.settings_panel  # type: ignore[attr-defined]
     scroll = panel.sections.scroll_area
     problems: list[str] = []
     names = panel.section_names()
     for index, name in enumerate(names):
         panel.show_section(index)
-        problems.extend(_section_problems(panel, scroll, app, name))
+        page = panel.stack.currentWidget()
+        tabs = page.findChild(QTabWidget) if page is not None else None
+        if tabs is not None and tabs.count() > 0:
+            for tab_idx in range(tabs.count()):
+                tabs.setCurrentIndex(tab_idx)
+                problems.extend(
+                    _section_problems(panel, scroll, app, f"{name} > {tabs.tabText(tab_idx)}")
+                )
+        else:
+            problems.extend(_section_problems(panel, scroll, app, name))
     # Güncelleme bölümünde tüm düğmeler (denetle/aç/indir/iptal) açıkken de sarma taşmamalı.
-    about_idx = next((i for i, n in enumerate(names) if n in ("Hakkında", "About")), None)
+    about_idx = next(
+        (i for i, n in enumerate(names) if n in ("Hakkında ve Güncelleme", "About & Updates")),
+        None,
+    )
     assert about_idx is not None, f"Hakkında/About bölümü bulunamadı: {names}"
     panel.show_section(about_idx)
     upd = panel.update_section

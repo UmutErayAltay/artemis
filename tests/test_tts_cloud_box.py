@@ -39,6 +39,7 @@ def qt_app() -> QApplication:
 
 def test_tts_cloud_box_visibility_follows_tts_combo(tmp_path: Path, qt_app: QApplication) -> None:
     panel = SettingsPanel(config(tmp_path, cloud=True))
+    panel.select_section("Yanıt (Çıkış)")
     panel.show()
     panel.tts_combo.setCurrentIndex(panel.tts_combo.findData("piper"))
     assert not panel.tts_cloud_box.isVisible()

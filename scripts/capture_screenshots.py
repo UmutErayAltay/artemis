@@ -257,6 +257,11 @@ def capture_projects(
 
 
 def _select_settings_section(panel: object, title: str) -> int:
+    select = getattr(panel, "select_section", None)
+    if callable(select):
+        if not select(title):
+            raise RuntimeError(f"Ayar bölümü bulunamadı: {title}")
+        return int(panel.sections.currentRow())  # type: ignore[attr-defined]
     from artemis.i18n import t
 
     sections = panel.sections  # type: ignore[attr-defined]

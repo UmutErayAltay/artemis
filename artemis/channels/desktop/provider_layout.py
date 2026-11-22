@@ -24,7 +24,15 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from artemis.channels.desktop.form_kit import button_row, divider, field, group, meta_label
+from artemis.channels.desktop.form_kit import (
+    _HeightForWidthBox,
+    button_row,
+    divider,
+    field,
+    group,
+    meta_label,
+)
+from artemis.channels.desktop.page_kit import SettingsTabWidget
 from artemis.channels.desktop.retranslate import set_i18n_context
 from artemis.channels.desktop.widgets import with_help
 from artemis.i18n import t
@@ -79,6 +87,40 @@ ROLE_TEXTS = {
 }
 
 
+def build_provider_tabs(section: ProviderSection, layout: QVBoxLayout) -> None:
+    """Sağlayıcı sayfasını üstte özet, ortada 2 sekme, altta durum satırı olarak kurar."""
+    section.banner = QLabel()  # "Beyin: ..." satırı veya sağlayıcı sorunu
+    section.banner.setWordWrap(True)
+    section.banner.setVisible(False)
+    layout.addWidget(section.banner)
+
+    section.tabs = SettingsTabWidget()
+    layout.addWidget(section.tabs)
+
+    models_tab = _HeightForWidthBox()
+    models_layout = QVBoxLayout(models_tab)
+    models_layout.setContentsMargins(0, 16, 0, 0)
+    models_layout.setSpacing(24)
+    build_models_box(section, models_layout)
+    models_layout.addStretch(1)
+    section.tabs.addTab(models_tab, t("Modeller ve Roller"))
+
+    manage_tab = _HeightForWidthBox()
+    manage_layout = QVBoxLayout(manage_tab)
+    manage_layout.setContentsMargins(0, 16, 0, 0)
+    manage_layout.setSpacing(24)
+    build_add_box(section, manage_layout)
+    build_connections_box(section, manage_layout)
+    manage_layout.addStretch(1)
+    section.tabs.addTab(manage_tab, t("Model Ekle ve Bağlantılar"))
+
+    section.status = QLabel()
+    section.status.setWordWrap(True)
+    # Uzun yol/adres tek "sözcük" sayılıp sütunu genişletmesin (yatay kaydırma çıkmasın).
+    section.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+    layout.addWidget(section.status)
+
+
 def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     model_box, models = group(
         t("Modeller"),
@@ -86,9 +128,11 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
         divided=False,
     )
     layout.addWidget(model_box)
-    section.banner = QLabel()  # "Beyin: ..." satırı veya sağlayıcı sorunu
-    section.banner.setWordWrap(True)
-    section.banner.setVisible(False)  # _render_banner metin varsa gösterir
+    if not hasattr(section, "banner"):
+        section.banner = QLabel()
+        section.banner.setWordWrap(True)
+        section.banner.setVisible(False)
+        models.addWidget(section.banner)
     section._test_settings = QSettings(
         QSettings.Format.IniFormat, QSettings.Scope.UserScope, "Artemis", "model_test"
     )
@@ -115,7 +159,6 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
     section.model_sort.setCurrentIndex(max(saved, 0))
     section.model_sort.currentIndexChanged.connect(section._sort_changed)
     section.sort_label = meta_label(t("Sırala"))
-    models.addWidget(section.banner)
     section.model_list = QListWidget()
     section.model_list.setAccessibleName(t("Eklenen modeller"))
     section.model_list.setVisible(False)  # reload() dolu olunca gösterir
@@ -418,8 +461,9 @@ def build_connections_box(section: ProviderSection, layout: QVBoxLayout) -> None
     conn.addLayout(button_row(
         section.delete_button, section.test_button, section.save_button,
     ))
-    section.status = QLabel()
-    section.status.setWordWrap(True)
-    # Uzun yol/adres tek "sözcük" sayılıp sütunu genişletmesin (yatay kaydırma çıkmasın).
-    section.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
-    layout.addWidget(section.status)
+    if not hasattr(section, "status"):
+        section.status = QLabel()
+        section.status.setWordWrap(True)
+        # Uzun yol/adres tek "sözcük" sayılıp sütunu genişletmesin (yatay kaydırma çıkmasın).
+        section.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        layout.addWidget(section.status)

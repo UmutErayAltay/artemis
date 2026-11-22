@@ -118,18 +118,20 @@ def test_settings_section_combo_replaces_list_when_narrow(
     assert pages == names  # aynı etiketler, aynı sıra
     headers = [combo.itemText(i) for i in range(combo.count()) if combo.itemData(i) is None]
     assert headers == list(panel.section_groups())  # grup yapısı korunur
-    target = names.index("Telegram")
+    target = names.index("Bağlantılar")
     combo.setCurrentIndex(combo.findData(target))
     combo.activated.emit(combo.currentIndex())
     assert panel.stack.currentIndex() == target
-    panel.show_section(names.index("Model"))  # kodla gezinme seçiciyi de günceller
-    assert combo.currentText() == "Model"
+    panel.show_section(names.index("Model ve Bağlantılar"))  # kodla gezinme seçiciyi de günceller
+    assert combo.currentText() == "Model ve Bağlantılar"
     # Grup başlığı ölü değil: tıklanınca grubun ilk sayfasına gider, kutuda sayfa adı görünür.
-    header = next(i for i in range(combo.count()) if combo.itemText(i) == "Bağlantılar")
+    header = next(
+        i for i in range(combo.count()) if combo.itemText(i) == "Dış Bağlantılar ve Sistem"
+    )
     combo.setCurrentIndex(header)
     combo.activated.emit(header)
-    assert panel.stack.currentIndex() == names.index("Telegram")
-    assert combo.currentText() == "Telegram"
+    assert panel.stack.currentIndex() == names.index("Bağlantılar")
+    assert combo.currentText() == "Bağlantılar"
 
 
 def test_settings_list_shows_at_default_window_size(
@@ -461,11 +463,20 @@ def test_open_settings_section_resolves_turkish_keys_in_english(
         win.show()
         _settle(app)
         names = win.settings_panel.section_names()
-        for key in ("Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma", "Model"):
+        expected_routes = {
+            "Rutinler": ("Otomasyon Kuralları", 0),
+            "Tetikleyiciler": ("Otomasyon Kuralları", 1),
+            "Gün özeti": ("Otomasyon Kuralları", 2),
+            "Araştırma": ("Otomasyon Kuralları", 3),
+            "Model": ("Model ve Bağlantılar", None),
+        }
+        for key, (page_tr, subtab) in expected_routes.items():
             win.automation_panel.settings_requested.emit(key)
             _settle(app)
             assert win.tabs.currentWidget() is win.settings_scroll
-            assert names[win.settings_panel.sections.currentRow()] == t(key)
+            assert names[win.settings_panel.sections.currentRow()] == t(page_tr)
+            if subtab is not None:
+                assert win.settings_panel.automation_tabs.currentIndex() == subtab
     finally:
         win._request_exit()
         end = 0

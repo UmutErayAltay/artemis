@@ -10,6 +10,7 @@ from collections.abc import Awaitable, Callable
 from concurrent.futures import Future, TimeoutError
 from contextlib import suppress
 from dataclasses import dataclass, field
+from decimal import Decimal
 from pathlib import Path
 from time import monotonic
 from typing import Any
@@ -516,6 +517,13 @@ class DesktopBridge:
 
     def selection_write_back(self) -> bool:
         return self._selection_call(lambda actions: actions.start_write_back())
+
+    def budget_target(self) -> tuple[Path, Decimal] | None:
+        """Aktif çalışma zamanının bütçe veritabanı yolunu ve günlük sınırını döndürür."""
+        runtime = self._runtime
+        if runtime is None:
+            return None
+        return runtime.settings.state_dir / "budget.sqlite3", runtime.settings.daily_budget_usd
 
     def _selection_call(self, call: Callable[[SelectionActions], None]) -> bool:
         loop = self._loop

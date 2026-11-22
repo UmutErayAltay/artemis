@@ -7,7 +7,16 @@ from pathlib import Path
 from typing import Any
 
 import yaml
-from PySide6.QtCore import QFileSystemWatcher, QSettings, QSize, Qt, QThread, QTimer, Signal
+from PySide6.QtCore import (
+    QFileSystemWatcher,
+    QObject,
+    QSettings,
+    QSize,
+    Qt,
+    QThread,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import QCloseEvent, QColor, QFont
 from PySide6.QtWidgets import (
     QAbstractButton,
@@ -24,11 +33,17 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QSpinBox,
+    QTabBar,
+    QTabWidget,
     QToolButton,
     QWidget,
 )
 
-from artemis.channels.desktop import voice_settings_section
+from artemis.channels.desktop import (
+    security_settings_section,
+    voice_preview,
+    voice_settings_section,
+)
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.file_search_section import FileSearchSection
@@ -52,22 +67,19 @@ from artemis.channels.desktop.settings_io import (
 from artemis.channels.desktop.settings_io import save_choices as save_choices
 from artemis.channels.desktop.settings_io import save_computer_mode as save_computer_mode
 from artemis.channels.desktop.settings_pages import (
-    build_about_page,
-    build_apps_page,
-    build_calendar_mail_page,
-    build_files_page,
-    build_github_page,
     build_look_page,
     build_model_page,
-    build_research_page,
-    build_routines_page,
     build_shell,
-    build_skills_page,
-    build_summary_page,
-    build_telegram_page,
-    build_triggers_page,
+    build_shortcuts_page,
     build_voice_page,
     default_repos_dir,
+)
+from artemis.channels.desktop.settings_pages_extra import (
+    build_about_page,
+    build_apps_page,
+    build_automation_page,
+    build_connections_page,
+    build_knowledge_page,
 )
 from artemis.channels.desktop.settings_widgets import (
     _DIRTY_A11Y,
@@ -91,7 +103,9 @@ from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.channels.desktop.triggers_section import TriggersSection
 from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
 from artemis.channels.desktop.update_section import UpdateSection
+from artemis.channels.desktop.voice_preview import VoicePreviewThread
 from artemis.channels.desktop.voice_settings_section import SttDownload as SttDownload
+from artemis.channels.desktop.voice_telemetry_card import VoiceTelemetryCard
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import (
     BUILTIN_AGENT,
@@ -150,6 +164,70 @@ def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> b
     return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
+_SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
+    _fold(key): value
+    for key, value in {
+        "ses": ("Ses", None),
+        "voice": ("Ses", None),
+        "dinleme": ("Ses", 0),
+        "dinleme (giriş)": ("Ses", 0),
+        "listening (input)": ("Ses", 0),
+        "yanıt": ("Ses", 1),
+        "yanıt (çıkış)": ("Ses", 1),
+        "response (output)": ("Ses", 1),
+        "dikte": ("Dikte ve Kısayollar", None),
+        "kısayollar": ("Dikte ve Kısayollar", None),
+        "hızlı açılış": ("Dikte ve Kısayollar", None),
+        "quick launch": ("Dikte ve Kısayollar", None),
+        "dikte ve kısayollar": ("Dikte ve Kısayollar", None),
+        "dictation & shortcuts": ("Dikte ve Kısayollar", None),
+        "model": ("Model ve Bağlantılar", None),
+        "model ve bağlantılar": ("Model ve Bağlantılar", None),
+        "models & connections": ("Model ve Bağlantılar", None),
+        "modeller": ("Model ve Bağlantılar", 0),
+        "modeller ve roller": ("Model ve Bağlantılar", 0),
+        "models & roles": ("Model ve Bağlantılar", 0),
+        "model ekle ve bağlantılar": ("Model ve Bağlantılar", 1),
+        "add model & connections": ("Model ve Bağlantılar", 1),
+        "görünüm": ("Görünüm", None),
+        "appearance": ("Görünüm", None),
+        "otomasyon": ("Otomasyon Kuralları", None),
+        "otomasyon ve rutinler": ("Otomasyon Kuralları", None),
+        "otomasyon kuralları": ("Otomasyon Kuralları", None),
+        "automation rules": ("Otomasyon Kuralları", None),
+        "rutinler": ("Otomasyon Kuralları", 0),
+        "routines": ("Otomasyon Kuralları", 0),
+        "tetikleyiciler": ("Otomasyon Kuralları", 1),
+        "triggers": ("Otomasyon Kuralları", 1),
+        "gün özeti": ("Otomasyon Kuralları", 2),
+        "daily summary": ("Otomasyon Kuralları", 2),
+        "araştırma": ("Otomasyon Kuralları", 3),
+        "research": ("Otomasyon Kuralları", 3),
+        "bilgi ve beceriler": ("Bilgi ve Beceriler", None),
+        "knowledge & skills": ("Bilgi ve Beceriler", None),
+        "beceriler": ("Bilgi ve Beceriler", 0),
+        "skills": ("Bilgi ve Beceriler", 0),
+        "dosya araması": ("Bilgi ve Beceriler", 1),
+        "file search": ("Bilgi ve Beceriler", 1),
+        "bağlantılar": ("Bağlantılar", None),
+        "connections": ("Bağlantılar", None),
+        "telegram": ("Bağlantılar", 0),
+        "takvim ve posta": ("Bağlantılar", 1),
+        "calendar & mail": ("Bağlantılar", 1),
+        "github": ("Bağlantılar", 2),
+        "github ve kod ajanları": ("Bağlantılar", 2),
+        "github & code agents": ("Bağlantılar", 2),
+        "uygulamalar": ("Uygulamalar ve Güvenlik", None),
+        "uygulamalar ve güvenlik": ("Uygulamalar ve Güvenlik", None),
+        "applications & security": ("Uygulamalar ve Güvenlik", None),
+        "hakkında": ("Hakkında ve Güncelleme", None),
+        "about": ("Hakkında ve Güncelleme", None),
+        "hakkında ve güncelleme": ("Hakkında ve Güncelleme", None),
+        "about & updates": ("Hakkında ve Güncelleme", None),
+    }.items()
+}
+
+
 
 
 class SettingsPanel(QWidget):
@@ -200,6 +278,13 @@ class SettingsPanel(QWidget):
     cloud_stt_hint: QLabel
     tts_combo: QComboBox
     tts_piper_hint: QLabel
+    tts_edge_box: QWidget
+    edge_voice_combo: QComboBox
+    tts_piper_box: QWidget
+    piper_voice_combo: QComboBox
+    tts_preview_button: QPushButton
+    tts_preview_status: QLabel
+    tts_preview_thread: VoicePreviewThread | None
     tts_cloud_box: QWidget
     tts_cloud_saved: QComboBox
     tts_cloud_server: QComboBox
@@ -212,6 +297,9 @@ class SettingsPanel(QWidget):
     tts_cloud_emotion: QCheckBox
     tts_cloud_emotion_tags: QLineEdit
     tts_cloud_hint: QLabel
+    voice_tabs: QTabWidget
+    voice_telemetry_card: VoiceTelemetryCard
+    listening_hotkey: QLineEdit
     continuous_mode: QCheckBox
     dictation_enabled: QCheckBox
     dictation_hotkey: QLineEdit
@@ -239,6 +327,7 @@ class SettingsPanel(QWidget):
     _theme_grid: QGridLayout
     _theme_columns: int
     proactive_enabled: QCheckBox
+    automation_tabs: QTabWidget
     routines_enabled: QCheckBox
     routines: RoutinesSection
     triggers_enabled: QCheckBox
@@ -246,6 +335,8 @@ class SettingsPanel(QWidget):
     daily_summary_enabled: QCheckBox
     daily_summary_at: QLineEdit
     research_enabled: QCheckBox
+    knowledge_tabs: QTabWidget
+    connections_tabs: QTabWidget
     telegram: TelegramSection
     telegram_voice: QCheckBox
     telegram_photo: QCheckBox
@@ -282,9 +373,13 @@ class SettingsPanel(QWidget):
     computer_auto: QCheckBox
     computer_observation: QComboBox
     application_list: QListWidget
+    close_without_confirmation_list: QListWidget
     add_application_button: QPushButton
     remove_application_button: QPushButton
     application_hint: QLabel
+    allow_cloud_file_content: QCheckBox
+    allow_cloud_clipboard: QCheckBox
+    memory_encrypt_at_rest: QCheckBox
     advanced_box: QWidget
     update_section: UpdateSection
     about_section: QWidget
@@ -331,18 +426,14 @@ class SettingsPanel(QWidget):
         build_shell(self)
         self._current_group = ""
         self.saved_notes: dict[str, _SavedNote] = {}
+        self._page_tabs: dict[str, QTabWidget] = {}
         build_voice_page(self)
+        build_shortcuts_page(self)
         build_model_page(self, pets_dir, codex_pets_dir)
         build_look_page(self)
-        build_routines_page(self)
-        build_triggers_page(self)
-        build_summary_page(self)
-        build_research_page(self)
-        build_telegram_page(self)
-        build_calendar_mail_page(self)
-        build_github_page(self)
-        build_skills_page(self)
-        build_files_page(self)
+        build_automation_page(self)
+        build_knowledge_page(self)
+        build_connections_page(self)
         build_apps_page(self)
         build_about_page(self)
         self._build_section_combo()
@@ -375,6 +466,7 @@ class SettingsPanel(QWidget):
                            self.github_auto, self.github_button, self.default_agent_combo,
                            self.add_custom_agent_button):
                 widget.setEnabled(False)
+            self._sync_voice_output_controls()
         else:
             self.refresh()
         # Açılır listeler en uzun öğeye göre genişlemesin: dar pencerede yatay kaydırma çıkarıyordu.
@@ -383,13 +475,16 @@ class SettingsPanel(QWidget):
             combo.setMinimumContentsLength(12)
         # Değişiklik izleme yalnız kullanıcı girdisine bakar; yenileme sonunda temiz sayılır.
         for edit in (
-            self.wake_name, self.dictation_hotkey, self.selection_hotkey,
+            self.wake_name, self.listening_hotkey, self.dictation_hotkey, self.selection_hotkey,
             self.selection_translate_to, self.github_owner, self.repos_dir,
             self.mail_host, self.mail_port, self.mail_username, self.mail_folder,
             self.daily_summary_at,
         ):
             edit.textEdited.connect(self._mark_dirty)
-        self.cloud_model.lineEdit().textEdited.connect(self._mark_dirty)  # type: ignore[union-attr]
+        for combo in (self.cloud_model, self.edge_voice_combo, self.piper_voice_combo):
+            line = combo.lineEdit()
+            if line is not None:
+                line.textEdited.connect(self._mark_dirty)
         for box in (*(getattr(self, b.widget) for b in PANEL_BINDINGS), self.github_auto):
             if isinstance(box, QCheckBox):
                 box.toggled.connect(self._mark_dirty)
@@ -397,6 +492,7 @@ class SettingsPanel(QWidget):
                 box.currentIndexChanged.connect(self._mark_dirty)
             elif isinstance(box, QSpinBox):
                 box.valueChanged.connect(self._mark_dirty)
+        self.close_without_confirmation_list.itemChanged.connect(self._mark_dirty)
         for combo in (self.device_combo, self.stt_combo):
             combo.currentIndexChanged.connect(self._mark_dirty)
         roots_model = self.file_search_roots.model()
@@ -421,6 +517,34 @@ class SettingsPanel(QWidget):
             self.sections.setCurrentRow(index)
         finally:
             self._navigating = False
+
+    def select_section(self, name: str) -> bool:
+        """Sayfa, eski bölüm veya alt sekme adına göre (TR/EN) ilgili sayfa ve sekmeyi açar."""
+        names = self.section_names()
+        direct = t(name)
+        if direct in names:
+            self.show_section(names.index(direct))
+            return True
+        if name in names:
+            self.show_section(names.index(name))
+            return True
+        route = _SECTION_ROUTES.get(_fold(name)) or _SECTION_ROUTES.get(_fold(direct))
+        if route is None:
+            return False
+        page_tr, subtab = route
+        candidates = (t(page_tr), page_tr)
+        row = next((i for i, item in enumerate(names) if item in candidates), None)
+        if row is None:
+            folded = {_fold(c) for c in candidates}
+            row = next((i for i, item in enumerate(names) if _fold(item) in folded), None)
+        if row is None:
+            return False
+        self.show_section(row)
+        if subtab is not None:
+            tabs = self._page_tabs.get(page_tr)
+            if tabs is not None and 0 <= subtab < tabs.count():
+                tabs.setCurrentIndex(subtab)
+        return True
 
     def _build_section_combo(self) -> None:
         """Bölüm listesinin açılır kopyası: sayfa satırı veri=satır. Grup başlığı kalın görünür;
@@ -458,10 +582,12 @@ class SettingsPanel(QWidget):
         self.section_combo.setVisible(compact)
 
     def _page_text(self, row: int) -> str:
-        """Sayfada görünen metinler: başlık, etiketler, kutu ve grup adları."""
+        """Sayfada görünen metinler: başlık, alt sekmeler, etiketler, kutu ve grup adları."""
         page = self.stack.widget(row)
         assert page is not None
         parts = [self.sections.item(row).text()]
+        for bar in page.findChildren(QTabBar):
+            parts.extend(bar.tabText(i) for i in range(bar.count()))
         parts += [label.text() for label in page.findChildren(QLabel)]
         parts += [button.text() for button in page.findChildren(QAbstractButton)]
         parts += [box.title() for box in page.findChildren(QGroupBox)]
@@ -563,10 +689,26 @@ class SettingsPanel(QWidget):
         """Kaydedilmemiş kullanıcı değişikliği var mı (demo modunda her zaman False)."""
         return self._dirty and not self._demo
 
+    def _owner_row(self, source: object) -> int | None:
+        if not isinstance(source, QObject):
+            return None
+        widget: QWidget | None = source if isinstance(source, QWidget) else None
+        cur: QObject | None = source
+        while widget is None and cur is not None:
+            cur = cur.parent()
+            if isinstance(cur, QWidget):
+                widget = cur
+        while widget is not None:
+            for row in range(self.stack.count()):
+                if self.stack.widget(row) is widget:
+                    return row
+            widget = widget.parentWidget()
+        return None
+
     def _mark_dirty(self, *_args: object) -> None:
         if not self._demo and not self._loading:
-            # ponytail: kirli bölüm = o an açık olan; değişiklik yalnız görünen sayfada olur.
-            self._dirty_rows.add(self.stack.currentIndex())
+            owner = self._owner_row(self.sender())
+            self._dirty_rows.add(owner if owner is not None else self.stack.currentIndex())
             self._set_dirty(True)
 
     def _set_dirty(self, dirty: bool) -> None:
@@ -803,6 +945,10 @@ class SettingsPanel(QWidget):
                 if binding.quiet:
                     widget.blockSignals(False)
             self._update_cloud_hint()
+            if isinstance(self.tts_cloud_box, TtsCloudBox):
+                self.tts_cloud_box.reload_servers()
+            self._sync_voice_output_controls()
+            self.voice_telemetry_card.refresh()
             self.routines.refresh()
             self.skills.refresh()
             self.triggers.refresh()
@@ -853,6 +999,7 @@ class SettingsPanel(QWidget):
             item = self.application_list.item(self.application_list.count() - 1)
             item.setData(Qt.ItemDataRole.UserRole, alias)
             item.setToolTip(executable)
+        security_settings_section.refresh_close_without_confirmation(self)
 
     def _sync_application_access(self) -> None:
         manual = not self.all_applications.isChecked() and not self._demo
@@ -862,6 +1009,7 @@ class SettingsPanel(QWidget):
         self.add_application_button.setVisible(manual)
         self.remove_application_button.setEnabled(manual)
         self.remove_application_button.setVisible(manual)
+        security_settings_section.sync_close_without_confirmation_access(self)
         self.application_hint.setText(
             t("Kurulu uygulamalar otomatik bulunur. Silme, kaldırma ve hassas işlemler onay ister.")
             if self.all_applications.isChecked()
@@ -984,7 +1132,7 @@ class SettingsPanel(QWidget):
         except (OSError, ValueError, KeyError, TypeError):
             self.github_status.setText(t("GitHub ayarları kaydedilemedi."))
             return
-        self.saved_notes["GitHub"].flash()
+        self.saved_notes[t("Bağlantılar")].flash()
         self.run_github_sync(auto=False)
 
     def start_auto_sync(self) -> None:
@@ -1025,6 +1173,22 @@ class SettingsPanel(QWidget):
     def _github_done(self, report: SyncReport) -> None:
         apply_github_report(self, report)
 
+    def _sync_voice_output_controls(self, *_args: object) -> None:
+        voice_preview.sync_voice_output_controls(self)
+
+    def _toggle_voice_preview(self) -> None:
+        voice_preview.toggle_voice_preview(self)
+
+    def _voice_preview_done(self, message: str) -> None:
+        self.tts_preview_status.setText(message)
+
+    def _voice_preview_failed(self, message: str) -> None:
+        self.tts_preview_status.setText(message)
+
+    def _voice_preview_finished(self) -> None:
+        self.tts_preview_thread = None
+        self._sync_voice_output_controls()
+
     def finish_inventory(self) -> None:
         if _shutdown_thread(
             self.github,
@@ -1043,6 +1207,13 @@ class SettingsPanel(QWidget):
             ("finished", self._stt_download_finished),
         ):
             self.stt_download_thread = None
+        if voice_preview._shutdown_thread(
+            self.tts_preview_thread,
+            ("done", self._voice_preview_done),
+            ("failed", self._voice_preview_failed),
+            ("finished", self._voice_preview_finished),
+        ):
+            self.tts_preview_thread = None
         self.telegram.finish()
         self.update_section.finish()
         if isinstance(self.tts_cloud_box, TtsCloudBox):

@@ -186,7 +186,8 @@ def test_window_nav_order_and_settings_link(app: QApplication, tmp_path: Path) -
         window.automation_panel.settings_requested.emit("Araştırma")
         assert window.tabs.currentWidget() is window.settings_scroll
         names = window.settings_panel.section_names()
-        assert window.settings_panel.sections.currentRow() == names.index("Araştırma")
+        assert window.settings_panel.sections.currentRow() == names.index("Otomasyon Kuralları")
+        assert window.settings_panel.automation_tabs.currentIndex() == 3
     finally:
         window._request_exit()
         end = time.monotonic() + 3

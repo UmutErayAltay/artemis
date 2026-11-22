@@ -402,6 +402,7 @@ def test_subscription_connection_writes_valid_cli_model(
     monkeypatch.setattr(section_module.shutil, "which", lambda name: "/bin/claude")
     path = config(tmp_path)
     section = ProviderSection(path)
+    section.tabs.setCurrentIndex(1)
     section.show()
     assert section.add_connection.currentData() == section_module.CLI_KEY  # tek seçenek
     assert section.cli_test_button.isVisible()

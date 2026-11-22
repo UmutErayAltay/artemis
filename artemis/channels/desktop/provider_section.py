@@ -41,6 +41,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMessageBox,
     QPushButton,
+    QTabWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -78,9 +79,7 @@ from artemis.channels.desktop.provider_layout import (
     PARALLEL_CHOICES,
     PARALLEL_TEST,
     PRESETS,
-    build_add_box,
-    build_connections_box,
-    build_models_box,
+    build_provider_tabs,
 )
 from artemis.channels.desktop.provider_workers import CliTest, ConnectionTest
 from artemis.channels.desktop.settings_io import _write_validated
@@ -171,6 +170,7 @@ class ProviderSection(QWidget):
     test_button: QPushButton
     save_button: QPushButton
     delete_button: QPushButton
+    tabs: QTabWidget
     status: QLabel
 
     def __init__(self, config_path: Path, *, demo: bool = False) -> None:
@@ -204,9 +204,7 @@ class ProviderSection(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
-        build_models_box(self, layout)
-        build_add_box(self, layout)
-        build_connections_box(self, layout)
+        build_provider_tabs(self, layout)
         self._sync_cli_button()
         self._sync_model_field()
         if demo:

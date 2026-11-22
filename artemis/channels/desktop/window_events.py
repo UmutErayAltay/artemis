@@ -27,6 +27,7 @@ from artemis.channels.desktop.bridge import (
     ToolFinished,
     VoiceCommand,
 )
+from artemis.channels.desktop.budget_bar import refresh_budget
 from artemis.channels.desktop.chat_widgets import OperationCard, StepBlock, _TurnSteps
 from artemis.channels.desktop.pet import level_from_message
 from artemis.channels.desktop.projects_panel import status_label
@@ -166,6 +167,7 @@ def handle_state(window: DesktopWindow, event: State) -> None:
             window.bridge.start_voice()
         if event.request_id is not None:
             dismiss_approval_for(window, event.request_id)
+        refresh_budget(window)
     elif event.state == "running":
         window._busy = True
         window._set_status(t("Çalışıyor…"), "running")

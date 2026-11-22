@@ -39,7 +39,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.autostart import Autostart
-from artemis.channels.desktop import gui_gc, pet_sprite, themes
+from artemis.channels.desktop import gui_gc, hotkey_manager, pet_sprite, themes
 from artemis.channels.desktop.approval_dialog import ApprovalDialog
 from artemis.channels.desktop.automation_panel import AutomationPanel
 from artemis.channels.desktop.bridge import (
@@ -49,6 +49,7 @@ from artemis.channels.desktop.bridge import (
     DesktopBridge,
     RuntimeFactory,
 )
+from artemis.channels.desktop.budget_bar import refresh_budget
 from artemis.channels.desktop.chat_widgets import (
     _VOICE_LABELS,
     ChatTranscript,
@@ -155,6 +156,7 @@ class DesktopWindow(QMainWindow):
     model_box: QPushButton
     voice_dot: QLabel
     voice_state: QLabel
+    budget_chip: QLabel
     voice_button: QPushButton
     auto_button: QPushButton
     status_pill: QFrame
@@ -265,6 +267,7 @@ class DesktopWindow(QMainWindow):
             lambda: self.bridge.selection_write_back(),
         )
         self.selection_popup.apply_theme(themes.THEMES[self._theme])
+        self._hotkey_pressed.connect(self.voice_button_click)
         self._selection_pressed.connect(lambda: self.bridge.selection_hotkey())
         # Köprü ayar uygulanınca yenilenir; sinyal her seferinde güncel olanı çağırır.
         self._dictation_pressed.connect(lambda: self.bridge.toggle_dictation())
@@ -319,72 +322,18 @@ class DesktopWindow(QMainWindow):
         return themes.THEMES[self._theme][key]
 
     def _start_hotkey(self) -> None:
-        try:
-            text = load_settings(self._config_path).voice.listening_hotkey.strip()
-        except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            return
-        if not text:
-            return
-        try:
-            hotkey = GlobalHotkey(text, self._hotkey_pressed.emit)
-        except ValueError:
-            self._hotkey_problem(t("Ses kısayolu tanınmadı: {text}").format(text=text))
-            return
-        self._hotkey_pressed.connect(self.voice_button_click)
-        if hotkey.start():
-            self._hotkey = hotkey
-        elif sys.platform == "win32":
-            self._hotkey_problem(
-                t("Ses kısayolu ({text}) başka bir programda kayıtlı.").format(text=text)
-            )
+        hotkey_manager.start_listening_hotkey(self, GlobalHotkey)
 
     def _start_dictation_hotkey(self) -> None:
         """Dikte kısayolu (ADR 0057): kapalıyken hiç kaydedilmez; ayar uygulanınca yenilenir."""
-        if self._dictation_hotkey is not None:
-            self._dictation_hotkey.stop()
-            self._dictation_hotkey = None
-        try:
-            config = load_settings(self._config_path).dictation
-        except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            return
-        if not config.enabled:
-            return
-        text = config.hotkey.strip()
-        try:
-            hotkey = GlobalHotkey(text, self._dictation_pressed.emit)
-        except ValueError:
-            self._hotkey_problem(t("Dikte kısayolu tanınmadı: {text}").format(text=text))
-            return
-        if hotkey.start():
-            self._dictation_hotkey = hotkey
-        elif sys.platform == "win32":
-            self._hotkey_problem(
-                t("Dikte kısayolu ({text}) başka bir programda kayıtlı.").format(text=text)
-            )
+        hotkey_manager.start_dictation_hotkey(self, GlobalHotkey)
 
     def _start_selection_hotkey(self) -> None:
         """Seçili metin kısayolu (ADR 0062): kapalıyken kaydedilmez; ayar uygulanınca yenilenir."""
-        if self._selection_hotkey is not None:
-            self._selection_hotkey.stop()
-            self._selection_hotkey = None
-        try:
-            config = load_settings(self._config_path).selection_actions
-        except (OSError, ValueError, ValidationError, yaml.YAMLError):
-            return
-        if not config.enabled:
-            return
-        text = config.hotkey.strip()
-        try:
-            hotkey = GlobalHotkey(text, self._selection_pressed.emit)
-        except ValueError:
-            self._hotkey_problem(t("Seçili metin kısayolu tanınmadı: {text}").format(text=text))
-            return
-        if hotkey.start():
-            self._selection_hotkey = hotkey
-        elif sys.platform == "win32":
-            self._hotkey_problem(
-                t("Seçili metin kısayolu ({text}) başka bir programda kayıtlı.").format(text=text)
-            )
+        hotkey_manager.start_selection_hotkey(self, GlobalHotkey)
+
+    def _reload_hotkeys(self) -> None:
+        hotkey_manager.reload_hotkeys(self, GlobalHotkey)
 
     def _show_selection(self, kind: str, message: str) -> None:
         """Seçili metin eylemi durumu: pencere imleç yanında açılır, sonuç orada görünür."""
@@ -581,6 +530,7 @@ class DesktopWindow(QMainWindow):
         self._describe_voice(t(_VOICE_LABELS["off"]), False)
         self._set_controls()
         self._fit_shell()
+        refresh_budget(self)
         QTimer.singleShot(0, self.prompt.setFocus)
         # Açılışta bir kez, arka plan thread'inde; CLI'da eşitleme yoktur.
         QTimer.singleShot(0, self.settings_panel.start_auto_sync)
@@ -594,10 +544,7 @@ class DesktopWindow(QMainWindow):
         self.tabs.setCurrentWidget(self.settings_scroll)
 
     def _open_settings_section(self, name: str) -> None:
-        names = self.settings_panel.section_names()
-        target = t(name) if t(name) in names else name
-        if target in names:
-            self.settings_panel.show_section(names.index(target))
+        self.settings_panel.select_section(name)
         self.tabs.setCurrentWidget(self.settings_scroll)
 
     def _sync_navigation(self, *_args: object) -> None:
@@ -786,6 +733,7 @@ class DesktopWindow(QMainWindow):
         wide = width >= _STEP_PANEL_MIN_WINDOW
         self.model_box.setVisible(width >= 800)
         self.model_caption.setVisible(width >= 800)
+        self.budget_chip.setVisible(width >= 800)
         self._show_model(self._model_full)
         self.operations_button.setVisible(not wide)
         self._dock_operations(not wide)
@@ -1146,8 +1094,7 @@ class DesktopWindow(QMainWindow):
                 self.bridge = DesktopBridge(self._config_path, self._runtime_factory)
                 if not self._demo:
                     self._refresh_welcome()
-                    self._start_dictation_hotkey()
-                    self._start_selection_hotkey()
+                    self._reload_hotkeys()
                 self.settings_panel.refresh()
                 self.settings_panel.notice.setText(
                     t("Ayarlar uygulandı; seçilen model ve mikrofon kullanılıyor.")

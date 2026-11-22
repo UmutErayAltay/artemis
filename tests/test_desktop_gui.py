@@ -1439,7 +1439,9 @@ def test_pet_workshop_model_button_opens_settings_model(app: QApplication, tmp_p
     try:
         window.settings_panel.pet.model_settings_requested.emit()
         assert window.tabs.currentWidget() is window.settings_scroll
-        assert window.settings_panel.sections.currentRow() == 1
+        assert window.settings_panel.sections.currentRow() == (
+            window.settings_panel.section_names().index("Model ve Bağlantılar")
+        )
     finally:
         _close_cleanly(app, window)
 

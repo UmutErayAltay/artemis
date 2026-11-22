@@ -183,10 +183,7 @@ def test_voice_cloud_tts_page_not_squeezed(lang: str, tmp_path: Path) -> None:
         window.tabs.setCurrentWidget(window.settings_scroll)
         _pump(app, 20)
 
-        for i in range(panel.sections.count()):
-            if panel.sections.item(i).text() in ("Ses", "Voice"):
-                panel.sections.setCurrentRow(i)
-                break
+        panel.select_section("Yanıt (Çıkış)")
         _pump(app, 50)
 
         panel.tts_combo.setCurrentIndex(panel.tts_combo.findData("cloud"))

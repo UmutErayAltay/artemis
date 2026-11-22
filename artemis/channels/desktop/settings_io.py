@@ -96,6 +96,37 @@ def _write_tts_cloud_server(combo: Any, value: Any) -> None:
     combo.setCurrentIndex(max(0, combo.findData(value)))
 
 
+def _read_checked_list(widget: Any) -> list[str]:
+    from PySide6.QtCore import Qt
+
+    selected: list[str] = []
+    for index in range(widget.count()):
+        item = widget.item(index)
+        if item is not None and item.checkState() == Qt.CheckState.Checked:
+            alias = item.data(Qt.ItemDataRole.UserRole)
+            if isinstance(alias, str) and alias:
+                selected.append(alias)
+    return selected
+
+
+def _write_checked_list(widget: Any, value: Any) -> None:
+    from PySide6.QtCore import Qt
+
+    selected = {str(item) for item in (value or ())}
+    blocked = widget.blockSignals(True)
+    try:
+        for index in range(widget.count()):
+            item = widget.item(index)
+            if item is None:
+                continue
+            alias = str(item.data(Qt.ItemDataRole.UserRole) or "")
+            item.setCheckState(
+                Qt.CheckState.Checked if alias in selected else Qt.CheckState.Unchecked
+            )
+    finally:
+        widget.blockSignals(blocked)
+
+
 _STANDARD_PRECISIONS = ("int8_float16", "float16")
 
 # Panelin "Uygula" ile yazdığı ve "yenile" ile okuduğu sade alanlar. Özel mantığı olanlar
@@ -106,7 +137,23 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         ("voice", "wake_word"), "wake_name",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
+    PanelBinding(
+        ("voice", "listening_hotkey"), "listening_hotkey",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
     _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
+    PanelBinding(
+        ("voice", "edge_voice"),
+        "edge_voice_combo",
+        lambda combo: combo.currentText().strip(),
+        lambda combo, value: combo.setEditText(str(value)),
+    ),
+    PanelBinding(
+        ("voice", "piper_voice"),
+        "piper_voice_combo",
+        lambda combo: combo.currentText().strip(),
+        lambda combo, value: combo.setEditText(str(value)),
+    ),
     _combo(("voice", "stt_language"), "stt_language_combo", fallback_first=False),
     PanelBinding(
         ("voice", "tts_cloud_endpoint"), "tts_cloud_server",
@@ -224,6 +271,13 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     ),
     _checkbox(("allow_all_applications",), "all_applications"),
     PanelBinding(
+        ("close_without_confirmation",), "close_without_confirmation_list",
+        _read_checked_list, _write_checked_list,
+    ),
+    _checkbox(("allow_cloud_file_content",), "allow_cloud_file_content"),
+    _checkbox(("allow_cloud_clipboard",), "allow_cloud_clipboard"),
+    _checkbox(("memory", "encrypt_at_rest"), "memory_encrypt_at_rest"),
+    PanelBinding(
         ("computer_use", "mode"),
         "computer_auto",
         lambda box: "auto" if box.isChecked() else "accept",
@@ -266,7 +320,9 @@ def save_choices(
     for setting_path, value in (values or {}).items():
         section = raw
         for key in setting_path[:-1]:
-            section = section.setdefault(key, {})
+            if not isinstance(section.get(key), dict):
+                section[key] = {}
+            section = section[key]
         # Config tuple alanları panelde tuple okunur; YAML yalnız liste yazabilir.
         section[setting_path[-1]] = list(value) if isinstance(value, tuple) else value
     if stt_model is not None:
