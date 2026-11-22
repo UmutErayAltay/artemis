@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 from artemis.channels.desktop.operations import (
@@ -205,3 +206,86 @@ def test_chip_not_tamam_for_denied_or_interrupted() -> None:
     )
     assert denied_card.chip != "Tamam" and denied_card.chip in CHIP_TONES
     assert interrupted_card.chip != "Tamam" and interrupted_card.chip in CHIP_TONES
+
+
+def test_finish_tool_closes_direct_panel_cards() -> None:
+    for status, success, expected_chip in (
+        ("ok", True, "Tamam"),
+        ("denied", False, "İptal"),
+        ("error", False, "Hata"),
+        ("sent", False, "Doğrulanamadı"),
+    ):
+        log = _log()
+        log.begin("r1", "Kasa")
+        _feed(log, "r1", "tool_requested", tool="open_application", arguments={})
+        _feed(
+            log,
+            "r1",
+            "tool_result",
+            tool="open_application",
+            result={"status": status, "success": success},
+        )
+        assert log.cards["r1"].chip == "Çalışıyor"
+        card = log.finish_tool("r1")
+        assert card is not None and card.chip == expected_chip
+
+    empty_log = _log()
+    assert empty_log.finish_tool("missing") is None
+
+
+def test_submit_tool_emits_turn_end_after_tool_result_so_card_closes(tmp_path: Path) -> None:
+    import time
+
+    from artemis.brain.fake import ScriptedProvider
+    from artemis.channels.desktop.bridge import Activity, DesktopBridge, State, ToolFinished
+    from artemis.channels.runtime import create_runtime
+    from artemis.config.settings import Settings
+    from artemis.safety.audit import AuditLog
+    from artemis.tools.plugins.routines import RoutineList
+    from artemis.tools.registry import ToolRegistry
+
+    settings = Settings(workspace=tmp_path, persist_memory=False, routines={"enabled": True})  # type: ignore[arg-type]
+
+    def factory(config: Path, approve: Any, on_record: Any) -> Any:
+        registry = ToolRegistry()
+        registry.register(RoutineList)
+        return create_runtime(
+            config, approve, settings=settings, provider=ScriptedProvider([]),
+            registry=registry, audit=AuditLog(tmp_path / "audit.jsonl", on_record),
+        )
+
+    bridge = DesktopBridge(tmp_path / "unused.yaml", factory)
+    try:
+        deadline = time.monotonic() + 10
+        events: list[Any] = []
+        while time.monotonic() < deadline:
+            events += bridge.poll_events()
+            if any(isinstance(e, State) and e.state == "ready" for e in events):
+                break
+            time.sleep(0.01)
+
+        req_id = bridge.submit_tool("routine_list", RoutineList.args_model())
+        assert req_id is not None
+        log = _log()
+        log.begin(req_id, "Rutinler")
+        collected: list[Any] = []
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            batch = bridge.poll_events()
+            for ev in batch:
+                collected.append(ev)
+                if isinstance(ev, Activity):
+                    labels = {"routine_list": ("Rutinler", "Rutinler")}
+                    log.feed(ev.request_id, ev.event, ev.fields, labels)
+            if any(isinstance(ev, Activity) and ev.event == "turn_end" for ev in collected):
+                break
+            time.sleep(0.01)
+
+        names = [
+            ev.event for ev in collected if isinstance(ev, Activity) and ev.request_id == req_id
+        ]
+        assert names[-2:] == ["tool_result", "turn_end"]
+        assert any(isinstance(ev, ToolFinished) and ev.request_id == req_id for ev in collected)
+        assert log.cards[req_id].chip == "Tamam"
+    finally:
+        bridge.shutdown()

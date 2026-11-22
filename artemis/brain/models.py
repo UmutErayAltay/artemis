@@ -28,6 +28,9 @@ class Message(BaseModel):
     # Bilgisayar kullanımı oturumunun ekran görüntüsü (ADR 0039). exclude=True: model_dump/
     # model_dump_json (hafıza, denetim) görüntüyü asla yazmaz; repr=False: log'a baytlar sızmaz.
     image_png: bytes | None = Field(default=None, repr=False, exclude=True)
+    # Doğrudan sesli komut WAV kaydı (opt-in). exclude=True: hafıza ve denetime ham ses
+    # baytı asla yazılmaz; repr=False: loglara sızmaz.
+    audio_wav: bytes | None = Field(default=None, repr=False, exclude=True)
 
 
 class Usage(BaseModel):

@@ -156,6 +156,7 @@ class VolumeSet(BaseTool):
     description = "Varsayılan hoparlörün ses düzeyini (0-100) ayarlar ya da sesi kapatıp açar."
     args_model = VolumeArguments
     risk = Risk.SIDE_EFFECT
+    auto_mode_ok = True
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(VolumeArguments, arguments)
@@ -177,6 +178,7 @@ class BrightnessSet(BaseTool):
     description = "Dizüstü dahili ekranın parlaklığını (0-100) ayarlar; harici monitörde çalışmaz."
     args_model = BrightnessArguments
     risk = Risk.SIDE_EFFECT
+    auto_mode_ok = True
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(BrightnessArguments, arguments)
@@ -190,8 +192,9 @@ class PowerArguments(BaseModel):
     action: Literal["lock", "sleep", "shutdown", "restart", "cancel_shutdown"]
 
 
-# Kilit ve iptal iş kaybettirmez; diğerleri kaydedilmemiş işi ve çalışan işleri etkiler.
-_CONFIRMED_POWER_ACTIONS = frozenset({"sleep", "shutdown", "restart"})
+# Kapatma ve yeniden başlatma açık iş/oturumu sonlandırdığı için her kipte onay ister;
+# kilit, uyku ve iptal temiz turda onaysız çalışır (Umut 2026-11-20 kararı).
+_CONFIRMED_POWER_ACTIONS = frozenset({"shutdown", "restart"})
 
 
 @register_tool
@@ -202,7 +205,8 @@ class Power(BaseTool):
     description = (
         "Bilgisayarı kilitler (lock), uyku moduna alır (sleep), kapatır (shutdown) ya da yeniden "
         "başlatır (restart); kapatma/yeniden başlatma gecikmelidir ve cancel_shutdown ile "
-        "iptal edilebilir. Uyku, kapatma ve yeniden başlatma her zaman onay ister."
+        "iptal edilebilir. Kullanıcı açıkça istediğinde metinle tekrar onay sorma, aracı "
+        "doğrudan çağır; kapatma ve yeniden başlatma için gereken onay penceresini sistem açar."
     )
     args_model = PowerArguments
     risk = Risk.CONFIRM_REQUIRED
@@ -212,6 +216,9 @@ class Power(BaseTool):
         if args.action in _CONFIRMED_POWER_ACTIONS:
             return Risk.CONFIRM_REQUIRED
         return Risk.SIDE_EFFECT
+
+    def auto_mode_allowed(self, arguments: BaseModel, context: ToolContext) -> bool:
+        return cast(PowerArguments, arguments).action not in _CONFIRMED_POWER_ACTIONS
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(PowerArguments, arguments)

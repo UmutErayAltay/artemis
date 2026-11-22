@@ -5,17 +5,37 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-import re
-from array import array
 from collections.abc import AsyncGenerator, Awaitable, Callable
 from contextlib import aclosing, suppress
-from difflib import SequenceMatcher
 from functools import partial
 from time import monotonic
 
 from artemis.brain.agent_loop import RunResult
 from artemis.brain.emotion import emotion_tags_active, strip_emotion_tags
 from artemis.channels.runner import CommandRunner
+from artemis.channels.voice.audio_routing import (
+    MAX_DIRECT_AUDIO_BYTES as MAX_DIRECT_AUDIO_BYTES,
+)
+from artemis.channels.voice.audio_routing import (
+    PRIVATE_REMOTE_TTS_NOTICE as _PRIVATE_REMOTE_TTS_NOTICE,
+)
+from artemis.channels.voice.audio_routing import (
+    accepts_kwarg,
+    call_run_command,
+    close_voice_resources,
+    continuous_toggle,
+    emit_private_tts_blocked,
+    encode_direct_audio_wav,
+    frame_input_level,
+    is_remote_synthesizer,
+    is_spoken_echo,
+    speech_words,
+    strip_spoken_prefix,
+    transcribe_cloud_command,
+)
+from artemis.channels.voice.audio_routing import (
+    pcm_to_wav as pcm_to_wav,
+)
 
 # Sözleşmeler contracts.py'de; eski içe aktarma yolları için buradan yeniden dışa aktarılır.
 from artemis.channels.voice.contracts import (
@@ -62,26 +82,13 @@ from artemis.channels.voice.telemetry import (
     Stage,
     VoiceTimingEvent,
 )
-from artemis.channels.voice.wake import _edit_distance, _fold
 from artemis.channels.voice.wake import find_wake_word as find_wake_word
 from artemis.channels.voice.wake import is_ghost_transcript as is_ghost_transcript
 from artemis.config.settings import VoiceConfig
 from artemis.i18n import t
 from artemis.safety.audit import AuditLog
-from artemis.text import turkish_fold
 
 logger = logging.getLogger(__name__)
-
-# Kip cümlesi: en çok 5 sözcük, "kesintisiz"/"sürekli" ve tek yönlü bir fiil. Sözcükler katlanmış
-# (_fold) karşılaştırılır. Anahtar bir harf farkla da tutar: Whisper "kesintisiz"i "gezintisiz"
-# yazdı ve kip açılmadı. Fiil kök + izinli ek olmalı ("geç", "geçelim", "açsana"); "geçmeyi",
-# "açıkla" fiil sayılmaz. Uzun komut içindekiler yine kaçırılır.
-_CONTINUOUS_MAX_WORDS = 5
-_CONTINUOUS_KEYS = ("kesintisis", "surekli")
-_CONTINUOUS_ON_VERBS = ("gec", "ac", "baslat", "gir", "dinle")
-_CONTINUOUS_OFF_VERBS = ("kapat", "cik", "bitir", "durdur")
-_VERB_SUFFIXES = {"", "in", "un", "yin", "elim", "alim", "yelim", "sene", "sana", "er", "ar"}
-_CONTINUOUS_OFF = {("normal", "moda", "gec"), ("normal", "moda", "don")}
 
 
 # Kapı kararı en çok bu kadar uçuştaki beslemeyi bekler; eşleşme sözün başından bu kadar geç
@@ -92,7 +99,6 @@ WAKE_HIT_SLACK = 0.5
 # ~100 ms'lik STT PCM'i birikince bir iş gönderilir; metin güncellemesi en çok ~150 ms'de bir.
 LIVE_BATCH_MS = 100
 LIVE_EMIT_INTERVAL = 0.15
-_PRIVATE_REMOTE_TTS_NOTICE = "Bu yanıt gizli içerik taşıdığı için bulut sesine gönderilmedi."
 
 
 class VoiceController:
@@ -167,6 +173,7 @@ class VoiceController:
         # Masaüstü köprüsü komutu kendi istek modelinden (request_id, tek aktif istek)
         # geçirir; varsayılan runner.run CLI/bench davranışını değiştirmez.
         self.run_command = run_command if run_command is not None else runner.run
+        self._run_accepts_audio = accepts_kwarg(self.run_command, "audio_wav")
         # ADR 0043: True ise run_command ``stream=`` kabul etmelidir (runner.run ve masaüstü
         # köprüsü eder); sağlayıcı akmıyorsa yanıt yine tamamı gelince söylenir.
         self.stream_responses = stream_responses
@@ -248,9 +255,7 @@ class VoiceController:
                     self.on_timing("audio_dropped_frames", float(drops))
                     self._event(0, "capture_health", reason=f"dropped_frames={drops}")
                 if self.clock() >= self._next_level_update:
-                    samples = array("h", frame.pcm[: len(frame.pcm) // 2 * 2])
-                    rms = math.sqrt(sum(value * value for value in samples) / max(1, len(samples)))
-                    self.on_input_level(min(100, int(rms / 32768 * 500)))
+                    self.on_input_level(frame_input_level(frame.pcm))
                     self._next_level_update = self.clock() + 0.2
                 if self._awaiting_followup and self.clock() > self._followup_until:
                     self._awaiting_followup = False
@@ -478,8 +483,7 @@ class VoiceController:
             and find_wake_word(transcript, self.config.wake_word) is None
         ):
             # ADR 0042: hoparlöre yazım sürerken doğrulanmış söz susturur ama komut olmaz;
-            # sonraki söz uyandırmasız takip olarak alınır. Kısa patlama (öksürük, kapı)
-            # STT'den geçse bile barge_in_ms altında kalır.
+            # kısa patlama (öksürük, kapı) STT'den geçse bile barge_in_ms altında kalır.
             if (
                 self.config.barge_in_without_wake
                 and self._output_active
@@ -487,8 +491,8 @@ class VoiceController:
             ):
                 self.on_transcript(t("Söz kesildi; dinliyorum."))
                 await self._interrupt_output(uid)
-                # Kullanıcı bilerek susturdu: takip sözü wake istemez. Yankı filtresi
-                # (_is_spoken_echo) son yanıt metniyle çalışmaya devam eder.
+                # Kullanıcı bilerek susturdu; takip sözü yalnız followup_listening açıkken
+                # wake istemeden kabul edilir (varsayılan kapalı, Umut 2026-11-20 kararı).
                 self._output_requires_wake = False
                 if self.config.followup_listening:
                     self._followup_until = self.clock() + self.config.followup_seconds
@@ -508,8 +512,14 @@ class VoiceController:
         if toggle is None and command is None:
             self._event(uid, "terminal", outcome="rejected", reason="no_wake")
             return
-        if (
+        audio_wav: bytes | None = None
+        if command and self.config.direct_audio_input and segment.pcm:
+            # Opt-in doğrudan ses modu: ham ses yalnız beyin modeline gider, ikinci bulut STT
+            # yüklemesi yapılmaz; çok uzun kayıtlar boyut sınırında güvenli biçimde metne düşer.
+            audio_wav = encode_direct_audio_wav(segment.pcm, self.config.sample_rate)
+        elif (
             command
+            and not self.config.direct_audio_input
             and self.cloud_recognizer is not None
             and (self._should_use_cloud is None or self._should_use_cloud())
         ):
@@ -530,33 +540,25 @@ class VoiceController:
             self._active = asyncio.create_task(self._acknowledge_wake(uid=uid, gid=gid))
         else:
             self._barge_cancelled = False
-            self._active = asyncio.create_task(self._run_and_speak(command, uid=uid, gid=gid))
+            self._active = asyncio.create_task(
+                self._run_and_speak(command, uid=uid, gid=gid, audio_wav=audio_wav)
+            )
 
     async def _cloud_command(self, uid: int, segment: AudioSegment, local_command: str) -> str:
-        """Komut metnini bulut tanıyıcıdan alır.
-
-        Yalnız istisnada (ağ/HTTP/geçersiz yanıt) yerel metne düşülür. Çağrı başarılıysa bulut
-        metni nihaidir: boş ya da yalnız uyandırma sözcüğü ise "" (tek başına uyandırma) döner;
-        yerel kuyruk (halüsinasyon) komut olmaz.
-        """
+        """Komut metnini bulut tanıyıcıdan alır."""
         assert self.cloud_recognizer is not None
-        try:
-            text = (await self.cloud_recognizer.transcribe(segment.pcm)).strip()
-        except asyncio.CancelledError:
-            self._event(uid, "terminal", outcome="cancelled", reason="stt_cancelled")
-            raise
-        except (OSError, RuntimeError, ValueError) as error:
-            # Hata metni yanıt gövdesi/anahtar taşımaz ama yine de yalnız tür günlüğe yazılır.
-            logger.warning(
-                "Bulut tanıma başarısız, yerel metin kullanılıyor (%s).", type(error).__name__
-            )
-            self._event(uid, "stt_cloud_fallback", reason="stt_cloud_fallback")
-            return local_command
-        span = find_wake_word(text, self.config.wake_word)
-        command = (text[span[1] :] if span is not None else text).lstrip(" \t,.;:!?-")
-        if is_ghost_transcript(command):
-            return ""
-        return command if command.strip(" \t,.;:!?-") else ""
+        return await transcribe_cloud_command(
+            self.cloud_recognizer,
+            segment.pcm,
+            local_command,
+            self.config.wake_word,
+            on_cancelled=lambda: self._event(
+                uid, "terminal", outcome="cancelled", reason="stt_cancelled"
+            ),
+            on_fallback=lambda: self._event(
+                uid, "stt_cloud_fallback", reason="stt_cloud_fallback"
+            ),
+        )
 
     async def _interrupt_output(self, uid: int) -> None:
         """Etkin turu ve oynatmayı durdurur; temizlik bitmeden yeni tur başlamaz.
@@ -582,7 +584,7 @@ class VoiceController:
 
     @staticmethod
     def _speech_words(text: str) -> list[str]:
-        return re.findall(r"\w+", turkish_fold(text))
+        return speech_words(text)
 
     def set_continuous(self, enabled: bool) -> None:
         """Kesintisiz kipi çalışırken değiştirir; arayüze bildirir."""
@@ -591,73 +593,19 @@ class VoiceController:
 
     def _continuous_toggle(self, transcript: str) -> bool | None:
         """Yalnız (uyandırma sözcüğü + ) kip cümlesinden ibaret söz; LLM'e gitmez."""
-        span = find_wake_word(transcript, self.config.wake_word)
-        if span is not None and not self._speech_words(transcript[: span[0]]):
-            transcript = transcript[span[1] :]
-        words = [_fold(word) for word in self._speech_words(transcript)]
-        if tuple(words) in _CONTINUOUS_OFF:
-            return False
-        if len(words) > _CONTINUOUS_MAX_WORDS or not any(
-            # z/s her konumda eşit: "gezintisiz" ile "kesintisiz" yalnız g/k farkıyla eşleşir.
-            _edit_distance(word.replace("z", "s"), key, 1) <= 1
-            for word in words
-            for key in _CONTINUOUS_KEYS
-        ):
-            return None
-
-        def has_verb(stems: tuple[str, ...]) -> bool:
-            return any(
-                word.startswith(stem) and word[len(stem) :] in _VERB_SUFFIXES
-                for word in words
-                for stem in stems
-            )
-
-        on = has_verb(_CONTINUOUS_ON_VERBS)
-        off = has_verb(_CONTINUOUS_OFF_VERBS)
-        if on == off:
-            return None
-        # TV/arka plan konuşmasının sürekli dinlemeyi açmaması için kipi açma
-        # yalnızca uyandırma sözcüğüyle veya açık takip penceresinde kabul edilir.
-        if on and not (
-            span is not None
-            or self._awaiting_followup
-            or self.clock() <= self._followup_until
-        ):
-            return None
-        return on
+        return continuous_toggle(
+            transcript,
+            self.config.wake_word,
+            awaiting_followup=self._awaiting_followup,
+            followup_active=self.clock() <= self._followup_until,
+        )
 
     def _is_spoken_echo(self, text: str, speech_start: float) -> bool:
-        if not self._spoken_text or speech_start > self._spoken_until:
-            return False
-        heard = self._speech_words(text)
-        spoken = self._speech_words(self._spoken_text)
-        if not heard:
-            return False
-        normalized = " ".join(heard)
-        for size in {max(1, len(heard) - 1), len(heard), len(heard) + 1}:
-            for index in range(max(0, len(spoken) - size + 1)):
-                candidate = " ".join(spoken[index : index + size])
-                if candidate == normalized or (
-                    len(heard) >= 2 and SequenceMatcher(None, normalized, candidate).ratio() >= 0.88
-                ):
-                    return True
-        return False
+        return is_spoken_echo(text, speech_start, self._spoken_text, self._spoken_until)
 
     def _strip_spoken_prefix(self, text: str, speech_start: float) -> str:
-        """Söz kendi sesimizle üst üste bindiyse baştaki o sözcükleri atar.
-
-        "Dinliyorum" sırasında mikrofon açık; Whisper "Dinliyorum saat kaç" yazabilir.
-        """
-        if not self._spoken_text or speech_start > self._spoken_until:
-            return text
-        spoken = [_fold(word) for word in self._speech_words(self._spoken_text)]
-        tokens = list(re.finditer(r"\w+", text))
-        if (
-            len(tokens) <= len(spoken)
-            or [_fold(token.group()) for token in tokens[: len(spoken)]] != spoken
-        ):
-            return text
-        return text[tokens[len(spoken) - 1].end() :].lstrip(" \t,.;:!?-")
+        """Söz kendi sesimizle üst üste bindiyse baştaki o sözcükleri atar."""
+        return strip_spoken_prefix(text, speech_start, self._spoken_text, self._spoken_until)
 
     def _mark_spoken(self, text: str, *, requires_wake: bool = True) -> None:
         self._spoken_text = text
@@ -865,49 +813,10 @@ class VoiceController:
         return bool(result.record is not None and result.record.answer_private)
 
     def _is_remote_synthesizer(self) -> bool:
-        # Çevrimsel içe aktarmayı önlemek için adaptörler burada geç yüklenir; politika tek yerde.
-        from artemis.channels.voice.adapters import (
-            EdgeTTSynthesizer,
-            EmaSynthesizer,
-            FallbackSynthesizer,
-            PiperSynthesizer,
-        )
-        from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
-
-        target: object = self.synthesizer
-        if isinstance(target, FallbackSynthesizer):
-            target = target.primary
-        if isinstance(target, (PiperSynthesizer, EmaSynthesizer)):
-            return False
-        if isinstance(target, (CloudSpeechSynthesizer, EdgeTTSynthesizer)):
-            return True
-        return self.config.tts_backend in ("edge", "cloud")
+        return is_remote_synthesizer(self.synthesizer, self.config.tts_backend)
 
     def _emit_private_tts_blocked(self) -> None:
-        if self._audit is None:
-            return
-        from artemis.channels.voice.adapters import EdgeTTSynthesizer, FallbackSynthesizer
-        from artemis.channels.voice.cloud_tts import CloudSpeechSynthesizer
-
-        target: object = self.synthesizer
-        if isinstance(target, FallbackSynthesizer):
-            target = target.primary
-        if isinstance(target, CloudSpeechSynthesizer):
-            self._audit.emit(
-                "cloud_tts_transfer", service=target.endpoint_id,
-                model=target.config.tts_cloud_model,
-                content_kind="assistant_response_text", allowed=False, reason="private",
-            )
-            return
-        service = (
-            "edge_tts"
-            if isinstance(target, EdgeTTSynthesizer) or self.config.tts_backend == "edge"
-            else (self.config.tts_cloud_endpoint or self.config.tts_backend)
-        )
-        self._audit.emit(
-            "cloud_tts_transfer", service=service,
-            content_kind="assistant_response_text", allowed=False, reason="private",
-        )
+        emit_private_tts_blocked(self._audit, self.synthesizer, self.config)
 
     async def _synth_stream(
         self, text: str, cancelled: asyncio.Event, *, private: bool = False,
@@ -1044,7 +953,24 @@ class VoiceController:
         async with aclosing(chunks()) as generator:
             await self.sink.play(generator, cancelled, first_pcm)
 
-    async def _run_and_speak_streamed(self, command: str, uid: int, gid: int | None) -> None:
+    def _call_run_command(
+        self,
+        command: str,
+        *,
+        stream: SpeechStream | None = None,
+        audio_wav: bytes | None = None,
+    ) -> Awaitable[RunResult]:
+        return call_run_command(
+            self.run_command,
+            command,
+            stream=stream,
+            audio_wav=audio_wav,
+            accepts_audio=self._run_accepts_audio,
+        )
+
+    async def _run_and_speak_streamed(
+        self, command: str, uid: int, gid: int | None, *, audio_wav: bytes | None = None
+    ) -> None:
         """ADR 0043: model yazarken cümleler söylenir; tek ``generation`` olayı hepsini durdurur."""
         generation = asyncio.Event()
         speech = SpeechStream()
@@ -1085,7 +1011,7 @@ class VoiceController:
                 )
             )
             self._playback = playback
-            result = await self.run_command(command, stream=speech)
+            result = await self._call_run_command(command, stream=speech, audio_wav=audio_wav)
             self._record_result(uid, gid, result)
             turn_private = self._is_private_result(result)
             speech.finish(result.text)
@@ -1130,9 +1056,10 @@ class VoiceController:
         *,
         uid: int = 0,
         gid: int | None = None,
+        audio_wav: bytes | None = None,
     ) -> None:
         if self.stream_responses:
-            await self._run_and_speak_streamed(command, uid, gid)
+            await self._run_and_speak_streamed(command, uid, gid, audio_wav=audio_wav)
             return
         generation = asyncio.Event()
         played = False
@@ -1141,7 +1068,7 @@ class VoiceController:
             self._emit_state("thinking")
             self._task_turns += 1
             self._event(uid, "command_start", generation_id=gid, warm=self._task_turns > 1)
-            result = await self.run_command(command)
+            result = await self._call_run_command(command, audio_wav=audio_wav)
             self._record_result(uid, gid, result)
             private = self._is_private_result(result)
             if result.text.strip() and not generation.is_set():
@@ -1257,21 +1184,8 @@ class VoiceController:
         closer = getattr(self.recognizer, "close", None)
         if callable(closer):
             closer()  # oyun modu izleyici iş parçacığı; düz tanıyıcıda yok
-        closers: list[tuple[str, Callable[[], Awaitable[None]]]] = [
-            ("mikrofon", self.microphone.close),
-            ("ses çıkışı", self.sink.close),
-            ("ses üretici", self.synthesizer.close),
-        ]
-        if (
-            self._local_synthesizer is not None
-            and self._local_synthesizer is not self.synthesizer
-            and self._local_synthesizer is not getattr(self.synthesizer, "local", None)
-        ):
-            closers.append(("yerel ses üretici", self._local_synthesizer.close))
-        for label, closer in closers:
-            try:
-                await closer()
-            except (OSError, RuntimeError, ValueError) as error:
-                logger.warning("%s kapatılamadı (%s).", label, type(error).__name__)
+        await close_voice_resources(
+            self.microphone, self.sink, self.synthesizer, self._local_synthesizer
+        )
         # Mikrofon gerçekten kapandıktan sonra bildirilir; ekran "açık" demeye devam etmez.
         self._emit_state("off")

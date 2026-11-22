@@ -47,16 +47,17 @@ class CommandRunner:
     async def _run_locked(
         self, text: str, unattended: bool, stream: ResponseStream | None = None,
         attachment: ToolResult | None = None,
+        audio_wav: bytes | None = None,
     ) -> RunResult:
         window = self.conversation.render()
-        if stream is None and attachment is None:
-            result = await self.loop.run(text, window, unattended=unattended)
-        elif attachment is None:
-            result = await self.loop.run(text, window, unattended=unattended, stream=stream)
-        else:
-            result = await self.loop.run(
-                text, window, unattended=unattended, stream=stream, attachment=attachment
-            )
+        kwargs: dict[str, Any] = {}
+        if stream is not None:
+            kwargs["stream"] = stream
+        if attachment is not None:
+            kwargs["attachment"] = attachment
+        if audio_wav is not None:
+            kwargs["audio_wav"] = audio_wav
+        result = await self.loop.run(text, window, unattended=unattended, **kwargs)
         tags = emotion_tags_active(self.loop.context.settings.voice)
         if tags:
             stripped_text = strip_emotion_tags(result.text, tags)
@@ -75,16 +76,21 @@ class CommandRunner:
     async def run(
         self, text: str, *, unattended: bool = False, stream: ResponseStream | None = None,
         attachment: ToolResult | None = None,
+        audio_wav: bytes | None = None,
     ) -> RunResult:
         async with self._lock:
             if not self.loop.cleanup_pending:
                 self.loop.context.cancelled.clear()
             task = asyncio.current_task()
             if task is None:
-                return await self._run_locked(text, unattended, stream, attachment)
+                return await self._run_locked(
+                    text, unattended, stream, attachment, audio_wav=audio_wav
+                )
             self._active_task = task
             try:
-                return await self._run_locked(text, unattended, stream, attachment)
+                return await self._run_locked(
+                    text, unattended, stream, attachment, audio_wav=audio_wav
+                )
             finally:
                 if self._active_task is task:
                     self._active_task = None

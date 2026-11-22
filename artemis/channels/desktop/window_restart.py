@@ -5,6 +5,7 @@ Config değişince çalışma zamanını kurmanın tek girişi `request_restart`
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -217,6 +218,12 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         panel.save_failed(t("Ayarlar kaydedilemedi; mevcut ayarlar korunuyor."))
         return
     panel.mark_saved(written)
+    reload_dictation = getattr(
+        getattr(window, "bridge", None), "reload_dictation_settings", None
+    )
+    if written and callable(reload_dictation):
+        with contextlib.suppress(OSError, ValueError, ValidationError, yaml.YAMLError):
+            reload_dictation(load_settings(window._config_path).dictation)
     new = str(values.get(("language",), old_language))
     if new != current_language():
         set_language(new)

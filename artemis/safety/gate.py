@@ -93,12 +93,120 @@ class TurnState:
     unattended: bool = False
 
 
+@dataclass(frozen=True)
+class _ApprovalPlan:
+    """Onay gereksinimi, güvenilen site ve otomatik kip kararı."""
+
+    history_outbound: bool
+    site: str | None
+    fills: bool
+    trusted_site: bool
+    auto_skipped: bool
+    would_require_approval: bool
+    requires_approval: bool
+
+
+def _plan_approval(
+    tool: BaseTool,
+    arguments: BaseModel,
+    normalized: dict[str, Any],
+    risk: Risk,
+    context: ToolContext,
+    state: TurnState,
+) -> _ApprovalPlan:
+    history_outbound = state.history_external and tool.outbound
+    # Site okuma her zaman sorulur; kullanıcının güvendiği site hiç sorulmaz (ADR 0036).
+    # Güven yalnız veri taşımayan adımları kapsar (izin listesi; `fill` dışarıda kalır).
+    # Dış içerik bağlamdayken sorgu/parça taşıyan adres de sorulur: güvenilen sitedeki
+    # açık yönlendirme (ör. google.com/url?q=...) veriyi başka siteye taşıyabilir.
+    site = site_of(tool.external, normalized)
+    steps = normalized.get("steps")
+    fills = isinstance(steps, list) and not all(
+        isinstance(step, dict) and step.get("action") in _TRUSTED_STEP_ACTIONS for step in steps
+    )
+    url = normalized.get("url")
+    parts = _safe_urlsplit(url) if isinstance(url, str) else None
+    malformed_url = isinstance(url, str) and parts is None
+    tainted_context = state.tainted or state.history_external
+    # Sorgu/parça veri taşır; bozuk URL trusted_site'ta ayrıca reddedilir. Yol bilerek
+    # dışarıda: güvenilen sitede sızdırma için saldırganın o sitenin erişim kayıtlarını
+    # görmesi gerekir, yolu saymak "bir daha sorma"yı lekeli her turda bozardı (2026-11-18).
+    carries_data = parts is not None and bool(parts.query or parts.fragment)
+    trusted_site = (
+        site is not None
+        and risk is not Risk.CONFIRM_REQUIRED
+        and not fills
+        and not malformed_url
+        and not (tainted_context and carries_data)
+        and site in load_trusted_sites(trusted_sites_path(context.settings.state_dir))
+    )
+    # Otomatik kipte yalnız `auto_mode_allowed` True olan çağrıların onayı atlanır
+    # (ADR 0039/0077 + 2026-11-20 kararları): ekran ve kullanıcı tercih araçları
+    # kesintisiz akarken kapatma/yeniden başlatma gibi geri dönülmez işlemler yine sorar.
+    auto_skipped = (
+        tool.auto_mode_allowed(arguments, context)
+        and context.settings.computer_use.mode == "auto"
+        and site is None
+    )
+    would_require_approval = not trusted_site and (
+        site is not None
+        or risk is Risk.CONFIRM_REQUIRED
+        or (state.tainted and risk is not Risk.READ_ONLY)
+        or (history_outbound and risk is not Risk.READ_ONLY)
+    )
+    requires_approval = not auto_skipped and would_require_approval
+    return _ApprovalPlan(
+        history_outbound=history_outbound,
+        site=site,
+        fills=fills,
+        trusted_site=trusted_site,
+        auto_skipped=auto_skipped,
+        would_require_approval=would_require_approval,
+        requires_approval=requires_approval,
+    )
+
+
 class SafetyGate:
     def __init__(self, registry: ToolRegistry) -> None:
         self.registry = registry
         self.pending_notice = ""
         # Onay penceresindeki "bu site için bir daha sorma" seçeneği için okunan host.
         self.pending_site = ""
+
+    def _request_approval(
+        self,
+        tool: BaseTool,
+        call: ToolCall,
+        normalized: dict[str, Any],
+        risk: Risk,
+        context: ToolContext,
+        state: TurnState,
+        approve: ApprovalCallback,
+        plan: _ApprovalPlan,
+    ) -> bool:
+        if plan.site is not None and not plan.fills and risk is not Risk.CONFIRM_REQUIRED:
+            self.pending_site = plan.site
+        if state.tainted:
+            notice = TAINT_NOTICE
+        elif plan.history_outbound:
+            notice = HISTORY_TAINT_NOTICE
+        elif plan.site is not None:
+            notice = f"{SITE_NOTICE} ({plan.site})"
+        else:
+            notice = "Bu işlem onay gerektirir."
+        # Onay ekranı tool açıklamasını da taşır; kullanıcı etkilenecek kapsamı
+        # (ör. uygulamanın tüm süreçlerinin zorla kapatılmasını) görebilir.
+        self.pending_notice = f"{notice}. {tool.description}"
+        approved = approve(call.name, deepcopy(normalized)) is True
+        context.audit.emit(
+            "approval",
+            turn_id=state.turn_id,
+            tool=call.name,
+            arguments=normalized,
+            approved=approved,
+            notice=self.pending_notice,
+        )
+        return approved
 
     async def dispatch(
         self,
@@ -188,49 +296,11 @@ class SafetyGate:
                 state,
                 started,
             )
-        history_outbound = state.history_external and tool.outbound
-        # Site okuma her zaman sorulur; kullanıcının güvendiği site hiç sorulmaz (ADR 0036).
-        # Güven yalnız veri taşımayan adımları kapsar (izin listesi; `fill` dışarıda kalır).
-        # Dış içerik bağlamdayken sorgu/parça taşıyan adres de sorulur: güvenilen sitedeki
-        # açık yönlendirme (ör. google.com/url?q=...) veriyi başka siteye taşıyabilir.
-        site = site_of(tool.external, normalized)
-        steps = normalized.get("steps")
-        fills = isinstance(steps, list) and not all(
-            isinstance(step, dict) and step.get("action") in _TRUSTED_STEP_ACTIONS for step in steps
-        )
-        url = normalized.get("url")
-        parts = _safe_urlsplit(url) if isinstance(url, str) else None
-        malformed_url = isinstance(url, str) and parts is None
-        tainted_context = state.tainted or state.history_external
-        # Sorgu/parça veri taşır; bozuk URL trusted_site'ta ayrıca reddedilir. Yol bilerek
-        # dışarıda: güvenilen sitede sızdırma için saldırganın o sitenin erişim kayıtlarını
-        # görmesi gerekir, yolu saymak "bir daha sorma"yı lekeli her turda bozardı (2026-11-18).
-        carries_data = parts is not None and bool(parts.query or parts.fragment)
-        trusted_site = (
-            site is not None
-            and risk is not Risk.CONFIRM_REQUIRED
-            and not fills
-            and not malformed_url
-            and not (tainted_context and carries_data)
-            and site in load_trusted_sites(trusted_sites_path(context.settings.state_dir))
-        )
-        # Otomatik kipte yalnız `auto_mode_ok` aracın onayı atlanır (ADR 0039 ek karar):
-        # ekran adımları her tur yeni dış içerik ürettiği için aksi hâlde kip hiç işe
-        # yaramazdı. Diğer her araç kural 4'e aynen uyar.
-        auto_skipped = (
-            tool.auto_mode_ok and context.settings.computer_use.mode == "auto" and site is None
-        )
-        would_require_approval = not trusted_site and (
-            site is not None
-            or risk is Risk.CONFIRM_REQUIRED
-            or (state.tainted and risk is not Risk.READ_ONLY)
-            or (history_outbound and risk is not Risk.READ_ONLY)
-        )
-        requires_approval = not auto_skipped and would_require_approval
+        plan = _plan_approval(tool, arguments, normalized, risk, context, state)
         approved: bool | None = None
         # Yalnız onay gerçekten istenecekken atlandıysa yazılır: aksi hâlde SIDE_EFFECT temiz
         # tur gibi hiç sorulmayacak çağrılar da "atlandı" diye denetimi kirletirdi.
-        if auto_skipped and would_require_approval:
+        if plan.auto_skipped and plan.would_require_approval:
             # Onay sorulmadı; "evet" diye kaydetmek uydurma olurdu.
             context.audit.emit(
                 "approval_skipped",
@@ -241,28 +311,9 @@ class SafetyGate:
                 tainted=state.tainted,
                 history_external=state.history_external,
             )
-        if requires_approval:
-            if site is not None and not fills and risk is not Risk.CONFIRM_REQUIRED:
-                self.pending_site = site
-            if state.tainted:
-                notice = TAINT_NOTICE
-            elif history_outbound:
-                notice = HISTORY_TAINT_NOTICE
-            elif site is not None:
-                notice = f"{SITE_NOTICE} ({site})"
-            else:
-                notice = "Bu işlem onay gerektirir."
-            # Onay ekranı tool açıklamasını da taşır; kullanıcı etkilenecek kapsamı
-            # (ör. uygulamanın tüm süreçlerinin zorla kapatılmasını) görebilir.
-            self.pending_notice = f"{notice}. {tool.description}"
-            approved = approve(call.name, deepcopy(normalized)) is True
-            context.audit.emit(
-                "approval",
-                turn_id=state.turn_id,
-                tool=call.name,
-                arguments=normalized,
-                approved=approved,
-                notice=self.pending_notice,
+        if plan.requires_approval:
+            approved = self._request_approval(
+                tool, call, normalized, risk, context, state, approve, plan
             )
             if not approved:
                 return self._finish(
@@ -291,12 +342,12 @@ class SafetyGate:
             tool=call.name,
             arguments=normalized,
             risk=risk.value,
-            confirmation_required=requires_approval,
+            confirmation_required=plan.requires_approval,
             approved=approved,
             tainted=state.tainted,
             outbound=tool.outbound,
             history_external=state.history_external,
-            trusted_site=trusted_site,
+            trusted_site=plan.trusted_site,
         )
         return await self._execute(tool, arguments, call, context, state, started)
 

@@ -23,7 +23,7 @@ Small) aynı diff ile karne yazdırıldı; bulgular kodda yeniden doğrulandı, 
 | OCR yedeğinin ilk (soğuk) çağrısı 6,0 sn, zaman aşımı 5 sn: her oturumun ilk OCR'ı boş dönüyordu (ölçüldü 2026-11-17: soğuk 6,03 sn, sıcak 1,07 sn) | bu tur (12 sn) | — | geçti 2026-11-17 (ölçüm betiği, gerçek pencere, 128 öğe) |
 | OCR çıktısında `null` koordinat oturumu `TypeError` ile çökertebiliyordu | bu tur | geçti | — |
 | Oyun modu bildiriminde model adı yerine HF önbellek hash'i görünüyordu (`536b0662…`) | bu tur | geçti | geçti 2026-11-17 (`installed_path("small")` → `small`) |
-| Bağlama sihirbazı kullanıcının temasından bağımsız koyu açılıyordu | bu tur | — (mevcut sihirbaz testleri geçti, tema ayrıca sınanmadı) | — |
+| Bağlama sihirbazı kullanıcının temasından bağımsız koyu açılıyordu | bu tur | geçti (`scripts/kabul_masaustu.py --offscreen`, 2026-11-20) | geçti 2026-11-20 (`scripts/kabul_masaustu.py`, gerçek ekranda açık/koyu tema) |
 
 Bilinen tavanlar ve izlenen işler: OCR her adımda yeni PowerShell süreci başlatır (sıcak ~1 sn);
 kalıcı işçi ya da süreç içi WinRT ile değiştirilmeli. `CopyFromScreen` üstteki pencereyi de okur
@@ -70,7 +70,7 @@ Bilinen sınırlar: eski öz notların gizlilik kökeni bilinmez (gizli sayılma
 | Kapanış temizliği süresiz bekleyebiliyordu (doğrulanmış hata) | `c274f5a` | geçti | betik geçti 2026-11-19 (`scripts/kabul_guvenilirlik.py`, arayüzsüz) |
 | Kod ajanı işi bitince hiç bildirim yoktu; görünür kip pencere kapanana dek "çalışıyor" (doğrulanmış hata, 2026-11-05 canlıda) | bu tur | geçti | bekliyor |
 | Geçmiş silme sohbet ekranını temizlemiyordu; kullanıcı iki kez sildi (doğrulanmış hata, 2026-11-05 canlıda) | bu tur | geçti | silme geçti 2026-11-05 (Umut: 9 tur silindi, 3 not kaldı, metin dosya baytlarında yok); ekran temizliği bekliyor |
-| Kilitli depoda önce onay sorulup sonra reddediliyordu (2026-11-05 canlıda) | bu tur | geçti | kilit + Kilidi bırak geçti 2026-11-05 (Umut, gerçek çökme: iş `8ed35ad` interrupted, başlatma 3 kez reddedildi, bırakınca iş `5bed53b` başladı); düğme pasifliği bekliyor |
+| Kilitli depoda önce onay sorulup sonra reddediliyordu (2026-11-05 canlıda) | bu tur | geçti | kilit + Kilidi bırak geçti 2026-11-05 (Umut, gerçek çökme: iş `8ed35ad` interrupted, başlatma 3 kez reddedildi, bırakınca iş `5bed53b` başladı); düğme pasifliği geçti 2026-11-20 (`scripts/kabul_masaustu.py`, offscreen ve gerçek ekran) |
 | Geri yüklenen geçmişte zaman yoktu: model 8 saatlik kapatmayı "az önce" sandı (2026-11-05 canlıda) | bu tur | geçti | geçti 2026-11-05 (Umut): "en son ne zaman konuştuk?" → doğru saat (22:21) |
 | Arka plan kod ajanı her işte `error`: `--agent coordinator` araç listesi StructuredOutput'u dışarıda bırakıyordu ("No such tool available"); ilk teşhis (model) yanlıştı (doğrulanmış hata, 2026-11-05 canlıda) | bu commit + hata özetinde artık değişiklik; config modelleri sonnet/sonnet/haiku 5.5 | geçti | geçti 2026-11-05 (Umut, Artemis içinden): arka plan işi `c1a3c890` `done`, 16 sn, commit atıldı, ağaç temiz (modeller sonnet/haiku 5.5) |
 | Projeler paneli her 2 sn bir denetlenen tur üretiyordu (bakım) | bu tur | geçti | — |
@@ -151,7 +151,7 @@ Kod commitleri: `1de710a` (onay/deadline), `c3d15a8` (ses), `8158e59` (hafıza/b
 | Ses kaybı ve kuyruk ölçümleri | capture_health + STT kuyruk/çözüm metrikleri | Profilli canlı rapor bekliyor |
 | Geçmiş listesi/silme/saklama | SQLite ve tipli onay testleri; 0 gün varsayılan | Panel/CLI kabulü bekliyor |
 | failed/uncertain listeleme ve tekrar | Eski kayıt ve gizlilik korunur; tek atomik tekrar | Bildirim teslim denemesi bekliyor |
-| Kanal/Runtime kapanış sahipliği | Tekrarlı shutdown, kurulum hatası, mevcut bridge testleri | Aç/kapat ve süreç kontrolü bekliyor |
+| Kanal/Runtime kapanış sahipliği | Tekrarlı shutdown, kurulum hatası, mevcut bridge testleri | geçti 2026-11-20 (`scripts/kabul_masaustu.py`, offscreen ve gerçek ekranda aç/kapat sonrası süreç kalmadı) |
 | Streaming | Sağlayıcılarda kod ve test mevcut; akışsız kipte first token boş | claude_cli `stream-json` biçimi 2026-10-31 canlı doğrulandı ([A3](WINDOWS_CHECKLIST.md)); diğer profiller bekliyor |
 
 Karar ve sınırlar: [ADR 0046](adr/0046-reliability-controls.md).
@@ -192,8 +192,19 @@ Tarih: eski kayıtlarda 2026-10-15–19; tek tek commit her kayıtta yok, uyduru
 bu tabloya tarih, test edilen commit, cihaz/ortam, geçti/kısmi/kaldı ve kanıt yolu yazılır.
 Gerçek cihaz kabulü tamamlanmadan güvenilir günlük ürün veya Windows kabulü tamamlandı denmez.
 
-ADR 0057-0080 (dikte, oyun modu, UIA, bulut ses, şifreleme ve benzeri değişiklikler) için
-henüz Windows kabul satırı yoktur; kullanıcının gerçek cihaz testi bekleniyor ("Windows kabulü bekliyor").
+ADR 0057-0082 (dikte, oyun modu, UIA, bulut ses, şifreleme, uygulama içi güncelleme
+[ADR 0081](adr/0081-uygulama-ici-guncelleme.md) ve İngilizce ses [ADR 0082](adr/0082-ingilizce-ses.md)
+değişiklikleri) için ilk ekran kontrolleri (`scripts/kabul_masaustu.py`, 2026-11-20)
+[kabul oturumlarında](KABUL_OTURUMLARI.md) kayıtlıdır; tam insan kabulü için gerçek cihaz testi
+bekleniyor ("Windows kabulü bekliyor").
+
+## Güncel yerel doğrulama — v0.2.3 / Faz 0 (2026-11-22, dal `main`)
+
+Windows 11, Python 3.12.9 (`.venv`), `QT_QPA_PLATFORM=offscreen` (gerçek ses/cihaz yan etkisi çalıştırılmadı):
+
+| Sürüm / Durum | pytest | ruff | mypy | Sahte bench |
+|---|---|---|---|---|
+| `v0.2.3` + Faz 0 | 3750 geçti / 32 atlandı / 5 seçilmedi | temiz | temiz (215 dosya) | `bench.run --sahte` 57/57 (tehlikeli/onaysız/yanlış hedef 0); `bench.voice_latency --sahte --iterations 3` 3/3 |
 
 ## 2026-10-27 yerel doğrulaması (geçmiş kayıt; güncel sürümün sonucu değildir)
 

@@ -141,15 +141,13 @@ yaptığını bildirdi ([F5 doğrulama raporu](F5_WORKFLOW_REPORT.md)). Karar:
 
 ### Faz 6 — Proaktiflik, MCP, ekran algısı
 
-Durum: başladı (2026-10-14, kullanıcı kararı). Kalemler aşağıdaki sırayla, her biri ayrı
-oturumda ve kendi ADR'siyle ele alınır; bir kalemin Windows kabulü bitmeden sonrakinin
-koduna geçilebilir, fakat "tamamlandı" yalnız kendi kabulüyle yazılır.
+Durum: kodlandı; 6b MCP Windows kabulü geçti (2026-11-15, `1575521`), 6a sabah brifingi geçti ve 6c kısmi doğrulandı ([durum tablosu](RELIABILITY_STATUS.md)). Kalemler ayrı oturumda ve kendi ADR'siyle ele alındı; "tamamlandı" yalnız tam Windows kabulüyle yazılır.
 
 | Sıra | Kalem | Durum | Karar |
 | --- | --- | --- | --- |
-| 6a | Proaktiflik: hatırlatma ve sabah brifingi | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0027](adr/0027-proactive-events.md) |
-| 6b | MCP istemcisi (stdio) | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0028](adr/0028-mcp-client.md) |
-| 6c | Ekran algısı | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0029](adr/0029-screen-perception.md) |
+| 6a | Proaktiflik: hatırlatma ve sabah brifingi | sabah brifingi (#3) geçti (2026-11-04), hatırlatma kısmi/bekliyor ([durum tablosu](RELIABILITY_STATUS.md)) | [ADR 0027](adr/0027-proactive-events.md) |
+| 6b | MCP istemcisi (stdio) | geçti (2026-11-15, `1575521`) | [ADR 0028](adr/0028-mcp-client.md) |
+| 6c | Ekran algısı | kısmi geçti (2026-11-15) | [ADR 0029](adr/0029-screen-perception.md) |
 
 Sıranın gerekçesi: 6a, F4 bildirimleri ve F5 SQLite/süreç altyapısını yeniden kullanır ve
 yeni bir dış veri kaynağı açmaz. 6b yeni bir dış araç yüzeyi açar; risk ve taint kuralları
@@ -172,15 +170,13 @@ CLAUDE.md 12. kural) taşır ve yalnız Windows'ta anlamlıdır; en sona kalır.
 
 ### Faz 7 — Windows'ta yaşayan Artemis
 
-Durum: başladı (2026-10-15, kullanıcı kararı). Amaç: Artemis'i bilgisayar açıkken hep hazır
-ve Windows'u yönetebilir hale getirmek; masaüstü araçlarını tamamlamak.
-Windows kabulü kullanıcının kendi makinesinde (kendi Claude Code oturumuyla) yapılır.
+Durum: kodlandı; 7c tarayıcı MCP kabulü geçti (2026-11-15, `1575521`), 7a/7b kısmi doğrulandı ([durum tablosu](RELIABILITY_STATUS.md)). Amaç: Artemis'i bilgisayar açıkken hep hazır ve Windows'u yönetebilir hale getirmek; masaüstü araçlarını tamamlamak. Windows kabulü kullanıcının kendi makinesinde yürütülür.
 
 | Sıra | Kalem | Durum | Karar |
 | --- | --- | --- | --- |
-| 7a | Windows açılışında başlama ve tek örnek | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0030](adr/0030-autostart-single-instance.md) |
-| 7b | Pencere ve sistem kontrolü | kodlandı; güncel Windows kabulü için [durum tablosu](RELIABILITY_STATUS.md) | [ADR 0031](adr/0031-window-and-system-control.md) |
-| 7c | Tarayıcı otomasyonu (MCP üzerinden) | kodlandı; gerçek Chromium/Windows kısmi sonuçları [durum tablosunda](RELIABILITY_STATUS.md) | [ADR 0032](adr/0032-browser-automation-mcp.md) |
+| 7a | Windows açılışında başlama ve tek örnek | kısmi geçti (açılış kaydı geçti, yeniden açılış/tepsi bekliyor) | [ADR 0030](adr/0030-autostart-single-instance.md) |
+| 7b | Pencere ve sistem kontrolü | kısmi geçti (#15–17 geçti, kilit/uyku/kapatma bekliyor) | [ADR 0031](adr/0031-window-and-system-control.md) |
+| 7c | Tarayıcı otomasyonu (MCP üzerinden) | geçti (2026-11-15, `1575521`; gerçek Chromium/Windows sonuçları [durum tablosunda](RELIABILITY_STATUS.md)) | [ADR 0032](adr/0032-browser-automation-mcp.md) |
 
 Sıranın gerekçesi: 7a, 6a hatırlatmalarının gerçekten çalışmasının ön koşuludur (Artemis
 kapalıyken hatırlatma gelmez) ve yeni araç yüzeyi açmaz. 7b pencere ve sistem
@@ -188,8 +184,9 @@ araçlarını ekler; yerel ve geri alınabilir işlerden geri alınamayanlara (k
 başlatma) doğru risk sınıfı belirlenir. 7c, 6b MCP istemcisini kullanır; Playwright
 sunucusu yeni araç yazılmadan bağlanır ve URL doğrulaması her isteğe uygulanır.
 
-**Kapsam dışı (ayrı faz ve ADR):** fare/klavye kontrolü, görsel modelle ekran anlama,
-gözetimsiz onay kanalı, kurulum paketi.
+**Kapsam dışı (Faz 7 sonrası eklendi / açık kalan):** fare/klavye ve UIA ekran kontrolü
+([ADR 0039](adr/0039-computer-use.md)) ile Windows kurulum paketi ([ADR 0075](adr/0075-urunlestirme-plani.md), `v0.2.3`)
+sonraki sürümlerde eklendi; gözetimsiz onay kanalı kapsam dışı kalır.
 
 **Bitiş şartı**
 - Açılışta başlama yalnız kullanıcının açık eylemiyle (CLI veya tepsi menüsü) kurulur ve
@@ -199,3 +196,14 @@ gözetimsiz onay kanalı, kurulum paketi.
   ister ve gözetimsiz turda çalışmaz (testle).
 - Tarayıcı otomasyonu yerel/özel adreslere ve `file:`/`data:`/`javascript:` şemalarına gitmez.
 - Her kalemin Windows kabulü kullanıcı tarafından yapılır.
+
+### Faz 7 sonrası ve v0.2.3 (ADR 0033–0082)
+
+Durum: `v0.2.3` yayımlandı; otomatik testler ve `scripts/kabul_masaustu.py` ilk ekran kontrolleri geçti, tam Windows insan kabulü sürüyor ([RELIABILITY_STATUS.md](RELIABILITY_STATUS.md), [YENI_OZELLIKLER_KABUL.md](YENI_OZELLIKLER_KABUL.md), [KABUL_OTURUMLARI.md](KABUL_OTURUMLARI.md), [adr/README.md](adr/README.md)).
+
+- **Sağlayıcı arayüzü ve Claude CLI:** `ADR 0033–0035`.
+- **Ses hattı (DFN3, AEC3, Silero VAD, Smart Turn, oyun modu, bulut TTS, karma tanıma, İngilizce ses):** `ADR 0037–0044`, `0047`, `0050`, `0067–0069`, `0071–0072`, `0074`, `0079–0080`, `0082`.
+- **Bilgisayar kullanımı, UIA, OCR yedeği ve yıkıcı kapı:** `ADR 0039`, `0070`, `0073`, `0077–0078`.
+- **Companion hafıza ve DPAPI şifreleme:** `ADR 0054`, `0056`, `0076`.
+- **Masaüstü yetenekleri (sprite pet, kod ajanı, dikte, rutin, takvim/posta, beceri, tetikleyici, seçili metin, araştırma, Telegram medya, dosya arama, gün özeti):** `ADR 0048–0049`, `0051–0053`, `0057–0066`.
+- **Ürünleştirme ve uygulama içi güncelleme (`v0.2.3`):** `ADR 0075`, `0081`.

@@ -41,6 +41,7 @@ from artemis.channels.voice.adapters import SoundDeviceMicrophone
 from artemis.channels.voice.core import VoiceController
 from artemis.channels.voice.factory import build_dictation_recognizer, build_voice_controller
 from artemis.channels.voice.metrics import EventCollector, collector_report, write_report
+from artemis.config.settings import DictationConfig
 from artemis.i18n import t
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.scheduler import ProactiveScheduler
@@ -345,8 +346,10 @@ class DesktopBridge:
         self._voice_stop_requested = False
         self._voice_controller: VoiceController | None = None
         self._voice_task: asyncio.Task[None] | None = None
-        # Dikte (ADR 0057) ilk kısayol basışında işçi döngüsünde kurulur.
+        # Dikte (ADR 0057) ilk kısayol basışında kurulur; ayar imzası değişince yenilenir.
         self._dictation: Dictation | None = None
+        self._dictation_override: DictationConfig | None = None
+        self._dictation_signature: tuple[float, int | str | None, str] | None = None
         # Seçili metin eylemleri (ADR 0062) de ilk kısayol basışında işçi döngüsünde kurulur.
         self._selection: SelectionActions | None = None
         # Proaktif zamanlayıcı (ADR 0027) yalnız işçi döngüsünde yaşar.
@@ -444,14 +447,54 @@ class DesktopBridge:
             return False
         return True
 
+    def reload_dictation_settings(self, dictation: DictationConfig) -> bool:
+        """Ayarlar kaydedilince dikte ayarlarını sekme açıkken de canlıya alır."""
+        loop = self._loop
+        if loop is None or not self._ready.is_set() or self._shutdown:
+            return False
+        try:
+            loop.call_soon_threadsafe(self._reload_dictation_settings_on_worker, dictation)
+        except RuntimeError:
+            return False
+        return True
+
+    def _reload_dictation_settings_on_worker(self, dictation: DictationConfig) -> None:
+        runtime = self._runtime
+        if runtime is None or self._shutdown:
+            return
+        self._dictation_override = dictation
+        runtime.context.settings = runtime.context.settings.model_copy(
+            update={"dictation": dictation}
+        )
+        if self._dictation is not None and not self._dictation.busy:
+            self._dictation.shutdown()
+            self._dictation = None
+            self._dictation_signature = None
+
     def _toggle_dictation_on_worker(self) -> None:
         runtime = self._runtime
-        if runtime is None or self._shutdown or not runtime.settings.dictation.enabled:
+        if runtime is None or self._shutdown:
             return
+        settings = runtime.settings
+        dictation_cfg = self._dictation_override or settings.dictation
+        if not dictation_cfg.enabled:
+            return
+        signature = (
+            dictation_cfg.max_seconds,
+            settings.voice.input_device,
+            settings.voice.stt_mode,
+        )
+        if (
+            self._dictation is not None
+            and not self._dictation.busy
+            and signature != self._dictation_signature
+        ):
+            self._dictation.shutdown()
+            self._dictation = None
         if self._dictation is None:
-            settings = runtime.settings
+            self._dictation_signature = signature
             self._dictation = Dictation(
-                max_seconds=settings.dictation.max_seconds,
+                max_seconds=dictation_cfg.max_seconds,
                 audit=runtime.audit,
                 open_microphone=lambda: SoundDeviceMicrophone(
                     settings.voice, device=settings.voice.input_device
@@ -587,6 +630,7 @@ class DesktopBridge:
                 delivered = True
                 return
             result = await runtime.runner.dispatch_tool(name, arguments)
+            self._enqueue_activity(request_id, "turn_end", {"stop_reason": "completed"})
             self._events.put(ToolFinished(request_id, name, result))
             delivered = True
         except (OSError, ValueError, RuntimeError, TypeError) as error:
@@ -663,6 +707,30 @@ class DesktopBridge:
                 break
         return result
 
+    def _enqueue_activity(
+        self,
+        request_id: str | None,
+        event_name: str,
+        fields: dict[str, Any],
+        turn_id: str | None = None,
+    ) -> None:
+        with self._audit_lock:
+            self._audit_seq += 1
+            event = Activity(
+                request_id=request_id,
+                turn_id=turn_id,
+                seq=self._audit_seq,
+                event=event_name,
+                fields=fields,
+            )
+            try:
+                self._audit_queue.put_nowait(event)
+            except queue.Full:
+                with suppress(queue.Empty):
+                    self._audit_queue.get_nowait()
+                self._audit_queue.put_nowait(event)
+                self._audit_dropped += 1
+
     def _on_record(self, record: dict[str, Any]) -> None:
         event_name = str(record.get("event", "unknown"))
         fields = {key: value for key, value in record.items() if key not in {"event", "timestamp"}}
@@ -682,8 +750,6 @@ class DesktopBridge:
                 }
             fields = summary
         with self._audit_lock:
-            self._audit_seq += 1
-            seq = self._audit_seq
             turn = record.get("turn_id")
             if record.get("event") == "turn_start" and turn is not None:
                 # Gözetimsiz brifing turu, o sırada yürüyen kullanıcı isteğine yazılmaz.
@@ -691,21 +757,13 @@ class DesktopBridge:
                 self._turn_requests[str(turn)] = owner
                 if len(self._turn_requests) > 64:
                     self._turn_requests.pop(next(iter(self._turn_requests)))
-        event = Activity(
-            request_id=self._request_for_turn(record.get("turn_id")),
-            turn_id=str(record["turn_id"]) if record.get("turn_id") is not None else None,
-            seq=seq,
-            event=event_name,
-            fields=fields,
+        turn_id = str(record["turn_id"]) if record.get("turn_id") is not None else None
+        self._enqueue_activity(
+            self._request_for_turn(record.get("turn_id")),
+            event_name,
+            fields,
+            turn_id=turn_id,
         )
-        with self._audit_lock:
-            try:
-                self._audit_queue.put_nowait(event)
-            except queue.Full:
-                with suppress(queue.Empty):
-                    self._audit_queue.get_nowait()
-                self._audit_queue.put_nowait(event)
-                self._audit_dropped += 1
 
     def _request_for_turn(self, turn_id: object) -> str | None:
         with self._audit_lock:
@@ -836,6 +894,7 @@ class DesktopBridge:
 
     async def _execute_request(
         self, request_id: str, text: str, stream: ResponseStream | None = None,
+        audio_wav: bytes | None = None,
     ) -> RunResult | None:
         """Yazılı ve sesli isteğin ortak turu: aynı olaylar, aynı temizlik, aynı bitiş."""
         runtime = self._runtime
@@ -847,10 +906,12 @@ class DesktopBridge:
             return None
         result: RunResult | None = None
         try:
-            if stream is None:
-                result = await runtime.runner.run(text)
-            else:
-                result = await runtime.runner.run(text, stream=stream)
+            kwargs: dict[str, Any] = {}
+            if stream is not None:
+                kwargs["stream"] = stream
+            if audio_wav is not None:
+                kwargs["audio_wav"] = audio_wav
+            result = await runtime.runner.run(text, **kwargs)
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id
             self._events.put(Finished(request_id, result))
@@ -873,6 +934,7 @@ class DesktopBridge:
 
     async def _run_voice_command(
         self, text: str, *, stream: ResponseStream | None = None,
+        audio_wav: bytes | None = None,
     ) -> RunResult:
         """Sesli komut, yazılı istekle aynı anda yürümez; meşgulse runner'a hiç gitmez."""
         with self._lock:
@@ -884,7 +946,7 @@ class DesktopBridge:
         self._events.put(VoiceCommand(request_id, text))
         self._events.put(State("running", t("Sesli istek çalışıyor."), request_id))
         # Söz kesme bu görevi iptal eder; CancelledError temizlikten sonra yukarı çıkar.
-        result = await self._execute_request(request_id, text, stream)
+        result = await self._execute_request(request_id, text, stream, audio_wav=audio_wav)
         if result is not None:
             return result
         if self._broker.is_cancelled():

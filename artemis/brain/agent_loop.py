@@ -43,7 +43,10 @@ Kullanıcı ajan ("codex ile yap") veya başlangıç klasörü ("ikinci beyinde 
 code_agent_prepare'a yalnız yapılandırılmış takma adı ver (agent, workdir); ad bilinmiyorsa
 bunu söyle, asla yol veya ad uydurma. Belirtmezse alanları boş bırak.
 Başlatma/cevap onayı yalnız SafetyGate üzerinden kullanıcıdan gelir. waiting durumunda
-soruyu kullanıcıya göster; kendi kendine cevap verme. CLI model profili config
+soruyu kullanıcıya göster; kendi kendine cevap verme. Kullanıcı açıkça bir işlem
+istediğinde (bilgisayarı kapatma/yeniden başlatma, uygulama kapatma, rutin kaydetme,
+açık bir pencerede istenen tuşa basma vb.) metinle ek onay sorma; aracı doğrudan çağır,
+gerekiyorsa onay penceresini sistem kendisi açar. CLI model profili config
 ayarına bağlıdır; abonelik, harcama veya gerçek model seçimi garantisi verme.
 İşi gerçek araçlarla yap; araç sonucu doğrulamadan yaptım deme. Önceki bir işin yapılıp
 yapılmadığı sorgulanırsa önce araçla bak (ör. reminder_list); bakmadan ne yaptım ne
@@ -509,6 +512,7 @@ class AgentLoop:
         isolated: bool,
         past: list[Message],
         private_seen: bool,
+        audio_wav: bytes | None = None,
     ) -> tuple[list[Message], bool, str]:
         """Turun açılış mesajları, gizli geçmiş bayrağı ve başlangıç zamanı."""
         settings = self.context.settings
@@ -539,6 +543,13 @@ class AgentLoop:
             "\n\nArayüz dili İngilizce: kullanıcıya İngilizce yanıt ver "
             "(kullanıcı başka dilde yazarsa onun dilini kullan)."
             if settings.language == "en"
+            else ""
+        )
+        audio_note = (
+            "\n[Doğrudan ses kaydı eklendi: yerel transkriptte özellikle yabancı uygulama/oyun "
+            "adlarında yazım hatası olabilir; komutu ekteki ses kaydından anla ve uyandırma "
+            "sözcüğünü yoksay.]"
+            if audio_wav is not None
             else ""
         )
         messages = [
@@ -596,7 +607,9 @@ class AgentLoop:
             Message(
                 role="user",
                 content=f"[{local_stamp(started_at)}] {text}"
-                + ("" if isolated else memory_hint(text) + explicit_hint(skills, text)),
+                + ("" if isolated else memory_hint(text) + explicit_hint(skills, text))
+                + audio_note,
+                audio_wav=audio_wav,
             ),
         ]
         return messages, history_private, started_at
@@ -645,6 +658,7 @@ class AgentLoop:
     async def run(
         self, text: str, history: ContextWindow | None = None, *, unattended: bool = False,
         stream: ResponseStream | None = None, attachment: ToolResult | None = None,
+        audio_wav: bytes | None = None,
     ) -> RunResult:
         # Gözetimsiz tur (ADR 0027): yan etki kararı kapıdadır, döngü yalnız bayrağı taşır.
         state = TurnState(unattended=unattended)
@@ -671,7 +685,7 @@ class AgentLoop:
             private_seen = self._result_private(attachment)
         past = history.messages if history is not None else []
         messages, history_private, started_at = self._opening_messages(
-            text, attachment, isolated, past, private_seen
+            text, attachment, isolated, past, private_seen, audio_wav=audio_wav
         )
         audit = self.context.audit
         route = self._emit_turn_start(

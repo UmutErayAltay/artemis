@@ -111,17 +111,17 @@ async def test_auto_mode_skips_the_start_and_its_taint(tmp_path: Path) -> None:
 
 
 async def test_auto_mode_does_not_relax_other_tools(tmp_path: Path) -> None:
-    # Aynı kipte başka bir yan etkili araç dış içerikten sonra yine sorulur.
-    gate, context, *_ = env(tmp_path, mode="auto")
+    # Aynı kipte kapsam dışı araçlar (kapatma, dosya/rutin silme) yine onay sorar;
+    # ses, uygulama kapatma (VS Code) ve temiz rutin kaydı oto onayda sorulmaz.
     asked: list[str] = []
 
     def refuse(name: str, arguments: dict[str, Any]) -> bool:
         asked.append(name)
         return False
 
-    # Otomatik kipin kapsamı bilgisayarını kontrol eden iki araçtır; diğerleri kural 4'te.
     for name, arguments in (
-        ("volume_set", {"level": 10}),
+        ("power", {"action": "shutdown"}),
+        ("delete_file", {"path": "x.txt"}),
         ("window_list", {}),
     ):
         gate, context, *_ = env(tmp_path, mode="auto")
@@ -132,8 +132,47 @@ async def test_auto_mode_does_not_relax_other_tools(tmp_path: Path) -> None:
             TurnState(tainted=True),
             refuse,
         )
-        if arguments:  # window_list READ_ONLY: onay sorulmaz, yalnız yan etkililer sorar
+        if arguments:  # window_list READ_ONLY: onay sorulmaz, kapsam dışı yan etkililer sorar
             assert asked == [name]
+
+
+async def test_auto_mode_skips_volume_close_app_and_clean_routine_save(tmp_path: Path) -> None:
+    import types
+
+    from artemis.tools.system_control import SystemOutcome
+
+    settings = Settings(
+        workspace=tmp_path,
+        applications={"Visual Studio Code": "code.exe"},
+        computer_use=ComputerUseConfig(mode="auto"),
+        routines={"enabled": True},  # type: ignore[arg-type]
+        persist_memory=False,
+    )
+    context = ToolContext(tmp_path, settings, AuditLog(tmp_path / "audit.jsonl"), turn_id="t1")
+    context.services["desktop"] = types.SimpleNamespace(close_application=lambda _exe: True)
+    context.services["system_control"] = types.SimpleNamespace(
+        set_volume=lambda level, muted: SystemOutcome(
+            "ok", "Ses ayarlandı.", level=level or 35, muted=bool(muted)
+        )
+    )
+    gate = SafetyGate(discover_tools())
+
+    vol_step = [{"tool": "volume_set", "arguments": {"level": 30}}]
+    for name, arguments, state in (
+        ("volume_set", {"level": 35}, TurnState(tainted=True)),
+        ("close_application", {"name": "Visual Studio Code"}, TurnState(tainted=True)),
+        ("routine_save", {"name": "sabah", "steps": vol_step}, TurnState()),
+        ("routine_save", {"name": "aksam", "steps": vol_step}, TurnState(tainted=True)),
+        ("routine_save", {"name": "gece", "steps": vol_step}, TurnState(history_external=True)),
+    ):
+        call_item = ToolCall(id="x", name=name, arguments=arguments)
+        res = await gate.dispatch(call_item, context, state, never)
+        assert res.success, (name, res.message)
+
+    events = [
+        line for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+    assert sum('"event": "approval_skipped"' in line for line in events) == 5
 
 
 @pytest.mark.parametrize("goal", ["", "x" * 501])
@@ -617,7 +656,7 @@ async def test_context_user_text_reaches_the_session(
 
 
 def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
-    """ADR 0039 + 0077: onay atlaması yalnız bu araçlarda; yenisi ADR'siz eklenirse kırılır."""
+    """ADR 0039/0077 + 2026-11-20 kararı: oto onay yalnız bu araçlarda; yenisi izinsiz eklenmez."""
     from artemis.tools.registry import discover_tools
 
     registry = discover_tools()
@@ -627,5 +666,13 @@ def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
         if getattr(registry.get(definition.name), "auto_mode_ok", False)
     }
     assert skipping == {
-        "computer_use", "window_control", "screen_read", "open_url", "app_alias_remember"
+        "computer_use",
+        "window_control",
+        "screen_read",
+        "open_url",
+        "app_alias_remember",
+        "volume_set",
+        "brightness_set",
+        "close_application",
+        "routine_save",
     }

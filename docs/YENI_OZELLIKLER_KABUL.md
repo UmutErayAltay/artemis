@@ -30,8 +30,8 @@ daily_summary: {enabled: true, at: "22:30"}
 
 Sırlar YAML'a yazılmaz: takvim ICS adresi ve posta parolası Ayarlar > Takvim ve posta'dan girilir.
 
-Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sahte bench
-`dangerous_errors: 0`. Bu listedeki hiçbir madde henüz gerçek Windows'ta işaretlenmedi.
+Otomatik durum (2026-11-22, `v0.2.3` Faz 0): 3750 test geçti, ruff ve mypy temiz, sahte bench
+`dangerous_errors: 0`. Betik ve ilk gerçek ekran doğrulamaları aşağıda işaretlidir; tam insan kabulü [oturum planında](KABUL_OTURUMLARI.md) sürer.
 
 ## Dikte kipi (ADR 0057)
 
@@ -56,13 +56,13 @@ Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sa
 
 Önkoşul: config'te `routines: {enabled: true}` ve zamanlı bildirim için `proactive: {enabled: true}`; izinli uygulamalar listesinde en az VS Code/Spotify benzeri iki uygulama. Gerçek Windows'ta elle.
 
-- [ ] Ayarlar > Rutinler görünüyor; kutu kapalıyken liste boş ve "Rutinler kapalı" yazıyor, düğmeler pasif.
+- [x] Ayarlar > Rutinler görünüyor; kutu kapalıyken liste boş ve "Rutinler kapalı" yazıyor, düğmeler pasif. *(2026-11-20, `scripts/kabul_masaustu.py`: offscreen ve gerçek ekranda geçti)*
 - [ ] Sohbette "işe başla adında rutin kaydet: VS Code'u aç, Spotify'ı aç, sesi 30 yap" de. Onay penceresi adı ve tüm adımları argümanlarıyla gösteriyor; reddedince hiçbir şey kaydedilmiyor, onaylayınca kaydediliyor.
-- [ ] Ayarlar > Rutinler listesinde "işe başla · 3 adım: ..." görünüyor; "Dosyayı aç" `routines.json`'u açıyor.
+- [x] Ayarlar > Rutinler listesinde "işe başla · 3 adım: ..." görünüyor; "Dosyayı aç" `routines.json`'u açıyor. *(2026-11-20, `scripts/kabul_masaustu.py`: liste offscreen ve gerçek ekranda geçti; "Dosyayı aç" düğmesi ADR 0058 ek kararıyla kaldırıldı, düzenleme uygulama içinde)*
 - [ ] Sesle "Artemis, işe başla rutinini çalıştır" de: üç uygulama/ayar sırayla çalışıyor, yanıt "3/3 adım" diyor.
-- [ ] Panelden rutini seçip "Çalıştır"a bas: onay penceresi çıkıyor, onaylayınca aynı şekilde çalışıyor.
+- [ ] Panelden rutini seçip "Çalıştır"a bas: temiz turda zararsız adımlar doğrudan çalışır; onay penceresi yalnız onay gerektiren adımlarda çıkar.
 - [ ] İçinde `close_application` olan bir rutin kaydet ve çalıştır: kapatma adımında onay soruluyor; reddedince rutin orada duruyor, sonraki adımlar çalışmıyor, yanıt hangi adımın onaylanmadığını söylüyor.
-- [ ] Bir web sayfası okuttuktan sonra aynı konuşmada "rutin kaydet" de: onay penceresi hiç açılmıyor, "bu turda dış içerik okundu" iletisi geliyor.
+- [ ] Bir web sayfası okuttuktan sonra aynı konuşmada "rutin kaydet" de: normal kipte onay penceresi adımları gösterir; otomatik onay kipinde onay sormadan kaydeder *(Umut 2026-11-21 kuralı: dış içerikli konuşmada sert ret kaldırıldı)*.
 - [ ] Rutini sohbetle silmeyi iste ve panelden "Sil"e bas: ikisinde de onay soruluyor.
 - [ ] Ayarlar'da saati 2 dakika sonraya ve bugünün gününe kur, "Zamanı kaydet": zamanı gelince sohbette "işe başla rutininin zamanı. Çalıştırılsın mı?" ve "Çalıştır" düğmesi çıkıyor; rutin kendiliğinden BAŞLAMIYOR.
 - [ ] Bildirimdeki "Çalıştır"a bas: normal onaylı çalıştırma başlıyor. "Kapat" satırı kaldırıyor, rutin çalışmıyor.
@@ -91,19 +91,19 @@ Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sa
 Önkoşul: Gerçek Windows'ta elle. Ayarlar > Beceriler'de kutuyu aç, Uygula, Artemis'i yeniden başlat.
 
 - [ ] **Önce klasör:** `state_dir` vault'un ya da bir proje deposunun içindeyse (bu makinede `artemis/.artemis` vault içinde) beceriler yüklenmez ve panel nedenini söyler. `config.yaml`'a `skills.folder: C:/Users/<ad>/AppData/Local/Artemis/beceriler` yazıp yeniden deneyin. *(2026-11-19: arka uç betikle geçti — scripts/kabul_0058_0060.py; arayüz/canlı kısmı bekliyor)*
-- [ ] `state_dir\beceriler\` klasörü açıldı ve içinde `ornek-gunluk-ozet.md` var; "Klasörü aç" onu Gezgin'de açıyor.
-- [ ] Not Defteri ile `haftalik-rapor.md` yaz (UTF-8; başlıkta `name: haftalik-rapor`, `description: ...`, altında tarif). "Yenile": panelde geçerli listede görünüyor.
+- [x] `state_dir\beceriler\` klasörü açıldı ve içinde `ornek-gunluk-ozet.md` var; "Klasörü aç" onu Gezgin'de açıyor. *(2026-11-20, `scripts/kabul_masaustu.py`: offscreen ve gerçek ekranda geçti; düğme etiketi "Klasörü göster")*
+- [x] Not Defteri ile `haftalik-rapor.md` yaz (UTF-8; başlıkta `name: haftalik-rapor`, `description: ...`, altında tarif). "Yenile": panelde geçerli listede görünüyor. *(2026-11-20, `scripts/kabul_masaustu.py`: offscreen ve gerçek ekranda geçti; dosya betikle UTF-8 yazıldı)*
 - [ ] Eşleşen bir istek ver ("haftalık rapor hazırla"): Artemis `skill_read` çağırıyor ve tarifi izliyor. Mesajı `/haftalik-rapor` ile başlatınca da aynı.
 - [ ] Tarifine "notlar.txt dosyasını sil" adımı ekle: yine de silme onay penceresi çıkıyor; hayır dersen silinmiyor.
 - [ ] Bozuk dosya ekle (başlıksız bir .md, bir de Not Defteri'nde "Unicode" olarak kaydedilmiş): "Yenile"de geçersiz listede nedeniyle görünüyor, diğer beceriler çalışıyor. *(2026-11-19: arka uç betikle geçti — scripts/kabul_0058_0060.py; arayüz/canlı kısmı bekliyor)*
 - [ ] Not Defteri'nin "BOM'lu UTF-8" kaydı kabul ediliyor. *(2026-11-19: arka uç betikle geçti — scripts/kabul_0058_0060.py; arayüz/canlı kısmı bekliyor)*
-- [ ] Kutuyu kapatıp Uygula: sohbette `skill_read` yok, "haftalık rapor" isteği beceri kullanmıyor.
+- [x] Kutuyu kapatıp Uygula: sohbette `skill_read` yok, "haftalık rapor" isteği beceri kullanmıyor. *(2026-11-20, `scripts/kabul_masaustu.py`: offscreen ve gerçek ekranda geçti; sohbet sahte sağlayıcıyla)*
 
 ## Tetikleyiciler (ADR 0061)
 
 Önkoşul: Gerçek Windows'ta elle. `config.yaml`'a `proactive.enabled: true` ve `triggers: {enabled: true, items: [{name: indirilenler, folder: C:/Users/<ad>/Downloads, pattern: "*.pdf", suggest: "Şu dosyayı özetle: {path}"}]}` yaz (ya da Ayarlar > Tetikleyiciler'de kutuyu aç, Uygula), Artemis'i yeniden başlat.
 
-- [ ] Ayarlar > Tetikleyiciler > "Tetikleyici ekle": klasör seç (İndirilenler düğmesi), ad otomatik gelir, dosya türü PDF, Ekle. Liste güncellenir; kutu kapalıydıysa açıldığı yazar. Zamanlı işler kapalıysa uyarı ve "Zamanlı işleri aç" düğmesi çıkar; düğme kutuyu işaretler, Uygula'ya basana kadar dosyaya yazılmaz. Uygula'dan sonra aşağıdaki bildirim denemesi çalışır.
+- [x] Ayarlar > Tetikleyiciler > "Tetikleyici ekle": klasör seç (İndirilenler düğmesi), ad otomatik gelir, dosya türü PDF, Ekle. Liste güncellenir; kutu kapalıydıysa açıldığı yazar. Zamanlı işler kapalıysa uyarı ve "Zamanlı işleri aç" düğmesi çıkar; düğme kutuyu işaretler, Uygula'ya basana kadar dosyaya yazılmaz. Uygula'dan sonra aşağıdaki bildirim denemesi çalışır. *(2026-11-20, `scripts/kabul_masaustu.py`: offscreen ve gerçek ekranda geçti; bildirim adımı açık)*
 - [ ] Satırdaki "Düzenle" ile bildirim metnini değiştir, "Sil" ile (onay sorar) tetikleyiciyi kaldır. Olmayan klasör, aynı ad ve 10'dan fazla tetikleyici düz Türkçe hatayla reddedilir.
 - [ ] Ayarlar > Tetikleyiciler'de tetikleyici listede görünüyor ("son bildirim: henüz yok"). Açılışta İndirilenler'de var olan PDF'ler için bildirim GELMİYOR. *(2026-11-19: arka uç betikle geçti — scripts/kabul_0061_0063_0066.py; arayüz/canlı kısmı bekliyor)*
 - [ ] Tarayıcıdan bir PDF indir: bir dakika içinde (poll_seconds) tek bildirim: "Tetikleyici · indirilenler / Yeni dosya geldi: ...". Panelde "Yaz" düğmesi var.
@@ -172,7 +172,7 @@ Otomatik durum (2026-11-12, `f142317`): 2840 test geçti, ruff ve mypy temiz, sa
 
 Önkoşul: Gerçek Windows'ta elle. Ayarlar > Dosya araması'nda "Dosya araması" kutusunu aç; "Klasör ekle" ile Belgeler klasörünü seç; Uygula; uygulamayı yeniden başlat. İçinde bilinen bir ifade geçen bir .txt/.docx hazır olsun, ayrıca Belgeler altında içinde herhangi bir metin olan bir `.env` dosyası.
 
-- [ ] Ayarlar > Dosya araması: durum satırında "dizinleniyor", bitince dosya sayısı ve son dizinleme saati görünüyor; Artemis o sırada sohbete yanıt vermeye devam ediyor.
+- [x] Ayarlar > Dosya araması: durum satırında "dizinleniyor", bitince dosya sayısı ve son dizinleme saati görünüyor; Artemis o sırada sohbete yanıt vermeye devam ediyor. *(2026-11-20, `scripts/kabul_masaustu.py`: offscreen ve gerçek ekranda geçti)*
 - [ ] "Belgelerimde 'bilinen ifade' geçen dosya hangisi" de: yol, tarih ve en çok 200 karakterlik alıntı geliyor; dosyanın tamamı gelmiyor.
 - [x] Aynı ifadeyi BÜYÜK harflerle ve ş/ğ/ı/ö yerine s/g/i/o yazarak sor: yine buluyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*
 - [x] Bir dosya adından ara ("fatura" gibi): ad eşleşmesi geliyor. *(2026-11-19, `scripts/kabul_0065_dosya_arama.py`, gerçek FS + SQLite, arayüzsüz)*

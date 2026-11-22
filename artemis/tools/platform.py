@@ -10,6 +10,21 @@ import time
 from typing import Any, Protocol, cast
 from urllib.parse import urlsplit
 
+_PROTECTED_CLOSE_PROCESSES = frozenset({
+    "notepad.exe",
+    "notepad++.exe",
+    "winword.exe",
+    "excel.exe",
+    "powerpnt.exe",
+    "code.exe",
+    "devenv.exe",
+    "regedit.exe",
+    "cmd.exe",
+    "powershell.exe",
+    "pwsh.exe",
+    "windowsterminal.exe",
+})
+
 
 class UnsupportedPlatformError(RuntimeError):
     """Desteklenmeyen sistemde başarı iddiası yerine açık sonuç üretir."""
@@ -197,6 +212,30 @@ class WindowsDesktop:
                 return True
             if attempt < 5:
                 time.sleep(0.2)
+        if name.casefold() in _PROTECTED_CLOSE_PROCESSES:
+            return False
+        # Pencereler kapanıp yalnız tepsi/yardımcı arka plan süreci (ör. Spotify) kaldıysa
+        # korumalı editör/terminal dışındaki süreç ağacı güvenli biçimde sonlandırılır.
+        try:
+            windows_open = self.application_windows_open(executable)
+        except OSError:
+            windows_open = True
+        if windows_open:
+            return False
+        subprocess.run(
+            [taskkill, "/F", "/T", "/IM", name],
+            shell=False,
+            check=False,
+            capture_output=True,
+            env=child_environment(),
+            timeout=10,
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        for attempt in range(5):
+            if not self._application_pids(name):
+                return True
+            if attempt < 4:
+                time.sleep(0.2)
         return False
 
     def _application_pids(self, name: str) -> set[int]:
@@ -284,12 +323,15 @@ class WindowsDesktop:
             _app_id, separator, process = executable.partition("|")
             if not separator or not process.casefold().endswith(".exe"):
                 raise ValueError("Kurulu uygulamanın süreç kimliği bilinmiyor")
-            return process
-        name = ntpath.basename(executable)
-        # Windows Hesap Makinesi başlatıcısı ayrı paket sürecini açar.
-        if name.casefold() == "calc.exe":
-            return "CalculatorApp.exe"
-        return name
+            name = process
+        else:
+            name = ntpath.basename(executable)
+        # Manifest/başlatıcı süreç adı yerine asıl pencere/süreç adı hedeflenir.
+        aliases = {
+            "calc.exe": "CalculatorApp.exe",
+            "spotifymigrator.exe": "Spotify.exe",
+        }
+        return aliases.get(name.casefold(), name)
 
     def wait_for_application_window(self, executable: str) -> bool:
         """Başlatma isteğinden sonra pencereyi sınırlı süre gerçek OS ile doğrular."""

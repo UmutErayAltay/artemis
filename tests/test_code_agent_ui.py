@@ -923,3 +923,15 @@ def test_projects_panel_has_no_lambda_reference_cycle(app: QApplication) -> None
     finally:
         if was_enabled:
             gc.enable()
+
+
+def test_projects_panel_has_no_horizontal_overflow_at_1280_window(app: QApplication) -> None:
+    panel = ProjectsPanel()
+    panel.setStyleSheet(themes.stylesheet(themes.DEFAULT_THEME))
+    panel.resize(1040, 760)
+    panel.show()
+    app.processEvents()
+    scroll = panel.findChild(QScrollArea)
+    assert scroll is not None
+    assert scroll.horizontalScrollBar().maximum() == 0
+    panel.close()

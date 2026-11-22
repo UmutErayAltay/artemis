@@ -176,6 +176,18 @@ class OperationLog:
         card.failed = True
         return card
 
+    def finish_tool(self, request_id: str, *, cancelled: bool = False) -> Card | None:
+        """Doğrudan panel/düğme aracı bitince (`ToolFinished`) açık kartı kapatır."""
+        card = self.cards.get(request_id)
+        if card is None:
+            return None
+        card.ended = True
+        card.stop_reason = "cancelled" if cancelled else "completed"
+        for op in card.ops:
+            if op.state == "running":
+                op.state, op.state_text = "interrupted", t("sonucu doğrulanamadı")
+        return card
+
     def clear(self) -> None:
         """Yeni sohbet: kartlar sıfırlanır. Denetim günlüğü başka yerde durur, buna dokunulmaz."""
         self.cards.clear()

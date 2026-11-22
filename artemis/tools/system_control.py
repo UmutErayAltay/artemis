@@ -451,15 +451,81 @@ LOCK_SCRIPT = "\n".join(
 )
 
 # Neden: SetSuspendState uyanana dek döner; doğrudan çağırsak araç bloke olur ve zaman aşımına
-# düşerdi. Bu yüzden ayrı, gizli bir süreç 2 sn sonra uykuya alır ve bu betik hemen çıkar.
+# düşerdi. Ayrıca Modern Standby (S0 / AoAc) sistemlerde klasik S1-S3 uyku yoktur ve
+# SetSuspendState uyutmaz; bu yüzden ayrılan çocuk süreç önce S1-S3 varsa SetSuspendState,
+# yoksa WM_SYSCOMMAND/SC_MONITORPOWER(2) ile Modern Standby S0 uykusunu tetikler.
+_SLEEP_CHILD_SCRIPT = "\n".join(
+    [
+        "Start-Sleep -Seconds 2",
+        "Add-Type -TypeDefinition @'",
+        "using System;",
+        "using System.Runtime.InteropServices;",
+        "public static class ArtemisSleep {",
+        "  [StructLayout(LayoutKind.Sequential)]",
+        "  public struct SYSTEM_POWER_CAPABILITIES {",
+        "    [MarshalAs(UnmanagedType.I1)] public bool PowerButtonPresent;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool SleepButtonPresent;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool LidPresent;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool SystemS1;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool SystemS2;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool SystemS3;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool SystemS4;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool SystemS5;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool HiberFilePresent;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool FullWake;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool VideoDimPresent;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool ApmPresent;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool UpsPresent;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool ThermalControl;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool ProcessorThrottle;",
+        "    public byte ProcessorMinThrottle;",
+        "    public byte ProcessorMaxThrottle;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool FastSystemS4;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool Hiberboot;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool WakeAlarmPresent;",
+        "    [MarshalAs(UnmanagedType.I1)] public bool AoAc;",
+        "    [MarshalAs(UnmanagedType.ByValArray, SizeConst=64)] public byte[] Rest;",
+        "  }",
+        '  [DllImport("powrprof.dll", SetLastError=true)]',
+        "  [return: MarshalAs(UnmanagedType.U1)]",
+        "  public static extern bool GetPwrCapabilities(out SYSTEM_POWER_CAPABILITIES caps);",
+        '  [DllImport("powrprof.dll", SetLastError=true)]',
+        "  [return: MarshalAs(UnmanagedType.U1)]",
+        "  public static extern bool SetSuspendState(",
+        "    [MarshalAs(UnmanagedType.U1)] bool hibernate,",
+        "    [MarshalAs(UnmanagedType.U1)] bool forceCritical,",
+        "    [MarshalAs(UnmanagedType.U1)] bool disableWakeEvent);",
+        '  [DllImport("user32.dll", SetLastError=true, CharSet=CharSet.Auto)]',
+        "  public static extern IntPtr SendMessageTimeout(",
+        "    IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam,",
+        "    uint flags, uint timeout, out UIntPtr result);",
+        "  public static void Suspend() {",
+        "    SYSTEM_POWER_CAPABILITIES caps = new SYSTEM_POWER_CAPABILITIES();",
+        "    bool legacy = GetPwrCapabilities(out caps) &&",
+        "      (caps.SystemS1 || caps.SystemS2 || caps.SystemS3);",
+        "    if (legacy && SetSuspendState(false, false, false)) {",
+        "      return;",
+        "    }",
+        "    UIntPtr res;",
+        "    SendMessageTimeout(",
+        "      (IntPtr)0xFFFF, 0x0112, (IntPtr)0xF170, (IntPtr)2, 0x0002, 2000, out res);",
+        "  }",
+        "}",
+        "'@",
+        "[ArtemisSleep]::Suspend()",
+        "",
+    ]
+)
+
+_SLEEP_CHILD_ENCODED = base64.b64encode(_SLEEP_CHILD_SCRIPT.encode("utf-16-le")).decode("ascii")
+
 SLEEP_SCRIPT = "\n".join(
     [
         "$ErrorActionPreference = 'Stop'",
         "try {",
-        "  $inner = 'Start-Sleep -Seconds 2; Add-Type -AssemblyName System.Windows.Forms; "
-        "[System.Windows.Forms.Application]::SetSuspendState(''Suspend'', $false, $false)'",
-        "  Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList "
-        "@('-NoProfile', '-NonInteractive', '-Command', $inner)",
+        "  $childArgs = @('-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', "
+        f"'-EncodedCommand', '{_SLEEP_CHILD_ENCODED}')",
+        "  Start-Process -FilePath 'powershell.exe' -WindowStyle Hidden -ArgumentList $childArgs",
         "} catch { exit 4 }",
         "exit 0",
         "",

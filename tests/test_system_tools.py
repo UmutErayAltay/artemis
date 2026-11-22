@@ -97,6 +97,7 @@ async def test_window_titles_stay_private_unless_cloud_screen_allowed(tmp_path: 
         ("volume_set", {"muted": True}, ("volume", None, True)),
         ("brightness_set", {"level": 70}, ("brightness", 70)),
         ("power", {"action": "lock"}, ("power", "lock", 60)),
+        ("power", {"action": "sleep"}, ("power", "sleep", 60)),
         ("power", {"action": "cancel_shutdown"}, ("power", "cancel_shutdown", 60)),
     ],
 )
@@ -109,7 +110,7 @@ async def test_reversible_actions_run_without_confirmation_in_clean_turn(
     assert service.calls == [expected]
 
 
-@pytest.mark.parametrize("action", ["sleep", "shutdown", "restart"])
+@pytest.mark.parametrize("action", ["shutdown", "restart"])
 async def test_disruptive_power_actions_always_ask_and_denial_runs_nothing(
     tmp_path: Path, action: str
 ) -> None:
@@ -237,3 +238,36 @@ async def test_power_actions_are_audited(tmp_path: Path) -> None:
     await gate.dispatch(call("power", action="lock"), context, TurnState(), never)
     text = (tmp_path / "audit.jsonl").read_text(encoding="utf-8")
     assert '"event": "power"' in text and '"action": "lock"' in text
+
+
+async def test_auto_mode_skips_sleep_lock_volume_but_keeps_shutdown_restart(
+    tmp_path: Path,
+) -> None:
+    from artemis.config.settings import ComputerUseConfig
+
+    service = FakeService(SystemOutcome("sent", "Gönderildi."))
+    gate, context = env(tmp_path, service, computer_use=ComputerUseConfig(mode="auto"))
+    for name, arguments in (
+        ("power", {"action": "sleep"}),
+        ("power", {"action": "lock"}),
+        ("volume_set", {"level": 30}),
+    ):
+        await gate.dispatch(call(name, **arguments), context, TurnState(tainted=True), never)
+
+    asked: list[str] = []
+
+    def deny(name: str, arguments: dict[str, Any]) -> bool:
+        asked.append(str(arguments.get("action")))
+        return False
+
+    for action in ("shutdown", "restart"):
+        result = await gate.dispatch(call("power", action=action), context, TurnState(), deny)
+        assert result.status == "denied"
+    assert asked == ["shutdown", "restart"]
+
+
+def test_power_description_forbids_double_confirmation_in_text() -> None:
+    tool = discover_tools().get("power")
+    assert tool is not None
+    assert "metinle tekrar onay sorma" in tool.description
+    assert "aracı doğrudan çağır" in tool.description

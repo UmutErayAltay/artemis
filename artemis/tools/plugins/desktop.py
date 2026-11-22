@@ -148,6 +148,9 @@ class OpenApplication(BaseTool):
             return Risk.CONFIRM_REQUIRED
         return self.risk
 
+    def auto_mode_allowed(self, arguments: BaseModel, context: ToolContext) -> bool:
+        return self.risk_for(arguments, context) is not Risk.CONFIRM_REQUIRED
+
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(OpenApplicationArguments, arguments)
         match = application_match(context, args.name, fuzzy=True)
@@ -228,6 +231,7 @@ class CloseApplication(BaseTool):
     )
     args_model = ApplicationArguments
     risk = Risk.CONFIRM_REQUIRED
+    auto_mode_ok = True
 
     def risk_for(self, arguments: BaseModel, context: ToolContext) -> Risk:
         args = cast(ApplicationArguments, arguments)

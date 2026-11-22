@@ -546,3 +546,11 @@ async def test_session_gate_allows_enter_on_uia_list_without_focus() -> None:
     assert backend.calls == [("keys", ("enter",))]
     assert audit.named("computer_destructive_blocked") == []
     assert audit.named("computer_blocked") == []
+
+
+def test_strict_chat_rules_direct_explicit_requests_to_tool_call() -> None:
+    from artemis.brain.strict_rules import STRICT_CHAT_RULES
+
+    normalized = " ".join(STRICT_CHAT_RULES.split())
+    assert "metinle ek onay sorma" in normalized
+    assert "aracı doğrudan çağır" in normalized

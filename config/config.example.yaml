@@ -120,6 +120,9 @@ voice:
   # değişkeni ARTEMIS_<UÇ>_API_KEY veya Kimlik Bilgisi Yöneticisi). Bulut hatasında (8 sn
   # zaman aşımı dahil) yerel metin kullanılır, komut kaybolmaz.
   stt_mode: local # local | hybrid
+  # Doğrudan sesli komut: komut sesi ayrı bulut STT adımına gitmeden doğrudan ses destekleyen
+  # beyin modeline (ör. Gemini) gönderilir (gizlilik bedeli); desteklemeyen modelde yerel metne düşer.
+  direct_audio_input: false
   # stt_cloud_endpoint: groq # Üstteki `endpoints` içinde tanımlı bir kimlik (hybrid için zorunlu).
   # stt_cloud_model: whisper-large-v3 # Sağlayıcının güncel belgesinden doğrulayın (hybrid için zorunlu).
   # stt_cloud_protocol: openai # openai (Whisper uyumlu /audio/transcriptions) | xai (/stt, model gerekmez; ADR 0050)

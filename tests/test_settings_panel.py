@@ -380,8 +380,11 @@ def _panel(path: Path):  # type: ignore[no-untyped-def]
 
 def _flip(widget) -> None:  # type: ignore[no-untyped-def]
     """Widget'ı varsayılandan farklı, seçilebilir bir değere getirir."""
-    from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit, QListWidget
+    from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit, QListWidget, QSpinBox
 
+    if isinstance(widget, QSpinBox):
+        widget.setValue(5 if widget.value() != 5 else 15)
+        return
     if isinstance(widget, QListWidget):  # file_search.roots: mutlak yol yeter, varlığı aranmaz
         widget.addItem(str(Path(widget.accessibleName() or "x").resolve() / "belgeler"))
         return
@@ -1406,3 +1409,21 @@ def test_stt_download_done_marks_current_page_dirty(tmp_path: Path, qt_app) -> N
     assert panel.sections.item(row).data(_DIRTY_ROLE)
     panel.deleteLater()
     qt_app.processEvents()
+
+
+def test_dictation_max_seconds_widget_persists_and_marks_dirty(tmp_path: Path, qt_app) -> None:
+    path = config(tmp_path)
+    panel = _panel(path)
+    try:
+        assert panel.dictation_max_seconds.value() == 120
+        assert not panel._dirty
+        panel.dictation_max_seconds.setValue(5)
+        assert panel._dirty and panel.has_unsaved
+        assert panel.values()[("dictation", "max_seconds")] == 5.0
+        assert save_choices(path, None, values=panel.values())
+        assert load_settings(path).dictation.max_seconds == 5.0
+        panel.refresh()
+        assert panel.dictation_max_seconds.value() == 5
+    finally:
+        panel.deleteLater()
+        qt_app.processEvents()

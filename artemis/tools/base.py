@@ -164,6 +164,10 @@ class BaseTool(ABC):
         """Doğrulanmış argümanlar için riski bildirir; onay kararını kapı verir."""
         return normalize_risk(self.risk)
 
+    def auto_mode_allowed(self, arguments: BaseModel, context: ToolContext) -> bool:
+        """Oto onay kipinde onayın atlanıp atlanmayacağını argümana göre sınar."""
+        return self.auto_mode_ok
+
     def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
         """Doluysa kapı onay SORMADAN çağrıyı bu gerekçeyle reddeder (ADR 0058)."""
         return None

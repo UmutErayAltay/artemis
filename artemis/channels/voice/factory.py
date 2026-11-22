@@ -233,6 +233,164 @@ def _setup_game_mode(
     return game, cloud_recognizer, None
 
 
+async def _build_denoiser(
+    voice: VoiceConfig, on_state: StateCallback
+) -> DeepFilterNetDenoiser | None:
+    if not voice.noise_suppression:
+        return None
+    # Gürültü engelleme isteğe bağlı bir iyileştirmedir: kurulamazsa ses hattı ham
+    # mikrofonla sürer, ama durum görünür olur (sessizce çalışıyormuş gibi davranılmaz).
+    try:
+        model_dir = voice.noise_model_dir or DEFAULT_NOISE_MODEL_DIR
+        return await asyncio.to_thread(
+            DeepFilterNetDenoiser,
+            model_dir,
+            atten_lim_db=NOISE_LEVEL_ATTEN_DB[voice.noise_suppression_level],
+            frame_samples=voice.sample_rate * voice.frame_ms // 1000,
+        )
+    except (OSError, ValueError, RuntimeError, ImportError) as error:
+        logger.warning("Gürültü engelleme açılamadı, ham mikrofonla sürülüyor: %s", error)
+        on_state("denoise:unavailable:" + _denoise_reason(error))
+        return None
+
+
+def _wrap_audio_io(
+    voice: VoiceConfig,
+    denoiser: DeepFilterNetDenoiser | None,
+    microphone: Microphone | None,
+    sink: AudioSink | None,
+    on_state: StateCallback,
+    cleanup: AsyncExitStack,
+) -> tuple[Microphone, AudioSink]:
+    if microphone is None:
+        microphone = SoundDeviceMicrophone(
+            voice,
+            device=voice.input_device,
+            capture_rate=MODEL_SR if denoiser is not None else None,
+        )
+    cleanup.push_async_callback(_close_optional, microphone)
+    echo_reference: EchoReference | None = None
+    if voice.echo_cancellation:
+        reference = EchoReference(MODEL_SR if denoiser is not None else voice.sample_rate)
+        echo_reference = reference
+
+        def make_canceller(rate: int) -> EchoCanceller:
+            reference.retarget(rate)
+            return EchoCanceller(rate, reference, delay_ms=voice.echo_delay_ms)
+
+        echo_off_reported = False
+
+        def report_echo_state(state: str) -> None:
+            # Mikrofon sarmalayıcısı ve hoparlör beslemesi aynı arızayı ayrı ayrı görebilir
+            # (ör. livekit yok); kullanıcıya tek bildirim yeter.
+            nonlocal echo_off_reported
+            if state == "echo:off":
+                if echo_off_reported:
+                    return
+                echo_off_reported = True
+            on_state(state)
+
+        microphone = EchoCancelledMicrophone(microphone, make_canceller, report_echo_state)
+    if denoiser is not None:
+        microphone = DenoisedMicrophone(
+            microphone, denoiser, on_state, raw_for_stt=not voice.noise_suppression_stt
+        )
+    if sink is None and echo_reference is None:
+        sink = SoundDeviceSink()
+    elif sink is None:
+        sink = SoundDeviceSink(
+            echo_reference=echo_reference,
+            on_echo_failure=lambda: report_echo_state("echo:off"),
+        )
+    cleanup.push_async_callback(_close_optional, sink)
+    return microphone, sink
+
+
+async def _build_synthesizer(
+    runtime: Runtime, cleanup: AsyncExitStack
+) -> tuple[SpeechSynthesizer, PiperSynthesizer | None]:
+    settings = runtime.settings
+    synthesizer: SpeechSynthesizer
+    local_tts: PiperSynthesizer | None = None
+    if settings.voice.tts_backend == "edge":
+        edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
+        cleanup.push_async_callback(_close_optional, edge_tts)
+        # Gizli yanıtların buluta gitmemesi için piper_model varken yerel sentez hazırlanır.
+        if settings.voice.piper_model:
+            local_tts = PiperSynthesizer(settings.voice)
+            await _prepare(local_tts)
+            cleanup.push_async_callback(_close_optional, local_tts)
+        # Yedek yalnız Piper modeli varken kurulur: `tts_local_fallback` varsayılan açıktır ve
+        # model yokken Piper kurucusu çalışabilecek Edge sesini de kapatırdı.
+        if settings.voice.tts_local_fallback and local_tts is not None:
+            synthesizer = FallbackSynthesizer(edge_tts, local_tts)
+        else:
+            synthesizer = edge_tts
+    elif settings.voice.tts_backend == "ema":
+        primary_tts = EmaSynthesizer(settings.voice)
+        await _prepare(primary_tts)
+        cleanup.push_async_callback(_close_optional, primary_tts)
+        if settings.voice.tts_local_fallback and settings.voice.piper_model:
+            local_tts = PiperSynthesizer(settings.voice)
+            await _prepare(local_tts)
+            cleanup.push_async_callback(_close_optional, local_tts)
+            synthesizer = FallbackSynthesizer(primary_tts, local_tts)
+        else:
+            synthesizer = primary_tts
+    elif settings.voice.tts_backend == "cloud":
+        endpoint_id = settings.voice.tts_cloud_endpoint
+        saved = cloud_tts_model(settings)
+        cloud_tts = CloudSpeechSynthesizer(
+            settings.voice,
+            endpoint_id,
+            settings.endpoints[endpoint_id],
+            runtime.audit,
+            paid=None if saved is None else (
+                saved.input_per_million > 0 or saved.output_per_million > 0
+            ),
+        )
+        cleanup.push_async_callback(_close_optional, cloud_tts)
+        # Gizli yanıtların buluta gitmemesi için piper_model varken yerel sentez hazırlanır.
+        if settings.voice.piper_model:
+            local_tts = PiperSynthesizer(settings.voice)
+            await _prepare(local_tts)
+            cleanup.push_async_callback(_close_optional, local_tts)
+        # Ücretsiz model süresi dolduğunda veya kota sınırında yerel Piper'a düşülür.
+        if settings.voice.tts_local_fallback and local_tts is not None:
+            synthesizer = FallbackSynthesizer(
+                cloud_tts, local_tts, strip_tags=emotion_tags_active(settings.voice)
+            )
+        else:
+            synthesizer = cloud_tts
+    else:
+        local_tts = PiperSynthesizer(settings.voice)
+        await _prepare(local_tts)
+        cleanup.push_async_callback(_close_optional, local_tts)
+        synthesizer = local_tts
+    return synthesizer, local_tts
+
+
+async def _build_live_transcriber(
+    voice: VoiceConfig, on_state: StateCallback
+) -> SherpaLiveTranscriber | None:
+    if not voice.live_transcript:
+        return None
+    # Canlı yazı yalnız gösterimdir (ADR 0047): kurulamazsa ses hattı onsuz sürer.
+    if not (voice.live_transcript_model and voice.live_transcript_revision):
+        on_state("live:unavailable:model:live_transcript_model/revision boş")
+        return None
+    candidate = SherpaLiveTranscriber(
+        voice.live_transcript_model, voice.live_transcript_revision
+    )
+    try:
+        await _prepare(candidate)
+    except (OSError, ValueError, RuntimeError, ImportError) as error:
+        logger.warning("Canlı yazı açılamadı, onsuz sürülüyor: %s", error)
+        on_state("live:unavailable:" + _live_reason(error))
+        return None
+    return candidate
+
+
 async def build_voice_controller(
     runtime: Runtime, run_command: RunCommand, on_state: StateCallback,
     *, on_timing: Callable[[str, float], None] | None = None,
@@ -250,67 +408,13 @@ async def build_voice_controller(
     burada bağlanmaz; onay yalnız ``create_runtime``'a verilen ekran onayıdır.
     """
     settings = runtime.settings
-    denoiser: DeepFilterNetDenoiser | None = None
-    if settings.voice.noise_suppression:
-        # Gürültü engelleme isteğe bağlı bir iyileştirmedir: kurulamazsa ses hattı ham
-        # mikrofonla sürer, ama durum görünür olur (sessizce çalışıyormuş gibi davranılmaz).
-        try:
-            model_dir = settings.voice.noise_model_dir or DEFAULT_NOISE_MODEL_DIR
-            denoiser = await asyncio.to_thread(
-                DeepFilterNetDenoiser,
-                model_dir,
-                atten_lim_db=NOISE_LEVEL_ATTEN_DB[settings.voice.noise_suppression_level],
-                frame_samples=settings.voice.sample_rate * settings.voice.frame_ms // 1000,
-            )
-        except (OSError, ValueError, RuntimeError, ImportError) as error:
-            logger.warning("Gürültü engelleme açılamadı, ham mikrofonla sürülüyor: %s", error)
-            on_state("denoise:unavailable:" + _denoise_reason(error))
+    denoiser = await _build_denoiser(settings.voice, on_state)
     # Gürültü engelleme açıksa mikrofon yerel 48 kHz yakalanır (modelin doğal hızı, >8 kHz bilgi
     # korunur); açılamazsa adaptör uyarıyla 16 kHz'e döner. Aşağı akış hep 16 kHz görür.
     async with AsyncExitStack() as cleanup:
-        if microphone is None:
-            microphone = SoundDeviceMicrophone(
-                settings.voice,
-                device=settings.voice.input_device,
-                capture_rate=MODEL_SR if denoiser is not None else None,
-            )
-        cleanup.push_async_callback(_close_optional, microphone)
-        echo_reference: EchoReference | None = None
-        if settings.voice.echo_cancellation:
-            reference = EchoReference(
-                MODEL_SR if denoiser is not None else settings.voice.sample_rate
-            )
-            echo_reference = reference
-
-            def make_canceller(rate: int) -> EchoCanceller:
-                reference.retarget(rate)
-                return EchoCanceller(rate, reference, delay_ms=settings.voice.echo_delay_ms)
-
-            echo_off_reported = False
-
-            def report_echo_state(state: str) -> None:
-                # Mikrofon sarmalayıcısı ve hoparlör beslemesi aynı arızayı ayrı ayrı görebilir
-                # (ör. livekit yok); kullanıcıya tek bildirim yeter.
-                nonlocal echo_off_reported
-                if state == "echo:off":
-                    if echo_off_reported:
-                        return
-                    echo_off_reported = True
-                on_state(state)
-
-            microphone = EchoCancelledMicrophone(microphone, make_canceller, report_echo_state)
-        if denoiser is not None:
-            microphone = DenoisedMicrophone(
-                microphone, denoiser, on_state, raw_for_stt=not settings.voice.noise_suppression_stt
-            )
-        if sink is None and echo_reference is None:
-            sink = SoundDeviceSink()
-        elif sink is None:
-            sink = SoundDeviceSink(
-                echo_reference=echo_reference,
-                on_echo_failure=lambda: report_echo_state("echo:off"),
-            )
-        cleanup.push_async_callback(_close_optional, sink)
+        microphone, sink = _wrap_audio_io(
+            settings.voice, denoiser, microphone, sink, on_state, cleanup
+        )
         cloud_recognizer: OpenAICompatibleTranscriber | None = None
         if settings.voice.stt_mode == "hybrid":
             endpoint_id = settings.voice.stt_cloud_endpoint
@@ -330,79 +434,8 @@ async def build_voice_controller(
         recognizer, cloud_recognizer, should_use_cloud = _setup_game_mode(
             runtime, whisper, local_voice, cloud_recognizer, on_state, cleanup,
         )
-        synthesizer: SpeechSynthesizer
-        local_tts: PiperSynthesizer | None = None
-        if settings.voice.tts_backend == "edge":
-            edge_tts = EdgeTTSynthesizer(settings.voice, runtime.audit)
-            cleanup.push_async_callback(_close_optional, edge_tts)
-            # Gizli yanıtların buluta gitmemesi için piper_model varken yerel sentez hazırlanır.
-            if settings.voice.piper_model:
-                local_tts = PiperSynthesizer(settings.voice)
-                await _prepare(local_tts)
-                cleanup.push_async_callback(_close_optional, local_tts)
-            # Yedek yalnız Piper modeli varken kurulur: `tts_local_fallback` varsayılan açıktır ve
-            # model yokken Piper kurucusu çalışabilecek Edge sesini de kapatırdı.
-            if settings.voice.tts_local_fallback and local_tts is not None:
-                synthesizer = FallbackSynthesizer(edge_tts, local_tts)
-            else:
-                synthesizer = edge_tts
-        elif settings.voice.tts_backend == "ema":
-            primary_tts = EmaSynthesizer(settings.voice)
-            await _prepare(primary_tts)
-            cleanup.push_async_callback(_close_optional, primary_tts)
-            if settings.voice.tts_local_fallback and settings.voice.piper_model:
-                local_tts = PiperSynthesizer(settings.voice)
-                await _prepare(local_tts)
-                cleanup.push_async_callback(_close_optional, local_tts)
-                synthesizer = FallbackSynthesizer(primary_tts, local_tts)
-            else:
-                synthesizer = primary_tts
-        elif settings.voice.tts_backend == "cloud":
-            endpoint_id = settings.voice.tts_cloud_endpoint
-            saved = cloud_tts_model(settings)
-            cloud_tts = CloudSpeechSynthesizer(
-                settings.voice,
-                endpoint_id,
-                settings.endpoints[endpoint_id],
-                runtime.audit,
-                paid=None if saved is None else (
-                    saved.input_per_million > 0 or saved.output_per_million > 0
-                ),
-            )
-            cleanup.push_async_callback(_close_optional, cloud_tts)
-            # Gizli yanıtların buluta gitmemesi için piper_model varken yerel sentez hazırlanır.
-            if settings.voice.piper_model:
-                local_tts = PiperSynthesizer(settings.voice)
-                await _prepare(local_tts)
-                cleanup.push_async_callback(_close_optional, local_tts)
-            # Ücretsiz model süresi dolduğunda veya kota sınırında yerel Piper'a düşülür.
-            if settings.voice.tts_local_fallback and local_tts is not None:
-                synthesizer = FallbackSynthesizer(
-                    cloud_tts, local_tts, strip_tags=emotion_tags_active(settings.voice)
-                )
-            else:
-                synthesizer = cloud_tts
-        else:
-            local_tts = PiperSynthesizer(settings.voice)
-            await _prepare(local_tts)
-            cleanup.push_async_callback(_close_optional, local_tts)
-            synthesizer = local_tts
-        live: SherpaLiveTranscriber | None = None
-        if settings.voice.live_transcript:
-            # Canlı yazı yalnız gösterimdir (ADR 0047): kurulamazsa ses hattı onsuz sürer.
-            voice = settings.voice
-            if not (voice.live_transcript_model and voice.live_transcript_revision):
-                on_state("live:unavailable:model:live_transcript_model/revision boş")
-            else:
-                candidate = SherpaLiveTranscriber(
-                    voice.live_transcript_model, voice.live_transcript_revision
-                )
-                try:
-                    await _prepare(candidate)
-                    live = candidate
-                except (OSError, ValueError, RuntimeError, ImportError) as error:
-                    logger.warning("Canlı yazı açılamadı, onsuz sürülüyor: %s", error)
-                    on_state("live:unavailable:" + _live_reason(error))
+        synthesizer, local_tts = await _build_synthesizer(runtime, cleanup)
+        live = await _build_live_transcriber(settings.voice, on_state)
         wake_spotter = await build_wake_spotter(settings.voice, on_state)
         if wake_spotter is not None:
             cleanup.callback(wake_spotter.close)
@@ -442,7 +475,13 @@ async def build_dictation_recognizer(
     Yeni bir izin ya da atlama yolu yoktur. `content_kind` yalnız denetim etiketidir (Telegram
     sesi `telegram_audio`, ADR 0064). Hazırlık engelleyicidir, `to_thread` ile yapılır."""
     settings = runtime.settings
-    voice = alias_hotword_config(settings)
+    # Dikte (dictation_audio) komut yolu değildir: uygulama/komut hotword listesi sessizlikte
+    # sahte uygulama adları uydurabildiği için yalnız yerel diktede temizlenir.
+    voice = (
+        settings.voice.model_copy(update={"stt_hotwords": ()})
+        if content_kind == "dictation_audio"
+        else alias_hotword_config(settings)
+    )
     if settings.voice.stt_mode == "hybrid":
         endpoint_id = settings.voice.stt_cloud_endpoint
         return OpenAICompatibleTranscriber(

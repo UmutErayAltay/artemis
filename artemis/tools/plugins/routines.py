@@ -243,23 +243,16 @@ class RoutineSave(BaseTool):
     done_label = "Rutin kaydedildi"
     description = (
         "Adlandırılmış bir rutin kaydeder: sabit, sırayla çalışacak araç çağrıları. Zaman "
-        "ayarlayamaz, rutin içinden rutin çağıramaz. Her zaman onay ister; onayda tüm adımlar "
-        "gösterilir."
+        "ayarlayamaz, rutin içinden rutin çağıramaz. Normal kipte onay penceresiyle tüm "
+        "adımları gösterir; otomatik onay kipinde onay sormadan kaydeder. Kullanıcı "
+        "istediğinde metinle ek onay sorma, aracı doğrudan çağır."
     )
     args_model = RoutineSaveArguments
     risk = Risk.CONFIRM_REQUIRED
+    auto_mode_ok = True
 
     def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
-        if (reason := _disabled(context)) is not None:
-            return reason
-        # memory_rule_add ile aynı kural (ADR 0054): dış içerik okunmuş turda kalıcı iş
-        # tarifi yazılmaz; enjekte edilmiş metin sonradan "kendi rutinim" diye çalışmasın.
-        if context.turn_read_external:
-            return t(
-                "Rutin kaydedilmedi: bu turda dış içerik okundu; "
-                "rutinler yalnız temiz turda kaydedilir."
-            )
-        return None
+        return _disabled(context)
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(RoutineSaveArguments, arguments)

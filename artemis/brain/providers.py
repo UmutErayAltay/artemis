@@ -59,6 +59,7 @@ def _cloud_messages(messages: list[Message]) -> list[Message]:
             update={
                 "content": _PRIVATE_PLACEHOLDER,
                 "image_png": None,  # gizli turun ekran görüntüsü de buluta gitmez
+                "audio_wav": None,  # gizli turun ham sesi de buluta gitmez
                 "tool_calls": [
                     call.model_copy(update={"arguments": {}}) for call in message.tool_calls
                 ],
@@ -100,18 +101,28 @@ def _chat_messages(
     }
     for message in messages:
         item: dict[str, Any] = {"role": message.role, "content": message.content}
-        if message.image_png is not None:
+        has_image = message.image_png is not None
+        has_audio = message.audio_wav is not None and not ollama
+        if has_image and ollama and message.image_png is not None:
             encoded = base64.b64encode(message.image_png).decode("ascii")
-            if ollama:
-                item["images"] = [encoded]  # Ollama görüntüyü ayrı alanda, ham base64 bekler
-            else:
-                parts: list[dict[str, Any]] = (
-                    [{"type": "text", "text": message.content}] if message.content else []
-                )
+            item["images"] = [encoded]  # Ollama görüntüyü ayrı alanda, ham base64 bekler
+        elif has_image or has_audio:
+            parts: list[dict[str, Any]] = (
+                [{"type": "text", "text": message.content}] if message.content else []
+            )
+            if message.image_png is not None:
+                encoded_img = base64.b64encode(message.image_png).decode("ascii")
+                url = f"data:image/png;base64,{encoded_img}"
+                parts.append({"type": "image_url", "image_url": {"url": url}})
+            if has_audio and message.audio_wav is not None:
+                encoded_audio = base64.b64encode(message.audio_wav).decode("ascii")
                 parts.append(
-                    {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{encoded}"}}
+                    {
+                        "type": "input_audio",
+                        "input_audio": {"data": encoded_audio, "format": "wav"},
+                    }
                 )
-                item["content"] = parts
+            item["content"] = parts
         if message.tool_call_id:
             if ollama:
                 # Ollama'nın chat message sözleşmesi tool yanıtını adla eşler.

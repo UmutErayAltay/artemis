@@ -652,3 +652,75 @@ def test_only_network_tools_declare_outbound() -> None:
     # open_url outbound kalır; lekeli turda her adres sorulur, otomatik onayda sorulmaz (ADR 0077).
     # computer_use ekran görüntüsünü buluta gönderebilir (ADR 0039).
     assert outbound == {"open_url", "web_search", "notify_telegram", "computer_use"}
+
+
+def test_close_force_kills_tray_leftover_when_windows_closed_for_non_protected_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("artemis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("artemis.tools.platform.time.sleep", lambda _: None)
+    pids_seq: Iterator[set[int]] = iter([
+        {101, 102}, {101, 102}, {101, 102}, {101, 102}, {101, 102}, {101, 102},
+        set(),
+    ])
+    monkeypatch.setattr(WindowsDesktop, "_application_pids", lambda *_: next(pids_seq))
+    monkeypatch.setattr(WindowsDesktop, "application_windows_open", lambda *_: False)
+    calls: list[list[str]] = []
+
+    def fake_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        assert kwargs["shell"] is False
+        assert "OPENROUTER_API_KEY" not in kwargs["env"]
+        calls.append(args[0])
+        return subprocess.CompletedProcess([], 0, b"", b"")
+
+    monkeypatch.setattr("artemis.tools.platform.subprocess.run", fake_run)
+    spotify = r"startapp:SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify|Spotify.exe"
+    assert WindowsDesktop().close_application(spotify) is True
+    assert calls[0][-2:] == ["/IM", "Spotify.exe"]
+    assert "/F" not in calls[0]
+    assert calls[1][-4:] == ["/F", "/T", "/IM", "Spotify.exe"]
+
+
+def test_close_never_force_kills_when_visible_window_still_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("artemis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("artemis.tools.platform.time.sleep", lambda _: None)
+    monkeypatch.setattr(WindowsDesktop, "_application_pids", lambda *_: {201})
+    monkeypatch.setattr(WindowsDesktop, "application_windows_open", lambda *_: True)
+    calls: list[list[str]] = []
+
+    def fake_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(args[0])
+        return subprocess.CompletedProcess([], 0, b"", b"")
+
+    monkeypatch.setattr("artemis.tools.platform.subprocess.run", fake_run)
+    assert WindowsDesktop().close_application("Spotify.exe") is False
+    assert len(calls) == 1
+    assert "/F" not in calls[0]
+
+
+def test_close_never_force_kills_protected_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr("artemis.tools.platform.platform.system", lambda: "Windows")
+    monkeypatch.setattr("artemis.tools.platform.time.sleep", lambda _: None)
+    monkeypatch.setattr(WindowsDesktop, "_application_pids", lambda *_: {301})
+    window_checks = 0
+
+    def fake_windows_open(*_args: Any) -> bool:
+        nonlocal window_checks
+        window_checks += 1
+        return False
+
+    monkeypatch.setattr(WindowsDesktop, "application_windows_open", fake_windows_open)
+    calls: list[list[str]] = []
+    def fake_run(*args: Any, **kwargs: Any) -> subprocess.CompletedProcess[bytes]:
+        calls.append(args[0])
+        return subprocess.CompletedProcess([], 0, b"", b"")
+
+    monkeypatch.setattr("artemis.tools.platform.subprocess.run", fake_run)
+    assert WindowsDesktop().close_application("code.exe") is False
+    assert window_checks == 0
+    assert len(calls) == 1
+    assert "/F" not in calls[0]

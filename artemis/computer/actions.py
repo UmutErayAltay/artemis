@@ -234,9 +234,14 @@ def is_sensitive(action: Action) -> bool:
     if action.type != "key" or action.keys is None:
         return False
     keys = set(parse_keys(action.keys))
-    # Enter kodla hassastır, modelin beyanına bakılmaz: "type" satır sonu taşıyamadığı için
-    # yazılan bir komut ya da gönderilen bir form yalnız bu onaydan geçerek çalışabilir.
-    return keys == {"alt", "f4"} or "enter" in keys
+    # Enter, Alt+F4 ve yıkıcı silme tuşları (Delete / Shift+Delete / Ctrl+D) modelin
+    # `sensitive` beyanına bakılmaksızın onay gerektirir.
+    return (
+        keys == {"alt", "f4"}
+        or "enter" in keys
+        or "delete" in keys
+        or keys == {"ctrl", "d"}
+    )
 
 
 def scale_point(

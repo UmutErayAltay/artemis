@@ -35,12 +35,13 @@ from artemis.channels.telegram.api import (
     build_telegram_client,
 )
 from artemis.channels.telegram.media import (
+    VOICE_SAMPLE_RATE,
     decode_voice,
     extension_allowed,
     sanitize_filename,
     save_document,
 )
-from artemis.channels.voice.core import SpeechRecognizer
+from artemis.channels.voice.core import MAX_DIRECT_AUDIO_BYTES, SpeechRecognizer, pcm_to_wav
 from artemis.channels.voice.factory import build_dictation_recognizer
 from artemis.config.settings import load_settings
 from artemis.i18n import t
@@ -611,16 +612,19 @@ class TelegramChannel:
         text: str,
         attachment: ToolResult | None = None,
         withheld: str = _PRIVATE_WITHHELD,
+        audio_wav: bytes | None = None,
     ) -> None:
         self._loop = asyncio.get_running_loop()
         self._sync_computer_mode(runtime)
         self._frame = None
         watcher = asyncio.create_task(self._watch_stop()) if self.computer_host else None
         try:
-            if attachment is None:
-                result = await runtime.runner.run(text)
-            else:
-                result = await runtime.runner.run(text, attachment=attachment)
+            kwargs: dict[str, Any] = {}
+            if attachment is not None:
+                kwargs["attachment"] = attachment
+            if audio_wav is not None:
+                kwargs["audio_wav"] = audio_wav
+            result = await runtime.runner.run(text, **kwargs)
         finally:
             if watcher is not None:
                 watcher.cancel()
@@ -734,9 +738,14 @@ class TelegramChannel:
         transcript = transcript[:_TRANSCRIPT_LIMIT]
         self._audit_download("voice", len(data), "ok")
         self._notify(t("Şunu duydum: {transcript}").format(transcript=transcript))
+        audio_wav: bytes | None = None
+        if runtime.context.settings.voice.direct_audio_input and pcm:
+            encoded_wav = pcm_to_wav(pcm, VOICE_SAMPLE_RATE)
+            if len(encoded_wav) <= MAX_DIRECT_AUDIO_BYTES:
+                audio_wav = encoded_wav
         # Yazıya çevrilen ses sıradan bir metin komutudur: onay yine yalnız düğmeyle, ve "/..."
         # kanal komutu sayılmaz (yalnız gerçek metin mesajında komut çözümlenir).
-        await self._run_turn(runtime, transcript)
+        await self._run_turn(runtime, transcript, audio_wav=audio_wav)
 
     async def _handle_photo(self, runtime: Runtime, message: Mapping[str, Any]) -> None:
         raw = message.get("photo")

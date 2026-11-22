@@ -165,6 +165,9 @@ class VoiceConfig(BaseModel):
     # ADR 0079: hybrid'de uyandırma/yankı kararları yerel metinle verilir, yalnız komut olacak
     # sözün sesi `stt_cloud_endpoint` ucuna (üst düzey `endpoints` kimliği) gider.
     stt_mode: Literal["local", "hybrid"] = "local"
+    # Opt-in: komut sesi ayrı bulut STT adımına gitmeden doğrudan ses destekleyen beyin
+    # modeline (`input_audio` WAV) eklenir; desteklemeyen modelde yerel metne düşer.
+    direct_audio_input: bool = False
     stt_cloud_endpoint: str = ""
     stt_cloud_model: str = ""
     # ADR 0050: xAI'nin STT REST ucu OpenAI uyumlu değildir (/stt, model alanı yok).

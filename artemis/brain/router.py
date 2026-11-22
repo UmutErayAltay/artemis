@@ -31,6 +31,22 @@ from artemis.config.settings import ModelConfig, Settings
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import ToolDefinition
 
+_AUDIO_CAPABLE_PROVIDERS = frozenset({"openai_compatible", "openrouter"})
+_AUDIO_REJECT_CODES = ("HTTP 400", "HTTP 415", "HTTP 422")
+
+
+def _strip_audio(messages: list[Message]) -> list[Message]:
+    return [
+        m.model_copy(update={"audio_wav": None}) if m.audio_wav is not None else m
+        for m in messages
+    ]
+
+
+def _is_audio_rejection(error: ProviderError) -> bool:
+    return not isinstance(error, RetryableProviderError) and any(
+        code in str(error) for code in _AUDIO_REJECT_CODES
+    )
+
 
 def _reservation(model: ModelConfig, max_output_tokens: int) -> Decimal:
     # Token tahmini dil ve tokenizer ile değişir; bağlam üst sınırı güvenli kalır.
@@ -117,6 +133,16 @@ class ProviderRouter:
             )
             raise
         started = self._clock()
+        has_audio = any(m.audio_wav is not None for m in messages)
+        if has_audio and model.provider not in _AUDIO_CAPABLE_PROVIDERS:
+            messages = _strip_audio(messages)
+            self._emit_audit(
+                "audio_input_fallback",
+                provider=model.provider,
+                model=model.model,
+                reason="unsupported_provider",
+            )
+            has_audio = False
         # Yerel uç dahil openai_compatible kaydı yazılır: uç adresi config'te değişebilir.
         if model.provider != "ollama":
             try:
@@ -128,23 +154,48 @@ class ProviderRouter:
                     masked_messages=sum(message.private for message in messages),
                     allow_cloud_file_content=self.settings.allow_cloud_file_content,
                     allow_cloud_clipboard=self.settings.allow_cloud_clipboard,
+                    **({"has_audio": True} if has_audio else {}),
                 )
             except ProviderError:
                 # Kaydın yazılamadığı sırada istek henüz gönderilmedi; bu
                 # rezervasyon güvenle kaldırılabilir.
                 self.ledger.release(reservation)
                 raise
+
+        async def _invoke(
+            msgs: list[Message], call_stream: TextStream | None, call_timeout: float
+        ) -> Completion:
+            if call_stream is None:
+                return await self._providers[alias].complete(
+                    msgs, tools, timeout=call_timeout
+                )
+            return await self._providers[alias].complete(
+                msgs, tools, timeout=call_timeout, stream=call_stream
+            )
+
         try:
             async with asyncio.timeout(timeout):
-                # Akışsız çağrıda kw geçilmez: sağlayıcı sözleşmesi eski çağıranlarla aynı kalır.
-                if stream is None:
-                    completion = await self._providers[alias].complete(
-                        messages, tools, timeout=timeout
-                    )
+                if not has_audio:
+                    completion = await _invoke(messages, stream, timeout)
                 else:
-                    completion = await self._providers[alias].complete(
-                        messages, tools, timeout=timeout, stream=stream
-                    )
+                    audio_guard = EmissionGuard(stream) if stream is not None else None
+                    try:
+                        completion = await _invoke(messages, audio_guard, timeout)
+                    except ProviderError as audio_error:
+                        if not _is_audio_rejection(audio_error) or (
+                            audio_guard is not None and audio_guard.emitted
+                        ):
+                            raise
+                        self._emit_audit(
+                            "audio_input_fallback",
+                            provider=model.provider,
+                            model=model.model,
+                            reason="rejected_audio_input",
+                        )
+                        remaining = timeout - (self._clock() - started)
+                        if remaining <= 0:
+                            raise TimeoutError from None
+                        completion = await _invoke(_strip_audio(messages), stream, remaining)
         except TimeoutError:
             error = RetryableProviderError("Sağlayıcı denemesi zaman aşımına uğradı.")
             self._emit_audit(

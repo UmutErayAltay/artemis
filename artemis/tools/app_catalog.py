@@ -34,7 +34,13 @@ Get-AppxPackage | ForEach-Object {
     $manifest = Get-AppxPackageManifest -Package $package
     foreach ($app in $manifest.Package.Applications.Application) {
       $id = $package.PackageFamilyName + '!' + $app.Id
-      $packages[$id] = [IO.Path]::GetFileName($app.Executable)
+      $exe = [IO.Path]::GetFileName($app.Executable)
+      $is_shim = $exe -match '(?i)(migrator|launcher|stub|shim|bootstrap|update)\.exe$'
+      if ($is_shim -and $package.InstallLocation) {
+        $sibling = Join-Path $package.InstallLocation ($app.Id + '.exe')
+        if (Test-Path -LiteralPath $sibling) { $exe = $app.Id + '.exe' }
+      }
+      $packages[$id] = $exe
     }
   } catch [System.Exception] { }
 }

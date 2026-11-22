@@ -49,3 +49,17 @@ def test_catalog_process_receives_no_provider_secret(monkeypatch: pytest.MonkeyP
         assert installed_applications() == {"Editor": "startapp:editor.app|editor.exe"}
     finally:
         installed_applications.cache_clear()
+
+
+def test_spotify_migrator_process_resolves_to_spotify_exe() -> None:
+    from artemis.tools.app_catalog import _SCRIPT
+    from artemis.tools.platform import WindowsDesktop
+
+    assert (
+        WindowsDesktop._application_process_name(
+            "startapp:SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify|SpotifyMigrator.exe"
+        )
+        == "Spotify.exe"
+    )
+    assert WindowsDesktop._application_process_name("SpotifyMigrator.exe") == "Spotify.exe"
+    assert "migrator|launcher" in _SCRIPT

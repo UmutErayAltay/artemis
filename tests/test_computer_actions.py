@@ -371,7 +371,10 @@ def test_start_menu_and_task_manager_combos_are_blocked(combo: str) -> None:
     assert key_block_reason(parse_keys(combo)) is not None
 
 
-@pytest.mark.parametrize("combo", ["enter", "ctrl+enter", "shift+enter", "alt+f4"])
+@pytest.mark.parametrize(
+    "combo",
+    ["enter", "ctrl+enter", "shift+enter", "alt+f4", "delete", "shift+delete", "ctrl+d"],
+)
 def test_enter_and_alt_f4_are_sensitive_regardless_of_model_flag(combo: str) -> None:
     action = Action(type="key", keys=combo, reason="deneme", sensitive=False)
     assert is_sensitive(action)

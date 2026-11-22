@@ -25,5 +25,9 @@ seçebilmesi ve sesli geri bildirimleri İngilizce duyması gerekiyor.
 **Sonuç:** Ses gizliliği, bulut STT/TTS izin kapıları ve uyandırma mantığı değişmeden
 İngilizce sesli komut ve karşılık desteklenir.
 
-**Tavan:** Masaüstü Ayarlar > Ses sayfasında henüz `stt_language` açılır kutusu yoktur;
-`"en"` seçimi şimdilik `config.yaml` üzerinden yapılır, arayüz kontrolü ayrı bir takip işidir.
+**Arayüz ve kalan tavan:** Masaüstü Ayarlar > Ses sayfasında **Tanıma dili** (`stt_language_combo`)
+açılır kutusu eklendi (`"tr"`, `"tr_en"`, `"en"`, `"auto"`); seçim `settings_io.py` üzerinden
+doğrudan `voice.stt_language` olarak kaydedilir ve İngilizce arayüzde yerel Piper seçiliyse
+Edge ya da bulut konuşma sesi öneren ipucu (`tts_piper_hint`) gösterilir. Yerel Piper TTS
+modelinin yalnız Türkçe olması kalan tavandır; gerçek mikrofonla İngilizce canlı kabul henüz
+yapılmamıştır.

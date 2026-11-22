@@ -86,8 +86,10 @@ def test_apply_settings_handles_missing_hotkey_keys_and_calls_save_choices(
         mark_saved=lambda written: marked.append(written),
         save_failed=lambda text: failed.append(text),
     )
+    reloaded: list[Any] = []
     window = SimpleNamespace(
         settings_panel=panel,
+        bridge=SimpleNamespace(reload_dictation_settings=lambda cfg: reloaded.append(cfg) or True),
         _demo=False,
         _exiting=False,
         _config_path=config_path,
@@ -97,3 +99,13 @@ def test_apply_settings_handles_missing_hotkey_keys_and_calls_save_choices(
     assert failed == []
     assert saved_calls == [(config_path, None, {})]
     assert marked == [True]
+    assert len(reloaded) == 1 and reloaded[0].max_seconds == 120.0
+
+    # bridge olmadan sahte/basit pencerede de güvenle tamamlanır.
+    bare = SimpleNamespace(
+        settings_panel=panel,
+        _demo=False,
+        _exiting=False,
+        _config_path=config_path,
+    )
+    window_restart.apply_settings(bare, None)  # type: ignore[arg-type]

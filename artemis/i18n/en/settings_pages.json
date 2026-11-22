@@ -53,8 +53,11 @@
   "Değişiklikleri hemen kaydeder ve uygular.": "Saves and applies changes immediately.",
   "Dikte kısayolu": "Dictation shortcut",
   "Dikte tuşu": "Dictation hotkey",
+  "Dikte üst süresi": "Dictation max duration",
+  "Dikte üst süresi (sn)": "Dictation max duration (s)",
   "Dikteyi kullan": "Use dictation",
   "Dil": "Language",
+  "Doğrudan sesli komut (sesi beyin modeline gönder)": "Direct voice command (send audio to brain model)",
   "Dosya araması": "File search",
   "Dosya aramasını kullan": "Use file search",
   "Dosyalar varsayılan olarak Artemis'in kullanıcı verisi klasöründeki beceriler klasöründe durur; Klasör seç ile başka bir klasör seçebilirsin. Açılışta ve Yenile'de okunur. Beceriler Artemis içinde eklenir, düzenlenir ve silinir; dosyayı başka bir düzenleyicide açmana gerek yok. Artemis kendi başına beceri yazamaz; beceri izin de vermez, her adım normal onaydan geçer. Beceri metni bulut modele gidebilir, kişisel veri yazma. Mesajı /beceri-adı ile başlatarak da çağırabilirsin.": "Files are stored by default in the skills folder inside Artemis's user data folder; you can choose another folder with Choose folder. Loaded on startup and Refresh. Skills are added, edited, and deleted inside Artemis; no need to open the file in another editor. Artemis cannot write skills on its own; skills do not grant permissions either—every step goes through normal confirmation. Skill text may be sent to a cloud model, so do not include personal data. You can also invoke a skill by starting your message with /skill-name.",
@@ -187,6 +190,8 @@
   "Uyandırma adı söylemeden sürekli dinler. Karma tanıma açıksa kesintisiz kipte her söz bulut sunucusuna gider.": "Listens continuously without the wake word. If hybrid recognition is on, every utterance in continuous mode goes to the cloud server.",
   "Uyandırma bu bilgisayarda kalır; komut olan sözün sesi seçtiğin bulut sunucusuna gider (gizlilik bedeli). Ses yeniden başlayınca uygulanır.": "Wake word stays on this computer; spoken commands are sent to your chosen cloud server (privacy trade-off). Takes effect when voice restarts.",
   "Uyandırma bu bilgisayarda kalır; komut olan sözün sesi seçtiğin bulut sunucusuna gider. Değişiklik ses yeniden başlayınca uygulanır.": "Wake word stays on this computer; spoken commands are sent to your chosen cloud server. Takes effect when voice restarts.",
+  "Uyandırma yerelde kalır; komut sesi ayrıca metne çevrilmeden doğrudan seçili beyin modeline gönderilir. Desteklemeyen modelde yerel metne düşer. Değişiklik ses yeniden başlayınca uygulanır.": "Wake word stays local; command audio is sent directly to the selected brain model without a separate cloud transcription step. Falls back to local text on unsupported models. Takes effect when voice restarts.",
+  "Uyandırma yerelde kalır; komut sesi doğrudan seçili beyin modeline (ör. Gemini) gönderilir (gizlilik bedeli). Desteklemeyen modelde yerel metne düşer. Ses yeniden başlayınca uygulanır.": "Wake word stays local; command audio is sent directly to the selected brain model (e.g. Gemini) (privacy cost). Falls back to local text on unsupported models. Takes effect when voice restarts.",
   "Uyandırma ve mikrofon": "Wake word & microphone",
   "Uyandırma, tanıma ve konuşma.": "Wake word, recognition, and speech.",
   "Uygulama ekle": "Add application",
@@ -208,6 +213,7 @@
   "Özet saati": "Summary time",
   "Özet saati (SS:DD)": "Summary time (HH:MM)",
   "İkisi birden · en sağlam, en yavaş": "Both · most robust, slowest",
+  "İkinci kez kısayola basmadan kaydın kendiliğinden duracağı üst süre (1–600 sn).": "Maximum recording length before dictation stops automatically without pressing the hotkey again (1–600 s).",
   "İndir": "Download",
   "İzinli uygulamalar": "Allowed applications"
 }

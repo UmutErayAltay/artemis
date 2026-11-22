@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QProgressBar,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -317,9 +318,7 @@ def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         stt_layout,
         t("Tanıma dili"),
         panel.stt_language_combo,
-        help=t(
-            "Konuştuğun dil. İngilizce arayüzde İngilizce konuşacaksan English seç."
-        ),
+        t("Konuştuğun dil. İngilizce arayüzde İngilizce konuşacaksan English seç."),
     )
     panel.precision_combo = QComboBox()
     panel.precision_combo.setAccessibleName(t("Tanıma hassasiyeti"))
@@ -342,6 +341,17 @@ def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     stt_layout.addLayout(with_help(panel.hybrid_stt, t(
         "Uyandırma bu bilgisayarda kalır; komut olan sözün sesi seçtiğin bulut sunucusuna "
         "gider (gizlilik bedeli). Ses yeniden başlayınca uygulanır."
+    )))
+    panel.direct_audio_input = QCheckBox(t("Doğrudan sesli komut (sesi beyin modeline gönder)"))
+    panel.direct_audio_input.setToolTip(t(
+        "Uyandırma yerelde kalır; komut sesi ayrıca metne çevrilmeden doğrudan seçili "
+        "beyin modeline gönderilir. Desteklemeyen modelde yerel metne düşer. Değişiklik "
+        "ses yeniden başlayınca uygulanır."
+    ))
+    stt_layout.addLayout(with_help(panel.direct_audio_input, t(
+        "Uyandırma yerelde kalır; komut sesi doğrudan seçili beyin modeline (ör. Gemini) "
+        "gönderilir (gizlilik bedeli). Desteklemeyen modelde yerel metne düşer. Ses "
+        "yeniden başlayınca uygulanır."
     )))
     panel.cloud_box = QWidget()
     cloud_layout = QVBoxLayout(panel.cloud_box)
@@ -440,6 +450,14 @@ def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     panel.dictation_hotkey.setAccessibleName(t("Dikte kısayolu"))
     panel.dictation_hotkey.setPlaceholderText(t("Örneğin: ctrl+alt+d"))
     field(speech, t("Dikte tuşu"), panel.dictation_hotkey)
+    panel.dictation_max_seconds = QSpinBox()
+    panel.dictation_max_seconds.setRange(1, 600)
+    panel.dictation_max_seconds.setValue(120)
+    panel.dictation_max_seconds.setAccessibleName(t("Dikte üst süresi"))
+    panel.dictation_max_seconds.setToolTip(t(
+        "İkinci kez kısayola basmadan kaydın kendiliğinden duracağı üst süre (1–600 sn)."
+    ))
+    field(speech, t("Dikte üst süresi (sn)"), panel.dictation_max_seconds)
     panel.selection_enabled = QCheckBox(t("Seçili metin eylemlerini kullan"))
     speech.addWidget(panel.selection_enabled)
     speech.addWidget(_check_hint(t(

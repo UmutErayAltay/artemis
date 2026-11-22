@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlparse
 
 import yaml
 from PySide6.QtCore import QFileSystemWatcher, QSettings, QSize, Qt, QThread, QTimer, Signal
@@ -24,18 +23,18 @@ from PySide6.QtWidgets import (
     QListWidget,
     QProgressBar,
     QPushButton,
+    QSpinBox,
     QToolButton,
     QWidget,
 )
 
-from artemis.brain.providers import stored_endpoint_key
-from artemis.channels.desktop import provider_section
+from artemis.channels.desktop import voice_settings_section
 from artemis.channels.desktop.calendar_mail_section import CalendarMailSection
 from artemis.channels.desktop.code_agent_config import AgentDialog, command_status
 from artemis.channels.desktop.file_search_section import FileSearchSection
 from artemis.channels.desktop.page_kit import PAGE_MAX_WIDTH, CurrentPageStack
 from artemis.channels.desktop.pet_section import PetSection
-from artemis.channels.desktop.provider_section import ProviderSection, store_endpoint_key
+from artemis.channels.desktop.provider_section import ProviderSection
 from artemis.channels.desktop.provider_workers import ConnectionTest
 from artemis.channels.desktop.routines_section import RoutinesSection
 from artemis.channels.desktop.settings_io import (
@@ -43,7 +42,6 @@ from artemis.channels.desktop.settings_io import (
     SettingPath,
     _same,
     apply_github_report,
-    refresh_device_combo,
     restore_baseline,
     save_code_agent,
     setting_value,
@@ -93,6 +91,7 @@ from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.channels.desktop.triggers_section import TriggersSection
 from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
 from artemis.channels.desktop.update_section import UpdateSection
+from artemis.channels.desktop.voice_settings_section import SttDownload as SttDownload
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import (
     BUILTIN_AGENT,
@@ -138,26 +137,6 @@ class GitHubSync(QThread):
             )
         except GitHubError as error:
             self.failed.emit(str(error))
-
-
-class SttDownload(QThread):
-    """Whisper modelini GUI olay döngüsünü kilitlemeden indirir."""
-
-    done = Signal(object)
-    failed = Signal(str)
-
-    def __init__(self, name: str, parent: QWidget | None = None) -> None:
-        super().__init__(parent)
-        self.name = name
-
-    def run(self) -> None:
-        try:
-            path = stt_catalog.download(self.name)
-        except Exception as error:
-            # Hata iletisi yol veya belirteç taşıyabilir; yalnız sınıf adı gösterilir.
-            self.failed.emit(type(error).__name__)
-        else:
-            self.done.emit(path)
 
 
 _LAST_SECTION_KEY = "settings/section"
@@ -208,6 +187,7 @@ class SettingsPanel(QWidget):
     stt_language_combo: QComboBox
     precision_combo: QComboBox
     hybrid_stt: QCheckBox
+    direct_audio_input: QCheckBox
     cloud_box: QWidget
     cloud_server: QComboBox
     cloud_protocol: QComboBox
@@ -235,6 +215,7 @@ class SettingsPanel(QWidget):
     continuous_mode: QCheckBox
     dictation_enabled: QCheckBox
     dictation_hotkey: QLineEdit
+    dictation_max_seconds: QSpinBox
     selection_enabled: QCheckBox
     selection_hotkey: QLineEdit
     selection_translate_to: QLineEdit
@@ -414,6 +395,8 @@ class SettingsPanel(QWidget):
                 box.toggled.connect(self._mark_dirty)
             elif isinstance(box, QComboBox):
                 box.currentIndexChanged.connect(self._mark_dirty)
+            elif isinstance(box, QSpinBox):
+                box.valueChanged.connect(self._mark_dirty)
         for combo in (self.device_combo, self.stt_combo):
             combo.currentIndexChanged.connect(self._mark_dirty)
         roots_model = self.file_search_roots.model()
@@ -744,256 +727,60 @@ class SettingsPanel(QWidget):
         self.layout().setContentsMargins(24 + side, 0, 24 + side, 24)  # type: ignore[union-attr]
 
     def _update_cloud_hint(self, *_args: object) -> None:
-        """Karma tanıma seçiliyken verinin nereye gittiğini açıkça yazar (ADR 0079)."""
-        gm = getattr(self, "game_mode", None)
-        gt = getattr(self, "game_mode_target", None)
-        if gm is not None and gt is not None:
-            gt.setEnabled(gm.isChecked() and not self._demo)
-        game_cloud = bool(gm and gm.isChecked() and gt and gt.currentData() == "cloud")
-        hybrid = self.hybrid_stt.isChecked()
-        on = hybrid or game_cloud
-        xai = self.cloud_protocol.currentData() == "xai"
-        self.cloud_box.setVisible(on)
-        live = on and not self._demo
-        self.cloud_model.setEnabled(live and not xai)
-        self.cloud_fetch_button.setEnabled(live and not xai and bool(self._cloud_endpoint()[0]))
-        edit = self.cloud_model.lineEdit()
-        if edit is not None:
-            edit.setPlaceholderText(
-                t("xAI için model gerekmez") if xai else t("Örneğin: whisper-1")
-            )
-        name, endpoint = self._cloud_endpoint()
-        needs_key = endpoint is not None and endpoint.api_key
-        self.cloud_key.setEnabled(live and needs_key)
-        self.cloud_key_button.setEnabled(live and needs_key)
-        self.cloud_key.setPlaceholderText(
-            "" if not name else t("Bu sunucu anahtar istemiyor") if not needs_key
-            else t("kayıtlı") if stored_endpoint_key(name) else ""
-        )
-        if not on:
-            self.cloud_stt_hint.setText("")
-            return
-        if hybrid:
-            text = t(
-                "Komut sesi seçtiğin bulut sunucusuna gönderilir; kesintisiz kipte her söz gider. "
-                "Sunucu eklemek için Ayarlar > Model > Bağlantılar bölümünü kullan."
-            )
-        else:
-            text = t(
-                "Oyun modunda bulut hedefi seçili: tam ekran oyun açıldığında büyük yerel model "
-                "VRAM'den bırakılır ve tanıma seçtiğin bulut sunucusuna geçer."
-            )
-        if xai:
-            text += t(
-                " Grok tanıma Türkçeyi resmi olarak doğrulamıyor; hata olursa yerel metne düşer."
-            )
-        if needs_key and not stored_endpoint_key(name) and not self.cloud_key.text().strip():
-            text += t(
-                " Bu sunucu için API anahtarı kayıtlı değil; yukarıya yazıp "
-                "'Anahtarı kaydet'e bas, yoksa tanıma çalışmaz."
-            )
-        self.cloud_stt_hint.setText(text)
+        voice_settings_section.update_cloud_hint(self)
 
     def _cloud_endpoint(self) -> tuple[str, EndpointConfig | None]:
-        """Seçili sunucunun kimliği ve config kaydı; seçilmemiş ya da okunamazsa (\"\", None)."""
-        name = str(self.cloud_server.currentData() or "")
-        if not name:
-            return "", None
-        try:
-            return name, load_settings(self.config_path).endpoints.get(name)
-        except (OSError, ValueError):
-            return name, None
+        return voice_settings_section.cloud_endpoint(self)
 
     def _save_cloud_key(self) -> None:
-        """Anahtarı kasaya yazar; YAML, bağlar ve Uygula'ya girmez, alan hemen temizlenir."""
-        name, endpoint = self._cloud_endpoint()
-        typed = self.cloud_key.text().strip()
-        if not name or endpoint is None or not endpoint.api_key or not typed:
-            self.cloud_stt_hint.setText(t("Önce bir sunucu seç ve anahtarı yaz."))
-            return
-        failure = store_endpoint_key(name, typed, provider_section.write_secret)
-        self.cloud_key.clear()
-        self._update_cloud_hint()
-        self.cloud_stt_hint.setText(
-            t("Anahtar saklanamadı; {failure}").format(failure=failure)
-            if failure
-            else t("{name} için anahtar kaydedildi.").format(name=name)
-        )
+        voice_settings_section.save_cloud_key(self)
 
     def _fetch_cloud_models(self) -> None:
-        """Seçili sunucunun /models listesini arka planda getirir; bir seferde tek istek."""
-        name, endpoint = self._cloud_endpoint()
-        if endpoint is None or (self._cloud_fetch is not None and self._cloud_fetch.isRunning()):
-            return
-        key = None
-        if endpoint.api_key:
-            key = self.cloud_key.text().strip() or stored_endpoint_key(name)
-        self.cloud_stt_hint.setText(t("Model listesi alınıyor…"))
-        self._cloud_fetch_for = name
-        self._cloud_fetch = ConnectionTest(
-            endpoint.base_url, key, self, provider_section.probe_models
-        )
-        self._cloud_fetch.done.connect(self._cloud_models_done)
-        self._cloud_fetch.start()
+        voice_settings_section.fetch_cloud_models(self)
 
     def _cloud_models_done(self, message: str, models: list[str]) -> None:
-        # İstek sürerken sunucu değiştiyse eski sunucunun listesi yeni sunucunun önerisi olmaz.
-        if self._cloud_fetch_for != str(self.cloud_server.currentData() or ""):
-            return
-        self.cloud_stt_hint.setText(message)
-        if not models:
-            return
-        current = self.cloud_model.currentText()
-        self.cloud_model.blockSignals(True)  # liste yenilemesi kirli sayılmasın
-        self.cloud_model.clear()
-        self.cloud_model.addItems(models)
-        self.cloud_model.setCurrentIndex(max(0, self.cloud_model.findText(current)))
-        if current:
-            self.cloud_model.setEditText(current)
-        self.cloud_model.blockSignals(False)
+        voice_settings_section.cloud_models_done(self, message, models)
 
     def _load_cloud_servers(self) -> None:
-        """Sunucu listesini config'teki endpoints'ten yeniler; seçimi korur."""
-        try:
-            endpoints = list(load_settings(self.config_path).endpoints)
-        except (OSError, ValueError):
-            return
-        current = self.cloud_server.currentData()
-        self.cloud_server.blockSignals(True)
-        self.cloud_server.clear()
-        self.cloud_server.addItem(t("Seçilmedi"), "")
-        for name in endpoints:
-            self.cloud_server.addItem(name, name)
-        self.cloud_server.setCurrentIndex(max(0, self.cloud_server.findData(current)))
-        self.cloud_server.blockSignals(False)
-        self._update_cloud_hint()
+        voice_settings_section.load_cloud_servers(self)
 
     def _cloud_server_picked(self, *_args: object) -> None:
-        """xAI sunucusu seçilince protokol xAI'ye önayarlanır (kullanıcı değiştirebilir)."""
-        name = str(self.cloud_server.currentData() or "")
-        try:
-            endpoint = load_settings(self.config_path).endpoints.get(name)
-        except (OSError, ValueError):
-            return
-        host = urlparse(endpoint.base_url).hostname or "" if endpoint else ""
-        if name == "xai" or host == "x.ai" or host.endswith(".x.ai"):
-            self.cloud_protocol.setCurrentIndex(self.cloud_protocol.findData("xai"))
+        voice_settings_section.cloud_server_picked(self)
 
     def _toggle_advanced(self, checked: bool) -> None:
-        """Gelişmiş ses ayarlarını açar ve ok yönünü duruma göre değiştirir."""
-        self.advanced_box.setVisible(checked)
-        self.advanced_toggle.setArrowType(
-            Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
-        )
+        voice_settings_section.toggle_advanced(self, checked)
 
     @staticmethod
     def _stt_size_text(choice: stt_catalog.WhisperChoice) -> str:
-        if choice.size_mb < 1000:
-            return f"{choice.size_mb} MB"
-        return f"{choice.size_mb / 1000:.1f} GB"
+        return voice_settings_section.stt_size_text(choice)
 
     def _populate_stt_choices(self, selected_name: str | None) -> None:
-        was_blocked = self.stt_combo.blockSignals(True)
-        try:
-            self.stt_combo.clear()
-            if selected_name is None:
-                self.stt_combo.addItem(t("Özel model (elle ayarlı)"), None)
-            for choice in stt_catalog.CATALOG:
-                text = f"{t(choice.label)} · {self._stt_size_text(choice)}"
-                if choice.name == self._recommended_stt:
-                    text += t(" · önerilen")
-                if stt_catalog.installed_path(choice.name) is not None:
-                    text += t(" · kurulu")
-                self.stt_combo.addItem(text, choice.name)
-                index = self.stt_combo.count() - 1
-                self.stt_combo.setItemData(
-                    index, t(choice.note), Qt.ItemDataRole.ToolTipRole
-                )
-            if selected_name is None:
-                self.stt_combo.setCurrentIndex(0)
-            else:
-                index = self.stt_combo.findData(selected_name)
-                if index >= 0:
-                    self.stt_combo.setCurrentIndex(index)
-        finally:
-            self.stt_combo.blockSignals(was_blocked)
-        self._stt_selection_changed()
+        voice_settings_section.populate_stt_choices(self, selected_name)
 
     def _selected_stt_choice(self) -> stt_catalog.WhisperChoice | None:
-        name = self.stt_combo.currentData()
-        if not isinstance(name, str):
-            return None
-        return next(
-            (choice for choice in stt_catalog.CATALOG if choice.name == name),
-            None,
-        )
+        return voice_settings_section.selected_stt_choice(self)
 
     def _stt_selection_changed(self, *_args: object) -> None:
-        choice = self._selected_stt_choice()
-        if choice is None:
-            self.stt_status.setText(
-                t("Özel model (elle ayarlı): ayar dosyasındaki model yolu kullanılıyor.")
-            )
-        else:
-            self.stt_status.setText(t(choice.note))
-        self._update_stt_download_button()
+        voice_settings_section.stt_selection_changed(self)
 
     def _update_stt_download_button(self) -> None:
-        choice = self._selected_stt_choice()
-        running = (
-            self.stt_download_thread is not None
-            and self.stt_download_thread.isRunning()
-        )
-        self.stt_download.setEnabled(
-            not self._demo
-            and choice is not None
-            and not running
-            and stt_catalog.installed_path(choice.name) is None
-        )
+        voice_settings_section.update_stt_download_button(self)
 
     def stt_model_path(self) -> Path | None:
         """Seçili katalog modelinin kullanılabilir yerel yolunu döndürür."""
-        choice = self._selected_stt_choice()
-        if choice is None:
-            return None
-        return stt_catalog.installed_path(choice.name)
+        return voice_settings_section.stt_model_path(self)
 
     def _download_stt(self, *_args: object) -> None:
-        if self._demo or self.stt_download_thread is not None:
-            return
-        choice = self._selected_stt_choice()
-        if choice is None:
-            return
-        if stt_catalog.installed_path(choice.name) is not None:
-            self._stt_selection_changed()
-            return
-
-        thread = SttDownload(choice.name, self)
-        thread.done.connect(self._stt_download_done)
-        thread.failed.connect(self._stt_download_failed)
-        thread.finished.connect(self._stt_download_finished)
-        thread.finished.connect(thread.deleteLater)
-        self.stt_download_thread = thread
-        self.stt_combo.setEnabled(False)
-        self.stt_download.setEnabled(False)
-        self.stt_status.setText(
-            t("İndiriliyor… ({size})").format(size=self._stt_size_text(choice))
-        )
-        thread.start()
+        voice_settings_section.download_stt(self)
 
     def _stt_download_done(self, _path: Path) -> None:
-        choice = self._selected_stt_choice()
-        self._populate_stt_choices(choice.name if choice is not None else None)
-        self.stt_status.setText(t("İndirildi; Kaydet ile kaydedilir."))
-        self._mark_dirty()
+        voice_settings_section.stt_download_done(self, _path)
 
     def _stt_download_failed(self, error_type: str) -> None:
-        self.stt_status.setText(t("İndirilemedi: {error_type}").format(error_type=error_type))
+        voice_settings_section.stt_download_failed(self, error_type)
 
     def _stt_download_finished(self) -> None:
-        self.stt_download_thread = None
-        self.stt_combo.setEnabled(not self._demo)
-        self._update_stt_download_button()
+        voice_settings_section.stt_download_finished(self)
 
     def refresh(self) -> None:
         self._loading = True
@@ -1046,27 +833,16 @@ class SettingsPanel(QWidget):
             self._loading = False
 
     def _no_device(self) -> None:
-        """Giriş yoksa liste boş kalmaz: soluk, kapalı satır nedenini söyler."""
-        self.device_combo.clear()
-        self.device_combo.addItem(t("Mikrofon bulunamadı"), None)
-        self.device_combo.setEnabled(False)
+        voice_settings_section.no_device(self)
 
     def _set_current_device(self, text: str) -> None:
-        self.current_device.setText(text.strip() or t("Seçilmedi"))
+        voice_settings_section.set_current_device(self, text)
 
     def _refresh_devices(self, settings: Settings) -> None:
-        refresh_device_combo(self, settings)
+        voice_settings_section.refresh_devices(self, settings)
 
     def _toggle_device_detail(self) -> None:
-        if self._demo:
-            return
-        was_dirty = self._dirty
-        try:
-            self._refresh_devices(load_settings(self.config_path))
-        except (OSError, ValueError):
-            self.notice.setText(t("Mikrofon ayarı okunamadı."))
-        # Listeyi yeniden kurmak kullanıcı değişikliği değildir.
-        self._set_dirty(was_dirty)
+        voice_settings_section.toggle_device_detail(self)
 
     def _refresh_applications(self) -> None:
         friendly = {"brave": "Brave", "notepad": t("Not Defteri"), "paint": "Paint",

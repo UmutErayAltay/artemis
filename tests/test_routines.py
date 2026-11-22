@@ -18,7 +18,12 @@ from pydantic import BaseModel, ConfigDict
 from artemis.brain.fake import ScriptedProvider
 from artemis.brain.models import ToolCall
 from artemis.channels.runtime import create_runtime
-from artemis.config.settings import ProactiveConfig, RoutinesConfig, Settings
+from artemis.config.settings import (
+    ComputerUseConfig,
+    ProactiveConfig,
+    RoutinesConfig,
+    Settings,
+)
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.routines import (
     Routine,
@@ -113,10 +118,12 @@ def make_settings(tmp_path: Path, *, enabled: bool = True) -> Settings:
 class Env:
     """Kapı, bağlam ve onay kaydı; testler `approvals` ile sorulanları görür."""
 
-    def __init__(self, tmp_path: Path, *, enabled: bool = True) -> None:
+    def __init__(
+        self, tmp_path: Path, *, enabled: bool = True, settings: Settings | None = None
+    ) -> None:
         Probe.ran = []
         self.tmp_path = tmp_path
-        self.settings = make_settings(tmp_path, enabled=enabled)
+        self.settings = settings or make_settings(tmp_path, enabled=enabled)
         self.gate = SafetyGate(build_registry())
         self.context = ToolContext(tmp_path, self.settings, AuditLog(self.settings.audit_path))
         self.approvals: list[str] = []
@@ -168,21 +175,47 @@ async def test_save_always_asks_and_denial_writes_nothing(env: Env) -> None:
     assert [s.tool for s in env.store.load()[0].steps] == ["probe_read"]
 
 
-async def test_save_is_refused_without_approval_on_tainted_turn(env: Env) -> None:
-    result = await env.call(
+async def test_save_after_external_read_asks_confirmation_in_accept_mode(env: Env) -> None:
+    env.answer = False
+    denied = await env.call(
         "routine_save", TurnState(tainted=True), name="x", steps=[step("probe_read")]
     )
-    assert not result.success and "dış içerik" in result.message
-    assert env.approvals == []  # onay penceresi hiç açılmadı
+    assert denied.status == "denied"
+    assert env.approvals == ["routine_save"]
     assert env.store.load() == []
 
-
-async def test_save_after_external_read_in_same_turn_is_refused(env: Env) -> None:
     state = TurnState()
     await env.call("probe_web", state)
     assert state.tainted
-    result = await env.call("routine_save", state, name="x", steps=[step("probe_read")])
-    assert not result.success and env.approvals == []
+    env.answer = True
+    saved = await env.call("routine_save", state, name="web-ozet", steps=[step("probe_read")])
+    assert saved.success, saved.message
+    assert env.approvals == ["routine_save", "routine_save"]
+    assert [r.name for r in env.store.load()] == ["web-ozet"]
+
+
+async def test_save_after_prior_external_read_confirms_in_accept_and_skips_in_auto(
+    tmp_path: Path,
+) -> None:
+    for mode in ("accept", "auto"):
+        settings = make_settings(tmp_path).model_copy(
+            update={"computer_use": ComputerUseConfig(mode=mode)}
+        )
+        local_env = Env(tmp_path / mode, settings=settings)
+        local_env.answer = True
+        for name, state in (
+            ("x-tainted", TurnState(tainted=True)),
+            ("x-history", TurnState(history_external=True)),
+        ):
+            result = await local_env.call(
+                "routine_save", state, name=name, steps=[step("probe_read")]
+            )
+            assert result.success, result.message
+        if mode == "accept":
+            assert local_env.approvals == ["routine_save", "routine_save"]
+        else:
+            assert local_env.approvals == []
+            assert len(local_env.events("approval_skipped")) == 2
 
 
 @pytest.mark.parametrize(

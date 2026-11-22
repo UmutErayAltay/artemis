@@ -70,8 +70,8 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 - [ ] Mikrofon göstergesi yalnız iki basış arasında yanıyor. `Y:53`
 
 ### Sesli komut, söz kesme ve STT
-- [ ] "Artemis, işe başla rutinini çalıştır" de → üç adım sırayla çalışır, yanıt "3/3 adım" der. `Y:62`
-- [ ] Artemis konuşurken "dur" / "bir saniye" → susar; bu söz komut olarak çalışmaz; hemen ardından "artemis" demeden söylenen cümle takip komutu olur. `W:40`
+- [ ] "Artemis, işe başla rutinini çalıştır" de → üç adım sırayla çalışır, yanıt "3/3 adım" der. *(Önkoşul: önce Oturum 3 `Y:60`'ta "işe başla" rutinini oluştur.)* `Y:62`
+- [ ] Artemis konuşurken "dur" / "bir saniye" → susar; bu söz komut olarak çalışmaz. *(Umut 2026-11-20 kararı: söz kesmede wake'siz takip sözü açılmaz; sonraki komut yine uyandırma adıyla verilir.)* `W:40`
 - [ ] Hoparlörle (kulaklıksız) uzun yanıt → Artemis kendi sesini söz sanıp susmaz; yankı giderme açık/kapalı ayrı denenir. `W:42`
 - [ ] Gürültü (öksürük, masa vuruşu) sesi kesmez. `W:44`
 - [ ] Uzun soru → ilk cümle model bitmeden duyulur; tur sonunda cümle tekrarlanmaz. `W:47`
@@ -129,10 +129,10 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 - Dış içerik okutmak için bir web sayfası hazır (`Y:65`).
 
 ### Rutin onayları (Y:60–66)
-- [ ] "işe başla adında rutin kaydet: VS Code'u aç, Spotify'ı aç, sesi 30 yap" → onay penceresi ad ve tüm adımları argümanlarıyla gösterir; reddedince kayıt yok, onaylayınca kaydedilir. `Y:60`
-- [ ] Panelden rutini seçip "Çalıştır" → onay penceresi çıkar; onaylayınca aynı şekilde çalışır. `Y:63`
+- [ ] "işe başla adında rutin kaydet: VS Code'u aç, Spotify'ı aç, sesi 30 yap" de → normal kipte onay penceresi ad ve tüm adımları argümanlarıyla gösterir (oto onayda temiz konuşmada onaysız kaydeder); reddedince kayıt yok, onaylayınca kaydedilir. `Y:60`
+- [ ] Panelden rutini seçip "Çalıştır" → temiz turda zararsız adımlar doğrudan çalışır; onay yalnız onay gerektiren adımlarda çıkar. `Y:63`
 - [ ] `close_application` içeren rutin kaydet ve çalıştır → kapatma adımında onay sorulur; reddedince rutin kalır, sonraki adımlar çalışmaz, yanıt hangi adımın onaylanmadığını söyler. `Y:64`
-- [ ] Web sayfası okuttuktan sonra aynı konuşmada "rutin kaydet" → onay penceresi açılmaz, "bu turda dış içerik okundu" iletisi gelir. `Y:65`
+- [ ] Web sayfası okuttuktan sonra aynı konuşmada "rutin kaydet" → *(Umut 2026-11-21 kararı: dış içerikli sohbette sabit reddetme kaldırıldı; normal kipte zorunlu onay penceresiyle adımları gösterip izin verir, otomatik onay kipinde onay sormadan kaydeder.)* `Y:65`
 - [ ] Rutini sohbetle silmeyi iste ve panelden "Sil"e bas → ikisinde de onay sorulur. `Y:66`
 
 ### Beceri (sohbet)
@@ -283,7 +283,7 @@ Oturum boyutları (tahmini süre, kaynakta yoktur):
 - [ ] Tepsi menüsünde "Windows açılışında başlat" işaretini kaldır → `autostart durum` "kapalı"; kayıt silinmiştir. `F:103` (#13; `F:59-60`)
 - [ ] "Bilgisayarı kilitle" → kilit ekranı gelir; yanıt "gönderildi" der (başarı değil). `F:108` (#18; `F:70`)
 - [ ] "Bilgisayarı kapat" → onay penceresi; onayla → Windows 60 sn uyarısı; "kapatmayı iptal et" → iptal edilir. (Önce açık işleri kaydet; `COMPUTERNAME` düzeltmesi sonrası yeniden denenecek.) `F:109` (#19; `F:71-72`)
-- [ ] "Uyku moduna al" → onay ister; onaylayınca 2–3 sn içinde uyur, uyanınca Artemis çalışır. `F:110` (#20; `F:73`)
+- [ ] "Uyku moduna al" → temiz turda onay sormadan 2–3 sn içinde (Modern Standby S0 dahil) uyur, uyanınca Artemis çalışır. `F:110` (#20; `F:73`)
 - [x] Kanal/Runtime kapanış sahipliği: aç/kapat sonrası süreç kalmaz (Görev Yöneticisi). `R:154` — 2026-11-20 betik (`scripts/kabul_masaustu.py --offscreen`): geçti; gerçek ekranda da geçti (2026-11-20, `scripts/kabul_masaustu.py`).
 
 ---

@@ -255,6 +255,15 @@ def test_sleep_is_sent_and_failure_is_error() -> None:
     assert make(FakeRunner(returncode=4)).power("sleep").status == "error"
 
 
+def test_sleep_child_script_supports_classic_and_modern_standby() -> None:
+    from artemis.tools.system_control import _SLEEP_CHILD_SCRIPT
+
+    assert "GetPwrCapabilities" in _SLEEP_CHILD_SCRIPT
+    assert "SetSuspendState" in _SLEEP_CHILD_SCRIPT
+    assert "SendMessageTimeout" in _SLEEP_CHILD_SCRIPT
+    assert "0xF170" in _SLEEP_CHILD_SCRIPT
+
+
 # --- pencere listesi -----------------------------------------------------------------------
 
 

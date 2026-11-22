@@ -425,3 +425,75 @@ def test_window_registers_dictation_hotkey_only_when_enabled(
         while time.monotonic() < deadline and not window.bridge.stopped:
             app.processEvents()
             time.sleep(0.01)
+
+
+async def test_build_dictation_recognizer_clears_hotwords_only_for_dictation(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import types
+
+    import artemis.channels.voice.factory as factory_module
+
+    captured: list[Any] = []
+
+    class RecordingRecognizer:
+        def __init__(self, voice_cfg: Any) -> None:
+            captured.append(voice_cfg)
+
+        def prepare(self) -> None:
+            return None
+
+    monkeypatch.setattr(factory_module, "FasterWhisperRecognizer", RecordingRecognizer)
+    monkeypatch.setattr(
+        factory_module,
+        "alias_hotword_config",
+        lambda s: s.voice.model_copy(update={"stt_hotwords": ("Brave", "Spotify")}),
+    )
+    settings = Settings(
+        workspace=tmp_path,
+        voice=VoiceConfig(stt_mode="local", stt_hotwords=("Not Defteri",)),
+    )
+    runtime = types.SimpleNamespace(settings=settings, audit=AuditLog(tmp_path / "audit.jsonl"))
+
+    await factory_module.build_dictation_recognizer(runtime)  # type: ignore[arg-type]
+    await factory_module.build_dictation_recognizer(runtime, "telegram_audio")  # type: ignore[arg-type]
+
+    assert len(captured) == 2
+    assert captured[0].stt_hotwords == ()
+    assert captured[1].stt_hotwords == ("Brave", "Spotify")
+
+
+def test_reload_dictation_settings_rebuilds_idle_dictation_with_new_max_seconds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    world = World()
+    monkeypatch.setattr(bridge_module, "windows_backend", world.backend)
+    monkeypatch.setattr(bridge_module, "SoundDeviceMicrophone", lambda *a, **k: FakeMic())
+
+    async def fake_recognizer(_runtime: Runtime) -> FakeRecognizer:
+        return FakeRecognizer("tamam")
+
+    monkeypatch.setattr(bridge_module, "build_dictation_recognizer", fake_recognizer)
+    bridge = _bridge(tmp_path)
+    try:
+        assert bridge.toggle_dictation()
+        _drain(bridge, lambda e: _has(e, "dictation_listening"))
+        assert bridge.toggle_dictation()
+        _drain(bridge, lambda e: _has(e, "dictation_message"))
+        first = bridge._dictation
+        assert first is not None and first._max_seconds == 120.0
+
+        assert bridge.reload_dictation_settings(DictationConfig(enabled=True, max_seconds=5.0))
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline and bridge._dictation is not None:
+            time.sleep(0.01)
+        assert bridge._dictation is None
+
+        assert bridge.toggle_dictation()
+        _drain(bridge, lambda e: _has(e, "dictation_listening"))
+        second = bridge._dictation
+        assert second is not None and second is not first and second._max_seconds == 5.0
+        assert bridge.toggle_dictation()
+        _drain(bridge, lambda e: _has(e, "dictation_message"))
+    finally:
+        bridge.shutdown()

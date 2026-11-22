@@ -140,6 +140,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda box: "hybrid" if box.isChecked() else "local",
         lambda box, value: box.setChecked(value == "hybrid"),
     ),
+    _checkbox(("voice", "direct_audio_input"), "direct_audio_input"),
     PanelBinding(
         ("voice", "stt_cloud_endpoint"), "cloud_server",
         lambda combo: str(combo.currentData() or ""),
@@ -164,6 +165,13 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     PanelBinding(
         ("dictation", "hotkey"), "dictation_hotkey",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
+    PanelBinding(
+        ("dictation", "max_seconds"),
+        "dictation_max_seconds",
+        lambda box: float(box.value()),
+        lambda box, value: box.setValue(int(round(float(value)))),
+        quiet=True,
     ),
     _checkbox(("selection_actions", "enabled"), "selection_enabled"),
     PanelBinding(

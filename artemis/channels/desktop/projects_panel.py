@@ -294,6 +294,7 @@ class ProjectsPanel(QWidget):
 
         # Sol kart: yeni iş formu.
         left, left_lay = make_card()
+        self._left_card = left
         left_lay.addWidget(make_label(t("Yeni iş"), "sectionTitle"))
         self.project = QComboBox()
         self.task = QPlainTextEdit()
@@ -333,6 +334,7 @@ class ProjectsPanel(QWidget):
 
         # Sağ kart: liste, ayrıntı, eylemler.
         right, right_lay = make_card()
+        self._right_card = right
         title_row = QHBoxLayout()
         title_row.setSpacing(8)
         title_row.addWidget(make_label(t("Taslaklar ve işler"), "sectionTitle"))
@@ -421,21 +423,34 @@ class ProjectsPanel(QWidget):
         self._sync_list()
         self.set_busy(True)
 
-    def resizeEvent(self, event: QResizeEvent) -> None:
-        super().resizeEvent(event)
-        wide = event.size().width() >= self.WIDE_BREAKPOINT
-        self._columns.setDirection(
-            QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
-        )
+    def _sync_responsive_layout(self, width: int) -> None:
+        wide = width >= self.WIDE_BREAKPOINT
         # İki seçici geniş düzende yan yana, dar düzende alt alta (aynı eşik).
         self._agent_row.setDirection(
             QBoxLayout.Direction.LeftToRight if wide else QBoxLayout.Direction.TopToBottom
         )
+        # Yan yana iki sütun mevcut genişliğe sığmazsa alt alta dizilir; 1280x850 gibi
+        # pencerelerde yatay kaydırma çubuğu çıkıp sol sütunu kesmez.
+        needed = (
+            self._left_card.minimumSizeHint().width()
+            + self._right_card.minimumSizeHint().width()
+            + self._columns.spacing()
+        )
+        available = max(0, width - 24)
+        columns_wide = wide and needed <= available
+        self._columns.setDirection(
+            QBoxLayout.Direction.LeftToRight if columns_wide else QBoxLayout.Direction.TopToBottom
+        )
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._sync_responsive_layout(event.size().width())
 
     def showEvent(self, event: QShowEvent) -> None:
         super().showEvent(event)
         # Ayarlar'da Uygula ile eklenen ajan/klasörler sayfaya dönünce görünür.
         self.reload_config()
+        self._sync_responsive_layout(self.width())
 
     # --- Kod ajanı ve başlangıç klasörü seçimi (ADR 0049) -------------------------------------
 
@@ -477,7 +492,7 @@ class ProjectsPanel(QWidget):
         # birkaç harf bol: 'x' ortalama harften geniştir, açılır ok ve dolgu da payı yer.
         # Kullanıcının eklediği uzun klasör adı yine de yalnız kendi satırında "…" ile kısalır.
         fit = QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
-        sizes = ((self.agent_combo, 9), (self.mode_combo, 13), (self.workdir_combo, 9))
+        sizes = ((self.agent_combo, 8), (self.mode_combo, 13), (self.workdir_combo, 8))
         for combo, chars in sizes:
             combo.setSizeAdjustPolicy(fit)
             combo.setMinimumContentsLength(chars)
