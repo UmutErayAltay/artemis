@@ -30,6 +30,7 @@ from artemis.channels.desktop.chat_widgets import (
     _Drawer,
 )
 from artemis.channels.desktop.page_kit import make_page_header
+from artemis.channels.desktop.profile_bar import build_profile_button
 from artemis.channels.desktop.widgets import HelpTip, PetFace
 from artemis.i18n import t
 
@@ -120,6 +121,7 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     window.budget_chip.setObjectName("chip")
     window.budget_chip.setAccessibleName(t("Günlük bütçe ve harcama"))
     row.addWidget(window.budget_chip, 0, Qt.AlignmentFlag.AlignVCenter)
+    row.addWidget(build_profile_button(window), 0, Qt.AlignmentFlag.AlignVCenter)
     window.voice_button = icon_toggle(t("Sesi aç veya kapat"))
     window.voice_button.clicked.connect(window._toggle_voice)
     row.addWidget(window.voice_button)
@@ -175,6 +177,9 @@ def fit_topbar(window: DesktopWindow) -> None:
     window.model_box.setVisible(width >= 800)
     window.model_caption.setVisible(width >= 800)
     window.budget_chip.setVisible(width >= 1000)
+    profile_button = getattr(window, "profile_button", None)
+    if profile_button is not None:
+        profile_button.setVisible(True)
 
     central = window.centralWidget()
     outer_layout = central.layout() if central is not None else None
@@ -196,7 +201,10 @@ def fit_topbar(window: DesktopWindow) -> None:
     if not widgets:
         return
     needed = sum(_topbar_item_width(w) for w in widgets) + spacing * (len(widgets) - 1)
-    optional_items: list[QWidget] = [window.model_caption, window.budget_chip, window.model_box]
+    optional_items: list[QWidget] = [window.model_caption, window.budget_chip]
+    if profile_button is not None:
+        optional_items.append(profile_button)
+    optional_items.append(window.model_box)
     if window.demo_chip is not None:
         optional_items.append(window.demo_chip)
     for optional in optional_items:

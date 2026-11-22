@@ -12,6 +12,7 @@ from typing import Any
 from artemis.brain.agent_loop import AgentLoop
 from artemis.brain.conversation import ConversationContext
 from artemis.brain.providers import Provider, build_provider
+from artemis.brain.router import ProviderRouter
 from artemis.channels.runner import CommandRunner
 from artemis.config.settings import Settings, load_settings
 from artemis.i18n import t
@@ -160,6 +161,8 @@ def create_runtime(
                 log.emit("proactive_unavailable", error_type=type(error).__name__)
         builder = provider_builder if provider_builder is not None else build_provider
         selected_provider = provider if provider is not None else builder(loaded, log)
+        if isinstance(selected_provider, ProviderRouter):
+            selected_provider.set_profile_getter(lambda: context.settings.work_profile)
         agent = AgentLoop(selected_provider, gate, context, approve)
         if loaded.research.enabled and with_code_agent:
             # Kod işleriyle aynı sahiplik: ikinci runtime (Telegram) işi `uncertain` yapmasın.

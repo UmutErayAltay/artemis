@@ -27,6 +27,7 @@ from artemis.channels.desktop.dictation import (
     type_into_target,
 )
 from artemis.config.settings import Settings
+from artemis.config.work_profile import is_local_only_profile
 from artemis.i18n import t
 
 MAX_CHARS = 6000
@@ -170,6 +171,7 @@ class SelectionActions:
         translate_to: str,
         cloud_allowed: bool,
         local_alias: str | None,
+        profile_getter: Callable[[], str] | None = None,
         other_busy: Callable[[], bool] = lambda: False,
         own_pid: int | None = None,
         timeout: float = 30.0,
@@ -184,6 +186,7 @@ class SelectionActions:
         self._lang = clean_transcript(translate_to) or "en"
         self._cloud_allowed = cloud_allowed
         self._local_alias = local_alias
+        self._profile_getter = profile_getter
         self._other_busy = other_busy
         self._own_pid = os.getpid() if own_pid is None else own_pid
         self._timeout = timeout
@@ -226,8 +229,13 @@ class SelectionActions:
         self._phase = phase
         return True
 
+    def _is_cloud_allowed(self) -> bool:
+        if self._profile_getter is not None and is_local_only_profile(self._profile_getter()):
+            return False
+        return self._cloud_allowed
+
     def _problem(self) -> str:
-        if not self._cloud_allowed and self._local_alias is None:
+        if not self._is_cloud_allowed() and self._local_alias is None:
             return t(_PRIVACY)
         return ""
 
@@ -357,7 +365,7 @@ class SelectionActions:
             if problem:
                 outcome, message = "privacy_refused", problem
                 return
-            private = not self._cloud_allowed
+            private = not self._is_cloud_allowed()
             task = _TASKS[action].format(lang=self._lang)
             messages = [
                 Message(role="system", content=_SYSTEM.format(task=task)),

@@ -921,6 +921,8 @@ class Settings(BaseModel):
 
     # Arayüz ve yanıt dili; ADR yok, basit tercih.
     language: Literal["tr", "en"] = "tr"
+    # Bağlamsal çalışma profili (ADR 0083): work | game | private | meeting.
+    work_profile: Literal["work", "game", "private", "meeting"] = "work"
     workspace: Path = Path("desktop")
     state_dir: Path = Path(".artemis")
     audit_path: Path = Path(".artemis/audit.jsonl")

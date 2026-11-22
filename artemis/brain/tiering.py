@@ -14,6 +14,7 @@ from collections.abc import Sequence
 
 from artemis.brain.models import Message
 from artemis.config.settings import Settings
+from artemis.config.work_profile import is_local_only_profile
 
 # Kullanıcının açıkça daha dikkatli düşünme istemesi.
 _DEEP = re.compile(
@@ -55,6 +56,8 @@ def choose_model(
     """(model anahtarı, neden kodu); zor işler modeli yoksa ya da gerekmiyorsa (None, "")."""
     hard = settings.hard_model
     if not hard or hard == settings.primary_model or hard not in settings.models:
+        return None, ""
+    if is_local_only_profile(settings.work_profile) and settings.models[hard].provider != "ollama":
         return None, ""
     if _DEEP.search(text):
         return hard, "deep"

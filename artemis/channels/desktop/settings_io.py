@@ -364,6 +364,18 @@ def save_computer_mode(path: Path, mode: str) -> None:
     _write_validated(path, raw)
 
 
+def save_work_profile(path: Path, profile: str) -> None:
+    """Yalnız çalışma profilini atomik olarak yazar; üst çubuk seçicisi Uygula beklemez."""
+    from artemis.config.work_profile import is_valid_work_profile
+
+    if not is_valid_work_profile(profile):
+        raise ValueError(f"Geçersiz çalışma profili: {profile!r}")
+    load_settings(path)
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    raw["work_profile"] = profile
+    _write_validated(path, raw)
+
+
 def save_code_agent(path: Path, code_agent: dict[str, Any]) -> None:
     """Yalnız code_agent alanları; model/cihaz seçimine bağlı değil (GitHub bağı hemen kalıcı)."""
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))

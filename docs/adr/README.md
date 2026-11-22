@@ -84,3 +84,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0080 — Ses modeli türü ve model listesinden bulut konuşma sesi](0080-ses-modeli-turu.md)
 - [0081 — Uygulama içi güncelleme](0081-uygulama-ici-guncelleme.md)
 - [0082 — İngilizce ses](0082-ingilizce-ses.md)
+- [0083 — Bağlamsal çalışma profilleri](0083-baglamsal-calisma-profilleri.md)

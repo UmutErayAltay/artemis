@@ -16,6 +16,7 @@ from datetime import datetime
 from artemis.channels.telegram.api import TelegramClient, TelegramError
 from artemis.channels.telegram.channel import split_text
 from artemis.config.settings import Settings
+from artemis.config.work_profile import is_local_only_profile, should_suppress_toast
 from artemis.safety.audit import AuditLog
 from artemis.tools.toast import ToastOutcome, show_toast
 
@@ -35,7 +36,7 @@ PRIVATE_WITHHELD = (
 @dataclass(frozen=True)
 class DeliveryOutcome:
     delivered: bool
-    # Hedef -> "ok" | "error" | "disabled" | "withheld"
+    # Hedef -> "ok" | "error" | "disabled" | "withheld" | "suppressed"
     targets: dict[str, str]
 
 
@@ -49,6 +50,7 @@ class Deliverer:
         routine_panel: RoutinePanelSink | None = None,
         toast: ToastFunction | None = show_toast,
         telegram: TelegramClient | None = None,
+        profile_getter: Callable[[], str] | None = None,
     ) -> None:
         self.settings = settings
         self.audit = audit
@@ -56,6 +58,7 @@ class Deliverer:
         self.routine_panel = routine_panel
         self.toast = toast
         self.telegram = telegram
+        self._profile_getter = profile_getter
 
     async def deliver(
         self,
@@ -78,19 +81,31 @@ class Deliverer:
             targets["panel"] = "ok" if sent else "error"
         elif self.panel is not None:
             targets["panel"] = "ok" if self.panel(title, body) else "error"
+        profile = (
+            self._profile_getter()
+            if self._profile_getter is not None
+            else self.settings.work_profile
+        )
         if self.toast is not None:
-            outcome = await asyncio.to_thread(self.toast, title, body)
-            targets["toast"] = outcome.status
+            if should_suppress_toast(profile):
+                targets["toast"] = "suppressed"
+            else:
+                outcome = await asyncio.to_thread(self.toast, title, body)
+                targets["toast"] = outcome.status
+        private_profile = is_local_only_profile(profile)
         chat_id = self.settings.telegram.chat_id
         if (
             self.telegram is not None
             and chat_id is not None
             and self.settings.proactive.telegram
-            and not local_only
         ):
-            targets["telegram"] = await asyncio.to_thread(
-                self._send_telegram, chat_id, title, body, private
-            )
+            if private_profile:
+                if not local_only:
+                    targets["telegram"] = "withheld"
+            elif not local_only:
+                targets["telegram"] = await asyncio.to_thread(
+                    self._send_telegram, chat_id, title, body, private
+                )
         delivered = any(status == "ok" for status in targets.values())
         self.audit.emit(
             "proactive_delivery",

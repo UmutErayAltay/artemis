@@ -22,7 +22,7 @@ from artemis.brain.agent_loop import RunResult
 from artemis.brain.models import Completion, Message
 from artemis.brain.router import ProviderRouter
 from artemis.brain.streaming import ResponseStream
-from artemis.channels.desktop import ptt_bridge
+from artemis.channels.desktop import profile_bridge, ptt_bridge
 from artemis.channels.desktop.computer_host import ComputerHost
 from artemis.channels.desktop.dictation import Dictation, windows_backend
 from artemis.channels.desktop.selection import (
@@ -354,7 +354,7 @@ class DesktopBridge:
         # Dikte (ADR 0057) ilk kısayol basışında kurulur; ayar imzası değişince yenilenir.
         self._dictation: Dictation | None = None
         self._dictation_override: DictationConfig | None = None
-        self._dictation_signature: tuple[float, int | str | None, str] | None = None
+        self._dictation_signature: tuple[float, int | str | None, str, str] | None = None
         # Seçili metin eylemleri (ADR 0062) de ilk kısayol basışında işçi döngüsünde kurulur.
         self._selection: SelectionActions | None = None
         # Proaktif zamanlayıcı (ADR 0027) yalnız işçi döngüsünde yaşar.
@@ -496,6 +496,7 @@ class DesktopBridge:
             dictation_cfg.max_seconds,
             settings.voice.input_device,
             settings.voice.stt_mode,
+            runtime.context.settings.work_profile,
         )
         if (
             self._dictation is not None
@@ -568,6 +569,7 @@ class DesktopBridge:
                 translate_to=settings.selection_actions.translate_to,
                 cloud_allowed=settings.allow_cloud_clipboard,
                 local_alias=local_chat_alias(settings),
+                profile_getter=lambda: runtime.context.settings.work_profile,
                 other_busy=lambda: self._dictation is not None and self._dictation.busy,
                 timeout=min(settings.provider_timeout_seconds * 2, settings.max_seconds),
             )
@@ -861,6 +863,7 @@ class DesktopBridge:
             panel=self._proactive_panel,
             routine_panel=self._proactive_routine_panel,
             telegram=self._proactive_telegram,
+            profile_getter=lambda: runtime.context.settings.work_profile,
         )
         scheduler = ProactiveScheduler(runtime, store, deliverer)
         self._proactive_stop = asyncio.Event()
@@ -1212,6 +1215,10 @@ class DesktopBridge:
         runtime.context.settings = runtime.context.settings.model_copy(
             update={"computer_use": computer_use}
         )
+
+    def set_work_profile(self, profile: str) -> bool:
+        """Çalışma profilini çalışan runtime'da günceller; Uygula beklemez."""
+        return profile_bridge.set_work_profile(self, profile)
 
     def _stop_voice_on_worker(self) -> None:
         if self._ptt_drain_task is not None and not self._ptt_drain_task.done():

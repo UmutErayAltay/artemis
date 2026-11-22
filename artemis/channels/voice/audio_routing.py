@@ -10,7 +10,8 @@ import math
 import re
 import wave
 from array import array
-from collections.abc import Awaitable, Callable
+from collections.abc import AsyncGenerator, Awaitable, Callable
+from contextlib import aclosing
 from difflib import SequenceMatcher
 from typing import Any
 
@@ -18,6 +19,7 @@ from artemis.brain.agent_loop import RunResult
 from artemis.channels.voice.contracts import (
     AudioSink,
     Microphone,
+    PCMChunk,
     SpeechRecognizer,
     SpeechSynthesizer,
 )
@@ -296,3 +298,58 @@ async def close_voice_resources(
             await closer()
         except (OSError, RuntimeError, ValueError) as error:
             logger.warning("%s kapatılamadı (%s).", label, type(error).__name__)
+
+
+async def play_speech_stream(
+    sink: AudioSink,
+    speech: SpeechStream,
+    cancelled: asyncio.Event,
+    first_pcm: Callable[[], None],
+    *,
+    synth_stream: Callable[..., AsyncGenerator[PCMChunk]],
+    on_first_chunk: Callable[[], None],
+    on_sentence: Callable[[], None],
+    should_stop_private: Callable[[bool], bool],
+    privacy_ready: asyncio.Event | None = None,
+    is_private: Callable[[], bool] | None = None,
+) -> None:
+    """Cümleleri sırayla sentezler; hepsi tek sink akışında çalınır (cihaz bir kez açılır)."""
+
+    async def chunks() -> AsyncGenerator[PCMChunk]:
+        first = True
+
+        async def next_sentences() -> AsyncGenerator[str]:
+            if privacy_ready is not None and not privacy_ready.is_set():
+                held = [s async for s in speech.sentences() if not cancelled.is_set()]
+                await privacy_ready.wait()
+                for sentence in held:
+                    yield sentence
+                return
+            async for sentence in speech.sentences():
+                yield sentence
+
+        index = 0
+        async for sentence in next_sentences():
+            if cancelled.is_set():
+                return
+            on_sentence()
+            private = is_private() if is_private is not None else False
+            stream = synth_stream(
+                sentence, cancelled, private=private, record_block=(index == 0)
+            )
+            index += 1
+            try:
+                async for chunk in stream:
+                    if first and chunk.pcm:
+                        first = False
+                        on_first_chunk()
+                    yield chunk
+            finally:
+                closer = getattr(stream, "aclose", None)
+                if closer is not None:
+                    await closer()
+            if should_stop_private(private):
+                return
+
+    async with aclosing(chunks()) as generator:
+        await sink.play(generator, cancelled, first_pcm)

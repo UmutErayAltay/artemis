@@ -29,6 +29,7 @@ from artemis.channels.voice.audio_routing import (
     frame_input_level,
     is_remote_synthesizer,
     is_spoken_echo,
+    play_speech_stream,
     speech_words,
     strip_spoken_prefix,
     transcribe_cloud_command,
@@ -85,6 +86,7 @@ from artemis.channels.voice.telemetry import (
 from artemis.channels.voice.wake import find_wake_word as find_wake_word
 from artemis.channels.voice.wake import is_ghost_transcript as is_ghost_transcript
 from artemis.config.settings import VoiceConfig
+from artemis.config.work_profile import is_local_only_profile, should_mute_tts
 from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 
@@ -131,6 +133,8 @@ class VoiceController:
         should_use_cloud: Callable[[], bool] | None = None,
         local_synthesizer: SpeechSynthesizer | None = None,
         audit: AuditLog | None = None,
+        muted: bool = False,
+        profile_getter: Callable[[], str] | None = None,
     ) -> None:
         self.runner = runner
         # ADR 0069: eşleşme tek başına uyandırmaz/çalıştırmaz; yalnız eşleşmesiz bölütler STT'ye
@@ -209,6 +213,8 @@ class VoiceController:
         self.continuous = config.continuous_mode
         self._ptt_active = False
         self._ptt_uids: set[int] = set()
+        self._muted = muted
+        self._profile_getter = profile_getter
 
     async def run(self) -> None:
         """Mikrofon yalnız bu açıkça çağrılan döngü süresince tüketilir."""
@@ -576,13 +582,19 @@ class VoiceController:
             self._event(uid, "terminal", outcome="rejected", reason="no_wake")
             return
         audio_wav: bytes | None = None
-        if command and self.config.direct_audio_input and segment.pcm:
+        if (
+            command
+            and self.config.direct_audio_input
+            and not self._is_private_profile()
+            and segment.pcm
+        ):
             # Opt-in doğrudan ses modu: ham ses yalnız beyin modeline gider, ikinci bulut STT
             # yüklemesi yapılmaz; çok uzun kayıtlar boyut sınırında güvenli biçimde metne düşer.
             audio_wav = encode_direct_audio_wav(segment.pcm, self.config.sample_rate)
         elif (
             command
             and not self.config.direct_audio_input
+            and not self._is_private_profile()
             and self.cloud_recognizer is not None
             and (self._should_use_cloud is None or self._should_use_cloud())
         ):
@@ -654,6 +666,22 @@ class VoiceController:
         self.continuous = enabled
         self._emit_state("mode:on" if enabled else "mode:off")
 
+    def set_muted(self, muted: bool) -> None:
+        """Konuşma çıkışını (toplantı profili vb.) sessize alır ve aktif oynatmayı keser."""
+        self._muted = bool(muted)
+        if self._muted and self._playback_cancelled is not None:
+            self._playback_cancelled.set()
+        if self._muted and self._playback is not None and not self._playback.done():
+            self._playback.cancel()
+
+    def _is_muted(self) -> bool:
+        return self._muted or (
+            self._profile_getter is not None and should_mute_tts(self._profile_getter())
+        )
+
+    def _is_private_profile(self) -> bool:
+        return self._profile_getter is not None and is_local_only_profile(self._profile_getter())
+
     def _continuous_toggle(self, transcript: str) -> bool | None:
         """Yalnız (uyandırma sözcüğü + ) kip cümlesinden ibaret söz; LLM'e gitmez."""
         return continuous_toggle(
@@ -702,9 +730,14 @@ class VoiceController:
             self._mark_spoken(text, requires_wake=False)
 
         try:
-            self._output_active = True
-            async with aclosing(self._timed_chunks(text, cancelled, uid, gid, ack=True)) as chunks:
-                await self.sink.play(chunks, cancelled, first_pcm)
+            muted = self._is_muted()
+            self._output_active = not muted
+            if not muted:
+                chunks = self._timed_chunks(
+                    text, cancelled, uid, gid, ack=True, private=self._is_private_profile()
+                )
+                async with aclosing(chunks) as stream:
+                    await self.sink.play(stream, cancelled, first_pcm)
             outcome = "ack" if played else "no_audio"
         except asyncio.CancelledError:
             outcome = "cancelled"
@@ -982,47 +1015,24 @@ class VoiceController:
     ) -> None:
         """Cümleleri sırayla sentezler; hepsi tek sink akışında çalınır (cihaz bir kez açılır)."""
 
-        async def chunks() -> AsyncGenerator[PCMChunk]:
-            first = True
+        def update_spoken() -> None:
+            if self._output_active:
+                self._spoken_text = " ".join(speech.spoken)
 
-            async def next_sentences() -> AsyncGenerator[str]:
-                if privacy_ready is not None and not privacy_ready.is_set():
-                    # Uzak TTS gizliliği yalnız tur bitince bilinir; cümleler önce tutulur.
-                    held = [s async for s in speech.sentences() if not cancelled.is_set()]
-                    await privacy_ready.wait()
-                    for sentence in held:
-                        yield sentence
-                    return
-                async for sentence in speech.sentences():
-                    yield sentence
-
-            index = 0
-            async for sentence in next_sentences():
-                if cancelled.is_set():
-                    return
-                if self._output_active:
-                    # Yankı süzgeci şimdiye dek söylenen/söylenecek tüm cümleleri bilsin.
-                    self._spoken_text = " ".join(speech.spoken)
-                private = is_private() if is_private is not None else False
-                stream = self._synth_stream(
-                    sentence, cancelled, private=private, record_block=(index == 0)
-                )
-                index += 1
-                try:
-                    async for chunk in stream:
-                        if first and chunk.pcm:
-                            first = False
-                            self._event(uid, "tts_first_chunk", generation_id=gid)
-                        yield chunk
-                finally:
-                    closer = getattr(stream, "aclose", None)
-                    if closer is not None:
-                        await closer()
-                if private and self._is_remote_synthesizer() and self._local_synthesizer is None:
-                    return
-
-        async with aclosing(chunks()) as generator:
-            await self.sink.play(generator, cancelled, first_pcm)
+        await play_speech_stream(
+            self.sink,
+            speech,
+            cancelled,
+            first_pcm,
+            synth_stream=self._synth_stream,
+            on_first_chunk=lambda: self._event(uid, "tts_first_chunk", generation_id=gid),
+            on_sentence=update_spoken,
+            should_stop_private=lambda priv: (
+                priv and self._is_remote_synthesizer() and self._local_synthesizer is None
+            ),
+            privacy_ready=privacy_ready,
+            is_private=is_private,
+        )
 
     def _call_run_command(
         self,
@@ -1069,30 +1079,35 @@ class VoiceController:
             turn_private = False
             if not self._is_remote_synthesizer():
                 privacy_ready.set()
-            self._playback_cancelled = generation
-            playback = asyncio.create_task(
-                self._play_stream(
-                    speech,
-                    generation,
-                    uid,
-                    gid,
-                    first_pcm,
-                    privacy_ready=privacy_ready,
-                    is_private=lambda: turn_private,
+            muted = self._is_muted()
+            if not muted:
+                self._playback_cancelled = generation
+                playback = asyncio.create_task(
+                    self._play_stream(
+                        speech,
+                        generation,
+                        uid,
+                        gid,
+                        first_pcm,
+                        privacy_ready=privacy_ready,
+                        is_private=lambda: turn_private,
+                    )
                 )
+                self._playback = playback
+            result = await self._call_run_command(
+                command, stream=None if muted else speech, audio_wav=audio_wav
             )
-            self._playback = playback
-            result = await self._call_run_command(command, stream=speech, audio_wav=audio_wav)
             self._record_result(uid, gid, result)
-            turn_private = self._is_private_result(result)
+            turn_private = self._is_private_result(result) or self._is_private_profile()
             speech.finish(result.text)
             privacy_ready.set()
-            try:
-                await playback
-            except asyncio.CancelledError:
-                current = asyncio.current_task()
-                if not generation.is_set() or (current is not None and current.cancelling()):
-                    raise
+            if playback is not None:
+                try:
+                    await playback
+                except asyncio.CancelledError:
+                    current = asyncio.current_task()
+                    if not generation.is_set() or (current is not None and current.cancelling()):
+                        raise
             if played and self.config.followup_listening:
                 self._followup_until = self.clock() + self.config.followup_seconds
             outcome = "completed" if played else "no_audio"
@@ -1141,8 +1156,8 @@ class VoiceController:
             self._event(uid, "command_start", generation_id=gid, warm=self._task_turns > 1)
             result = await self._call_run_command(command, audio_wav=audio_wav)
             self._record_result(uid, gid, result)
-            private = self._is_private_result(result)
-            if result.text.strip() and not generation.is_set():
+            private = self._is_private_result(result) or self._is_private_profile()
+            if result.text.strip() and not generation.is_set() and not self._is_muted():
 
                 def first_pcm() -> None:
                     nonlocal played

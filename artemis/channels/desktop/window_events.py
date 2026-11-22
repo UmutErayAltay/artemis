@@ -34,6 +34,7 @@ from artemis.channels.desktop.projects_panel import status_label
 from artemis.channels.desktop.steps import step_line
 from artemis.channels.desktop.text_viewer import open_text_file
 from artemis.config.settings import load_settings
+from artemis.config.work_profile import should_suppress_toast
 from artemis.i18n import t
 from artemis.proactive.daily_summary import VAULT_TEXT_LIMIT, parse_day, summary_path
 from artemis.tools.plugins.memory import AppendArguments
@@ -167,6 +168,8 @@ def handle_state(window: DesktopWindow, event: State) -> None:
             window.bridge.start_voice()
         if event.request_id is not None:
             dismiss_approval_for(window, event.request_id)
+        if event.request_id is None and getattr(window, "_work_profile", "work") != "work":
+            window.bridge.set_work_profile(window._work_profile)
         refresh_budget(window)
     elif event.state == "running":
         window._busy = True
@@ -349,6 +352,8 @@ def notify_job(window: DesktopWindow, fields: dict[str, Any]) -> None:
     # Makbuz ipucu yalnız sohbet satırında; toast metni değişmez.
     hint = " " + t("Makbuz için: “bu işin makbuzunu yaz”.") if status == "done" else ""
     window._append_chat("Artemis", text + hint)
+    if should_suppress_toast(getattr(window, "_work_profile", "work")):
+        return
     toast = window._toast
     if toast is None:
         return

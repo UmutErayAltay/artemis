@@ -435,17 +435,18 @@ class ProactiveScheduler:
         self, briefing: BriefingConfig, scheduled: datetime
     ) -> tuple[DeliveryOutcome, str]:
         runtime = self.runtime
+        live_settings = runtime.context.settings
         # Ayrı bağlam: iptal sinyali, tur kimliği ve süre kullanıcının turuyla paylaşılmaz.
         context = ToolContext(
             workspace=runtime.context.workspace,
-            settings=runtime.settings,
+            settings=live_settings,
             audit=runtime.audit,
             services=runtime.context.services,
             user_text=briefing.prompt,
         )
         agent = AgentLoop(runtime.provider, SafetyGate(runtime.registry), context, _refuse)
         runner = CommandRunner(
-            agent, ConversationContext(0, runtime.settings.context_token_budget)
+            agent, ConversationContext(0, live_settings.context_token_budget)
         )
         local = format_local(scheduled, self.tz)
         text = BRIEFING_PREFIX + f"Brifing «{briefing.name}» ({local}): {briefing.prompt}"

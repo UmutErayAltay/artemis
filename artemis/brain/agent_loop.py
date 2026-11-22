@@ -30,6 +30,7 @@ from artemis.brain.streaming import ResponseStream
 from artemis.brain.strict_rules import STRICT_CHAT_RULES, strict_rules_on
 from artemis.brain.tiering import choose_model
 from artemis.config.settings import Settings
+from artemis.config.work_profile import effective_settings_for_profile, is_local_only_profile
 from artemis.memory.companion import content_private, content_tainted, read_companion
 from artemis.safety.gate import SafetyGate, TurnState
 from artemis.skills import Catalog, explicit_hint, load_skills, prompt_section
@@ -496,9 +497,10 @@ class AgentLoop:
         return bool(self._pending_cleanup)
 
     def _result_private(self, result: ToolResult) -> bool:
-        settings = self.context.settings
+        settings = effective_settings_for_profile(self.context.settings)
         return bool(
             result.private
+            or is_local_only_profile(settings.work_profile)
             or (result.content_kind == "file" and not settings.allow_cloud_file_content)
             or (result.content_kind == "clipboard" and not settings.allow_cloud_clipboard)
             # Ekran metni (ADR 0029) ayrı izinle buluta verilir.
@@ -678,11 +680,11 @@ class AgentLoop:
             )
         )
         start = time.monotonic()
-        settings = self.context.settings
+        settings = effective_settings_for_profile(self.context.settings)
         state.deadline = start + settings.max_seconds
-        private_seen = False
+        private_seen = is_local_only_profile(settings.work_profile)
         if attachment is not None:
-            private_seen = self._result_private(attachment)
+            private_seen = private_seen or self._result_private(attachment)
         past = history.messages if history is not None else []
         messages, history_private, started_at = self._opening_messages(
             text, attachment, isolated, past, private_seen, audio_wav=audio_wav

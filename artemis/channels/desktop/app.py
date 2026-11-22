@@ -74,6 +74,7 @@ from artemis.channels.desktop.operations import OperationLog
 from artemis.channels.desktop.page_kit import center_page
 from artemis.channels.desktop.pet import PetWidget
 from artemis.channels.desktop.pet_sprite import pets_dir_for
+from artemis.channels.desktop.profile_bar import refresh_profile_button, switch_work_profile
 from artemis.channels.desktop.projects_panel import ProjectsPanel
 from artemis.channels.desktop.selection_popup import SelectionPopup
 from artemis.channels.desktop.settings_io import _same, save_computer_mode
@@ -161,6 +162,9 @@ class DesktopWindow(QMainWindow):
     voice_dot: QLabel
     voice_state: QLabel
     budget_chip: QLabel
+    profile_button: QPushButton
+    _profile_actions: dict[str, QAction]
+    _work_profile: str
     voice_button: QPushButton
     auto_button: QPushButton
     status_pill: QFrame
@@ -258,6 +262,10 @@ class DesktopWindow(QMainWindow):
         self._theme = themes.DEFAULT_THEME
         self._status_tone = "running"
         self._model_full = ""
+        self._work_profile = "work"
+        if not demo:
+            with contextlib.suppress(OSError, ValueError, ValidationError, yaml.YAMLError):
+                self._work_profile = load_settings(self._config_path).work_profile
         self._build_pet()
         self._build_ui()
         self._build_overlay()
@@ -943,6 +951,11 @@ class DesktopWindow(QMainWindow):
             control.blockSignals(False)
         self._show_auto_state(on)
 
+    def _on_profile_action(self, action: QAction) -> None:
+        profile = action.data()
+        if isinstance(profile, str):
+            switch_work_profile(self, profile)
+
     def _toggle_auto_mode(self, checked: bool) -> None:
         """Üst çubuktaki düğme: kip anında değişir ve config'e yazılır."""
         mode = "auto" if checked else "accept"
@@ -1079,6 +1092,7 @@ class DesktopWindow(QMainWindow):
         self.composer_voice.setEnabled(voice_ok)
         # Kip değişimi çalışan turu kesmez; yalnız bitişte kapanmasın diye korunur.
         self.auto_button.setEnabled(not self._exiting and not self._demo)
+        self.profile_button.setEnabled(not self._exiting)
         self.projects_panel.set_busy(not enabled)
         self.data_panel.set_busy(not enabled)
         self.automation_panel.set_busy(not enabled)
@@ -1113,6 +1127,8 @@ class DesktopWindow(QMainWindow):
                 if not self._demo:
                     self._refresh_welcome()
                     self._reload_hotkeys()
+                    with contextlib.suppress(OSError, ValueError, ValidationError, yaml.YAMLError):
+                        refresh_profile_button(self, load_settings(self._config_path).work_profile)
                 self.settings_panel.refresh()
                 self.settings_panel.notice.setText(
                     t("Ayarlar uygulandı; seçilen model ve mikrofon kullanılıyor.")

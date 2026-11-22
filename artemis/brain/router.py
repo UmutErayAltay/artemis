@@ -28,6 +28,8 @@ from artemis.brain.providers import (
 )
 from artemis.brain.streaming import EmissionGuard, TextStream
 from artemis.config.settings import ModelConfig, Settings
+from artemis.config.work_profile import is_local_only_profile
+from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 from artemis.tools.base import ToolDefinition
 
@@ -64,6 +66,7 @@ class ProviderRouter:
         *,
         providers: dict[str, Provider] | None = None,
         clock: Callable[[], float] = time.monotonic,
+        profile_getter: Callable[[], str] | None = None,
     ) -> None:
         if not settings.primary_model or settings.primary_model not in settings.models:
             raise ProviderError("Birincil model config içinde tanımlanmalı.")
@@ -71,6 +74,7 @@ class ProviderRouter:
         self.audit = audit
         self.ledger = BudgetLedger(settings.state_dir / "budget.sqlite3", settings.daily_budget_usd)
         self._clock = clock
+        self._profile_getter = profile_getter
         self._fallback_until = 0.0
         self._providers: dict[str, Provider]
         if providers is not None:
@@ -94,6 +98,53 @@ class ProviderRouter:
         Bulut yedeğe gizli içerik zaten maskeli gider; o tur normal sınırlarla sürer."""
         return self.settings.models[alias].provider == "ollama"
 
+    def set_profile_getter(self, getter: Callable[[], str] | None) -> None:
+        """Çalışma anında canlı çalışma profili okuyucusunu bağlar (ADR 0083)."""
+        self._profile_getter = getter
+
+    def _active_profile(self) -> str:
+        if self._profile_getter is not None:
+            return self._profile_getter()
+        return self.settings.work_profile
+
+    def _local_fallback_alias(self) -> str | None:
+        for candidate in (
+            self.settings.primary_model,
+            self.settings.fallback_model,
+            *self.settings.models,
+        ):
+            if not candidate or candidate not in self._providers:
+                continue
+            model = self.settings.models.get(candidate)
+            if model is not None and model.provider == "ollama" and model.kind == "chat":
+                return candidate
+        return None
+
+    def _guard_private_alias(self, alias: str) -> str:
+        """Gizli profilde bulut model isteğini engeller; yerel (ollama) varsa ona düşer."""
+        if not is_local_only_profile(self._active_profile()):
+            return alias
+        model = self.settings.models.get(alias)
+        if model is not None and model.provider == "ollama":
+            return alias
+        local_alias = self._local_fallback_alias()
+        self._emit_audit(
+            "cloud_blocked_by_profile",
+            profile="private",
+            requested_alias=alias,
+            provider=model.provider if model is not None else "unknown",
+            model=model.model if model is not None else alias,
+            fallback_alias=local_alias,
+        )
+        if local_alias is None:
+            raise ProviderError(
+                t(
+                    "Gizli profil etkin: bulut modeline istek engellendi; "
+                    "yerel (ollama) model gerekli."
+                )
+            )
+        return local_alias
+
     def _emit_audit(self, event: str, **fields: object) -> None:
         try:
             self.audit.emit(event, **fields)
@@ -110,6 +161,7 @@ class ProviderRouter:
         local_fallback: bool,
         stream: TextStream | None = None,
     ) -> Completion:
+        alias = self._guard_private_alias(alias)
         model = self.settings.models[alias]
         _check_paid(self.settings, model)
         if timeout <= 0:
@@ -269,6 +321,25 @@ class ProviderRouter:
     ) -> Completion:
         started = self._clock()
         guard = EmissionGuard(stream) if stream is not None else None
+        if is_local_only_profile(self._active_profile()):
+            requested = (
+                model
+                if (
+                    model
+                    and model != self.settings.primary_model
+                    and model in self.settings.models
+                )
+                else self.settings.primary_model
+            )
+            target = self._guard_private_alias(requested)
+            return await self._call(
+                target,
+                messages,
+                tools,
+                timeout=min(timeout, self.settings.provider_timeout_seconds),
+                local_fallback=False,
+                stream=guard,
+            )
         if model and model != self.settings.primary_model and model in self.settings.models:
             # Model kademesi: zor işler modeli denenir; ücret izni/bütçe/sağlayıcı hatası
             # kullanıcıyı durdurmaz, tur ana modelle (aşağıdaki normal yol) sürer.

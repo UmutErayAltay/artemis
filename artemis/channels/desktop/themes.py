@@ -249,6 +249,10 @@ QPushButton#iconToggle:disabled {{ background: transparent; }}
 QPushButton#chip {{ background: {t['soft']}; border: 1px solid {t['border']}; border-radius: 14px;
  font-size: 13px; padding: 4px 12px; }}
 QPushButton#chip:hover {{ border-color: {t['accent']}; background: {t['accent_soft']}; }}
+QPushButton#chipWarning {{ background: {t['soft']}; color: {t['warning']};
+ border: 1px solid {t['warning']}; border-radius: 14px; font-size: 13px; font-weight: 600;
+ padding: 4px 12px; }}
+QPushButton#chipWarning:hover {{ border-color: {t['accent']}; background: {t['accent_soft']}; }}
 QPushButton#navItem {{ border-radius: 18px; }}
 QFrame#opCard, QFrame#stepBlock {{ background: transparent; }}
 QFrame#composer {{ background: {t['surface']}; border: 1px solid {t['border']};

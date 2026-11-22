@@ -59,6 +59,11 @@ from artemis.channels.voice.smart_turn import SmartTurnDetector
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 from artemis.config.settings import Settings, VoiceConfig, cloud_tts_model
+from artemis.config.work_profile import (
+    is_game_profile,
+    is_local_only_profile,
+    should_mute_tts,
+)
 from artemis.tools.app_resolver import AliasStoreError, alias_store
 
 logger = logging.getLogger(__name__)
@@ -170,6 +175,12 @@ def _cloud_stt_ready(runtime: Runtime) -> bool:
     )
 
 
+def _live_profile(runtime: Runtime) -> str:
+    context = getattr(runtime, "context", None)
+    live_settings = getattr(context, "settings", None) or runtime.settings
+    return str(getattr(live_settings, "work_profile", "work"))
+
+
 def _setup_game_mode(
     runtime: Runtime,
     whisper: FasterWhisperRecognizer,
@@ -178,13 +189,17 @@ def _setup_game_mode(
     on_state: StateCallback,
     cleanup: AsyncExitStack,
 ) -> tuple[SpeechRecognizer, OpenAICompatibleTranscriber | None, Callable[[], bool] | None]:
-    """Oyun modu açıkken tam ekran algılandığında ana modeli hafif veya bulut hedefe geçirir."""
+    """Oyun modu açıkken veya Oyun profilinde ana modeli hafif veya bulut hedefe geçirir."""
     settings = runtime.settings
-    if not settings.voice.game_mode:
+    profile = _live_profile(runtime)
+    if not settings.voice.game_mode and not is_game_profile(profile):
         return whisper, cloud_recognizer, None
+    detector: Callable[[], bool] = lambda: (  # noqa: E731
+        fullscreen_app_active() or is_game_profile(_live_profile(runtime))
+    )
     primary_label = resolve_model_label(settings.voice.stt_model, "ana yerel model")
     light_path = resolve_light_model(settings.voice)
-    if settings.voice.game_mode_target == "cloud":
+    if settings.voice.game_mode_target == "cloud" and not is_local_only_profile(profile):
         if not _cloud_stt_ready(runtime):
             on_state("game:cloud_unavailable")
             return whisper, cloud_recognizer, None
@@ -210,11 +225,13 @@ def _setup_game_mode(
         wake_name = resolve_model_label(light_path, "small")
         light_label = f"{wake_name} (CPU) + Bulut ({cloud_name})"
         game = GameModeRecognizer(
-            whisper, light_rec, fullscreen_app_active, on_state,
+            whisper, light_rec, detector, on_state,
             primary_label=primary_label, light_label=light_label,
         )
         if settings.voice.stt_mode != "hybrid":
-            should_use_cloud = lambda: game.in_game  # noqa: E731
+            should_use_cloud = lambda: (  # noqa: E731
+                game.in_game and not is_local_only_profile(_live_profile(runtime))
+            )
         game.start()
         cleanup.callback(game.close)
         return game, active_cloud, should_use_cloud
@@ -224,7 +241,7 @@ def _setup_game_mode(
         return whisper, cloud_recognizer, None
     light = FasterWhisperRecognizer(local_voice.model_copy(update={"stt_model": light_path}))
     game = GameModeRecognizer(
-        whisper, light, fullscreen_app_active, on_state,
+        whisper, light, detector, on_state,
         primary_label=primary_label, light_label=resolve_model_label(light_path, "small"),
     )
     game.start()
@@ -462,6 +479,8 @@ async def build_voice_controller(
             should_use_cloud=should_use_cloud,
             local_synthesizer=local_tts,
             audit=runtime.audit,
+            muted=should_mute_tts(_live_profile(runtime)),
+            profile_getter=lambda: _live_profile(runtime),
         )
         cleanup.pop_all()
         return controller
@@ -475,6 +494,7 @@ async def build_dictation_recognizer(
     Yeni bir izin ya da atlama yolu yoktur. `content_kind` yalnız denetim etiketidir (Telegram
     sesi `telegram_audio`, ADR 0064). Hazırlık engelleyicidir, `to_thread` ile yapılır."""
     settings = runtime.settings
+    profile = _live_profile(runtime)
     # Dikte (dictation_audio) komut yolu değildir: uygulama/komut hotword listesi sessizlikte
     # sahte uygulama adları uydurabildiği için yalnız yerel diktede temizlenir.
     voice = (
@@ -482,7 +502,7 @@ async def build_dictation_recognizer(
         if content_kind == "dictation_audio"
         else alias_hotword_config(settings)
     )
-    if settings.voice.stt_mode == "hybrid":
+    if settings.voice.stt_mode == "hybrid" and not is_local_only_profile(profile):
         endpoint_id = settings.voice.stt_cloud_endpoint
         return OpenAICompatibleTranscriber(
             voice, endpoint_id, settings.endpoints[endpoint_id], runtime.audit,

@@ -1,0 +1,13 @@
+{
+  "Gizli": "Private",
+  "Gizli profil etkin: bulut modeline istek engellendi; yerel (ollama) model gerekli.": "Private profile active: cloud model request blocked; a local (ollama) model is required.",
+  "Gizli profil: yalnız yerel modeller, bulut ve Telegram kapalı (değiştirmek için tıkla)": "Private profile: local-only models, cloud and Telegram off (click to switch)",
+  "Oyun": "Game",
+  "Oyun profili: bildirimler bastırılır, hafif ses modeli kullanılır (değiştirmek için tıkla)": "Game profile: notifications suppressed, lightweight voice model (click to switch)",
+  "Toplantı": "Meeting",
+  "Toplantı profili: konuşma sesi ve bildirimler sessizde (değiştirmek için tıkla)": "Meeting profile: voice output and notifications muted (click to switch)",
+  "work_profile::Çalışma": "Work",
+  "work_profile::Çalışma profili": "Work profile",
+  "Çalışma profili kaydedilemedi.": "Could not save work profile.",
+  "Çalışma profili: normal ayarlar (değiştirmek için tıkla)": "Work profile: normal settings (click to switch)"
+}
