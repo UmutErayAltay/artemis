@@ -69,8 +69,8 @@ def _risk_label(risk: Risk) -> str:
 class MCPHealthTestThread(QThread):
     """Arayüzü dondurmadan arka planda `list_tools(cancel=...)` bağlantı testi çalıştırır."""
 
-    done = Signal(str, list)
-    failed = Signal(str, str)
+    done = Signal(int, str, list)
+    failed = Signal(int, str, str)
 
     def __init__(
         self,
@@ -95,17 +95,19 @@ class MCPHealthTestThread(QThread):
             tools = self._probe(self.server, self._cancel)
         except MCPError as error:
             if not (self.isInterruptionRequested() or self._cancel.is_set()):
-                self.failed.emit(self.server.name, _safe_error_message(error))
+                self.failed.emit(self.generation, self.server.name, _safe_error_message(error))
             return
         except (OSError, ValueError):
             if not (self.isInterruptionRequested() or self._cancel.is_set()):
                 self.failed.emit(
-                    self.server.name, t("MCP sunucusu çalıştırılamadı veya ayar geçersiz.")
+                    self.generation,
+                    self.server.name,
+                    t("MCP sunucusu çalıştırılamadı veya ayar geçersiz."),
                 )
             return
         if self.isInterruptionRequested() or self._cancel.is_set():
             return
-        self.done.emit(self.server.name, tools)
+        self.done.emit(self.generation, self.server.name, tools)
 
 
 class MCPSection(QWidget):
@@ -358,20 +360,22 @@ class MCPSection(QWidget):
                 thread.finished.disconnect(self._health_finished)
             thread.deleteLater()
 
-    def _is_current_sender(self) -> bool:
+    def _is_current_sender(self, generation: int | None = None) -> bool:
         sender = self.sender()
-        if sender is None:
-            return True
-        return (
-            sender is self._test_thread
-            and getattr(sender, "generation", None) == self._test_generation
-        )
+        if sender is None or sender is not self._test_thread:
+            return False
+        if getattr(sender, "generation", None) != self._test_generation:
+            return False
+        return generation is None or generation == self._test_generation
 
     def _test_selected(self) -> None:
         if self._demo:
             return
-        if self._test_thread is not None and self._test_thread.isRunning():
-            return
+        if self._test_thread is not None:
+            if self._test_thread.isRunning():
+                return
+            self._cancel_active_test()
+            self._sync_buttons()
         server = self._selected_server()
         if server is None:
             return
@@ -386,8 +390,8 @@ class MCPSection(QWidget):
         thread.start()
         self._sync_buttons()
 
-    def _health_done(self, name: str, tools: list[MCPToolSpec]) -> None:
-        if not self._is_current_sender():
+    def _health_done(self, generation: int, name: str, tools: list[MCPToolSpec]) -> None:
+        if generation != self._test_generation or not self._is_current_sender(generation):
             return
         server = next((item for item in self._servers if item.name == name), None)
         if not tools:
@@ -425,8 +429,8 @@ class MCPSection(QWidget):
                 )
             )
 
-    def _health_failed(self, name: str, message: str) -> None:
-        if not self._is_current_sender():
+    def _health_failed(self, generation: int, name: str, message: str) -> None:
+        if generation != self._test_generation or not self._is_current_sender(generation):
             return
         self.test_status.setText(
             t("'{name}' testi başarısız: {message}").format(name=name, message=message)
@@ -434,13 +438,14 @@ class MCPSection(QWidget):
 
     def _health_finished(self) -> None:
         sender = self.sender()
+        if sender is None:
+            return
         if isinstance(sender, MCPHealthTestThread) and sender in self._retiring_threads:
             self._retiring_threads.remove(sender)
             sender.deleteLater()
-        if sender is None or sender is self._test_thread:
-            if self._test_thread is not None:
-                self._test_thread.deleteLater()
+        elif sender is self._test_thread:
             self._test_thread = None
+            sender.deleteLater()
             self._sync_buttons()
 
     def finish(self) -> None:

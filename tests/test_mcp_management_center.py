@@ -17,7 +17,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
-from PySide6.QtCore import QCoreApplication, QEvent, QTimer
+from PySide6.QtCore import QCoreApplication, QEvent, QTimer, qInstallMessageHandler
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QDialog
@@ -804,6 +804,216 @@ def test_inflight_health_test_cancelled_and_gated_on_delete_edit_and_refresh(
             ev.set()
         section.finish()
         section.deleteLater()
+
+
+def _wait_thread_finished_without_events(thread: Any, timeout_s: float = 2.0) -> None:
+    deadline = time.monotonic() + timeout_s
+    while not thread.isFinished() and time.monotonic() < deadline:
+        time.sleep(0.01)
+    assert thread.isFinished()
+
+
+def test_finished_queued_signals_ignored_on_refresh_delete_and_edit(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """İş parçacığı bitip sinyali kuyruğa attıktan hemen sonra gelen iptallerde durum ezilmez."""
+    path = config(tmp_path)
+    alpha = _sample_server("alpha", read_only_tools=("echo",))
+    save_choices(path, None, mcp_servers=[dump_mcp_server(alpha)])
+
+    mode_state = {"mode": "done"}
+    qt_warnings: list[str] = []
+    previous_handler = qInstallMessageHandler(
+        lambda _kind, _ctx, msg: qt_warnings.append(msg)
+    )
+
+    def _probe(server: MCPServerConfig, _cancel: threading.Event) -> list[MCPToolSpec]:
+        if mode_state["mode"] == "mcp_err":
+            raise MCPError("uzak hata", error_type="remote")
+        if mode_state["mode"] == "os_err":
+            raise OSError("calistirilamadi")
+        return [MCPToolSpec("ghost_tool", "Ghost", {"type": "object"}, {})]
+
+    section = MCPSection(path, probe=_probe)
+    try:
+        # 1) done + finished kuyrukta iken refresh() -> test_status boş kalır
+        section.test_button.click()
+        assert section._test_thread is not None
+        _wait_thread_finished_without_events(section._test_thread)
+        section.refresh()
+        qt_app.processEvents()
+        assert section.test_status.text() == ""
+        assert section._test_thread is None
+        assert not section._retiring_threads
+
+        # 2) done + finished kuyrukta iken delete_button.click() -> test_status boş kalır
+        monkeypatch.setattr(section, "_confirm", lambda _text: True)
+        section.test_button.click()
+        assert section._test_thread is not None
+        _wait_thread_finished_without_events(section._test_thread)
+        section.delete_button.click()
+        qt_app.processEvents()
+        assert section.server_list.count() == 0
+        assert section.test_status.text() == ""
+        assert section._test_thread is None
+
+        # 3) failed(MCPError) kuyrukta iken delete_button.click() -> test_status boş kalır
+        mode_state["mode"] = "mcp_err"
+        section._servers = [alpha]
+        section._render_rows(alpha.name)
+        section.test_button.click()
+        assert section._test_thread is not None
+        _wait_thread_finished_without_events(section._test_thread)
+        section.delete_button.click()
+        qt_app.processEvents()
+        assert section.test_status.text() == ""
+        assert section._test_thread is None
+
+        # 4) failed(OSError) kuyrukta iken refresh() -> test_status boş kalır
+        mode_state["mode"] = "os_err"
+        section.refresh()
+        section.test_button.click()
+        assert section._test_thread is not None
+        _wait_thread_finished_without_events(section._test_thread)
+        section.refresh()
+        qt_app.processEvents()
+        assert section.test_status.text() == ""
+        assert section._test_thread is None
+
+        # 5) done + finished kuyrukta iken edit + save -> test_status boş kalır
+        mode_state["mode"] = "done"
+        edited = _sample_server("alpha", timeout_seconds=45.0, read_only_tools=("echo",))
+
+        class _FakeEditDialog:
+            DialogCode = MCPServerDialog.DialogCode
+
+            def __init__(self, existing: Any, taken: Any, parent: Any = None) -> None:
+                self.result_server = edited
+
+            def exec(self) -> int:
+                return int(MCPServerDialog.DialogCode.Accepted)
+
+        monkeypatch.setattr(mcp_section_mod, "MCPServerDialog", _FakeEditDialog)
+        section.test_button.click()
+        assert section._test_thread is not None
+        _wait_thread_finished_without_events(section._test_thread)
+        section.edit_button.click()
+        qt_app.processEvents()
+        assert section.test_status.text() == ""
+        assert section._test_thread is None
+        assert section.servers()[0].timeout_seconds == 45.0
+    finally:
+        section.finish()
+        section.deleteLater()
+        qt_app.processEvents()
+        qInstallMessageHandler(previous_handler)
+
+    qthread_msgs = [msg for msg in qt_warnings if "QThread" in msg or "still running" in msg]
+    assert not qthread_msgs, qthread_msgs
+
+
+def test_finished_queued_signals_do_not_clobber_immediate_beta_test(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Kuyruktaki alpha sinyalleri yeni başlayan beta testini ezemez ve çökme yaratmaz."""
+    path = config(tmp_path)
+    alpha = _sample_server("alpha")
+    beta = _sample_server("beta")
+    save_choices(path, None, mcp_servers=[dump_mcp_server(alpha), dump_mcp_server(beta)])
+
+    beta_hold = threading.Event()
+    qt_warnings: list[str] = []
+    previous_handler = qInstallMessageHandler(
+        lambda _kind, _ctx, msg: qt_warnings.append(msg)
+    )
+
+    def _probe(server: MCPServerConfig, _cancel: threading.Event) -> list[MCPToolSpec]:
+        if server.name == "alpha":
+            return [MCPToolSpec("alpha_ghost", "Ghost", {"type": "object"}, {})]
+        beta_hold.wait(timeout=3.0)
+        return [MCPToolSpec("beta_real", "Real", {"type": "object"}, {})]
+
+    section = MCPSection(path, probe=_probe)
+    try:
+        # 1) _cancel_active_test() sonrası hemen beta başlatılır
+        section._render_rows("alpha")
+        section.test_button.click()
+        assert section._test_thread is not None
+        _wait_thread_finished_without_events(section._test_thread)
+
+        section._cancel_active_test()
+        section.server_list.setCurrentRow(1)
+        section.test_button.click()
+        assert section._test_thread is not None
+        beta_thread = section._test_thread
+
+        qt_app.processEvents()
+        assert section._test_thread is beta_thread
+        assert not section.test_button.isEnabled()
+        assert "beta" in section.test_status.text()
+        assert "alpha_ghost" not in section.test_status.text()
+
+        beta_hold.set()
+        assert _wait(lambda: section._test_thread is None, timeout_ms=3000)
+        assert "beta_real" in section.test_status.text()
+        assert section.test_button.isEnabled()
+
+        # 2) alpha bitmiş (_test_thread != None, isRunning() == False) iken _test_selected()
+        # doğrudan çağrılırsa eski iş parçacığı temizce emekli edilir ve beta ezilmez.
+        beta_hold.clear()
+        section._render_rows("alpha")
+        section.test_button.click()
+        assert section._test_thread is not None
+        _wait_thread_finished_without_events(section._test_thread)
+
+        section.server_list.setCurrentRow(1)
+        section._test_selected()
+        assert section._test_thread is not None
+        beta_thread_2 = section._test_thread
+
+        qt_app.processEvents()
+        assert section._test_thread is beta_thread_2
+        assert "beta" in section.test_status.text()
+        assert "alpha_ghost" not in section.test_status.text()
+
+        beta_hold.set()
+        assert _wait(lambda: section._test_thread is None, timeout_ms=3000)
+        assert "beta_real" in section.test_status.text()
+        assert section.test_button.isEnabled()
+
+        # 3) delete_button.click() sonrası hemen beta başlatılır
+        beta_hold.clear()
+        section._servers = [alpha, beta]
+        section._render_rows("alpha")
+        monkeypatch.setattr(section, "_confirm", lambda _text: True)
+        section.test_button.click()
+        assert section._test_thread is not None
+        _wait_thread_finished_without_events(section._test_thread)
+
+        section.delete_button.click()
+        assert section.server_list.count() == 1
+        section.test_button.click()
+        assert section._test_thread is not None
+        beta_thread_3 = section._test_thread
+
+        qt_app.processEvents()
+        assert section._test_thread is beta_thread_3
+        assert "beta" in section.test_status.text()
+        assert "alpha_ghost" not in section.test_status.text()
+
+        beta_hold.set()
+        assert _wait(lambda: section._test_thread is None, timeout_ms=3000)
+        assert "beta_real" in section.test_status.text()
+        assert section.test_button.isEnabled()
+    finally:
+        beta_hold.set()
+        section.finish()
+        section.deleteLater()
+        qt_app.processEvents()
+        qInstallMessageHandler(previous_handler)
+
+    qthread_msgs = [msg for msg in qt_warnings if "QThread" in msg or "still running" in msg]
+    assert not qthread_msgs, qthread_msgs
 
 
 def test_mcp_section_and_dialog_have_no_signal_cycles(
