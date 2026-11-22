@@ -54,6 +54,7 @@ class WindowsProcessTree:
 
         # Any sınırı yalnız WinDLL içindir; Linux'ta ctypes.WinDLL bulunmaz.
         loader_name = "WinDLL"
+        self._custom_kernel = kernel is not None
         self._kernel: Any = (
             kernel
             if kernel is not None
@@ -107,11 +108,51 @@ class WindowsProcessTree:
         self._accounting = Accounting
         # CREATE_SUSPENDED: ilk kullanıcı kodu ancak job üyeliği kurulduktan sonra koşar.
         try:
-            if resume_allowed is None or resume_allowed():
+            if (resume_allowed is None or resume_allowed()) and (
+                self._custom_kernel or not self._resume_first_thread(int(proc._handle))
+            ):
                 self._resume_owned_thread(proc.pid)
         except OSError:
             self.kill()
             raise
+
+    def _resume_first_thread(self, process_handle: int) -> bool:
+        """Askıdaki sürecin ana thread'ini tek `NtGetNextThread` çağrısıyla devam ettirir.
+
+        4000+ sistem thread'ini `Thread32Next` ile tek tek gezmez; böylece `QThread` +
+        `QTest.qWait` altında GIL açlığına düşmez. `ntdll` yoksa False döner, çağıran
+        `CreateToolhelp32Snapshot` yoluna düşer.
+        """
+        import ctypes
+        from ctypes import wintypes
+
+        loader_name = "WinDLL"
+        try:
+            ntdll: Any = getattr(ctypes, loader_name)("ntdll", use_last_error=True)
+            get_next = ntdll.NtGetNextThread
+        except (AttributeError, OSError):
+            return False
+        get_next.argtypes = [
+            wintypes.HANDLE,
+            wintypes.HANDLE,
+            wintypes.DWORD,
+            wintypes.ULONG,
+            wintypes.ULONG,
+            ctypes.POINTER(wintypes.HANDLE),
+        ]
+        get_next.restype = ctypes.c_long
+        self._kernel.ResumeThread.argtypes = [wintypes.HANDLE]
+        self._kernel.ResumeThread.restype = wintypes.DWORD
+        thread_handle = wintypes.HANDLE()
+        status = get_next(process_handle, None, 0x2, 0, 0, ctypes.byref(thread_handle))
+        if status != 0 or not thread_handle:
+            return False
+        try:
+            if self._kernel.ResumeThread(thread_handle) != 1:
+                raise OSError("Askıya alınmış Windows thread devam ettirilemedi.")
+            return True
+        finally:
+            self._kernel.CloseHandle(thread_handle)
 
     def _resume_owned_thread(self, process_id: int) -> None:
         import ctypes

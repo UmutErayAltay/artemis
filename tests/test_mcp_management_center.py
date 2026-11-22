@@ -427,15 +427,15 @@ def test_background_health_test_fake_server_and_clean_shutdown(
         assert panel.mcp.servers()[0].read_only_tools == ()
 
         # Hata yolları: die, bad_version, timeout(hang), eksik komut
-        for mode, expected_fragment in (
-            ("die", "başlatılamadı"),
-            ("bad_version", "sürümü"),
-            ("hang", "zaman aşımı"),
+        for mode, expected_fragment, mode_timeout in (
+            ("die", "başlatılamadı", 5.0),
+            ("bad_version", "sürümü", 5.0),
+            ("hang", "zaman aşımı", 1.0),
         ):
             err_srv = _sample_server(
                 f"err_{mode}",
                 args=(str(FAKE_SERVER), mode),
-                timeout_seconds=1.0,
+                timeout_seconds=mode_timeout,
                 env_passthrough=("MCP_TEST_SECRET",),
             )
             panel.mcp._servers = [err_srv]
@@ -617,6 +617,193 @@ def test_routing_search_retranslate_no_squeeze_and_no_signal_cycles(
         qt_app.setStyleSheet(prev_style)
         if font_id >= 0:
             QFontDatabase.removeApplicationFont(font_id)
+
+
+def test_hang_child_via_mcp_section_kills_grandchild_on_timeout_and_close(
+    tmp_path: Path, qt_app: QApplication
+) -> None:
+    path = config(tmp_path)
+    section = MCPSection(path)
+    try:
+        # 1) Zaman aşımı yolunda torun süreç job ile ölür
+        pid_timeout = tmp_path / "timeout_child.pid"
+        srv_timeout = _sample_server(
+            "hc_timeout",
+            args=(str(FAKE_SERVER), "hang_child", str(pid_timeout)),
+            timeout_seconds=1.5,
+        )
+        section._servers = [srv_timeout]
+        section._render_rows(srv_timeout.name)
+        section.test_button.click()
+        assert _wait(lambda: section._test_thread is None, timeout_ms=6000)
+        assert "zaman aşımı" in section.test_status.text()
+        assert pid_timeout.exists()
+        assert wait_dead(int(pid_timeout.read_text(encoding="utf-8").strip()))
+
+        # 2) Uçuş ortasında close()/finish() 2s beklemeden iptal eder ve torunu öldürür
+        pid_close = tmp_path / "close_child.pid"
+        srv_close = _sample_server(
+            "hc_close",
+            args=(str(FAKE_SERVER), "hang_child", str(pid_close)),
+            timeout_seconds=10.0,
+        )
+        section._servers = [srv_close]
+        section._render_rows(srv_close.name)
+        section.test_button.click()
+        assert _wait(
+            lambda: pid_close.exists() and pid_close.read_text(encoding="utf-8").strip().isdigit(),
+            timeout_ms=5000,
+        )
+        assert section._test_thread is not None
+        started = time.monotonic()
+        section.close()
+        assert time.monotonic() - started < 1.5
+        assert section._test_thread is None
+        assert not section._retiring_threads
+        assert wait_dead(int(pid_close.read_text(encoding="utf-8").strip()))
+    finally:
+        section.finish()
+        section.deleteLater()
+
+
+def test_mcp_server_dialog_no_squeeze_tr_and_en_with_errors(qt_app: QApplication) -> None:
+    font_path = Path(os.environ.get("SYSTEMROOT", r"C:\Windows")) / "Fonts" / "segoeui.ttf"
+    font_id = QFontDatabase.addApplicationFont(str(font_path)) if font_path.is_file() else -1
+    prev_font = qt_app.font()
+    prev_style = qt_app.styleSheet()
+    if font_id >= 0:
+        qt_app.setFont(QFont("Segoe UI", 10))
+    qt_app.setStyleSheet(_STYLE)
+    try:
+        for lang in ("tr", "en"):
+            set_language(lang)
+            dialog = MCPServerDialog(None, ("varolan",))
+            try:
+                dialog.show()
+                for width, height in ((520, 460), (680, 720)):
+                    dialog.resize(width, height)
+                    QTest.qWait(20)
+                    _assert_no_squeeze(dialog, f"dialog:{lang}:{width}x{height}")
+
+                dialog.name_edit.setText("varolan")
+                dialog.command_edit.setText("")
+                dialog.env_edit.setText("TOKEN=gizli")
+                dialog.submit()
+                assert not dialog._errors["name"].isHidden()
+                assert not dialog._errors["command"].isHidden()
+                assert not dialog._errors["content"].isHidden()
+                assert not dialog._errors["env_passthrough"].isHidden()
+                for width, height in ((520, 460), (680, 720)):
+                    dialog.resize(width, height)
+                    QTest.qWait(20)
+                    _assert_no_squeeze(dialog, f"dialog_err:{lang}:{width}x{height}")
+            finally:
+                dialog.close()
+                dialog.deleteLater()
+    finally:
+        qt_app.setFont(prev_font)
+        qt_app.setStyleSheet(prev_style)
+        if font_id >= 0:
+            QFontDatabase.removeApplicationFont(font_id)
+
+
+def test_inflight_health_test_cancelled_and_gated_on_delete_edit_and_refresh(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    path = config(tmp_path)
+    alpha = _sample_server("alpha", read_only_tools=("echo",))
+    save_choices(path, None, mcp_servers=[dump_mcp_server(alpha)])
+
+    started = threading.Event()
+    cancel_events: list[threading.Event] = []
+    call_releases: list[threading.Event] = []
+    mode_state = {"mode": "ok"}
+
+    def _probe(server: MCPServerConfig, cancel: threading.Event) -> list[MCPToolSpec]:
+        ev = threading.Event()
+        call_releases.append(ev)
+        cancel_events.append(cancel)
+        started.set()
+        ev.wait(timeout=3.0)
+        if mode_state["mode"] == "fail":
+            raise MCPError("uzak hata", error_type="remote")
+        return [MCPToolSpec("echo", "Echo", {"type": "object"}, {})]
+
+    section = MCPSection(path, probe=_probe)
+    try:
+        # 1) Silme sırasında çalışan test iptal edilir; eski done sinyali test_status'u ezmez
+        section.test_button.click()
+        assert started.wait(timeout=2.0)
+        monkeypatch.setattr(section, "_confirm", lambda _text: True)
+        section.delete_button.click()
+        assert section.server_list.count() == 0
+        assert section.test_status.text() == ""
+        assert section._test_thread is None
+        assert cancel_events[-1].is_set()
+        call_releases[-1].set()
+        assert _wait(lambda: not section._retiring_threads, timeout_ms=3000)
+        QTest.qWait(30)
+        assert section.test_status.text() == ""
+
+        # 2) Düzenleme sırasında eski test iptal edilir; emekli olmadan hemen yeni test açılır
+        started.clear()
+        section._servers = [alpha]
+        section._render_rows(alpha.name)
+        section.test_button.click()
+        assert started.wait(timeout=2.0)
+        old_cancel = cancel_events[-1]
+        old_release = call_releases[-1]
+        edited = _sample_server("alpha", timeout_seconds=30.0, read_only_tools=("echo",))
+
+        class _FakeEditDialog:
+            DialogCode = MCPServerDialog.DialogCode
+
+            def __init__(self, existing: Any, taken: Any, parent: Any = None) -> None:
+                self.result_server = edited
+
+            def exec(self) -> int:
+                return int(MCPServerDialog.DialogCode.Accepted)
+
+        monkeypatch.setattr(mcp_section_mod, "MCPServerDialog", _FakeEditDialog)
+        section.edit_button.click()
+        assert old_cancel.is_set()
+        assert section.test_status.text() == ""
+        assert section._test_thread is None
+        assert section.test_button.isEnabled()
+
+        # Eski iş parçacığı hâlâ çalışırken hemen yeni test başlat; eski bitiş yeniyi bozamaz
+        started.clear()
+        section.test_button.click()
+        assert started.wait(timeout=2.0)
+        new_release = call_releases[-1]
+        old_release.set()
+        assert _wait(lambda: not section._retiring_threads, timeout_ms=3000)
+        assert section._test_thread is not None
+        assert "test ediliyor" in section.test_status.text()
+        new_release.set()
+        assert _wait(lambda: section._test_thread is None, timeout_ms=3000)
+        assert "bağlandı" in section.test_status.text()
+
+        # 3) refresh() sırasında çalışan test iptal edilir; eski failed sinyali test_status'u ezmez
+        started.clear()
+        mode_state["mode"] = "fail"
+        section.test_button.click()
+        assert started.wait(timeout=2.0)
+        refresh_cancel = cancel_events[-1]
+        refresh_release = call_releases[-1]
+        section.refresh()
+        assert refresh_cancel.is_set()
+        assert section.test_status.text() == ""
+        assert section._test_thread is None
+        refresh_release.set()
+        assert _wait(lambda: not section._retiring_threads, timeout_ms=3000)
+        QTest.qWait(30)
+        assert section.test_status.text() == ""
+    finally:
+        for ev in call_releases:
+            ev.set()
+        section.finish()
+        section.deleteLater()
 
 
 def test_mcp_section_and_dialog_have_no_signal_cycles(

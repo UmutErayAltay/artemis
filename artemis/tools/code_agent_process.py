@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import importlib
 import logging
 import os
@@ -41,14 +42,17 @@ def visible_options() -> dict[str, Any]:
     return {"start_new_session": True}  # yalnız testler: gerçek pencere Windows'a özgüdür
 
 
-def own_process_tree(proc: Any, *, kernel: Any = None) -> Any | None:
-    """Windows: zaten başlamış süreci KILL_ON_JOB_CLOSE job'una bağlar (MCP, claude_cli).
+def own_process_tree(
+    proc: Any, *, kernel: Any = None, suspended: bool = False
+) -> Any | None:
+    """Windows: süreci `KILL_ON_JOB_CLOSE` job'una bağlar (MCP, claude_cli).
 
     `proc` subprocess.Popen ya da asyncio sürecidir (altındaki Popen `_transport`'tan alınır).
     Dönen nesnenin `kill()` metodu job'u sonlandırır; Artemis ölürse tutamak kapanır ve
-    torunlar da biter. Süreç askıya alınmadan başladığı için atama öncesi doğan çocuklar job
-    dışında kalabilir (kalan yarış, RELIABILITY_STATUS); askıda başlatma bu çağıranlarda
-    yoktur. Başarısızlık çağrıyı bozmaz: None döner, çağıran `kill_tree`'ye düşer.
+    torunlar da biter. `suspended=True` ise süreç `CREATE_SUSPENDED` ile başlatılmıştır:
+    job atandıktan sonra ana thread devam ettirilir; job veya resume hatasında süreç
+    sonlandırılıp `OSError` yükseltilir. `suspended=False` iken hata `None` döner ve
+    çağıran `kill_tree`'ye düşer.
     """
     if os.name != "nt":
         return None
@@ -59,9 +63,18 @@ def own_process_tree(proc: Any, *, kernel: Any = None) -> Any | None:
     try:
         from artemis.tools.code_agent_windows import WindowsProcessTree
 
-        # resume_allowed=False: süreç askıda başlamadı, ResumeThread'e gerek yok.
-        return WindowsProcessTree(popen, kernel=kernel, resume_allowed=lambda: False)
+        return WindowsProcessTree(popen, kernel=kernel, resume_allowed=lambda: suspended)
     except OSError as error:
+        if suspended:
+            kill_fn = getattr(popen, "kill", None)
+            wait_fn = getattr(popen, "wait", None)
+            if callable(kill_fn):
+                with contextlib.suppress(OSError):
+                    kill_fn()
+            if callable(wait_fn):
+                with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+                    wait_fn(timeout=CLEANUP_SECONDS)
+            raise
         _logger.warning("Süreç job'a bağlanamadı, kill_tree kullanılacak: %s", error)
         return None
 

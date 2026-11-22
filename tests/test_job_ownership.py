@@ -23,9 +23,13 @@ class FakeTree:
     def __init__(self, result: bool = True) -> None:
         self.kills = 0
         self.result = result
+        self.proc: Any = None
 
     def kill(self) -> bool:
         self.kills += 1
+        if self.result and self.proc is not None:
+            self.proc.kill()
+            self.proc.wait(timeout=2)
         return self.result
 
 
@@ -63,6 +67,18 @@ def test_helper_assignment_failure_falls_back_to_none() -> None:
     kernel.CloseHandle.assert_called()  # yarım job sızdırılmadı
 
 
+@windows_only
+def test_helper_suspended_assignment_failure_kills_proc_and_raises() -> None:
+    kernel = fake_kernel()
+    kernel.AssignProcessToJobObject.return_value = 0
+    proc = SimpleNamespace(_handle=1, pid=5, kill=MagicMock(), wait=MagicMock())
+    with pytest.raises(OSError):
+        own_process_tree(proc, kernel=kernel, suspended=True)
+    kernel.CloseHandle.assert_called()
+    proc.kill.assert_called_once()
+    proc.wait.assert_called_once()
+
+
 def test_helper_is_none_without_handle_or_off_windows() -> None:
     assert own_process_tree(SimpleNamespace(pid=1)) is None  # FakeProc benzeri
 
@@ -73,10 +89,12 @@ def test_helper_noop_on_non_windows(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _session(monkeypatch: pytest.MonkeyPatch, tree: Any) -> mcp_client._Session:
-    seen: list[Any] = []
+    seen: list[tuple[Any, bool]] = []
 
-    def fake_own(proc: Any) -> Any:
-        seen.append(proc)
+    def fake_own(proc: Any, *, suspended: bool = False) -> Any:
+        seen.append((proc, suspended))
+        if hasattr(tree, "proc"):
+            tree.proc = proc
         return tree
 
     monkeypatch.setattr(mcp_client, "own_process_tree", fake_own)
@@ -88,8 +106,30 @@ def _session(monkeypatch: pytest.MonkeyPatch, tree: Any) -> mcp_client._Session:
         time.monotonic() + 5,
         1 << 20,
     )
-    assert isinstance(seen[0], subprocess.Popen)  # spawn sonrası bağlandı
+    assert isinstance(seen[0][0], subprocess.Popen)  # spawn sonrası bağlandı
+    assert seen[0][1] is True
     return session
+
+
+def test_mcp_job_failure_cleans_up_suspended_process(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_own(proc: Any, *, suspended: bool = False) -> Any:
+        proc.kill()
+        proc.wait(timeout=2)
+        raise OSError("assign failed")
+
+    monkeypatch.setattr(mcp_client, "own_process_tree", fail_own)
+    server = os.path.join(os.path.dirname(__file__), "mcp_fake_server.py")
+    with pytest.raises(mcp_client.MCPError) as info:
+        mcp_client._Session(
+            [sys.executable, server, "ok"],
+            {"PATH": os.environ.get("PATH", "")},
+            None,
+            time.monotonic() + 5,
+            1 << 20,
+        )
+    assert info.value.error_type == "process"
 
 
 def test_mcp_job_assigned_on_spawn_and_terminated_on_close(

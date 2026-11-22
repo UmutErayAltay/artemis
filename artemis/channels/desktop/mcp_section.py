@@ -7,6 +7,7 @@ riski yalnız kullanıcının `read_only_tools` ve `confirm_tools` listeleri bel
 
 from __future__ import annotations
 
+import contextlib
 import threading
 from collections.abc import Callable
 from pathlib import Path
@@ -77,9 +78,11 @@ class MCPHealthTestThread(QThread):
         parent: QWidget | None = None,
         *,
         probe: ProbeFunc | None = None,
+        generation: int = 0,
     ) -> None:
         super().__init__(parent)
         self.server = server
+        self.generation = generation
         self._probe = probe or _default_probe
         self._cancel = threading.Event()
 
@@ -91,15 +94,16 @@ class MCPHealthTestThread(QThread):
         try:
             tools = self._probe(self.server, self._cancel)
         except MCPError as error:
-            self.failed.emit(self.server.name, _safe_error_message(error))
+            if not (self.isInterruptionRequested() or self._cancel.is_set()):
+                self.failed.emit(self.server.name, _safe_error_message(error))
             return
         except (OSError, ValueError):
-            self.failed.emit(
-                self.server.name, t("MCP sunucusu çalıştırılamadı veya ayar geçersiz.")
-            )
+            if not (self.isInterruptionRequested() or self._cancel.is_set()):
+                self.failed.emit(
+                    self.server.name, t("MCP sunucusu çalıştırılamadı veya ayar geçersiz.")
+                )
             return
         if self.isInterruptionRequested() or self._cancel.is_set():
-            self.failed.emit(self.server.name, t("Bağlantı testi iptal edildi."))
             return
         self.done.emit(self.server.name, tools)
 
@@ -122,6 +126,8 @@ class MCPSection(QWidget):
         self._probe = probe or _default_probe
         self._servers: list[MCPServerConfig] = []
         self._test_thread: MCPHealthTestThread | None = None
+        self._test_generation: int = 0
+        self._retiring_threads: list[MCPHealthTestThread] = []
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -191,6 +197,7 @@ class MCPSection(QWidget):
         return [dump_mcp_server(server) for server in self._servers]
 
     def refresh(self) -> None:
+        self._cancel_active_test()
         self.notice.setText("")
         self.test_status.setText("")
         try:
@@ -284,6 +291,7 @@ class MCPSection(QWidget):
         if dialog.exec() != MCPServerDialog.DialogCode.Accepted or dialog.result_server is None:
             return
         updated = dialog.result_server
+        self._cancel_active_test()
         if existing is None:
             self._servers.append(updated)
         else:
@@ -320,11 +328,44 @@ class MCPSection(QWidget):
             return
         if not self._confirm(t("'{name}' MCP sunucusu silinsin mi?").format(name=server.name)):
             return
+        self._cancel_active_test()
         self._servers = [item for item in self._servers if item.name != server.name]
         self._render_rows()
         self.test_status.setText("")
         self.notice.setText(t("Değişiklik Kaydet ile kalıcı olur."))
         self.changed.emit()
+
+    def _cancel_active_test(self) -> None:
+        """Etkin sağlık testini nesil sayacını artırarak iptal eder; geç sinyaller yok sayılır."""
+        self._test_generation += 1
+        thread = self._test_thread
+        if thread is None:
+            return
+        self._test_thread = None
+        for signal_name, slot in (
+            ("done", self._health_done),
+            ("failed", self._health_failed),
+        ):
+            signal = getattr(thread, signal_name, None)
+            if signal is not None:
+                with contextlib.suppress(RuntimeError, TypeError):
+                    signal.disconnect(slot)
+        thread.requestInterruption()
+        if not thread.isFinished():
+            self._retiring_threads.append(thread)
+        else:
+            with contextlib.suppress(RuntimeError, TypeError):
+                thread.finished.disconnect(self._health_finished)
+            thread.deleteLater()
+
+    def _is_current_sender(self) -> bool:
+        sender = self.sender()
+        if sender is None:
+            return True
+        return (
+            sender is self._test_thread
+            and getattr(sender, "generation", None) == self._test_generation
+        )
 
     def _test_selected(self) -> None:
         if self._demo:
@@ -334,7 +375,9 @@ class MCPSection(QWidget):
         server = self._selected_server()
         if server is None:
             return
-        thread = MCPHealthTestThread(server, self, probe=self._probe)
+        thread = MCPHealthTestThread(
+            server, self, probe=self._probe, generation=self._test_generation
+        )
         thread.done.connect(self._health_done)
         thread.failed.connect(self._health_failed)
         thread.finished.connect(self._health_finished)
@@ -344,6 +387,8 @@ class MCPSection(QWidget):
         self._sync_buttons()
 
     def _health_done(self, name: str, tools: list[MCPToolSpec]) -> None:
+        if not self._is_current_sender():
+            return
         server = next((item for item in self._servers if item.name == name), None)
         if not tools:
             self.test_status.setText(
@@ -381,23 +426,39 @@ class MCPSection(QWidget):
             )
 
     def _health_failed(self, name: str, message: str) -> None:
+        if not self._is_current_sender():
+            return
         self.test_status.setText(
             t("'{name}' testi başarısız: {message}").format(name=name, message=message)
         )
 
     def _health_finished(self) -> None:
-        self._test_thread = None
-        self._sync_buttons()
+        sender = self.sender()
+        if isinstance(sender, MCPHealthTestThread) and sender in self._retiring_threads:
+            self._retiring_threads.remove(sender)
+            sender.deleteLater()
+        if sender is None or sender is self._test_thread:
+            if self._test_thread is not None:
+                self._test_thread.deleteLater()
+            self._test_thread = None
+            self._sync_buttons()
 
     def finish(self) -> None:
-        if shutdown_thread(
-            self._test_thread,
-            ("done", self._health_done),
-            ("failed", self._health_failed),
-            ("finished", self._health_finished),
-            wait_ms=_SHUTDOWN_WAIT_MS,
-        ) or (self._test_thread is not None and not self._test_thread.isRunning()):
-            self._test_thread = None
+        self._cancel_active_test()
+        for thread in list(self._retiring_threads):
+            if shutdown_thread(
+                thread,
+                ("done", self._health_done),
+                ("failed", self._health_failed),
+                ("finished", self._health_finished),
+                wait_ms=_SHUTDOWN_WAIT_MS,
+            ):
+                if thread in self._retiring_threads:
+                    self._retiring_threads.remove(thread)
+            elif not thread.isRunning():
+                if thread in self._retiring_threads:
+                    self._retiring_threads.remove(thread)
+                thread.deleteLater()
         self._sync_buttons()
 
     def closeEvent(self, event: QCloseEvent) -> None:

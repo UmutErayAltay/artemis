@@ -86,9 +86,9 @@ def _qss_controls(t: dict[str, str], up: str, down: str) -> str:
         for child in (".QWidget", ".QFrame", ".QStackedWidget", "QCheckBox", "QRadioButton",
                       "QScrollArea > .QWidget > .QWidget")
     )
-    ctl = "QPushButton, QLineEdit, QComboBox, QSpinBox"
+    ctl = "QPushButton, QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox"
     foc = ("QPushButton:focus, QLineEdit:focus, QComboBox:focus, QSpinBox:focus, "
-           "QPlainTextEdit:focus, QTextEdit:focus")
+           "QDoubleSpinBox:focus, QPlainTextEdit:focus, QTextEdit:focus")
     return f"""
 QWidget {{ background: {t['bg']}; color: {t['text']};
  font-family: 'Segoe UI Variable Text', 'Segoe UI'; font-size: 14px; }}
@@ -143,15 +143,15 @@ QFrame#sidebar QLabel {{ color: {t['nav_text']}; }}
 /* Tek kontrol yüksekliği: min-height içerik kutusudur, Qt üstüne 4px dolgu ve 1px çerçeve ekler.
    26px + 2*4 + 2*1 = 36px toplam; düğme, metin alanı, kutu ve sayaç aynı hizada kalır. */
 QPushButton {{ padding: 4px 12px; min-height: 26px; }}
-QLineEdit, QComboBox, QSpinBox {{ min-height: 26px; background: {t['surface']};
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {{ min-height: 26px; background: {t['surface']};
  color: {t['text']}; selection-background-color: {t['accent']};
  selection-color: {t['accent_text']}; }}
 QPlainTextEdit, QTextEdit, QListWidget {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; border-radius: 8px; padding: 4px 8px;
  selection-background-color: {t['accent']}; selection-color: {t['accent_text']}; }}
-QLineEdit, QComboBox, QSpinBox, QPlainTextEdit, QTextEdit {{
+QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox, QPlainTextEdit, QTextEdit {{
  border: 1px solid {t['control_border']}; }}
-QPushButton:hover, QLineEdit:hover, QComboBox:hover, QSpinBox:hover {{
+QPushButton:hover, QLineEdit:hover, QComboBox:hover, QSpinBox:hover, QDoubleSpinBox:hover {{
  border-color: {t['accent']}; }}
 {foc} {{ border: 2px solid {t['accent']}; padding: 3px 7px; }}
 QPushButton:disabled, QComboBox:disabled, QCheckBox:disabled, QLineEdit:disabled {{
@@ -182,13 +182,15 @@ QComboBox::down-arrow {{ image: url("{down}"); width: 10px; height: 6px; }}
 QComboBox QAbstractItemView {{ background: {t['surface']}; color: {t['text']};
  border: 1px solid {t['border']}; outline: 0;
  selection-background-color: {t['soft']}; selection-color: {t['text']}; }}
-QSpinBox {{ padding-right: 24px; }}
-QSpinBox::up-button, QSpinBox::down-button {{ background: transparent; border: none;
+QSpinBox, QDoubleSpinBox {{ padding-right: 24px; }}
+QSpinBox::up-button, QSpinBox::down-button,
+QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ background: transparent; border: none;
  width: 24px; subcontrol-origin: border; }}
-QSpinBox::up-button {{ subcontrol-position: top right; }}
-QSpinBox::down-button {{ subcontrol-position: bottom right; }}
-QSpinBox::up-arrow {{ image: url("{up}"); width: 10px; height: 6px; }}
-QSpinBox::down-arrow {{ image: url("{down}"); width: 10px; height: 6px; }}
+QSpinBox::up-button, QDoubleSpinBox::up-button {{ subcontrol-position: top right; }}
+QSpinBox::down-button, QDoubleSpinBox::down-button {{ subcontrol-position: bottom right; }}
+QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image: url("{up}"); width: 10px; height: 6px; }}
+QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image: url("{down}");
+ width: 10px; height: 6px; }}
 """
 
 
@@ -320,7 +322,7 @@ QFrame#dangerZone QLabel#sectionTitle {{ color: {t['error']}; }}
 /* Devre dışı birincil düğme birincil kalır: accent çerçeve + kalın yazı, ama dolgu/metin sönük. */
 QPushButton#primary:disabled {{ background: {t['soft']}; color: {t['muted']};
  border-color: {t['accent']}; font-weight: 650; }}
-QSpinBox:disabled {{ background: {t['soft']}; color: {t['muted']}; }}
+QSpinBox:disabled, QDoubleSpinBox:disabled {{ background: {t['soft']}; color: {t['muted']}; }}
 /* Bağlama sihirbazı: seçilebilir kartlar ve sayfa yüzeyi. */
 QPushButton#choiceCard {{ background: {t['surface']}; border: 1px solid {t['border']};
  border-radius: 12px; padding: 0; text-align: left; min-height: 80px; }}

@@ -13,9 +13,10 @@ Ortam: istemci `os.environ`'u çocuğa aktarmaz ve PATH'i çağıranın verdiği
 Tek istisna Windows'ta `shutil.which`'in PATHEXT'i `os.environ`'dan okumasıdır; bu yalnız
 komut adı çözümlemesidir, çocuğa değer taşımaz.
 
-Bilinen sınır (Windows): sunucu lideri çıktıktan sonra `taskkill /T` ağacı bulamaz, bu
-yüzden normal çıkışta bırakılan torun süreçler Windows'ta temizlenmez. POSIX'te lider
-çıksa da süreç grubu (`start_new_session`) `killpg` ile temizlenir.
+Süreç ağacı temizliği: Windows'ta süreç `CREATE_SUSPENDED` ile açılıp ilk kullanıcı
+kodu çalışmadan `KILL_ON_JOB_CLOSE` Job Object'ine bağlanır; böylece `.venv` veya
+`.cmd` sarmalayıcılarının doğurduğu torun süreçler de job kapanışında/iptalde temizlenir.
+POSIX'te lider çıksa da süreç grubu (`start_new_session`) `killpg` ile temizlenir.
 """
 
 from __future__ import annotations
@@ -44,18 +45,23 @@ CLEANUP_SECONDS = 2.0
 MAX_SESSION_BYTES = 8 << 20
 CANCEL_POLL_SECONDS = 0.1
 UNSAFE_BATCH_CHARACTERS = frozenset('"&|<>^%!\r\n')
+_CREATE_SUSPENDED = 0x4
 
 
 def _spawn_options() -> dict[str, Any]:
-    """Süreç ağacı `kill_tree` ile kapatılabilsin diye yeni grup/oturum açılır.
+    """Süreç ağacı job/`kill_tree` ile kapatılabilsin diye yeni grup ve askıda başlatma açılır.
 
-    Kod ajanının `process_options()`'ı kullanılmaz: Windows'ta CREATE_SUSPENDED ekler,
-    çünkü o süreç Job Object'e bağlandıktan sonra devam ettirilir. MCP sunucusu devam
-    ettirilmediği için askıda kalır ve her çağrı zaman aşımına düşerdi (Windows CI'da
-    ölçüldü).
+    Windows'ta `CREATE_SUSPENDED` (`0x4`) verilir; ilk kod çalışmadan
+    `own_process_tree(..., suspended=True)` süreci Job Object'e bağlar ve devam ettirir.
     """
     if os.name == "nt":
-        return {"creationflags": NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)}
+        return {
+            "creationflags": (
+                NO_WINDOW
+                | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+                | _CREATE_SUSPENDED
+            )
+        }
     return {"start_new_session": True}
 
 
@@ -133,8 +139,22 @@ class _Session:
         self._outgoing: queue.Queue[bytes | None] = queue.Queue()
         self._threads: list[threading.Thread] = []
         self._proc = self._spawn(command, env, cwd)
-        self._tree = own_process_tree(self._proc)  # Windows job; None ise kill_tree
+        try:
+            self._tree = own_process_tree(self._proc, suspended=True)
+        except OSError as exc:
+            self._cleanup_failed_spawn()
+            raise MCPError("MCP sunucusu başlatılamadı.", error_type="process") from exc
         self._start_threads()
+
+    def _cleanup_failed_spawn(self) -> None:
+        proc = self._proc
+        with contextlib.suppress(OSError):
+            proc.kill()
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
+            proc.wait(timeout=CLEANUP_SECONDS)
+        self._close_pipe(proc.stdin)
+        self._close_pipe(proc.stdout)
+        self._close_pipe(proc.stderr)
 
     @staticmethod
     def _spawn(
