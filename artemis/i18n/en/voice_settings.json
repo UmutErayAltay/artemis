@@ -1,5 +1,12 @@
 {
   "({skipped} bozuk/uyumsuz dosya atlandı)": "({skipped} corrupt/incompatible files skipped)",
+  "Bas-konuş (Push-to-Talk)": "Push-to-Talk",
+  "Bas-konuş için genel kısayol (ör. ctrl+alt+v; boş bırakılırsa kapalı).": "Global shortcut for push-to-talk (e.g. ctrl+alt+v; leave empty to disable).",
+  "Bas-konuş kısayolu": "Push-to-talk shortcut",
+  "Bas-konuş kısayolu ({text}) başka bir programda kayıtlı.": "Push-to-talk shortcut ({text}) is registered by another application.",
+  "Bas-konuş kısayolu tanınmadı: {text}": "Push-to-talk shortcut not recognized: {text}",
+  "Belirlenen kısayolu basılı tutarken dinler, bırakınca komutu işler.": "Listens while holding the assigned shortcut and runs the command on release.",
+  "Dikte sürerken bas-konuş kullanılamaz.": "Push-to-talk cannot be used while dictation is active.",
   "Edge konuşma sesi": "Edge speech voice",
   "Edge sesi": "Edge voice",
   "Geçerli ses ölçüm raporu bulunamadı ({skipped} dosya atlandı).": "No valid voice telemetry report found ({skipped} files skipped).",

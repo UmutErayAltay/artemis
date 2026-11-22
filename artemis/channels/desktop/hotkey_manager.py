@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 import yaml
 from pydantic import ValidationError
 
-from artemis.channels.desktop.hotkey import GlobalHotkey, parse_hotkey
+from artemis.channels.desktop.hotkey import GlobalHotkey, PushToTalkHotkey, parse_hotkey
 from artemis.config.settings import load_settings, same_hotkey
 from artemis.i18n import t
 
@@ -166,8 +166,37 @@ def start_selection_hotkey(
     )
 
 
+def start_ptt_hotkey(
+    window: DesktopWindow, hotkey_cls: type[PushToTalkHotkey] = PushToTalkHotkey
+) -> None:
+    """Bas-konuş genel kısayolunu başlatır veya yeniler."""
+    _stop_handle(window, "_ptt_hotkey")
+    try:
+        voice = load_settings(window._config_path).voice
+    except (OSError, ValueError, ValidationError, yaml.YAMLError):
+        return
+    if not voice.ptt_enabled:
+        return
+    cleaned = voice.ptt_hotkey.strip()
+    if not cleaned:
+        return
+    try:
+        hotkey = hotkey_cls(cleaned, window._ptt_pressed.emit, window._ptt_released.emit)
+    except ValueError:
+        window._hotkey_problem(t("Bas-konuş kısayolu tanınmadı: {text}").format(text=cleaned))
+        return
+    if hotkey.start():
+        window._ptt_hotkey = hotkey
+    elif sys.platform == "win32":
+        window._hotkey_problem(
+            t("Bas-konuş kısayolu ({text}) başka bir programda kayıtlı.").format(text=cleaned)
+        )
+
+
 def reload_hotkeys(
-    window: DesktopWindow, hotkey_cls: type[GlobalHotkey] = GlobalHotkey
+    window: DesktopWindow,
+    hotkey_cls: type[GlobalHotkey] = GlobalHotkey,
+    ptt_cls: type[PushToTalkHotkey] = PushToTalkHotkey,
 ) -> None:
     """Tüm aktif genel kısayolları temizleyip güncel config'le yeniden başlatır."""
     if window._demo:
@@ -175,3 +204,4 @@ def reload_hotkeys(
     start_listening_hotkey(window, hotkey_cls)
     start_dictation_hotkey(window, hotkey_cls)
     start_selection_hotkey(window, hotkey_cls)
+    start_ptt_hotkey(window, ptt_cls)

@@ -207,6 +207,8 @@ class VoiceController:
         self._ack_cache: dict[str, list[PCMChunk]] = {}
         # Çalışma anı kipi; config yalnız başlangıç değeridir (ADR 0024).
         self.continuous = config.continuous_mode
+        self._ptt_active = False
+        self._ptt_uids: set[int] = set()
 
     async def run(self) -> None:
         """Mikrofon yalnız bu açıkça çağrılan döngü süresince tüketilir."""
@@ -329,7 +331,20 @@ class VoiceController:
             await asyncio.wait({task}, timeout=WAKE_GATE_WAIT)
         return self._wake_gate_blocks(segment.speech_start)
 
-    async def _queue_segment(self, segment: AudioSegment) -> None:
+    def _submit_segment(self, segment: AudioSegment, uid: int) -> bool:
+        self._event(uid, "stt_queued")
+        try:
+            self._segments.put_nowait((segment, uid, self._capture_epoch, self.clock()))
+        except asyncio.QueueFull:
+            self._ptt_uids.discard(uid)
+            self.on_transcript(t("Ses tanıma yoğun; son söz alınamadı. Lütfen tekrar söyle."))
+            self._event(uid, "terminal", outcome="rejected", reason="stt_queue_full")
+            self._forget_spec(uid)
+            return False
+        self.on_timing("stt_queue_depth", float(self._segments.qsize()))
+        return True
+
+    async def _queue_segment(self, segment: AudioSegment, *, ptt: bool = False) -> None:
         uid = self._capturing_id
         self._capturing_id = None
         if uid is None:
@@ -338,18 +353,58 @@ class VoiceController:
         self.on_timing("speech_end", segment.speech_end)
         self._event(uid, "speech_end", timestamp=segment.speech_end)
         self._event(uid, "endpoint")
-        if await self._wake_gate_drops(segment):
+        if not ptt and await self._wake_gate_drops(segment):
             self._event(uid, "terminal", outcome="rejected", reason="no_wake_kws")
             self._forget_spec(uid)
             return
-        self._event(uid, "stt_queued")
-        try:
-            self._segments.put_nowait((segment, uid, self._capture_epoch, self.clock()))
-        except asyncio.QueueFull:
-            self.on_transcript(t("Ses tanıma yoğun; son söz alınamadı. Lütfen tekrar söyle."))
-            self._event(uid, "terminal", outcome="rejected", reason="stt_queue_full")
-            self._forget_spec(uid)
-        self.on_timing("stt_queue_depth", float(self._segments.qsize()))
+        if ptt:
+            self._ptt_uids.add(uid)
+        self._submit_segment(segment, uid)
+
+    def ptt_press(self) -> None:
+        """Bas-konuş başlangıcı: etkin TTS varsa keser ve segmenteri bas-konuş kipine alır."""
+        if self._closed or self._stop.is_set() or self._ptt_active:
+            return
+        self._ptt_active = True
+        if self._active is not None and not self._active.done():
+            self._barge_cancelled = True
+            self.runner.cancel_current()
+            self._active.cancel()
+        self.segmenter.begin_ptt(self.clock())
+        if self._capturing_id is None:
+            self._capturing_id = self._new_utterance(self.clock())
+        self._emit_state("listening")
+
+    def ptt_release(self) -> AudioSegment | None:
+        """Bas-konuş bitişi: biriken sesi beklemeden tek komut olarak sıraya alır."""
+        if not self._ptt_active or self._closed:
+            return None
+        self._ptt_active = False
+        segment = self.segmenter.flush_active(self.clock())
+        if segment is None or not segment.pcm:
+            self._capturing_id = None
+            self._live_reset()
+            return None
+        self._live_reset()
+        uid = self._capturing_id
+        self._capturing_id = None
+        if uid is None:
+            uid = self._new_utterance(segment.speech_start)
+        self.on_timing("speech_start", segment.speech_start)
+        self.on_timing("speech_end", segment.speech_end)
+        self._event(uid, "speech_end", timestamp=segment.speech_end)
+        self._event(uid, "endpoint")
+        self._ptt_uids.add(uid)
+        if not self._submit_segment(segment, uid):
+            return None
+        return segment
+
+    async def drain_and_stop(self) -> None:
+        """Bekleyen bas-konuş bölütü ve yanıtı bitince denetleyiciyi temizce durdurur."""
+        await self._drain_segments()
+        await self._settle_active()
+        if not self._ptt_active and not self._closed:
+            self.request_stop()
 
     async def _decode_segments(self) -> None:
         while True:
@@ -373,6 +428,7 @@ class VoiceController:
         # Onay sırasındaki/eski ses uyandırma kanıtı olarak taşınmaz (CLAUDE.md ses kuralı).
         self._wake_heard_at = -math.inf
         self._wake_buffer.clear()
+        self._ptt_uids.clear()
         while not self._segments.empty():
             _segment, uid, _epoch, _at = self._segments.get_nowait()
             self._segments.task_done()
@@ -429,6 +485,7 @@ class VoiceController:
         *,
         uid: int | None = None,
         epoch: int | None = None,
+        ptt: bool = False,
     ) -> None:
         # Kimlik, async yanıtın ömrünce korunur; reddedilen sonraki söz bunu değiştirmez.
         if uid is None:
@@ -436,6 +493,8 @@ class VoiceController:
             self._capturing_id = None
         if uid is None:
             uid = self._new_utterance(segment.speech_start)
+        is_ptt = ptt or uid in self._ptt_uids
+        self._ptt_uids.discard(uid)
         if epoch is None:
             epoch = self._capture_epoch
             self.on_timing("speech_start", segment.speech_start)
@@ -476,7 +535,8 @@ class VoiceController:
             return
         transcript = self._strip_spoken_prefix(transcript, segment.speech_start)
         if (
-            self.config.require_wake_during_output
+            not is_ptt
+            and self.config.require_wake_during_output
             and self._output_requires_wake
             and self._spoken_text
             and segment.speech_start <= self._spoken_until
@@ -507,8 +567,11 @@ class VoiceController:
             return
         self.on_transcript(transcript)
         self.on_timing("stt_final", self.clock())
-        toggle = self._continuous_toggle(transcript)
-        command = None if toggle is not None else self._wake_command(transcript)
+        toggle = None if is_ptt else self._continuous_toggle(transcript)
+        if is_ptt:
+            command: str | None = self._ptt_command(transcript)
+        else:
+            command = None if toggle is not None else self._wake_command(transcript)
         if toggle is None and command is None:
             self._event(uid, "terminal", outcome="rejected", reason="no_wake")
             return
@@ -664,6 +727,14 @@ class VoiceController:
         # bitiş zamanı ile bayrak aynı noktada sıfırlanır.
         self._followup_until = 0.0
         self._awaiting_followup = False
+
+    def _ptt_command(self, transcript: str) -> str:
+        """Bas-konuş bölütü için uyandırma adını isteğe bağlı ayıklar; continuous'u değiştirmez."""
+        span = find_wake_word(transcript, self.config.wake_word)
+        if span is None:
+            return transcript
+        tail = transcript[span[1] :].lstrip(" \t,.;:!?-")
+        return tail if tail.strip(" \t,.;:!?-") else ""
 
     def _wake_command(self, transcript: str) -> str | None:
         """None: wake word yok/expired; boş dize: wake word tek başına."""
@@ -1140,6 +1211,7 @@ class VoiceController:
         self._live_reset()
 
     def pause_for_approval(self) -> None:
+        self._ptt_active = False
         self._invalidate_segments()
         self.microphone.pause()
         self._discard_capture("approval")

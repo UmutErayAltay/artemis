@@ -241,7 +241,14 @@ def _wake_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     panel.device_combo = QComboBox()
     panel.device_combo.setAccessibleName(t("Mikrofon girişi"))
     panel._no_device()
-    field(wake, t("Mikrofon girişi"), panel.device_combo)
+    panel.mic_test_button = QPushButton(t("Mikrofonu test et"))
+    panel.mic_test_button.setAccessibleName(t("Mikrofonu test et"))
+    panel.mic_test_button.clicked.connect(panel._open_mic_wizard)
+    device_row = QHBoxLayout()
+    device_row.setSpacing(8)
+    device_row.addWidget(panel.device_combo, 1)
+    device_row.addWidget(panel.mic_test_button)
+    field(wake, t("Mikrofon girişi"), device_row)
     panel.current_device = QLabel(t("Seçilmedi"))
     panel.current_device.setWordWrap(True)
     field(wake, t("Kullanılan mikrofon"), panel.current_device)
@@ -275,6 +282,21 @@ def _wake_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         "bulut sunucusuna gider."
     )))
     wake.addWidget(_check_hint(t("Uyandırma adı söylemeden sürekli dinler.")))
+    panel.ptt_enabled = QCheckBox(t("Bas-konuş (Push-to-Talk)"))
+    wake.addWidget(panel.ptt_enabled)
+    wake.addWidget(_check_hint(
+        t("Belirlenen kısayolu basılı tutarken dinler, bırakınca komutu işler.")
+    ))
+    panel.ptt_hotkey = QLineEdit()
+    panel.ptt_hotkey.setMaxLength(40)
+    panel.ptt_hotkey.setAccessibleName(t("Bas-konuş kısayolu"))
+    panel.ptt_hotkey.setPlaceholderText("ctrl+alt+v")
+    field(
+        wake,
+        t("Bas-konuş kısayolu"),
+        panel.ptt_hotkey,
+        t("Bas-konuş için genel kısayol (ör. ctrl+alt+v; boş bırakılırsa kapalı)."),
+    )
 
 
 def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:

@@ -142,6 +142,11 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         ("voice", "listening_hotkey"), "listening_hotkey",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
     ),
+    _checkbox(("voice", "ptt_enabled"), "ptt_enabled"),
+    PanelBinding(
+        ("voice", "ptt_hotkey"), "ptt_hotkey",
+        lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),
+    ),
     _combo(("voice", "tts_backend"), "tts_combo", fallback_first=False),
     PanelBinding(
         ("voice", "edge_voice"),

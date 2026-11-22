@@ -119,6 +119,9 @@ class VoiceConfig(BaseModel):
     # Masaüstünde sesi açıp kapatan Windows genel kısayolu ("Ses" düğmesiyle aynı yol);
     # tek elle basılabilsin diye ctrl+space. Boş dize kısayolu kapatır.
     listening_hotkey: str = Field(default="ctrl+space", max_length=40)
+    # Bas-konuş (Push-to-Talk): tuşu basılı tutarken dinler, bırakınca komutu işler.
+    ptt_enabled: bool = False
+    ptt_hotkey: str = Field(default="", max_length=40)
     # ADR 0037: DeepFilterNet3 gürültü engelleme (CPU). Düzey bastırma sınırını (dB) belirler:
     # hafif 12, orta 24, güçlü sınırsız; güçlü bastırma Whisper doğruluğunu düşürebilir.
     noise_suppression: bool = False
@@ -714,6 +717,25 @@ class ComputerUseConfig(BaseModel):
     fallback_models: tuple[str, ...] = ()
 
 
+_HOTKEY_MODIFIERS = frozenset({"alt", "ctrl", "shift", "win"})
+_HOTKEY_NAMED_KEYS = frozenset(
+    {"space", "pause", "capslock", "escape", *(f"f{n}" for n in range(1, 25))}
+)
+
+
+def _valid_hotkey_syntax(text: str) -> bool:
+    """Genel kısayol biçimini doğrular (channels.desktop.hotkey.parse_hotkey ile uyumlu)."""
+    parts = [part.strip().lower() for part in text.split("+")]
+    if not parts or any(not part for part in parts):
+        return False
+    *modifiers, key = parts
+    if not modifiers and (key == "space" or (len(key) == 1 and key.isalnum())):
+        return False
+    if len(set(modifiers)) != len(modifiers) or any(m not in _HOTKEY_MODIFIERS for m in modifiers):
+        return False
+    return (len(key) == 1 and key.isascii() and key.isalnum()) or key in _HOTKEY_NAMED_KEYS
+
+
 def same_hotkey(first: str, second: str) -> bool:
     """"Ctrl+Alt+D" ile "alt + ctrl + d" aynı kısayoldur; iki özellik aynı tuşu kaydedemez."""
     def normal(text: str) -> tuple[frozenset[str], str]:
@@ -978,6 +1000,17 @@ class Settings(BaseModel):
             selection, self.dictation.hotkey
         ):
             raise ValueError("Seçili metin kısayolu ses ve dikte kısayolundan farklı olmalı")
+        ptt_hotkey = voice.ptt_hotkey.strip()
+        if ptt_hotkey:
+            if not _valid_hotkey_syntax(ptt_hotkey):
+                raise ValueError(
+                    "Bas-konuş kısayolu geçersiz: ör. ctrl+alt+v (boş bırakılırsa kapalı)."
+                )
+            if any(
+                same_hotkey(ptt_hotkey, other)
+                for other in (voice.listening_hotkey, self.dictation.hotkey, selection)
+            ):
+                raise ValueError("Bas-konuş kısayolu diğer kısayollarla aynı olamaz.")
         if voice.stt_mode == "hybrid" and (
             voice.stt_cloud_endpoint not in self.endpoints
             or (voice.stt_cloud_protocol == "openai" and not voice.stt_cloud_model.strip())

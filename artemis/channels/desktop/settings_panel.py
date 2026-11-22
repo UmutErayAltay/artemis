@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop import (
+    mic_wizard,
     security_settings_section,
     voice_preview,
     voice_settings_section,
@@ -279,6 +280,7 @@ class SettingsPanel(QWidget):
     no_results: QLabel
     wake_name: QLineEdit
     device_combo: QComboBox
+    mic_test_button: QPushButton
     current_device: QLabel
     input_level: QProgressBar
     level_value: QLabel
@@ -324,6 +326,8 @@ class SettingsPanel(QWidget):
     voice_tabs: QTabWidget
     voice_telemetry_card: VoiceTelemetryCard
     listening_hotkey: QLineEdit
+    ptt_enabled: QCheckBox
+    ptt_hotkey: QLineEdit
     continuous_mode: QCheckBox
     dictation_enabled: QCheckBox
     dictation_hotkey: QLineEdit
@@ -485,6 +489,7 @@ class SettingsPanel(QWidget):
             self.add_application_button.setEnabled(False)
             self.remove_application_button.setEnabled(False)
             self.advanced_devices.setEnabled(False)
+            self.mic_test_button.setEnabled(False)
             self.stt_combo.setEnabled(False)
             self.stt_download.setEnabled(False)
             for binding in PANEL_BINDINGS:
@@ -502,7 +507,8 @@ class SettingsPanel(QWidget):
             combo.setMinimumContentsLength(12)
         # Değişiklik izleme yalnız kullanıcı girdisine bakar; yenileme sonunda temiz sayılır.
         for edit in (
-            self.wake_name, self.listening_hotkey, self.dictation_hotkey, self.selection_hotkey,
+            self.wake_name, self.listening_hotkey, self.ptt_hotkey, self.dictation_hotkey,
+            self.selection_hotkey,
             self.selection_translate_to, self.github_owner, self.repos_dir,
             self.mail_host, self.mail_port, self.mail_username, self.mail_folder,
             self.daily_summary_at,
@@ -1213,6 +1219,9 @@ class SettingsPanel(QWidget):
 
     def _github_done(self, report: SyncReport) -> None:
         apply_github_report(self, report)
+
+    def _open_mic_wizard(self) -> None:
+        mic_wizard.open_mic_wizard(self)
 
     def _sync_voice_output_controls(self, *_args: object) -> None:
         voice_preview.sync_voice_output_controls(self)

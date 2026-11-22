@@ -63,7 +63,7 @@ from artemis.channels.desktop.chat_widgets import (
 )
 from artemis.channels.desktop.connect_wizard import maybe_connect
 from artemis.channels.desktop.data_panel import DataPanel
-from artemis.channels.desktop.hotkey import GlobalHotkey
+from artemis.channels.desktop.hotkey import GlobalHotkey, PushToTalkHotkey
 from artemis.channels.desktop.instance import (
     InstanceServer,
     claim_instance,
@@ -147,6 +147,8 @@ class DesktopWindow(QMainWindow):
     _hotkey_pressed = Signal()
     _dictation_pressed = Signal()
     _selection_pressed = Signal()
+    _ptt_pressed = Signal()
+    _ptt_released = Signal()
     _toast_failed = Signal(str)
     # Alanları window_layout kurar; burada yalnız tipleri bildirilir.
     _topbar: QFrame
@@ -263,6 +265,7 @@ class DesktopWindow(QMainWindow):
         self._hotkey: GlobalHotkey | None = None
         self._dictation_hotkey: GlobalHotkey | None = None
         self._selection_hotkey: GlobalHotkey | None = None
+        self._ptt_hotkey: PushToTalkHotkey | None = None
         # Seçili metin eylemleri (ADR 0062): pencere yalnız düğme basışlarını köprüye iletir.
         self.selection_popup = SelectionPopup(
             self, lambda action: self.bridge.selection_run(action),
@@ -273,11 +276,14 @@ class DesktopWindow(QMainWindow):
         self._selection_pressed.connect(lambda: self.bridge.selection_hotkey())
         # Köprü ayar uygulanınca yenilenir; sinyal her seferinde güncel olanı çağırır.
         self._dictation_pressed.connect(lambda: self.bridge.toggle_dictation())
+        self._ptt_pressed.connect(lambda: self.bridge.ptt_press())
+        self._ptt_released.connect(lambda: self.bridge.ptt_release())
         if not demo:
             self._refresh_welcome()
             self._start_hotkey()
             self._start_dictation_hotkey()
             self._start_selection_hotkey()
+            self._start_ptt_hotkey()
         self.pet.start()
         self._refresh_brand_pet()
         self.settings_panel.pet.set_current(self.pet.skin)
@@ -334,8 +340,12 @@ class DesktopWindow(QMainWindow):
         """Seçili metin kısayolu (ADR 0062): kapalıyken kaydedilmez; ayar uygulanınca yenilenir."""
         hotkey_manager.start_selection_hotkey(self, GlobalHotkey)
 
+    def _start_ptt_hotkey(self) -> None:
+        """Bas-konuş kısayolu: kapalıyken kaydedilmez; ayar uygulanınca yenilenir."""
+        hotkey_manager.start_ptt_hotkey(self, PushToTalkHotkey)
+
     def _reload_hotkeys(self) -> None:
-        hotkey_manager.reload_hotkeys(self, GlobalHotkey)
+        hotkey_manager.reload_hotkeys(self, GlobalHotkey, PushToTalkHotkey)
 
     def _show_selection(self, kind: str, message: str) -> None:
         """Seçili metin eylemi durumu: pencere imleç yanında açılır, sonuç orada görünür."""

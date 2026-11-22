@@ -197,10 +197,12 @@ def apply_settings(window: DesktopWindow, device: int | str | None) -> None:
         selection_key = str(
             values.get(("selection_actions", "hotkey"), loaded.selection_actions.hotkey)
         )
+        ptt_key = str(values.get(("voice", "ptt_hotkey"), loaded.voice.ptt_hotkey))
         hotkey_error = validate_hotkeys(
             listening=voice_key,
             dictation=dictation_key,
             selection=selection_key,
+            ptt=ptt_key,
         )
     except (OSError, ValueError, KeyError, ValidationError, yaml.YAMLError):
         hotkey_error = None  # okunamayan config aşağıdaki kayıtta yakalanır
@@ -297,6 +299,10 @@ def finish_exit(window: DesktopWindow) -> None:
     if window._selection_hotkey is not None:
         window._selection_hotkey.stop()
         window._selection_hotkey = None
+    ptt_hotkey = getattr(window, "_ptt_hotkey", None)
+    if ptt_hotkey is not None:
+        ptt_hotkey.stop()
+        window._ptt_hotkey = None
     window.selection_popup.close()
     window.settings_panel.finish_inventory()
     window.settings_panel.providers.shutdown()

@@ -22,6 +22,7 @@ from artemis.brain.agent_loop import RunResult
 from artemis.brain.models import Completion, Message
 from artemis.brain.router import ProviderRouter
 from artemis.brain.streaming import ResponseStream
+from artemis.channels.desktop import ptt_bridge
 from artemis.channels.desktop.computer_host import ComputerHost
 from artemis.channels.desktop.dictation import Dictation, windows_backend
 from artemis.channels.desktop.selection import (
@@ -347,6 +348,9 @@ class DesktopBridge:
         self._voice_stop_requested = False
         self._voice_controller: VoiceController | None = None
         self._voice_task: asyncio.Task[None] | None = None
+        self._ptt_holding = False
+        self._ptt_auto_voice = False
+        self._ptt_drain_task: asyncio.Task[None] | None = None
         # Dikte (ADR 0057) ilk kısayol basışında kurulur; ayar imzası değişince yenilenir.
         self._dictation: Dictation | None = None
         self._dictation_override: DictationConfig | None = None
@@ -436,6 +440,14 @@ class DesktopBridge:
         except RuntimeError:
             return False
         return True
+
+    def ptt_press(self) -> bool:
+        """Bas-konuş başlangıcı (GUI thread'i): aktif sese bağlanır veya geçici ses başlatır."""
+        return ptt_bridge.ptt_press(self, State)
+
+    def ptt_release(self) -> bool:
+        """Bas-konuş bitişi (GUI thread'i): biriken sesi komut olarak işler."""
+        return ptt_bridge.ptt_release(self)
 
     def toggle_dictation(self) -> bool:
         """Dikte kısayolu (GUI thread'i): kayıt başlatır ya da durdurup yazdırır (ADR 0057)."""
@@ -1087,7 +1099,11 @@ class DesktopBridge:
             if collector is not None:
                 controller.on_event = collector
             with self._lock:
-                abandoned = self._voice_stop_requested or self._shutdown
+                abandoned = (
+                    self._voice_stop_requested
+                    or self._shutdown
+                    or (self._ptt_auto_voice and not self._ptt_holding)
+                )
                 if not abandoned:
                     self._voice_controller = controller
                     # Model `voice_continuous` aracıyla kipi değiştirebilsin;
@@ -1095,6 +1111,10 @@ class DesktopBridge:
                     runtime.context.services["voice_controller"] = controller
                     self._voice_task = asyncio.create_task(self._run_voice(controller, collector))
                     handed_over = True
+                    if self._ptt_holding:
+                        controller.ptt_press()
+                else:
+                    self._ptt_auto_voice = False
             if abandoned:
                 # Hazırlık sürerken kapatıldı: mikrofon hiç açılmadan kaynaklar bırakılır.
                 await controller.close()
@@ -1102,6 +1122,9 @@ class DesktopBridge:
             # Beklenmeyen hata veya close() arızasında başlangıç bayrağı takılı kalmasın.
             with self._lock:
                 self._voice_starting = False
+                if not handed_over:
+                    self._ptt_auto_voice = False
+                    self._ptt_holding = False
             if not handed_over:
                 self._emit_voice_state("off")
 
@@ -1119,6 +1142,9 @@ class DesktopBridge:
                 if self._runtime is not None:
                     self._runtime.context.services.pop("voice_controller", None)
                 self._voice_stop_requested = False
+                self._ptt_auto_voice = False
+                self._ptt_holding = False
+                self._ptt_drain_task = None
             if collector is not None:
                 await self._export_voice_telemetry(controller, collector)
             self._emit_voice_state("off")
@@ -1188,6 +1214,8 @@ class DesktopBridge:
         )
 
     def _stop_voice_on_worker(self) -> None:
+        if self._ptt_drain_task is not None and not self._ptt_drain_task.done():
+            self._ptt_drain_task.cancel()
         controller = self._voice_controller
         if controller is not None:
             controller.request_stop()

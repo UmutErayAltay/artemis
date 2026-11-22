@@ -404,6 +404,8 @@ def _flip(widget) -> None:  # type: ignore[no-untyped-def]
             widget.setText("587")
         elif name == "Özet saati":
             widget.setText("07:15")
+        elif "Bas-konuş" in name:
+            widget.setText("ctrl+shift+p")
         elif "Ses" in name:
             widget.setText("ctrl+shift+v")
         elif "Dikte" in name:

@@ -114,6 +114,8 @@ class AudioSegmenter:
         self._discarding = False
         self._speech_start = 0.0
         self._speech_end = 0.0
+        self._has_start = False
+        self._ptt_mode = False
         self.voiced_frames = 0
 
     @property
@@ -157,6 +159,19 @@ class AudioSegmenter:
         speech = self.vad.is_speech(pcm)
         keep = pcm if stt_pcm is None else stt_pcm
         self.voiced_frames = self.voiced_frames + 1 if speech else 0
+        if self._ptt_mode:
+            if not self._active and self._pre:
+                self._active = [*self._pre]
+                self._pre.clear()
+            if not self._has_start:
+                self._speech_start = timestamp
+                self._has_start = True
+            if len(self._active) < self.max_frames:
+                self._active.append(keep)
+            self._speech_end = timestamp
+            self._silence = 0
+            self._judged = False
+            return None
         if self._discarding:
             self._silence = 0 if speech else self._silence + 1
             if self._silence >= self.silence_limit:
@@ -173,6 +188,7 @@ class AudioSegmenter:
             self._silence = 0
             self._speech_start = timestamp
             self._speech_end = timestamp
+            self._has_start = True
             return None
         self._active.append(keep)
         if speech:
@@ -192,7 +208,38 @@ class AudioSegmenter:
             self._silence = 0 if speech else self._silence
             self._speech_start = 0.0
             self._speech_end = 0.0
+            self._has_start = False
         return None
+
+    def begin_ptt(self, timestamp: float | None = None) -> None:
+        """Bas-konuş kaydını başlatır; sessizlik veya tur sonu beklemeden kareleri biriktirir."""
+        self._discarding = False
+        self._silence = 0
+        self._judged = False
+        self._ptt_mode = True
+        if not self._active:
+            if self._pre:
+                self._active = [*self._pre]
+                self._pre.clear()
+            if timestamp is not None:
+                self._speech_start = timestamp
+                self._speech_end = timestamp
+                self._has_start = True
+            else:
+                self._speech_start = 0.0
+                self._speech_end = 0.0
+                self._has_start = False
+
+    def flush_active(self, timestamp: float) -> AudioSegment | None:
+        """Biriken sesi `end_silence_ms` / Smart Turn beklemeden hemen bölüt olarak döndürür."""
+        if not self._active:
+            self.reset()
+            return None
+        start = self._speech_start if self._has_start else timestamp
+        end = max(start, self._speech_end if self._has_start else timestamp, timestamp)
+        result = AudioSegment(b"".join(self._active), start, end)
+        self.reset()
+        return result
 
     def reset(self) -> None:
         self.voiced_frames = 0
@@ -203,6 +250,8 @@ class AudioSegmenter:
         self._discarding = False
         self._speech_start = 0.0
         self._speech_end = 0.0
+        self._has_start = False
+        self._ptt_mode = False
 
     def snapshot(self) -> bytes:
         """Geçici, sonlu pencereli STT girdisi; kalıcı kayda yazılmaz."""
