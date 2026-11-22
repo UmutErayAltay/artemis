@@ -139,26 +139,33 @@ class Dictation:
         own_pid: int | None = None,
         clock: Callable[[], float] = monotonic,
         other_busy: Callable[[], bool] = lambda: False,
+        polish: Callable[[str], Awaitable[str]] | None = None,
     ) -> None:
         self._max_seconds = max_seconds
         self._audit = audit
         self._open_microphone = open_microphone
         self._get_recognizer = get_recognizer
         self._backend = backend
-        self._emit = emit  # (tür, metin): listening | working | idle | message | text
+        self._emit = emit  # (tür, metin): listening | working | idle | message | text | history
         self._voice_active = voice_active
         self._other_busy = other_busy  # seçili metin eylemi sürerken dikte başlamaz (ADR 0062)
         self._own_pid = os.getpid() if own_pid is None else own_pid
         self._clock = clock
+        self._polish = polish
         self._recognizer: SpeechRecognizer | None = None
         self._phase = "idle"
         self._stop = asyncio.Event()
         self._task: asyncio.Task[None] | None = None
         self._closing = False
+        self._last_target: int | None = None
 
     @property
     def busy(self) -> bool:
         return self._phase != "idle"
+
+    @property
+    def last_target(self) -> int | None:
+        return self._last_target
 
     def toggle(self) -> None:
         """Kısayol basışı (işçi döngüsünde): boşta başlatır, kayıttaysa durdurup yazdırır."""
@@ -197,6 +204,8 @@ class Dictation:
     async def _session(self) -> None:
         started = self._clock()
         target = self._target()
+        if target is not None:
+            self._last_target = target
         self._emit("listening", "")
         outcome, chars, typed = "error", 0, 0
         message = t("Dikte çalışmadı; ses ve model ayarlarını kontrol edin.")
@@ -209,6 +218,13 @@ class Dictation:
             self._emit("working", "")
             recognizer = await prepare
             text = clean_transcript(await recognizer.transcribe(pcm)) if pcm else ""
+            if text and self._polish is not None:
+                try:
+                    polished = clean_transcript(await self._polish(text))
+                    if polished:
+                        text = polished
+                except (OSError, RuntimeError, ValueError, TimeoutError):
+                    pass
             chars = len(text)
             if not text:
                 outcome, message = "empty", t("Dikte: konuşma anlaşılamadı.")
@@ -229,6 +245,8 @@ class Dictation:
                 typed=typed,
                 outcome=outcome,
             )
+            if text and outcome != "empty":
+                self._emit("history", text)
             # Yazılmayan metin kaybolmasın: panelde gösterilir (pano kullanılmaz).
             if text and outcome in {"no_target", "partial", "cancelled"}:
                 self._emit("text", text)

@@ -588,6 +588,21 @@ def build_shortcuts_page(panel: SettingsPanel) -> None:
         "İkinci kez kısayola basmadan kaydın kendiliğinden duracağı üst süre (1–600 sn)."
     ))
     field(dict_layout, t("Dikte üst süresi (sn)"), panel.dictation_max_seconds)
+    panel.dictation_polish = QCheckBox(t("Diktede noktalama ve büyük harfi düzelt"))
+    dict_layout.addLayout(
+        with_help(
+            panel.dictation_polish,
+            t(
+                "Açıkken tanınan metin yazılmadan önce tek adımlı, araçsız model çağrısıyla "
+                "noktalama ve büyük harf için düzeltilir; konuşma geçmişine girmez. Gizli "
+                "çalışma profilinde yalnız yerel model kullanılır."
+            ),
+        )
+    )
+    dict_layout.addWidget(_check_hint(t(
+        "İsteğe bağlıdır (varsayılan kapalı). Hata veya gizlilik kısıtında ham dikte "
+        "metni korunur."
+    )))
 
     sel_box, sel_layout = group(t("Seçili metin eylemleri"))
     page.addWidget(sel_box)

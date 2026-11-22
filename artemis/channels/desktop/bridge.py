@@ -22,13 +22,16 @@ from artemis.brain.agent_loop import RunResult
 from artemis.brain.models import Completion, Message
 from artemis.brain.router import ProviderRouter
 from artemis.brain.streaming import ResponseStream
-from artemis.channels.desktop import profile_bridge, ptt_bridge
+from artemis.channels.desktop import dictation_bridge, profile_bridge, ptt_bridge
 from artemis.channels.desktop.computer_host import ComputerHost
-from artemis.channels.desktop.dictation import Dictation, windows_backend
+from artemis.channels.desktop.dictation import Dictation
+from artemis.channels.desktop.dictation import windows_backend as windows_backend
 from artemis.channels.desktop.selection import (
     SelectionActions,
     local_chat_alias,
-    windows_selection_backend,
+)
+from artemis.channels.desktop.selection import (
+    windows_selection_backend as windows_selection_backend,
 )
 from artemis.channels.runtime import (
     Approval as ApprovalCallback,
@@ -39,9 +42,12 @@ from artemis.channels.runtime import (
     create_runtime,
 )
 from artemis.channels.telegram.api import TelegramClient, build_telegram_client
-from artemis.channels.voice.adapters import SoundDeviceMicrophone
+from artemis.channels.voice.adapters import SoundDeviceMicrophone as SoundDeviceMicrophone
 from artemis.channels.voice.core import VoiceController
-from artemis.channels.voice.factory import build_dictation_recognizer, build_voice_controller
+from artemis.channels.voice.factory import (
+    build_dictation_recognizer as build_dictation_recognizer,
+)
+from artemis.channels.voice.factory import build_voice_controller
 from artemis.channels.voice.metrics import EventCollector, collector_report, write_report
 from artemis.config.settings import DictationConfig
 from artemis.i18n import t
@@ -354,7 +360,7 @@ class DesktopBridge:
         # Dikte (ADR 0057) ilk kısayol basışında kurulur; ayar imzası değişince yenilenir.
         self._dictation: Dictation | None = None
         self._dictation_override: DictationConfig | None = None
-        self._dictation_signature: tuple[float, int | str | None, str, str] | None = None
+        self._dictation_signature: tuple[float, int | str | None, str, str, bool] | None = None
         # Seçili metin eylemleri (ADR 0062) de ilk kısayol basışında işçi döngüsünde kurulur.
         self._selection: SelectionActions | None = None
         # Proaktif zamanlayıcı (ADR 0027) yalnız işçi döngüsünde yaşar.
@@ -471,55 +477,15 @@ class DesktopBridge:
             return False
         return True
 
+    def repaste_dictation(self, text: str, target_hwnd: int | None = None) -> bool:
+        """Son dikte metnini dış hedef pencereye yeniden yazar; yoksa panoya kopyalar."""
+        return dictation_bridge.repaste_dictation(self, text, target_hwnd)
+
     def _reload_dictation_settings_on_worker(self, dictation: DictationConfig) -> None:
-        runtime = self._runtime
-        if runtime is None or self._shutdown:
-            return
-        self._dictation_override = dictation
-        runtime.context.settings = runtime.context.settings.model_copy(
-            update={"dictation": dictation}
-        )
-        if self._dictation is not None and not self._dictation.busy:
-            self._dictation.shutdown()
-            self._dictation = None
-            self._dictation_signature = None
+        dictation_bridge.reload_dictation_settings_on_worker(self, dictation)
 
     def _toggle_dictation_on_worker(self) -> None:
-        runtime = self._runtime
-        if runtime is None or self._shutdown:
-            return
-        settings = runtime.settings
-        dictation_cfg = self._dictation_override or settings.dictation
-        if not dictation_cfg.enabled:
-            return
-        signature = (
-            dictation_cfg.max_seconds,
-            settings.voice.input_device,
-            settings.voice.stt_mode,
-            runtime.context.settings.work_profile,
-        )
-        if (
-            self._dictation is not None
-            and not self._dictation.busy
-            and signature != self._dictation_signature
-        ):
-            self._dictation.shutdown()
-            self._dictation = None
-        if self._dictation is None:
-            self._dictation_signature = signature
-            self._dictation = Dictation(
-                max_seconds=dictation_cfg.max_seconds,
-                audit=runtime.audit,
-                open_microphone=lambda: SoundDeviceMicrophone(
-                    settings.voice, device=settings.voice.input_device
-                ),
-                get_recognizer=lambda: build_dictation_recognizer(runtime),
-                backend=windows_backend(),
-                emit=lambda kind, text: self._events.put(State(f"dictation_{kind}", text)),
-                voice_active=lambda: self.voice_active,
-                other_busy=lambda: self._selection is not None and self._selection.busy,
-            )
-        self._dictation.toggle()
+        dictation_bridge.toggle_dictation_on_worker(self)
 
     def selection_hotkey(self) -> bool:
         """Seçili metin kısayolu (GUI thread'i): seçimi yakalar (ADR 0062)."""

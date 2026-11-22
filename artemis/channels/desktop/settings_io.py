@@ -226,6 +226,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda box, value: box.setValue(int(round(float(value)))),
         quiet=True,
     ),
+    _checkbox(("dictation", "polish_punctuation"), "dictation_polish"),
     _checkbox(("selection_actions", "enabled"), "selection_enabled"),
     PanelBinding(
         ("selection_actions", "hotkey"), "selection_hotkey",

@@ -412,6 +412,7 @@ memory:
 #   enabled: true            # varsayılan false
 #   hotkey: ctrl+alt+d
 #   max_seconds: 120         # 1-600; kayıt kendiliğinden biter
+#   polish_punctuation: false # true: tek adımlı, araçsız noktalama ve büyük harf düzeltmesi
 
 # Seçili metin eylemleri (ADR 0062): bir uygulamada metin seçip kısayola basın; Çevir / Düzelt /
 # Özetle / Açıkla çıkar, sonuç kopyalanır ya da "Yerine yaz" ile hedef pencereye yazılır. Seçimi

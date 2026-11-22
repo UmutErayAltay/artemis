@@ -304,6 +304,12 @@ def finish_exit(window: DesktopWindow) -> None:
         ptt_hotkey.stop()
         window._ptt_hotkey = None
     window.selection_popup.close()
+    history = getattr(window, "_dictation_history", None)
+    if history is not None:
+        history.clear()
+    history_menu = getattr(window, "dictation_history_menu", None)
+    if history_menu is not None:
+        history_menu.clear()
     window.settings_panel.finish_inventory()
     window.settings_panel.providers.shutdown()
     if window._tray is not None:

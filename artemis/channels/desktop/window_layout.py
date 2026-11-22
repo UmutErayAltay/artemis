@@ -29,6 +29,7 @@ from artemis.channels.desktop.chat_widgets import (
     _ChatPage,
     _Drawer,
 )
+from artemis.channels.desktop.dictation_history import build_dictation_history_button
 from artemis.channels.desktop.page_kit import make_page_header
 from artemis.channels.desktop.profile_bar import build_profile_button
 from artemis.channels.desktop.widgets import HelpTip, PetFace
@@ -242,6 +243,7 @@ def build_chat_page(window: DesktopWindow) -> QWidget:
             # Marka üst çubukta, sayfa adı kenar çubuğunda zaten var; üçüncü kez yazılmaz.
             "",
             actions=(
+                build_dictation_history_button(window),
                 window.operations_button,
                 (window.new_chat_button, t(_HELP_NEW_CHAT)),
                 (window.quick_action, t(_HELP_QUICK)),

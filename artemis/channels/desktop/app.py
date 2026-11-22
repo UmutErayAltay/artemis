@@ -63,6 +63,11 @@ from artemis.channels.desktop.chat_widgets import (
 )
 from artemis.channels.desktop.connect_wizard import maybe_connect
 from artemis.channels.desktop.data_panel import DataPanel
+from artemis.channels.desktop.dictation_history import (
+    DictationHistory,
+    handle_dictation_ui,
+    on_dictation_history_action,
+)
 from artemis.channels.desktop.hotkey import GlobalHotkey, PushToTalkHotkey
 from artemis.channels.desktop.instance import (
     InstanceServer,
@@ -173,6 +178,9 @@ class DesktopWindow(QMainWindow):
     quick_action: QPushButton
     new_chat_button: QPushButton
     operations_button: QPushButton
+    dictation_history_button: QPushButton
+    dictation_history_menu: QMenu
+    _dictation_history: DictationHistory
     _chat_row: QHBoxLayout
     chat: ChatTranscript
     _routine_name: str
@@ -368,24 +376,11 @@ class DesktopWindow(QMainWindow):
             self._set_status(message, "ready")
 
     def _show_dictation(self, kind: str, message: str) -> None:
-        """Dikte durumu (ADR 0057): kayıt sürerken görünür gösterge, bitince normal duruma dönüş."""
-        if kind in {"listening", "working"}:
-            line = t("Dikte dinliyor…") if kind == "listening" else t("Dikte yazıya çevriliyor…")
-            self._set_status(line, "running")
-            self.overlay.set_busy(True, line)
-            self.pet.set_voice("listening" if kind == "listening" else "thinking")
-        elif kind == "idle":
-            self._set_status(t("Çalışıyor…") if self._busy else t("Hazır"),
-                             "running" if self._busy else "ready")
-            self.overlay.set_busy(self._busy)
-            self.pet.set_voice(self._voice_state)
-        elif kind == "message" and message:
-            self._set_status(message, "ready")
-        elif kind == "text":
-            # Yazılamayan metin kaybolmasın; pano değil panel (konuşma geçmişine girmez).
-            self._append_chat("Artemis", t(
-                "Dikte metni (yazılmadı ya da yarım kaldı): {message}"
-            ).format(message=message))
+        """Dikte durumu ve RAM içi son-5 geçmişi (ADR 0057)."""
+        handle_dictation_ui(self, kind, message)
+
+    def _on_dictation_history_action(self, action: QAction) -> None:
+        on_dictation_history_action(self, action)
 
     def _hotkey_problem(self, message: str) -> None:
         if self._tray is not None:

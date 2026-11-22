@@ -21,6 +21,7 @@
   "Ayarlar": "Settings",
   "Ayarlar açıldığındaki kayıtlı hâline döner. API anahtarları ve kasadaki parolalar geri alınmaz.": "Reverts to the saved state when Settings was opened. API keys and vault passwords are not reverted.",
   "Ayarlarda ara": "Search settings",
+  "Açıkken tanınan metin yazılmadan önce tek adımlı, araçsız model çağrısıyla noktalama ve büyük harf için düzeltilir; konuşma geçmişine girmez. Gizli çalışma profilinde yalnız yerel model kullanılır.": "When enabled, recognized text is polished for punctuation and capitalization in a single tool-free model call before typing; it is not added to conversation history. Under the private work profile, only a local model is used.",
   "Bas-konuş kısayolu diğer kısayollarla aynı olamaz.": "Push-to-talk shortcut cannot be the same as other shortcuts.",
   "Bas-konuş kısayolu geçersiz: ör. ctrl+alt+v (boş bırakılırsa kapalı).": "Push-to-talk shortcut is invalid: e.g. ctrl+alt+v (leave empty to disable).",
   "Bağla ve repoları çek": "Connect and pull repos",
@@ -68,6 +69,7 @@
   "Dikte üst süresi (sn)": "Dictation max duration (s)",
   "Dikte ve Kısayollar": "Dictation & Shortcuts",
   "Dikteyi kullan": "Use dictation",
+  "Diktede noktalama ve büyük harfi düzelt": "Fix punctuation and capitalization in dictation",
   "Dil": "Language",
   "Dinleme (Giriş)": "Listening (Input)",
   "Doğrudan sesli komut (sesi beyin modeline gönder)": "Direct voice command (send audio to brain model)",
@@ -267,6 +269,7 @@
   "İkisi birden · en sağlam, en yavaş": "Both · most robust, slowest",
   "İkinci kez kısayola basmadan kaydın kendiliğinden duracağı üst süre (1–600 sn).": "Maximum recording length before dictation stops automatically without pressing the hotkey again (1–600 s).",
   "İndir": "Download",
+  "İsteğe bağlıdır (varsayılan kapalı). Hata veya gizlilik kısıtında ham dikte metni korunur.": "Optional (off by default). On error or privacy restriction, the raw dictated text is kept.",
   "İzinli uygulamalar": "Allowed applications",
   "İşaretli uygulamalar dış içerik okunmamış temiz turda yeniden onay sormadan kapatılabilir.": "Checked applications can be closed without asking again during a clean turn without external content."
 }

@@ -332,6 +332,7 @@ class SettingsPanel(QWidget):
     dictation_enabled: QCheckBox
     dictation_hotkey: QLineEdit
     dictation_max_seconds: QSpinBox
+    dictation_polish: QCheckBox
     selection_enabled: QCheckBox
     selection_hotkey: QLineEdit
     selection_translate_to: QLineEdit

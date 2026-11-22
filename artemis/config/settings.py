@@ -748,7 +748,8 @@ def same_hotkey(first: str, second: str) -> bool:
 class DictationConfig(BaseModel):
     """Dikte kipi (ADR 0057): kısayola bas, konuş, tekrar bas; metin odaktaki uygulamaya yazılır.
 
-    Komut yolu DEĞİLDİR: metin modele, geçmişe ya da hafızaya gitmez. Varsayılan kapalı.
+    Komut yolu DEĞİLDİR: varsayılan kapalıdır ve konuşma geçmişine/hafızaya girmez. İsteğe bağlı
+    noktalama düzeltmesi açılırsa yalnızca tek adımlı, araçsız çağrı yapılır.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -757,6 +758,8 @@ class DictationConfig(BaseModel):
     hotkey: str = Field(default="ctrl+alt+d", min_length=1, max_length=40)
     # Kayıt bu süreyi aşarsa kendiliğinden biter ve o ana kadarki ses yazılır.
     max_seconds: float = Field(default=120.0, ge=1, le=600)
+    # İsteğe bağlı: yazmadan önce tek adımlı, araçsız noktalama ve büyük harf düzeltmesi.
+    polish_punctuation: bool = False
 
 
 class SelectionActionsConfig(BaseModel):
