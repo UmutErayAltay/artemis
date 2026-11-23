@@ -53,9 +53,33 @@ def test_release_windows_workflow_structure_and_signing_fallback() -> None:
     ):
         assert secret_name in signpath_if
 
+    auth_steps = [s for s in steps if "Authenticode" in s.get("name", "")]
+    assert auth_steps
+    auth_if = str(auth_steps[0].get("if", ""))
+    for secret_name in (
+        "SIGNPATH_API_TOKEN",
+        "SIGNPATH_ORGANIZATION_ID",
+        "SIGNPATH_PROJECT_SLUG",
+        "SIGNPATH_SIGNING_POLICY_SLUG",
+        "WINDOWS_CERT_PFX_BASE64",
+        "WINDOWS_CERT_PASSWORD",
+    ):
+        assert secret_name in auth_if
+    assert "SIGNPATH_API_TOKEN ==" in auth_if
+    assert "SIGNPATH_ORGANIZATION_ID ==" in auth_if
+
     fallback_steps = [s for s in steps if "Unsigned" in s.get("name", "")]
     assert fallback_steps
-    assert "SIGNPATH_API_TOKEN ==" in str(fallback_steps[0].get("if", ""))
+    fallback_if = str(fallback_steps[0].get("if", ""))
+    for secret_name in (
+        "SIGNPATH_API_TOKEN",
+        "SIGNPATH_ORGANIZATION_ID",
+        "SIGNPATH_PROJECT_SLUG",
+        "SIGNPATH_SIGNING_POLICY_SLUG",
+        "WINDOWS_CERT_PFX_BASE64",
+        "WINDOWS_CERT_PASSWORD",
+    ):
+        assert secret_name in fallback_if
 
     assert any("SHA256SUMS.txt" in name for name in step_names)
     assert "SHA256SUMS.txt" in joined_runs

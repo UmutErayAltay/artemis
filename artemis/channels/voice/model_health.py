@@ -450,6 +450,15 @@ def _discover_piper_ids(search_dirs: Sequence[Path]) -> list[str]:
     return found
 
 
+def _same_path(first: Path | None, second: Path | None) -> bool:
+    if first is None or second is None:
+        return False
+    try:
+        return first.resolve() == second.resolve()
+    except OSError:
+        return first == second
+
+
 def _resolve_piper_pair(
     voice_id: str,
     search_dirs: Sequence[Path],
@@ -462,7 +471,7 @@ def _resolve_piper_pair(
             sibling = Path(f"{candidate}.json")
             if sibling.is_file():
                 return candidate, sibling
-            cfg = configured_config if configured_model == candidate else None
+            cfg = configured_config if _same_path(configured_model, candidate) else None
             return candidate, cfg
     if (
         configured_model is not None
@@ -880,23 +889,61 @@ def _default_url_fetch(url: str) -> bytes:
         return response.content
 
 
-def _write_verified_file(
-    dest: Path, data: bytes, expected_sha256: str | None
+def _validate_downloaded_payload(
+    filename: str, data: bytes, expected_sha256: str | None
 ) -> None:
     if not data:
-        raise ValueError(f"İndirilen dosya boş: {dest.name}")
+        raise ValueError(f"İndirilen dosya boş: {filename}")
     actual = hashlib.sha256(data).hexdigest()
     if expected_sha256 and actual.lower() != expected_sha256.lower():
         raise ValueError(
-            f"SHA-256 doğrulaması başarısız ({dest.name}): {actual[:12]}…"
+            f"SHA-256 doğrulaması başarısız ({filename}): {actual[:12]}…"
         )
-    part = dest.with_name(f"{dest.name}.part")
+
+
+def _write_verified_piper_pair(
+    onnx_dest: Path,
+    onnx_bytes: bytes,
+    expected_onnx_sha256: str | None,
+    json_dest: Path,
+    json_bytes: bytes,
+    expected_json_sha256: str | None,
+) -> None:
+    """ONNX ve JSON yüklerini önce doğrular, sonra iki aşamada atomik yazar."""
+    _validate_downloaded_payload(json_dest.name, json_bytes, expected_json_sha256)
     try:
-        part.write_bytes(data)
-        os.replace(part, dest)
+        parsed = json.loads(json_bytes.decode("utf-8"))
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise ValueError("İndirilen Piper yapılandırması geçersiz JSON.") from exc
+    if not isinstance(parsed, dict):
+        raise ValueError("İndirilen Piper yapılandırması geçersiz JSON.")
+    _validate_downloaded_payload(onnx_dest.name, onnx_bytes, expected_onnx_sha256)
+
+    onnx_dest.parent.mkdir(parents=True, exist_ok=True)
+    json_part = json_dest.with_name(f"{json_dest.name}.part")
+    onnx_part = onnx_dest.with_name(f"{onnx_dest.name}.part")
+    json_bak = json_dest.with_name(f"{json_dest.name}.bak")
+    had_json = json_dest.is_file()
+    try:
+        json_part.write_bytes(json_bytes)
+        onnx_part.write_bytes(onnx_bytes)
+        if had_json:
+            shutil.copyfile(json_dest, json_bak)
+        os.replace(json_part, json_dest)
+        try:
+            os.replace(onnx_part, onnx_dest)
+        except OSError:
+            if had_json and json_bak.is_file():
+                with contextlib.suppress(OSError):
+                    os.replace(json_bak, json_dest)
+            elif not had_json:
+                with contextlib.suppress(OSError):
+                    json_dest.unlink(missing_ok=True)
+            raise
     finally:
-        with contextlib.suppress(OSError):
-            part.unlink(missing_ok=True)
+        for tmp_file in (json_part, onnx_part, json_bak):
+            with contextlib.suppress(OSError):
+                tmp_file.unlink(missing_ok=True)
 
 
 def download_voice_model(
@@ -940,7 +987,6 @@ def download_voice_model(
         if spec is None:
             raise ValueError(f"İndirilebilir Piper kataloğunda yok: {entry.name}")
         target_dir = piper_models_dir or (config_path.parent / "models")
-        target_dir.mkdir(parents=True, exist_ok=True)
         fetcher = url_fetcher or _default_url_fetch
         pinned = piper_pins.get(entry.name) if piper_pins else None
         exp_onnx = pinned[0] if pinned else spec.onnx_sha256
@@ -948,14 +994,16 @@ def download_voice_model(
 
         onnx_bytes = fetcher(spec.onnx_url)
         json_bytes = fetcher(spec.json_url)
-        parsed = json.loads(json_bytes.decode("utf-8"))
-        if not isinstance(parsed, dict):
-            raise ValueError("İndirilen Piper yapılandırması geçersiz JSON.")
-
         onnx_dest = target_dir / f"{entry.name}.onnx"
         json_dest = target_dir / f"{entry.name}.onnx.json"
-        _write_verified_file(json_dest, json_bytes, exp_json)
-        _write_verified_file(onnx_dest, onnx_bytes, exp_onnx)
+        _write_verified_piper_pair(
+            onnx_dest,
+            onnx_bytes,
+            exp_onnx,
+            json_dest,
+            json_bytes,
+            exp_json,
+        )
     else:
         raise ValueError(f"Bu model türü indirilemez: {entry.family}")
 

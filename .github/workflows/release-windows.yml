@@ -101,7 +101,7 @@ jobs:
           wait-for-completion: true
 
       - name: Sign installer via Authenticode certificate
-        if: ${{ secrets.SIGNPATH_API_TOKEN == '' && secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
+        if: ${{ (secrets.SIGNPATH_API_TOKEN == '' || secrets.SIGNPATH_ORGANIZATION_ID == '' || secrets.SIGNPATH_PROJECT_SLUG == '' || secrets.SIGNPATH_SIGNING_POLICY_SLUG == '') && secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
         shell: pwsh
         env:
           PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}

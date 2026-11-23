@@ -224,7 +224,7 @@ def test_offline_download_verify_and_clean_piper_and_whisper(tmp_path: Path) -> 
             return json_payload
         raise AssertionError(f"Beklenmeyen URL: {url}")
 
-    # 1) SHA uyuşmazlığı indirilen yarım dosyayı bırakmaz
+    # 1) SHA uyuşmazlığı indirilen yarım dosyayı (.onnx ve .onnx.json) bırakmaz
     with pytest.raises(ValueError, match="SHA-256"):
         download_voice_model(
             "piper:tr_TR-dfki-medium",
@@ -238,7 +238,9 @@ def test_offline_download_verify_and_clean_piper_and_whisper(tmp_path: Path) -> 
             hf_cache_roots=(hf_cache,),
         )
     assert not (piper_dir / "tr_TR-dfki-medium.onnx").exists()
+    assert not (piper_dir / "tr_TR-dfki-medium.onnx.json").exists()
     assert not (piper_dir / "tr_TR-dfki-medium.onnx.part").exists()
+    assert not (piper_dir / "tr_TR-dfki-medium.onnx.json.part").exists()
 
     # 2) Doğru SHA ile Piper indir -> doğrula -> temizle
     downloaded_piper = download_voice_model(
@@ -549,3 +551,83 @@ def test_settings_panel_dual_mount_sync_9_pages_and_demo_mode(
         demo_panel.finish_inventory()
         demo_panel.deleteLater()
         app.processEvents()
+
+
+def test_piper_atomic_rollback_preserves_existing_and_resolves_relative_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from artemis.channels.voice import model_health as mh
+
+    cfg = _write_config(tmp_path)
+    piper_dir = tmp_path / "models"
+    silero_dir, dfn3_dir = _copy_bundled_silero_and_dfn3(tmp_path)
+    spec = PIPER_VOICE_CATALOG["tr_TR-dfki-medium"]
+
+    existing_onnx, existing_json = _make_piper_pair(
+        piper_dir,
+        "tr_TR-dfki-medium",
+        onnx_bytes=b"valid-existing-onnx",
+        json_text='{"audio": {"sample_rate": 22050}}',
+    )
+    new_json = json.dumps({"audio": {"sample_rate": 16000}}).encode("utf-8")
+    new_json_sha = hashlib.sha256(new_json).hexdigest()
+
+    def bad_onnx_fetch(url: str) -> bytes:
+        return b"corrupt-onnx" if url == spec.onnx_url else new_json
+
+    # Var olan geçerli dosyalar, başarısız yeni indirmede üzerine yazılmaz
+    with pytest.raises(ValueError, match="SHA-256"):
+        download_voice_model(
+            "piper:tr_TR-dfki-medium",
+            cfg,
+            whisper_installed=lambda _n: None,
+            url_fetcher=bad_onnx_fetch,
+            piper_models_dir=piper_dir,
+            piper_pins={"tr_TR-dfki-medium": ("0" * 64, new_json_sha)},
+            silero_dir=silero_dir,
+            dfn3_dir=dfn3_dir,
+            hf_cache_roots=(),
+        )
+    assert existing_onnx.read_bytes() == b"valid-existing-onnx"
+    assert existing_json.read_text(encoding="utf-8") == '{"audio": {"sample_rate": 22050}}'
+
+    # İkinci replace adımında OS hatası oluşursa .onnx.json da eski durumuna geri alınır
+    good_onnx = b"new-good-onnx"
+    good_onnx_sha = hashlib.sha256(good_onnx).hexdigest()
+    real_replace = os.replace
+
+    def fail_on_onnx_replace(src: os.PathLike[str] | str, dst: os.PathLike[str] | str) -> None:
+        if str(dst).endswith(".onnx") and not str(src).endswith(".bak"):
+            raise OSError("disk full simulated")
+        real_replace(src, dst)
+
+    monkeypatch.setattr(mh.os, "replace", fail_on_onnx_replace)
+    with pytest.raises(OSError, match="disk full simulated"):
+        download_voice_model(
+            "piper:tr_TR-dfki-medium",
+            cfg,
+            whisper_installed=lambda _n: None,
+            url_fetcher=lambda u: good_onnx if u == spec.onnx_url else new_json,
+            piper_models_dir=piper_dir,
+            piper_pins={"tr_TR-dfki-medium": (good_onnx_sha, new_json_sha)},
+            silero_dir=silero_dir,
+            dfn3_dir=dfn3_dir,
+            hf_cache_roots=(),
+        )
+    assert existing_onnx.read_bytes() == b"valid-existing-onnx"
+    assert existing_json.read_text(encoding="utf-8") == '{"audio": {"sample_rate": 22050}}'
+    assert not (piper_dir / "tr_TR-dfki-medium.onnx.json.bak").exists()
+
+    # _resolve_piper_pair normalleştirilmemiş configured_model yolunu .resolve() ile eşleştirir
+    existing_json.unlink()
+    custom_cfg = tmp_path / "custom.onnx.json"
+    custom_cfg.write_text("{}", encoding="utf-8")
+    unnormalized_model = piper_dir / "." / "tr_TR-dfki-medium.onnx"
+    found_onnx, found_cfg = mh._resolve_piper_pair(
+        "tr_TR-dfki-medium",
+        [piper_dir],
+        unnormalized_model,
+        custom_cfg,
+    )
+    assert found_onnx == existing_onnx
+    assert found_cfg == custom_cfg

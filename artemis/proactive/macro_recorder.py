@@ -59,6 +59,8 @@ _SENSITIVE_FIELD_RE = re.compile(
 _EXTRA_SECRET_RE = re.compile(
     r"(?i)\b(?:pin|otp|cvv|cvc|passcode|kart\s*no|card\s*number|2fa|totp"
     r"|doğrulama\s*kodu|security\s*code)\b\s*(?:[:=]\s*\S+|\d{3,})"
+    r"|\bBearer\s+\S+"
+    r"|\b(?:password|passwd|parola|şifre|sifre|token|api[ _-]?key|anahtar|secret)\b\s*[:=]\s*\S{4,}"
     r"|(?:https?://)[^\s/@:]+:[^\s/@]+@[^\s]+"
     r"|(?<!\d)(?:\d[ -]?){13,19}(?!\d)"
 )
@@ -190,6 +192,13 @@ class MacroDraft(BaseModel):
     error: str = ""
 
 
+def _normalize_control_text(text: str) -> str:
+    """Denetim adı/kimliğindeki camelCase ve ayraçları boşluğa açar."""
+    spaced = re.sub(r"([a-z0-9])([A-Z])", r"\1 \2", text)
+    spaced = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1 \2", spaced)
+    return re.sub(r"[_.\-]+", " ", spaced)
+
+
 def is_sensitive_control(
     info: FocusedControlInfo | None,
     *,
@@ -207,7 +216,7 @@ def is_sensitive_control(
         candidates.extend([info.name, info.automation_id])
     # Parola/OTP/kart vb. kalıplar veya zaten maskelenmiş alan adları hassas sayılır.
     return any(
-        _REDACTED in item or _SENSITIVE_FIELD_RE.search(item)
+        _REDACTED in item or _SENSITIVE_FIELD_RE.search(_normalize_control_text(item))
         for item in candidates
         if item
     )

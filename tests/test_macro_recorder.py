@@ -28,6 +28,7 @@ from artemis.proactive.macro_recorder import (
     WindowsMacroObserver,
     compile_macro_steps,
     focused_control_info,
+    is_sensitive_control,
     sanitize_macro_text,
 )
 from artemis.proactive.routines import MAX_STEPS, RoutineStore
@@ -344,6 +345,45 @@ def test_sanitize_macro_text_redacts_secrets_and_url_userinfo() -> None:
     assert masked is True
     assert "gizli123" not in text
     assert "abcdef123456" not in text
+
+    bearer_text, bearer_masked = sanitize_macro_text("Authorization: Bearer supersecret12345")
+    assert bearer_masked is True
+    assert "supersecret12345" not in bearer_text
+    assert "[GİZLENDİ]" in bearer_text
+
+    short_pw_text, short_pw_masked = sanitize_macro_text("girişte password=abc12 yaz")
+    assert short_pw_masked is True
+    assert "abc12" not in short_pw_text
+    assert "[GİZLENDİ]" in short_pw_text
+
+    normal_text, normal_masked = sanitize_macro_text("Not Defteri aç ve Devam düğmesine tıkla")
+    assert normal_masked is False
+    assert normal_text == "Not Defteri aç ve Devam düğmesine tıkla"
+
+
+def test_sensitive_control_catches_snake_and_camel_case_ids_without_false_positives() -> None:
+    sensitive_ids = (
+        "user_pin",
+        "otp_code",
+        "cvv_input",
+        "auth_token",
+        "client_secret",
+        "pinCode",
+        "apiToken",
+    )
+    rec = MacroRecorder()
+    for aid in sensitive_ids:
+        info = FocusedControlInfo(name="Giriş", kind="Edit", automation_id=aid)
+        assert is_sensitive_control(info) is True, aid
+        assert rec.record_text("AdvSecret999", app="app.exe", target_info=info) is None
+    assert rec.masked_count == len(sensitive_ids)
+    assert rec.events == []
+
+    for benign_aid in ("spinner_count", "opinion_box", "spinnerBox"):
+        benign_info = FocusedControlInfo(name="Miktar", kind="Edit", automation_id=benign_aid)
+        assert is_sensitive_control(benign_info) is False, benign_aid
+        ev = rec.record_text("42", app="app.exe", target_info=benign_info)
+        assert ev is not None and ev.value == "42"
 
 
 def test_bounds_steps_to_max_12_and_forbids_recursive_routine_tools(tmp_path: Path) -> None:
