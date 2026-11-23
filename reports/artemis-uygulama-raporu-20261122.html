@@ -1,0 +1,1598 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Artemis Uygulama Raporu · Faz 0–3 ve İki Dallı Doğrulama (2026-11-23)</title>
+<style>
+  :root {
+    --bg: #F6F4EE;
+    --surface: #FFFFFF;
+    --soft: #EEEAE0;
+    --border: #DFD9CC;
+    --border-strong: #C5BDB0;
+    --ink: #181B20;
+    --muted: #55524C;
+    --accent: #1B4D5C;
+    --accent-2: #2B6CB0;
+    --accent-soft: #E5F0F3;
+    --green: #15803D;
+    --green-soft: #ECFDF5;
+    --amber: #B45309;
+    --amber-soft: #FEF3C7;
+    --red: #B91C1C;
+    --red-soft: #FEE2E2;
+    --purple: #6D28D9;
+    --purple-soft: #F3E8FF;
+    --font-serif: Georgia, 'Times New Roman', serif;
+    --font-sans: 'Segoe UI', system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+    --font-mono: Consolas, 'Cascadia Mono', 'Courier New', monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--font-sans);
+    font-size: 15px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+  code {
+    font-family: var(--font-mono);
+    font-size: 0.86em;
+    background: var(--soft);
+    padding: 2px 6px;
+    border-radius: 5px;
+    color: var(--ink);
+  }
+  .mono { font-family: var(--font-mono); }
+  .num { text-align: right; font-variant-numeric: tabular-nums; }
+  .muted { color: var(--muted); }
+
+  /* Sticky Top Navigation */
+  .topnav {
+    position: sticky;
+    top: 0;
+    z-index: 60;
+    background: rgba(246, 244, 238, 0.95);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid var(--border);
+  }
+  .topnav-inner {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 11px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    flex-wrap: wrap;
+  }
+  .brand {
+    font-family: var(--font-serif);
+    font-weight: 700;
+    font-size: 18px;
+    color: var(--ink);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .brand-tag {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    font-weight: 600;
+    background: var(--accent-soft);
+    color: var(--accent);
+    padding: 2px 9px;
+    border-radius: 999px;
+  }
+  .nav-links {
+    display: flex;
+    gap: 5px;
+    flex-wrap: wrap;
+  }
+  .nav-links a {
+    text-decoration: none;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 10px;
+    border-radius: 7px;
+    transition: background .15s, color .15s;
+  }
+  .nav-links a:hover, .nav-links a.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  /* Layout */
+  .wrap {
+    max-width: 1240px;
+    margin: 0 auto;
+    padding: 26px 24px 80px;
+  }
+  section {
+    margin-top: 44px;
+    scroll-margin-top: 76px;
+  }
+  h1, h2, h3, h4 {
+    font-family: var(--font-serif);
+    letter-spacing: -0.015em;
+    margin: 0;
+  }
+  h2 {
+    font-size: 26px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+  .sec-lead {
+    color: var(--muted);
+    margin: 0 0 18px;
+    max-width: 82ch;
+  }
+
+  /* Hero */
+  .hero {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 28px 30px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(290px, 0.9fr);
+    gap: 24px;
+    align-items: stretch;
+  }
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    margin-bottom: 8px;
+    font-weight: 700;
+  }
+  .hero h1 {
+    font-size: 31px;
+    line-height: 1.2;
+    margin-bottom: 12px;
+  }
+  .hero p {
+    color: var(--muted);
+    margin: 0 0 16px;
+  }
+  .hero-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 7px;
+  }
+  .branch-summary-box {
+    background: var(--soft);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    gap: 12px;
+  }
+  .branch-mini {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 12px 14px;
+  }
+  .branch-mini-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 4px;
+  }
+  .branch-mini-title {
+    font-family: var(--font-mono);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .branch-mini-stats {
+    font-size: 12.5px;
+    color: var(--muted);
+  }
+
+  /* Badges */
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 9px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .badge-teal { background: var(--accent-soft); color: var(--accent); }
+  .badge-green { background: var(--green-soft); color: var(--green); }
+  .badge-amber { background: var(--amber-soft); color: var(--amber); }
+  .badge-red { background: var(--red-soft); color: var(--red); }
+  .badge-purple { background: var(--purple-soft); color: var(--purple); }
+  .badge-neutral { background: var(--soft); color: var(--muted); }
+
+  /* Interactive Controls */
+  .bar-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 14px;
+  }
+  .tab-bar, .filter-bar {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+  }
+  .tab-btn, .filter-btn {
+    font-family: var(--font-sans);
+    font-size: 13px;
+    font-weight: 600;
+    background: var(--surface);
+    color: var(--muted);
+    border: 1px solid var(--border);
+    padding: 7px 13px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all .15s;
+  }
+  .tab-btn:hover, .filter-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+  .tab-btn.active, .filter-btn.active {
+    background: var(--accent);
+    color: #FFFFFF;
+    border-color: var(--accent);
+  }
+
+  /* KPI Grid */
+  .kpi-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(185px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+  }
+  .kpi {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .kpi-val {
+    font-family: var(--font-mono);
+    font-size: 21px;
+    font-weight: 700;
+    color: var(--ink);
+  }
+  .kpi-lbl {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+  .kpi-sub {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* Cards & Grids */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 22px;
+  }
+  .grid-2 {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+  }
+  .grid-3 {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+  }
+
+  /* Tables */
+  .table-wrap {
+    overflow-x: auto;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13.5px;
+  }
+  th, td {
+    text-align: left;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  th {
+    background: var(--soft);
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  tr:last-child td { border-bottom: none; }
+
+  /* Callouts */
+  .callout {
+    border-radius: 10px;
+    padding: 14px 18px;
+    margin: 16px 0;
+    font-size: 13.8px;
+    border: 1px solid var(--border);
+  }
+  .callout-teal {
+    background: var(--accent-soft);
+    border-color: #BFD8DE;
+    color: #143744;
+  }
+  .callout-warn {
+    background: var(--amber-soft);
+    border-color: #E6C775;
+    color: #5C3806;
+  }
+  .callout-green {
+    background: var(--green-soft);
+    border-color: #A7F3D0;
+    color: #064E3B;
+  }
+  .callout ul { margin: 6px 0 0 18px; padding: 0; }
+
+  /* Feature Cards */
+  .feat-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+    gap: 15px;
+  }
+  .feat-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 9px;
+  }
+  .feat-top {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
+  .feat-card h3 {
+    font-size: 17.5px;
+    line-height: 1.3;
+  }
+  .feat-desc {
+    margin: 0;
+    font-size: 13.5px;
+    color: var(--muted);
+    flex: 1;
+  }
+  .feat-meta {
+    border-top: 1px solid var(--border);
+    padding-top: 9px;
+    font-size: 12px;
+    color: var(--muted);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
+  /* Settings UX Shell */
+  .mockup-shell {
+    display: grid;
+    grid-template-columns: 245px minmax(0, 1fr);
+    gap: 16px;
+    background: var(--soft);
+    border: 1px solid var(--border-strong);
+    border-radius: 12px;
+    padding: 16px;
+  }
+  .mockup-nav {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .m-item {
+    padding: 8px 10px;
+    border-radius: 7px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--ink);
+    text-align: left;
+    font-family: var(--font-sans);
+  }
+  .m-item:hover { background: var(--bg); }
+  .m-item.active {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-color: #BFD8DE;
+    font-weight: 700;
+  }
+  .m-count {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--muted);
+    white-space: nowrap;
+  }
+  .mockup-body {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    padding: 18px 20px;
+  }
+  .subtab-pills {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0 14px;
+  }
+  .subtab-pill {
+    font-family: var(--font-sans);
+    font-size: 12.5px;
+    font-weight: 600;
+    padding: 5px 11px;
+    border-radius: 7px;
+    background: var(--soft);
+    color: var(--ink);
+    border: 1px solid var(--border);
+  }
+  .wire-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 12px;
+    padding: 7px 11px;
+    background: var(--bg);
+    border-radius: 6px;
+    margin-bottom: 6px;
+    font-size: 13px;
+  }
+
+  /* Acceptance Split */
+  .accept-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    font-size: 13.5px;
+  }
+  .accept-row:last-child { border-bottom: none; }
+
+  details {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    margin-top: 12px;
+  }
+  summary {
+    cursor: pointer;
+    font-weight: 700;
+    font-size: 14px;
+  }
+
+  .svg-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+  }
+  .svg-card h3 {
+    font-size: 17px;
+    margin-bottom: 4px;
+  }
+  .svg-sub {
+    font-size: 12.5px;
+    color: var(--muted);
+    margin: 0 0 12px;
+  }
+
+  .footer {
+    margin-top: 56px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 12.5px;
+    display: flex;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  @media (max-width: 920px) {
+    .hero, .grid-2, .grid-3, .mockup-shell { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+
+<nav class="topnav" aria-label="Bölümler">
+  <div class="topnav-inner">
+    <div class="brand">Artemis Uygulama Raporu <span class="brand-tag">Faz 0–3 · İki Dallı Doğrulama</span></div>
+    <div class="nav-links">
+      <a href="#ozet" class="active">1. Özet &amp; Dallar</a>
+      <a href="#olcumler">2. Ölçüm Karşılaştırması</a>
+      <a href="#teslimatlar">3. Faz 0–3 Teslimatları</a>
+      <a href="#ayarlar-ux">4. Ayarlar UX (14→9)</a>
+      <a href="#kabul-ayrimi">5. Canlı Kabul &amp; Dış Adımlar</a>
+      <a href="#izlenebilirlik">6. Commit &amp; Modül İzi</a>
+    </div>
+  </div>
+</nav>
+
+<main class="wrap">
+
+  <!-- HERO -->
+  <section id="ozet" style="margin-top:0;">
+    <header class="hero">
+      <div>
+        <div class="eyebrow">Artemis Masaüstü Asistanı · Güncel Uygulama ve Doğrulama Raporu (2026-11-23)</div>
+        <h1>Faz 0–2 (<code>main</code>) ve Faz 3 Vizyon Özellikleri (<code>feat/vizyon-ozellikler</code>) Tamamlandı</h1>
+        <p>
+          Karne 4’te (2026-11-22) tespit edilen 44 commit’siz dosya ve 5 test kırığı <strong>Faz 0</strong> ile temizlendi;
+          <strong>Faz 1</strong>’de Ayarlar arayüzü 14 sayfadan 9 sayfaya sadeleştirilip YAML’da gizli kalan 5 güvenlik/gizlilik
+          ayarı ile canlı bütçe sayacı eklendi; <strong>Faz 2</strong>’de 5 orta vadeli ürün özelliği (MCP Yönetim Merkezi,
+          Bas-Konuş + 3 adımlı Mikrofon Testi, Çalışma Profilleri, Onaylı İki Yönlü Takvim/Posta, Dikte İyileştirme +
+          Son-5 Geçmişi) <code>main</code> dalına işlendi. Ardından <code>feat/vizyon-ozellikler</code> dalında
+          <strong>Faz 3</strong>’ün 4 vizyon özelliği (Ses+Görüntü Çok Kipli Akış, Olay Tetikleyicileri + Zincirler,
+          Öğretilebilir Makro Kaydedici, Ses Modeli Sağlık Yöneticisi + Windows Yayın CI) kodlandı ve ADR 0083–0088 ile belgelendi.
+        </p>
+        <div class="hero-pills">
+          <span class="badge badge-green">main: 3867/3867 pytest geçti</span>
+          <span class="badge badge-teal">feat: 3908 geçti / 1 zamanlama* (M3 kapısı 3909 geçti)</span>
+          <span class="badge badge-green">ruff &amp; mypy: her iki dalda 0 hata</span>
+          <span class="badge badge-green">bench --sahte: 57/57 temiz</span>
+          <span class="badge badge-green">test_code_size ALLOW = {} (0 ihlal)</span>
+          <span class="badge badge-purple">ADR 0001–0088 · 9 Ayar Sayfası</span>
+        </div>
+      </div>
+
+      <aside class="branch-summary-box">
+        <div class="branch-mini">
+          <div class="branch-mini-head">
+            <span class="branch-mini-title">main @ 06d6c7c</span>
+            <span class="badge badge-green">Faz 0–2 Yeşil</span>
+          </div>
+          <div class="branch-mini-stats">
+            <strong>13 commit</strong> (<code>8a5c784</code> → <code>06d6c7c</code>) · 126 dosya (+15.769 / -1.772)<br>
+            <code>pytest -q</code>: <strong>3867 geçti</strong>, 0 kaldı, 32 atlandı, 5 seçilmedi (683,13 sn)<br>
+            <code>mypy</code>: 234 dosya temiz · <code>SettingsPanel</code>: 9 sayfa / 74 bağlama · 84 ADR
+          </div>
+        </div>
+        <div class="branch-mini">
+          <div class="branch-mini-head">
+            <span class="branch-mini-title">feat/vizyon-ozellikler @ 6e52f37</span>
+            <span class="badge badge-teal">Faz 3 Teslim</span>
+          </div>
+          <div class="branch-mini-stats">
+            <strong>+5 commit</strong> (<code>86191da</code> → <code>6e52f37</code>) · 48 dosya (+8.457 / -277)<br>
+            <code>pytest -q</code>: <strong>3908 geçti</strong>, 1 zamanlama*, 32 atlandı, 5 seçilmedi (992,53 sn)<br>
+            <code>mypy</code>: 243 dosya temiz · <code>SettingsPanel</code>: 9 sayfa / 75 bağlama · 88 ADR
+          </div>
+        </div>
+        <div style="font-size:12px;color:var(--muted);line-height:1.45;">
+          * Tüm metrikler 2026-11-23 tarihinde her iki dal ayrı ayrı checkout edilerek <code>QT_QPA_PLATFORM=offscreen</code> ile canlı ölçülmüştür.
+        </div>
+      </aside>
+    </header>
+
+    <div class="bar-row" style="margin-top:18px;">
+      <div class="tab-bar" role="tablist" aria-label="KPI Dal Görünümü">
+        <button class="tab-btn active" onclick="selectBranchKpi('both', this)">Karşılaştırmalı (İki Dal)</button>
+        <button class="tab-btn" onclick="selectBranchKpi('main', this)">Yalnız main (06d6c7c)</button>
+        <button class="tab-btn" onclick="selectBranchKpi('feat', this)">Yalnız feat/vizyon-ozellikler (6e52f37)</button>
+      </div>
+      <span class="muted" style="font-size:12.5px;">Her ölçüm Windows 11 · Python 3.12.9 · yerel çalışma ağacı üzerinde alınmıştır</span>
+    </div>
+
+    <div class="kpi-grid" id="kpi-grid">
+      <div class="kpi" data-kpi="pytest">
+        <div class="kpi-val" data-both="3867 → 3908" data-main="3867 / 0" data-feat="3908 / 1*">3867 → 3908</div>
+        <div class="kpi-lbl">Tam Pytest Geçen</div>
+        <div class="kpi-sub" data-both="Karne 4: 3745/5 kırık → iki dal yeşil*" data-main="0 kaldı · 32 atlandı · 683,13 sn" data-feat="1 zamanlama-duyarlı* · 992,53 sn">Karne 4: 3745/5 kırık → iki dal yeşil*</div>
+      </div>
+      <div class="kpi" data-kpi="static">
+        <div class="kpi-val" data-both="0 / 0" data-main="0 / 0" data-feat="0 / 0">0 / 0</div>
+        <div class="kpi-lbl">Ruff &amp; Mypy Hata Sayısı</div>
+        <div class="kpi-sub" data-both="main: 234 dosya · feat: 243 dosya" data-main="ruff: 0 · mypy: 234 dosyada 0" data-feat="ruff: 0 · mypy: 243 dosyada 0">main: 234 dosya · feat: 243 dosya</div>
+      </div>
+      <div class="kpi" data-kpi="bench">
+        <div class="kpi-val" data-both="57/57 · 3/3" data-main="57/57 · 3/3" data-feat="57/57 · 3/3">57/57 · 3/3</div>
+        <div class="kpi-lbl">Sahte Güvenlik &amp; Ses Bench</div>
+        <div class="kpi-sub" data-both="0 tehlikeli / 0 onaysız / p50=157 ms" data-main="57/57 (medyan 16 ms) · ses p50=157 ms" data-feat="57/57 (medyan 31 ms) · ses p50=157 ms">0 tehlikeli / 0 onaysız / p50=157 ms</div>
+      </div>
+      <div class="kpi" data-kpi="ux">
+        <div class="kpi-val" data-both="14 → 9 Sayfa" data-main="9 Sayfa (74 bağ)" data-feat="9 Sayfa (75 bağ)">14 → 9 Sayfa</div>
+        <div class="kpi-lbl">Canlı Ayarlar Paneli (TR+EN)</div>
+        <div class="kpi-sub" data-both="0 eksik bağlama · 25 yardım balonu" data-main="74/74 PANEL_BINDINGS · Ses: 6/6" data-feat="75/75 PANEL_BINDINGS · 2x Model Sağlığı">0 eksik bağlama · 25 yardım balonu</div>
+      </div>
+      <div class="kpi" data-kpi="size">
+        <div class="kpi-val" data-both="68.583 → 73.203" data-main="68.583 satır" data-feat="73.203 satır">68.583 → 73.203</div>
+        <div class="kpi-lbl">Uygulama Kodu (<code>artemis/</code>)</div>
+        <div class="kpi-sub" data-both="219 → 228 .py · 84 → 88 ADR · 71 araç" data-main="219 .py · maks dosya 1278/1300" data-feat="228 .py · maks dosya 1294/1300">219 → 228 .py · 84 → 88 ADR · 71 araç</div>
+      </div>
+    </div>
+
+    <div class="callout callout-warn">
+      <strong>* Şeffaflık Notu — <code>feat/vizyon-ozellikler</code> Üzerindeki Tek Zamanlama Duyarlı Test Gözlemi:</strong>
+      <code>main</code> tam <code>pytest -q</code> koşusu <strong>3867/3867</strong> sıfır hata ile geçti.
+      <code>feat/vizyon-ozellikler</code> (<code>6e52f37</code>) üzerinde ise önceki M3 kapısı koşusu <strong>3909/3909</strong> geçmişken,
+      M4 canlı ölçüm koşusunda <strong>3908 geçti, 1 test kaldı</strong>:
+      <code>tests/test_loop.py::test_expired_approval_cannot_dispatch_side_effect</code> (<code>assert len(provider.requests) == 1</code> → <code>0 == 1</code>).
+      5 tekrarlı izole zamanlama ölçümünde kök neden doğrulandı: test <code>max_seconds=0.02</code> (20 ms) sınırını kullanıyor;
+      Windows’ta <code>time.monotonic()</code> saat çözünürlüğü ~15,6 ms olduğu için <code>turn_start</code> denetim kaydı diske yazılırken
+      2 saat adımı (~31,0 ms) geçtiğinde tur henüz ilk <code>provider.complete</code> çağrısına ulaşmadan <code>timeout</code> ile güvenli duruyor
+      (5 denemede 2 geçiş, 3’ünde 31 ms’de <code>reqs=0</code>). Faz 3 kodu bu davranışı değiştirmedi; M3 yeni testlerinin tamamı (41/41) ve
+      koruma paketleri (108/108) tamamen yeşildir.
+    </div>
+  </section>
+
+  <!-- SECTION 2: MEASUREMENTS -->
+  <section id="olcumler">
+    <h2>2. İki Dallı Canlı Ölçüm Karşılaştırması ve Grafikler</h2>
+    <p class="sec-lead">
+      Karne 4 başlangıç noktası (commit’lenmemiş 44 dosya) ile Faz 0–2 sonrası <code>main</code> (<code>06d6c7c</code>) ve
+      Faz 3 sonrası <code>feat/vizyon-ozellikler</code> (<code>6e52f37</code>) canlı ölçümlerinin birebir kıyaslaması.
+    </p>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Ölçüt / Doğrulama Paketi</th>
+            <th class="num">Karne 4 Tabanı (22 Kas)</th>
+            <th class="num"><code>main</code> · Faz 0–2 (<code>06d6c7c</code>)</th>
+            <th class="num"><code>feat/vizyon-ozellikler</code> · Faz 3 (<code>6e52f37</code>)</th>
+            <th>Not</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Tam <code>pytest -q</code> (offscreen Qt)</strong></td>
+            <td class="num mono"><span class="badge badge-red">3745 geçti / 5 kaldı</span></td>
+            <td class="num mono"><span class="badge badge-green">3867 geçti / 0 kaldı</span></td>
+            <td class="num mono"><span class="badge badge-amber">3908 geçti / 1 kaldı*</span></td>
+            <td>32 atlandı, 5 seçilmedi (her iki dal) · M3 kapısı tam koşu: 3909 geçti</td>
+          </tr>
+          <tr>
+            <td><strong>Koruma Paketleri (5 dosya)</strong></td>
+            <td class="num mono"><span class="badge badge-red">4 kırık</span></td>
+            <td class="num mono"><span class="badge badge-green">107 passed (5,85 sn)</span></td>
+            <td class="num mono"><span class="badge badge-green">108 passed (10,92 sn)</span></td>
+            <td><code>test_code_size</code>, <code>help_bubbles</code>, <code>config_example</code>, <code>docs_index</code>, <code>i18n</code></td>
+          </tr>
+          <tr>
+            <td><strong><code>tests/test_shell_chat.py</code></strong></td>
+            <td class="num mono"><span class="badge badge-red">1 kırık (1280px)</span></td>
+            <td class="num mono"><span class="badge badge-green">36 passed (16,90 sn)</span></td>
+            <td class="num mono"><span class="badge badge-green">36 passed (23,64 sn)</span></td>
+            <td>1280px <code>Kod ajanı</code> açılır kutusu + tüm kabuk/sohbet kuralları</td>
+          </tr>
+          <tr>
+            <td><strong>Faz 3 M3 Özellik Testleri (6 dosya)</strong></td>
+            <td class="num mono muted">—</td>
+            <td class="num mono muted">—</td>
+            <td class="num mono"><span class="badge badge-green">41 passed (11,59 sn)</span></td>
+            <td>Multimodal, olay tetikleyicileri, makro kaydedici/dialog, ses sağlığı, release CI</td>
+          </tr>
+          <tr>
+            <td><strong><code>ruff check artemis tests bench</code></strong></td>
+            <td class="num mono">0 hata</td>
+            <td class="num mono"><span class="badge badge-green">0 hata</span></td>
+            <td class="num mono"><span class="badge badge-green">0 hata</span></td>
+            <td>Sıfır stil / lint ihlali</td>
+          </tr>
+          <tr>
+            <td><strong><code>mypy artemis bench</code></strong></td>
+            <td class="num mono">0 hata (213 dosya)</td>
+            <td class="num mono"><span class="badge badge-green">0 hata (234 dosya)</span></td>
+            <td class="num mono"><span class="badge badge-green">0 hata (243 dosya)</span></td>
+            <td>Katı tip denetimi tam geçti</td>
+          </tr>
+          <tr>
+            <td><strong><code>python -m bench.run --sahte</code></strong></td>
+            <td class="num mono">57/57</td>
+            <td class="num mono"><span class="badge badge-green">57/57 (148 adım)</span></td>
+            <td class="num mono"><span class="badge badge-green">57/57 (148 adım)</span></td>
+            <td>0 tehlikeli hata · 0 onaysız yan etki · 0 yanlış hedef · tool_success 0,8219</td>
+          </tr>
+          <tr>
+            <td><strong><code>bench.voice_latency --sahte --iterations 3</code></strong></td>
+            <td class="num mono">3/3</td>
+            <td class="num mono"><span class="badge badge-green">3/3 (p50=157 / p90=172 ms)</span></td>
+            <td class="num mono"><span class="badge badge-green">3/3 (p50=157 / p90=172 ms)</span></td>
+            <td><code>aborted=0</code>, <code>overflow=0</code>, <code>speech_end_to_tool_end_ms p50=156 ms</code></td>
+          </tr>
+          <tr>
+            <td><strong><code>artemis/</code> Dosya &amp; Satır Sayısı</strong></td>
+            <td class="num mono">198 .py · 62.108</td>
+            <td class="num mono">219 .py · 68.583</td>
+            <td class="num mono">228 .py · 73.203</td>
+            <td>184 → 189 → 195 test dosyası (63.644 → 68.595 → 71.592 satır) + 15 bench (3.946)</td>
+          </tr>
+          <tr>
+            <td><strong>En Uzun Dosya / En Uzun İşlev</strong></td>
+            <td class="num mono"><span class="badge badge-red">1328 / 201</span></td>
+            <td class="num mono"><span class="badge badge-green">1278 / 198</span></td>
+            <td class="num mono"><span class="badge badge-green">1294 / 198</span></td>
+            <td>Sınır: ≤ 1300 dosya · ≤ 200 işlev · <code>ALLOW = {}</code></td>
+          </tr>
+          <tr>
+            <td><strong>Ayarlar Sayfa &amp; Bağlama Sayısı</strong></td>
+            <td class="num mono">14 sayfa</td>
+            <td class="num mono">9 sayfa · 74/74 bağ</td>
+            <td class="num mono">9 sayfa · 75/75 bağ</td>
+            <td>TR+EN <code>SettingsPanel</code> canlı offscreen içgörü: 0 eksik · 25 yardım balonu</td>
+          </tr>
+          <tr>
+            <td><strong>İngilizce Çeviri (<code>artemis/i18n/en/</code>)</strong></td>
+            <td class="num mono">35 JSON</td>
+            <td class="num mono">38 JSON · 2.790 anahtar</td>
+            <td class="num mono">40 JSON · 2.928 anahtar</td>
+            <td><code>test_i18n.py</code> TR/EN eşliği ve çakışma denetimi temiz</td>
+          </tr>
+          <tr>
+            <td><strong>ADR &amp; Araç Eklentileri</strong></td>
+            <td class="num mono">82 ADR · 69 araç</td>
+            <td class="num mono">84 ADR · 71 araç (23 modül)</td>
+            <td class="num mono">88 ADR · 71 araç (23 modül)</td>
+            <td>Olay tetikleyicileri sıfır LLM aracıyla (yalnız config) eklendi</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="grid-2" style="margin-top:18px;">
+      <!-- SVG Chart 1: Code size headroom -->
+      <div class="svg-card">
+        <h3>Kod Boyutu Tavan Payı (<code>feat/vizyon-ozellikler</code>)</h3>
+        <p class="svg-sub"><code>test_code_size.py</code> sınırları: dosya ≤ 1300 satır, işlev ≤ 200 satır (<code>ALLOW = {}</code> boş).</p>
+        <svg viewBox="0 0 540 270" width="100%" height="auto" role="img" aria-label="En uzun dosyalar ve işlevler tavan grafiği">
+          <rect x="0" y="0" width="540" height="270" fill="#FFFFFF"/>
+          <text x="10" y="18" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#1B4D5C">En Büyük 5 Dosya (Sınır: 1300)</text>
+          <line x1="470" y1="24" x2="470" y2="128" stroke="#B91C1C" stroke-dasharray="4 3" stroke-width="1.5"/>
+          <text x="474" y="34" font-family="Consolas, monospace" font-size="10" fill="#B91C1C">1300</text>
+          <!-- 5 file bars: scale x = 210 + (val/1300)*260 -->
+          <g font-family="Consolas, monospace" font-size="10.5" fill="#181B20">
+            <text x="10" y="42">voice/core.py</text>
+            <rect x="210" y="31" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="31" width="258.8" height="13" rx="3" fill="#B45309"/>
+            <text x="476" y="42" font-weight="700">1294</text>
+
+            <text x="10" y="62">desktop/bridge.py</text>
+            <rect x="210" y="51" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="51" width="254.8" height="13" rx="3" fill="#1B4D5C"/>
+            <text x="476" y="62">1274</text>
+
+            <text x="10" y="82">desktop/app.py</text>
+            <rect x="210" y="71" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="71" width="252.6" height="13" rx="3" fill="#1B4D5C"/>
+            <text x="476" y="82">1263</text>
+
+            <text x="10" y="102">computer/session.py</text>
+            <rect x="210" y="91" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="91" width="251.2" height="13" rx="3" fill="#1B4D5C"/>
+            <text x="476" y="102">1256</text>
+
+            <text x="10" y="122">desktop/provider_section.py</text>
+            <rect x="210" y="111" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="111" width="248.4" height="13" rx="3" fill="#15803D"/>
+            <text x="476" y="122">1242</text>
+          </g>
+
+          <text x="10" y="152" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#1B4D5C">En Uzun 5 İşlev (Sınır: 200)</text>
+          <line x1="470" y1="158" x2="470" y2="262" stroke="#B91C1C" stroke-dasharray="4 3" stroke-width="1.5"/>
+          <text x="474" y="168" font-family="Consolas, monospace" font-size="10" fill="#B91C1C">200</text>
+          <!-- 5 func bars: scale x = 210 + (val/200)*260 -->
+          <g font-family="Consolas, monospace" font-size="10.5" fill="#181B20">
+            <text x="10" y="176">pet_creator_panel::__init__</text>
+            <rect x="210" y="165" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="165" width="257.4" height="13" rx="3" fill="#B45309"/>
+            <text x="476" y="176" font-weight="700">198</text>
+
+            <text x="10" y="196">code_agent_jobs::_run</text>
+            <rect x="210" y="185" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="185" width="254.8" height="13" rx="3" fill="#1B4D5C"/>
+            <text x="476" y="196">196</text>
+
+            <text x="10" y="216">provider_layout::build_models</text>
+            <rect x="210" y="205" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="205" width="252.2" height="13" rx="3" fill="#1B4D5C"/>
+            <text x="476" y="216">194</text>
+
+            <text x="10" y="236">projects_panel::__init__</text>
+            <rect x="210" y="225" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="225" width="243.1" height="13" rx="3" fill="#15803D"/>
+            <text x="476" y="236">187</text>
+
+            <text x="10" y="256">data_panel::__init__</text>
+            <rect x="210" y="245" width="260" height="13" rx="3" fill="#EEEAE0"/>
+            <rect x="210" y="245" width="243.1" height="13" rx="3" fill="#15803D"/>
+            <text x="476" y="256">187</text>
+          </g>
+        </svg>
+      </div>
+
+      <!-- SVG Chart 2: Test progression & Settings consolidation -->
+      <div class="svg-card">
+        <h3>Test Büyümesi ve Ayarlar Sayfası Konsolidasyonu</h3>
+        <p class="svg-sub">Karne 4 tabanından <code>main</code> ve <code>feat/vizyon-ozellikler</code> dallarına test kapsamı ve UI yoğunluğu değişimi.</p>
+        <svg viewBox="0 0 540 270" width="100%" height="auto" role="img" aria-label="Test büyümesi ve ayarlar konsolidasyon grafiği">
+          <rect x="0" y="0" width="540" height="270" fill="#FFFFFF"/>
+          <text x="10" y="18" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#1B4D5C">Canlı Geçen Pytest Sayısı (3745 → 3867 → 3908+)</text>
+          <!-- Bar scale: 3600 to 3950 mapped cleanly -->
+          <g font-family="Consolas, monospace" font-size="11" fill="#181B20">
+            <text x="10" y="44">Karne 4 (kirli ağaç)</text>
+            <rect x="180" y="32" width="300" height="16" rx="4" fill="#EEEAE0"/>
+            <rect x="180" y="32" width="190" height="16" rx="4" fill="#B91C1C"/>
+            <text x="488" y="44">3745 (5 kırık)</text>
+
+            <text x="10" y="70">main (06d6c7c)</text>
+            <rect x="180" y="58" width="300" height="16" rx="4" fill="#EEEAE0"/>
+            <rect x="180" y="58" width="265" height="16" rx="4" fill="#15803D"/>
+            <text x="488" y="70" font-weight="700">3867 (0 kırık)</text>
+
+            <text x="10" y="96">feat (6e52f37)</text>
+            <rect x="180" y="84" width="300" height="16" rx="4" fill="#EEEAE0"/>
+            <rect x="180" y="84" width="292" height="16" rx="4" fill="#1B4D5C"/>
+            <text x="488" y="96" font-weight="700">3908 (1*)</text>
+          </g>
+
+          <line x1="10" y1="118" x2="530" y2="118" stroke="#DFD9CC"/>
+          <text x="10" y="140" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#1B4D5C">Ayarlar Sol Menü Sayısı (14 → 9 · %35,7 Azalma)</text>
+          <g font-family="Segoe UI, sans-serif" font-size="11" fill="#181B20">
+            <rect x="14" y="154" width="235" height="96" rx="8" fill="#FEF3C7" stroke="#E6C775"/>
+            <text x="26" y="174" font-weight="700" fill="#5C3806">Önce: 14 Sayfa (Dengesiz)</text>
+            <text x="26" y="193" fill="#5C3806">• Ses (55) + Model (44) aşırı yüklü</text>
+            <text x="26" y="210" fill="#5C3806">• Gün özeti (3) + Araştırma (2) boş</text>
+            <text x="26" y="227" fill="#5C3806">• 5 gizlilik/kısayol ayarı YAML’daydı</text>
+            <text x="26" y="242" fill="#5C3806">• Ses yardım balonu tavandaydı (7 &gt; 6)</text>
+
+            <text x="258" y="206" font-size="22" font-weight="700" fill="#1B4D5C">→</text>
+
+            <rect x="284" y="154" width="242" height="96" rx="8" fill="#ECFDF5" stroke="#A7F3D0"/>
+            <text x="296" y="174" font-weight="700" fill="#064E3B">Sonra: 9 Sayfa (Sekmeli &amp; Dengeli)</text>
+            <text x="296" y="193" fill="#064E3B">• Ses (2 sekme) + Dikte ve Kısayollar</text>
+            <text x="296" y="210" fill="#064E3B">• Otomasyon (4) + Bağlantılar (4) + Bilgi (2)</text>
+            <text x="296" y="227" fill="#064E3B">• 75/75 PANEL_BINDINGS korunmuş</text>
+            <text x="296" y="242" fill="#064E3B">• Ses yardım balonu: 6/6 tavan içinde</text>
+          </g>
+        </svg>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 3: DELIVERABLES EXPLORER -->
+  <section id="teslimatlar">
+    <h2>3. Faz 0–3 Uygulama Teslimatları Gezgini</h2>
+    <p class="sec-lead">
+      Yol haritasındaki tüm iş kalemleri (Faz 0 açık işler, Faz 1 UX + 5 hızlı kazanım, Faz 2 orta vadeli 5 ürün özelliği ve
+      Faz 3 vizyon 4 özellik + CI) faz, dal ve doğrulama düzeyine göre filtrelenebilir.
+    </p>
+
+    <div class="bar-row">
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="filterDeliverables('all', 'phase', this)">Tümü (16)</button>
+        <button class="filter-btn" onclick="filterDeliverables('p0', 'phase', this)">Faz 0 · Temel (2)</button>
+        <button class="filter-btn" onclick="filterDeliverables('p1', 'phase', this)">Faz 1 · UX &amp; Hızlı (5)</button>
+        <button class="filter-btn" onclick="filterDeliverables('p2', 'phase', this)">Faz 2 · Orta Vadeli (5)</button>
+        <button class="filter-btn" onclick="filterDeliverables('p3', 'phase', this)">Faz 3 · Vizyon (4)</button>
+      </div>
+      <div class="filter-bar">
+        <button class="filter-btn active" onclick="filterDeliverables('all', 'branch', this)">Her İki Dal</button>
+        <button class="filter-btn" onclick="filterDeliverables('main', 'branch', this)">main (06d6c7c)</button>
+        <button class="filter-btn" onclick="filterDeliverables('feat', 'branch', this)">feat/vizyon-ozellikler (6e52f37)</button>
+      </div>
+    </div>
+
+    <div class="feat-grid" id="deliv-grid">
+      <!-- PHASE 0 -->
+      <article class="feat-card" data-phase="p0" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-neutral">Faz 0 · M0</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · 8a5c784</span>
+        </div>
+        <h3><code>voice/core.py</code> &amp; <code>SafetyGate.dispatch</code> Kod Bölme</h3>
+        <p class="feat-desc">WAV/PCM ve doğrudan ses yönlendirmesi <code>artemis/channels/voice/audio_routing.py</code> modülüne ayrıldı; <code>SafetyGate.dispatch</code> taint/onay kararı yardımcı metoda çıkarıldı ve <code>factory.py::build_voice_controller</code> 199’dan güvenli satır sayısına çekildi.</p>
+        <div class="feat-meta">
+          <span><strong>Doğrulama:</strong> <code>test_code_size.py</code> geçti (<code>ALLOW = {}</code> boş) · güvenlik değişmezleri korundu</span>
+          <span><strong>Modüller:</strong> <code>artemis/channels/voice/core.py</code>, <code>audio_routing.py</code>, <code>artemis/safety/gate.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p0" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-neutral">Faz 0 · M0</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · 8a5c784</span>
+        </div>
+        <h3>5 Pytest Kırığının Giderilmesi &amp; <code>SettingsPanel</code> Ayrıştırma</h3>
+        <p class="feat-desc"><code>config/config.example.yaml</code> içine <code>voice.direct_audio_input</code> eklendi, <em>Ses</em> yardım balonu sayısı 7 → 6’ya indirildi, <code>projects_panel.py</code> 1280px <code>Kod ajanı</code> kutu taşması giderildi ve ses/STT yardımcıları <code>voice_settings_section.py</code>’ye taşındı.</p>
+        <div class="feat-meta">
+          <span><strong>Doğrulama:</strong> <code>test_config_example.py</code>, <code>test_help_bubbles_settings.py</code>, <code>test_shell_chat.py</code> yeşil</span>
+          <span><strong>Belge Eşitleme:</strong> <code>RELIABILITY_STATUS.md</code>, <code>ADR 0082</code>, <code>YENI_OZELLIKLER_KABUL.md</code>, <code>ROADMAP.md</code></span>
+        </div>
+      </article>
+
+      <!-- PHASE 1 -->
+      <article class="feat-card" data-phase="p1" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-teal">Faz 1 · M1</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · 937be14..c49a081</span>
+        </div>
+        <h3>Ayarlar Arayüzü Sadeleştirme (14 → 9 Sayfa)</h3>
+        <p class="feat-desc">Mevcut <code>QTabWidget</code>/<code>QTabBar</code> stiliyle 14 sayfa 9 dengeli sayfaya indirildi: <em>Ses</em> (Dinleme/Yanıt), <em>Dikte ve Kısayollar</em>, <em>Model ve Bağlantılar</em> (2 sekme), <em>Görünüm</em>, <em>Otomasyon Kuralları</em> (4 sekme), <em>Bilgi ve Beceriler</em> (2 sekme), <em>Bağlantılar</em>, <em>Uygulamalar ve Güvenlik</em>, <em>Hakkında ve Güncelleme</em>.</p>
+        <div class="feat-meta">
+          <span><strong>Sözleşme:</strong> Tüm <code>SettingsPanel</code> öznitelikleri ve <code>PANEL_BINDINGS</code> korundu; <code>select_section</code> eski adları da eşler</span>
+          <span><strong>Modüller:</strong> <code>settings_pages.py</code>, <code>settings_pages_extra.py</code>, <code>settings_nav.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p1" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-teal">Faz 1 · M1</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · 937be14</span>
+        </div>
+        <h3>YAML’da Kalan 5 Gizlilik &amp; Kısayol Ayarının Panele Taşınması</h3>
+        <p class="feat-desc"><code>voice.listening_hotkey</code> (tüm kısayollar arasında birleşik çakışma denetimi + canlı yenileme), <code>allow_cloud_clipboard</code>, <code>allow_cloud_file_content</code>, <code>memory.encrypt_at_rest</code> (DPAPI) ve <code>close_without_confirmation</code> arayüzden düzenlenebilir hale getirildi.</p>
+        <div class="feat-meta">
+          <span><strong>Doğrulama:</strong> <code>test_settings_panel.py</code>, <code>test_settings_no_squeeze.py</code>, <code>test_ux_r7a.py</code> geçti</span>
+          <span><strong>Modüller:</strong> <code>security_settings_section.py</code>, <code>settings_io.py</code>, <code>settings_panel.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p1" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-teal">Faz 1 · M1</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · 937be14 / 4aeb299</span>
+        </div>
+        <h3>Yanıt Sesi Önizleme &amp; <code>edge_voice</code> / <code>piper_voice</code> Seçici</h3>
+        <p class="feat-desc"><em>Ses &gt; Yanıt</em> sekmesine arka plan iş parçacığında çalışan 1 cümlelik <strong>Sesi Test Et</strong> düğmesi ve yerel/Edge ses profil seçicileri eklendi; bulut TTS izni (<code>allow_cloud_tts_text</code>) ve bütçe sınırları korunur.</p>
+        <div class="feat-meta">
+          <span><strong>Modüller:</strong> <code>artemis/channels/desktop/voice_preview.py</code>, <code>voice_settings_section.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p1" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-teal">Faz 1 · M1</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · 937be14</span>
+        </div>
+        <h3>Ses Telemetri Özet Kartı (<code>.artemis/voice-telemetry/</code>)</h3>
+        <p class="feat-desc"><em>Ses &gt; Dinleme</em> altında JSON v2 ses telemetri dosyalarını okuyup p50/p90 gecikme, örnek sayısı ve akış kalitesi özetini gösteren kart eklendi; içerik veya ses metni kaydetmez.</p>
+        <div class="feat-meta">
+          <span><strong>Modüller:</strong> <code>artemis/channels/voice/metrics.py</code>, <code>artemis/channels/desktop/voice_settings_section.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p1" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-teal">Faz 1 · M1</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · 4aeb299 / c49a081</span>
+        </div>
+        <h3>Üst Çubukta Canlı Günlük Bütçe &amp; Maliyet Sayacı</h3>
+        <p class="feat-desc"><code>BudgetLedger</code> üzerinden <code>daily_budget_usd</code> harcamasını canlı okuyan gösterge üst çubuğa eklendi ve <code>fit_topbar</code> dar pencere daraltma kurallarıyla hizalandı.</p>
+        <div class="feat-meta">
+          <span><strong>Modüller:</strong> <code>artemis/channels/desktop/window_layout.py</code>, <code>bridge.py</code>, <code>budget.py</code></span>
+        </div>
+      </article>
+
+      <!-- PHASE 2 -->
+      <article class="feat-card" data-phase="p2" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-purple">Faz 2 · M2A</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · 869cb6e..104c365</span>
+        </div>
+        <h3>Grafik MCP Sunucu Yönetim Merkezi</h3>
+        <p class="feat-desc"><em>Bağlantılar</em> altında 4. sekme (<em>MCP Sunucuları</em>) eklendi: sunucu ekleme/düzenleme/silme, açık <code>read_only_tools</code>/<code>confirm_tools</code> listeleri, <code>env_passthrough</code> ve bağlantı/sağlık sınaması. <code>mcp.servers</code> boşsa süreç başlatılmaz, <code>readOnlyHint</code> risk sınıfını düşürmez, sır YAML’a yazılmaz.</p>
+        <div class="feat-meta">
+          <span><strong>Modüller:</strong> <code>mcp_section.py</code>, <code>mcp_dialog.py</code>, <code>artemis/mcp/client.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p2" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-purple">Faz 2 · M2B</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · c4a7651..06d6c7c</span>
+        </div>
+        <h3>Bas-Konuş (Push-to-Talk) &amp; 3 Adımlı Mikrofon Testi Sihirbazı</h3>
+        <p class="feat-desc"><code>pynput</code> olmadan Windows <code>hotkey.py</code> içinde basılı-tutma / bırakma (<code>voice.ptt_enabled</code>, <code>voice.ptt_hotkey</code>) ve ses hattı desteği eklendi. <em>Ses &gt; Dinleme</em> altından açılan 3 adımlı Mikrofon Test Sihirbazı cihaz seçimi, seviye ölçümü ve oynatma sınamasını güvenli iptalle yürütür.</p>
+        <div class="feat-meta">
+          <span><strong>Modüller:</strong> <code>desktop/hotkey.py</code>, <code>desktop/mic_wizard.py</code>, <code>channels/voice/core.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p2" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-purple">Faz 2 · M2C</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · d03cb00 · ADR 0083</span>
+        </div>
+        <h3>Bağlamsal Çalışma Profilleri (<code>work</code> / <code>game</code> / <code>private</code> / <code>meeting</code>)</h3>
+        <p class="feat-desc">Üst çubuktan tek tıkla geçiş yapılan 4 çalışma profili: <code>private</code> tüm bulut modellerini kapatıp yereli zorlar; <code>game</code> toast bildirimlerini bastırıp hafif STT’ye geçer; <code>meeting</code> sesi ve bildirimleri susturur.</p>
+        <div class="feat-meta">
+          <span><strong>Karar &amp; Modüller:</strong> <code>docs/adr/0083-baglamsal-calisma-profilleri.md</code> · <code>work_profile.py</code>, <code>profile_bar.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p2" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-purple">Faz 2 · M2D</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · d9a57e0 · ADR 0084</span>
+        </div>
+        <h3>Onaylı İki Yönlü Takvim (CalDAV) ve E-Posta (SMTP) Yazımı</h3>
+        <p class="feat-desc">Varsayılan kapalı (<code>mail.allow_send=False</code>, <code>calendar.allow_write=False</code>) iki araç: <code>mail_send</code> ve <code>calendar_create_event</code>. İkisi de <code>Risk.CONFIRM_REQUIRED</code>, <code>outbound=True</code>, gözetimsiz turda yasak ve <code>ApprovalDialog</code> içinde tam alıcı/konu/gövde önizlemeli; başlık enjeksiyonu ağ öncesi reddedilir.</p>
+        <div class="feat-meta">
+          <span><strong>Karar &amp; Modüller:</strong> <code>docs/adr/0084-iki-yonlu-takvim-ve-eposta.md</code> · <code>calendar_mail_write.py</code>, <code>calendar_mail.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p2" data-branch="main">
+        <div class="feat-top">
+          <span class="badge badge-purple">Faz 2 · M2E</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">main · a251715</span>
+        </div>
+        <h3>Dikte Noktalama İyileştirme &amp; Bellek İçi Son-5 Geçmişi</h3>
+        <p class="feat-desc">İsteğe bağlı 1 adımlı noktalama/imla düzeltmesi (<code>tools=[]</code>, <code>"VERİDİR"</code> çerçevesi, bulut kapalıysa yalnızca yerel model) ve yalnızca RAM’de tutulan son-5 dikte geçmişi ile tek tıkla yeniden yapıştırma; metin asla diske veya denetim kaydına yazılmaz.</p>
+        <div class="feat-meta">
+          <span><strong>Modüller:</strong> <code>artemis/channels/desktop/dictation.py</code>, <code>settings_pages.py</code></span>
+        </div>
+      </article>
+
+      <!-- PHASE 3 -->
+      <article class="feat-card" data-phase="p3" data-branch="feat">
+        <div class="feat-top">
+          <span class="badge badge-amber">Faz 3 · M3A</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">feat · 86191da · ADR 0085</span>
+        </div>
+        <h3>Ses + Görüntü Çok Kipli Akış (<code>multimodal_screen_context</code>)</h3>
+        <p class="feat-desc"><code>voice.multimodal_screen_context</code> + <code>perception.allow_cloud_screen</code> + <code>voice.direct_audio_input</code> üçlü kapısıyla korunur ve <code>private</code> profilde engellenir. Ekran görüntüsü yalnızca RAM’de PNG’ye çevrilip tura eklenir (sıfır disk yazımı), turu lekeler ve tüm onaylar ekranda <code>SafetyGate</code> ile kalır.</p>
+        <div class="feat-meta">
+          <span><strong>Test &amp; ADR:</strong> <code>tests/test_voice_multimodal.py</code> · <code>docs/adr/0085-ses-ve-goruntu-cok-kipli-akis.md</code></span>
+          <span><strong>Modüller:</strong> <code>artemis/channels/voice/multimodal.py</code> (98 satır), <code>voice/core.py</code>, <code>agent_loop.py</code>, <code>router.py</code></span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p3" data-branch="feat">
+        <div class="feat-top">
+          <span class="badge badge-amber">Faz 3 · M3B</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">feat · d4bd013 · ADR 0086</span>
+        </div>
+        <h3>Olay Tetikleyicileri &amp; Koşullu Rutin Öneri Zincirleri</h3>
+        <p class="feat-desc"><code>app_opened</code>, <code>calendar_before</code>, <code>system_resume</code> (<code>power_events.py</code>) tetikleyicileri ve rutin/tetikleyici sonrası koşullu öneri zincirleri (<code>ChainDialog</code>). Sıfır LLM tetikleyici aracı (yalnız config), LLM’siz sabit şablonlar, ≤1 eylem düğmesi, tıklamadan çalışmaz ve asla Telegram’a sızmaz (<code>local_only=True</code>).</p>
+        <div class="feat-meta">
+          <span><strong>Test &amp; ADR:</strong> <code>tests/test_event_triggers.py</code> · <code>docs/adr/0086-olay-tetikleyicileri-ve-rutin-zincirleri.md</code></span>
+          <span><strong>Modüller:</strong> <code>artemis/proactive/event_triggers.py</code> (515 satır), <code>chain_dialog.py</code> (304 satır), <code>power_events.py</code> (41 satır)</span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p3" data-branch="feat">
+        <div class="feat-top">
+          <span class="badge badge-amber">Faz 3 · M3C</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-teal">feat · 386a573 · 6e52f37 · ADR 0087</span>
+        </div>
+        <h3>Doğal Dil + UIA Öğretilebilir Makro Rutin Kaydedici</h3>
+        <p class="feat-desc">Enjekte edilebilir <code>MacroObserverBackend</code> / <code>WindowsMacroObserver</code> (üçüncü parti tuş kancası yok), <code>BLOCKED_PROCESSES</code> atlama, <code>IsPassword</code> ve parola/PIN/OTP/Bearer kalıplarını maskeleme, ≤12 adım sınırı, <code>routine_*</code> yasağı, <code>routine_save</code> onay önizlemesi ve her adımın <code>SafetyGate.dispatch</code> üzerinden oynatılması.</p>
+        <div class="feat-meta">
+          <span><strong>Test &amp; ADR:</strong> <code>tests/test_macro_recorder.py</code>, <code>test_macro_dialog.py</code> · <code>docs/adr/0087-ogretilebilir-makro-rutin-kaydedici.md</code></span>
+          <span><strong>Modüller:</strong> <code>artemis/proactive/macro_recorder.py</code> (770 satır), <code>artemis/channels/desktop/macro_dialog.py</code> (296 satır)</span>
+        </div>
+      </article>
+
+      <article class="feat-card" data-phase="p3" data-branch="feat">
+        <div class="feat-top">
+          <span class="badge badge-amber">Faz 3 · M3D</span>
+          <span class="badge badge-green">Kodlandı + Otomatik Test</span>
+          <span class="badge badge-amber">Canlı CI Sırrı Bekler</span>
+        </div>
+        <h3>Ses Modeli Sağlık Yöneticisi UI &amp; Windows Yayın CI (SignPath Hazır)</h3>
+        <p class="feat-desc">Whisper, Piper, Silero VAD ve DFN3 envanterini boyut, SHA-256 doğrulama, atomik indirme/geri alma ve paket içi model korumasıyla yöneten arayüz hem <em>Ses</em> hem <em>Hakkında ve Güncelleme</em> sayfalarına bağlandı. <code>.github/workflows/release-windows.yml</code> PyInstaller + Inno Setup + SignPath/Authenticode kancası + imzasız <code>SHA256SUMS.txt</code> yedeği içerir.</p>
+        <div class="feat-meta">
+          <span><strong>Test &amp; ADR:</strong> <code>tests/test_voice_model_health.py</code>, <code>test_release_workflow.py</code> · <code>docs/adr/0088-ses-modeli-saglik-yoneticisi-ve-windows-dagitim-hatti.md</code></span>
+          <span><strong>Modüller:</strong> <code>voice/model_health.py</code> (1082 satır), <code>desktop/voice_model_manager.py</code> (483 satır), <code>packaging/artemis.iss</code></span>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <!-- SECTION 4: SETTINGS UI INTROSPECTION -->
+  <section id="ayarlar-ux">
+    <h2>4. Canlı <code>SettingsPanel</code> İçgörüsü: 14 Sayfadan 9 Sayfaya</h2>
+    <p class="sec-lead">
+      PySide6 <code>SettingsPanel</code> nesnesi <code>QT_QPA_PLATFORM=offscreen</code> ortamında hem Türkçe (<code>tr</code>) hem
+      İngilizce (<code>en</code>) dillerinde canlı örneklendi. İki dalda da 9 sayfa, 0 eksik <code>PANEL_BINDINGS</code> ve
+      sayfa başına yardım balonu tavanları doğrulandı.
+    </p>
+
+    <div class="bar-row">
+      <div class="tab-bar" role="tablist" aria-label="Ayarlar Dil Seçimi">
+        <button class="tab-btn active" onclick="setUxLang('tr', this)">Türkçe Arayüz (tr · 9 Sayfa)</button>
+        <button class="tab-btn" onclick="setUxLang('en', this)">English UI (en · 9 Pages)</button>
+      </div>
+      <span class="badge badge-green">PANEL_BINDINGS: 74 (main) → 75 (feat) · Eksik: 0</span>
+    </div>
+
+    <div class="mockup-shell">
+      <div class="mockup-nav" id="ux-nav-list" aria-label="Ayar Sayfaları"></div>
+      <div class="mockup-body" id="ux-detail-body"></div>
+    </div>
+
+    <div class="callout callout-teal" style="margin-top:16px;">
+      <strong>Çift Konumlu Ses Modeli Yöneticisi &amp; Balon Tavanı Korundu:</strong>
+      <code>feat/vizyon-ozellikler</code> üzerinde <code>VoiceModelManagerWidget</code> hem indeks <code>0</code> (<em>Ses / Voice</em>) hem de
+      indeks <code>8</code> (<em>Hakkında ve Güncelleme / About &amp; Updates</em>) altında canlı olarak bağlıdır (<code>2</code> örnek, <code>models_changed</code> ile eşzamanlı).
+      <em>Ses</em> sayfasındaki <code>HelpTip</code> sayısı tam olarak <strong>6/6</strong> tavanında tutuldu; toplam 9 sayfada <strong>25</strong> yardım balonu bulunuyor.
+    </div>
+  </section>
+
+  <!-- SECTION 5: HONEST DISTINCTION -->
+  <section id="kabul-ayrimi">
+    <h2>5. Dürüst Kabul Ayrımı: Otomatik Doğrulananlar vs. Canlı Windows / Dış Adımlar</h2>
+    <p class="sec-lead">
+      Bu rapor <strong>kodlanmış + sahte/offscreen otomatik testlerden geçmiş</strong> teslimatları, gerçek Windows etkileşimi veya
+      dış organizasyon kurulumu gerektiren açık maddelerden kesin çizgiyle ayırır. Otomatik testler gerçek cihaz kabulünün yerine geçmez.
+    </p>
+
+    <div class="grid-2">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+          <h3 style="font-size:19px;">A. Kodlanmış ve Otomatik Test Edilmiş</h3>
+          <span class="badge badge-green">Bu Oturumda Doğrulandı</span>
+        </div>
+        <div class="accept-row">
+          <div>
+            <strong>Statik Çözümleme &amp; Boyut Sınırları</strong><br>
+            <span class="muted"><code>ruff</code> 0 hata, <code>mypy</code> 0 hata (234→243 dosya), <code>test_code_size.py</code> (<code>ALLOW={}</code> boş), <code>test_docs_index.py</code> (84→88 ADR), <code>test_i18n.py</code> (38→40 EN JSON, 2790→2928 anahtar).</span>
+          </div>
+          <span class="badge badge-green">Her İki Dal</span>
+        </div>
+        <div class="accept-row">
+          <div>
+            <strong>Güvenlik &amp; Ses Sahte Kıyaslamaları</strong><br>
+            <span class="muted"><code>bench.run --sahte</code> 57/57 (0 tehlikeli, 0 onaysız, 0 yanlış hedef); <code>bench.voice_latency --sahte --iterations 3</code> 3/3 (p50=157 ms, p90=172 ms, aborted=0, overflow=0).</span>
+          </div>
+          <span class="badge badge-green">Her İki Dal</span>
+        </div>
+        <div class="accept-row">
+          <div>
+            <strong>Tam Birim / Entegrasyon / Offscreen Qt Paketi</strong><br>
+            <span class="muted"><code>main</code>: <strong>3867/3867</strong> geçti. <code>feat</code>: <strong>3908 geçti</strong> (1 zamanlama-duyarlı <code>max_seconds=0.02</code> testi hariç*; M3 yeni testleri 41/41, koruma 108/108, <code>test_shell_chat</code> 36/36 geçti).</span>
+          </div>
+          <span class="badge badge-teal">Offscreen + Sahte</span>
+        </div>
+        <div class="accept-row">
+          <div>
+            <strong>Güvenlik Kapısı &amp; Mimari Değişmezler</strong><br>
+            <span class="muted">Tek <code>SafetyGate.dispatch</code> yürütme yolu, yalnızca <code>artemis/tools/plugins/</code> içinde <code>@register_tool</code> (MCP köprüsü istisnasıyla), sıfır LLM tetikleyici aracı, RAM-içi multimodal PNG, <code>IsPassword</code>/Bearer maskeleme, <code>mail_send</code>/<code>calendar_create_event</code> tam önizleme ve gözetimsiz tur yasağı.</span>
+          </div>
+          <span class="badge badge-green">Testle Kilitli</span>
+        </div>
+      </div>
+
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:10px;">
+          <h3 style="font-size:19px;">B. Canlı Windows Kabulü veya Dış Ortam Gerektirenler</h3>
+          <span class="badge badge-amber">Kullanıcı / Dış Adım Bekliyor</span>
+        </div>
+
+        <div class="filter-bar" style="margin-bottom:10px;">
+          <button class="filter-btn active" onclick="filterPending('all', this)">Tümü (15)</button>
+          <button class="filter-btn" onclick="filterPending('active', this)">5 Aktif Kabul (Y / R)</button>
+          <button class="filter-btn" onclick="filterPending('gpu', this)">8 İsteğe Bağlı GPU / WER / Karar</button>
+          <button class="filter-btn" onclick="filterPending('ext', this)">CI İmza &amp; Video (2)</button>
+        </div>
+
+        <div id="pending-list">
+          <div class="accept-row" data-pkind="active">
+            <div><code>Y:48</code> — Ayarlar’dan <code>dictation.max_seconds = 5</code> yapıp Not Defteri’nde ikinci basış olmadan kaydın kendiliğinden durması ve yazım tekrarı.</div>
+            <span class="badge badge-amber">Canlı Windows</span>
+          </div>
+          <div class="accept-row" data-pkind="active">
+            <div><code>Y:60</code> — Gerçek sohbette <code>işe başla</code> rutini kaydetme (normal kipte onay önizlemesi red/onay, otomatik kipte kayıt).</div>
+            <span class="badge badge-amber">Canlı Windows</span>
+          </div>
+          <div class="accept-row" data-pkind="active">
+            <div><code>Y:64</code> — İçinde <code>close_application</code> olan rutini kaydetme ve çalıştırma; kapatma onayını reddedince rutinin o adımda durması.</div>
+            <span class="badge badge-amber">Canlı Windows</span>
+          </div>
+          <div class="accept-row" data-pkind="active">
+            <div><code>R:18</code> — Gerçek Not Defteri / Dosya Gezgini penceresinde <code>Delete</code> / <code>Shift+Delete</code> / <code>Ctrl+D</code> yıkıcı öğe kapısı kabulü.</div>
+            <span class="badge badge-amber">Canlı Windows</span>
+          </div>
+          <div class="accept-row" data-pkind="active">
+            <div><code>R:16</code> — Gerçek pencerede <code>both</code> / <code>hybrid</code> kipte öğe (pencereyi kaplayan Pane) içi koordinat ölçekli tıklama.</div>
+            <span class="badge badge-amber">Canlı Windows</span>
+          </div>
+
+          <div class="accept-row" data-pkind="gpu">
+            <div><code>W:33</code> (<code>R:151, R:155</code>) — Canlı <code>bench.voice_latency --canli --duration 600</code> (her profil için ≥30 sohbet+araç turu, <code>targets.*.met</code> dolu).</div>
+            <span class="badge badge-neutral">GPU / Canlı Ölçüm</span>
+          </div>
+          <div class="accept-row" data-pkind="gpu">
+            <div><code>W:37</code> — Akışlı (streaming) canlı profillerde <code>model_first_token_ms</code> rapor doğrulaması.</div>
+            <span class="badge badge-neutral">GPU / Canlı Ölçüm</span>
+          </div>
+          <div class="accept-row" data-pkind="gpu">
+            <div><code>W:147</code> — Soğuk ve sıcak GPU profillerinde ≥30 tur, A6/A7 gürültü setleri ve söz kesme (barge-in) tekrarı.</div>
+            <span class="badge badge-neutral">GPU / Canlı Ölçüm</span>
+          </div>
+          <div class="accept-row" data-pkind="gpu">
+            <div><code>W:71–75</code> — Kişisel ses kayıt seti ile <code>bench.speech_accuracy --canli --ek-hotword</code> A/B WER ve sessizlik uydurması ölçümü.</div>
+            <span class="badge badge-neutral">WER / A-B Ölçüm</span>
+          </div>
+          <div class="accept-row" data-pkind="gpu">
+            <div><code>W:76–78</code> — <code>voice.stt_alias_hotwords: true</code> ile bir günlük gerçek kullanımda uyandırma/yanlış uyanma takibi.</div>
+            <span class="badge badge-neutral">Canlı Kullanım</span>
+          </div>
+          <div class="accept-row" data-pkind="gpu">
+            <div><code>W:100</code> — Bulut gürültü seti (<code>wake_noise_tr.zip</code>, 150 örnek) ile 4 yollu gürültüde uyandırma yenileme ölçümü.</div>
+            <span class="badge badge-neutral">İsteğe Bağlı Set</span>
+          </div>
+          <div class="accept-row" data-pkind="gpu">
+            <div><code>W:112</code> — 10 sesli sentetik set (XTTS-v2 + Piper + Emel, 1340 örnek) için ayrı GPU ortamında yeniden ölçüm.</div>
+            <span class="badge badge-neutral">İsteğe Bağlı Set</span>
+          </div>
+          <div class="accept-row" data-pkind="gpu">
+            <div><code>W:138</code> — Oturum dışı ürün/iletişim kararı: LinkedIn tanıtım taslağı yayını (cihaz kabulü değildir).</div>
+            <span class="badge badge-neutral">Karar Maddesi</span>
+          </div>
+
+          <div class="accept-row" data-pkind="ext">
+            <div><strong>SignPath / Authenticode Kurulumu</strong> — <code>.github/workflows/release-windows.yml</code> iş akışı hazır; organizasyon sertifikası ve GitHub Actions <code>SIGNPATH_*</code> / <code>WINDOWS_CERT_PFX_*</code> gizli anahtarları tanımlanana dek canlı CI imzasız kurucu + <code>SHA256SUMS.txt</code> üretir.</div>
+            <span class="badge badge-purple">Dış Kurulum</span>
+          </div>
+          <div class="accept-row" data-pkind="ext">
+            <div><strong>EN Tanıtım Videosu Karesi</strong> — İngilizce tanıtım videosunda kalan Türkçe onay penceresi karesinin EN arayüz çekimiyle yenilenmesi.</div>
+            <span class="badge badge-purple">Medya / Dış Adım</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- SECTION 6: TRACEABILITY -->
+  <section id="izlenebilirlik">
+    <h2>6. Commit Geçmişi ve Yeni Modül Envanteri</h2>
+    <p class="sec-lead">
+      Tüm commit’ler yalnızca yerelde oluşturulmuştur (<code>git push</code> çalıştırılmamıştır). <code>main</code> dalı Faz 0–2’yi,
+      <code>feat/vizyon-ozellikler</code> dalı Faz 3’ü ve bu rapor dosyasını taşır.
+    </p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h3><code>main</code> Dalı Commit Zinciri (<code>06d6c7c</code> · 13 Commit)</h3>
+        <div class="table-wrap" style="margin-top:10px;">
+          <table>
+            <thead>
+              <tr><th>Hash</th><th>Faz</th><th>Özet</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="mono">8a5c784</td><td><span class="badge badge-neutral">M0</span></td><td>faz0: doğrudan ses girdisi, kural güncellemeleri, kod bölme ve yeşil taban</td></tr>
+              <tr><td class="mono">937be14</td><td><span class="badge badge-teal">M1</span></td><td>Phase 1: simplify settings 14-&gt;9 pages and add privacy/voice/budget quick wins</td></tr>
+              <tr><td class="mono">4aeb299</td><td><span class="badge badge-teal">M1</span></td><td>Faz 1 düzeltmeleri: üst çubuk bütçe sığdırma, sarma/sekme sıkışma giderimi ve ses önizleme fiyatlaması</td></tr>
+              <tr><td class="mono">c49a081</td><td><span class="badge badge-teal">M1</span></td><td>fix(desktop): fit_topbar model_box ve demo_chip daraltma + ADR 0039 testi</td></tr>
+              <tr><td class="mono">869cb6e</td><td><span class="badge badge-purple">M2A</span></td><td>feat(desktop): add graphical MCP server management center</td></tr>
+              <tr><td class="mono">a45f1b5</td><td><span class="badge badge-purple">M2A</span></td><td>fix(mcp,desktop): prevent Windows grandchild leaks, QDoubleSpinBox squeeze, and stale health signals</td></tr>
+              <tr><td class="mono">104c365</td><td><span class="badge badge-purple">M2A</span></td><td>fix(desktop): reject stale queued health-test signals in MCPSection</td></tr>
+              <tr><td class="mono">c4a7651</td><td><span class="badge badge-purple">M2B</span></td><td>feat(voice,desktop): add Push-to-Talk hotkey pipeline and 3-step Mic Test Wizard</td></tr>
+              <tr><td class="mono">d03cb00</td><td><span class="badge badge-purple">M2C</span></td><td>feat(profiles,desktop,voice,brain): add contextual work profiles and ADR 0083</td></tr>
+              <tr><td class="mono">d9a57e0</td><td><span class="badge badge-purple">M2D</span></td><td>feat(m2d): confirmed two-way calendar and email write + ADR 0084</td></tr>
+              <tr><td class="mono">a251715</td><td><span class="badge badge-purple">M2E</span></td><td>feat(m2e): opt-in dictation punctuation polish and RAM-only last-5 history</td></tr>
+              <tr><td class="mono">e0b1b83</td><td><span class="badge badge-purple">M2</span></td><td>fix(m2): resolve mic wizard, qt timer, test parity, and hardening findings</td></tr>
+              <tr><td class="mono">06d6c7c</td><td><span class="badge badge-purple">M2</span></td><td>fix(m2): cancel blocked sink play_task on mic wizard abort</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3><code>feat/vizyon-ozellikler</code> Faz 3 Commitleri &amp; Yeni Modüller</h3>
+        <div class="table-wrap" style="margin-top:10px;">
+          <table>
+            <thead>
+              <tr><th>Hash</th><th>Alt Faz</th><th>Özet</th></tr>
+            </thead>
+            <tbody>
+              <tr><td class="mono">86191da</td><td><span class="badge badge-amber">M3A</span></td><td>feat(m3a): add voice+vision multimodal screen context flow and ADR 0085</td></tr>
+              <tr><td class="mono">d4bd013</td><td><span class="badge badge-amber">M3B</span></td><td>feat(m3b): add event triggers, conditional suggestion chains, and ADR 0086</td></tr>
+              <tr><td class="mono">386a573</td><td><span class="badge badge-amber">M3C</span></td><td>feat(m3c): add teachable macro routine recorder and ADR 0087</td></tr>
+              <tr><td class="mono">d55a080</td><td><span class="badge badge-amber">M3D</span></td><td>feat(m3d): add voice model health manager UI, Windows release CI, and ADR 0088</td></tr>
+              <tr><td class="mono">6e52f37</td><td><span class="badge badge-amber">M3-Fix</span></td><td>fix(m3): harden macro sensitive-field masking and atomic piper download rollback</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <details open>
+          <summary>Faz 3 Yeni Modül ve Dağıtım Dosyaları (Canlı Satır Sayımı · 48 Değişen Dosya)</summary>
+          <div class="table-wrap" style="margin-top:10px;">
+            <table>
+              <thead><tr><th>Dosya Yolu</th><th class="num">Satır</th><th>Rol</th></tr></thead>
+              <tbody>
+                <tr><td><code>artemis/channels/voice/model_health.py</code></td><td class="num mono">1082</td><td>Whisper/Piper/Silero/DFN3 sağlık &amp; SHA-256 çekirdeği</td></tr>
+                <tr><td><code>artemis/proactive/macro_recorder.py</code></td><td class="num mono">770</td><td>UIA/odak gözlemcisi, hassas alan maskeleme, makro taslağı</td></tr>
+                <tr><td><code>artemis/proactive/event_triggers.py</code></td><td class="num mono">515</td><td><code>app_opened</code> / <code>calendar_before</code> / <code>system_resume</code> &amp; zincir motoru</td></tr>
+                <tr><td><code>artemis/channels/desktop/voice_model_manager.py</code></td><td class="num mono">483</td><td>Çift konumlu Ses Modeli Yöneticisi (<code>QThread</code> + güvenli kapanış)</td></tr>
+                <tr><td><code>artemis/channels/desktop/chain_dialog.py</code></td><td class="num mono">304</td><td>Koşullu rutin öneri zinciri düzenleme penceresi</td></tr>
+                <tr><td><code>artemis/channels/desktop/macro_dialog.py</code></td><td class="num mono">296</td><td>Öğretilebilir makro kayıt ve adım düzenleme penceresi</td></tr>
+                <tr><td><code>.github/workflows/release-windows.yml</code></td><td class="num mono">178</td><td>Windows PyInstaller + Inno Setup + SignPath/Authenticode CI</td></tr>
+                <tr><td><code>artemis/channels/voice/multimodal.py</code></td><td class="num mono">98</td><td>RAM-içi etkin ekran PNG yakalama yardımcı modülü</td></tr>
+                <tr><td><code>packaging/artemis.iss</code></td><td class="num mono">60</td><td>Inno Setup 64-bit, sürüm meta verisi ve <code>SignToolCmd</code> kancası</td></tr>
+                <tr><td><code>artemis/channels/desktop/power_events.py</code></td><td class="num mono">41</td><td>Windows <code>WM_POWERBROADCAST</code> uyku dönüşü köprüsü</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </details>
+      </div>
+    </div>
+  </section>
+
+  <footer class="footer">
+    <span>Artemis Uygulama Raporu · <code>main</code> (<code>06d6c7c</code>) &amp; <code>feat/vizyon-ozellikler</code> (<code>6e52f37</code>)</span>
+    <span>Tek başına etkileşimli HTML · Sıfır dış bağlantı · 2026-11-23</span>
+  </footer>
+</main>
+
+<script>
+  const UX_DATA = {
+    tr: [
+      {
+        index: 0, title: "Ses", helptips: 6, cap: 6,
+        subtabs: ["Dinleme (Giriş)", "Yanıt (Çıkış)"],
+        notes: [
+          "Dinleme (Giriş): Uyandırma adı, kesintisiz sohbet, mikrofon/seviye, STT modeli/dili/hassasiyeti, karma bulut STT, direct_audio_input, multimodal_screen_context, oyun modu, PTT, 3 adımlı Mikrofon Testi Sihirbazı, Ses Telemetri Kartı ve Ses Modeli Sağlık Yöneticisi.",
+          "Yanıt (Çıkış): Edge/Piper/EMA/Bulut TTS seçicisi, 1 cümlelik 'Sesi Test Et' önizleme düğmesi, edge_voice/piper_voice profili, söz kesme, takip dinleme ve WebRTC AEC3 yankı engelleme."
+        ]
+      },
+      {
+        index: 1, title: "Dikte ve Kısayollar", helptips: 1, cap: 5,
+        subtabs: [],
+        notes: [
+          "Yeni ayrılmış sayfa: voice.listening_hotkey (Ctrl+Space vb.) artık panelden düzenlenir ve dikte/seçili metin kısayollarıyla tek tabloda çakışma denetimine girer.",
+          "Dikte (enabled, max_seconds, noktalama iyileştirme, son-5 bellek içi geçmiş) ve Seçili Metin Eylemleri + allow_cloud_clipboard kontrolü."
+        ]
+      },
+      {
+        index: 2, title: "Model ve Bağlantılar", helptips: 6, cap: 6,
+        subtabs: ["Modeller ve Roller", "Model Ekle ve Bağlantılar"],
+        notes: [
+          "Modeller ve Roller: Beyin, hızlı, zor, kodlama ve görsel model rolleri + maliyet/tahmin ipuçları.",
+          "Model Ekle ve Bağlantılar: Sağlayıcı bağlantıları, API anahtarı kasa kaydı ve canlı model test kartı."
+        ]
+      },
+      {
+        index: 3, title: "Görünüm", helptips: 0, cap: 5,
+        subtabs: [],
+        notes: [
+          "Tema kartları, arayüz dili (Türkçe / English canlı değiştirme) ve sprite pet ayarları."
+        ]
+      },
+      {
+        index: 4, title: "Otomasyon Kuralları", helptips: 2, cap: 5,
+        subtabs: ["Rutinler", "Tetikleyiciler", "Gün özeti", "Araştırma"],
+        notes: [
+          "Rutinler: Kayıtlı rutinler, öğretilebilir Makro Kaydedici düğmesi ve zamanlama.",
+          "Tetikleyiciler: Klasör, uygulama açılışı (app_opened), toplantı öncesi (calendar_before), uykudan dönüş (system_resume) ve öneri zincirleri (ChainDialog).",
+          "Gün özeti & Araştırma: Eski 3 ve 2 kontrollü iki sayfa sekme olarak tek merkezde toplandı."
+        ]
+      },
+      {
+        index: 5, title: "Bilgi ve Beceriler", helptips: 2, cap: 5,
+        subtabs: ["Beceriler", "Dosya araması"],
+        notes: [
+          "Beceriler: Geçerli/geçersiz beceri listeleri ve beceri klasörü gösterimi.",
+          "Dosya araması: İzinli kök klasörler, yeniden dizinleme ve allow_cloud_file_content kontrolü."
+        ]
+      },
+      {
+        index: 6, title: "Bağlantılar", helptips: 5, cap: 5,
+        subtabs: ["Telegram", "Takvim ve posta", "GitHub ve kod ajanları", "MCP Sunucuları"],
+        notes: [
+          "Telegram: Bot, izinli sohbet kimliği ve ses/fotoğraf/dosya alım izinleri.",
+          "Takvim ve posta: ICS/IMAP okuma ayarlarına ek olarak opt-in CalDAV/SMTP iki yönlü yazım izinleri (allow_write, allow_send).",
+          "GitHub ve kod ajanları + 4. sekme MCP Sunucuları: Grafik ekleme/düzenleme/silme, read_only_tools / confirm_tools ve sağlık testi."
+        ]
+      },
+      {
+        index: 7, title: "Uygulamalar ve Güvenlik", helptips: 3, cap: 5,
+        subtabs: [],
+        notes: [
+          "İzinli uygulamalar, onaysız kapatma listesi (close_without_confirmation), bilgisayar kullanımı kipi ve DPAPI bellek şifreleme (memory.encrypt_at_rest)."
+        ]
+      },
+      {
+        index: 8, title: "Hakkında ve Güncelleme", helptips: 0, cap: 5,
+        subtabs: [],
+        notes: [
+          "Sürüm, Apache-2.0 lisansı, sistem bilgisi, SHA-256 uygulama içi güncelleyici ve ikinci VoiceModelManagerWidget (Ses sayfasıyla eşzamanlı)."
+        ]
+      }
+    ],
+    en: [
+      {
+        index: 0, title: "Voice", helptips: 6, cap: 6,
+        subtabs: ["Listening (Input)", "Response (Output)"],
+        notes: [
+          "Listening (Input): Wake name, continuous mode, mic/level, STT model/language/precision, hybrid cloud STT, direct_audio_input, multimodal_screen_context, game mode, PTT, 3-step Mic Test Wizard, Voice Telemetry Card, and Voice Model Health Manager.",
+          "Response (Output): Edge/Piper/EMA/Cloud TTS selector, 1-sentence 'Test Voice' preview, edge_voice/piper_voice selectors, barge-in, follow-up listening, and WebRTC AEC3."
+        ]
+      },
+      {
+        index: 1, title: "Dictation & Shortcuts", helptips: 1, cap: 5,
+        subtabs: [],
+        notes: [
+          "Dedicated page unifying voice.listening_hotkey, dictation hotkey/max_seconds/punctuation polish/last-5 RAM history, and selection actions + allow_cloud_clipboard with unified conflict checks."
+        ]
+      },
+      {
+        index: 2, title: "Models & Connections", helptips: 6, cap: 6,
+        subtabs: ["Models & Roles", "Add Model & Connections"],
+        notes: [
+          "Models & Roles: Brain, fast, hard, coding, and vision role assignments.",
+          "Add Model & Connections: Provider endpoints, OS keyring secrets, and live model testing."
+        ]
+      },
+      {
+        index: 3, title: "Appearance", helptips: 0, cap: 5,
+        subtabs: [],
+        notes: ["Theme cards, live TR/EN UI language switching, and sprite pet configuration."]
+      },
+      {
+        index: 4, title: "Automation Rules", helptips: 2, cap: 5,
+        subtabs: ["Routines", "Triggers", "Daily summary", "Research"],
+        notes: [
+          "Consolidates Routines (+ Teachable Macro Recorder), Triggers (folder, app_opened, calendar_before, system_resume + suggestion chains), Daily summary, and Research into 4 sub-tabs."
+        ]
+      },
+      {
+        index: 5, title: "Knowledge & Skills", helptips: 2, cap: 5,
+        subtabs: ["Skills", "File search"],
+        notes: ["Skills catalog validation and local File Search indexing + allow_cloud_file_content toggle."]
+      },
+      {
+        index: 6, title: "Connections", helptips: 5, cap: 5,
+        subtabs: ["Telegram", "Calendar & mail", "GitHub & code agents", "MCP Servers"],
+        notes: ["Telegram media flags, read/write Calendar & Mail (opt-in CalDAV/SMTP), GitHub & code agents, and graphical MCP Servers manager."]
+      },
+      {
+        index: 7, title: "Applications & Security", helptips: 3, cap: 5,
+        subtabs: [],
+        notes: ["Allowed applications, close_without_confirmation, computer-use mode, and DPAPI memory.encrypt_at_rest."]
+      },
+      {
+        index: 8, title: "About & Updates", helptips: 0, cap: 5,
+        subtabs: [],
+        notes: ["Version, Apache-2.0 notices, SHA-256 in-app updater, and mirrored VoiceModelManagerWidget synced with Voice page."]
+      }
+    ]
+  };
+
+  let currentLang = 'tr';
+  let currentUxIdx = 0;
+
+  function renderUx() {
+    const pages = UX_DATA[currentLang];
+    const nav = document.getElementById('ux-nav-list');
+    nav.innerHTML = pages.map(p => `
+      <button class="m-item ${p.index === currentUxIdx ? 'active' : ''}" onclick="pickUxPage(${p.index})">
+        <span>${p.index + 1}. ${p.title}</span>
+        <span class="m-count">${p.subtabs.length ? p.subtabs.length + ' sekme' : 'tek'} · ?${p.helptips}/${p.cap}</span>
+      </button>
+    `).join('');
+
+    const cur = pages[currentUxIdx];
+    const body = document.getElementById('ux-detail-body');
+    const subs = cur.subtabs.length
+      ? `<div class="subtab-pills">${cur.subtabs.map(s => `<span class="subtab-pill">${s}</span>`).join('')}</div>`
+      : `<div class="subtab-pills"><span class="subtab-pill">${currentLang === 'tr' ? 'Alt sekme yok (doğrudan sayfa)' : 'No sub-tabs (single page)'}</span></div>`;
+    const rows = cur.notes.map(n => `<div class="wire-row"><span>${n}</span></div>`).join('');
+    body.innerHTML = `
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+        <h3 style="font-size:20px;">${cur.index + 1}. ${cur.title}</h3>
+        <span class="badge badge-green">HelpTip: ${cur.helptips} / ${cur.cap} tavan içinde</span>
+      </div>
+      ${subs}
+      <div style="margin-top:8px;">${rows}</div>
+    `;
+  }
+
+  function setUxLang(lang, btn) {
+    currentLang = lang;
+    btn.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    renderUx();
+  }
+
+  function pickUxPage(idx) {
+    currentUxIdx = idx;
+    renderUx();
+  }
+
+  function selectBranchKpi(which, btn) {
+    btn.parentElement.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('#kpi-grid .kpi').forEach(card => {
+      const valEl = card.querySelector('.kpi-val');
+      const subEl = card.querySelector('.kpi-sub');
+      valEl.textContent = valEl.dataset[which];
+      subEl.textContent = subEl.dataset[which];
+    });
+  }
+
+  let activePhase = 'all', activeBranch = 'all';
+  function filterDeliverables(val, kind, btn) {
+    if (kind === 'phase') activePhase = val;
+    else activeBranch = val;
+    btn.parentElement.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('#deliv-grid .feat-card').forEach(card => {
+      const okPhase = activePhase === 'all' || card.dataset.phase === activePhase;
+      const okBranch = activeBranch === 'all' || card.dataset.branch === activeBranch;
+      card.style.display = (okPhase && okBranch) ? 'flex' : 'none';
+    });
+  }
+
+  function filterPending(kind, btn) {
+    btn.parentElement.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.querySelectorAll('#pending-list .accept-row').forEach(row => {
+      row.style.display = (kind === 'all' || row.dataset.pkind === kind) ? 'flex' : 'none';
+    });
+  }
+
+  const navLinks = document.querySelectorAll('.nav-links a');
+  window.addEventListener('scroll', () => {
+    let current = 'ozet';
+    document.querySelectorAll('main section').forEach(sec => {
+      if (window.scrollY >= sec.offsetTop - 110) current = sec.id;
+    });
+    navLinks.forEach(a => a.classList.toggle('active', a.getAttribute('href') === '#' + current));
+  });
+
+  renderUx();
+</script>
+</body>
+</html>
