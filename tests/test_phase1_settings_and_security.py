@@ -57,11 +57,22 @@ def test_legacy_and_subtab_routing_in_tr_and_en(
         assert len(panel.section_names()) == 9
         assert panel.select_section("Yanıt (Çıkış)")
         assert panel.sections.currentRow() == 0
+        assert panel.voice_tabs.currentIndex() == 2
+
+        assert panel.select_section("Tanıma")
+        assert panel.sections.currentRow() == 0
         assert panel.voice_tabs.currentIndex() == 1
+
+        assert panel.select_section("Modeller ve ölçüm")
+        assert panel.sections.currentRow() == 0
+        assert panel.voice_tabs.currentIndex() == 3
 
         assert panel.select_section("Dinleme (Giriş)")
         assert panel.sections.currentRow() == 0
         assert panel.voice_tabs.currentIndex() == 0
+
+        assert panel.select_section("Bas-konuş")
+        assert panel.sections.currentRow() == 1
 
         assert panel.select_section("Model")
         assert panel.sections.currentRow() == 2
@@ -111,13 +122,20 @@ def test_search_indexes_subtab_titles_and_dirty_tracks_owner_row(
 ) -> None:
     panel = SettingsPanel(config(tmp_path))
     try:
-        panel.search.setText("Yanıt (Çıkış)")
+        panel.search.setText("Modeller ve ölçüm")
         visible = [
             panel.sections.item(r).text()
             for r in range(panel.sections.count())
             if not panel.sections.item(r).isHidden()
         ]
         assert visible == ["Ses"]
+        panel.search.setText("Bas-konuş")
+        visible_ptt = [
+            panel.sections.item(r).text()
+            for r in range(panel.sections.count())
+            if not panel.sections.item(r).isHidden()
+        ]
+        assert visible_ptt == ["Dikte ve Kısayollar"]
         panel.search.clear()
 
         panel.show_section(0)
@@ -366,9 +384,12 @@ def test_live_retranslate_github_saved_note_and_en_routes(
             ("Automation & routines", 4, None),
             ("Automation and routines", 4, None),
             ("Listening", 0, 0),
-            ("Response", 0, 1),
-            ("Ses modelleri", 0, 2),
-            ("Voice models", 0, 2),
+            ("Recognition", 0, 1),
+            ("Response", 0, 2),
+            ("Ses modelleri", 0, 3),
+            ("Voice models", 0, 3),
+            ("Models & metrics", 0, 3),
+            ("Push-to-Talk", 1, None),
             ("Dictation", 1, None),
             ("Shortcuts", 1, None),
             ("Models", 2, 0),

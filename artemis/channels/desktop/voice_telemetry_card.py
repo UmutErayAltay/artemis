@@ -1,4 +1,4 @@
-"""Ayarlar > Ses > Dinleme (Giriş): ses gecikmesi ve kalite özeti kartı."""
+"""Ayarlar > Ses > Modeller ve ölçüm: ses gecikmesi ve kalite özeti kartı."""
 
 from __future__ import annotations
 
@@ -273,7 +273,7 @@ def _fmt_ms(value: float | None) -> str:
 
 
 class VoiceTelemetryCard(QFrame):
-    """Ses > Dinleme altında ses gecikme ve kalite metriklerini özetler."""
+    """Ses > Modeller ve ölçüm altında ses gecikme ve kalite metriklerini özetler."""
 
     def __init__(
         self,

@@ -304,6 +304,18 @@ def test_advanced_voice_settings_are_collapsed_by_default(tmp_path: Path, qt_app
     from artemis.channels.desktop import settings_panel
 
     panel = settings_panel.SettingsPanel(config(tmp_path))
+    assert panel.mic_advanced_box.isHidden()
+    assert not panel.mic_advanced_box.isVisibleTo(panel)
+    assert panel.mic_advanced_toggle.arrowType() == Qt.ArrowType.RightArrow
+    panel.mic_advanced_toggle.setChecked(True)
+    assert not panel.mic_advanced_box.isHidden()
+    assert panel.mic_advanced_box.isVisibleTo(panel)
+    assert panel.mic_advanced_toggle.arrowType() == Qt.ArrowType.DownArrow
+    panel.mic_advanced_toggle.setChecked(False)
+    assert panel.mic_advanced_box.isHidden()
+    assert panel.mic_advanced_toggle.arrowType() == Qt.ArrowType.RightArrow
+
+    panel.select_section("Tanıma")
     assert panel.advanced_box.isHidden()
     assert not panel.advanced_box.isVisibleTo(panel)
     assert panel.advanced_toggle.arrowType() == Qt.ArrowType.RightArrow
@@ -565,6 +577,7 @@ def test_cloud_stt_controls_visibility_server_list_and_xai_preselect(tmp_path: P
     raw["endpoints"]["xai"] = {"base_url": "https://api.x.ai/v1"}
     path.write_text(yaml.safe_dump(raw), encoding="utf-8")
     panel = _panel(path)
+    panel.select_section("Tanıma")
     panel.show()
     assert not panel.cloud_box.isVisible()
     panel.hybrid_stt.setChecked(True)
@@ -1447,5 +1460,70 @@ def test_dictation_max_seconds_widget_persists_and_marks_dirty(tmp_path: Path, q
         panel.refresh()
         assert panel.dictation_max_seconds.value() == 5
     finally:
+        panel.deleteLater()
+        qt_app.processEvents()
+
+
+def test_voice_subtabs_shortcuts_relocation_and_conditional_fields(
+    tmp_path: Path, qt_app
+) -> None:
+    from artemis.channels.desktop.retranslate import retranslate_widgets
+    from artemis.i18n import set_language
+
+    panel = _panel(config(tmp_path))
+    try:
+        assert [panel.voice_tabs.tabText(i) for i in range(panel.voice_tabs.count())] == [
+            "Dinleme",
+            "Tanıma",
+            "Yanıt",
+            "Modeller ve ölçüm",
+        ]
+        set_language("en")
+        retranslate_widgets([panel], "en")
+        assert [panel.voice_tabs.tabText(i) for i in range(panel.voice_tabs.count())] == [
+            "Listening",
+            "Recognition",
+            "Response",
+            "Models & metrics",
+        ]
+        set_language("tr")
+        retranslate_widgets([panel], "tr")
+        assert [panel.voice_tabs.tabText(i) for i in range(panel.voice_tabs.count())] == [
+            "Dinleme",
+            "Tanıma",
+            "Yanıt",
+            "Modeller ve ölçüm",
+        ]
+
+        listen_tab, stt_tab, _reply_tab, models_tab = (
+            panel.voice_tabs.widget(i) for i in range(4)
+        )
+        assert listen_tab is not None and stt_tab is not None and models_tab is not None
+        assert panel.mic_advanced_box.isAncestorOf(panel.advanced_devices)
+        assert panel.mic_advanced_box.isAncestorOf(panel.refresh_button)
+        assert panel.advanced_box.isAncestorOf(panel.precision_combo)
+        assert stt_tab.isAncestorOf(panel.advanced_box)
+        assert models_tab.isAncestorOf(panel.voice_telemetry_card)
+        assert not listen_tab.isAncestorOf(panel.voice_telemetry_card)
+
+        shortcuts_row = panel.section_names().index("Dikte ve Kısayollar")
+        shortcuts_page = panel.stack.widget(shortcuts_row)
+        assert shortcuts_page is not None
+        assert shortcuts_page.isAncestorOf(panel.ptt_enabled)
+        assert shortcuts_page.isAncestorOf(panel.ptt_hotkey)
+
+        assert panel.ptt_hotkey_box.isHidden() and not panel.ptt_hotkey.isEnabled()
+        panel.ptt_enabled.setChecked(True)
+        assert not panel.ptt_hotkey_box.isHidden() and panel.ptt_hotkey.isEnabled()
+
+        assert panel.game_mode_target_box.isHidden()
+        panel.game_mode.setChecked(True)
+        assert not panel.game_mode_target_box.isHidden()
+
+        assert panel.multimodal_screen_box.isHidden()
+        panel.direct_audio_input.setChecked(True)
+        assert not panel.multimodal_screen_box.isHidden()
+    finally:
+        set_language("tr")
         panel.deleteLater()
         qt_app.processEvents()

@@ -48,6 +48,9 @@ def update_cloud_hint(panel: SettingsPanel) -> None:
     gt = getattr(panel, "game_mode_target", None)
     if gm is not None and gt is not None:
         gt.setEnabled(gm.isChecked() and not panel._demo)
+    gt_box = getattr(panel, "game_mode_target_box", None)
+    if gm is not None and gt_box is not None:
+        gt_box.setVisible(gm.isChecked())
     game_cloud = bool(gm and gm.isChecked() and gt and gt.currentData() == "cloud")
     hybrid = panel.hybrid_stt.isChecked()
     on = hybrid or game_cloud
@@ -185,12 +188,42 @@ def cloud_server_picked(panel: SettingsPanel) -> None:
         panel.cloud_protocol.setCurrentIndex(panel.cloud_protocol.findData("xai"))
 
 
-def toggle_advanced(panel: SettingsPanel, checked: bool) -> None:
-    """Gelişmiş ses ayarlarını açar ve ok yönünü duruma göre değiştirir."""
-    panel.advanced_box.setVisible(checked)
-    panel.advanced_toggle.setArrowType(
+def _toggle_disclosure(toggle: object, box: QWidget, checked: bool) -> None:
+    box.setVisible(checked)
+    toggle.setArrowType(  # type: ignore[attr-defined]
         Qt.ArrowType.DownArrow if checked else Qt.ArrowType.RightArrow
     )
+
+
+def toggle_mic_advanced(panel: SettingsPanel, checked: bool) -> None:
+    """Gelişmiş mikrofon ayarlarını açar ve ok yönünü duruma göre değiştirir."""
+    _toggle_disclosure(panel.mic_advanced_toggle, panel.mic_advanced_box, checked)
+
+
+def toggle_advanced(panel: SettingsPanel, checked: bool) -> None:
+    """Gelişmiş tanıma ayarlarını açar ve ok yönünü duruma göre değiştirir."""
+    _toggle_disclosure(panel.advanced_toggle, panel.advanced_box, checked)
+
+
+def sync_voice_conditional_boxes(panel: SettingsPanel) -> None:
+    """Bağımlı ses ve kısayol alanlarının görünürlüğünü üst onay kutusuna bağlar."""
+    ptt = getattr(panel, "ptt_enabled", None)
+    ptt_box = getattr(panel, "ptt_hotkey_box", None)
+    if ptt is not None and ptt_box is not None:
+        ptt_on = ptt.isChecked()
+        ptt_box.setVisible(ptt_on)
+        panel.ptt_hotkey.setEnabled(ptt_on and not panel._demo)
+    gm = getattr(panel, "game_mode", None)
+    gm_box = getattr(panel, "game_mode_target_box", None)
+    if gm is not None and gm_box is not None:
+        gm_on = gm.isChecked()
+        gm_box.setVisible(gm_on)
+        panel.game_mode_target.setEnabled(gm_on and not panel._demo)
+    direct = getattr(panel, "direct_audio_input", None)
+    mm_box = getattr(panel, "multimodal_screen_box", None)
+    if direct is not None and mm_box is not None:
+        mm_on = direct.isChecked() or panel.multimodal_screen_context.isChecked()
+        mm_box.setVisible(mm_on)
 
 
 def stt_size_text(choice: stt_catalog.WhisperChoice) -> str:

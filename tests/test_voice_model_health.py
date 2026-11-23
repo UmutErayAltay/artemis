@@ -499,27 +499,30 @@ def test_settings_panel_voice_models_subtab_single_mount_and_demo_mode(
     try:
         names = panel.section_names()
         assert len(names) == 9
-        assert panel.voice_tabs.count() == 3
-        assert panel.voice_tabs.tabText(2) == "Ses modelleri"
+        assert panel.voice_tabs.count() == 4
+        assert panel.voice_tabs.tabText(3) == "Modeller ve ölçüm"
 
         ses_page = panel.stack.widget(names.index("Ses"))
         about_page = panel.stack.widget(names.index("Hakkında ve Güncelleme"))
-        models_tab = panel.voice_tabs.widget(2)
+        models_tab = panel.voice_tabs.widget(3)
         assert ses_page is not None and ses_page.isAncestorOf(panel.voice_model_manager)
         assert models_tab is not None and models_tab.isAncestorOf(panel.voice_model_manager)
+        assert models_tab.isAncestorOf(panel.voice_telemetry_card)
         assert about_page is not None
         assert not about_page.findChildren(VoiceModelManagerWidget)
         assert not hasattr(panel, "about_voice_model_manager")
 
-        assert panel.select_section("Ses modelleri")
-        assert panel.sections.currentRow() == 0
-        assert panel.voice_tabs.currentIndex() == 2
+        for route in ("Ses modelleri", "Modeller ve ölçüm"):
+            assert panel.select_section(route)
+            assert panel.sections.currentRow() == 0
+            assert panel.voice_tabs.currentIndex() == 3
 
         set_language("en")
         try:
-            assert panel.select_section("Voice models")
-            assert panel.sections.currentRow() == 0
-            assert panel.voice_tabs.currentIndex() == 2
+            for route in ("Voice models", "Models & metrics"):
+                assert panel.select_section(route)
+                assert panel.sections.currentRow() == 0
+                assert panel.voice_tabs.currentIndex() == 3
         finally:
             set_language("tr")
     finally:

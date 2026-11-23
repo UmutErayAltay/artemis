@@ -176,12 +176,25 @@ _SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
         "listening": ("Ses", 0),
         "dinleme (giriş)": ("Ses", 0),
         "listening (input)": ("Ses", 0),
-        "yanıt": ("Ses", 1),
-        "response": ("Ses", 1),
-        "yanıt (çıkış)": ("Ses", 1),
-        "response (output)": ("Ses", 1),
-        "ses modelleri": ("Ses", 2),
-        "voice models": ("Ses", 2),
+        "mikrofon": ("Ses", 0),
+        "microphone": ("Ses", 0),
+        "tanıma": ("Ses", 1),
+        "recognition": ("Ses", 1),
+        "ses tanıma": ("Ses", 1),
+        "speech recognition": ("Ses", 1),
+        "yanıt": ("Ses", 2),
+        "response": ("Ses", 2),
+        "yanıt (çıkış)": ("Ses", 2),
+        "response (output)": ("Ses", 2),
+        "ses modelleri": ("Ses", 3),
+        "voice models": ("Ses", 3),
+        "modeller ve ölçüm": ("Ses", 3),
+        "models & metrics": ("Ses", 3),
+        "models and metrics": ("Ses", 3),
+        "ses ölçümü": ("Ses", 3),
+        "voice telemetry": ("Ses", 3),
+        "bas-konuş": ("Dikte ve Kısayollar", None),
+        "push-to-talk": ("Dikte ve Kısayollar", None),
         "dikte": ("Dikte ve Kısayollar", None),
         "dictation": ("Dikte ve Kısayollar", None),
         "kısayollar": ("Dikte ve Kısayollar", None),
@@ -295,6 +308,7 @@ class SettingsPanel(QWidget):
     precision_combo: QComboBox
     hybrid_stt: QCheckBox
     direct_audio_input: QCheckBox
+    multimodal_screen_box: QWidget
     multimodal_screen_context: QCheckBox
     multimodal_screen_hint: QLabel
     cloud_box: QWidget
@@ -333,6 +347,7 @@ class SettingsPanel(QWidget):
     voice_model_manager: VoiceModelManagerWidget
     listening_hotkey: QLineEdit
     ptt_enabled: QCheckBox
+    ptt_hotkey_box: QWidget
     ptt_hotkey: QLineEdit
     continuous_mode: QCheckBox
     dictation_enabled: QCheckBox
@@ -347,8 +362,11 @@ class SettingsPanel(QWidget):
     live_transcript: QCheckBox
     noise_suppression: QCheckBox
     game_mode: QCheckBox
+    game_mode_target_box: QWidget
     game_mode_target: QComboBox
     echo_cancellation: QCheckBox
+    mic_advanced_toggle: QToolButton
+    mic_advanced_box: QWidget
     advanced_toggle: QToolButton
     noise_level: QComboBox
     noise_stt: QCheckBox
@@ -474,6 +492,7 @@ class SettingsPanel(QWidget):
         self._page_tabs: dict[str, QTabWidget] = {}
         build_voice_page(self)
         build_shortcuts_page(self)
+        self._sync_voice_conditional_boxes()
         build_model_page(self, pets_dir, codex_pets_dir)
         build_look_page(self)
         build_automation_page(self)
@@ -873,8 +892,14 @@ class SettingsPanel(QWidget):
     def _cloud_server_picked(self, *_args: object) -> None:
         voice_settings_section.cloud_server_picked(self)
 
+    def _toggle_mic_advanced(self, checked: bool) -> None:
+        voice_settings_section.toggle_mic_advanced(self, checked)
+
     def _toggle_advanced(self, checked: bool) -> None:
         voice_settings_section.toggle_advanced(self, checked)
+
+    def _sync_voice_conditional_boxes(self, *_args: object) -> None:
+        voice_settings_section.sync_voice_conditional_boxes(self)
 
     @staticmethod
     def _stt_size_text(choice: stt_catalog.WhisperChoice) -> str:
@@ -929,6 +954,7 @@ class SettingsPanel(QWidget):
                 if binding.quiet:
                     widget.blockSignals(False)
             self._update_cloud_hint()
+            self._sync_voice_conditional_boxes()
             if isinstance(self.tts_cloud_box, TtsCloudBox):
                 self.tts_cloud_box.reload_servers()
             self._sync_voice_output_controls()
