@@ -57,6 +57,7 @@ from artemis.channels.desktop.settings_widgets import (
 )
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS
 from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
+from artemis.channels.desktop.voice_model_manager import VoiceModelManagerWidget
 from artemis.channels.desktop.voice_preview import build_voice_output_controls
 from artemis.channels.desktop.voice_telemetry_card import VoiceTelemetryCard
 from artemis.channels.desktop.widgets import with_help
@@ -207,6 +208,10 @@ def build_voice_page(panel: SettingsPanel) -> None:
     _cleanup_group(panel, listen_layout)
     panel.voice_telemetry_card = VoiceTelemetryCard(panel.config_path)
     listen_layout.addWidget(panel.voice_telemetry_card)
+    panel.voice_model_manager = VoiceModelManagerWidget(
+        panel.config_path, parent=panel, demo=panel._demo
+    )
+    listen_layout.addWidget(panel.voice_model_manager)
     listen_layout.addStretch(1)
     tabs.addTab(listen_page, t("Dinleme (Giriş)"))
 

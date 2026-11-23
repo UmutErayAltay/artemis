@@ -10,11 +10,12 @@ from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import QWidget
 
 from artemis.brain.providers import stored_endpoint_key
-from artemis.channels.desktop import provider_section
+from artemis.channels.desktop import provider_section, voice_preview
 from artemis.channels.desktop.provider_section import store_endpoint_key
 from artemis.channels.desktop.provider_workers import ConnectionTest
 from artemis.channels.desktop.settings_io import refresh_device_combo
 from artemis.channels.voice import stt_catalog
+from artemis.channels.voice.model_health import VoiceModelEntry
 from artemis.config.settings import EndpointConfig, Settings, load_settings
 from artemis.i18n import t
 
@@ -335,4 +336,35 @@ def toggle_device_detail(panel: SettingsPanel) -> None:
     except (OSError, ValueError):
         panel.notice.setText(t("Mikrofon ayarı okunamadı."))
     # Listeyi yeniden kurmak kullanıcı değişikliği değildir.
+    panel._set_dirty(was_dirty)
+
+
+def sync_voice_models_from_manager(
+    panel: SettingsPanel, sender: object, entries: object
+) -> None:
+    """Ses ve Hakkında sayfalarındaki model yöneticilerini ve seçicileri eşitler."""
+    if not isinstance(entries, list):
+        return
+    typed_entries = [e for e in entries if isinstance(e, VoiceModelEntry)]
+    for peer in (panel.voice_model_manager, panel.about_voice_model_manager):
+        if peer is not sender:
+            peer.apply_entries(typed_entries)
+
+    was_dirty = panel._dirty
+    selected_stt = panel.stt_combo.currentData()
+    populate_stt_choices(
+        panel, selected_stt if isinstance(selected_stt, str) else None
+    )
+
+    current_piper = panel.piper_voice_combo.currentText()
+    was_blocked = panel.piper_voice_combo.blockSignals(True)
+    try:
+        panel.piper_voice_combo.clear()
+        panel.piper_voice_combo.addItems(
+            voice_preview.discover_piper_voices(panel.config_path)
+        )
+        if current_piper:
+            panel.piper_voice_combo.setEditText(current_piper)
+    finally:
+        panel.piper_voice_combo.blockSignals(was_blocked)
     panel._set_dirty(was_dirty)

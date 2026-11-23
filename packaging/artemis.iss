@@ -9,6 +9,15 @@ AppId={{8D6D4A7E-4D1B-4C9A-9D5F-3B2E7A1C6F04}
 AppName=Artemis
 AppVersion={#MyAppVersion}
 AppPublisher=Artemis
+AppPublisherURL=https://github.com/UmutErayAltay/artemis
+AppSupportURL=https://github.com/UmutErayAltay/artemis/issues
+AppUpdatesURL=https://github.com/UmutErayAltay/artemis/releases
+VersionInfoVersion={#MyAppVersion}
+VersionInfoProductName=Artemis
+VersionInfoCompany=Artemis
+VersionInfoDescription=Artemis Masaüstü Asistanı Kurulumu
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
 DefaultDirName={localappdata}\Programs\Artemis
 DefaultGroupName=Artemis
 PrivilegesRequired=lowest
@@ -23,6 +32,10 @@ OutputBaseFilename=Artemis-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+#ifdef SignToolCmd
+SignTool={#SignToolCmd}
+SignedUninstaller=yes
+#endif
 
 [Languages]
 Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
