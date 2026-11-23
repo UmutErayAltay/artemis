@@ -651,7 +651,15 @@ def test_only_network_tools_declare_outbound() -> None:
     # notify_telegram metni makine dışına taşır; alıcı sabit olsa da ADR 0013 geçerli (ADR 0016).
     # open_url outbound kalır; lekeli turda her adres sorulur, otomatik onayda sorulmaz (ADR 0077).
     # computer_use ekran görüntüsünü buluta gönderebilir (ADR 0039).
-    assert outbound == {"open_url", "web_search", "notify_telegram", "computer_use"}
+    # mail_send ve calendar_create_event açık onayla dışa veri yazar (ADR 0084).
+    assert outbound == {
+        "open_url",
+        "web_search",
+        "notify_telegram",
+        "computer_use",
+        "mail_send",
+        "calendar_create_event",
+    }
 
 
 def test_close_force_kills_tray_leftover_when_windows_closed_for_non_protected_app(

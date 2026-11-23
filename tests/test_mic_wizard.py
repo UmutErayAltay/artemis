@@ -331,3 +331,131 @@ def test_settings_panel_ptt_bindings_and_mic_test_button(
         panel.deleteLater()
         demo_panel.deleteLater()
         app.processEvents()
+
+
+async def test_step2_closes_sink_when_mic_raises() -> None:
+    class _ErrorMic:
+        def __init__(self) -> None:
+            self.closed = False
+
+        async def frames(self):
+            if False:
+                yield AudioFrame(pcm=b"", timestamp=0.0, sample_rate=16000)
+            raise RuntimeError("mikrofon kesildi")
+
+        def discard_pending(self) -> None:
+            pass
+
+        def pause(self) -> None:
+            pass
+
+        def resume(self) -> None:
+            pass
+
+        async def close(self) -> None:
+            self.closed = True
+
+    mic = _ErrorMic()
+    sink = _FakeSink()
+    with pytest.raises(RuntimeError, match="mikrofon kesildi"):
+        await run_step2_record_and_playback(mic, sink, duration_seconds=0.2)
+    assert mic.closed is True
+    assert sink.closed is True
+
+
+def test_mic_wizard_cancels_stalled_record_promptly_and_closes_devices() -> None:
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+
+    class _StalledMic:
+        def __init__(self) -> None:
+            self.closed = False
+            self.waiting = False
+
+        async def frames(self):
+            self.waiting = True
+            await asyncio.sleep(3.5)
+            yield AudioFrame(pcm=_pcm_tone(1000), timestamp=0.0, sample_rate=16000)
+
+        def discard_pending(self) -> None:
+            pass
+
+        def pause(self) -> None:
+            pass
+
+        def resume(self) -> None:
+            pass
+
+        async def close(self) -> None:
+            self.closed = True
+
+    mic = _StalledMic()
+    sink = _FakeSink()
+    wizard = MicTestWizard(
+        VoiceConfig(),
+        mic_factory=lambda: mic,
+        sink_factory=lambda: sink,
+        recognizer_factory=_FakeLocalRecognizer,
+        duration_seconds=1.0,
+        auto_start=False,
+    )
+    try:
+        wizard.go_to_step(1)
+        wizard.start_record()
+        record_thread = wizard._record_thread
+        assert record_thread is not None
+        deadline = time.monotonic() + 1.0
+        while not mic.waiting and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert mic.waiting is True
+        started = time.monotonic()
+        wizard.reject()
+        elapsed = time.monotonic() - started
+        assert elapsed < 1.0
+        assert not record_thread.isRunning()
+        assert wizard._record_thread is None
+        assert mic.closed is True
+        assert sink.closed is True
+    finally:
+        wizard.deleteLater()
+        app.processEvents()
+
+
+def test_mic_wizard_advancing_to_step3_mid_record_enables_stt_button_when_done() -> None:
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+
+    sink = _FakeSink()
+    wizard = MicTestWizard(
+        VoiceConfig(),
+        mic_factory=lambda: _FakeMic(
+            [_pcm_tone(300), _pcm_tone(2500), _pcm_tone(2400), _pcm_tone(2200)],
+            delay=0.04,
+        ),
+        sink_factory=lambda: sink,
+        recognizer_factory=_FakeLocalRecognizer,
+        duration_seconds=0.3,
+        auto_start=False,
+    )
+    try:
+        wizard.go_to_step(1)
+        wizard.start_record()
+        assert wizard._record_thread is not None and wizard._record_thread.isRunning()
+        wizard._next_step()
+        app.processEvents()
+        assert wizard.stack.currentIndex() == 2
+        assert not wizard.stt_run_button.isEnabled()
+
+        deadline = time.monotonic() + 3.0
+        while wizard._record_thread is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        app.processEvents()
+        assert wizard._record_thread is None
+        assert wizard._recorded_pcm
+        assert wizard.stt_run_button.isEnabled()
+    finally:
+        wizard.reject()
+        wizard.deleteLater()
+        app.processEvents()

@@ -342,7 +342,7 @@ class DataPanel(QWidget):
         # Doğrudan emit, çağıran _set_controls'un ortasında yeniden girişe yol açar; olay
         # döngüsüne ertelenir ve koşullar o anda yeniden denetlenir.
         if not self._auto_tried and not self._history_loaded:
-            QTimer.singleShot(0, self._autoload)
+            QTimer.singleShot(0, self, self._autoload)
 
     def _autoload(self) -> None:
         """Sayfa ilk görününce salt-okunur "list" bir kez istenir; demo/meşgulken istenmez.
@@ -436,7 +436,7 @@ class DataPanel(QWidget):
             self._schedule_autoload()
             if self._memory_pending:
                 # Tür/yeniden giriş nedeniyle doğrudan emit yok; olay döngüsüne ertelenir.
-                QTimer.singleShot(0, self._flush_memory_request)
+                QTimer.singleShot(0, self, self._flush_memory_request)
 
     def _retry(self) -> None:
         item = self.items.currentItem()

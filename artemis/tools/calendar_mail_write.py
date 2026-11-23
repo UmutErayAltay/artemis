@@ -35,7 +35,7 @@ CALDAV_PASSWORD_TARGET = "Artemis/calendar_caldav_password"
 SMTP_PASSWORD_ENV = "ARTEMIS_MAIL_SMTP_PASSWORD"
 SMTP_PASSWORD_TARGET = "Artemis/mail_smtp_password"
 
-_CTL_CHARS = ("\r", "\n", "\0")
+_CTL_CHARS = ("\r", "\n", "\0", "\x0b", "\x0c", "\x85", "\u2028", "\u2029")
 _EMAIL_RE = re.compile(
     r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$"
 )

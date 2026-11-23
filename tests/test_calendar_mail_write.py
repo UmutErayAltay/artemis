@@ -710,3 +710,38 @@ def test_settings_ui_write_toggles_follow_parent_and_secrets_stay_out_of_yaml(
         assert saved.mail.smtp_port == 587
     finally:
         panel.deleteLater()
+
+
+@pytest.mark.parametrize("sep", ["\x0b", "\x0c", "\x85", "\u2028", "\u2029"])
+def test_ctl_chars_reject_unicode_and_vertical_separators(sep: str) -> None:
+    from artemis.tools.plugins.calendar_mail_write import (
+        CalendarCreateEventArguments,
+        MailSendArguments,
+    )
+
+    with pytest.raises(ValidationError):
+        MailSendArguments(to="ali@example.com", subject=f"Konu{sep}Bcc: x", body="Gövde")
+    with pytest.raises(ValidationError):
+        CalendarCreateEventArguments(
+            title=f"Başlık{sep}X",
+            start="2026-11-23T10:00",
+            end="2026-11-23T11:00",
+        )
+    with pytest.raises(core_read.SourceError):
+        core_write.send_mail(
+            lambda *_: _FakeSmtp(),
+            host="smtp.example.com",
+            port=465,
+            username="u@example.com",
+            password=SECRET_SMTP_PASS,
+            to="ali@example.com",
+            subject=f"Konu{sep}ek",
+            body="Merhaba",
+        )
+    with pytest.raises(core_read.SourceError):
+        core_write.build_vevent_ics(
+            uid="u1",
+            title=f"Etkinlik{sep}ek",
+            start="2026-11-23T10:00",
+            end="2026-11-23T11:00",
+        )

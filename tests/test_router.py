@@ -334,3 +334,27 @@ async def test_rate_limit_pins_fallback(tmp_path: Path) -> None:
     assert second.local_fallback and second.content == "Yerel 2"
     assert len(cloud.timeouts) == 1
     assert len(local.timeouts) == 2
+
+
+async def test_private_messages_on_local_model_do_not_tier_fallback_to_cloud(
+    tmp_path: Path,
+) -> None:
+    settings = settings_for(tmp_path)
+    cloud = Responses(Completion(content="Bulut"))
+    local = Responses(ProviderError("Yerel Ollama kapalı"))
+    router = ProviderRouter(
+        settings,
+        AuditLog(settings.audit_path),
+        providers={"cloud": cloud, "local": local},
+    )
+    messages = [
+        Message(role="system", content="Sistem"),
+        Message(role="user", content="Gizli dikte metni", private=True),
+    ]
+    with pytest.raises(ProviderError, match="Ollama"):
+        await router.complete(messages, [], timeout=10, model="local")
+    assert cloud.timeouts == []
+    assert len(local.timeouts) == 1
+    events = [json.loads(line)["event"] for line in settings.audit_path.read_text().splitlines()]
+    assert "model_tier_fallback" not in events
+    assert "cloud_transfer" not in events

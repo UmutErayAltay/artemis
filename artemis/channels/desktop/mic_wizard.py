@@ -179,28 +179,53 @@ async def run_step2_record_and_playback(
     max_frames = max(1, int(round(max(0.1, duration_seconds) * 1000 / max(1, frame_ms))))
     deadline = monotonic() + max(0.1, duration_seconds)
     detected_rate = sample_rate
+    sink_closed = False
     if on_phase is not None:
         on_phase("recording")
     try:
-        async for frame in mic.frames():
-            if is_interrupted():
-                break
-            detected_rate = frame.sample_rate or detected_rate
-            chunks.append(frame.pcm)
-            if on_level is not None:
-                on_level(measure_rms_level(frame.pcm))
-            if len(chunks) >= max_frames or monotonic() >= deadline:
-                break
+        async def _record() -> None:
+            nonlocal detected_rate
+            async for frame in mic.frames():
+                if is_interrupted():
+                    break
+                detected_rate = frame.sample_rate or detected_rate
+                chunks.append(frame.pcm)
+                if on_level is not None:
+                    on_level(measure_rms_level(frame.pcm))
+                if len(chunks) >= max_frames or monotonic() >= deadline:
+                    break
+
+        recorder = asyncio.create_task(_record())
+
+        async def _watch() -> None:
+            while not recorder.done():
+                if is_interrupted():
+                    recorder.cancel()
+                    return
+                await asyncio.sleep(0.025)
+
+        watcher = asyncio.create_task(_watch())
+        try:
+            with contextlib.suppress(asyncio.CancelledError):
+                await recorder
+        finally:
+            watcher.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await watcher
+            await mic.close()
+
+        stats = compute_recording_stats(chunks, sample_rate=detected_rate)
+        if play and stats.pcm and not is_interrupted():
+            if on_phase is not None:
+                on_phase("playback")
+            sink_closed = True
+            await play_pcm_buffer(
+                sink, stats.pcm, stats.sample_rate, is_interrupted=is_interrupted
+            )
+        return stats
     finally:
-        await mic.close()
-    stats = compute_recording_stats(chunks, sample_rate=detected_rate)
-    if play and stats.pcm and not is_interrupted():
-        if on_phase is not None:
-            on_phase("playback")
-        await play_pcm_buffer(sink, stats.pcm, stats.sample_rate, is_interrupted=is_interrupted)
-    else:
-        await sink.close()
-    return stats
+        if not sink_closed:
+            await sink.close()
 
 
 async def run_step3_stt_check(pcm: bytes, recognizer: SpeechRecognizer) -> str:
@@ -653,6 +678,8 @@ class MicTestWizard(QDialog):
         self._recorded_rate = stats.sample_rate
         self._stt_ran_for_pcm = False
         self.replay_button.setEnabled(bool(stats.pcm))
+        stt_running = self._stt_thread is not None and self._stt_thread.isRunning()
+        self.stt_run_button.setEnabled(bool(stats.pcm) and not stt_running)
         self.record_summary.setText(
             t("Ortalama: %{avg} · Tepe: %{peak} · Gürültü tabanı: %{floor}").format(
                 avg=stats.rms_avg,
@@ -680,6 +707,8 @@ class MicTestWizard(QDialog):
         self._record_thread = None
         self.record_button.setEnabled(True)
         self.replay_button.setEnabled(bool(self._recorded_pcm))
+        stt_running = self._stt_thread is not None and self._stt_thread.isRunning()
+        self.stt_run_button.setEnabled(bool(self._recorded_pcm) and not stt_running)
 
     def start_replay(self) -> None:
         if not self._recorded_pcm or (
@@ -753,7 +782,7 @@ class MicTestWizard(QDialog):
             ("failed", self._on_record_failed),
             ("finished", self._on_record_finished),
             wait_ms=_SHUTDOWN_WAIT_MS,
-        ):
+        ) or (self._record_thread is not None and not self._record_thread.isRunning()):
             self._record_thread = None
         if shutdown_thread(
             self._playback_thread,
@@ -761,7 +790,7 @@ class MicTestWizard(QDialog):
             ("failed", self._on_replay_failed),
             ("finished", self._on_replay_finished),
             wait_ms=_SHUTDOWN_WAIT_MS,
-        ):
+        ) or (self._playback_thread is not None and not self._playback_thread.isRunning()):
             self._playback_thread = None
         if shutdown_thread(
             self._stt_thread,
@@ -769,7 +798,7 @@ class MicTestWizard(QDialog):
             ("failed", self._on_stt_failed),
             ("finished", self._on_stt_finished),
             wait_ms=_SHUTDOWN_WAIT_MS,
-        ):
+        ) or (self._stt_thread is not None and not self._stt_thread.isRunning()):
             self._stt_thread = None
 
     def accept(self) -> None:

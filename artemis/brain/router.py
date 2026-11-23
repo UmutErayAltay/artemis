@@ -352,6 +352,12 @@ class ProviderRouter:
             except (BudgetExceeded, ProviderError) as error:
                 if guard is not None and guard.emitted:
                     raise  # yarım akış üstüne ikinci bir yanıt üretilmez (ADR 0043)
+                if (
+                    self._local(model)
+                    and not self._local(self.settings.primary_model)
+                    and any(message.private for message in messages)
+                ):
+                    raise
                 self._emit_audit(
                     "model_tier_fallback", model=model, primary=self.settings.primary_model,
                     reason=type(error).__name__,

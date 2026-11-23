@@ -144,7 +144,11 @@ def test_buttons_and_fields_share_one_control_height() -> None:
         css = stylesheet(name)
         assert "QPushButton {" in css and "min-height: 26px" in css, name
         assert "QPushButton {" in css and "padding: 4px 12px" in css, name
-        assert "QSpinBox {" in css and "min-height: 26px" in css, name
+        spin_blocks = [
+            block.split("}", 1)[0]
+            for block in css.split("QLineEdit, QComboBox, QSpinBox, QDoubleSpinBox {")[1:]
+        ]
+        assert any("min-height: 26px" in block for block in spin_blocks), name
         primary = css.split("QPushButton#primary {", 1)[1].split("}", 1)[0]
         assert "min-height" not in primary, name
 

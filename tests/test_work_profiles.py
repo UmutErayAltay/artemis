@@ -851,4 +851,3 @@ async def test_voice_controller_set_muted_interrupts_active_playback(tmp_path: P
     await asyncio.wait_for(interrupted.wait(), timeout=2.0)
     await asyncio.wait_for(task, timeout=2.0)
     assert controller._is_muted()
-

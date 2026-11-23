@@ -20,7 +20,7 @@ from artemis.tools import calendar_mail_write as core_write
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.registry import register_tool
 
-_CTL_CHARS = ("\r", "\n", "\0")
+_CTL_CHARS = ("\r", "\n", "\0", "\x0b", "\x0c", "\x85", "\u2028", "\u2029")
 
 
 class MailSendArguments(BaseModel):
