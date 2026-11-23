@@ -362,6 +362,24 @@ def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         "gönderilir (gizlilik bedeli). Desteklemeyen modelde yerel metne düşer. Ses "
         "yeniden başlayınca uygulanır."
     )))
+    panel.multimodal_screen_context = QCheckBox(
+        t("Sesli komutta etkin ekranı paylaş (çok kipli)")
+    )
+    panel.multimodal_screen_context.setToolTip(
+        t(
+            "Yalnız Doğrudan sesli komut ve bulut ekran izni birlikte açıkken, "
+            "komut anındaki ekran görüntüsü bellekte modele eklenir; diske yazılmaz. "
+            "Gizli profilde kapalıdır."
+        )
+    )
+    stt_layout.addWidget(panel.multimodal_screen_context)
+    panel.multimodal_screen_hint = _check_hint(
+        t(
+            "Etkin ekranı bellekte gönderir; doğrudan sesli komut ve bulut ekran "
+            "izni gerektirir, diske yazılmaz."
+        )
+    )
+    stt_layout.addWidget(panel.multimodal_screen_hint)
     panel.cloud_box = QWidget()
     cloud_layout = QVBoxLayout(panel.cloud_box)
     cloud_layout.setContentsMargins(0, 0, 0, 0)

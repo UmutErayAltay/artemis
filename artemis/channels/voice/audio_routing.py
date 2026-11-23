@@ -16,6 +16,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from artemis.brain.agent_loop import RunResult
+from artemis.brain.emotion import emotion_tags_active, strip_emotion_tags
 from artemis.channels.voice.contracts import (
     AudioSink,
     Microphone,
@@ -26,6 +27,7 @@ from artemis.channels.voice.contracts import (
 from artemis.channels.voice.streaming import SpeechStream
 from artemis.channels.voice.wake import _edit_distance, _fold, find_wake_word, is_ghost_transcript
 from artemis.config.settings import VoiceConfig
+from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 from artemis.text import turkish_fold
 
@@ -83,13 +85,17 @@ def call_run_command(
     stream: SpeechStream | None = None,
     audio_wav: bytes | None = None,
     accepts_audio: bool = False,
+    image_png: bytes | None = None,
+    accepts_image: bool = False,
 ) -> Awaitable[RunResult]:
-    """Komut çalıştırıcıyı akış ve isteğe bağlı doğrudan ses baytlarıyla çağırır."""
+    """Komut çalıştırıcıyı akış ve isteğe bağlı doğrudan ses/ekran baytlarıyla çağırır."""
     kwargs: dict[str, Any] = {}
     if stream is not None:
         kwargs["stream"] = stream
     if audio_wav is not None and accepts_audio:
         kwargs["audio_wav"] = audio_wav
+    if image_png is not None and accepts_image:
+        kwargs["image_png"] = image_png
     return run_command(command, **kwargs)
 
 
@@ -298,6 +304,48 @@ async def close_voice_resources(
             await closer()
         except (OSError, RuntimeError, ValueError) as error:
             logger.warning("%s kapatılamadı (%s).", label, type(error).__name__)
+
+
+def ptt_command(transcript: str, wake_word: str) -> str:
+    """Bas-konuş bölütü için uyandırma adını isteğe bağlı ayıklar; continuous'u değiştirmez."""
+    span = find_wake_word(transcript, wake_word)
+    if span is None:
+        return transcript
+    tail = transcript[span[1] :].lstrip(" \t,.;:!?-")
+    return tail if tail.strip(" \t,.;:!?-") else ""
+
+
+async def synth_text_chunks(
+    text: str,
+    cancelled: asyncio.Event,
+    synthesizer: SpeechSynthesizer,
+    local_synthesizer: SpeechSynthesizer | None,
+    config: VoiceConfig,
+    *,
+    private: bool = False,
+    record_block: bool = True,
+    audit: AuditLog | None = None,
+    on_transcript: Callable[[str], None] | None = None,
+) -> AsyncGenerator[PCMChunk]:
+    """Gizli yanıtları bulut/Edge TTS'ten kesen tek ses kapısı."""
+    synth = synthesizer
+    if private and is_remote_synthesizer(synthesizer, config.tts_backend):
+        if record_block:
+            emit_private_tts_blocked(audit, synthesizer, config)
+        if local_synthesizer is None:
+            if record_block and on_transcript is not None:
+                on_transcript(t(PRIVATE_REMOTE_TTS_NOTICE))
+            return
+        synth = local_synthesizer
+        text = strip_emotion_tags(text, emotion_tags_active(config))
+    stream = synth.stream(text, cancelled)
+    try:
+        async for chunk in stream:
+            yield chunk
+    finally:
+        closer = getattr(stream, "aclose", None)
+        if closer is not None:
+            await closer()
 
 
 async def play_speech_stream(

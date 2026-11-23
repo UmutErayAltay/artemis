@@ -292,6 +292,8 @@ class SettingsPanel(QWidget):
     precision_combo: QComboBox
     hybrid_stt: QCheckBox
     direct_audio_input: QCheckBox
+    multimodal_screen_context: QCheckBox
+    multimodal_screen_hint: QLabel
     cloud_box: QWidget
     cloud_server: QComboBox
     cloud_protocol: QComboBox

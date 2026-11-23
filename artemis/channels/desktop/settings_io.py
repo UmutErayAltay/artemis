@@ -194,6 +194,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
         lambda box, value: box.setChecked(value == "hybrid"),
     ),
     _checkbox(("voice", "direct_audio_input"), "direct_audio_input"),
+    _checkbox(("voice", "multimodal_screen_context"), "multimodal_screen_context"),
     PanelBinding(
         ("voice", "stt_cloud_endpoint"), "cloud_server",
         lambda combo: str(combo.currentData() or ""),

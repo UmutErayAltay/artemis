@@ -79,6 +79,7 @@ def effective_settings_for_profile(settings: Settings) -> Settings:
                 update={
                     "stt_mode": "local",
                     "direct_audio_input": False,
+                    "multimodal_screen_context": False,
                     "allow_cloud_tts_text": False,
                 }
             ),

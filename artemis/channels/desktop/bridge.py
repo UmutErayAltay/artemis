@@ -884,6 +884,7 @@ class DesktopBridge:
     async def _execute_request(
         self, request_id: str, text: str, stream: ResponseStream | None = None,
         audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> RunResult | None:
         """Yazılı ve sesli isteğin ortak turu: aynı olaylar, aynı temizlik, aynı bitiş."""
         runtime = self._runtime
@@ -900,6 +901,8 @@ class DesktopBridge:
                 kwargs["stream"] = stream
             if audio_wav is not None:
                 kwargs["audio_wav"] = audio_wav
+            if image_png is not None:
+                kwargs["image_png"] = image_png
             result = await runtime.runner.run(text, **kwargs)
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id
@@ -924,6 +927,7 @@ class DesktopBridge:
     async def _run_voice_command(
         self, text: str, *, stream: ResponseStream | None = None,
         audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> RunResult:
         """Sesli komut, yazılı istekle aynı anda yürümez; meşgulse runner'a hiç gitmez."""
         with self._lock:
@@ -935,7 +939,9 @@ class DesktopBridge:
         self._events.put(VoiceCommand(request_id, text))
         self._events.put(State("running", t("Sesli istek çalışıyor."), request_id))
         # Söz kesme bu görevi iptal eder; CancelledError temizlikten sonra yukarı çıkar.
-        result = await self._execute_request(request_id, text, stream, audio_wav=audio_wav)
+        result = await self._execute_request(
+            request_id, text, stream, audio_wav=audio_wav, image_png=image_png
+        )
         if result is not None:
             return result
         if self._broker.is_cancelled():

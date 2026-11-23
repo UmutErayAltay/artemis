@@ -126,6 +126,10 @@ voice:
   # Doğrudan sesli komut: komut sesi ayrı bulut STT adımına gitmeden doğrudan ses destekleyen
   # beyin modeline (ör. Gemini) gönderilir (gizlilik bedeli); desteklemeyen modelde yerel metne düşer.
   direct_audio_input: false
+  # Çok kipli ses + ekran bağlamı (ADR 0085): yalnızca direct_audio_input ve
+  # perception.allow_cloud_screen birlikte açıkken komut anındaki ekran PNG'si bellekte eklenir;
+  # diske yazılmaz ve private çalışma profilinde kapalıdır.
+  multimodal_screen_context: false
   # stt_cloud_endpoint: groq # Üstteki `endpoints` içinde tanımlı bir kimlik (hybrid için zorunlu).
   # stt_cloud_model: whisper-large-v3 # Sağlayıcının güncel belgesinden doğrulayın (hybrid için zorunlu).
   # stt_cloud_protocol: openai # openai (Whisper uyumlu /audio/transcriptions) | xai (/stt, model gerekmez; ADR 0050)

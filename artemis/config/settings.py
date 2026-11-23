@@ -171,6 +171,9 @@ class VoiceConfig(BaseModel):
     # Opt-in: komut sesi ayrı bulut STT adımına gitmeden doğrudan ses destekleyen beyin
     # modeline (`input_audio` WAV) eklenir; desteklemeyen modelde yerel metne düşer.
     direct_audio_input: bool = False
+    # Opt-in çok kipli ekran bağlamı (ADR 0085): doğrudan sesli komut sırasında etkin ekran
+    # görüntüsü (PNG) bellekte beyin modeline eklenir; diske yazılmaz, üçlü kapıdan geçer.
+    multimodal_screen_context: bool = False
     stt_cloud_endpoint: str = ""
     stt_cloud_model: str = ""
     # ADR 0050: xAI'nin STT REST ucu OpenAI uyumlu değildir (/stt, model alanı yok).

@@ -86,3 +86,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0082 — İngilizce ses](0082-ingilizce-ses.md)
 - [0083 — Bağlamsal çalışma profilleri](0083-baglamsal-calisma-profilleri.md)
 - [0084 — Onaylı iki yönlü takvim ve e-posta](0084-iki-yonlu-takvim-ve-eposta.md)
+- [0085 — Ses ve görüntü çok kipli akışı](0085-ses-ve-goruntu-cok-kipli-akis.md)
