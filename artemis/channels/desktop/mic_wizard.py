@@ -112,20 +112,31 @@ async def play_pcm_buffer(
     async def chunks() -> AsyncIterator[PCMChunk]:
         yield PCMChunk(pcm=pcm, sample_rate=sample_rate, channels=1, sample_width=2)
 
+    play_task = asyncio.create_task(sink.play(chunks(), cancelled, lambda: None))
+
     async def watch_cancel() -> None:
-        while not cancelled.is_set():
+        while not play_task.done():
             if is_interrupted():
                 cancelled.set()
+                play_task.cancel()
                 return
-            await asyncio.sleep(0.05)
+            await asyncio.sleep(0.025)
 
     watcher = asyncio.create_task(watch_cancel())
     try:
-        await sink.play(chunks(), cancelled, lambda: None)
+        try:
+            await play_task
+        except asyncio.CancelledError:
+            if not is_interrupted() and not cancelled.is_set():
+                raise
     finally:
         watcher.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await watcher
+        if not play_task.done():
+            play_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await play_task
         await sink.close()
 
 
@@ -597,7 +608,8 @@ class MicTestWizard(QDialog):
         if clamped == 0 and self._auto_start:
             self.start_meter()
         elif clamped == 2:
-            self.stt_run_button.setEnabled(bool(self._recorded_pcm))
+            stt_running = self._stt_thread is not None and self._stt_thread.isRunning()
+            self.stt_run_button.setEnabled(bool(self._recorded_pcm) and not stt_running)
             if self._auto_start and self._recorded_pcm and not self._stt_ran_for_pcm:
                 self.start_stt_test()
 

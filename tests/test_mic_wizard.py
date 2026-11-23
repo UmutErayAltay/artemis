@@ -22,11 +22,13 @@ from artemis.channels.desktop.mic_wizard import (
     MicTestWizard,
     compute_recording_stats,
     measure_rms_level,
+    play_pcm_buffer,
     run_step2_record_and_playback,
     run_step3_stt_check,
 )
 from artemis.channels.desktop.settings_io import PANEL_BINDINGS, save_choices
 from artemis.channels.desktop.settings_panel import SettingsPanel
+from artemis.channels.desktop.thread_shutdown import DETACHED
 from artemis.channels.voice.contracts import AudioFrame
 from artemis.config.settings import VoiceConfig, load_settings
 from artemis.i18n import set_language
@@ -455,6 +457,152 @@ def test_mic_wizard_advancing_to_step3_mid_record_enables_stt_button_when_done()
         assert wizard._record_thread is None
         assert wizard._recorded_pcm
         assert wizard.stt_run_button.isEnabled()
+    finally:
+        wizard.reject()
+        wizard.deleteLater()
+        app.processEvents()
+
+
+def test_mic_wizard_cancels_blocked_sink_during_step2_playback_and_replay() -> None:
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+
+    class _BlockedSink:
+        def __init__(self) -> None:
+            self.play_started = False
+            self.closed = False
+
+        async def play(self, _chunks: Any, _cancelled: asyncio.Event, _on_first_pcm: Any) -> None:
+            self.play_started = True
+            await asyncio.sleep(5.0)
+
+        async def close(self) -> None:
+            self.closed = True
+
+    # 1) Step 2 record -> playback sırasında bloklanan sink
+    record_sink = _BlockedSink()
+    wizard = MicTestWizard(
+        VoiceConfig(),
+        mic_factory=lambda: _FakeMic([_pcm_tone(2000), _pcm_tone(2200)]),
+        sink_factory=lambda: record_sink,
+        recognizer_factory=_FakeLocalRecognizer,
+        duration_seconds=0.1,
+        auto_start=False,
+    )
+    try:
+        wizard.go_to_step(1)
+        wizard.start_record()
+        record_thread = wizard._record_thread
+        assert record_thread is not None
+        deadline = time.monotonic() + 1.5
+        while not record_sink.play_started and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert record_sink.play_started is True
+
+        started = time.monotonic()
+        wizard.reject()
+        elapsed = time.monotonic() - started
+        assert elapsed < 1.0
+        assert not record_thread.isRunning()
+        assert wizard._record_thread is None
+        assert record_sink.closed is True
+        assert DETACHED == []
+    finally:
+        wizard.deleteLater()
+        app.processEvents()
+
+    # 2) Step 2 start_replay() sırasında bloklanan sink
+    replay_sink = _BlockedSink()
+    replay_wizard = MicTestWizard(
+        VoiceConfig(),
+        mic_factory=lambda: _FakeMic([]),
+        sink_factory=lambda: replay_sink,
+        recognizer_factory=_FakeLocalRecognizer,
+        duration_seconds=0.1,
+        auto_start=False,
+    )
+    try:
+        replay_wizard._recorded_pcm = _pcm_tone(2000)
+        replay_wizard.go_to_step(1)
+        replay_wizard.start_replay()
+        playback_thread = replay_wizard._playback_thread
+        assert playback_thread is not None
+        deadline = time.monotonic() + 1.5
+        while not replay_sink.play_started and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        assert replay_sink.play_started is True
+
+        started = time.monotonic()
+        replay_wizard.reject()
+        elapsed = time.monotonic() - started
+        assert elapsed < 1.0
+        assert not playback_thread.isRunning()
+        assert replay_wizard._playback_thread is None
+        assert replay_sink.closed is True
+        assert DETACHED == []
+    finally:
+        replay_wizard.deleteLater()
+        app.processEvents()
+
+
+async def test_play_pcm_buffer_propagates_external_cancellation_and_closes_sink() -> None:
+    class _FutureSink:
+        def __init__(self) -> None:
+            self.started = asyncio.Event()
+            self.closed = False
+
+        async def play(self, _chunks: Any, _cancelled: asyncio.Event, _on_first_pcm: Any) -> None:
+            self.started.set()
+            await asyncio.Future()
+
+        async def close(self) -> None:
+            self.closed = True
+
+    sink = _FutureSink()
+    task = asyncio.create_task(play_pcm_buffer(sink, _pcm_tone(1500)))
+    await sink.started.wait()
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert sink.closed is True
+
+
+def test_mic_wizard_go_to_step3_keeps_stt_button_disabled_while_stt_running() -> None:
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+
+    class _SlowRecognizer(_FakeLocalRecognizer):
+        def prepare(self) -> None:
+            time.sleep(0.25)
+            super().prepare()
+
+    wizard = MicTestWizard(
+        VoiceConfig(),
+        mic_factory=lambda: _FakeMic([]),
+        sink_factory=_FakeSink,
+        recognizer_factory=lambda: _SlowRecognizer("gecikmeli metin"),
+        auto_start=False,
+    )
+    try:
+        wizard._recorded_pcm = _pcm_tone(1800)
+        wizard.go_to_step(2)
+        wizard.start_stt_test()
+        assert wizard._stt_thread is not None and wizard._stt_thread.isRunning()
+        assert not wizard.stt_run_button.isEnabled()
+
+        wizard.go_to_step(1)
+        wizard.go_to_step(2)
+        assert not wizard.stt_run_button.isEnabled()
+
+        deadline = time.monotonic() + 2.0
+        while wizard._stt_thread is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+        app.processEvents()
+        assert wizard.stt_run_button.isEnabled()
+        assert wizard.stt_result.text() == "gecikmeli metin"
     finally:
         wizard.reject()
         wizard.deleteLater()
