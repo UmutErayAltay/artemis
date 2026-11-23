@@ -570,7 +570,7 @@
         </p>
         <div class="hero-pills">
           <span class="badge badge-green">main: 3867/3867 pytest geçti</span>
-          <span class="badge badge-teal">feat: 3908 geçti / 1 zamanlama* (M3 kapısı 3909 geçti)</span>
+          <span class="badge badge-green">feat: 3909/3909 pytest geçti</span>
           <span class="badge badge-green">ruff &amp; mypy: her iki dalda 0 hata</span>
           <span class="badge badge-green">bench --sahte: 57/57 temiz</span>
           <span class="badge badge-green">test_code_size ALLOW = {} (0 ihlal)</span>
@@ -592,12 +592,12 @@
         </div>
         <div class="branch-mini">
           <div class="branch-mini-head">
-            <span class="branch-mini-title">feat/vizyon-ozellikler @ 6e52f37</span>
-            <span class="badge badge-teal">Faz 3 Teslim</span>
+            <span class="branch-mini-title">feat/vizyon-ozellikler @ f0f9153</span>
+            <span class="badge badge-green">Faz 3 + M4 Yeşil</span>
           </div>
           <div class="branch-mini-stats">
-            <strong>+5 commit</strong> (<code>86191da</code> → <code>6e52f37</code>) · 48 dosya (+8.457 / -277)<br>
-            <code>pytest -q</code>: <strong>3908 geçti</strong>, 1 zamanlama*, 32 atlandı, 5 seçilmedi (992,53 sn)<br>
+            <strong>+7 commit</strong> (<code>86191da</code> → <code>f0f9153</code>, + M4 rapor eşitleme) · 50 dosya (+10.062 / -280)<br>
+            <code>pytest -q</code>: <strong>3909 geçti</strong>, 0 kaldı, 32 atlandı, 5 seçilmedi (970,70 sn)<br>
             <code>mypy</code>: 243 dosya temiz · <code>SettingsPanel</code>: 9 sayfa / 75 bağlama · 88 ADR
           </div>
         </div>
@@ -611,16 +611,16 @@
       <div class="tab-bar" role="tablist" aria-label="KPI Dal Görünümü">
         <button class="tab-btn active" onclick="selectBranchKpi('both', this)">Karşılaştırmalı (İki Dal)</button>
         <button class="tab-btn" onclick="selectBranchKpi('main', this)">Yalnız main (06d6c7c)</button>
-        <button class="tab-btn" onclick="selectBranchKpi('feat', this)">Yalnız feat/vizyon-ozellikler (6e52f37)</button>
+        <button class="tab-btn" onclick="selectBranchKpi('feat', this)">Yalnız feat/vizyon-ozellikler (f0f9153)</button>
       </div>
       <span class="muted" style="font-size:12.5px;">Her ölçüm Windows 11 · Python 3.12.9 · yerel çalışma ağacı üzerinde alınmıştır</span>
     </div>
 
     <div class="kpi-grid" id="kpi-grid">
       <div class="kpi" data-kpi="pytest">
-        <div class="kpi-val" data-both="3867 → 3908" data-main="3867 / 0" data-feat="3908 / 1*">3867 → 3908</div>
+        <div class="kpi-val" data-both="3867 → 3909" data-main="3867 / 0" data-feat="3909 / 0">3867 → 3909</div>
         <div class="kpi-lbl">Tam Pytest Geçen</div>
-        <div class="kpi-sub" data-both="Karne 4: 3745/5 kırık → iki dal yeşil*" data-main="0 kaldı · 32 atlandı · 683,13 sn" data-feat="1 zamanlama-duyarlı* · 992,53 sn">Karne 4: 3745/5 kırık → iki dal yeşil*</div>
+        <div class="kpi-sub" data-both="Karne 4: 3745/5 kırık → iki dal 0 kırık" data-main="0 kaldı · 32 atlandı · 683,13 sn" data-feat="0 kaldı · 32 atlandı · 970,70 sn">Karne 4: 3745/5 kırık → iki dal 0 kırık</div>
       </div>
       <div class="kpi" data-kpi="static">
         <div class="kpi-val" data-both="0 / 0" data-main="0 / 0" data-feat="0 / 0">0 / 0</div>
@@ -644,17 +644,13 @@
       </div>
     </div>
 
-    <div class="callout callout-warn">
-      <strong>* Şeffaflık Notu — <code>feat/vizyon-ozellikler</code> Üzerindeki Tek Zamanlama Duyarlı Test Gözlemi:</strong>
-      <code>main</code> tam <code>pytest -q</code> koşusu <strong>3867/3867</strong> sıfır hata ile geçti.
-      <code>feat/vizyon-ozellikler</code> (<code>6e52f37</code>) üzerinde ise önceki M3 kapısı koşusu <strong>3909/3909</strong> geçmişken,
-      M4 canlı ölçüm koşusunda <strong>3908 geçti, 1 test kaldı</strong>:
-      <code>tests/test_loop.py::test_expired_approval_cannot_dispatch_side_effect</code> (<code>assert len(provider.requests) == 1</code> → <code>0 == 1</code>).
-      5 tekrarlı izole zamanlama ölçümünde kök neden doğrulandı: test <code>max_seconds=0.02</code> (20 ms) sınırını kullanıyor;
-      Windows’ta <code>time.monotonic()</code> saat çözünürlüğü ~15,6 ms olduğu için <code>turn_start</code> denetim kaydı diske yazılırken
-      2 saat adımı (~31,0 ms) geçtiğinde tur henüz ilk <code>provider.complete</code> çağrısına ulaşmadan <code>timeout</code> ile güvenli duruyor
-      (5 denemede 2 geçiş, 3’ünde 31 ms’de <code>reqs=0</code>). Faz 3 kodu bu davranışı değiştirmedi; M3 yeni testlerinin tamamı (41/41) ve
-      koruma paketleri (108/108) tamamen yeşildir.
+    <div class="callout callout-green">
+      <strong>Şeffaflık Notu — <code>tests/test_loop.py</code> Zamanlama Duyarlılığının Giderilmesi ve Temiz 3909/3909 Doğrulaması:</strong>
+      <code>main</code> (<code>06d6c7c</code>) tam <code>pytest -q</code> koşusu <strong>3867/3867</strong> sıfır hata ile geçti.
+      <code>feat/vizyon-ozellikler</code> üzerinde ilk M4 ölçümünde (<code>6e52f37</code> / <code>54d4e0c</code>) <code>tests/test_loop.py::test_expired_approval_cannot_dispatch_side_effect</code> testi <code>3908 geçti, 1 kaldı</code> sonucunu verdi; iki bileşenli kök neden doğrulandı:
+      (1) <code>make_loop</code> yardımcı işlevi <code>Settings.state_dir</code> değerini geçici klasöre ayırmadığı için <code>AgentLoop._opening_messages</code> içindeki <code>companion_blocks</code> çağrısı <code>start = time.monotonic()</code> sonrası canlı <code>.artemis/hafiza/degisiklikler.sqlite3</code> veritabanını okuyordu (~19–25 ms), ve
+      (2) Windows’ta <code>time.monotonic()</code> (<code>GetTickCount64()</code>) saati <strong>15,625 ms</strong> adımlarla ilerlediğinden <code>max_seconds=0.02</code> (20 ms) bütçesi 2 saat adımında (~31,25 ms) dolup tur daha <code>provider.complete</code> çağrısına ulaşmadan güvenli <code>timeout</code> ile durabiliyordu.
+      <code>f0f9153</code> commit’i ile <code>artemis/brain/agent_loop.py</code> veya <code>artemis/safety/gate.py</code> dosyalarına dokunulmadan yalnızca test katmanı düzeltildi: <code>make_loop</code> içine <code>settings.setdefault("state_dir", tmp_path / "state")</code> eklendi ve <code>test_expired_approval_cannot_dispatch_side_effect</code> testi <code>max_seconds=0.3</code> / <code>time.sleep(0.4)</code> ile <code>approvals == ["write"]</code> doğrulaması yapacak şekilde güncellendi. Ardışık 10x stres koşusu <strong>10/10</strong>, <code>tests/test_loop.py</code> <strong>21/21</strong> ve temiz tam <code>pytest -q</code> koşusu <strong>3909 geçti, 0 kaldı, 32 atlandı, 5 seçilmedi (970,70 sn)</strong> sonucuyla kapandı.
     </div>
   </section>
 
@@ -663,7 +659,7 @@
     <h2>2. İki Dallı Canlı Ölçüm Karşılaştırması ve Grafikler</h2>
     <p class="sec-lead">
       Karne 4 başlangıç noktası (commit’lenmemiş 44 dosya) ile Faz 0–2 sonrası <code>main</code> (<code>06d6c7c</code>) ve
-      Faz 3 sonrası <code>feat/vizyon-ozellikler</code> (<code>6e52f37</code>) canlı ölçümlerinin birebir kıyaslaması.
+      Faz 3 + M4 test düzeltmesi sonrası <code>feat/vizyon-ozellikler</code> (<code>f0f9153</code>) canlı ölçümlerinin birebir kıyaslaması.
     </p>
 
     <div class="table-wrap">
@@ -673,7 +669,7 @@
             <th>Ölçüt / Doğrulama Paketi</th>
             <th class="num">Karne 4 Tabanı (22 Kas)</th>
             <th class="num"><code>main</code> · Faz 0–2 (<code>06d6c7c</code>)</th>
-            <th class="num"><code>feat/vizyon-ozellikler</code> · Faz 3 (<code>6e52f37</code>)</th>
+            <th class="num"><code>feat/vizyon-ozellikler</code> · Faz 3 (<code>f0f9153</code>)</th>
             <th>Not</th>
           </tr>
         </thead>
@@ -682,8 +678,8 @@
             <td><strong>Tam <code>pytest -q</code> (offscreen Qt)</strong></td>
             <td class="num mono"><span class="badge badge-red">3745 geçti / 5 kaldı</span></td>
             <td class="num mono"><span class="badge badge-green">3867 geçti / 0 kaldı</span></td>
-            <td class="num mono"><span class="badge badge-amber">3908 geçti / 1 kaldı*</span></td>
-            <td>32 atlandı, 5 seçilmedi (her iki dal) · M3 kapısı tam koşu: 3909 geçti</td>
+            <td class="num mono"><span class="badge badge-green">3909 geçti / 0 kaldı</span></td>
+            <td>32 atlandı, 5 seçilmedi (her iki dal) · <code>f0f9153</code> tam koşu 970,70 sn · <code>test_loop.py</code> 10x stres 10/10</td>
           </tr>
           <tr>
             <td><strong>Koruma Paketleri (5 dosya)</strong></td>
@@ -739,7 +735,7 @@
             <td class="num mono">198 .py · 62.108</td>
             <td class="num mono">219 .py · 68.583</td>
             <td class="num mono">228 .py · 73.203</td>
-            <td>184 → 189 → 195 test dosyası (63.644 → 68.595 → 71.592 satır) + 15 bench (3.946)</td>
+            <td>184 → 189 → 195 test dosyası (63.644 → 68.595 → 71.596 satır) + 15 bench (3.946)</td>
           </tr>
           <tr>
             <td><strong>En Uzun Dosya / En Uzun İşlev</strong></td>
@@ -850,7 +846,7 @@
         <p class="svg-sub">Karne 4 tabanından <code>main</code> ve <code>feat/vizyon-ozellikler</code> dallarına test kapsamı ve UI yoğunluğu değişimi.</p>
         <svg viewBox="0 0 540 270" width="100%" height="auto" role="img" aria-label="Test büyümesi ve ayarlar konsolidasyon grafiği">
           <rect x="0" y="0" width="540" height="270" fill="#FFFFFF"/>
-          <text x="10" y="18" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#1B4D5C">Canlı Geçen Pytest Sayısı (3745 → 3867 → 3908+)</text>
+          <text x="10" y="18" font-family="Segoe UI, sans-serif" font-size="11.5" font-weight="700" fill="#1B4D5C">Canlı Geçen Pytest Sayısı (3745 → 3867 → 3909)</text>
           <!-- Bar scale: 3600 to 3950 mapped cleanly -->
           <g font-family="Consolas, monospace" font-size="11" fill="#181B20">
             <text x="10" y="44">Karne 4 (kirli ağaç)</text>
@@ -863,10 +859,10 @@
             <rect x="180" y="58" width="265" height="16" rx="4" fill="#15803D"/>
             <text x="488" y="70" font-weight="700">3867 (0 kırık)</text>
 
-            <text x="10" y="96">feat (6e52f37)</text>
+            <text x="10" y="96">feat (f0f9153)</text>
             <rect x="180" y="84" width="300" height="16" rx="4" fill="#EEEAE0"/>
-            <rect x="180" y="84" width="292" height="16" rx="4" fill="#1B4D5C"/>
-            <text x="488" y="96" font-weight="700">3908 (1*)</text>
+            <rect x="180" y="84" width="295" height="16" rx="4" fill="#15803D"/>
+            <text x="488" y="96" font-weight="700">3909 (0 kırık)</text>
           </g>
 
           <line x1="10" y1="118" x2="530" y2="118" stroke="#DFD9CC"/>
@@ -912,7 +908,7 @@
       <div class="filter-bar">
         <button class="filter-btn active" onclick="filterDeliverables('all', 'branch', this)">Her İki Dal</button>
         <button class="filter-btn" onclick="filterDeliverables('main', 'branch', this)">main (06d6c7c)</button>
-        <button class="filter-btn" onclick="filterDeliverables('feat', 'branch', this)">feat/vizyon-ozellikler (6e52f37)</button>
+        <button class="filter-btn" onclick="filterDeliverables('feat', 'branch', this)">feat/vizyon-ozellikler (f0f9153)</button>
       </div>
     </div>
 
@@ -1200,7 +1196,7 @@
         <div class="accept-row">
           <div>
             <strong>Tam Birim / Entegrasyon / Offscreen Qt Paketi</strong><br>
-            <span class="muted"><code>main</code>: <strong>3867/3867</strong> geçti. <code>feat</code>: <strong>3908 geçti</strong> (1 zamanlama-duyarlı <code>max_seconds=0.02</code> testi hariç*; M3 yeni testleri 41/41, koruma 108/108, <code>test_shell_chat</code> 36/36 geçti).</span>
+            <span class="muted"><code>main</code> (<code>06d6c7c</code>): <strong>3867/3867</strong> geçti. <code>feat</code> (<code>f0f9153</code>): <strong>3909/3909</strong> geçti (0 kaldı, 32 atlandı, 5 seçilmedi; M3 yeni testleri 41/41, koruma 108/108, <code>test_shell_chat</code> 36/36, <code>test_loop</code> 21/21 ve 10x stres 10/10 geçti).</span>
           </div>
           <span class="badge badge-teal">Offscreen + Sahte</span>
         </div>
@@ -1342,12 +1338,15 @@
               <tr><td class="mono">386a573</td><td><span class="badge badge-amber">M3C</span></td><td>feat(m3c): add teachable macro routine recorder and ADR 0087</td></tr>
               <tr><td class="mono">d55a080</td><td><span class="badge badge-amber">M3D</span></td><td>feat(m3d): add voice model health manager UI, Windows release CI, and ADR 0088</td></tr>
               <tr><td class="mono">6e52f37</td><td><span class="badge badge-amber">M3-Fix</span></td><td>fix(m3): harden macro sensitive-field masking and atomic piper download rollback</td></tr>
+              <tr><td class="mono">54d4e0c</td><td><span class="badge badge-teal">M4-Rapor</span></td><td>docs(m4): add standalone interactive dual-branch implementation report</td></tr>
+              <tr><td class="mono">f0f9153</td><td><span class="badge badge-green">M4-Fix</span></td><td>fix(tests): isolate make_loop state_dir and stabilize expired-approval timeout</td></tr>
+              <tr><td class="mono">HEAD</td><td><span class="badge badge-teal">M4-Sync</span></td><td>docs(m4): update dual-branch report with clean 3909 passed verification (bu rapor eşitleme commit’i)</td></tr>
             </tbody>
           </table>
         </div>
 
         <details open>
-          <summary>Faz 3 Yeni Modül ve Dağıtım Dosyaları (Canlı Satır Sayımı · 48 Değişen Dosya)</summary>
+          <summary>Faz 3 Yeni Modül ve Dağıtım Dosyaları (Canlı Satır Sayımı · 50 Değişen Dosya)</summary>
           <div class="table-wrap" style="margin-top:10px;">
             <table>
               <thead><tr><th>Dosya Yolu</th><th class="num">Satır</th><th>Rol</th></tr></thead>
@@ -1371,7 +1370,7 @@
   </section>
 
   <footer class="footer">
-    <span>Artemis Uygulama Raporu · <code>main</code> (<code>06d6c7c</code>) &amp; <code>feat/vizyon-ozellikler</code> (<code>6e52f37</code>)</span>
+    <span>Artemis Uygulama Raporu · <code>main</code> (<code>06d6c7c</code>) &amp; <code>feat/vizyon-ozellikler</code> (<code>f0f9153</code> · M4 rapor eşitleme)</span>
     <span>Tek başına etkileşimli HTML · Sıfır dış bağlantı · 2026-11-23</span>
   </footer>
 </main>
