@@ -21,7 +21,9 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.bridge import Approval
+from artemis.channels.desktop.tool_titles import tool_display
 from artemis.channels.notice import split_approval_notice
+from artemis.computer.actions import mask_screen_secrets
 from artemis.i18n import t
 
 
@@ -88,6 +90,9 @@ class ApprovalDialog(QDialog):
         self.outbound_preview_box: QFrame | None = None
         self.outbound_preview_text: QPlainTextEdit | None = None
         self._add_outbound_preview(item, body_layout)
+        self.routine_preview_box: QFrame | None = None
+        self.routine_preview_text: QPlainTextEdit | None = None
+        self._add_routine_preview(item, body_layout)
 
         # Özet: her argüman anahtarı görünür; uzun değer kısalır, tamamı ipucunda ve ayrıntıda.
         intro = QLabel(t("Artemis bu aracı şu değerlerle çalıştırmak için izin istiyor:"))
@@ -244,6 +249,44 @@ class ApprovalDialog(QDialog):
         body_layout.addWidget(box)
         self.outbound_preview_box = box
         self.outbound_preview_text = preview
+
+    def _add_routine_preview(self, item: Approval, body_layout: QVBoxLayout) -> None:
+        """`routine_save` onayında numaralı adımları sır sızdırmadan önizler (ADR 0087)."""
+        steps = item.arguments.get("steps")
+        if item.tool_name != "routine_save" or not isinstance(steps, list):
+            return
+        heading_text = t("Kaydedilecek rutin adımları")
+        routine_name = mask_screen_secrets(str(item.arguments.get("name", "")))
+        lines = [f"{t('Rutin adı')}: {routine_name}"]
+        for number, raw_step in enumerate(steps, start=1):
+            if not isinstance(raw_step, dict):
+                continue
+            tool_name = str(raw_step.get("tool", ""))
+            raw_args = raw_step.get("arguments")
+            if isinstance(raw_args, dict) and raw_args:
+                args_str = mask_screen_secrets(json.dumps(raw_args, ensure_ascii=False))
+                lines.append(f"{number}. {tool_display(tool_name)} — {args_str}")
+            else:
+                lines.append(f"{number}. {tool_display(tool_name)}")
+        box = QFrame()
+        box.setObjectName("previewWell")
+        box_layout = QVBoxLayout(box)
+        box_layout.setContentsMargins(12, 10, 12, 10)
+        box_layout.setSpacing(6)
+        heading = QLabel(heading_text)
+        heading.setObjectName("fieldLabel")
+        box_layout.addWidget(heading)
+        preview = QPlainTextEdit()
+        preview.setObjectName("routinePreview")
+        preview.setReadOnly(True)
+        preview.setLineWrapMode(QPlainTextEdit.LineWrapMode.WidgetWidth)
+        preview.setPlainText("\n".join(lines))
+        preview.setAccessibleName(heading_text)
+        preview.setMinimumHeight(110)
+        box_layout.addWidget(preview)
+        body_layout.addWidget(box)
+        self.routine_preview_box = box
+        self.routine_preview_text = preview
 
     def _show_details(self, on: bool) -> None:
         self.raw_name.setVisible(on)
