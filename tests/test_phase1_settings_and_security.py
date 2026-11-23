@@ -367,6 +367,8 @@ def test_live_retranslate_github_saved_note_and_en_routes(
             ("Automation and routines", 4, None),
             ("Listening", 0, 0),
             ("Response", 0, 1),
+            ("Ses modelleri", 0, 2),
+            ("Voice models", 0, 2),
             ("Dictation", 1, None),
             ("Shortcuts", 1, None),
             ("Models", 2, 0),

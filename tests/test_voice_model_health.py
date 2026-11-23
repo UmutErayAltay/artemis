@@ -1,4 +1,4 @@
-"""Ses modeli sağlık yöneticisi testleri (Qt'siz çekirdek + çift konumlu UI, çevrimdışı)."""
+"""Ses modeli sağlık yöneticisi testleri (Qt'siz çekirdek + Ses modelleri sekmesi, çevrimdışı)."""
 
 from __future__ import annotations
 
@@ -24,6 +24,7 @@ from artemis.channels.voice.model_health import (
 )
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 from artemis.config.settings import Settings, VoiceConfig
+from artemis.i18n import set_language
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -479,13 +480,14 @@ def test_widget_finish_detaches_running_thread(
         release.set()
 
 
-def test_settings_panel_dual_mount_sync_9_pages_and_demo_mode(
+def test_settings_panel_voice_models_subtab_single_mount_and_demo_mode(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
 
     from artemis.channels.desktop.settings_panel import SettingsPanel
+    from artemis.channels.desktop.voice_model_manager import VoiceModelManagerWidget
     from artemis.channels.voice import stt_catalog
     from tests.test_settings_panel import config
 
@@ -497,45 +499,29 @@ def test_settings_panel_dual_mount_sync_9_pages_and_demo_mode(
     try:
         names = panel.section_names()
         assert len(names) == 9
+        assert panel.voice_tabs.count() == 3
+        assert panel.voice_tabs.tabText(2) == "Ses modelleri"
+
         ses_page = panel.stack.widget(names.index("Ses"))
         about_page = panel.stack.widget(names.index("Hakkında ve Güncelleme"))
+        models_tab = panel.voice_tabs.widget(2)
         assert ses_page is not None and ses_page.isAncestorOf(panel.voice_model_manager)
-        assert about_page is not None and about_page.isAncestorOf(
-            panel.about_voice_model_manager
-        )
+        assert models_tab is not None and models_tab.isAncestorOf(panel.voice_model_manager)
+        assert about_page is not None
+        assert not about_page.findChildren(VoiceModelManagerWidget)
+        assert not hasattr(panel, "about_voice_model_manager")
 
-        # İki yöneticinin başlangıç envanteri eşit olmalı
-        assert [e.id for e in panel.voice_model_manager.entries()] == [
-            e.id for e in panel.about_voice_model_manager.entries()
-        ]
+        assert panel.select_section("Ses modelleri")
+        assert panel.sections.currentRow() == 0
+        assert panel.voice_tabs.currentIndex() == 2
 
-        # Birindeki güncelleme diğerine otomatik yansımalı
-        updated = [
-            VoiceModelEntry(
-                id="piper:tr_TR-dfki-medium",
-                family="piper",
-                name="tr_TR-dfki-medium",
-                label="Piper · Türkçe · DFKI Medium",
-                path=tmp_path / "models" / "tr_TR-dfki-medium.onnx",
-                size_bytes=4096,
-                status="ok",
-                integrity="sha256_ok",
-                bundled=False,
-                can_download=False,
-                can_clean=True,
-                active=False,
-                detail="Senkron test",
-            )
-            if e.id == "piper:tr_TR-dfki-medium"
-            else e
-            for e in panel.voice_model_manager.entries()
-        ]
-        panel.voice_model_manager.apply_entries(updated)
-        panel.voice_model_manager.models_changed.emit(updated)
-        app.processEvents()
-        about_map = {e.id: e for e in panel.about_voice_model_manager.entries()}
-        assert about_map["piper:tr_TR-dfki-medium"].status == "ok"
-        assert about_map["piper:tr_TR-dfki-medium"].size_bytes == 4096
+        set_language("en")
+        try:
+            assert panel.select_section("Voice models")
+            assert panel.sections.currentRow() == 0
+            assert panel.voice_tabs.currentIndex() == 2
+        finally:
+            set_language("tr")
     finally:
         panel.finish_inventory()
         panel.deleteLater()
@@ -545,8 +531,6 @@ def test_settings_panel_dual_mount_sync_9_pages_and_demo_mode(
     try:
         assert not demo_panel.voice_model_manager.download_button.isEnabled()
         assert not demo_panel.voice_model_manager.clean_button.isEnabled()
-        assert not demo_panel.about_voice_model_manager.download_button.isEnabled()
-        assert not demo_panel.about_voice_model_manager.clean_button.isEnabled()
     finally:
         demo_panel.finish_inventory()
         demo_panel.deleteLater()

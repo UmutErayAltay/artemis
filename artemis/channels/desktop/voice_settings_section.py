@@ -15,7 +15,6 @@ from artemis.channels.desktop.provider_section import store_endpoint_key
 from artemis.channels.desktop.provider_workers import ConnectionTest
 from artemis.channels.desktop.settings_io import refresh_device_combo
 from artemis.channels.voice import stt_catalog
-from artemis.channels.voice.model_health import VoiceModelEntry
 from artemis.config.settings import EndpointConfig, Settings, load_settings
 from artemis.i18n import t
 
@@ -340,16 +339,11 @@ def toggle_device_detail(panel: SettingsPanel) -> None:
 
 
 def sync_voice_models_from_manager(
-    panel: SettingsPanel, sender: object, entries: object
+    panel: SettingsPanel,
+    _sender: object = None,
+    _entries: object = None,
 ) -> None:
-    """Ses ve Hakkında sayfalarındaki model yöneticilerini ve seçicileri eşitler."""
-    if not isinstance(entries, list):
-        return
-    typed_entries = [e for e in entries if isinstance(e, VoiceModelEntry)]
-    for peer in (panel.voice_model_manager, panel.about_voice_model_manager):
-        if peer is not sender:
-            peer.apply_entries(typed_entries)
-
+    """Model yöneticisindeki değişiklik sonrası Dinleme ve Yanıt ses seçicilerini yeniler."""
     was_dirty = panel._dirty
     selected_stt = panel.stt_combo.currentData()
     populate_stt_choices(

@@ -14,14 +14,14 @@
      - **Silero VAD (`silero.py`) & DeepFilterNet3 (`denoise.py`, `model_paths.py`):** Sırasıyla `verify_silero_model()` ve `verify_step_model()` ile SHA-256 doğrulaması (`ok` / `corrupt` / `missing`) yapar. Paket içi modeller (`bundled=True`, `can_clean=False`) ve özel `noise_model_dir` konumları temizlemeden kesin olarak korunur.
    - Tüm indirme ve doğrulama işlevleri enjekte edilebilir getirici kancaları (`whisper_installed`, `whisper_downloader`, `url_fetcher`) kabul ederek testlerin tamamen çevrimdışı çalışmasını sağlar.
 
-2. **Çift konumlu Masaüstü Ses Modeli Yöneticisi (`artemis/channels/desktop/voice_model_manager.py`):**
+2. **Masaüstü Ses Modeli Yöneticisi (`artemis/channels/desktop/voice_model_manager.py`):**
    - `VoiceModelManagerWidget` envanter yenileme, doğrulama, tek tık indirme ve temizleme işlemlerini arayüz iş parçacığını kilitlemeden arka plan `QThread` işçileriyle yürütür; panel kapanırken `shutdown_thread` ile güvenli sonlandırma yapar.
    - Paket içi modellerde `Temizle` düğmesi devre dışıdır; `demo=True` kipinde indirme ve temizleme devre dışı kalır.
-   - Bileşen hem *Ayarlar > Ses > Dinleme (Giriş)* (`panel.voice_model_manager`) hem de *Ayarlar > Hakkında ve Güncelleme* (`panel.about_voice_model_manager`) altında eşzamanlı bağlanır; iki örnek `models_changed` sinyali ve `SettingsPanel.refresh()` / `finish_inventory()` üzerinden eşitlenir. *Ses* sayfasının `6/6` yardım baloncuğu sınırı yeni `HelpTip` eklenmeden korunur.
+   - Bileşen tekrar oluşturmadan *Ayarlar > Ses > Ses modelleri* 3. alt sekmesi (`panel.voice_model_manager`) altında tek merkezde bağlanır ve model değişikliğinde `models_changed` sinyaliyle *Dinleme* / *Yanıt* ses seçicilerini günceller; *Hakkında ve Güncelleme* yalnızca uygulama sürümü, lisans ve güncelleyiciye odaklanır. *Ses* sayfasının `6/6` yardım baloncuğu sınırı yeni `HelpTip` eklenmeden korunur.
 
 3. **Windows sürüm CI ve kurucu hizalaması (`.github/workflows/release-windows.yml`, `packaging/artemis.iss`):**
    - `windows-latest` ve Python `3.12` üzerinde `workflow_dispatch` ile `v*` etiketlerinde çalışan yayın akışı PyInstaller paketini (`packaging/artemis.spec`) ve Inno Setup kurucusunu (`packaging/artemis.iss /DMyAppVersion=...`) derler.
    - SignPath (`SIGNPATH_*`) veya Authenticode (`WINDOWS_CERT_PFX_BASE64`) gizli anahtarları tanımlıysa imzalama adımını çalıştırır; anahtarlar yoksa açık bir özet bildirimiyle imzasız derlemeye devam edip `SHA256SUMS.txt` özet manifesti ve sürüm varlıklarını üretir.
    - `packaging/artemis.iss` yayın/sürüm URL'leri, `VersionInfo*` alanları, 64-bit mimari meta verisi ve isteğe bağlı `#ifdef SignToolCmd` kancasıyla hizalanır; `DisableDirPage=yes`, `PrivilegesRequired=lowest` ve `{userappdata}` dokunmayan `[UninstallDelete]` değişmezleri korunur.
 
-**Sonuç:** Kullanıcılar tüm ses modellerinin sağlık, boyut ve SHA-256 durumunu hem *Ses* hem *Hakkında ve Güncelleme* sayfalarından güvenle yönetebilir; Windows kurucuları da imzalama gizli anahtarları olsun veya olmasın tekrarlanabilir bir CI hattıyla `SHA256SUMS.txt` eşliğinde üretilir.
+**Sonuç:** Kullanıcılar tüm ses modellerinin sağlık, boyut ve SHA-256 durumunu *Ayarlar > Ses > Ses modelleri* alt sekmesinden tek yerde güvenle yönetebilir; Windows kurucuları da imzalama gizli anahtarları olsun veya olmasın tekrarlanabilir bir CI hattıyla `SHA256SUMS.txt` eşliğinde üretilir.

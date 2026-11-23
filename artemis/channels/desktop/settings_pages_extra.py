@@ -37,7 +37,6 @@ from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.triggers_section import TriggersSection
 from artemis.channels.desktop.update_section import UpdateSection
-from artemis.channels.desktop.voice_model_manager import VoiceModelManagerWidget
 from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import BUILTIN_AGENT
 from artemis.i18n import t
@@ -635,8 +634,4 @@ def build_about_page(panel: SettingsPanel) -> None:
     panel.update_section = UpdateSection(panel)
     body.addWidget(panel.update_section)
     about.addWidget(box)
-    panel.about_voice_model_manager = VoiceModelManagerWidget(
-        panel.config_path, parent=panel, demo=panel._demo
-    )
-    about.addWidget(panel.about_voice_model_manager)
     about.addStretch(1)

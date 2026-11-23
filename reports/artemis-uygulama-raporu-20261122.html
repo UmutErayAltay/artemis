@@ -635,7 +635,7 @@
       <div class="kpi" data-kpi="ux">
         <div class="kpi-val" data-both="14 → 9 Sayfa" data-main="9 Sayfa (74 bağ)" data-feat="9 Sayfa (75 bağ)">14 → 9 Sayfa</div>
         <div class="kpi-lbl">Canlı Ayarlar Paneli (TR+EN)</div>
-        <div class="kpi-sub" data-both="0 eksik bağlama · 25 yardım balonu" data-main="74/74 PANEL_BINDINGS · Ses: 6/6" data-feat="75/75 PANEL_BINDINGS · 2x Model Sağlığı">0 eksik bağlama · 25 yardım balonu</div>
+        <div class="kpi-sub" data-both="0 eksik bağlama · 25 yardım balonu" data-main="74/74 PANEL_BINDINGS · Ses: 6/6" data-feat="75/75 PANEL_BINDINGS · Ses modelleri sekmesi">0 eksik bağlama · 25 yardım balonu</div>
       </div>
       <div class="kpi" data-kpi="size">
         <div class="kpi-val" data-both="68.583 → 73.203" data-main="68.583 satır" data-feat="73.203 satır">68.583 → 73.203</div>
@@ -1126,7 +1126,7 @@
           <span class="badge badge-amber">Canlı CI Sırrı Bekler</span>
         </div>
         <h3>Ses Modeli Sağlık Yöneticisi UI &amp; Windows Yayın CI (SignPath Hazır)</h3>
-        <p class="feat-desc">Whisper, Piper, Silero VAD ve DFN3 envanterini boyut, SHA-256 doğrulama, atomik indirme/geri alma ve paket içi model korumasıyla yöneten arayüz hem <em>Ses</em> hem <em>Hakkında ve Güncelleme</em> sayfalarına bağlandı. <code>.github/workflows/release-windows.yml</code> PyInstaller + Inno Setup + SignPath/Authenticode kancası + imzasız <code>SHA256SUMS.txt</code> yedeği içerir.</p>
+        <p class="feat-desc">Whisper, Piper, Silero VAD ve DFN3 envanterini boyut, SHA-256 doğrulama, atomik indirme/geri alma ve paket içi model korumasıyla yöneten arayüz <em>Ses &gt; Ses modelleri</em> sekmesine yerleştirildi. <code>.github/workflows/release-windows.yml</code> PyInstaller + Inno Setup + SignPath/Authenticode kancası + imzasız <code>SHA256SUMS.txt</code> yedeği içerir.</p>
         <div class="feat-meta">
           <span><strong>Test &amp; ADR:</strong> <code>tests/test_voice_model_health.py</code>, <code>test_release_workflow.py</code> · <code>docs/adr/0088-ses-modeli-saglik-yoneticisi-ve-windows-dagitim-hatti.md</code></span>
           <span><strong>Modüller:</strong> <code>voice/model_health.py</code> (1082 satır), <code>desktop/voice_model_manager.py</code> (483 satır), <code>packaging/artemis.iss</code></span>
@@ -1158,9 +1158,9 @@
     </div>
 
     <div class="callout callout-teal" style="margin-top:16px;">
-      <strong>Çift Konumlu Ses Modeli Yöneticisi &amp; Balon Tavanı Korundu:</strong>
-      <code>feat/vizyon-ozellikler</code> üzerinde <code>VoiceModelManagerWidget</code> hem indeks <code>0</code> (<em>Ses / Voice</em>) hem de
-      indeks <code>8</code> (<em>Hakkında ve Güncelleme / About &amp; Updates</em>) altında canlı olarak bağlıdır (<code>2</code> örnek, <code>models_changed</code> ile eşzamanlı).
+      <strong>Özel <em>Ses modelleri</em> Sekmesi &amp; Balon Tavanı Korundu:</strong>
+      <code>feat/vizyon-ozellikler</code> üzerinde <code>VoiceModelManagerWidget</code> yalnızca indeks <code>0</code> (<em>Ses / Voice</em>) altındaki
+      3. sekmede (<em>Ses modelleri / Voice models</em>) yer alır; <em>Hakkında ve Güncelleme</em> tekrarından arındırılmıştır.
       <em>Ses</em> sayfasındaki <code>HelpTip</code> sayısı tam olarak <strong>6/6</strong> tavanında tutuldu; toplam 9 sayfada <strong>25</strong> yardım balonu bulunuyor.
     </div>
   </section>
@@ -1354,7 +1354,7 @@
                 <tr><td><code>artemis/channels/voice/model_health.py</code></td><td class="num mono">1082</td><td>Whisper/Piper/Silero/DFN3 sağlık &amp; SHA-256 çekirdeği</td></tr>
                 <tr><td><code>artemis/proactive/macro_recorder.py</code></td><td class="num mono">770</td><td>UIA/odak gözlemcisi, hassas alan maskeleme, makro taslağı</td></tr>
                 <tr><td><code>artemis/proactive/event_triggers.py</code></td><td class="num mono">515</td><td><code>app_opened</code> / <code>calendar_before</code> / <code>system_resume</code> &amp; zincir motoru</td></tr>
-                <tr><td><code>artemis/channels/desktop/voice_model_manager.py</code></td><td class="num mono">483</td><td>Çift konumlu Ses Modeli Yöneticisi (<code>QThread</code> + güvenli kapanış)</td></tr>
+                <tr><td><code>artemis/channels/desktop/voice_model_manager.py</code></td><td class="num mono">483</td><td>Ses &gt; Ses modelleri Yöneticisi (<code>QThread</code> + güvenli kapanış)</td></tr>
                 <tr><td><code>artemis/channels/desktop/chain_dialog.py</code></td><td class="num mono">304</td><td>Koşullu rutin öneri zinciri düzenleme penceresi</td></tr>
                 <tr><td><code>artemis/channels/desktop/macro_dialog.py</code></td><td class="num mono">296</td><td>Öğretilebilir makro kayıt ve adım düzenleme penceresi</td></tr>
                 <tr><td><code>.github/workflows/release-windows.yml</code></td><td class="num mono">178</td><td>Windows PyInstaller + Inno Setup + SignPath/Authenticode CI</td></tr>
@@ -1380,10 +1380,11 @@
     tr: [
       {
         index: 0, title: "Ses", helptips: 6, cap: 6,
-        subtabs: ["Dinleme (Giriş)", "Yanıt (Çıkış)"],
+        subtabs: ["Dinleme (Giriş)", "Yanıt (Çıkış)", "Ses modelleri"],
         notes: [
-          "Dinleme (Giriş): Uyandırma adı, kesintisiz sohbet, mikrofon/seviye, STT modeli/dili/hassasiyeti, karma bulut STT, direct_audio_input, multimodal_screen_context, oyun modu, PTT, 3 adımlı Mikrofon Testi Sihirbazı, Ses Telemetri Kartı ve Ses Modeli Sağlık Yöneticisi.",
-          "Yanıt (Çıkış): Edge/Piper/EMA/Bulut TTS seçicisi, 1 cümlelik 'Sesi Test Et' önizleme düğmesi, edge_voice/piper_voice profili, söz kesme, takip dinleme ve WebRTC AEC3 yankı engelleme."
+          "Dinleme (Giriş): Uyandırma adı, kesintisiz sohbet, mikrofon/seviye, STT modeli/dili/hassasiyeti, karma bulut STT, direct_audio_input, multimodal_screen_context, oyun modu, PTT, 3 adımlı Mikrofon Testi Sihirbazı ve Ses Telemetri Kartı.",
+          "Yanıt (Çıkış): Edge/Piper/EMA/Bulut TTS seçicisi, 1 cümlelik 'Sesi Test Et' önizleme düğmesi, edge_voice/piper_voice profili, söz kesme, takip dinleme ve WebRTC AEC3 yankı engelleme.",
+          "Ses modelleri: Whisper, Piper, Silero VAD ve DFN3 envanteri, SHA-256 doğrulama, tek tık indirme/temizleme ve Dinleme/Yanıt seçicilerini otomatik güncelleme."
         ]
       },
       {
@@ -1446,17 +1447,18 @@
         index: 8, title: "Hakkında ve Güncelleme", helptips: 0, cap: 5,
         subtabs: [],
         notes: [
-          "Sürüm, Apache-2.0 lisansı, sistem bilgisi, SHA-256 uygulama içi güncelleyici ve ikinci VoiceModelManagerWidget (Ses sayfasıyla eşzamanlı)."
+          "Sürüm, Apache-2.0 lisansı, sistem bilgisi ve SHA-256 uygulama içi güncelleyici."
         ]
       }
     ],
     en: [
       {
         index: 0, title: "Voice", helptips: 6, cap: 6,
-        subtabs: ["Listening (Input)", "Response (Output)"],
+        subtabs: ["Listening (Input)", "Response (Output)", "Voice models"],
         notes: [
-          "Listening (Input): Wake name, continuous mode, mic/level, STT model/language/precision, hybrid cloud STT, direct_audio_input, multimodal_screen_context, game mode, PTT, 3-step Mic Test Wizard, Voice Telemetry Card, and Voice Model Health Manager.",
-          "Response (Output): Edge/Piper/EMA/Cloud TTS selector, 1-sentence 'Test Voice' preview, edge_voice/piper_voice selectors, barge-in, follow-up listening, and WebRTC AEC3."
+          "Listening (Input): Wake name, continuous mode, mic/level, STT model/language/precision, hybrid cloud STT, direct_audio_input, multimodal_screen_context, game mode, PTT, 3-step Mic Test Wizard, and Voice Telemetry Card.",
+          "Response (Output): Edge/Piper/EMA/Cloud TTS selector, 1-sentence 'Test Voice' preview, edge_voice/piper_voice selectors, barge-in, follow-up listening, and WebRTC AEC3.",
+          "Voice models: Dedicated tab for Whisper, Piper, Silero VAD, and DFN3 inventory, SHA-256 verification, and 1-click download/cleanup synced with Listening & Response selectors."
         ]
       },
       {
@@ -1504,7 +1506,7 @@
       {
         index: 8, title: "About & Updates", helptips: 0, cap: 5,
         subtabs: [],
-        notes: ["Version, Apache-2.0 notices, SHA-256 in-app updater, and mirrored VoiceModelManagerWidget synced with Voice page."]
+        notes: ["Version, Apache-2.0 notices, and SHA-256 in-app updater."]
       }
     ]
   };

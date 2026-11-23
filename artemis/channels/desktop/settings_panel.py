@@ -180,6 +180,8 @@ _SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
         "response": ("Ses", 1),
         "yanıt (çıkış)": ("Ses", 1),
         "response (output)": ("Ses", 1),
+        "ses modelleri": ("Ses", 2),
+        "voice models": ("Ses", 2),
         "dikte": ("Dikte ve Kısayollar", None),
         "dictation": ("Dikte ve Kısayollar", None),
         "kısayollar": ("Dikte ve Kısayollar", None),
@@ -329,7 +331,6 @@ class SettingsPanel(QWidget):
     voice_tabs: QTabWidget
     voice_telemetry_card: VoiceTelemetryCard
     voice_model_manager: VoiceModelManagerWidget
-    about_voice_model_manager: VoiceModelManagerWidget
     listening_hotkey: QLineEdit
     ptt_enabled: QCheckBox
     ptt_hotkey: QLineEdit
@@ -481,7 +482,6 @@ class SettingsPanel(QWidget):
         build_apps_page(self)
         build_about_page(self)
         self.voice_model_manager.models_changed.connect(self._on_voice_models_changed)
-        self.about_voice_model_manager.models_changed.connect(self._on_voice_models_changed)
         self._build_section_combo()
         self.sections.currentRowChanged.connect(self._on_section)
         self.section_combo.activated.connect(self._combo_picked)
@@ -933,7 +933,7 @@ class SettingsPanel(QWidget):
                 self.tts_cloud_box.reload_servers()
             self._sync_voice_output_controls()
             self.voice_telemetry_card.refresh()
-            self.about_voice_model_manager.apply_entries(self.voice_model_manager.refresh())
+            self.voice_model_manager.refresh()
             self.routines.refresh()
             self.skills.refresh()
             self.triggers.refresh()
@@ -1191,10 +1191,8 @@ class SettingsPanel(QWidget):
         self.tts_preview_thread = None
         self._sync_voice_output_controls()
 
-    def _on_voice_models_changed(self, entries: object) -> None:
-        voice_settings_section.sync_voice_models_from_manager(
-            self, self.sender(), entries
-        )
+    def _on_voice_models_changed(self, _entries: object = None) -> None:
+        voice_settings_section.sync_voice_models_from_manager(self)
 
     def finish_inventory(self) -> None:
         if _shutdown_thread(
@@ -1224,7 +1222,6 @@ class SettingsPanel(QWidget):
         self.telegram.finish()
         self.update_section.finish()
         self.voice_model_manager.finish()
-        self.about_voice_model_manager.finish()
         if isinstance(self.tts_cloud_box, TtsCloudBox):
             self.tts_cloud_box.finish()
         self.file_search.finish()

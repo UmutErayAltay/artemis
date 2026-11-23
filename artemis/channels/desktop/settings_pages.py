@@ -192,7 +192,7 @@ def add_page(
 
 
 def build_voice_page(panel: SettingsPanel) -> None:
-    """1. sayfa: Ses (Dinleme (Giriş) | Yanıt (Çıkış))."""
+    """1. sayfa: Ses (Dinleme (Giriş) | Yanıt (Çıkış) | Ses modelleri)."""
     voice = add_page(panel, t("Ses"), t("Uyandırma, tanıma, konuşma sesi ve ölçüm."), t("Temel"))
     tabs = SettingsTabWidget()
     panel.voice_tabs = tabs
@@ -208,10 +208,6 @@ def build_voice_page(panel: SettingsPanel) -> None:
     _cleanup_group(panel, listen_layout)
     panel.voice_telemetry_card = VoiceTelemetryCard(panel.config_path)
     listen_layout.addWidget(panel.voice_telemetry_card)
-    panel.voice_model_manager = VoiceModelManagerWidget(
-        panel.config_path, parent=panel, demo=panel._demo
-    )
-    listen_layout.addWidget(panel.voice_model_manager)
     listen_layout.addStretch(1)
     tabs.addTab(listen_page, t("Dinleme (Giriş)"))
 
@@ -222,6 +218,17 @@ def build_voice_page(panel: SettingsPanel) -> None:
     _speech_group(panel, reply_layout)
     reply_layout.addStretch(1)
     tabs.addTab(reply_page, t("Yanıt (Çıkış)"))
+
+    models_page = _HeightForWidthBox()
+    models_layout = QVBoxLayout(models_page)
+    models_layout.setContentsMargins(0, 16, 0, 0)
+    models_layout.setSpacing(24)
+    panel.voice_model_manager = VoiceModelManagerWidget(
+        panel.config_path, parent=panel, demo=panel._demo
+    )
+    models_layout.addWidget(panel.voice_model_manager)
+    models_layout.addStretch(1)
+    tabs.addTab(models_page, t("Ses modelleri"))
     voice.addStretch(1)
 
 
