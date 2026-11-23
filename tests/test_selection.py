@@ -21,6 +21,7 @@ from artemis.channels.desktop.selection import (
     MAX_CHARS,
     SelectionActions,
     SelectionBackend,
+    has_nontext_clipboard_formats,
     local_chat_alias,
 )
 from artemis.channels.runtime import Runtime, create_runtime
@@ -60,6 +61,7 @@ class World:
         self.copy_error: Exception | None = None
         self.read_error: Exception | None = None
         self.nontext = False
+        self.uia_result: tuple[str | None, bool] = (None, False)
         self.copy_calls = 0
         self.focus_works = True
         self.focus_calls: list[int] = []
@@ -113,6 +115,7 @@ class World:
             self.modifiers_down,
             self.focus,
             lambda: self.nontext,
+            lambda: self.uia_result,
         )
 
 
@@ -585,6 +588,8 @@ def test_window_registers_selection_hotkey_only_when_enabled(
         window._config_path = config
         window._start_selection_hotkey()
         assert _RecordingHotkey.registered == expected
+        assert window.selection_popup.parent() is None
+        assert window.selection_badge.parent() is None
         popup = window.selection_popup
         window._show_selection("ready", "5 karakter seçildi.")
         assert popup.isVisible() and not popup.result.isVisible()
@@ -621,3 +626,77 @@ async def test_read_clipboard_oserror_refuses_without_crashing() -> None:
     assert "pano kullanılamıyor" in rig.kinds("message")[-1]
     assert rig.audit.named("selection_capture") == [{"outcome": "error", "chars": 0}]
     assert not rig.actions.busy
+
+
+def test_clipboard_format_classifier_allows_html_and_meta_beside_text() -> None:
+    assert has_nontext_clipboard_formats([]) is False
+    assert has_nontext_clipboard_formats([(1, ""), (7, ""), (13, ""), (16, "")]) is False
+    # Gerçek Chrome/Chromium kopyalama biçimleri (HTML + RFH token + URL + CF_UNICODETEXT)
+    chrome_formats = [
+        (49385, "HTML Format"),
+        (13, ""),
+        (49770, "Chromium internal source RFH token"),
+        (49632, "Chromium internal source URL"),
+        (16, ""),
+        (1, ""),
+        (7, ""),
+    ]
+    assert has_nontext_clipboard_formats(chrome_formats) is False
+    # VS Code / Win11 Not Defteri yan biçimleri
+    vscode_formats = [
+        (13, ""),
+        (49161, "DataObject"),
+        (49200, "Rich Text Format"),
+        (49501, "vscode-editor-data"),
+    ]
+    assert has_nontext_clipboard_formats(vscode_formats) is False
+    # Ekran görüntüsü ve kopyalanan dosyalar veri kaybı riski taşır -> engellenir
+    assert has_nontext_clipboard_formats([(8, ""), (2, ""), (49400, "PNG")]) is True
+    assert has_nontext_clipboard_formats([(15, ""), (49158, "FileNameW")]) is True
+    assert has_nontext_clipboard_formats([(49999, "CustomBinary")]) is True
+
+
+async def test_uia_selection_captures_without_clipboard_even_when_nontext() -> None:
+    rig = Rig()
+    rig.world.nontext = True
+    rig.world.uia_result = ("UIA metni", False)
+    await rig.capture()
+    assert rig.world.copy_calls == 0
+    assert rig.world.clip_history == []
+    assert rig.kinds("ready") == ["9 karakter seçildi."]
+    assert rig.audit.named("selection_capture") == [{"outcome": "captured_uia", "chars": 9}]
+    await rig.run("translate")
+    assert "UIA metni" in rig.calls[0][0][1].content
+
+
+async def test_uia_password_field_is_refused_without_copy() -> None:
+    rig = Rig()
+    rig.world.uia_result = (None, True)
+    await rig.capture()
+    assert rig.world.copy_calls == 0
+    assert rig.kinds("ready") == []
+    assert "Parola" in rig.kinds("message")[-1]
+    assert rig.audit.named("selection_capture") == [{"outcome": "password_field", "chars": 0}]
+
+
+async def test_accept_selection_respects_privacy_truncation_and_dictation_exclusion() -> None:
+    blocked = Rig(cloud_allowed=False, local_alias=None)
+    blocked.actions.accept_selection(TARGET, "Merhaba")
+    assert "izin yok" in blocked.kinds("message")[-1]
+    assert blocked.audit.events == []
+
+    busy = Rig()
+    busy.dictation_busy = True
+    busy.actions.accept_selection(TARGET, "Merhaba")
+    assert "Dikte" in busy.kinds("message")[-1]
+
+    rig = Rig()
+    long_text = "x" * (MAX_CHARS + 50)
+    rig.actions.accept_selection(TARGET, long_text)
+    assert f"{MAX_CHARS} karakter seçildi" in rig.kinds("ready")[-1]
+    audit = rig.audit.named("selection_capture")[-1]
+    assert audit == {"outcome": "captured_uia", "chars": MAX_CHARS}
+    assert long_text[:12] not in str(rig.audit.events)
+    await rig.run("fix")
+    assert len(rig.calls) == 1
+

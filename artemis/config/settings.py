@@ -793,6 +793,7 @@ class SelectionActionsConfig(BaseModel):
     hotkey: str = Field(default="ctrl+alt+s", min_length=1, max_length=40)
     # "Çevir" eyleminin hedef dili (ör. en, tr, de); modele düz metin olarak söylenir.
     translate_to: str = Field(default="en", min_length=1, max_length=40)
+    mouse_popup: bool = True
 
 
 class RoutinesConfig(BaseModel):

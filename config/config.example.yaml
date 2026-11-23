@@ -428,6 +428,7 @@ memory:
 #   enabled: true            # varsayılan false
 #   hotkey: ctrl+alt+s
 #   translate_to: en         # "Çevir" eyleminin hedef dili
+#   mouse_popup: true        # metin seçince fare yanında simge göster
 
 # Rutinler (ADR 0058): adlandırılmış, sabit adımlı işler ("işe başla": VS Code aç, Spotify aç,
 # sesi 30 yap). Adımlar `state_dir/routines.json` dosyasındadır; sohbetle (onaylı routine_save)

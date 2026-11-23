@@ -11,7 +11,7 @@ from typing import Any
 
 import yaml
 from pydantic import BaseModel, ValidationError
-from PySide6.QtCore import QSettings, Qt, QTimer, Signal
+from PySide6.QtCore import QPoint, QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QAction,
     QCloseEvent,
@@ -82,7 +82,8 @@ from artemis.channels.desktop.pet_sprite import pets_dir_for
 from artemis.channels.desktop.power_events import is_resume_native_event
 from artemis.channels.desktop.profile_bar import refresh_profile_button, switch_work_profile
 from artemis.channels.desktop.projects_panel import ProjectsPanel
-from artemis.channels.desktop.selection_popup import SelectionPopup
+from artemis.channels.desktop.selection_mouse import SelectionCandidate, SelectionMouseWatcher
+from artemis.channels.desktop.selection_popup import SelectionBadge, SelectionPopup
 from artemis.channels.desktop.settings_io import _same, save_computer_mode
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
@@ -154,6 +155,8 @@ class DesktopWindow(QMainWindow):
     _hotkey_pressed = Signal()
     _dictation_pressed = Signal()
     _selection_pressed = Signal()
+    _selection_mouse_candidate = Signal(object)
+    _selection_mouse_dismiss = Signal()
     _ptt_pressed = Signal()
     _ptt_released = Signal()
     _toast_failed = Signal(str)
@@ -282,15 +285,22 @@ class DesktopWindow(QMainWindow):
         self._hotkey: GlobalHotkey | None = None
         self._dictation_hotkey: GlobalHotkey | None = None
         self._selection_hotkey: GlobalHotkey | None = None
+        self._selection_mouse: SelectionMouseWatcher | None = None
+        self._selection_anchor: QPoint | None = None
         self._ptt_hotkey: PushToTalkHotkey | None = None
-        # Seçili metin eylemleri (ADR 0062): pencere yalnız düğme basışlarını köprüye iletir.
+        # Seçili metin eylemleri (ADR 0062): parent=None ki Windows'ta sahip ana pencereyi
+        # öne çekmesin (`finish_exit` ikisini de kapatır); düğmeler köprüye iletilir.
+        self.selection_badge = SelectionBadge(None, self._on_selection_badge_clicked)
+        self.selection_badge.apply_theme(themes.THEMES[self._theme])
         self.selection_popup = SelectionPopup(
-            self, lambda action: self.bridge.selection_run(action),
+            None, lambda action: self.bridge.selection_run(action),
             lambda: self.bridge.selection_write_back(),
         )
         self.selection_popup.apply_theme(themes.THEMES[self._theme])
         self._hotkey_pressed.connect(self.voice_button_click)
         self._selection_pressed.connect(lambda: self.bridge.selection_hotkey())
+        self._selection_mouse_candidate.connect(self._on_selection_mouse_candidate)
+        self._selection_mouse_dismiss.connect(self.selection_badge.hide)
         # Köprü ayar uygulanınca yenilenir; sinyal her seferinde güncel olanı çağırır.
         self._dictation_pressed.connect(lambda: self.bridge.toggle_dictation())
         self._ptt_pressed.connect(lambda: self.bridge.ptt_press())
@@ -367,14 +377,32 @@ class DesktopWindow(QMainWindow):
     def _show_selection(self, kind: str, message: str) -> None:
         """Seçili metin eylemi durumu: pencere imleç yanında açılır, sonuç orada görünür."""
         if kind == "ready":
-            self.selection_popup.show_ready(message)
+            self.selection_badge.hide()
+            anchor, self._selection_anchor = self._selection_anchor, None
+            self.selection_popup.show_ready(message, anchor=anchor)
         elif kind == "working":
             self.selection_popup.show_working()
         elif kind == "result":
             self.selection_popup.show_result(message)
         elif kind == "message" and message:
+            self._selection_anchor = None
+            self.selection_badge.hide()
             self.selection_popup.show_message(message)
             self._set_status(message, "ready")
+
+    def _is_selection_ui_at(self, x: int, y: int) -> bool:
+        return (
+            self.selection_badge.contains_global(x, y)
+            or self.selection_popup.contains_global(x, y)
+        )
+
+    def _on_selection_mouse_candidate(self, candidate: SelectionCandidate) -> None:
+        if not self._busy and not self.selection_popup.isVisible():
+            self.selection_badge.show_for(candidate)
+
+    def _on_selection_badge_clicked(self, candidate: SelectionCandidate) -> None:
+        self._selection_anchor = QPoint(candidate.x, candidate.y)
+        self.bridge.selection_capture_mouse(candidate.hwnd, candidate.pre_text)
 
     def _show_dictation(self, kind: str, message: str) -> None:
         """Dikte durumu ve RAM içi son-5 geçmişi (ADR 0057)."""

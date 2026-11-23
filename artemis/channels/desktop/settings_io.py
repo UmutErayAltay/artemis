@@ -229,6 +229,7 @@ PANEL_BINDINGS: tuple[PanelBinding, ...] = (
     ),
     _checkbox(("dictation", "polish_punctuation"), "dictation_polish"),
     _checkbox(("selection_actions", "enabled"), "selection_enabled"),
+    _checkbox(("selection_actions", "mouse_popup"), "selection_mouse_popup"),
     PanelBinding(
         ("selection_actions", "hotkey"), "selection_hotkey",
         lambda edit: edit.text().strip(), lambda edit, value: edit.setText(str(value)),

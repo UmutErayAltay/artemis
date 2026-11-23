@@ -689,6 +689,14 @@ def build_shortcuts_page(panel: SettingsPanel) -> None:
         "içeriği (resim, dosya) geri konamaz. Metin modele araçsız gider, geçmişe girmez. "
         "Pano için bulut izni yoksa yalnız yerel model kullanılır."
     )))
+    panel.selection_mouse_popup = QCheckBox(t("Metin seçince fare yanında simge göster"))
+    panel.selection_mouse_popup.setChecked(True)
+    panel.selection_mouse_popup.setEnabled(False)
+    panel.selection_enabled.toggled.connect(panel.selection_mouse_popup.setEnabled)
+    sel_layout.addWidget(panel.selection_mouse_popup)
+    sel_layout.addWidget(_check_hint(t(
+        "Metin seçtikten sonra çıkan simgeye tıklayınca farenin etrafında eylem düğmeleri açılır."
+    )))
     panel.selection_hotkey = QLineEdit()
     panel.selection_hotkey.setMaxLength(40)
     panel.selection_hotkey.setAccessibleName(t("Seçili metin kısayolu"))

@@ -492,6 +492,12 @@ class DesktopBridge:
         """Seçili metin kısayolu (GUI thread'i): seçimi yakalar (ADR 0062)."""
         return self._selection_call(lambda actions: actions.start_capture())
 
+    def selection_capture_mouse(self, hwnd: int, pre_text: str | None) -> bool:
+        """Fare seçimi sonrası simge tıklamasıyla yakalama başlatır."""
+        if pre_text is not None and pre_text.strip():
+            return self._selection_call(lambda actions: actions.accept_selection(hwnd, pre_text))
+        return self._selection_call(lambda actions: actions.start_capture(skip_key_wait=True))
+
     def selection_run(self, action: str) -> bool:
         return self._selection_call(lambda actions: actions.start_run(action))
 

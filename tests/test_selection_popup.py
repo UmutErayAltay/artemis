@@ -56,3 +56,72 @@ def test_working_disables_actions_and_keeps_result_box() -> None:
     assert popup.info.text() == "Sonuç hazır."
     assert all(button.isEnabled() for button in popup.buttons.values())
     assert popup.copy_button.isEnabled() and popup.write_button.isEnabled()
+
+
+def test_radial_menu_places_actions_around_anchor_and_resizes_cleanly() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QPoint
+
+    _app, _parent, popup = _popup()
+    popup.show_ready("12 karakter seçildi.", anchor=QPoint(400, 300))
+    assert popup._mode == "radial"
+    assert not popup.radial_container.isHidden()
+    assert popup.card_container.isHidden()
+
+    c = popup.close_button.geometry().center()
+    assert popup.buttons["translate"].geometry().center().y() < c.y()
+    assert popup.buttons["summarize"].geometry().center().y() > c.y()
+    assert popup.buttons["explain"].geometry().center().x() < c.x()
+    assert popup.buttons["fix"].geometry().center().x() > c.x()
+
+    popup_center = popup.geometry().center()
+    assert abs(popup_center.x() - 400) <= 60
+    assert abs(popup_center.y() - 300) <= 60
+
+    popup.show_working()
+    assert popup._mode == "card"
+    assert popup.radial_container.isHidden()
+    assert not popup.card_container.isHidden()
+    assert popup.width() == 340
+
+    popup.show_ready("5 karakter seçildi.", anchor=QPoint(420, 310))
+    assert popup._mode == "radial"
+    assert popup.buttons["translate"].isVisibleTo(popup)
+
+
+def test_selection_badge_activates_without_focus_steal_and_follows_theme() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from artemis.channels.desktop import themes
+    from artemis.channels.desktop.selection_mouse import SelectionCandidate
+    from artemis.channels.desktop.selection_popup import SelectionBadge
+
+    QApplication.instance() or QApplication([])
+    parent = QWidget()
+    activated: list[SelectionCandidate] = []
+    badge = SelectionBadge(parent, on_activate=activated.append)
+    assert bool(badge.windowFlags() & Qt.WindowType.WindowDoesNotAcceptFocus)
+    assert badge.testAttribute(Qt.WidgetAttribute.WA_ShowWithoutActivating)
+
+    cand = SelectionCandidate(x=320, y=240, hwnd=77, pre_text="Selam")
+    badge.show_for(cand)
+    assert badge.isVisible()
+    center = badge.frameGeometry().center()
+    assert badge.contains_global(center.x(), center.y())
+
+    badge.apply_theme(themes.THEMES["light"])
+    press = QMouseEvent(
+        QMouseEvent.Type.MouseButtonPress,
+        QPointF(16, 16),
+        QPointF(center),
+        Qt.MouseButton.LeftButton,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+    )
+    badge.mousePressEvent(press)
+    assert not badge.isVisible()
+    assert activated == [cand]
+

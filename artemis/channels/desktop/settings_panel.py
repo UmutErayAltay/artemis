@@ -355,6 +355,7 @@ class SettingsPanel(QWidget):
     dictation_max_seconds: QSpinBox
     dictation_polish: QCheckBox
     selection_enabled: QCheckBox
+    selection_mouse_popup: QCheckBox
     selection_hotkey: QLineEdit
     selection_translate_to: QLineEdit
     barge_in_box: QCheckBox
@@ -971,6 +972,9 @@ class SettingsPanel(QWidget):
             )
             self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self.noise_stt.setEnabled(self.noise_suppression.isChecked() and not self._demo)
+            self.selection_mouse_popup.setEnabled(
+                self.selection_enabled.isChecked() and not self._demo
+            )
             self._sync_application_access()
             agent = settings.code_agent
             self.github_owner.setText(agent.github_owner or "")
