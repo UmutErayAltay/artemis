@@ -131,9 +131,9 @@ def build_automation_page(panel: SettingsPanel) -> None:
     triggers_tab.addWidget(
         _check_hint(
             t(
-                "Klasör yoklanır; ilk bakışta var olan dosyalar bildirilmez. Dosya yazılması "
-                "bitince bir kez haber verilir. Dosya adları Telegram'a gönderilmez. "
-                "Zamanlı işler açık olmalı."
+                "Klasör, uygulama açılışı, yaklaşan toplantı, sistem uyanışı ve koşullu "
+                "öneri zincirleri yalnız yerel bildirim gösterir; tıklamadan hiçbir şey "
+                "çalışmaz ve bildirimler Telegram'a gitmez. Zamanlı işler açık olmalı."
             )
         )
     )

@@ -409,14 +409,24 @@ def save_code_agent(path: Path, code_agent: dict[str, Any]) -> None:
     _write_validated(path, raw)
 
 
-def save_triggers(path: Path, items: list[dict[str, Any]], *, enable: bool = False) -> None:
-    """Tetikleyici listesini yazar (ADR 0061). Yalnız Ayarlar formundan, kullanıcı eylemiyle
-    çağrılır; hiçbir araç ya da model ulaşamaz. Diğer anahtarlar ve atomik yazım
-    `_write_validated`ta."""
+def save_triggers(
+    path: Path,
+    items: list[dict[str, Any]],
+    *,
+    enable: bool = False,
+    chains: list[dict[str, Any]] | None = None,
+) -> None:
+    """Tetikleyici ve öneri zinciri listesini yazar (ADR 0061, ADR 0086).
+
+    Yalnız Ayarlar formundan, kullanıcı eylemiyle çağrılır; hiçbir araç ya da model ulaşamaz.
+    Diğer anahtarlar ve atomik yazım `_write_validated`ta.
+    """
     load_settings(path)  # bozuk config'i kaydetmeden önce yakalar
     raw = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     section = raw.get("triggers") or {}
     section["items"] = items
+    if chains is not None:
+        section["chains"] = chains
     if enable:
         section["enabled"] = True
     raw["triggers"] = section

@@ -87,3 +87,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0083 — Bağlamsal çalışma profilleri](0083-baglamsal-calisma-profilleri.md)
 - [0084 — Onaylı iki yönlü takvim ve e-posta](0084-iki-yonlu-takvim-ve-eposta.md)
 - [0085 — Ses ve görüntü çok kipli akışı](0085-ses-ve-goruntu-cok-kipli-akis.md)
+- [0086 — Olay tetikleyicileri ve koşullu rutin öneri zincirleri](0086-olay-tetikleyicileri-ve-rutin-zincirleri.md)

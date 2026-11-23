@@ -79,6 +79,7 @@ from artemis.channels.desktop.operations import OperationLog
 from artemis.channels.desktop.page_kit import center_page
 from artemis.channels.desktop.pet import PetWidget
 from artemis.channels.desktop.pet_sprite import pets_dir_for
+from artemis.channels.desktop.power_events import is_resume_native_event
 from artemis.channels.desktop.profile_bar import refresh_profile_button, switch_work_profile
 from artemis.channels.desktop.projects_panel import ProjectsPanel
 from artemis.channels.desktop.selection_popup import SelectionPopup
@@ -1193,6 +1194,11 @@ class DesktopWindow(QMainWindow):
             return
         event.ignore()
         self._request_exit()
+
+    def nativeEvent(self, eventType: Any, message: Any) -> object:
+        if is_resume_native_event(eventType, message):
+            self.bridge.notify_system_resume()
+        return super().nativeEvent(eventType, message)
 
 
 def build_window(

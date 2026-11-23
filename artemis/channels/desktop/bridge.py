@@ -367,6 +367,7 @@ class DesktopBridge:
         self._proactive_stop: asyncio.Event | None = None
         self._proactive_task: asyncio.Task[None] | None = None
         self._proactive_telegram: TelegramClient | None = None
+        self._proactive_scheduler: ProactiveScheduler | None = None
         self._ready = threading.Event()
         self._stopped = threading.Event()
         self._thread = threading.Thread(
@@ -746,6 +747,15 @@ class DesktopBridge:
                 if len(self._turn_requests) > 64:
                     self._turn_requests.pop(next(iter(self._turn_requests)))
         turn_id = str(record["turn_id"]) if record.get("turn_id") is not None else None
+        if event_name == "routine_run_end" and self._proactive_scheduler is not None:
+            loop = self._loop
+            if loop is not None and not self._loop_stopping:
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(
+                        self._notify_routine_chain,
+                        str(fields.get("name", "")),
+                        bool(fields.get("completed", False)),
+                    )
         self._enqueue_activity(
             self._request_for_turn(record.get("turn_id")),
             event_name,
@@ -832,10 +842,23 @@ class DesktopBridge:
             profile_getter=lambda: runtime.context.settings.work_profile,
         )
         scheduler = ProactiveScheduler(runtime, store, deliverer)
+        self._proactive_scheduler = scheduler
         self._proactive_stop = asyncio.Event()
         self._proactive_task = asyncio.get_running_loop().create_task(
             scheduler.serve(self._proactive_stop)
         )
+
+    def notify_system_resume(self) -> None:
+        """Sistem uykudan uyandığında (`WM_POWERBROADCAST`) zamanlayıcıya haber verir."""
+        scheduler, loop = self._proactive_scheduler, self._loop
+        if scheduler is not None and loop is not None and not self._loop_stopping:
+            with suppress(RuntimeError):
+                loop.call_soon_threadsafe(scheduler.notify_system_resume)
+
+    def _notify_routine_chain(self, routine_name: str, completed: bool) -> None:
+        scheduler = self._proactive_scheduler
+        if scheduler is not None and not self._shutdown:
+            asyncio.create_task(scheduler.notify_routine_completed(routine_name, completed))
 
     def _proactive_panel(self, title: str, body: str) -> bool:
         if self._shutdown:
@@ -852,6 +875,7 @@ class DesktopBridge:
         return True
 
     def _stop_proactive(self) -> None:
+        self._proactive_scheduler = None
         if self._proactive_stop is not None:
             self._proactive_stop.set()
         task = self._proactive_task
