@@ -186,6 +186,7 @@ class SelectionPopup(QWidget):
             | Qt.WindowType.Tool,
         )
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self._on_action = on_action
         self._on_write = on_write
         self._palette = themes.THEMES[themes.DEFAULT_THEME]
@@ -202,6 +203,8 @@ class SelectionPopup(QWidget):
         self.info.setWordWrap(True)
         self.close_button = QPushButton("×", self)
         self.close_button.setObjectName("close")
+        self.close_button.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.close_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_button.setFixedSize(24, 24)
         self.close_button.setAccessibleName(t("Kapat"))
         self.close_button.setToolTip(t("Kapat"))
@@ -212,6 +215,7 @@ class SelectionPopup(QWidget):
             label = t(ACTION_LABELS[action])
             button = QPushButton(label, self)
             button.setAccessibleName(label)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setProperty("action", action)
             button.clicked.connect(self._action_clicked)
             self.buttons[action] = button
@@ -222,26 +226,37 @@ class SelectionPopup(QWidget):
         self.result.setFixedHeight(120)
         self.result.hide()
         self.copy_button = QPushButton(t("Kopyala"), self)
+        self.copy_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.copy_button.clicked.connect(self._copy)
         self.write_button = QPushButton(t("Yerine yaz"), self)
+        self.write_button.setObjectName("primaryAction")
+        self.write_button.setCursor(Qt.CursorShape.PointingHandCursor)
         self.write_button.clicked.connect(self._write)
         self.result_row = QWidget(self)
+        self.result_row.setObjectName("resultRow")
+        self.result_row.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         res_row = QHBoxLayout(self.result_row)
         res_row.setContentsMargins(0, 0, 0, 0)
+        res_row.setSpacing(6)
         res_row.addWidget(self.copy_button)
         res_row.addWidget(self.write_button)
         self.result_row.hide()
 
         self.radial_container = QWidget(self)
+        self.radial_container.setObjectName("radialContainer")
+        self.radial_container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.radial_grid = QGridLayout(self.radial_container)
-        self.radial_grid.setContentsMargins(4, 4, 4, 4)
-        self.radial_grid.setSpacing(8)
+        self.radial_grid.setContentsMargins(2, 2, 2, 2)
+        self.radial_grid.setHorizontalSpacing(6)
+        self.radial_grid.setVerticalSpacing(6)
         self.radial_container.hide()
 
         self.card_container = QWidget(self)
+        self.card_container.setObjectName("cardContainer")
+        self.card_container.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         card_layout = QVBoxLayout(self.card_container)
         card_layout.setContentsMargins(0, 0, 0, 0)
-        card_layout.setSpacing(6)
+        card_layout.setSpacing(8)
         text = QVBoxLayout()
         text.setSpacing(2)
         text.addWidget(self.title)
@@ -251,13 +266,14 @@ class SelectionPopup(QWidget):
         self.header_row.addWidget(self.header_icon, 0, Qt.AlignmentFlag.AlignTop)
         self.header_row.addLayout(text, 1)
         self.card_actions = QHBoxLayout()
+        self.card_actions.setSpacing(5)
         card_layout.addLayout(self.header_row)
         card_layout.addLayout(self.card_actions)
         card_layout.addWidget(self.result)
         card_layout.addWidget(self.result_row)
 
         self._main_layout = QVBoxLayout(self)
-        self._main_layout.setContentsMargins(16, 12, 16, 12)
+        self._main_layout.setContentsMargins(14, 12, 14, 12)
         self._main_layout.setSpacing(0)
         self._main_layout.addWidget(self.radial_container)
         self._main_layout.addWidget(self.card_container)
@@ -290,10 +306,10 @@ class SelectionPopup(QWidget):
             )
             for button in self.buttons.values():
                 button.setObjectName("radialAction")
-                button.setMinimumWidth(84)
+                button.setMinimumWidth(72)
                 button.show()
                 repolish(button)
-            self.close_button.setFixedSize(30, 30)
+            self.close_button.setFixedSize(28, 28)
             self.close_button.setProperty("radial", True)
             self.close_button.show()
             repolish(self.close_button)
@@ -321,7 +337,7 @@ class SelectionPopup(QWidget):
             self.close_button.show()
             repolish(self.close_button)
             self.setFixedWidth(WIDTH)
-            self._main_layout.setContentsMargins(16, 12, 16, 12)
+            self._main_layout.setContentsMargins(14, 12, 14, 12)
             self._main_layout.activate()
             self.resize(self.sizeHint())
         self.update()
@@ -329,25 +345,49 @@ class SelectionPopup(QWidget):
     def apply_theme(self, palette: dict[str, str]) -> None:
         self._palette = palette
         self.setStyleSheet(
+            "QWidget { background: transparent; }"
+            "#radialContainer, #cardContainer, #resultRow"
+            " { background: transparent; border: none; }"
             f"QLabel {{ color: {palette['text']}; font-size: 12px; background: transparent; }}"
-            f"QPlainTextEdit {{ color: {palette['text']}; background: transparent;"
-            f" border: 1px solid {palette['border']}; border-radius: 6px; font-size: 13px; }}"
-            f"QPushButton {{ color: {palette['text']}; background: transparent;"
-            f" border: 1px solid {palette['border']}; border-radius: 6px; padding: 4px 8px; }}"
-            f"QPushButton#radialAction {{ color: {palette['text']};"
-            f" background: {palette['surface']}; border: 1px solid {palette['border']};"
-            f" border-radius: 14px; padding: 6px 12px; font-weight: 500; }}"
-            f"QPushButton#radialAction:hover {{ border: 1.4px solid {palette['accent']}; }}"
-            f"QPushButton:disabled {{ color: {palette['muted']}; }}"
             f"QLabel#title {{ font-size: 13px; font-weight: 600; }}"
             f"QLabel#meta {{ color: {palette['muted']}; font-size: 12px; }}"
+            f"QPlainTextEdit {{ color: {palette['text']}; background: {palette['soft']};"
+            f" border: 1px solid {palette['control_border']}; border-radius: 8px;"
+            f" padding: 6px 8px; font-size: 13px; }}"
+            f"QPushButton {{ color: {palette['text']}; background: {palette['soft']};"
+            f" border: 1px solid {palette['control_border']}; border-radius: 7px;"
+            f" min-height: 22px; padding: 3px 6px; font-size: 12px; }}"
+            f"QPushButton:hover {{ border-color: {palette['accent']};"
+            f" background: {palette['accent_soft']}; }}"
+            f"QPushButton:focus {{ border: 1px solid {palette['accent']}; padding: 3px 6px; }}"
+            f"QPushButton#primaryAction {{ color: {palette['accent_text']};"
+            f" background: {palette['accent']}; border: 1px solid {palette['accent']};"
+            f" padding: 3px 10px; font-weight: 600; }}"
+            f"QPushButton#primaryAction:hover {{ background: {palette['accent']}; }}"
+            f"QPushButton#radialAction {{ color: {palette['text']};"
+            f" background: {palette['surface']}; border: 1px solid {palette['control_border']};"
+            f" border-radius: 15px; min-height: 22px; padding: 4px 12px;"
+            f" font-size: 12px; font-weight: 600; }}"
+            f"QPushButton#radialAction:hover {{ border-color: {palette['accent']};"
+            f" background: {palette['accent_soft']}; }}"
+            f"QPushButton#radialAction:pressed {{ background: {palette['accent']};"
+            f" color: {palette['accent_text']}; border-color: {palette['accent']}; }}"
+            f"QPushButton#radialAction:focus {{ border: 1px solid {palette['accent']};"
+            f" padding: 4px 12px; }}"
+            f"QPushButton:disabled {{ color: {palette['muted']};"
+            f" border-color: {palette['border']}; background: transparent; }}"
             f"QPushButton#close {{ color: {palette['muted']}; background: transparent;"
-            f" border: none; border-radius: 6px; padding: 0; font-size: 16px; }}"
-            f"QPushButton#close[radial=\"true\"] {{ background: {palette['surface']};"
-            f" border: 1px solid {palette['border']}; border-radius: 15px; }}"
-            f"QPushButton#close[radial=\"true\"]:hover"
-            f" {{ border: 1.4px solid {palette['accent']}; }}"
-            f"QPushButton#close:focus {{ border: 1px solid {palette['accent']}; }}"
+            f" border: none; border-radius: 12px; min-width: 24px; max-width: 24px;"
+            f" min-height: 24px; max-height: 24px; padding: 0px;"
+            f" font-size: 15px; font-weight: 500; }}"
+            f"QPushButton#close:hover {{ color: {palette['text']};"
+            f" background: {palette['soft']}; }}"
+            f'QPushButton#close[radial="true"] {{ background: {palette["surface"]};'
+            f' border: 1px solid {palette["control_border"]}; border-radius: 14px;'
+            f" min-width: 28px; max-width: 28px; min-height: 28px; max-height: 28px;"
+            f" padding: 0px; }}"
+            f'QPushButton#close[radial="true"]:hover {{ color: {palette["text"]};'
+            f' border-color: {palette["accent"]}; background: {palette["accent_soft"]}; }}'
         )
         self.update()
 
@@ -389,6 +429,7 @@ class SelectionPopup(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+        self.setFocus()
 
     def show_working(self) -> None:
         # Sonuç kutusu boş da olsa görünür kalır: sonuç gelince pencere boyu değişmez.
@@ -438,6 +479,7 @@ class SelectionPopup(QWidget):
         self.show()
         self.raise_()
         self.activateWindow()
+        self.setFocus()
 
     def keyPressEvent(self, event: QKeyEvent) -> None:
         if event.key() == Qt.Key.Key_Escape:
@@ -455,7 +497,7 @@ class SelectionPopup(QWidget):
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing)
-        p.setPen(QPen(QColor(self._palette["border"]), 1.2))
+        p.setPen(QPen(QColor(self._palette["control_border"]), 1.0))
         p.setBrush(QColor(self._palette["surface"]))
         p.drawRoundedRect(QRectF(self.rect()).adjusted(1, 1, -1, -1), 12, 12)
         p.end()

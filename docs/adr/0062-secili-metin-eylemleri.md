@@ -11,14 +11,14 @@
    sonrası imleç yanında küçük simgeyi açar. Kod: `artemis/channels/desktop/selection.py` (Qt'siz),
    `selection_uia.py` (süreç içi COM UIA okuyucu), `selection_mouse.py` (yoklamalı fare izleyici) ve
    `selection_popup.py` (`SelectionBadge` + radyal/kart `SelectionPopup`).
-2. **Seçimi alma (UIA öncelikli, gerçek ikili pano korumalı).** Önce süreç içi UIA `TextPattern`
-   (`selection_uia.py`) ile odaktaki öğe yoklanır: `IsPassword` alanı kesin reddedilir, seçili
-   metin doğrudan okunursa panoya hiç dokunulmadan yakalanır (`captured_uia`). UIA boşsa pano yedek
-   yoluna geçilir: `has_nontext_clipboard_formats` yalnızca gerçek ikili pano biçimleri (bitmap/DIB/PNG,
-   `CF_HDROP`/dosya listesi, RIFF/WAVE) varsa veya hiç metin biçimi yoksa reddeder; tarayıcı ve
-   düzenleyicilerin `CF_UNICODETEXT` yanında koyduğu `HTML Format`, Chromium/VS Code meta verileri ve
-   `CF_LOCALE` gibi yan biçimler düz metni bloke etmez. Ardından Ctrl+C + işaretçi ile seçili metin
-   okunur ve `finally` ile eski pano metni geri yazılır.
+2. **Seçimi alma (UIA öncelikli, HGLOBAL pano yedekli Ctrl+C).** Önce süreç içi UIA
+   `TextPattern` (`selection_uia.py`) ile odaktaki öğe yoklanır: `IsPassword` alanı kesin
+   reddedilir, seçili metin doğrudan okunursa panoya hiç dokunulmadan yakalanır
+   (`captured_uia`). UIA boşsa pano yedek yoluna geçilir: panoda metin dışı içerik (resim,
+   dosya listesi, zengin biçim) bulunsa bile seçili metin alınması reddedilmez; mevcut HGLOBAL
+   pano biçimleri (`16 MiB` tavanına dek) en iyi çaba yedeklenir, Ctrl+C + işaretçi ile seçili
+   metin okunur ve `finally` içinde ikili anlık görüntü (yoksa eski metin) geri yüklenir.
+   (`has_nontext_clipboard_formats` yardımcı sınıflandırıcısı dışa açık kalır.)
 3. **Fare simgesi ve imleç çevresinde radyal menü.** `SelectionMouseWatcher`, `SetWindowsHookEx`
    ve ek bağımlılık kullanmadan sürükleme/çift tıklama bitişini yoklar; Artemis'in kendi penceresini,
    engelli süreçleri (`BLOCKED_PROCESSES`) ve parola alanlarını yok sayar. Metin seçimi sonrası
@@ -50,12 +50,14 @@
 
 Kullanıcı/model tarafından düzenlenen şablonlar, eylemleri araç olarak modele açmak, sonucu otomatik
 yazmak, çoklu satır yazımı (sonuç tek satıra indirilir ki hedefte Enter gibi davranmasın; "Kopyala"
-biçimi korur), uzun metni parçalayıp işlemek, metin dışı pano içeriğini yedeklemek.
+biçimi korur), uzun metni parçalayıp işlemek, GDI tanıtıcıları (`CF_BITMAP`, `CF_ENHMETAFILE`) veya
+`16 MiB` üzeri çok büyük ikili pano nesnelerini bire bir klonlamak.
 
 ## Sınırlar
 
-- **Metin dışı pano içeriği** (resim, dosya listesi, zengin metin biçimi) yedeklenemez ve geri
-  konamaz; eylem sonrası pano boş ya da düz metin kalır. Panelde ipucunda yazar.
+- **Büyük veya GDI-özel pano nesneleri** (`16 MiB` üstü veya `HGLOBAL` olmayan GDI tanıtıcıları)
+  bire bir yedeklenemez; `HGLOBAL` biçimleri (`CF_DIB`, `CF_HDROP`, `PNG`, zengin biçimler) en iyi
+  çaba geri konur, geri yüklenemeyen durumda en azından önceki düz metin korunur.
 - Ctrl+C'yi desteklemeyen ya da seçimi başka yolla kopyalayan uygulamalarda "bulunamadı" çıkar.
 - Odak denetimi ile `SendInput` arasında ADR 0056'daki tek karakterlik yarış kalır.
 - "Yerine yaz" ile hedefte imleç/seçim kullanıcı pencereyi tekrar tıkladıysa değişmiş olabilir;

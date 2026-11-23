@@ -125,3 +125,45 @@ def test_selection_badge_activates_without_focus_steal_and_follows_theme() -> No
     assert not badge.isVisible()
     assert activated == [cand]
 
+
+def test_radial_popup_has_transparent_background_and_no_close_focus_with_global_theme() -> None:
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtGui import QColor, QPixmap
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop import themes
+    from artemis.channels.desktop.selection_popup import SelectionPopup
+
+    app = QApplication.instance() or QApplication([])
+    assert isinstance(app, QApplication)
+    prev_sheet = app.styleSheet()
+    popup: SelectionPopup | None = None
+    try:
+        for theme_name in ("dark", "light"):
+            app.setStyleSheet(themes.stylesheet(theme_name))
+            popup = SelectionPopup(None, on_action=lambda _name: None, on_write=lambda: None)
+            popup.apply_theme(themes.THEMES[theme_name])
+            popup.show_ready("4 karakter seçildi.", anchor=QPoint(300, 260))
+            app.processEvents()
+
+            assert popup.close_button.focusPolicy() == Qt.FocusPolicy.NoFocus
+            assert popup.radial_container.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            assert popup.card_container.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+            assert popup.result_row.testAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+
+            canvas = QPixmap(popup.size())
+            canvas.fill(Qt.GlobalColor.transparent)
+            popup.render(canvas)
+            image = canvas.toImage()
+            assert QColor.fromRgba(image.pixel(0, 0)).alpha() == 0
+            assert QColor.fromRgba(image.pixel(2, 2)).alpha() == 0
+            assert popup.close_button.width() >= 28
+            assert popup.close_button.height() >= 28
+            popup.close()
+    finally:
+        if popup is not None:
+            popup.close()
+        app.setStyleSheet(prev_sheet)
+
+

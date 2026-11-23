@@ -66,6 +66,9 @@ class World:
         self.focus_works = True
         self.focus_calls: list[int] = []
         self.clip_history: list[str] = []
+        self.backup_data: object = None
+        self.restore_ok = True
+        self.restored_snapshots: list[object] = []
 
     def type_text(self, text: str, should_continue: Callable[[], bool]) -> int:
         sent = 0
@@ -103,6 +106,13 @@ class World:
         self.focus_calls.append(hwnd)
         return self.focus_works
 
+    def backup(self) -> object:
+        return self.backup_data
+
+    def restore(self, snapshot: object) -> bool:
+        self.restored_snapshots.append(snapshot)
+        return self.restore_ok
+
     def backend(self) -> SelectionBackend:
         window = DictationBackend(
             lambda: self.window, lambda: 222, self.type_text, lambda press: FakeHotkey()
@@ -116,6 +126,8 @@ class World:
             self.focus,
             lambda: self.nontext,
             lambda: self.uia_result,
+            backup_clipboard=self.backup,
+            restore_clipboard=self.restore,
         )
 
 
@@ -604,16 +616,40 @@ def test_window_registers_selection_hotkey_only_when_enabled(
             time.sleep(0.01)
 
 
-async def test_nontext_clipboard_is_refused_without_copy_or_sentinel() -> None:
+async def test_nontext_clipboard_still_captures_selected_text_without_error() -> None:
     rig = Rig()
     rig.world.nontext = True
+    rig.world.clip = ""
     await rig.capture()
-    assert rig.world.copy_calls == 0
-    assert rig.world.clip_history == []
-    assert rig.kinds("ready") == []
-    assert "metin dışı" in rig.kinds("message")[-1]
-    assert rig.audit.named("selection_capture") == [{"outcome": "nontext_clipboard", "chars": 0}]
+    assert rig.world.copy_calls == 1
+    assert rig.kinds("ready") == [f"{len(SECRET)} karakter seçildi."]
+    assert rig.kinds("message") == []
+    assert rig.audit.named("selection_capture") == [{"outcome": "captured", "chars": len(SECRET)}]
     assert not rig.actions.busy
+
+
+async def test_binary_clipboard_snapshot_is_backed_up_and_restored_across_copy() -> None:
+    rig = Rig()
+    snapshot = [(8, b"dib"), (49400, b"png")]
+    rig.world.nontext = True
+    rig.world.clip = ""
+    rig.world.backup_data = snapshot
+    await rig.capture()
+    assert rig.kinds("ready") == [f"{len(SECRET)} karakter seçildi."]
+    assert rig.kinds("message") == []
+    assert rig.world.restored_snapshots == [snapshot]
+    # Anlık görüntü geri konduğunda boş düz metin üzerine yazılmaz; yalnızca işaretçi konmuştur.
+    assert len(rig.world.clip_history) == 1
+
+    fallback = Rig()
+    fallback.world.nontext = True
+    fallback.world.clip = "ESKI METIN"
+    fallback.world.backup_data = snapshot
+    fallback.world.restore_ok = False
+    await fallback.capture()
+    assert fallback.kinds("ready") == [f"{len(SECRET)} karakter seçildi."]
+    assert fallback.kinds("message") == []
+    assert fallback.world.clip == "ESKI METIN"
 
 
 async def test_read_clipboard_oserror_refuses_without_crashing() -> None:
