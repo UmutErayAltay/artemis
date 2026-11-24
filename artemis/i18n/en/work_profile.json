@@ -1,7 +1,12 @@
 {
   "Gizli": "Private",
+  "Gizli profil etkin: Telegram kanalı kapalı.": "Private profile active: Telegram channel is disabled.",
   "Gizli profil etkin: bulut modeline istek engellendi; yerel (ollama) model gerekli.": "Private profile active: cloud model request blocked; a local (ollama) model is required.",
   "Gizli profil: yalnız yerel modeller, bulut ve Telegram kapalı (değiştirmek için tıkla)": "Private profile: local-only models, cloud and Telegram off (click to switch)",
+  "Gizli profilde Telegram bildirimleri kapalı.": "Telegram notifications are disabled in Private profile.",
+  "Gizli profilde Telegram kanalı kapalı.": "Telegram channel is disabled in Private profile.",
+  "Gizli profilde bilgisayar kullanımı yalnızca yerel (ollama) modelle çalışır.": "In Private profile, computer use works only with a local (ollama) model.",
+  "Gizli profilde bulut veya Edge sesi önizlenemez.": "Cloud or Edge voice preview is disabled in Private profile.",
   "Oyun": "Game",
   "Oyun profili: bildirimler bastırılır, hafif ses modeli kullanılır (değiştirmek için tıkla)": "Game profile: notifications suppressed, lightweight voice model (click to switch)",
   "Toplantı": "Meeting",

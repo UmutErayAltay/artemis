@@ -107,11 +107,19 @@ class ComputerUse(BaseTool):
                 )
             )
         names = vision_models(settings)
-        # Görüntüyü yakalamadan ÖNCE reddedilir: ekran buluta yalnız açık izinle gider. Yedek
-        # modeller de sayılır; yoksa ilk model yerel olunca bulut yedeği izinsiz görüntü alırdı.
-        if not settings.perception.allow_cloud_screen:
+        # Görüntüyü yakalamadan ÖNCE reddedilir: gizli profilde ve izinsiz bulut kullanımında
+        # yalnız yerel (ollama) model kalır.
+        local_only = is_local_only_profile(settings.work_profile)
+        if not settings.perception.allow_cloud_screen or local_only:
             names = tuple(name for name in names if settings.models[name].provider == "ollama")
         if not names:
+            if local_only:
+                return ToolResult(
+                    message=t(
+                        "Gizli profilde bilgisayar kullanımı yalnızca yerel (ollama) "
+                        "modelle çalışır."
+                    )
+                )
             return ToolResult(
                 message=t(
                     "Ekran görüntüsü bulut modele gönderilemez: yerel (ollama) model seçin "
@@ -193,9 +201,17 @@ def vision_models(settings: Settings) -> tuple[str, ...]:
     """Bilgisayar kullanımının deneyeceği model adları, sırasıyla.
 
     Boş `computer_use.model` "ana beyni kullan" demektir: o an seçili ana model görüntüyü alır.
+    Görüntü gönderen kiplerde `claude_cli` (görsel eki soyulduğu için) dışarıda tutulur.
     """
     config = settings.computer_use
-    return tuple(dict.fromkeys((config.model or settings.primary_model, *config.fallback_models)))
+    raw = tuple(dict.fromkeys((config.model or settings.primary_model, *config.fallback_models)))
+    if config.observation == "uia":
+        return raw
+    return tuple(
+        name
+        for name in raw
+        if name not in settings.models or settings.models[name].provider != "claude_cli"
+    )
 
 
 def planner_models(settings: Settings) -> tuple[str, ...]:
@@ -215,10 +231,7 @@ def planner_models(settings: Settings) -> tuple[str, ...]:
     )
     if not settings.perception.allow_cloud_screen or is_local_only_profile(settings.work_profile):
         return tuple(name for name in candidates if settings.models[name].provider == "ollama")
-    vision_capable = tuple(
-        name for name in candidates if settings.models[name].provider != "claude_cli"
-    )
-    return vision_capable or candidates
+    return tuple(name for name in candidates if settings.models[name].provider != "claude_cli")
 
 
 def _build_chain(names: tuple[str, ...], settings: Settings, audit: Any) -> _ModelChain:

@@ -67,7 +67,12 @@ class PiperVoiceSpec:
 
 
 def _build_piper_spec(
-    voice_id: str, label: str, approx_size_mb: int
+    voice_id: str,
+    label: str,
+    approx_size_mb: int,
+    *,
+    onnx_sha256: str | None = None,
+    json_sha256: str | None = None,
 ) -> PiperVoiceSpec:
     match = _PIPER_VOICE_RE.fullmatch(voice_id)
     if match is None:
@@ -87,18 +92,32 @@ def _build_piper_spec(
         onnx_url=_PIPER_URL_TEMPLATE.format(extension=".onnx", **args),
         json_url=_PIPER_URL_TEMPLATE.format(extension=".onnx.json", **args),
         approx_size_mb=approx_size_mb,
+        onnx_sha256=onnx_sha256,
+        json_sha256=json_sha256,
     )
 
 
 PIPER_VOICE_CATALOG: dict[str, PiperVoiceSpec] = {
     "tr_TR-dfki-medium": _build_piper_spec(
-        "tr_TR-dfki-medium", "Türkçe · DFKI Medium", 63
+        "tr_TR-dfki-medium",
+        "Türkçe · DFKI Medium",
+        63,
+        onnx_sha256="2844717f524ab965d3fe86e60562cbb601d3e456836efcc2196cc3a14112a8fb",
+        json_sha256="13ebd7810f1b61b5027583cf3131a0a233b6ea81c38f2200ebc4ff41c3cca039",
     ),
     "en_US-lessac-medium": _build_piper_spec(
-        "en_US-lessac-medium", "English (US) · Lessac Medium", 63
+        "en_US-lessac-medium",
+        "English (US) · Lessac Medium",
+        63,
+        onnx_sha256="5efe09e69902187827af646e1a6e9d269dee769f9877d17b16b1b46eeaaf019f",
+        json_sha256="efe19c417bed055f2d69908248c6ba650fa135bc868b0e6abb3da181dab690a0",
     ),
     "en_GB-alba-medium": _build_piper_spec(
-        "en_GB-alba-medium", "English (UK) · Alba Medium", 63
+        "en_GB-alba-medium",
+        "English (UK) · Alba Medium",
+        63,
+        onnx_sha256="1f9da809b6da1ef4190bb5dd6cce4f4af803274539e9cf9e0693085150bac3d7",
+        json_sha256="ed4b1f015a8aae5eb26d4bdeed7b712c660f5698a0dd954aa6df9c8be60b900b",
     ),
 }
 
@@ -557,8 +576,8 @@ def _piper_entries(
             voice_id, search_dirs, settings.voice.piper_model, settings.voice.piper_config
         )
         pinned = piper_pins.get(voice_id) if piper_pins else None
-        exp_onnx = pinned[0] if pinned else (spec.onnx_sha256 if spec else None)
-        exp_json = pinned[1] if pinned else (spec.json_sha256 if spec else None)
+        exp_onnx = pinned[0] if pinned is not None else (spec.onnx_sha256 if spec else None)
+        exp_json = pinned[1] if pinned is not None else (spec.json_sha256 if spec else None)
         is_active = voice_id == settings.voice.piper_voice or (
             settings.voice.piper_model is not None
             and onnx_path is not None
@@ -880,10 +899,19 @@ def verify_voice_model(
     return entry
 
 
+def _require_https_request(request: httpx.Request) -> None:
+    if request.url.scheme != "https":
+        raise ValueError("Yalnız HTTPS adresleri indirilebilir (yönlendirme reddedildi).")
+
+
 def _default_url_fetch(url: str) -> bytes:
     if not url.startswith("https://"):
         raise ValueError("Yalnız HTTPS adresleri indirilebilir.")
-    with httpx.Client(follow_redirects=True, timeout=60.0) as client:
+    with httpx.Client(
+        follow_redirects=True,
+        timeout=60.0,
+        event_hooks={"request": [_require_https_request]},
+    ) as client:
         response = client.get(url)
         response.raise_for_status()
         return response.content
@@ -989,8 +1017,8 @@ def download_voice_model(
         target_dir = piper_models_dir or (config_path.parent / "models")
         fetcher = url_fetcher or _default_url_fetch
         pinned = piper_pins.get(entry.name) if piper_pins else None
-        exp_onnx = pinned[0] if pinned else spec.onnx_sha256
-        exp_json = pinned[1] if pinned else spec.json_sha256
+        exp_onnx = pinned[0] if pinned is not None else spec.onnx_sha256
+        exp_json = pinned[1] if pinned is not None else spec.json_sha256
 
         onnx_bytes = fetcher(spec.onnx_url)
         json_bytes = fetcher(spec.json_url)

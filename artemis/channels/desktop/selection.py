@@ -28,6 +28,7 @@ from artemis.channels.desktop.dictation import (
     type_into_target,
 )
 from artemis.channels.desktop.selection_uia import read_uia_selection
+from artemis.computer.actions import process_block_reason
 from artemis.config.settings import Settings
 from artemis.config.work_profile import is_local_only_profile
 from artemis.i18n import t
@@ -121,6 +122,7 @@ class SelectionBackend:
     read_selection: Callable[[], tuple[str | None, bool]] | None = None
     backup_clipboard: Callable[[], object] | None = None
     restore_clipboard: Callable[[object], bool] | None = None
+    foreground_process: Callable[[], tuple[str, int]] | None = None
 
 
 def _win_clipboard_apis() -> tuple[Any, Any] | None:
@@ -330,6 +332,11 @@ def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
         finally:
             user32.CloseClipboard()
 
+    def fg_process() -> tuple[str, int]:
+        from artemis.computer import windows
+
+        return windows.foreground_process()
+
     return SelectionBackend(
         window,
         read,
@@ -341,6 +348,7 @@ def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
         lambda: read_uia_selection(MAX_CHARS + 1),
         backup_clipboard=_backup_clipboard_formats,
         restore_clipboard=_restore_clipboard_formats,
+        foreground_process=fg_process,
     )
 
 
@@ -441,6 +449,18 @@ class SelectionActions:
             return t(_PRIVACY)
         return ""
 
+    def _is_target_blocked(self) -> bool:
+        probe = self._backend.foreground_process
+        if probe is None:
+            return False
+        try:
+            exe_path, pid = probe()
+        except (OSError, RuntimeError):
+            return True
+        if pid == self._own_pid or not exe_path.strip():
+            return True
+        return process_block_reason(exe_path, pid, self._own_pid) is not None
+
     def start_capture(self, *, skip_key_wait: bool = False) -> None:
         problem = self._problem()
         if problem:
@@ -454,6 +474,10 @@ class SelectionActions:
         problem = self._problem()
         if problem:
             self._emit("message", problem)
+            return
+        if self._is_target_blocked():
+            self._audit_safe("selection_capture", outcome="blocked", chars=0)
+            self._emit("message", t("Korumalı veya engelli pencerede seçili metin alınmaz."))
             return
         if not self._begin("capturing"):
             return
@@ -511,6 +535,11 @@ class SelectionActions:
             target = foreground_target(self._backend.window, self._own_pid)
             if target is None:
                 outcome, message = "no_target", t("Seçili metin için hedef pencere yok.")
+                return
+            if await asyncio.to_thread(self._is_target_blocked):
+                outcome, message = "blocked", t(
+                    "Korumalı veya engelli pencerede seçili metin alınmaz."
+                )
                 return
             if not skip_key_wait and not await self._keys_released():
                 outcome, message = "keys_down", t("Kısayol tuşlarını bırakıp yeniden deneyin.")

@@ -146,7 +146,20 @@ def send_mail(
         except (smtplib.SMTPException, OSError) as error:
             raise SourceError(f"E-posta gönderilemedi ({type(error).__name__}).") from None
         if refused:
-            raise SourceError("E-posta alıcılarından bazıları sunucu tarafından reddedildi.")
+            all_recipients = to_addrs + cc_addrs
+            refused_addrs = list(refused.keys())
+            refused_set = {addr.casefold() for addr in refused_addrs}
+            accepted_addrs = [addr for addr in all_recipients if addr.casefold() not in refused_set]
+            if accepted_addrs:
+                raise SourceError(
+                    "E-posta kısmen gönderildi. Teslim edilen: "
+                    f"{', '.join(accepted_addrs)}; reddedilen: {', '.join(refused_addrs)}. "
+                    "Çift gönderim yapmamak için yalnız reddedilen alıcılara tekrar deneyin."
+                )
+            raise SourceError(
+                f"E-posta tüm alıcılar için sunucu tarafından reddedildi: "
+                f"{', '.join(refused_addrs)}."
+            )
     finally:
         with contextlib.suppress(smtplib.SMTPException, OSError):
             smtp.quit()
@@ -282,8 +295,21 @@ class _CalDavRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(  # type: ignore[no-untyped-def]
         self, req: Any, fp: Any, code: Any, msg: Any, headers: Any, newurl: Any
     ):
-        if not _is_allowed_caldav_url(str(newurl)):
+        target = str(newurl)
+        if not _is_allowed_caldav_url(target):
             raise SourceError("CalDAV adresi güvenli olmayan bir adrese yönlendirdi; reddedildi.")
+        orig = urlparse(req.full_url)
+        dest = urlparse(target)
+        if (
+            orig.scheme.lower(),
+            (orig.hostname or "").lower(),
+            orig.port,
+        ) != (
+            dest.scheme.lower(),
+            (dest.hostname or "").lower(),
+            dest.port,
+        ):
+            raise SourceError("CalDAV sunucusu farklı bir adrese yönlendirdi; reddedildi.")
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 

@@ -94,5 +94,8 @@ def switch_work_profile(window: DesktopWindow, profile: str) -> bool:
     runtime_dump = getattr(window, "_runtime_dump", None)
     if isinstance(runtime_dump, dict):
         runtime_dump["work_profile"] = profile
+    sync_telegram = getattr(window, "_sync_telegram_service", None)
+    if callable(sync_telegram):
+        sync_telegram()
     refresh_profile_button(window, profile)
     return True

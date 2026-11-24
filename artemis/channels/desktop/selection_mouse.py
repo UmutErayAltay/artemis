@@ -121,6 +121,7 @@ class SelectionMouseWatcher:
         if (
             snap.hwnd <= 0
             or snap.pid == self._own_pid
+            or not snap.exe_path.strip()
             or self._is_own_widget_at(snap.x, snap.y)
         ):
             self._last_click = None

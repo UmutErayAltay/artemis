@@ -135,6 +135,7 @@ from artemis.channels.desktop.window_theme import (
 )
 from artemis.channels.runtime import Runtime, create_runtime
 from artemis.config.settings import load_settings
+from artemis.config.work_profile import is_local_only_profile
 from artemis.i18n import set_language, t
 from artemis.safety.audit import AuditLog
 from artemis.tools.toast import ToastOutcome, show_toast
@@ -647,10 +648,10 @@ class DesktopWindow(QMainWindow):
         if self._demo or self._exiting:
             return
         try:
-            config = load_settings(self._config_path).telegram
+            loaded = load_settings(self._config_path)
         except (OSError, ValueError, yaml.YAMLError):
             return
-        if should_run(config):
+        if not is_local_only_profile(loaded.work_profile) and should_run(loaded.telegram):
             service.start(self._config_path)
 
     def _code_agent_config_saved(self) -> None:
