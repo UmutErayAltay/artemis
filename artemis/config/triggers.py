@@ -130,6 +130,10 @@ class SuggestionChainConfig(BaseModel):
             raise ValueError(
                 "Zincir için after_routine veya after_trigger alanlarından biri gerekli"
             )
+        if self.after_routine and self.after_trigger:
+            raise ValueError(
+                "Zincir yalnız bir kaynak seçebilir: after_routine veya after_trigger"
+            )
         if self.suggest is not None and self.routine is not None:
             raise ValueError("Bir öneri zinciri en çok bir düğme taşır: suggest ya da routine")
         if (

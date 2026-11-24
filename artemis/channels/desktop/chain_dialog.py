@@ -71,6 +71,10 @@ def validate_chain(
         errors["name"] = t("Bu ad zaten kullanılıyor.")
     if not after_routine and not after_trigger:
         errors["after_routine"] = t("Bir kaynak rutin veya kaynak tetikleyici seç.")
+    elif after_routine and after_trigger:
+        errors["after_routine"] = t(
+            "Yalnız bir kaynak seç: ya rutin ya tetikleyici, ikisi birden olmaz."
+        )
     if suggest is not None and routine is not None:
         errors["routine"] = t("Düğme ya öneri ya rutin olur, ikisi birden olmaz.")
     if (

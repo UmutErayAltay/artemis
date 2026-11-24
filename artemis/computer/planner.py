@@ -513,3 +513,22 @@ async def consult_strategist_decision(
         return await ask_fn(messages)
     except ProviderError:
         return None
+
+
+def describe_action(action: Action) -> str:
+    """Kısa hedef tarifi: yuvarlanmış koordinat / tuşlar / yalnız metin UZUNLUĞU."""
+    if action.type in ("click", "scroll", "hover"):
+        text = f"({round((action.x or 0) / 10) * 10},{round((action.y or 0) / 10) * 10})"
+        if action.screen > 1:
+            text += f" ekran{action.screen}"
+        return text + (f" dy={action.dy}" if action.type == "scroll" else "")
+    if action.type == "click_element":
+        return f"öğe {action.element}"
+    if action.type == "type":
+        return f"{len(action.text or '')} karakter"
+    if action.type == "key":
+        keys = action.keys or ""
+        return f"{keys} x{action.repeat}" if action.repeat > 1 else keys
+    if action.type == "wait":
+        return f"{action.seconds}sn"
+    return ""

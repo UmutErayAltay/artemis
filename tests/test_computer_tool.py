@@ -720,7 +720,7 @@ def test_planner_models_routing_and_privacy_gates(tmp_path: Path) -> None:
         primary_model="cli",
         perception=PerceptionConfig(allow_cloud_screen=True),
     )
-    assert planner_models(only_cli) == ("cli",)
+    assert planner_models(only_cli) == ()
     # allow_cloud_screen kapalıysa yalnız ollama kalır
     no_cloud = base.model_copy(update={"perception": PerceptionConfig(allow_cloud_screen=False)})
     assert planner_models(no_cloud) == ("local",)

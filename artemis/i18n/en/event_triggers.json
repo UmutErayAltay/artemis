@@ -43,6 +43,7 @@
   "Uygulama veya süreç adı gir (ör. code.exe).": "Enter an application or process name (e.g. code.exe).",
   "Uygulama: {app}{button} · son bildirim: {last}": "Application: {app}{button} · last notification: {last}",
   "Yaklaşan toplantı: {title} ({minutes} dk)": "Upcoming meeting: {title} ({minutes} min)",
+  "Yalnız bir kaynak seç: ya rutin ya tetikleyici, ikisi birden olmaz.": "Choose only one source: either a routine or a trigger, not both.",
   "Yeniden bildirme bekleme süresi": "Re-notification cooldown",
   "Zincir aynı rutini doğrudan yeniden öneremez.": "A chain cannot directly suggest the same routine again.",
   "Zincir ekle": "Add chain",

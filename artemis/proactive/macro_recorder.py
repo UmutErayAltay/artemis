@@ -435,7 +435,6 @@ class MacroRecorder:
             return None
 
         if self._is_blocked(snap):
-            self._prev_left_down = False
             blocked_key = (_normalize_exe_name(snap.exe_path), snap.pid)
             if blocked_key != self._last_blocked_key or left_edge:
                 self.skipped_blocked_count += 1

@@ -68,6 +68,12 @@ def test_release_windows_workflow_structure_and_signing_fallback() -> None:
     assert auth_steps
     auth_if = str(auth_steps[0].get("if", ""))
     assert "steps.signing.outputs.authenticode == 'true'" in auth_if
+    assert "/DSignToolCmd=" in str(auth_steps[0].get("run", ""))
+    signing_idx = next(i for i, s in enumerate(steps) if s.get("id") == "signing")
+    iscc_indices = [
+        i for i, s in enumerate(steps) if "packaging\\artemis.iss" in str(s.get("run", ""))
+    ]
+    assert iscc_indices and all(signing_idx < i for i in iscc_indices)
 
     fallback_steps = [s for s in steps if "Unsigned" in s.get("name", "")]
     assert fallback_steps

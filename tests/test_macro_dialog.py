@@ -69,6 +69,11 @@ def test_macro_dialog_observation_privacy_masking_and_submit(
                 left_down=True,
             ),
             ObserverSnapshot(
+                exe_path=r"C:\Windows\System32\cmd.exe",
+                pid=10,
+                left_down=False,
+            ),
+            ObserverSnapshot(
                 exe_path=r"C:\Windows\System32\notepad.exe",
                 pid=20,
                 hwnd=5,
@@ -120,7 +125,7 @@ def test_macro_dialog_observation_privacy_masking_and_submit(
 
         assert not dialog.save_button.isEnabled()
         dialog.start_recording()
-        for _ in range(4):
+        for _ in range(5):
             dialog.poll_once()
         dialog.stop_recording()
 

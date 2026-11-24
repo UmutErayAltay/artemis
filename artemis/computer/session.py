@@ -58,6 +58,7 @@ from artemis.computer.planner import (
     build_executor_messages,
     build_verify_messages,
     consult_strategist_decision,
+    describe_action,
     describe_screens_context,
     is_give_up_question,
     is_no_progress,
@@ -206,25 +207,6 @@ def _signature(
     return None
 
 
-def _describe(action: Action) -> str:
-    """Kısa hedef tarifi: yuvarlanmış koordinat / tuşlar / yalnız metin UZUNLUĞU."""
-    if action.type in ("click", "scroll", "hover"):
-        text = f"({round((action.x or 0) / 10) * 10},{round((action.y or 0) / 10) * 10})"
-        if action.screen > 1:
-            text += f" ekran{action.screen}"
-        return text + (f" dy={action.dy}" if action.type == "scroll" else "")
-    if action.type == "click_element":
-        return f"öğe {action.element}"
-    if action.type == "type":
-        return f"{len(action.text or '')} karakter"
-    if action.type == "key":
-        keys = action.keys or ""
-        return f"{keys} x{action.repeat}" if action.repeat > 1 else keys
-    if action.type == "wait":
-        return f"{action.seconds}sn"
-    return ""
-
-
 class ComputerSession:
     def __init__(
         self,
@@ -361,10 +343,12 @@ class ComputerSession:
                     not elements or self._last_used_vision
                 ):
                     step_images = True
-                    captured = await self._capture(limit, with_images=True)
-                    if isinstance(captured, SessionResult):
-                        return captured
-                    screens = captured
+                    recaptured = await self._recapture_hybrid(
+                        elements, layout.window if layout else None, limit
+                    )
+                    if isinstance(recaptured, SessionResult):
+                        return recaptured
+                    screens, elements = recaptured
                     layout = self._layout
                 self._elements = {item.id: item for item in elements}
                 elements_block = "\n" + _render_elements(elements)
@@ -812,11 +796,15 @@ class ComputerSession:
                     # _loop gibi taze ekran görüntüsünü de eklemelidir.
                     if not elements_list or self._last_used_vision:
                         with_images = True
-                        re_shot = await self._capture(limit, with_images=True)
-                        if isinstance(re_shot, SessionResult):
-                            re_captured = re_shot
+                        recaptured = await self._recapture_hybrid(
+                            elements_list,
+                            self._layout.window if self._layout else None,
+                            limit,
+                        )
+                        if isinstance(recaptured, SessionResult):
+                            re_captured = recaptured
                         else:
-                            captured = re_shot
+                            captured, elements_list = recaptured
                 if re_captured is not None:
                     verdict = (False, f"Doğrulama çalışamadı: {re_captured.summary}")
                 elif with_images:
@@ -873,6 +861,20 @@ class ComputerSession:
         # "Bitti" notu da modelin ekrandan aktardığı metin olabilir; kanıtla aynı süzgeçten geçer.
         note = mask_screen_secrets(done_text)
         return SessionResult("done", note, self._steps, verdict[0], verdict[1])
+
+    async def _recapture_hybrid(
+        self, elements: list[UiElement], prev_window: Any, limit: float
+    ) -> tuple[list[_Screen], list[UiElement]] | SessionResult:
+        """Hybrid yeniden yakalamada pencere değişmişse UIA öğelerini yeni pencereye eşitler."""
+        captured = await self._capture(limit, with_images=True)
+        if isinstance(captured, SessionResult):
+            return captured
+        cur_window = self._layout.window if self._layout else None
+        if prev_window is None or cur_window is None or cur_window != prev_window:
+            elements = await self._read_elements(
+                cur_window[0] if cur_window else 0, limit=limit
+            )
+        return captured, elements
 
     async def _os_check(self, limit: float, *, ask_ui: bool) -> tuple[bool | None, str]:
         """OS kanıtı (ADR 0070): girdi sonuçları ve yazımda odaktaki alan. Modelin "hayır"ını
@@ -1090,7 +1092,7 @@ class ComputerSession:
             StepRecord(
                 n=self._steps,
                 action=action.type,
-                target=_describe(action),
+                target=describe_action(action),
                 reason=masked_reason,
                 window=window,
                 signature=_signature(action, point),

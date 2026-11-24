@@ -97,6 +97,7 @@ def test_inventory_covers_all_four_families_with_sizes_and_statuses(
         cfg,
         whisper_installed=lambda name: small_snap if name == "small" else None,
         piper_models_dir=piper_dir,
+        piper_pins={"tr_TR-dfki-medium": (None, None)},
         silero_dir=silero_dir,
         dfn3_dir=dfn3_dir,
         hf_cache_roots=(hf_cache,),
@@ -348,6 +349,12 @@ def test_widget_offline_operations_bundled_protection_and_demo_mode(
     common = {
         "whisper_installed": lambda _n: None,
         "piper_models_dir": piper_dir,
+        "piper_pins": {
+            "tr_TR-dfki-medium": (
+                hashlib.sha256(onnx_payload).hexdigest(),
+                hashlib.sha256(json_payload).hexdigest(),
+            )
+        },
         "silero_dir": silero_dir,
         "dfn3_dir": dfn3_dir,
         "hf_cache_roots": (hf_cache,),
