@@ -9,12 +9,6 @@ description = "Local-first Windows personal desktop assistant with a unified saf
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE", "LICENSES/*.txt", "THIRD_PARTY_NOTICES.md"]
-
-[project.urls]
-Homepage = "https://github.com/UmutErayAltay/artemis"
-Repository = "https://github.com/UmutErayAltay/artemis"
-Issues = "https://github.com/UmutErayAltay/artemis/issues"
-Releases = "https://github.com/UmutErayAltay/artemis/releases"
 dependencies = [
   "pydantic==2.12.3",
   "httpx==0.28.1",
@@ -23,6 +17,12 @@ dependencies = [
   # Windows'ta sistem IANA saat dilimi veritabanı yok; zoneinfo bunu kullanır (ADR 0027).
   "tzdata==2026.4; sys_platform == 'win32'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/UmutErayAltay/artemis"
+Repository = "https://github.com/UmutErayAltay/artemis"
+Issues = "https://github.com/UmutErayAltay/artemis/issues"
+Releases = "https://github.com/UmutErayAltay/artemis/releases"
 
 [project.optional-dependencies]
 dev = [
