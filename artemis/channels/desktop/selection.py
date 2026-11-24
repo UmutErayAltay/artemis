@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import sys
 import time
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -124,7 +125,6 @@ class SelectionBackend:
 
 def _win_clipboard_apis() -> tuple[Any, Any] | None:
     import ctypes
-    import sys
     from ctypes import wintypes
 
     # sys.platform (platform.system() değil): mypy Linux'ta Windows'a özel ctypes'ı atlar.
@@ -186,6 +186,8 @@ def _backup_clipboard_formats(
     """Panodaki HGLOBAL tabanlı ikili/zengin biçimleri bellek sınırı içinde yedekler."""
     import ctypes
 
+    if sys.platform != "win32":
+        return []
     apis = _win_clipboard_apis()
     if apis is None:
         return []
@@ -300,6 +302,8 @@ def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
     def has_nontext() -> bool:
         import ctypes
 
+        if sys.platform != "win32":
+            return False
         apis = _win_clipboard_apis()
         if apis is None:
             return False

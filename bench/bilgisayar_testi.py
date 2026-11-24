@@ -262,6 +262,9 @@ class SimBackend:
         with self._lock:
             self.app.click(x, y, double)
 
+    def hover(self, x: int, y: int) -> None:
+        return None
+
     def scroll(self, x: int, y: int, notches: int) -> None:
         with self._lock:
             self.app.wheel(notches)

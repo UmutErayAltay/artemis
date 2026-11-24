@@ -65,6 +65,8 @@ def _release(ptr: ctypes.c_void_p | None) -> None:
 def _read_text_ranges(
     elem: ctypes.c_void_p, max_chars: int, sys_free_string: Any
 ) -> str | None:
+    if sys.platform != "win32":
+        return None
     pattern = ctypes.c_void_p()
     ranges = ctypes.c_void_p()
     try:
