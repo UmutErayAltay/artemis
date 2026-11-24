@@ -249,7 +249,7 @@ def fit_topbar(window: DesktopWindow) -> None:
         window.model_caption.setVisible(False)
     if (
         needed > available
-        and width >= 1000
+        and width >= 1200
         and status_label is not None
         and status_pill is not None
         and full_text
