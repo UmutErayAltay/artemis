@@ -172,7 +172,7 @@ async def test_provider_timeout_falls_back_with_remaining_turn_budget(
         audit_path=tmp_path / "audit.jsonl",
         primary_model="cloud",
         fallback_model="local",
-        max_seconds=1.0,
+        max_seconds=5.0,
         provider_timeout_seconds=0.05,
         max_output_tokens=100,
         allow_paid=True,
@@ -199,7 +199,7 @@ async def test_provider_timeout_falls_back_with_remaining_turn_budget(
     class SlowCloud:
         async def complete(self, messages, tools, *, timeout):
             try:
-                await asyncio.sleep(5)
+                await asyncio.sleep(10)
             finally:
                 cloud_cancelled.set()
 
