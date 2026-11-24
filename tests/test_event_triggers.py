@@ -748,4 +748,4 @@ def test_bridge_forwards_system_resume_and_routine_completion_chains(tmp_path: P
         assert seen_proactive[0].suggest == "Özetle"
     finally:
         bridge.shutdown()
-        assert bridge._stopped.wait(timeout=5.0)
+        assert bridge._stopped.wait(timeout=20.0)

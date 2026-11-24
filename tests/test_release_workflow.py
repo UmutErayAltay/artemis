@@ -41,45 +41,43 @@ def test_release_windows_workflow_structure_and_signing_fallback() -> None:
     assert "packaging\\artemis.iss" in joined_runs or "packaging/artemis.iss" in joined_runs
     assert "/DMyAppVersion=" in joined_runs
 
-    # SignPath + Authenticode kancası + imzasız yedek bildirimi + SHA256SUMS.txt
-    signpath_steps = [s for s in steps if "SignPath" in s.get("name", "")]
-    assert signpath_steps
-    signpath_if = str(signpath_steps[0].get("if", ""))
+    # SignPath + Authenticode kancası (`Resolve signing mode` çıktıları; `secrets.` yok)
+    signing_steps = [s for s in steps if s.get("id") == "signing"]
+    assert signing_steps
+    signing_env = signing_steps[0].get("env", {})
+    signing_run = str(signing_steps[0].get("run", ""))
+    assert isinstance(signing_env, dict)
     for secret_name in (
         "SIGNPATH_API_TOKEN",
         "SIGNPATH_ORGANIZATION_ID",
         "SIGNPATH_PROJECT_SLUG",
         "SIGNPATH_SIGNING_POLICY_SLUG",
+        "WINDOWS_CERT_PFX_BASE64",
+        "WINDOWS_CERT_PASSWORD",
     ):
-        assert secret_name in signpath_if
+        assert secret_name in signing_env
+    assert "GITHUB_OUTPUT" in signing_run
+    assert "signpath" in signing_run and "authenticode" in signing_run
+
+    signpath_steps = [s for s in steps if "SignPath" in s.get("name", "")]
+    assert signpath_steps
+    signpath_if = str(signpath_steps[0].get("if", ""))
+    assert "steps.signing.outputs.signpath == 'true'" in signpath_if
 
     auth_steps = [s for s in steps if "Authenticode" in s.get("name", "")]
     assert auth_steps
     auth_if = str(auth_steps[0].get("if", ""))
-    for secret_name in (
-        "SIGNPATH_API_TOKEN",
-        "SIGNPATH_ORGANIZATION_ID",
-        "SIGNPATH_PROJECT_SLUG",
-        "SIGNPATH_SIGNING_POLICY_SLUG",
-        "WINDOWS_CERT_PFX_BASE64",
-        "WINDOWS_CERT_PASSWORD",
-    ):
-        assert secret_name in auth_if
-    assert "SIGNPATH_API_TOKEN ==" in auth_if
-    assert "SIGNPATH_ORGANIZATION_ID ==" in auth_if
+    assert "steps.signing.outputs.authenticode == 'true'" in auth_if
 
     fallback_steps = [s for s in steps if "Unsigned" in s.get("name", "")]
     assert fallback_steps
     fallback_if = str(fallback_steps[0].get("if", ""))
-    for secret_name in (
-        "SIGNPATH_API_TOKEN",
-        "SIGNPATH_ORGANIZATION_ID",
-        "SIGNPATH_PROJECT_SLUG",
-        "SIGNPATH_SIGNING_POLICY_SLUG",
-        "WINDOWS_CERT_PFX_BASE64",
-        "WINDOWS_CERT_PASSWORD",
-    ):
-        assert secret_name in fallback_if
+    assert "steps.signing.outputs.signpath != 'true'" in fallback_if
+    assert "steps.signing.outputs.authenticode != 'true'" in fallback_if
+
+    for job in jobs.values():
+        for step in job.get("steps", []):
+            assert "secrets." not in str(step.get("if", ""))
 
     assert any("SHA256SUMS.txt" in name for name in step_names)
     assert "SHA256SUMS.txt" in joined_runs

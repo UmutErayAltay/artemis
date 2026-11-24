@@ -166,6 +166,30 @@ def _topbar_item_width(widget: QWidget) -> int:
     return max(widget.minimumWidth(), widget.sizeHint().width(), 0)
 
 
+def _elide_status_pill(
+    status_pill: QFrame,
+    status_label: QLabel,
+    full_text: str,
+    other_w: int,
+    available: int,
+) -> None:
+    pill_w = _topbar_item_width(status_pill)
+    label_w = status_label.sizeHint().width()
+    pill_chrome = max(0, pill_w - label_w)
+    max_label_w = max(32, available - other_w - pill_chrome - 4)
+    metrics = QFontMetrics(status_label.font())
+    shown = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, max_label_w)
+    status_label.setText(shown)
+    status_pill.adjustSize()
+    while other_w + _topbar_item_width(status_pill) > available and max_label_w > 32:
+        max_label_w = max(32, max_label_w - 8)
+        shown = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, max_label_w)
+        status_label.setText(shown)
+        status_pill.adjustSize()
+    status_label.setProperty("_elided_text", shown)
+    status_pill.setToolTip(full_text if shown != full_text else t("Çalışma durumu"))
+
+
 def fit_topbar(window: DesktopWindow) -> None:
     """Üst çubukta durum hapının kırpılmaması için ikincil etiketleri sığdırır."""
     header = getattr(window, "_topbar", None)
@@ -190,6 +214,7 @@ def fit_topbar(window: DesktopWindow) -> None:
             status_label.setText(full_text)
             status_pill.adjustSize()
         status_label.setProperty("_elided_text", None)
+        status_pill.setToolTip(t("Çalışma durumu"))
     if window.demo_chip is not None:
         window.demo_chip.setVisible(True)
     window.model_box.setVisible(width >= 800)
@@ -219,7 +244,21 @@ def fit_topbar(window: DesktopWindow) -> None:
     if not widgets:
         return
     needed = sum(_topbar_item_width(w) for w in widgets) + spacing * (len(widgets) - 1)
-    optional_items: list[QWidget] = [window.model_caption, window.budget_chip]
+    if needed > available and not window.model_caption.isHidden():
+        needed -= _topbar_item_width(window.model_caption) + spacing
+        window.model_caption.setVisible(False)
+    if (
+        needed > available
+        and width >= 1000
+        and status_label is not None
+        and status_pill is not None
+        and full_text
+    ):
+        other_w = needed - _topbar_item_width(status_pill)
+        if available - other_w >= 180:
+            _elide_status_pill(status_pill, status_label, full_text, other_w, available)
+            needed = other_w + _topbar_item_width(status_pill)
+    optional_items: list[QWidget] = [window.budget_chip]
     if profile_button is not None:
         optional_items.append(profile_button)
     optional_items.append(window.model_box)
@@ -231,26 +270,14 @@ def fit_topbar(window: DesktopWindow) -> None:
         if not optional.isHidden():
             needed -= _topbar_item_width(optional) + spacing
             optional.setVisible(False)
-    if status_label is not None and status_pill is not None:
-        if needed > available and full_text:
-            pill_w = _topbar_item_width(status_pill)
-            label_w = status_label.sizeHint().width()
-            other_w = needed - pill_w
-            pill_chrome = max(0, pill_w - label_w)
-            max_label_w = max(32, available - other_w - pill_chrome - 4)
-            metrics = QFontMetrics(status_label.font())
-            shown = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, max_label_w)
-            status_label.setText(shown)
-            status_pill.adjustSize()
-            while other_w + _topbar_item_width(status_pill) > available and max_label_w > 32:
-                max_label_w = max(32, max_label_w - 8)
-                shown = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, max_label_w)
-                status_label.setText(shown)
-                status_pill.adjustSize()
-            status_label.setProperty("_elided_text", shown)
-            status_pill.setToolTip(full_text)
-        else:
-            status_pill.setToolTip(t("Çalışma durumu"))
+    if needed > available and status_label is not None and status_pill is not None and full_text:
+        _elide_status_pill(
+            status_pill,
+            status_label,
+            full_text,
+            needed - _topbar_item_width(status_pill),
+            available,
+        )
 
 
 def build_chat_page(window: DesktopWindow) -> QWidget:
