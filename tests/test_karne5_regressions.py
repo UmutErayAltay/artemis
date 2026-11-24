@@ -7,6 +7,7 @@ bilinçli tasarımların (R2-2, R2-3, Adj-2) korunduğunu doğrular.
 from __future__ import annotations
 
 import asyncio
+import importlib.util
 import os
 import threading
 import time
@@ -22,21 +23,13 @@ import yaml
 
 from artemis.brain.fake import ScriptedProvider
 from artemis.brain.models import Completion, ToolCall
-from artemis.channels.desktop.chain_dialog import validate_chain
-from artemis.channels.desktop.profile_bar import switch_work_profile
 from artemis.channels.desktop.selection import SelectionActions, SelectionBackend
 from artemis.channels.desktop.selection_mouse import (
     MouseSnapshot,
     SelectionCandidate,
     SelectionMouseWatcher,
 )
-from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.telegram_service import should_run
-from artemis.channels.desktop.voice_preview import (
-    VoicePreviewRequest,
-    run_voice_preview,
-    validate_preview_request,
-)
 from artemis.channels.runtime import create_runtime
 from artemis.channels.telegram.api import SentMessage
 from artemis.channels.telegram.channel import TelegramChannel, serve_telegram
@@ -218,6 +211,13 @@ def test_r2_4a_private_profile_blocks_cloud_voice_preview(tmp_path: Path) -> Non
     pytest.importorskip("PySide6")
     from PySide6.QtWidgets import QApplication
 
+    from artemis.channels.desktop.settings_panel import SettingsPanel
+    from artemis.channels.desktop.voice_preview import (
+        VoicePreviewRequest,
+        run_voice_preview,
+        validate_preview_request,
+    )
+
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     app = QApplication.instance() or QApplication([])
     cfg_path = tmp_path / "config.yaml"
@@ -292,24 +292,31 @@ def test_r2_4b_private_profile_blocks_telegram_channel_and_notify_tool(
         encoding="utf-8",
     )
     statuses: list[str] = []
-    # switch_work_profile canlı durdurur; private profil ağ açılmadan durur.
-    sync_calls: list[str] = []
+    if importlib.util.find_spec("PySide6") is not None:
+        from artemis.channels.desktop.profile_bar import switch_work_profile
 
-    class FakeWin:
-        _demo = False
-        _config_path = cfg_path
-        _work_profile = "work"
-        _worker_ready = False
-        profile_button = None
+        # switch_work_profile canlı durdurur; private profil ağ açılmadan durur.
+        sync_calls: list[str] = []
 
-        def _set_status(self, *_a: Any) -> None:
-            return None
+        class FakeWin:
+            _demo = False
+            _config_path = cfg_path
+            _work_profile = "work"
+            _worker_ready = False
+            profile_button = None
 
-        def _sync_telegram_service(self) -> None:
-            sync_calls.append("synced")
+            def _set_status(self, *_a: Any) -> None:
+                return None
 
-    assert switch_work_profile(FakeWin(), "private") is True  # type: ignore[arg-type]
-    assert sync_calls == ["synced"]
+            def _sync_telegram_service(self) -> None:
+                sync_calls.append("synced")
+
+        assert switch_work_profile(FakeWin(), "private") is True  # type: ignore[arg-type]
+        assert sync_calls == ["synced"]
+    else:
+        raw_cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+        raw_cfg["work_profile"] = "private"
+        cfg_path.write_text(yaml.safe_dump(raw_cfg), encoding="utf-8")
     statuses.clear()
     code = asyncio.run(
         serve_telegram(cfg_path, asyncio.Event(), embedded=True, status=statuses.append)
@@ -395,13 +402,16 @@ def test_r2_5_send_mail_reports_accepted_and_refused_recipients() -> None:
 def test_f1_to_f4_automation_and_selection_guards(tmp_path: Path) -> None:
     """F1 (XOR chain), F2 (private capture block), F3 (fail-closed selection), F4 (macro LMB)."""
     # F1
-    chain, errors = validate_chain(
-        name="dual",
-        after_routine="morning",
-        after_trigger="opened",
-        suggest="Özet?",
-    )
-    assert chain is None and "after_routine" in errors
+    if importlib.util.find_spec("PySide6") is not None:
+        from artemis.channels.desktop.chain_dialog import validate_chain
+
+        chain, errors = validate_chain(
+            name="dual",
+            after_routine="morning",
+            after_trigger="opened",
+            suggest="Özet?",
+        )
+        assert chain is None and "after_routine" in errors
     with pytest.raises(ValueError, match="Yalnız bir|yalnız bir"):
         SuggestionChainConfig(
             name="dual", after_routine="morning", after_trigger="opened", suggest="x"
