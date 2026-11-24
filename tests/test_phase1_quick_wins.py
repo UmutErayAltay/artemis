@@ -578,11 +578,13 @@ def test_topbar_computer_use_status_wide_font_elides_cleanly(
 
     prev_font = qt_app.font()
     qt_app.setFont(QFont("Arial", 13))
-    window = build_window(cfg, demo=False, app=qt_app)
+    window = build_window(cfg, demo=True, app=qt_app)
     long_status = "Bilgisayarı kullanıyorum · düğmeye tıkla · durdurmak için Esc"
     try:
         window.show()
         _wait(qt_app, lambda: window._worker_ready)
+        window.budget_chip.setText("$12.34 / $25.00")
+        window._show_model("claude-sonnet-4-5-20250929-very-long-name")
         window._set_status(long_status, "running")
         window.resize(720, 720)
         qt_app.processEvents()
@@ -593,7 +595,14 @@ def test_topbar_computer_use_status_wide_font_elides_cleanly(
         window.resize(1280, 720)
         qt_app.processEvents()
         _assert_topbar_geometry_clean(window)
-        assert window.status_label.text() == long_status
+        assert window.model_box.isVisibleTo(window)
+        assert window.budget_chip.isVisibleTo(window)
+        assert window.demo_chip is not None and window.demo_chip.isVisibleTo(window)
+
+        window._set_status("Hazır", "ready")
+        qt_app.processEvents()
+        _assert_topbar_geometry_clean(window)
+        assert window.status_label.text() == "Hazır"
     finally:
         _close_cleanly(qt_app, window)
         qt_app.setFont(prev_font)
