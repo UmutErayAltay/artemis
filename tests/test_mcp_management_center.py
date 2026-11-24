@@ -480,7 +480,7 @@ def test_adr0028_invariants_empty_spawns_nothing_risk_privacy_and_no_secrets(
     tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     path = config(tmp_path)
-    secret = "sk-super-secret-value-42"
+    secret = "mcp-test-dummy-value-42"
     monkeypatch.setenv("MCP_SECRET_ENV", secret)
 
     # Boş liste kaydedilince create_runtime / discover_mcp_tools hiç süreç başlatmaz
