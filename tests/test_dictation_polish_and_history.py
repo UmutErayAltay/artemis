@@ -572,7 +572,8 @@ def test_settings_dictation_polish_round_trip_help_no_squeeze_and_no_cycle(
         panel.select_section("Dikte ve Kısayollar")
         panel.resize(900, 700)
         panel.show()
-        app.processEvents()
+        for _ in range(5):
+            app.processEvents()
         page = panel.stack.currentWidget()
         assert page is not None
         assert len(page.findChildren(HelpTip)) == 1
@@ -587,7 +588,8 @@ def test_settings_dictation_polish_round_trip_help_no_squeeze_and_no_cycle(
         # EN kontrolü
         set_language("en")
         retranslate_widgets([panel], "en")
-        app.processEvents()
+        for _ in range(5):
+            app.processEvents()
         assert panel.dictation_polish.text() == "Fix punctuation and capitalization in dictation"
         _assert_no_squeeze(page, "en-shortcuts")
     finally:

@@ -8,12 +8,12 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from PySide6.QtGui import QAction, QGuiApplication
-from PySide6.QtWidgets import QMenu, QPushButton
-
 from artemis.i18n import t
 
 if TYPE_CHECKING:
+    from PySide6.QtGui import QAction
+    from PySide6.QtWidgets import QPushButton
+
     from artemis.channels.desktop.app import DesktopWindow
 
 MAX_HISTORY_ENTRIES = 5
@@ -65,6 +65,8 @@ class DictationHistory:
 
 def build_dictation_history_button(window: DesktopWindow) -> QPushButton:
     """Sohbet başlığı için son 5 dikte açılır menü düğmesini kurar."""
+    from PySide6.QtWidgets import QMenu, QPushButton
+
     window._dictation_history = DictationHistory()
     button = QPushButton(t("Dikte geçmişi"))
     button.setAccessibleName(t("Son dikte geçmişi"))
@@ -111,6 +113,8 @@ def on_dictation_history_action(window: DesktopWindow, action: QAction) -> None:
         window._set_status(t("Dikte geçmişi temizlendi."), "ready")
         return
     if kind == "copy_insert" and isinstance(text, str) and text:
+        from PySide6.QtGui import QGuiApplication
+
         clipboard = QGuiApplication.clipboard()
         if clipboard is not None:
             clipboard.setText(text)

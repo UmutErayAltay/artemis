@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from PySide6.QtCore import QSize, Qt
+from PySide6.QtGui import QFontMetrics
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
@@ -150,6 +151,8 @@ def build_topbar(window: DesktopWindow) -> QFrame:
     window.status_label.setObjectName("status")
     window.status_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
     window.status_label.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Preferred)
+    window._status_full = ""
+    window.status_label.setProperty("_elided_text", None)
     window._set_status(t("Başlatılıyor…"), "running")
     status_row.addWidget(window.status_dot)
     status_row.addWidget(window.status_label)
@@ -173,6 +176,20 @@ def fit_topbar(window: DesktopWindow) -> None:
     if header is None or layout is None:
         return
     width = window.width()
+    status_label = getattr(window, "status_label", None)
+    status_pill = getattr(window, "status_pill", None)
+    full_text = ""
+    if status_label is not None and status_pill is not None:
+        current_text = status_label.text()
+        elided_prev = status_label.property("_elided_text")
+        full_text = getattr(window, "_status_full", "")
+        if not full_text or (current_text != full_text and current_text != elided_prev):
+            full_text = current_text
+            window._status_full = full_text
+        if current_text != full_text:
+            status_label.setText(full_text)
+            status_pill.adjustSize()
+        status_label.setProperty("_elided_text", None)
     if window.demo_chip is not None:
         window.demo_chip.setVisible(True)
     window.model_box.setVisible(width >= 800)
@@ -214,6 +231,26 @@ def fit_topbar(window: DesktopWindow) -> None:
         if not optional.isHidden():
             needed -= _topbar_item_width(optional) + spacing
             optional.setVisible(False)
+    if status_label is not None and status_pill is not None:
+        if needed > available and full_text:
+            pill_w = _topbar_item_width(status_pill)
+            label_w = status_label.sizeHint().width()
+            other_w = needed - pill_w
+            pill_chrome = max(0, pill_w - label_w)
+            max_label_w = max(32, available - other_w - pill_chrome - 4)
+            metrics = QFontMetrics(status_label.font())
+            shown = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, max_label_w)
+            status_label.setText(shown)
+            status_pill.adjustSize()
+            while other_w + _topbar_item_width(status_pill) > available and max_label_w > 32:
+                max_label_w = max(32, max_label_w - 8)
+                shown = metrics.elidedText(full_text, Qt.TextElideMode.ElideMiddle, max_label_w)
+                status_label.setText(shown)
+                status_pill.adjustSize()
+            status_label.setProperty("_elided_text", shown)
+            status_pill.setToolTip(full_text)
+        else:
+            status_pill.setToolTip(t("Çalışma durumu"))
 
 
 def build_chat_page(window: DesktopWindow) -> QWidget:

@@ -1040,6 +1040,7 @@ class DesktopWindow(QMainWindow):
 
     def _set_status(self, text: str, tone: str) -> None:
         # Durum düz metindir; ton yalnız yanındaki noktanın rengini belirler.
+        self._status_full = text
         self.status_label.setText(text)
         self._status_tone = tone
         self.status_dot.setStyleSheet(dot_style(self._token(STATUS_TONES[tone])))
