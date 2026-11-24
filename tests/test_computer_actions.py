@@ -24,6 +24,7 @@ from artemis.computer.actions import (
     "payload",
     [
         {"type": "click", "x": 0, "y": 0, "reason": "Düğmeye tıkla"},
+        {"type": "hover", "x": 12, "y": 34, "reason": "Denetimleri görmek için üzerine gel"},
         {"type": "type", "text": "Merhaba", "reason": "Metni yaz"},
         {"type": "key", "keys": "ctrl+l", "reason": "Adres çubuğunu aç"},
         {"type": "scroll", "x": 10, "y": 20, "dy": -5, "reason": "Aşağı kaydır"},
@@ -74,6 +75,9 @@ def test_action_screen_rejects_out_of_range_monitor(screen: int) -> None:
         {"type": "click", "x": 1, "reason": "Eksik y"},
         {"type": "click", "x": -1, "y": 1, "reason": "Negatif x"},
         {"type": "click", "x": 1, "y": -1, "reason": "Negatif y"},
+        {"type": "hover", "y": 1, "reason": "Eksik x"},
+        {"type": "hover", "x": -1, "y": 1, "reason": "Negatif x"},
+        {"type": "hover", "x": 1, "y": 1, "screen": 9, "reason": "Sınır dışı ekran"},
         {"type": "type", "reason": "Eksik metin"},
         {"type": "type", "text": "", "reason": "Boş metin"},
         {"type": "type", "text": "x" * 501, "reason": "Uzun metin"},
@@ -360,7 +364,7 @@ def test_process_block_reason_allows_other_process() -> None:
 
 @pytest.mark.parametrize(
     "action_type",
-    ["click", "type", "key", "scroll", "wait", "done", "ask_user"],
+    ["click", "hover", "type", "key", "scroll", "wait", "done", "ask_user"],
 )
 def test_system_prompt_mentions_every_action_type(action_type: str) -> None:
     assert f'"{action_type}"' in SYSTEM_PROMPT
@@ -427,6 +431,16 @@ def test_observed_and_progress_are_optional_and_length_limited() -> None:
     with pytest.raises(ValueError):
         parse_action(json.dumps({**base, "progress": "p" * 401}))
     assert parse_action(json.dumps({**base, "observed": "x"})).observed == "x"
+
+
+def test_thought_field_and_exploration_ladder_in_prompt() -> None:
+    base = {"type": "key", "keys": "f", "reason": "Tam ekrandan çık"}
+    parsed = parse_action(json.dumps({**base, "thought": "Video tam ekranda; f ile çık"}))
+    assert parsed.thought == "Video tam ekranda; f ile çık"
+    with pytest.raises(ValidationError):
+        Action.model_validate({**base, "thought": "t" * 301})
+    assert "Explore before giving up!" in SYSTEM_PROMPT
+    assert '"thought"' in SYSTEM_PROMPT
 
 
 def test_verdict_masks_quoted_screen_secrets() -> None:

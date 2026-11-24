@@ -720,6 +720,8 @@ class ComputerUseConfig(BaseModel):
     # `Settings.models` anahtarı; `observation` "screen"/"both" iken görüntü kabul eden bir model
     # olmalı, "uia" iken metin modeli de çalışır. Boşsa `Settings.primary_model` kullanılır.
     model: str = ""
+    # Tıkanmada devreye giren arka plan stratejist modeli; boşsa `hard_model -> primary_model`.
+    planner_model: str = ""
     max_steps: int = Field(default=25, ge=1, le=100)
     max_minutes: float = Field(default=5.0, ge=0.5, le=30)
     screenshot_width: int = Field(default=1280, ge=640, le=2560)
@@ -1027,7 +1029,7 @@ class Settings(BaseModel):
             self.models[name].kind != "chat"
             for name in (
                 self.primary_model, self.hard_model or "", self.computer_use.model,
-                *self.computer_use.fallback_models,
+                self.computer_use.planner_model, *self.computer_use.fallback_models,
             )
             if name in self.models
         ):
@@ -1046,6 +1048,8 @@ class Settings(BaseModel):
         vision_model = self.computer_use.model or self.primary_model
         if self.computer_use.enabled and vision_model not in self.models:
             raise ValueError("computer_use.model models içinde tanımlanmalı")
+        if self.computer_use.planner_model and self.computer_use.planner_model not in self.models:
+            raise ValueError("computer_use.planner_model models içinde tanımlanmalı")
         for name in self.computer_use.fallback_models:
             if name not in self.models:
                 raise ValueError("computer_use.fallback_models models içinde tanımlanmalı")

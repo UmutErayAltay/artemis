@@ -401,6 +401,7 @@ memory:
 # computer_use:
 #   enabled: true
 #   model: vision            # models altındaki bir anahtar
+#   planner_model: ""        # boş: hard_model -> primary_model -> model (tıkanmada arka plan stratejisti)
 #   max_steps: 25            # 1-100
 #   max_minutes: 5           # 0.5-30
 #   screenshot_width: 1280   # 640-2560

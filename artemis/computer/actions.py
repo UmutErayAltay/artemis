@@ -71,7 +71,7 @@ class Action(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid", frozen=True)
 
     type: Literal[
-        "click", "click_element", "type", "key", "scroll", "wait", "done", "ask_user"
+        "click", "click_element", "hover", "type", "key", "scroll", "wait", "done", "ask_user"
     ]
     x: int | None = None
     y: int | None = None
@@ -86,6 +86,8 @@ class Action(BaseModel):
     dy: int | None = None
     seconds: float | None = None
     reason: str = Field(min_length=1, max_length=300)
+    # Adım içi kısa düşünce/hipotez (hedef görünmüyorsa neyin keşfedileceği); isteğe bağlı.
+    thought: str | None = Field(default=None, max_length=300)
     sensitive: bool = False
     # Modelin oturum belleği: `observed` bir ÖNCEKİ eylemin yeni görüntüde gerçekte ne yaptığı,
     # `progress` birikimli not (biten / başarısız / sıradaki). Kodla zorlanmaz (1. adımda yok),
@@ -97,11 +99,11 @@ class Action(BaseModel):
     def validate_by_type(self) -> Self:
         """Eylem türüne özgü alanların kurallarını doğrular."""
 
-        if self.type == "click":
+        if self.type in ("click", "hover"):
             x = self.x
             y = self.y
             if x is None or y is None or x < 0 or y < 0:
-                raise ValueError("Click eylemi için negatif olmayan x ve y zorunludur.")
+                raise ValueError("Click ve hover eylemleri için negatif olmayan x ve y zorunludur.")
 
         elif self.type == "click_element":
             if self.element is None:
@@ -433,6 +435,9 @@ Required fields by action type:
 - "click": x and y are required non-negative pixel coordinates of the selected screen.
   Optional "screen" is the 1-based monitor number (default 1); optional "button" is
   "left", "right", or "middle", and optional "double" is a boolean.
+- "hover": x and y are required non-negative pixel coordinates of the selected screen (optional
+  "screen" default 1). Moves the mouse cursor without clicking to reveal auto-hidden video
+  controls, menus, or tooltips without pausing playback.
 - "type": text is required, 1-500 characters, and must not contain a newline.
 - "key": keys is required and must be a valid combination such as "ctrl+l". Optional "repeat"
   (1-20, default 1) presses a single navigation/media key multiple times in one step. Never
@@ -448,15 +453,29 @@ Always include "reason" with a short Turkish explanation of 1-300 characters. In
 "sensitive": true for anything that sends, submits, buys, pays, deletes, shares, or
 publishes; otherwise include "sensitive": false.
 
-Memory fields (short Turkish strings):
+Memory and thinking fields (short Turkish strings):
+- "thought" (optional, max 300 chars): brief reasoning about hidden state or what to uncover
+  next (e.g. "tam ekran nedeniyle sonraki bölüm düğmesi gizli olabilir; önce f ile çıkacağım").
 - "observed" (max 200 chars): from step 2 on, state what your PREVIOUS action actually did, as
   visible on the newly shown screenshot (e.g. "video durdu", "ekran değişmedi"). Be honest:
   if nothing changed or the result was unexpected, say so.
 - "progress" (max 400 chars): every step, your cumulative note: what is already COMPLETED,
   what was tried and FAILED, and what to try next. It is shown back to you next step.
-- Never copy passwords or secrets into "observed" or "progress".
+- Never copy passwords or secrets into "thought", "observed", or "progress".
 
 Working rules:
+- Explore before giving up! If the target button/control is NOT visible right now, do NOT emit
+  "ask_user" immediately — reason about where it could be hidden and try safe exploration:
+  1. Check all monitors and the open windows / [TAM EKRAN] list: if the target app is on another
+     screen or unfocused, focus it first by clicking a safe neutral area of that window.
+  2. If controls auto-hide or a video/anime player is [TAM EKRAN], try "hover" near the bottom/
+     corners to reveal controls, or exit fullscreen with "f" or double-clicking the video
+     (NEVER "escape", which stops Artemis) so episode lists and page controls become visible.
+  3. If the control (e.g. "Sonraki Bölüm / Next Episode") may be below the fold, use "scroll" /
+     "pagedown", search with "ctrl+f", check player/app menus or hotkeys, or inspect the URL bar
+     with "ctrl+l" (e.g. incrementing an episode number when appropriate).
+  4. Use "ask_user" ONLY for logins, passwords, 2FA, CAPTCHAs, payments, genuine user choices,
+     or after alternative exploration paths fail.
 - Prefer the keyboard and URLs over hunting pixels. To navigate: key "ctrl+l", type the URL,
   then key "enter".
 - To seek a web video, click directly on the video progress/seek bar at the proportional
@@ -542,14 +561,22 @@ Always include "reason" with a short Turkish explanation of 1-300 characters. In
 "sensitive": true for anything that sends, submits, buys, pays, deletes, shares, or
 publishes; otherwise include "sensitive": false.
 
-Memory fields (short Turkish strings):
+Memory and thinking fields (short Turkish strings):
+- "thought" (optional, max 300 chars): brief reasoning about hidden state or what to uncover
+  next (e.g. "video tam ekranda olabilir; f ile çıkıp sonraki bölüm düğmesine bakacağım").
 - "observed" (max 200 chars): from step 2 on, state what your PREVIOUS action actually did, as
   shown by the new element list (e.g. "alan odaklandı", "liste değişmedi"). Be honest.
 - "progress" (max 400 chars): every step, your cumulative note: what is already COMPLETED,
   what was tried and FAILED, and what to try next. It is shown back to you next step.
-- Never copy passwords or secrets into "observed" or "progress".
+- Never copy passwords or secrets into "thought", "observed", or "progress".
 
 Working rules:
+- Explore before giving up! If the needed button or text is not in "Pencere öğeleri", do NOT
+  emit "ask_user" right away: check the open windows / [TAM EKRAN] context (if a fullscreen
+  player hides page buttons, exit fullscreen with key "f" — never "escape"), try scrolling with
+  "pagedown"/"down", searching with "ctrl+f", inspecting the URL with "ctrl+l", or media keys
+  like "media_next". Use "ask_user" only for passwords, logins, ambiguous user choices, or after
+  safe exploration fails.
 - Prefer keyboard shortcuts (e.g. "ctrl+l" then "type" URL then "enter") and "click_element" on
   named controls. To scroll a list or page in this mode, use "key" with "pagedown", "pageup",
   "down", "up", "home", or "end". For media playback, "key" supports "media_play_pause",
@@ -569,8 +596,8 @@ Working rules:
   controls, OCR-detected "VisualText" elements are appended and can be clicked with "click_element".
   After clicking a game or item in a list/library, check the updated "Pencere öğeleri" list for
   action buttons ("Oyna", "Play", "Başlat", "Yükle") before trying "ctrl+f" or scrolling.
-  If the element list is empty or does not expose the needed control, try a keyboard
-  shortcut or use "ask_user".
+  If the element list is empty or does not expose the needed control, follow the exploration
+  steps above (focus/fullscreen/scroll/shortcut) before using "ask_user".
 - Do not emit "done" until the element list shows the goal state; the done text must state what
   is present. Never redo a part listed as COMPLETED in the progress note.
 - Repeating the same action is blocked by the system; change your method if nothing changed.

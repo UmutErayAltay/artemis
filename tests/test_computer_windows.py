@@ -178,3 +178,65 @@ def test_focused_value_contains_returns_none_for_password_output(
     monkeypatch.setattr(w.sys, "platform", "win32")
     runner = lambda *_a, **_k: SimpleNamespace(stdout="?\n", returncode=0)  # noqa: E731
     assert w.focused_value_contains("secret", 1.0, runner=runner) is None
+
+
+def test_hover_moves_pointer_without_clicking(monkeypatch: pytest.MonkeyPatch) -> None:
+    sent: list[list[Any]] = []
+    monkeypatch.setattr(w, "_require_windows", lambda: None)
+    monkeypatch.setattr(w, "_move_event", lambda x, y: ("move", x, y))
+    monkeypatch.setattr(w, "_send", lambda inputs: sent.append(list(inputs)))
+    w.hover(320, 480)
+    assert sent == [[("move", 320, 480)]]
+
+
+def test_visible_windows_filters_minimized_tiny_and_sanitizes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ctypes import wintypes
+
+    win_defs = {
+        1: (True, False, "Brave\nAnime\tBölüm 5", (1920, 0, 3840, 1080), ("C:\\brave.exe", 11)),
+        2: (True, True, "Küçültülmüş", (0, 0, 800, 600), ("C:\\min.exe", 12)),
+        3: (True, False, "Mini", (0, 0, 10, 10), ("C:\\tiny.exe", 13)),
+        4: (False, False, "Gizli", (0, 0, 800, 600), ("C:\\hid.exe", 14)),
+        5: (True, False, "   ", (0, 0, 800, 600), ("C:\\blank.exe", 15)),
+    }
+
+    class _FakeUser32:
+        def EnumWindows(self, callback: Any, _lparam: int) -> int:
+            for hwnd in win_defs:
+                callback(hwnd, 0)
+            return 1
+
+        def IsWindowVisible(self, hwnd: int) -> int:
+            return 1 if win_defs[hwnd][0] else 0
+
+        def IsIconic(self, hwnd: int) -> int:
+            return 1 if win_defs[hwnd][1] else 0
+
+        def GetWindowTextLengthW(self, hwnd: int) -> int:
+            return len(win_defs[hwnd][2])
+
+        def GetWindowTextW(self, hwnd: int, buf: Any, size: int) -> int:
+            text = win_defs[hwnd][2][: size - 1]
+            buf.value = text
+            return len(text)
+
+        def GetWindowRect(self, hwnd: int, rect_ptr: Any) -> int:
+            rect = ctypes.cast(rect_ptr, ctypes.POINTER(wintypes.RECT)).contents
+            left, top, right, bottom = win_defs[hwnd][3]
+            rect.left, rect.top, rect.right, rect.bottom = left, top, right, bottom
+            return 1
+
+    monkeypatch.setattr(w.sys, "platform", "win32")
+    monkeypatch.setattr(w, "set_dpi_aware", lambda: None)
+    monkeypatch.setattr(w, "_libs", lambda: (_FakeUser32(), None, None))
+    monkeypatch.setattr(w, "_window_process", lambda hwnd: win_defs[int(hwnd)][4])
+    monkeypatch.setattr(w, "_ENUM_WINDOWS_PROC", lambda fn: fn)
+    listed = w.visible_windows()
+    assert len(listed) == 1
+    assert listed[0] == w.WindowInfo(
+        hwnd=1, title="Brave Anime Bölüm 5", exe="C:\\brave.exe", pid=11, rect=(1920, 0, 3840, 1080)
+    )
+    monkeypatch.setattr(w.sys, "platform", "linux")
+    assert w.visible_windows() == []
