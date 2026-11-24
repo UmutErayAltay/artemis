@@ -42,10 +42,16 @@ Screenshots are captured from real Qt windows in **demo mode** using synthetic d
 
 ## Demo Videos
 
-Generated with Remotion from real demo screenshots (English narration):
-- **Product tour (~110s):** https://github.com/user-attachments/assets/f7be8b4a-4e5d-457c-a95c-0430421a9009
-- **Setup guide (~35s):** https://github.com/user-attachments/assets/d5ebb21b-0178-4df0-acb5-9b4f231e83d5
-- Turkish-narrated versions are in [README.tr.md](README.tr.md#tanıtım-videoları).
+Generated with Remotion from real demo screenshots (English narration).
+Turkish-narrated versions are in [README.tr.md](README.tr.md#tanıtım-videoları).
+
+**Product tour (≈110 s)**
+
+https://github.com/user-attachments/assets/f7be8b4a-4e45-457c-a95c-0430421a9009
+
+**Setup guide (≈35 s)**
+
+https://github.com/user-attachments/assets/d5ebb21b-0178-4df0-acb5-9b4f231e83d5
 
 ## Quick Start
 
