@@ -18,7 +18,13 @@ from pydantic import ValidationError
 import artemis.channels.desktop.computer_host as host_module
 from artemis.brain.models import ToolCall
 from artemis.channels.desktop.computer_host import ComputerHost, SessionHandles
-from artemis.config.settings import ComputerUseConfig, ModelConfig, PerceptionConfig, Settings
+from artemis.config.settings import (
+    ComputerUseConfig,
+    EndpointConfig,
+    ModelConfig,
+    PerceptionConfig,
+    Settings,
+)
 from artemis.safety.audit import AuditLog
 from artemis.safety.gate import SafetyGate, TurnState
 from artemis.tools.base import Risk, ToolContext
@@ -676,3 +682,75 @@ def test_only_adr_0039_tools_skip_approval_in_auto_mode() -> None:
         "close_application",
         "routine_save",
     }
+
+
+def test_planner_models_routing_and_privacy_gates(tmp_path: Path) -> None:
+    from artemis.tools.plugins.computer import planner_models
+
+    cloud_strong = model("openrouter")
+    cloud_cli = model("claude_cli")
+    local_mod = model("ollama")
+    base = Settings(
+        workspace=tmp_path,
+        models={
+            "fast": model("openrouter"),
+            "strong": cloud_strong,
+            "cli": cloud_cli,
+            "local": local_mod,
+        },
+        primary_model="fast",
+        hard_model="strong",
+        perception=PerceptionConfig(allow_cloud_screen=True),
+        computer_use=ComputerUseConfig(enabled=True, model="local", fallback_models=("fast",)),
+    )
+    # Bos planner_model -> hard_model -> primary -> vision_models
+    assert planner_models(base) == ("strong", "fast", "local")
+    # Acik planner_model en basa gelir; claude_cli goruntu alabildiği icin disarida kalir
+    explicit_cloud = base.model_copy(
+        update={"computer_use": base.computer_use.model_copy(update={"planner_model": "local"})}
+    )
+    assert planner_models(explicit_cloud) == ("local", "strong", "fast")
+    explicit_cli = base.model_copy(
+        update={"computer_use": base.computer_use.model_copy(update={"planner_model": "cli"})}
+    )
+    assert planner_models(explicit_cli) == ("strong", "fast", "local")
+    only_cli = Settings(
+        workspace=tmp_path,
+        models={"cli": cloud_cli},
+        primary_model="cli",
+        perception=PerceptionConfig(allow_cloud_screen=True),
+    )
+    assert planner_models(only_cli) == ()
+    # allow_cloud_screen kapalıysa yalnız ollama kalır
+    no_cloud = base.model_copy(update={"perception": PerceptionConfig(allow_cloud_screen=False)})
+    assert planner_models(no_cloud) == ("local",)
+    # work_profile == private iken yalnız ollama kalır
+    priv = base.model_copy(update={"work_profile": "private"})
+    assert planner_models(priv) == ("local",)
+
+
+def test_planner_model_setting_validation(tmp_path: Path) -> None:
+    speech = ModelConfig(
+        provider="openai_compatible",
+        endpoint="ep",
+        model="tts-1",
+        kind="speech",
+        input_per_million=0,  # type: ignore[arg-type]
+        output_per_million=0,  # type: ignore[arg-type]
+    )
+    ep = EndpointConfig(base_url="https://api.example.com/v1")
+    with pytest.raises(ValidationError):
+        Settings(
+            workspace=tmp_path,
+            models={"main": model("ollama")},
+            primary_model="main",
+            computer_use=ComputerUseConfig(planner_model="missing"),
+        )
+    with pytest.raises(ValidationError):
+        Settings(
+            workspace=tmp_path,
+            endpoints={"ep": ep},
+            models={"main": model("ollama"), "tts": speech},
+            primary_model="main",
+            computer_use=ComputerUseConfig(planner_model="tts"),
+        )

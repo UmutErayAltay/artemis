@@ -106,6 +106,7 @@ from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
 from artemis.channels.desktop.triggers_section import TriggersSection
 from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
 from artemis.channels.desktop.update_section import UpdateSection
+from artemis.channels.desktop.voice_model_manager import VoiceModelManagerWidget
 from artemis.channels.desktop.voice_preview import VoicePreviewThread
 from artemis.channels.desktop.voice_settings_section import SttDownload as SttDownload
 from artemis.channels.desktop.voice_telemetry_card import VoiceTelemetryCard
@@ -175,10 +176,25 @@ _SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
         "listening": ("Ses", 0),
         "dinleme (giriş)": ("Ses", 0),
         "listening (input)": ("Ses", 0),
-        "yanıt": ("Ses", 1),
-        "response": ("Ses", 1),
-        "yanıt (çıkış)": ("Ses", 1),
-        "response (output)": ("Ses", 1),
+        "mikrofon": ("Ses", 0),
+        "microphone": ("Ses", 0),
+        "tanıma": ("Ses", 1),
+        "recognition": ("Ses", 1),
+        "ses tanıma": ("Ses", 1),
+        "speech recognition": ("Ses", 1),
+        "yanıt": ("Ses", 2),
+        "response": ("Ses", 2),
+        "yanıt (çıkış)": ("Ses", 2),
+        "response (output)": ("Ses", 2),
+        "ses modelleri": ("Ses", 3),
+        "voice models": ("Ses", 3),
+        "modeller ve ölçüm": ("Ses", 3),
+        "models & metrics": ("Ses", 3),
+        "models and metrics": ("Ses", 3),
+        "ses ölçümü": ("Ses", 3),
+        "voice telemetry": ("Ses", 3),
+        "bas-konuş": ("Dikte ve Kısayollar", None),
+        "push-to-talk": ("Dikte ve Kısayollar", None),
         "dikte": ("Dikte ve Kısayollar", None),
         "dictation": ("Dikte ve Kısayollar", None),
         "kısayollar": ("Dikte ve Kısayollar", None),
@@ -292,6 +308,9 @@ class SettingsPanel(QWidget):
     precision_combo: QComboBox
     hybrid_stt: QCheckBox
     direct_audio_input: QCheckBox
+    multimodal_screen_box: QWidget
+    multimodal_screen_context: QCheckBox
+    multimodal_screen_hint: QLabel
     cloud_box: QWidget
     cloud_server: QComboBox
     cloud_protocol: QComboBox
@@ -325,8 +344,10 @@ class SettingsPanel(QWidget):
     tts_cloud_hint: QLabel
     voice_tabs: QTabWidget
     voice_telemetry_card: VoiceTelemetryCard
+    voice_model_manager: VoiceModelManagerWidget
     listening_hotkey: QLineEdit
     ptt_enabled: QCheckBox
+    ptt_hotkey_box: QWidget
     ptt_hotkey: QLineEdit
     continuous_mode: QCheckBox
     dictation_enabled: QCheckBox
@@ -334,6 +355,7 @@ class SettingsPanel(QWidget):
     dictation_max_seconds: QSpinBox
     dictation_polish: QCheckBox
     selection_enabled: QCheckBox
+    selection_mouse_popup: QCheckBox
     selection_hotkey: QLineEdit
     selection_translate_to: QLineEdit
     barge_in_box: QCheckBox
@@ -341,8 +363,11 @@ class SettingsPanel(QWidget):
     live_transcript: QCheckBox
     noise_suppression: QCheckBox
     game_mode: QCheckBox
+    game_mode_target_box: QWidget
     game_mode_target: QComboBox
     echo_cancellation: QCheckBox
+    mic_advanced_toggle: QToolButton
+    mic_advanced_box: QWidget
     advanced_toggle: QToolButton
     noise_level: QComboBox
     noise_stt: QCheckBox
@@ -468,6 +493,7 @@ class SettingsPanel(QWidget):
         self._page_tabs: dict[str, QTabWidget] = {}
         build_voice_page(self)
         build_shortcuts_page(self)
+        self._sync_voice_conditional_boxes()
         build_model_page(self, pets_dir, codex_pets_dir)
         build_look_page(self)
         build_automation_page(self)
@@ -475,6 +501,7 @@ class SettingsPanel(QWidget):
         build_connections_page(self)
         build_apps_page(self)
         build_about_page(self)
+        self.voice_model_manager.models_changed.connect(self._on_voice_models_changed)
         self._build_section_combo()
         self.sections.currentRowChanged.connect(self._on_section)
         self.section_combo.activated.connect(self._combo_picked)
@@ -866,8 +893,14 @@ class SettingsPanel(QWidget):
     def _cloud_server_picked(self, *_args: object) -> None:
         voice_settings_section.cloud_server_picked(self)
 
+    def _toggle_mic_advanced(self, checked: bool) -> None:
+        voice_settings_section.toggle_mic_advanced(self, checked)
+
     def _toggle_advanced(self, checked: bool) -> None:
         voice_settings_section.toggle_advanced(self, checked)
+
+    def _sync_voice_conditional_boxes(self, *_args: object) -> None:
+        voice_settings_section.sync_voice_conditional_boxes(self)
 
     @staticmethod
     def _stt_size_text(choice: stt_catalog.WhisperChoice) -> str:
@@ -922,10 +955,12 @@ class SettingsPanel(QWidget):
                 if binding.quiet:
                     widget.blockSignals(False)
             self._update_cloud_hint()
+            self._sync_voice_conditional_boxes()
             if isinstance(self.tts_cloud_box, TtsCloudBox):
                 self.tts_cloud_box.reload_servers()
             self._sync_voice_output_controls()
             self.voice_telemetry_card.refresh()
+            self.voice_model_manager.refresh()
             self.routines.refresh()
             self.skills.refresh()
             self.triggers.refresh()
@@ -937,6 +972,9 @@ class SettingsPanel(QWidget):
             )
             self.noise_level.setEnabled(self.noise_suppression.isChecked() and not self._demo)
             self.noise_stt.setEnabled(self.noise_suppression.isChecked() and not self._demo)
+            self.selection_mouse_popup.setEnabled(
+                self.selection_enabled.isChecked() and not self._demo
+            )
             self._sync_application_access()
             agent = settings.code_agent
             self.github_owner.setText(agent.github_owner or "")
@@ -1183,6 +1221,9 @@ class SettingsPanel(QWidget):
         self.tts_preview_thread = None
         self._sync_voice_output_controls()
 
+    def _on_voice_models_changed(self, _entries: object = None) -> None:
+        voice_settings_section.sync_voice_models_from_manager(self)
+
     def finish_inventory(self) -> None:
         if _shutdown_thread(
             self.github,
@@ -1210,6 +1251,7 @@ class SettingsPanel(QWidget):
             self.tts_preview_thread = None
         self.telegram.finish()
         self.update_section.finish()
+        self.voice_model_manager.finish()
         if isinstance(self.tts_cloud_box, TtsCloudBox):
             self.tts_cloud_box.finish()
         self.file_search.finish()

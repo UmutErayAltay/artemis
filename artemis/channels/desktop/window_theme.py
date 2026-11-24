@@ -60,6 +60,8 @@ def apply_theme(window: DesktopWindow, name: str) -> None:
     window.pet.apply_theme(window._theme)
     if hasattr(window, "selection_popup"):
         window.selection_popup.apply_theme(palette)
+    if hasattr(window, "selection_badge"):
+        window.selection_badge.apply_theme(palette)
     theme_placeholders(window, window)
     refresh_tones(window)
     refresh_icons(window)

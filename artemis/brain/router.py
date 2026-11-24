@@ -34,7 +34,8 @@ from artemis.safety.audit import AuditLog
 from artemis.tools.base import ToolDefinition
 
 _AUDIO_CAPABLE_PROVIDERS = frozenset({"openai_compatible", "openrouter"})
-_AUDIO_REJECT_CODES = ("HTTP 400", "HTTP 415", "HTTP 422")
+_IMAGE_UNSUPPORTED_PROVIDERS = frozenset({"claude_cli"})
+_MEDIA_REJECT_CODES = ("HTTP 400", "HTTP 415", "HTTP 422")
 
 
 def _strip_audio(messages: list[Message]) -> list[Message]:
@@ -44,9 +45,17 @@ def _strip_audio(messages: list[Message]) -> list[Message]:
     ]
 
 
-def _is_audio_rejection(error: ProviderError) -> bool:
-    return not isinstance(error, RetryableProviderError) and any(
-        code in str(error) for code in _AUDIO_REJECT_CODES
+def _strip_image(messages: list[Message]) -> list[Message]:
+    return [
+        m.model_copy(update={"image_png": None}) if m.image_png is not None else m
+        for m in messages
+    ]
+
+
+def _is_media_rejection(error: ProviderError) -> bool:
+    return not isinstance(error, RetryableProviderError) and (
+        any(code in str(error) for code in _MEDIA_REJECT_CODES)
+        or "ekran görüntüsü taşıyamaz" in str(error)
     )
 
 
@@ -151,6 +160,91 @@ class ProviderRouter:
         except OSError:
             raise ProviderError("Sağlayıcı denetim kaydı güvenli biçimde yazılamadı.") from None
 
+    def _prepare_media_messages(
+        self, messages: list[Message], model: ModelConfig
+    ) -> tuple[list[Message], bool, bool]:
+        has_audio = any(m.audio_wav is not None for m in messages)
+        has_image = any(m.image_png is not None for m in messages)
+        if has_audio and model.provider not in _AUDIO_CAPABLE_PROVIDERS:
+            messages = _strip_audio(messages)
+            self._emit_audit(
+                "audio_input_fallback",
+                provider=model.provider,
+                model=model.model,
+                reason="unsupported_provider",
+            )
+            has_audio = False
+        if has_image and model.provider in _IMAGE_UNSUPPORTED_PROVIDERS:
+            messages = _strip_image(messages)
+            self._emit_audit(
+                "image_input_fallback",
+                provider=model.provider,
+                model=model.model,
+                reason="unsupported_provider",
+            )
+            has_image = False
+        return messages, has_audio, has_image
+
+    async def _invoke_with_media_fallback(
+        self,
+        alias: str,
+        model: ModelConfig,
+        messages: list[Message],
+        tools: list[ToolDefinition],
+        *,
+        timeout: float,
+        started: float,
+        stream: TextStream | None,
+        has_audio: bool,
+        has_image: bool,
+    ) -> Completion:
+        async def _invoke(
+            msgs: list[Message], call_stream: TextStream | None, call_timeout: float
+        ) -> Completion:
+            if call_stream is None:
+                return await self._providers[alias].complete(
+                    msgs, tools, timeout=call_timeout
+                )
+            return await self._providers[alias].complete(
+                msgs, tools, timeout=call_timeout, stream=call_stream
+            )
+
+        current = messages
+        audio_active = has_audio
+        image_active = has_image
+        while True:
+            remaining = timeout - (self._clock() - started)
+            if remaining <= 0:
+                raise TimeoutError from None
+            if not audio_active and not image_active:
+                return await _invoke(current, stream, remaining)
+            guard = EmissionGuard(stream) if stream is not None else None
+            try:
+                return await _invoke(current, guard, remaining)
+            except ProviderError as error:
+                if (guard is not None and guard.emitted) or not _is_media_rejection(error):
+                    raise
+                if audio_active and "ekran görüntüsü taşıyamaz" not in str(error):
+                    current = _strip_audio(current)
+                    audio_active = False
+                    self._emit_audit(
+                        "audio_input_fallback",
+                        provider=model.provider,
+                        model=model.model,
+                        reason="rejected_audio_input",
+                    )
+                elif image_active:
+                    current = _strip_image(current)
+                    image_active = False
+                    self._emit_audit(
+                        "image_input_fallback",
+                        provider=model.provider,
+                        model=model.model,
+                        reason="rejected_image_input",
+                    )
+                else:
+                    raise
+
     async def _call(
         self,
         alias: str,
@@ -185,16 +279,7 @@ class ProviderRouter:
             )
             raise
         started = self._clock()
-        has_audio = any(m.audio_wav is not None for m in messages)
-        if has_audio and model.provider not in _AUDIO_CAPABLE_PROVIDERS:
-            messages = _strip_audio(messages)
-            self._emit_audit(
-                "audio_input_fallback",
-                provider=model.provider,
-                model=model.model,
-                reason="unsupported_provider",
-            )
-            has_audio = False
+        messages, has_audio, has_image = self._prepare_media_messages(messages, model)
         # Yerel uç dahil openai_compatible kaydı yazılır: uç adresi config'te değişebilir.
         if model.provider != "ollama":
             try:
@@ -207,6 +292,7 @@ class ProviderRouter:
                     allow_cloud_file_content=self.settings.allow_cloud_file_content,
                     allow_cloud_clipboard=self.settings.allow_cloud_clipboard,
                     **({"has_audio": True} if has_audio else {}),
+                    **({"has_image": True} if has_image else {}),
                 )
             except ProviderError:
                 # Kaydın yazılamadığı sırada istek henüz gönderilmedi; bu
@@ -214,40 +300,19 @@ class ProviderRouter:
                 self.ledger.release(reservation)
                 raise
 
-        async def _invoke(
-            msgs: list[Message], call_stream: TextStream | None, call_timeout: float
-        ) -> Completion:
-            if call_stream is None:
-                return await self._providers[alias].complete(
-                    msgs, tools, timeout=call_timeout
-                )
-            return await self._providers[alias].complete(
-                msgs, tools, timeout=call_timeout, stream=call_stream
-            )
-
         try:
             async with asyncio.timeout(timeout):
-                if not has_audio:
-                    completion = await _invoke(messages, stream, timeout)
-                else:
-                    audio_guard = EmissionGuard(stream) if stream is not None else None
-                    try:
-                        completion = await _invoke(messages, audio_guard, timeout)
-                    except ProviderError as audio_error:
-                        if not _is_audio_rejection(audio_error) or (
-                            audio_guard is not None and audio_guard.emitted
-                        ):
-                            raise
-                        self._emit_audit(
-                            "audio_input_fallback",
-                            provider=model.provider,
-                            model=model.model,
-                            reason="rejected_audio_input",
-                        )
-                        remaining = timeout - (self._clock() - started)
-                        if remaining <= 0:
-                            raise TimeoutError from None
-                        completion = await _invoke(_strip_audio(messages), stream, remaining)
+                completion = await self._invoke_with_media_fallback(
+                    alias,
+                    model,
+                    messages,
+                    tools,
+                    timeout=timeout,
+                    started=started,
+                    stream=stream,
+                    has_audio=has_audio,
+                    has_image=has_image,
+                )
         except TimeoutError:
             error = RetryableProviderError("Sağlayıcı denemesi zaman aşımına uğradı.")
             self._emit_audit(

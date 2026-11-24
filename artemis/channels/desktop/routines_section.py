@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.form_kit import button_row, field, group, meta_label
+from artemis.channels.desktop.macro_dialog import MacroDialog
 from artemis.channels.desktop.routine_dialog import RoutineDialog, RoutineFileDialog
 from artemis.channels.desktop.settings_lists import ListWithEmpty
 from artemis.config.settings import load_settings
@@ -81,12 +82,17 @@ class RoutinesSection(QWidget):
         self.delete_button = QPushButton(t("Sil"))
         self.edit_button = QPushButton(t("Düzenle"))
         self.fix_button = QPushButton(t("Dosyayı düzelt"))
+        self.macro_button = QPushButton(t("Makro kaydet…"))
         self.add_button = QPushButton(t("Rutin ekle"))
         self.add_button.setObjectName("primary")
         self.action_row = QWidget()
         self.action_row.setLayout(
             button_row(
-                self.fix_button, self.delete_button, self.edit_button, self.add_button,
+                self.fix_button,
+                self.delete_button,
+                self.edit_button,
+                self.macro_button,
+                self.add_button,
             )
         )
         listing.addWidget(self.action_row)
@@ -122,6 +128,7 @@ class RoutinesSection(QWidget):
         layout.addWidget(self.notice)
         self.delete_button.clicked.connect(self._delete)
         self.add_button.clicked.connect(self._add)
+        self.macro_button.clicked.connect(self._record_macro)
         self.edit_button.clicked.connect(self._edit)
         self.fix_button.clicked.connect(self._fix_file)
         self.save_time_button.clicked.connect(self._save_time)
@@ -193,6 +200,7 @@ class RoutinesSection(QWidget):
         self.action_row.setVisible(self._enabled)
         self.run_hint.setVisible(self._enabled)
         self.add_button.setEnabled(editable)
+        self.macro_button.setEnabled(editable)
         self.edit_button.setEnabled(editable and has_selection)
         self.delete_button.setEnabled(editable and has_selection)
         self.fix_button.setVisible(self._corrupt)
@@ -255,6 +263,24 @@ class RoutinesSection(QWidget):
 
     def _add(self) -> None:
         self._edit_routine(None)
+
+    def _record_macro(self) -> None:
+        routines = self._load_strict()
+        if routines is None:
+            return
+        if len(routines) >= MAX_ROUTINES:
+            self.notice.setText(
+                t("En çok {max_routines} rutin olabilir.").format(max_routines=MAX_ROUTINES)
+            )
+            return
+        try:
+            current_settings = load_settings(self._config_path)
+        except (OSError, ValueError):
+            current_settings = None
+        dialog = MacroDialog(routines, self._tools(), current_settings, parent=self)
+        if dialog.exec() != MacroDialog.DialogCode.Accepted or dialog.result_args is None:
+            return
+        self.tool_requested.emit("routine_save", dialog.result_args)
 
     def _edit(self) -> None:
         self._edit_routine(self.routine_list.currentRow())

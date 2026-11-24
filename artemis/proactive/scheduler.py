@@ -29,6 +29,14 @@ from artemis.channels.runtime import Runtime
 from artemis.config.settings import BriefingConfig, TriggerConfig
 from artemis.proactive.daily_summary import build_summary, summary_path, write_summary
 from artemis.proactive.delivery import Deliverer, DeliveryOutcome
+from artemis.proactive.event_triggers import (
+    ActiveAppProvider,
+    CalendarEventsProvider,
+    ChainMatch,
+    EventTriggerTracker,
+    ResumeProbe,
+    TriggerMatch,
+)
 from artemis.proactive.routines import RoutinesError, RoutineStore
 from artemis.proactive.schedule import (
     briefing_occurrence,
@@ -72,6 +80,10 @@ class ProactiveScheduler:
         *,
         clock: Callable[[], datetime] | None = None,
         owner: str | None = None,
+        active_app_getter: ActiveAppProvider | None = None,
+        calendar_fetcher: CalendarEventsProvider | None = None,
+        resume_probe: ResumeProbe | None = None,
+        monotonic_clock: Callable[[], float] | None = None,
     ) -> None:
         self.runtime = runtime
         self.store = store
@@ -83,6 +95,47 @@ class ProactiveScheduler:
         self._capped_day: date | None = None
         self._routines_error_reported = False
         self._trigger_errors: set[str] = set()
+        self._event_tracker = EventTriggerTracker(
+            runtime,
+            active_app_getter=active_app_getter,
+            calendar_fetcher=calendar_fetcher,
+            resume_probe=resume_probe,
+            monotonic_clock=monotonic_clock,
+            clock_injected=clock is not None,
+        )
+
+    def notify_system_resume(self) -> None:
+        """İşletim sistemi uykudan uyanma sinyalini (`WM_POWERBROADCAST`) zamanlayıcıya bildirir."""
+        self._event_tracker.notify_resume()
+
+    async def notify_routine_completed(self, routine_name: str, success: bool = True) -> int:
+        """Rutin tamamlandığında koşullu öneri zincirlerini değerlendirir (ADR 0086)."""
+        settings = self.runtime.settings
+        if not settings.proactive.enabled or not settings.triggers.enabled or not routine_name:
+            return 0
+        now = self.clock()
+        start, end = local_day_bounds(now, self.tz)
+        left = self.config.max_events_per_day - self.store.count_finished_between(start, end)
+        if left <= 0:
+            return 0
+        matches = self._event_tracker.evaluate_chains(
+            event_kind="routine_completed",
+            source_name=routine_name,
+            now=now,
+            tz=self.tz,
+            store=self.store,
+            routine_success=success,
+        )
+        delivered_total = 0
+        for match in matches:
+            if left <= 0:
+                break
+            delivered = await self._fire_chain(match, start, now)
+            if delivered:
+                self._event_tracker.mark_chain_fired(match.chain_name, now)
+                left -= delivered
+                delivered_total += delivered
+        return delivered_total
 
     async def serve(self, stop: asyncio.Event) -> None:
         """Sınırlı aralıklarla tarar; durdurma sinyali beklemeyi hemen keser."""
@@ -190,29 +243,11 @@ class ProactiveScheduler:
                 left -= delivered
                 handled += delivered
         triggers = self.runtime.settings.triggers
-        for trigger in triggers.items if triggers.enabled else ():
-            try:
-                ready = await self._poll_trigger(trigger, now)
-                if not ready:
-                    continue
-                if left <= 0:
-                    capped = True
-                    continue
-                delivered = await self._fire_trigger(trigger, ready, start, now)
-                if delivered:
-                    self._mark_trigger_seen(trigger.name, ready)
-            except (OSError, ValueError, RuntimeError) as error:
-                # Bozuk ya da erişilemeyen klasör yalnız o tetikleyiciyi etkiler; hata her taramada
-                # değil, bir kez denetime yazılır. Diğer tetikleyiciler çalışmaya devam eder.
-                if trigger.name not in self._trigger_errors:
-                    self._trigger_errors.add(trigger.name)
-                    self.runtime.audit.emit(
-                        "trigger_unavailable", trigger=trigger.name, error_type=type(error).__name__
-                    )
-                continue
-            self._trigger_errors.discard(trigger.name)
-            left -= delivered
-            handled += delivered
+        if triggers.enabled:
+            self._event_tracker.begin_tick(now)
+            t_handled, left, t_capped = await self._run_triggers(triggers.items, start, now, left)
+            handled += t_handled
+            capped = capped or t_capped
         if capped:
             today = now.astimezone(self.tz).date()
             if self._capped_day != today:
@@ -349,6 +384,133 @@ class ProactiveScheduler:
             private=True,
             routine=routine or "",
             suggest=suggest,
+            local_only=True,
+        )
+        self._finish(event_id, day_start, outcome, "completed")
+        return int(outcome.delivered)
+
+    async def _run_triggers(
+        self,
+        items: Any,
+        day_start: datetime,
+        now: datetime,
+        left: int,
+    ) -> tuple[int, int, bool]:
+        handled = 0
+        capped = False
+        for trigger in items:
+            kind = getattr(trigger, "kind", "folder")
+            try:
+                if kind == "folder":
+                    ready = await self._poll_trigger(trigger, now)
+                    if not ready:
+                        continue
+                    if left <= 0:
+                        capped = True
+                        continue
+                    delivered = await self._fire_trigger(trigger, ready, day_start, now)
+                    if delivered:
+                        self._mark_trigger_seen(trigger.name, ready)
+                else:
+                    match = await self._event_tracker.poll(trigger, now, self.store)
+                    if match is None:
+                        continue
+                    if left <= 0:
+                        capped = True
+                        continue
+                    delivered = await self._fire_event_trigger(trigger, match, day_start, now)
+                    if delivered:
+                        self._event_tracker.mark_fired(trigger, match, now)
+            except (OSError, ValueError, RuntimeError) as error:
+                if trigger.name not in self._trigger_errors:
+                    self._trigger_errors.add(trigger.name)
+                    self.runtime.audit.emit(
+                        "trigger_unavailable", trigger=trigger.name, error_type=type(error).__name__
+                    )
+                continue
+            self._trigger_errors.discard(trigger.name)
+            left -= delivered
+            handled += delivered
+            if delivered > 0:
+                c_delivered, left, c_capped = await self._deliver_trigger_chains(
+                    trigger.name, day_start, now, left
+                )
+                handled += c_delivered
+                capped = capped or c_capped
+        return handled, left, capped
+
+    async def _deliver_trigger_chains(
+        self, source_name: str, day_start: datetime, now: datetime, left: int
+    ) -> tuple[int, int, bool]:
+        matches = self._event_tracker.evaluate_chains(
+            event_kind="trigger_fired",
+            source_name=source_name,
+            now=now,
+            tz=self.tz,
+            store=self.store,
+        )
+        handled = 0
+        capped = False
+        for match in matches:
+            if left <= 0:
+                capped = True
+                break
+            delivered = await self._fire_chain(match, day_start, now)
+            if delivered:
+                self._event_tracker.mark_chain_fired(match.chain_name, now)
+                left -= delivered
+                handled += delivered
+        return handled, left, capped
+
+    async def _fire_event_trigger(
+        self, trigger: TriggerConfig, match: TriggerMatch, day_start: datetime, now: datetime
+    ) -> int:
+        digest = hashlib.sha1(match.event_key.encode("utf-8")).hexdigest()[:12]
+        base_id = f"trigger:{trigger.name}:{digest}"
+        event_id = base_id
+        attempt = 1
+        while not self.store.claim(event_id, day_start, "trigger", self.owner, now):
+            if self.store.occurrence_state(event_id, day_start) != "failed":
+                return 0
+            attempt += 1
+            event_id = f"{base_id}:{attempt}"
+        routine = match.routine if self.runtime.settings.routines.enabled else ""
+        outcome = await self.deliverer.deliver(
+            event_id=event_id,
+            scheduled_for=day_start,
+            kind="trigger",
+            title=match.title,
+            body=match.body,
+            private=True,
+            routine=routine,
+            suggest=match.suggest,
+            local_only=True,
+        )
+        self._finish(event_id, day_start, outcome, "completed")
+        return int(outcome.delivered)
+
+    async def _fire_chain(
+        self, match: ChainMatch, day_start: datetime, now: datetime
+    ) -> int:
+        digest = hashlib.sha1(match.event_key.encode("utf-8")).hexdigest()[:12]
+        base_id = f"chain:{match.chain_name}:{digest}"
+        event_id = base_id
+        attempt = 1
+        while not self.store.claim(event_id, day_start, "trigger_chain", self.owner, now):
+            if self.store.occurrence_state(event_id, day_start) != "failed":
+                return 0
+            attempt += 1
+            event_id = f"{base_id}:{attempt}"
+        routine = match.routine if self.runtime.settings.routines.enabled else ""
+        outcome = await self.deliverer.deliver(
+            event_id=event_id,
+            scheduled_for=day_start,
+            kind="trigger_chain",
+            title=match.title,
+            body=match.body,
+            private=True,
+            routine=routine,
+            suggest=match.suggest,
             local_only=True,
         )
         self._finish(event_id, day_start, outcome, "completed")

@@ -44,6 +44,7 @@ from artemis.channels.telegram.media import (
 from artemis.channels.voice.core import MAX_DIRECT_AUDIO_BYTES, SpeechRecognizer, pcm_to_wav
 from artemis.channels.voice.factory import build_dictation_recognizer
 from artemis.config.settings import load_settings
+from artemis.config.work_profile import is_local_only_profile
 from artemis.i18n import t
 from artemis.perception.screen import ScreenOutcome, read_image
 from artemis.safety.audit import AuditLog
@@ -83,6 +84,7 @@ _HELP_TEXT = (
 )
 _STOPPING = "Bilgisayar kullanımı oturumu durduruluyor."
 _NO_SESSION = "Çalışan bir bilgisayar kullanımı oturumu yok."
+_PRIVATE_PROFILE_BLOCKED = "Gizli profil etkin: Telegram kanalı kapalı."
 # /dur turu bloklayan döngüde dinlenir: bu aralıkla, yalnız bilgisayar oturumu sürerken yoklanır.
 _STOP_POLL_SECONDS = 1.0
 _REJECTION_NOTICES = {
@@ -310,21 +312,31 @@ class TelegramChannel:
             loop.call_soon_threadsafe(runtime.runner.cancel_current)
 
     def _sync_computer_mode(self, runtime: Runtime) -> None:
-        """Kip masaüstü ile aynıdır: panelin yazdığı config her turdan önce yeniden okunur.
+        """Kip ve çalışma profili masaüstü ile aynıdır: panelin yazdığı config yeniden okunur.
 
         Okunamazsa `accept` (sor) seçilir; belirsizlikte sormak güvenli taraftır.
         """
         if self._config_path is None:
             return
         try:
-            mode = load_settings(self._config_path).computer_use.mode
+            loaded = load_settings(self._config_path)
+            mode = loaded.computer_use.mode
+            work_profile = loaded.work_profile
         except (OSError, ValueError, yaml.YAMLError):
             mode = "accept"
+            work_profile = runtime.context.settings.work_profile
         settings = runtime.context.settings
+        updates: dict[str, Any] = {}
         if settings.computer_use.mode != mode:
-            runtime.context.settings = settings.model_copy(
-                update={"computer_use": settings.computer_use.model_copy(update={"mode": mode})}
-            )
+            updates["computer_use"] = settings.computer_use.model_copy(update={"mode": mode})
+        if settings.work_profile != work_profile:
+            updates["work_profile"] = work_profile
+        if updates:
+            runtime.context.settings = settings.model_copy(update=updates)
+
+    def _is_private_profile(self, runtime: Runtime) -> bool:
+        self._sync_computer_mode(runtime)
+        return is_local_only_profile(runtime.context.settings.work_profile)
 
     # ------------------------------------------------------------------ yardımcılar
 
@@ -595,6 +607,9 @@ class TelegramChannel:
             return
         if runtime is None:
             return
+        if self._is_private_profile(runtime):
+            self.audit.emit("telegram_blocked_private")
+            return
         if command == "/yeni":
             if runtime.runner.reset_context():
                 self._notify(t("Yeni sohbet başladı."))
@@ -615,7 +630,9 @@ class TelegramChannel:
         audio_wav: bytes | None = None,
     ) -> None:
         self._loop = asyncio.get_running_loop()
-        self._sync_computer_mode(runtime)
+        if self._is_private_profile(runtime):
+            self.audit.emit("telegram_blocked_private")
+            return
         self._frame = None
         watcher = asyncio.create_task(self._watch_stop()) if self.computer_host else None
         try:
@@ -674,6 +691,9 @@ class TelegramChannel:
         runtime = self.runtime
         if runtime is None:
             return
+        if self._is_private_profile(runtime):
+            self.audit.emit("telegram_blocked_private")
+            return
         config = runtime.context.settings.telegram
         enabled = {
             "voice": config.accept_voice,
@@ -692,6 +712,9 @@ class TelegramChannel:
             await self._handle_document(runtime, message)
 
     async def _handle_voice(self, runtime: Runtime, message: Mapping[str, Any]) -> None:
+        if self._is_private_profile(runtime):
+            self.audit.emit("telegram_blocked_private")
+            return
         voice = message.get("voice")
         if not isinstance(voice, Mapping):
             return
@@ -748,6 +771,9 @@ class TelegramChannel:
         await self._run_turn(runtime, transcript, audio_wav=audio_wav)
 
     async def _handle_photo(self, runtime: Runtime, message: Mapping[str, Any]) -> None:
+        if self._is_private_profile(runtime):
+            self.audit.emit("telegram_blocked_private")
+            return
         raw = message.get("photo")
         items = raw if isinstance(raw, list) else []
         photos = [item for item in items if isinstance(item, Mapping)]
@@ -999,6 +1025,7 @@ def _start_proactive(
 STATUS_STARTING = "Telegram kanalı başlıyor"
 STATUS_RUNNING = "Telegram kanalı açık"
 STATUS_STOPPED = "Telegram kanalı durdu"
+STATUS_PRIVATE = "Gizli profilde kapalı"
 STATUS_CONFLICT = (
     "Çakışma: botu başka bir süreç dinliyor (`artemis telegram` açık olabilir); "
     "kanal durduruldu"
@@ -1035,6 +1062,9 @@ async def serve_telegram(
         status(embedded_text if embedded else cli_text)
 
     settings = load_settings(config_path)
+    if is_local_only_profile(settings.work_profile):
+        say(t(_PRIVATE_PROFILE_BLOCKED), STATUS_PRIVATE)
+        return 2
     config = settings.telegram
     if config.chat_id is None:
         say(

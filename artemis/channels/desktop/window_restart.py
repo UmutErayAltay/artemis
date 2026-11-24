@@ -299,10 +299,16 @@ def finish_exit(window: DesktopWindow) -> None:
     if window._selection_hotkey is not None:
         window._selection_hotkey.stop()
         window._selection_hotkey = None
+    selection_mouse = getattr(window, "_selection_mouse", None)
+    if selection_mouse is not None:
+        selection_mouse.stop()
+        window._selection_mouse = None
     ptt_hotkey = getattr(window, "_ptt_hotkey", None)
     if ptt_hotkey is not None:
         ptt_hotkey.stop()
         window._ptt_hotkey = None
+    if hasattr(window, "selection_badge"):
+        window.selection_badge.close()
     window.selection_popup.close()
     history = getattr(window, "_dictation_history", None)
     if history is not None:

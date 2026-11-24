@@ -37,6 +37,7 @@ from artemis.config.settings import (
     cloud_tts_model,
     load_settings,
 )
+from artemis.config.work_profile import effective_settings_for_profile, is_local_only_profile
 from artemis.i18n import current_language, t
 from artemis.safety.audit import AuditLog
 
@@ -143,6 +144,7 @@ class VoicePreviewRequest:
     ffmpeg: str
     sample_text: str
     paid_override: bool | None = None
+    work_profile: str = "work"
 
 
 SynthesizerFactory = Callable[[VoiceConfig, EndpointConfig | None, AuditLog], Any]
@@ -181,6 +183,8 @@ async def run_voice_preview(
     sink_factory: SinkFactory | None = None,
 ) -> None:
     """Seçilen TTS motoruyla tek cümlelik ses üretir ve çalar."""
+    if request.backend in ("edge", "cloud") and is_local_only_profile(request.work_profile):
+        raise ValueError(t("Gizli profilde bulut veya Edge sesi önizlenemez."))
     if request.backend in ("edge", "cloud") and not request.allow_cloud_tts_text:
         raise ValueError(t("Metin gönderme izni kapalı; bulut veya Edge sesi önizlenemedi."))
 
@@ -317,11 +321,14 @@ def validate_preview_request(
         loaded = load_settings(panel.config_path)
     except (OSError, ValueError, ValidationError, yaml.YAMLError):
         return None, None, None, t("Ayar dosyası okunamadı.")
+    effective = effective_settings_for_profile(loaded)
 
     backend = str(panel.tts_combo.currentData() or "piper")
     edge_voice = panel.edge_voice_combo.currentText().strip()
     piper_voice = panel.piper_voice_combo.currentText().strip()
-    consent = panel.tts_cloud_consent.isChecked()
+    consent = panel.tts_cloud_consent.isChecked() and not is_local_only_profile(
+        loaded.work_profile
+    )
     endpoint_name = str(panel.tts_cloud_server.currentData() or "")
     protocol = str(panel.tts_cloud_protocol.currentData() or "openai")
     cloud_model = panel.tts_cloud_model.currentText().strip()
@@ -329,6 +336,13 @@ def validate_preview_request(
     allow_paid = panel.tts_cloud_paid.isChecked()
     endpoint = loaded.endpoints.get(endpoint_name) if endpoint_name else None
 
+    if backend in ("edge", "cloud") and is_local_only_profile(loaded.work_profile):
+        return (
+            None,
+            None,
+            None,
+            t("Gizli profilde bulut veya Edge sesi önizlenemez."),
+        )
     if backend in ("edge", "cloud") and not consent:
         return (
             None,
@@ -389,12 +403,13 @@ def validate_preview_request(
         tts_cloud_protocol=protocol,
         tts_cloud_model=cloud_model,
         tts_cloud_voice=cloud_voice,
-        tts_cloud_sample_rate=loaded.voice.tts_cloud_sample_rate,
+        tts_cloud_sample_rate=effective.voice.tts_cloud_sample_rate,
         tts_cloud_allow_paid=allow_paid,
         allow_cloud_tts_text=consent,
-        ffmpeg=loaded.voice.ffmpeg,
+        ffmpeg=effective.voice.ffmpeg,
         sample_text=sample,
         paid_override=paid_override,
+        work_profile=loaded.work_profile,
     )
     return req, endpoint, loaded.audit_path, None
 

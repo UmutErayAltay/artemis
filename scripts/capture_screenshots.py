@@ -305,6 +305,8 @@ def capture_settings(
     for title, name in (("Ses", "settings-ses.png"), ("Telegram", "settings-telegram.png")):
         _select_settings_section(panel, title)
         if title == "Ses":
+            if hasattr(panel, "voice_tabs") and panel.voice_tabs.count() > 1:
+                panel.voice_tabs.setCurrentIndex(1)
             # Karma tanıma alanları kutu işaretlenince açılır; sayfa o bölüme kaydırılır.
             panel.hybrid_stt.setChecked(True)
             app.processEvents()

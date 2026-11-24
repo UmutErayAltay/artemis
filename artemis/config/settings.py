@@ -4,7 +4,7 @@ import os
 import re
 from datetime import time
 from decimal import Decimal
-from pathlib import Path, PureWindowsPath
+from pathlib import Path
 from typing import Any, Literal, Self
 from urllib.parse import urlparse
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -13,6 +13,24 @@ import yaml
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
+from artemis.config.triggers import (
+    MAX_CHAINS as MAX_CHAINS,
+)
+from artemis.config.triggers import (
+    MAX_TRIGGERS as MAX_TRIGGERS,
+)
+from artemis.config.triggers import (
+    SuggestionChainConfig as SuggestionChainConfig,
+)
+from artemis.config.triggers import (
+    TriggerConfig as TriggerConfig,
+)
+from artemis.config.triggers import (
+    TriggerKind as TriggerKind,
+)
+from artemis.config.triggers import (
+    TriggersConfig as TriggersConfig,
+)
 
 GITHUB_OWNER_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})")
 ENDPOINT_ID_RE = re.compile(r"[A-Za-z0-9_-]{1,40}")
@@ -171,6 +189,9 @@ class VoiceConfig(BaseModel):
     # Opt-in: komut sesi ayrı bulut STT adımına gitmeden doğrudan ses destekleyen beyin
     # modeline (`input_audio` WAV) eklenir; desteklemeyen modelde yerel metne düşer.
     direct_audio_input: bool = False
+    # Opt-in çok kipli ekran bağlamı (ADR 0085): doğrudan sesli komut sırasında etkin ekran
+    # görüntüsü (PNG) bellekte beyin modeline eklenir; diske yazılmaz, üçlü kapıdan geçer.
+    multimodal_screen_context: bool = False
     stt_cloud_endpoint: str = ""
     stt_cloud_model: str = ""
     # ADR 0050: xAI'nin STT REST ucu OpenAI uyumlu değildir (/stt, model alanı yok).
@@ -699,6 +720,8 @@ class ComputerUseConfig(BaseModel):
     # `Settings.models` anahtarı; `observation` "screen"/"both" iken görüntü kabul eden bir model
     # olmalı, "uia" iken metin modeli de çalışır. Boşsa `Settings.primary_model` kullanılır.
     model: str = ""
+    # Tıkanmada devreye giren arka plan stratejist modeli; boşsa `hard_model -> primary_model`.
+    planner_model: str = ""
     max_steps: int = Field(default=25, ge=1, le=100)
     max_minutes: float = Field(default=5.0, ge=0.5, le=30)
     screenshot_width: int = Field(default=1280, ge=640, le=2560)
@@ -772,6 +795,7 @@ class SelectionActionsConfig(BaseModel):
     hotkey: str = Field(default="ctrl+alt+s", min_length=1, max_length=40)
     # "Çevir" eyleminin hedef dili (ör. en, tr, de); modele düz metin olarak söylenir.
     translate_to: str = Field(default="en", min_length=1, max_length=40)
+    mouse_popup: bool = True
 
 
 class RoutinesConfig(BaseModel):
@@ -780,56 +804,6 @@ class RoutinesConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     enabled: bool = False
-
-
-MAX_TRIGGERS = 10
-
-
-class TriggerConfig(BaseModel):
-    """Config'te tanımlı tetikleyici (ADR 0061): yalnız kullanıcı yazar, hiçbir araç yazamaz."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str = Field(pattern=r"^[A-Za-z0-9_-]{1,32}$")
-    folder: str = Field(min_length=1, max_length=500)
-    pattern: str = Field(default="*", min_length=1, max_length=100)
-    # Yer tutucular: {name} (tetikleyici adı), {file} (yalnız dosya adı).
-    message: str = Field(default="Yeni dosya geldi: {file}", min_length=1, max_length=300)
-    # Kullanıcının yazdığı istem şablonu; {path} dosyanın tam yoludur. Sohbet kutusuna yazılır.
-    suggest: str | None = Field(default=None, min_length=1, max_length=500)
-    # ADR 0058 rutin adı; düğme normal, onaylı bir rutin çalıştırır.
-    routine: str | None = Field(default=None, min_length=1, max_length=40)
-
-    @field_validator("folder")
-    @classmethod
-    def validate_folder(cls, value: str) -> str:
-        absolute = Path(value).is_absolute() or PureWindowsPath(value).is_absolute()
-        if chr(0) in value or not absolute:
-            raise ValueError("folder mutlak bir yol olmalı (ör. C:/Users/ben/Downloads)")
-        return value
-
-    @model_validator(mode="after")
-    def one_button(self) -> Self:
-        if self.suggest is not None and self.routine is not None:
-            raise ValueError("Bir tetikleyici en çok bir düğme taşır: suggest ya da routine")
-        return self
-
-
-class TriggersConfig(BaseModel):
-    """Tetikleyiciler (ADR 0061): klasöre yeni dosya gelince bildirim. Varsayılan kapalı."""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    enabled: bool = False
-    items: tuple[TriggerConfig, ...] = Field(default=(), max_length=MAX_TRIGGERS)
-
-    @field_validator("items")
-    @classmethod
-    def unique_names(cls, values: tuple[TriggerConfig, ...]) -> tuple[TriggerConfig, ...]:
-        names = [item.name.casefold() for item in values]
-        if len(names) != len(set(names)):
-            raise ValueError("Tetikleyici adları benzersiz olmalı")
-        return values
 
 
 class CalendarConfig(BaseModel):
@@ -1055,7 +1029,7 @@ class Settings(BaseModel):
             self.models[name].kind != "chat"
             for name in (
                 self.primary_model, self.hard_model or "", self.computer_use.model,
-                *self.computer_use.fallback_models,
+                self.computer_use.planner_model, *self.computer_use.fallback_models,
             )
             if name in self.models
         ):
@@ -1074,6 +1048,8 @@ class Settings(BaseModel):
         vision_model = self.computer_use.model or self.primary_model
         if self.computer_use.enabled and vision_model not in self.models:
             raise ValueError("computer_use.model models içinde tanımlanmalı")
+        if self.computer_use.planner_model and self.computer_use.planner_model not in self.models:
+            raise ValueError("computer_use.planner_model models içinde tanımlanmalı")
         for name in self.computer_use.fallback_models:
             if name not in self.models:
                 raise ValueError("computer_use.fallback_models models içinde tanımlanmalı")

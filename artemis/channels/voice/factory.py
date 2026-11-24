@@ -54,12 +54,17 @@ from artemis.channels.voice.game_mode import (
 )
 from artemis.channels.voice.kws import WakeSpotter
 from artemis.channels.voice.live_text import SherpaLiveTranscriber
+from artemis.channels.voice.multimodal import (
+    capture_active_screen_png,
+    is_voice_screen_context_allowed,
+)
 from artemis.channels.voice.silero import SileroVAD
 from artemis.channels.voice.smart_turn import SmartTurnDetector
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.model_paths import DEFAULT_NOISE_MODEL_DIR
 from artemis.config.settings import Settings, VoiceConfig, cloud_tts_model
 from artemis.config.work_profile import (
+    effective_settings_for_profile,
     is_game_profile,
     is_local_only_profile,
     should_mute_tts,
@@ -175,10 +180,14 @@ def _cloud_stt_ready(runtime: Runtime) -> bool:
     )
 
 
-def _live_profile(runtime: Runtime) -> str:
+def _live_settings(runtime: Runtime) -> Settings:
     context = getattr(runtime, "context", None)
-    live_settings = getattr(context, "settings", None) or runtime.settings
-    return str(getattr(live_settings, "work_profile", "work"))
+    live_settings = getattr(context, "settings", None)
+    return live_settings if isinstance(live_settings, Settings) else runtime.settings
+
+
+def _live_profile(runtime: Runtime) -> str:
+    return str(getattr(_live_settings(runtime), "work_profile", "work"))
 
 
 def _setup_game_mode(
@@ -456,6 +465,15 @@ async def build_voice_controller(
         wake_spotter = await build_wake_spotter(settings.voice, on_state)
         if wake_spotter is not None:
             cleanup.callback(wake_spotter.close)
+        def capture_screen() -> bytes | None:
+            live_settings = _live_settings(runtime)
+            if not is_voice_screen_context_allowed(live_settings):
+                return None
+            effective = effective_settings_for_profile(live_settings)
+            return capture_active_screen_png(
+                max_width=effective.computer_use.screenshot_width
+            )
+
         controller = VoiceController(
             runtime.runner,
             settings.voice,
@@ -481,6 +499,7 @@ async def build_voice_controller(
             audit=runtime.audit,
             muted=should_mute_tts(_live_profile(runtime)),
             profile_getter=lambda: _live_profile(runtime),
+            capture_screen=capture_screen,
         )
         cleanup.pop_all()
         return controller

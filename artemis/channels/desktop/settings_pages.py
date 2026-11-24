@@ -57,6 +57,7 @@ from artemis.channels.desktop.settings_widgets import (
 )
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEME_LABELS
 from artemis.channels.desktop.tts_cloud_box import build_tts_cloud_box
+from artemis.channels.desktop.voice_model_manager import VoiceModelManagerWidget
 from artemis.channels.desktop.voice_preview import build_voice_output_controls
 from artemis.channels.desktop.voice_telemetry_card import VoiceTelemetryCard
 from artemis.channels.desktop.widgets import with_help
@@ -190,33 +191,58 @@ def add_page(
     return content
 
 
+def _voice_subtab(tabs: SettingsTabWidget, title: str) -> QVBoxLayout:
+    page = _HeightForWidthBox()
+    layout = QVBoxLayout(page)
+    layout.setContentsMargins(0, 16, 0, 0)
+    layout.setSpacing(24)
+    tabs.addTab(page, title)
+    return layout
+
+
+def _conditional_box(spacing: int = 4) -> tuple[_HeightForWidthBox, QVBoxLayout]:
+    box = _HeightForWidthBox()
+    layout = QVBoxLayout(box)
+    layout.setContentsMargins(0, 0, 0, 0)
+    layout.setSpacing(spacing)
+    return box, layout
+
+
 def build_voice_page(panel: SettingsPanel) -> None:
-    """1. sayfa: Ses (Dinleme (Giriş) | Yanıt (Çıkış))."""
+    """1. sayfa: Ses (Dinleme | Tanıma | Yanıt | Modeller ve ölçüm)."""
     voice = add_page(panel, t("Ses"), t("Uyandırma, tanıma, konuşma sesi ve ölçüm."), t("Temel"))
     tabs = SettingsTabWidget()
+    set_i18n_context(tabs, "voice_tab")
     panel.voice_tabs = tabs
     panel._page_tabs["Ses"] = tabs
     voice.addWidget(tabs)
 
-    listen_page = _HeightForWidthBox()
-    listen_layout = QVBoxLayout(listen_page)
-    listen_layout.setContentsMargins(0, 16, 0, 0)
-    listen_layout.setSpacing(24)
+    listen_layout = _voice_subtab(tabs, t("Dinleme", context="voice_tab"))
     _wake_group(panel, listen_layout)
-    _stt_group(panel, listen_layout)
-    _cleanup_group(panel, listen_layout)
-    panel.voice_telemetry_card = VoiceTelemetryCard(panel.config_path)
-    listen_layout.addWidget(panel.voice_telemetry_card)
+    _mic_advanced_group(panel, listen_layout)
     listen_layout.addStretch(1)
-    tabs.addTab(listen_page, t("Dinleme (Giriş)"))
 
-    reply_page = _HeightForWidthBox()
-    reply_layout = QVBoxLayout(reply_page)
-    reply_layout.setContentsMargins(0, 16, 0, 0)
-    reply_layout.setSpacing(24)
+    stt_layout = _voice_subtab(tabs, t("Tanıma"))
+    _stt_group(panel, stt_layout)
+    _audio_processing_group(panel, stt_layout)
+    _cloud_stt_group(panel, stt_layout)
+    _stt_advanced_group(panel, stt_layout)
+    stt_layout.addStretch(1)
+
+    reply_layout = _voice_subtab(tabs, t("Yanıt"))
     _speech_group(panel, reply_layout)
     reply_layout.addStretch(1)
-    tabs.addTab(reply_page, t("Yanıt (Çıkış)"))
+
+    models_layout = _voice_subtab(tabs, t("Modeller ve ölçüm"))
+    panel.voice_model_manager = VoiceModelManagerWidget(
+        panel.config_path, parent=panel, demo=panel._demo
+    )
+    models_layout.addWidget(panel.voice_model_manager)
+    panel.voice_telemetry_card = VoiceTelemetryCard(panel.config_path)
+    models_layout.addWidget(panel.voice_telemetry_card)
+    models_layout.addStretch(1)
+
+    panel._sync_voice_conditional_boxes()
     voice.addStretch(1)
 
 
@@ -282,25 +308,31 @@ def _wake_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         "bulut sunucusuna gider."
     )))
     wake.addWidget(_check_hint(t("Uyandırma adı söylemeden sürekli dinler.")))
-    panel.ptt_enabled = QCheckBox(t("Bas-konuş (Push-to-Talk)"))
-    wake.addWidget(panel.ptt_enabled)
-    wake.addWidget(_check_hint(
-        t("Belirlenen kısayolu basılı tutarken dinler, bırakınca komutu işler.")
-    ))
-    panel.ptt_hotkey = QLineEdit()
-    panel.ptt_hotkey.setMaxLength(40)
-    panel.ptt_hotkey.setAccessibleName(t("Bas-konuş kısayolu"))
-    panel.ptt_hotkey.setPlaceholderText("ctrl+alt+v")
-    field(
-        wake,
-        t("Bas-konuş kısayolu"),
-        panel.ptt_hotkey,
-        t("Bas-konuş için genel kısayol (ör. ctrl+alt+v; boş bırakılırsa kapalı)."),
-    )
+
+
+def _mic_advanced_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
+    panel.mic_advanced_toggle = QToolButton()
+    panel.mic_advanced_toggle.setText(t("Gelişmiş mikrofon ayarları"))
+    panel.mic_advanced_toggle.setCheckable(True)
+    panel.mic_advanced_toggle.setChecked(False)
+    panel.mic_advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    panel.mic_advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+    voice.addWidget(divider())
+    voice.addWidget(panel.mic_advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+    panel.mic_advanced_box, mic_adv = group(t("Gelişmiş mikrofon ayarları"), divided=False)
+    panel.advanced_devices = QCheckBox(t("Sanal ve diğer ses girişlerini göster"))
+    panel.advanced_devices.toggled.connect(panel._toggle_device_detail)
+    mic_adv.addWidget(panel.advanced_devices)
+    panel.refresh_button = QPushButton(t("Mikrofon listesini yenile"))
+    panel.refresh_button.clicked.connect(panel.refresh)
+    mic_adv.addLayout(button_row(panel.refresh_button))
+    voice.addWidget(panel.mic_advanced_box)
+    panel.mic_advanced_box.setVisible(False)
+    panel.mic_advanced_toggle.toggled.connect(panel._toggle_mic_advanced)
 
 
 def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
-    stt_card, stt_layout = group(t("Tanıma"))
+    stt_card, stt_layout = group(t("Konuşma tanıma"), divided=False)
     voice.addWidget(stt_card)
     stt_controls = QHBoxLayout()
     stt_controls.setSpacing(8)
@@ -329,19 +361,60 @@ def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         panel.stt_language_combo,
         t("Konuştuğun dil. İngilizce arayüzde İngilizce konuşacaksan English seç."),
     )
-    panel.precision_combo = QComboBox()
-    panel.precision_combo.setAccessibleName(t("Tanıma hassasiyeti"))
-    panel.precision_combo.setToolTip(t(
-        "Dengeli ölçümde En yüksek hassasiyetle aynı doğrulukta, yaklaşık 1,8 GB daha az "
-        "ekran kartı belleği kullanır. İşlemcide çalışırken seçici kapalıdır. Değişiklik ses "
-        "yeniden başlayınca uygulanır."
+    panel.stt_combo.currentIndexChanged.connect(panel._stt_selection_changed)
+    panel.stt_download.clicked.connect(panel._download_stt)
+    panel._populate_stt_choices(None)
+
+
+def _audio_processing_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
+    clean_card, clean = group(t("Ses işleme ve modlar"))
+    voice.addWidget(clean_card)
+    panel.live_transcript = QCheckBox(t("Canlı yazı (konuşurken)"))
+    panel.live_transcript.setToolTip(t(
+        "Konuşurken metin pet balonunda akar; yalnız gösterimdir, komutu etkilemez. "
+        "Ek bir bileşen kurulumu ister. Değişiklik ses yeniden başlayınca uygulanır."
     ))
-    panel.precision_combo.addItem(t("Dengeli (az bellek)"), "int8_float16")
-    panel.precision_combo.addItem(t("En yüksek hassasiyet"), "float16")
-    field(stt_layout, t("Tanıma hassasiyeti"), panel.precision_combo, help=t(
-        "En yüksek hassasiyet (float16) daha çok ekran kartı belleği kullanır; Dengeli ölçümde "
-        "aynı doğrulukta yaklaşık 1,8 GB daha az bellek ister. İşlemcide seçici kapalıdır."
+    clean.addWidget(panel.live_transcript)
+    clean.addWidget(
+        meta_label(t("Yerel, işlemcide çalışır. Powered by mihu · mihu Community License"))
+    )
+    panel.noise_suppression = QCheckBox(t("Gürültü engelleme"))
+    panel.noise_suppression.setToolTip(t(
+        "DeepFilterNet3; işlemcide çalışır, ekran kartı gerekmez. Yankı gidermez. "
+        "Model pakete dahildir; indirme gerekmez. "
+        "Değişiklik ses yeniden başlayınca uygulanır."
     ))
+    clean.addWidget(panel.noise_suppression)
+    panel.game_mode = QCheckBox(t("Oyun modu"))
+    panel.game_mode.setToolTip(t(
+        "Tam ekran oyun öndeyken büyük tanıma modeli ekran kartı belleğinden bırakılır, "
+        "hafif yerel model (Small) devralır; bulut hedefinde Small CPU'da yalnız uyandırmayı "
+        "dinler, komut buluta gider (Small gerekir). Oyundan çıkınca "
+        "büyük model geri yüklenir. Değişiklik ses yeniden başlayınca uygulanır."
+    ))
+    clean.addWidget(panel.game_mode)
+    panel.game_mode_target_box, gm_target_lay = _conditional_box(spacing=0)
+    panel.game_mode_target = QComboBox()
+    panel.game_mode_target.addItem(t("Hafif yerel model (Small)"), "local_light")
+    panel.game_mode_target.addItem(t("Bulut komut + yerel uyandırma (VRAM boşalır)"), "cloud")
+    field(
+        gm_target_lay,
+        t("Oyun modu hedefi"),
+        panel.game_mode_target,
+        t(
+            "Bulut seçilirse tam ekran oyunda büyük model bırakılır; "
+            "Ses tanıma bölümündeki bulut sunucusu ayarları kullanılır."
+        ),
+    )
+    clean.addWidget(panel.game_mode_target_box)
+    panel.game_mode.toggled.connect(panel._update_cloud_hint)
+    panel.game_mode.toggled.connect(panel._sync_voice_conditional_boxes)
+    panel.game_mode_target.currentIndexChanged.connect(panel._update_cloud_hint)
+
+
+def _cloud_stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
+    cloud_card, stt_layout = group(t("Bulut ve çok kipli"))
+    voice.addWidget(cloud_card)
     panel.hybrid_stt = QCheckBox(t("Karma tanıma (komutları bulutta çöz)"))
     panel.hybrid_stt.setToolTip(t(
         "Uyandırma bu bilgisayarda kalır; komut olan sözün sesi seçtiğin bulut sunucusuna "
@@ -362,9 +435,27 @@ def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
         "gönderilir (gizlilik bedeli). Desteklemeyen modelde yerel metne düşer. Ses "
         "yeniden başlayınca uygulanır."
     )))
-    panel.cloud_box = QWidget()
-    cloud_layout = QVBoxLayout(panel.cloud_box)
-    cloud_layout.setContentsMargins(0, 0, 0, 0)
+    panel.multimodal_screen_box, mm_layout = _conditional_box(spacing=6)
+    panel.multimodal_screen_context = QCheckBox(
+        t("Sesli komutta etkin ekranı paylaş (çok kipli)")
+    )
+    panel.multimodal_screen_context.setToolTip(
+        t(
+            "Yalnız Doğrudan sesli komut ve bulut ekran izni birlikte açıkken, "
+            "komut anındaki ekran görüntüsü bellekte modele eklenir; diske yazılmaz. "
+            "Gizli profilde kapalıdır."
+        )
+    )
+    mm_layout.addWidget(panel.multimodal_screen_context)
+    panel.multimodal_screen_hint = _check_hint(
+        t(
+            "Etkin ekranı bellekte gönderir; doğrudan sesli komut ve bulut ekran "
+            "izni gerektirir, diske yazılmaz."
+        )
+    )
+    mm_layout.addWidget(panel.multimodal_screen_hint)
+    stt_layout.addWidget(panel.multimodal_screen_box)
+    panel.cloud_box, cloud_layout = _conditional_box(spacing=12)
     panel.cloud_server = QComboBox()
     panel.cloud_server.setAccessibleName(t("Bulut tanıma sunucusu"))
     field(cloud_layout, t("Tanıma sunucusu"), panel.cloud_server)
@@ -399,10 +490,59 @@ def _stt_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     panel.cloud_stt_hint = meta_label("")
     stt_layout.addWidget(panel.cloud_stt_hint)
     panel.hybrid_stt.toggled.connect(panel._update_cloud_hint)
+    panel.direct_audio_input.toggled.connect(panel._sync_voice_conditional_boxes)
+    panel.multimodal_screen_context.toggled.connect(panel._sync_voice_conditional_boxes)
     panel.cloud_protocol.currentIndexChanged.connect(panel._update_cloud_hint)
     panel.cloud_server.activated.connect(panel._cloud_server_picked)
     panel.cloud_server.currentIndexChanged.connect(panel._update_cloud_hint)
     panel._update_cloud_hint()
+
+
+def _stt_advanced_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
+    panel.advanced_toggle = QToolButton()
+    panel.advanced_toggle.setText(t("Gelişmiş tanıma ayarları"))
+    panel.advanced_toggle.setCheckable(True)
+    panel.advanced_toggle.setChecked(False)
+    panel.advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+    panel.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
+    voice.addWidget(divider())
+    voice.addWidget(panel.advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
+    panel.advanced_box, advanced_layout = group(t("Gelişmiş tanıma ayarları"), divided=False)
+    panel.precision_combo = QComboBox()
+    panel.precision_combo.setAccessibleName(t("Tanıma hassasiyeti"))
+    panel.precision_combo.setToolTip(t(
+        "Dengeli ölçümde En yüksek hassasiyetle aynı doğrulukta, yaklaşık 1,8 GB daha az "
+        "ekran kartı belleği kullanır. İşlemcide çalışırken seçici kapalıdır. Değişiklik ses "
+        "yeniden başlayınca uygulanır."
+    ))
+    panel.precision_combo.addItem(t("Dengeli (az bellek)"), "int8_float16")
+    panel.precision_combo.addItem(t("En yüksek hassasiyet"), "float16")
+    field(advanced_layout, t("Tanıma hassasiyeti"), panel.precision_combo, help=t(
+        "En yüksek hassasiyet (float16) daha çok ekran kartı belleği kullanır; Dengeli ölçümde "
+        "aynı doğrulukta yaklaşık 1,8 GB daha az bellek ister. İşlemcide seçici kapalıdır."
+    ))
+    panel.noise_level = QComboBox()
+    for label, key in ((t("Hafif"), "hafif"), (t("Orta"), "orta"), (t("Güçlü"), "guclu")):
+        panel.noise_level.addItem(label, key)
+    panel.noise_level.setAccessibleName(t("Gürültü engelleme düzeyi"))
+    panel.noise_level.setToolTip(t(
+        "Düzey bastırma sınırıdır; algılamayı etkiler. Tanıma varsayılan olarak ham sesi alır."
+    ))
+    panel.noise_level.setEnabled(False)
+    panel.noise_suppression.toggled.connect(panel.noise_level.setEnabled)
+    field(advanced_layout, t("Gürültü engelleme düzeyi"), panel.noise_level)
+    panel.noise_stt = QCheckBox(t("Tanımaya da temizlenmiş ses ver"))
+    panel.noise_stt.setToolTip(t(
+        "Kapalıyken (önerilen) temizlenmiş ses yalnız konuşma algılamaya, cümle bitişine ve "
+        "söz kesmeye gider; konuşma tanıma aynı aralığın ham sesini alır. Ölçümlerde Whisper "
+        "temizlenmiş sesle çoğunlukla daha kötü sonuç verdi."
+    ))
+    panel.noise_stt.setEnabled(False)
+    panel.noise_suppression.toggled.connect(panel.noise_stt.setEnabled)
+    advanced_layout.addWidget(panel.noise_stt)
+    voice.addWidget(panel.advanced_box)
+    panel.advanced_box.setVisible(False)
+    panel.advanced_toggle.toggled.connect(panel._toggle_advanced)
 
 
 def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
@@ -460,98 +600,14 @@ def _speech_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
     speech.addWidget(_check_hint(t("Hoparlörle kullanırken aç; kulaklıkta gerekmez.")))
 
 
-def _cleanup_group(panel: SettingsPanel, voice: QVBoxLayout) -> None:
-    clean_card, clean = group(t("Canlı yazı ve ses temizleme"))
-    voice.addWidget(clean_card)
-    panel.live_transcript = QCheckBox(t("Canlı yazı (konuşurken)"))
-    panel.live_transcript.setToolTip(t(
-        "Konuşurken metin pet balonunda akar; yalnız gösterimdir, komutu etkilemez. "
-        "Ek bir bileşen kurulumu ister. Değişiklik ses yeniden başlayınca uygulanır."
-    ))
-    clean.addWidget(panel.live_transcript)
-    clean.addWidget(
-        meta_label(t("Yerel, işlemcide çalışır. Powered by mihu · mihu Community License"))
-    )
-    panel.noise_suppression = QCheckBox(t("Gürültü engelleme"))
-    panel.noise_suppression.setToolTip(t(
-        "DeepFilterNet3; işlemcide çalışır, ekran kartı gerekmez. Yankı gidermez. "
-        "Model pakete dahildir; indirme gerekmez. "
-        "Değişiklik ses yeniden başlayınca uygulanır."
-    ))
-    clean.addWidget(panel.noise_suppression)
-    panel.game_mode = QCheckBox(t("Oyun modu"))
-    panel.game_mode.setToolTip(t(
-        "Tam ekran oyun öndeyken büyük tanıma modeli ekran kartı belleğinden bırakılır, "
-        "hafif yerel model (Small) devralır; bulut hedefinde Small CPU'da yalnız uyandırmayı "
-        "dinler, komut buluta gider (Small gerekir). Oyundan çıkınca "
-        "büyük model geri yüklenir. Değişiklik ses yeniden başlayınca uygulanır."
-    ))
-    clean.addWidget(panel.game_mode)
-    panel.game_mode_target = QComboBox()
-    panel.game_mode_target.addItem(t("Hafif yerel model (Small)"), "local_light")
-    panel.game_mode_target.addItem(t("Bulut komut + yerel uyandırma (VRAM boşalır)"), "cloud")
-    field(
-        clean,
-        t("Oyun modu hedefi"),
-        panel.game_mode_target,
-        t(
-            "Bulut seçilirse tam ekran oyunda büyük model bırakılır; "
-            "Ses tanıma bölümündeki bulut sunucusu ayarları kullanılır."
-        ),
-    )
-    panel.game_mode.toggled.connect(panel._update_cloud_hint)
-    panel.game_mode_target.currentIndexChanged.connect(panel._update_cloud_hint)
-    panel._update_cloud_hint()
-    panel.advanced_toggle = QToolButton()
-    panel.advanced_toggle.setText(t("Gelişmiş ses ayarları"))
-    panel.advanced_toggle.setCheckable(True)
-    panel.advanced_toggle.setChecked(False)
-    panel.advanced_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-    panel.advanced_toggle.setArrowType(Qt.ArrowType.RightArrow)
-    voice.addWidget(divider())
-    voice.addWidget(panel.advanced_toggle, 0, Qt.AlignmentFlag.AlignLeft)
-    panel.advanced_box, advanced_layout = group(t("Gelişmiş ses ayarları"), divided=False)
-    panel.noise_level = QComboBox()
-    for label, key in ((t("Hafif"), "hafif"), (t("Orta"), "orta"), (t("Güçlü"), "guclu")):
-        panel.noise_level.addItem(label, key)
-    panel.noise_level.setAccessibleName(t("Gürültü engelleme düzeyi"))
-    panel.noise_level.setToolTip(t(
-        "Düzey bastırma sınırıdır; algılamayı etkiler. Tanıma varsayılan olarak ham sesi alır."
-    ))
-    panel.noise_level.setEnabled(False)
-    panel.noise_suppression.toggled.connect(panel.noise_level.setEnabled)
-    field(advanced_layout, t("Gürültü engelleme düzeyi"), panel.noise_level)
-    panel.noise_stt = QCheckBox(t("Tanımaya da temizlenmiş ses ver"))
-    panel.noise_stt.setToolTip(t(
-        "Kapalıyken (önerilen) temizlenmiş ses yalnız konuşma algılamaya, cümle bitişine ve "
-        "söz kesmeye gider; konuşma tanıma aynı aralığın ham sesini alır. Ölçümlerde Whisper "
-        "temizlenmiş sesle çoğunlukla daha kötü sonuç verdi."
-    ))
-    panel.noise_stt.setEnabled(False)
-    panel.noise_suppression.toggled.connect(panel.noise_stt.setEnabled)
-    advanced_layout.addWidget(panel.noise_stt)
-    panel.advanced_devices = QCheckBox(t("Sanal ve diğer ses girişlerini göster"))
-    panel.advanced_devices.toggled.connect(panel._toggle_device_detail)
-    advanced_layout.addWidget(panel.advanced_devices)
-    panel.refresh_button = QPushButton(t("Mikrofon listesini yenile"))
-    panel.refresh_button.clicked.connect(panel.refresh)
-    advanced_layout.addLayout(button_row(panel.refresh_button))
-    voice.addWidget(panel.advanced_box)
-    panel.advanced_box.setVisible(False)
-    panel.stt_combo.currentIndexChanged.connect(panel._stt_selection_changed)
-    panel.stt_download.clicked.connect(panel._download_stt)
-    panel._populate_stt_choices(None)
-    panel.advanced_toggle.toggled.connect(panel._toggle_advanced)
-
-
 def build_shortcuts_page(panel: SettingsPanel) -> None:
     """2. sayfa: Dikte ve Kısayollar."""
     page = add_page(
         panel,
         t("Dikte ve Kısayollar"),
-        t("Genel ses kısayolu, dikte ve seçili metin eylemleri."),
+        t("Ses kısayolları, dikte ve seçili metin eylemleri."),
     )
-    voice_box, voice_hk = group(t("Genel ses kısayolu"), divided=False)
+    voice_box, voice_hk = group(t("Ses kısayolları"), divided=False)
     page.addWidget(voice_box)
     panel.listening_hotkey = QLineEdit()
     panel.listening_hotkey.setMaxLength(40)
@@ -566,6 +622,25 @@ def build_shortcuts_page(panel: SettingsPanel) -> None:
             "kısayolundan farklı olmalı."
         ),
     )
+    panel.ptt_enabled = QCheckBox(t("Bas-konuş (Push-to-Talk)"))
+    voice_hk.addWidget(panel.ptt_enabled)
+    voice_hk.addWidget(_check_hint(
+        t("Belirlenen kısayolu basılı tutarken dinler, bırakınca komutu işler.")
+    ))
+    panel.ptt_hotkey_box, ptt_lay = _conditional_box(spacing=0)
+    panel.ptt_hotkey = QLineEdit()
+    panel.ptt_hotkey.setMaxLength(40)
+    panel.ptt_hotkey.setAccessibleName(t("Bas-konuş kısayolu"))
+    panel.ptt_hotkey.setPlaceholderText("ctrl+alt+v")
+    field(
+        ptt_lay,
+        t("Bas-konuş kısayolu"),
+        panel.ptt_hotkey,
+        t("Bas-konuş için genel kısayol (ör. ctrl+alt+v; boş bırakılırsa kapalı)."),
+    )
+    voice_hk.addWidget(panel.ptt_hotkey_box)
+    panel.ptt_enabled.toggled.connect(panel._sync_voice_conditional_boxes)
+    panel._sync_voice_conditional_boxes()
 
     dict_box, dict_layout = group(t("Dikte"))
     page.addWidget(dict_box)
@@ -613,6 +688,14 @@ def build_shortcuts_page(panel: SettingsPanel) -> None:
         "Seçimi almak için pano geçici kullanılır ve eski metin geri konur; metin dışı pano "
         "içeriği (resim, dosya) geri konamaz. Metin modele araçsız gider, geçmişe girmez. "
         "Pano için bulut izni yoksa yalnız yerel model kullanılır."
+    )))
+    panel.selection_mouse_popup = QCheckBox(t("Metin seçince fare yanında simge göster"))
+    panel.selection_mouse_popup.setChecked(True)
+    panel.selection_mouse_popup.setEnabled(False)
+    panel.selection_enabled.toggled.connect(panel.selection_mouse_popup.setEnabled)
+    sel_layout.addWidget(panel.selection_mouse_popup)
+    sel_layout.addWidget(_check_hint(t(
+        "Metin seçtikten sonra çıkan simgeye tıklayınca farenin etrafında eylem düğmeleri açılır."
     )))
     panel.selection_hotkey = QLineEdit()
     panel.selection_hotkey.setMaxLength(40)

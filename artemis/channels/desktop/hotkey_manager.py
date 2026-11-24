@@ -10,6 +10,7 @@ import yaml
 from pydantic import ValidationError
 
 from artemis.channels.desktop.hotkey import GlobalHotkey, PushToTalkHotkey, parse_hotkey
+from artemis.channels.desktop.selection_mouse import SelectionMouseWatcher
 from artemis.config.settings import load_settings, same_hotkey
 from artemis.i18n import t
 
@@ -144,11 +145,38 @@ def start_dictation_hotkey(
     )
 
 
+def start_selection_mouse(
+    window: DesktopWindow,
+    watcher_cls: type[SelectionMouseWatcher] = SelectionMouseWatcher,
+) -> None:
+    """Fareyle metin seçimi izleyicisini başlatır veya yeniler (ADR 0062)."""
+    _stop_handle(window, "_selection_mouse")
+    badge = getattr(window, "selection_badge", None)
+    if badge is not None:
+        badge.hide()
+    if window._demo:
+        return
+    try:
+        config = load_settings(window._config_path).selection_actions
+    except (OSError, ValueError, ValidationError, yaml.YAMLError):
+        return
+    if not (config.enabled and config.mouse_popup):
+        return
+    watcher = watcher_cls(
+        on_candidate=window._selection_mouse_candidate.emit,
+        on_dismiss=window._selection_mouse_dismiss.emit,
+        is_own_widget_at=window._is_selection_ui_at,
+    )
+    if watcher.start():
+        window._selection_mouse = watcher
+
+
 def start_selection_hotkey(
     window: DesktopWindow, hotkey_cls: type[GlobalHotkey] = GlobalHotkey
 ) -> None:
     """Seçili metin kısayolunu başlatır veya yeniler (ADR 0062)."""
     _stop_handle(window, "_selection_hotkey")
+    start_selection_mouse(window)
     try:
         config = load_settings(window._config_path).selection_actions
     except (OSError, ValueError, ValidationError, yaml.YAMLError):

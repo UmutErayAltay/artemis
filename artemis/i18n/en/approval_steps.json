@@ -22,6 +22,7 @@
   "Gözetimsiz turda yan etkili işlem yapılmaz": "Side-effect actions are not allowed in an unattended turn",
   "Ham araç adı": "Raw tool name",
   "Hayır": "No",
+  "Kaydedilecek rutin adımları": "Routine steps to save",
   "Model yanıt veremedi": "Model could not respond",
   "Model yanıtı alındı": "Model response received",
   "Oluşturulacak etkinlik önizlemesi": "Event to create preview",

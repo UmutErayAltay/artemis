@@ -5,10 +5,16 @@ build-backend = "hatchling.build"
 [project]
 name = "artemis-tr"
 version = "0.2.3"
-description = "Türkçe, güvenlik kapılı kişisel masaüstü asistanı"
+description = "Local-first Windows personal desktop assistant with a unified safety gate, taint tracking, voice pipeline, and UIA computer use"
 requires-python = ">=3.12"
 license = "Apache-2.0"
 license-files = ["LICENSE", "LICENSES/*.txt", "THIRD_PARTY_NOTICES.md"]
+
+[project.urls]
+Homepage = "https://github.com/UmutErayAltay/artemis"
+Repository = "https://github.com/UmutErayAltay/artemis"
+Issues = "https://github.com/UmutErayAltay/artemis/issues"
+Releases = "https://github.com/UmutErayAltay/artemis/releases"
 dependencies = [
   "pydantic==2.12.3",
   "httpx==0.28.1",

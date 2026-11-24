@@ -123,12 +123,15 @@ def test_game_mode_cloud_target_round_trip_and_cloud_box(tmp_path, qapp) -> None
     panel = SettingsPanel(config_path)
     try:
         panel.show()
+        panel.select_section("Tanıma")
         assert hasattr(panel, "game_mode_target")
         assert panel.game_mode_target.currentData() == "local_light"
+        assert not panel.game_mode_target_box.isVisible()
         assert not panel.game_mode_target.isEnabled()
         assert not panel.cloud_box.isVisible()
 
         panel.game_mode.setChecked(True)
+        assert panel.game_mode_target_box.isVisible()
         assert panel.game_mode_target.isEnabled()
         cloud_idx = panel.game_mode_target.findData("cloud")
         assert cloud_idx >= 0

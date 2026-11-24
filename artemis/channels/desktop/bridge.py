@@ -367,6 +367,7 @@ class DesktopBridge:
         self._proactive_stop: asyncio.Event | None = None
         self._proactive_task: asyncio.Task[None] | None = None
         self._proactive_telegram: TelegramClient | None = None
+        self._proactive_scheduler: ProactiveScheduler | None = None
         self._ready = threading.Event()
         self._stopped = threading.Event()
         self._thread = threading.Thread(
@@ -490,6 +491,12 @@ class DesktopBridge:
     def selection_hotkey(self) -> bool:
         """Seçili metin kısayolu (GUI thread'i): seçimi yakalar (ADR 0062)."""
         return self._selection_call(lambda actions: actions.start_capture())
+
+    def selection_capture_mouse(self, hwnd: int, pre_text: str | None) -> bool:
+        """Fare seçimi sonrası simge tıklamasıyla yakalama başlatır."""
+        if pre_text is not None and pre_text.strip():
+            return self._selection_call(lambda actions: actions.accept_selection(hwnd, pre_text))
+        return self._selection_call(lambda actions: actions.start_capture(skip_key_wait=True))
 
     def selection_run(self, action: str) -> bool:
         return self._selection_call(lambda actions: actions.start_run(action))
@@ -746,6 +753,15 @@ class DesktopBridge:
                 if len(self._turn_requests) > 64:
                     self._turn_requests.pop(next(iter(self._turn_requests)))
         turn_id = str(record["turn_id"]) if record.get("turn_id") is not None else None
+        if event_name == "routine_run_end" and self._proactive_scheduler is not None:
+            loop = self._loop
+            if loop is not None and not self._loop_stopping:
+                with suppress(RuntimeError):
+                    loop.call_soon_threadsafe(
+                        self._notify_routine_chain,
+                        str(fields.get("name", "")),
+                        bool(fields.get("completed", False)),
+                    )
         self._enqueue_activity(
             self._request_for_turn(record.get("turn_id")),
             event_name,
@@ -832,10 +848,23 @@ class DesktopBridge:
             profile_getter=lambda: runtime.context.settings.work_profile,
         )
         scheduler = ProactiveScheduler(runtime, store, deliverer)
+        self._proactive_scheduler = scheduler
         self._proactive_stop = asyncio.Event()
         self._proactive_task = asyncio.get_running_loop().create_task(
             scheduler.serve(self._proactive_stop)
         )
+
+    def notify_system_resume(self) -> None:
+        """Sistem uykudan uyandığında (`WM_POWERBROADCAST`) zamanlayıcıya haber verir."""
+        scheduler, loop = self._proactive_scheduler, self._loop
+        if scheduler is not None and loop is not None and not self._loop_stopping:
+            with suppress(RuntimeError):
+                loop.call_soon_threadsafe(scheduler.notify_system_resume)
+
+    def _notify_routine_chain(self, routine_name: str, completed: bool) -> None:
+        scheduler = self._proactive_scheduler
+        if scheduler is not None and not self._shutdown:
+            asyncio.create_task(scheduler.notify_routine_completed(routine_name, completed))
 
     def _proactive_panel(self, title: str, body: str) -> bool:
         if self._shutdown:
@@ -852,6 +881,7 @@ class DesktopBridge:
         return True
 
     def _stop_proactive(self) -> None:
+        self._proactive_scheduler = None
         if self._proactive_stop is not None:
             self._proactive_stop.set()
         task = self._proactive_task
@@ -884,6 +914,7 @@ class DesktopBridge:
     async def _execute_request(
         self, request_id: str, text: str, stream: ResponseStream | None = None,
         audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> RunResult | None:
         """Yazılı ve sesli isteğin ortak turu: aynı olaylar, aynı temizlik, aynı bitiş."""
         runtime = self._runtime
@@ -900,6 +931,8 @@ class DesktopBridge:
                 kwargs["stream"] = stream
             if audio_wav is not None:
                 kwargs["audio_wav"] = audio_wav
+            if image_png is not None:
+                kwargs["image_png"] = image_png
             result = await runtime.runner.run(text, **kwargs)
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id
@@ -924,6 +957,7 @@ class DesktopBridge:
     async def _run_voice_command(
         self, text: str, *, stream: ResponseStream | None = None,
         audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> RunResult:
         """Sesli komut, yazılı istekle aynı anda yürümez; meşgulse runner'a hiç gitmez."""
         with self._lock:
@@ -935,7 +969,9 @@ class DesktopBridge:
         self._events.put(VoiceCommand(request_id, text))
         self._events.put(State("running", t("Sesli istek çalışıyor."), request_id))
         # Söz kesme bu görevi iptal eder; CancelledError temizlikten sonra yukarı çıkar.
-        result = await self._execute_request(request_id, text, stream, audio_wav=audio_wav)
+        result = await self._execute_request(
+            request_id, text, stream, audio_wav=audio_wav, image_png=image_png
+        )
         if result is not None:
             return result
         if self._broker.is_cancelled():

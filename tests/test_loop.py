@@ -55,6 +55,7 @@ def make_loop(tmp_path, responses, *, approved=False, **settings):
     registry = ToolRegistry()
     registry.register(ReadTool)
     registry.register(WriteTool)
+    settings.setdefault("state_dir", tmp_path / "state")
     context = ToolContext(
         workspace=tmp_path,
         settings=Settings(**settings),
@@ -218,11 +219,13 @@ async def test_timeout_cancels_provider(tmp_path):
 
 async def test_expired_approval_cannot_dispatch_side_effect(tmp_path):
     loop, provider = make_loop(
-        tmp_path, [call("write")], approved=True, max_seconds=0.02
+        tmp_path, [call("write")], approved=True, max_seconds=0.3
     )
+    approvals = []
 
-    def slow_approval(_name, _arguments):
-        time.sleep(0.04)
+    def slow_approval(name, _arguments):
+        approvals.append(name)
+        time.sleep(0.4)
         return True
 
     loop.approve = slow_approval
@@ -231,6 +234,7 @@ async def test_expired_approval_cannot_dispatch_side_effect(tmp_path):
     assert "yeni adım çalıştırılmayacak" in result.text
     assert "Başlamış sistem işlemlerinin tamamlandığı doğrulanamadı" in result.text
     assert len(provider.requests) == 1
+    assert approvals == ["write"]
     assert not (tmp_path / "effect.txt").exists()
 
 

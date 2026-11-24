@@ -126,6 +126,10 @@ voice:
   # Doğrudan sesli komut: komut sesi ayrı bulut STT adımına gitmeden doğrudan ses destekleyen
   # beyin modeline (ör. Gemini) gönderilir (gizlilik bedeli); desteklemeyen modelde yerel metne düşer.
   direct_audio_input: false
+  # Çok kipli ses + ekran bağlamı (ADR 0085): yalnızca direct_audio_input ve
+  # perception.allow_cloud_screen birlikte açıkken komut anındaki ekran PNG'si bellekte eklenir;
+  # diske yazılmaz ve private çalışma profilinde kapalıdır.
+  multimodal_screen_context: false
   # stt_cloud_endpoint: groq # Üstteki `endpoints` içinde tanımlı bir kimlik (hybrid için zorunlu).
   # stt_cloud_model: whisper-large-v3 # Sağlayıcının güncel belgesinden doğrulayın (hybrid için zorunlu).
   # stt_cloud_protocol: openai # openai (Whisper uyumlu /audio/transcriptions) | xai (/stt, model gerekmez; ADR 0050)
@@ -397,6 +401,7 @@ memory:
 # computer_use:
 #   enabled: true
 #   model: vision            # models altındaki bir anahtar
+#   planner_model: ""        # boş: hard_model -> primary_model -> model (tıkanmada arka plan stratejisti)
 #   max_steps: 25            # 1-100
 #   max_minutes: 5           # 0.5-30
 #   screenshot_width: 1280   # 640-2560
@@ -424,6 +429,7 @@ memory:
 #   enabled: true            # varsayılan false
 #   hotkey: ctrl+alt+s
 #   translate_to: en         # "Çevir" eyleminin hedef dili
+#   mouse_popup: true        # metin seçince fare yanında simge göster
 
 # Rutinler (ADR 0058): adlandırılmış, sabit adımlı işler ("işe başla": VS Code aç, Spotify aç,
 # sesi 30 yap). Adımlar `state_dir/routines.json` dosyasındadır; sohbetle (onaylı routine_save)
@@ -433,20 +439,45 @@ memory:
 # routines:
 #   enabled: true            # varsayılan false
 
-# Tetikleyiciler (ADR 0061). KAPALI gelir; proactive.enabled gerekir. İzlenen klasöre yeni dosya
-# gelince (indirme bitince, bir kez) Artemis bildirim gösterir; kendiliğinden hiçbir şey çalıştırmaz.
-# Yalnız burada tanımlanır, hiçbir araç eklemez/değiştirmez (en çok 10). Açılışta var olan dosyalar
-# bildirilmez. message: {name} tetikleyici adı, {file} dosya adı. Bildirim en çok bir düğme taşır:
-# suggest (metin sohbet kutusuna yazılır, GÖNDERİLMEZ; {path} tam yol) ya da routine (ADR 0058
-# rutin adı; normal, onaylı çalışır). Dosya adları Telegram'a gönderilmez.
+# Tetikleyiciler (ADR 0061, ADR 0086). KAPALI gelir; proactive.enabled gerekir. Desteklenen
+# türler (`kind`): folder (varsayılan), app_opened, calendar_before, system_resume.
+# Bildirimler yalnız yerel panelde gösterilir, LLM'siz sabit şablonlarla kurulur, en çok bir
+# düğme taşır (`suggest` ya da `routine`) ve tıklamadan hiçbir şey çalıştırmaz; Telegram'a
+# gönderilmez. Yalnız burada veya Ayarlar formundan tanımlanır, hiçbir araç ekleyemez.
 # triggers:
 #   enabled: true
 #   items:
 #     - name: indirilenler
-#       folder: C:/Users/ben/Downloads     # mutlak yol
+#       kind: folder                       # folder | app_opened | calendar_before | system_resume
+#       folder: C:/Users/ben/Downloads     # kind=folder için mutlak yol
 #       pattern: "*.pdf"                   # varsayılan "*"
 #       message: "Yeni dosya geldi: {file}"
 #       suggest: "Şu dosyayı özetle: {path}"
+#     - name: vscode-acildi
+#       kind: app_opened
+#       app: code.exe                      # ön planda açılan uygulama/süreç adı
+#       cooldown_minutes: 30               # yeniden bildirme bekleme süresi (1-1440 dk)
+#       message: "Uygulama açıldı: {app}"
+#       routine: ise-basla                 # ya suggest ya routine (ikisi birden olmaz)
+#     - name: toplanti-oncesi
+#       kind: calendar_before
+#       minutes_before: 10                 # 1-120 dk
+#       title_filter: ""                   # isteğe bağlı başlık süzgeci
+#       message: "Yaklaşan toplantı: {title} ({minutes} dk)"
+#     - name: uyanis-ozeti
+#       kind: system_resume
+#       cooldown_minutes: 30
+#       message: "Sistem uykudan uyandı"
+#   chains:
+#     - name: toplanti-sonrasi
+#       enabled: true
+#       after_routine: ise-basla           # ya da after_trigger: vscode-acildi
+#       work_profiles: [work]              # boşsa tüm profiller
+#       active_app: ""                     # isteğe bağlı etkin uygulama koşulu
+#       time_range: "09:00-18:00"          # isteğe bağlı yerel saat aralığı
+#       cooldown_minutes: 60
+#       message: "Sıradaki adım önerisi: {source}"
+#       routine: gunluk-notlar
 
 openrouter_base_url: https://openrouter.ai/api/v1
 anthropic_base_url: https://api.anthropic.com/v1

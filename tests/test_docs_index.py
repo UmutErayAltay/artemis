@@ -39,17 +39,19 @@ def test_index_links_exist():
 
 
 def test_readme_en_and_contributing_exist_and_small():
-    readme_en = ROOT / "README.en.md"
+    readme = ROOT / "README.md"
+    readme_tr = ROOT / "README.tr.md"
     contributing = ROOT / "CONTRIBUTING.md"
-    assert readme_en.is_file(), "README.en.md is missing at the repo root"
+    assert readme.is_file(), "README.md is missing at the repo root"
+    assert readme_tr.is_file(), "README.tr.md is missing at the repo root"
     assert contributing.is_file(), "CONTRIBUTING.md is missing at the repo root"
-    text = readme_en.read_text(encoding="utf-8")
-    assert len(text.splitlines()) <= 150, "README.en.md exceeds 150 lines"
+    text = readme.read_text(encoding="utf-8")
+    assert len(text.splitlines()) <= 150, "README.md exceeds 150 lines"
 
 
 def test_relative_links_resolve():
     missing = []
-    for name in ("README.en.md", "CONTRIBUTING.md"):
+    for name in ("README.md", "README.tr.md", "CONTRIBUTING.md"):
         text = (ROOT / name).read_text(encoding="utf-8")
         for target in relative_link_targets(text):
             if not (ROOT / target).exists():

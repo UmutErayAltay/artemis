@@ -48,6 +48,7 @@ class CommandRunner:
         self, text: str, unattended: bool, stream: ResponseStream | None = None,
         attachment: ToolResult | None = None,
         audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> RunResult:
         window = self.conversation.render()
         kwargs: dict[str, Any] = {}
@@ -57,6 +58,8 @@ class CommandRunner:
             kwargs["attachment"] = attachment
         if audio_wav is not None:
             kwargs["audio_wav"] = audio_wav
+        if image_png is not None:
+            kwargs["image_png"] = image_png
         result = await self.loop.run(text, window, unattended=unattended, **kwargs)
         tags = emotion_tags_active(self.loop.context.settings.voice)
         if tags:
@@ -77,6 +80,7 @@ class CommandRunner:
         self, text: str, *, unattended: bool = False, stream: ResponseStream | None = None,
         attachment: ToolResult | None = None,
         audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> RunResult:
         async with self._lock:
             if not self.loop.cleanup_pending:
@@ -84,12 +88,22 @@ class CommandRunner:
             task = asyncio.current_task()
             if task is None:
                 return await self._run_locked(
-                    text, unattended, stream, attachment, audio_wav=audio_wav
+                    text,
+                    unattended,
+                    stream,
+                    attachment,
+                    audio_wav=audio_wav,
+                    image_png=image_png,
                 )
             self._active_task = task
             try:
                 return await self._run_locked(
-                    text, unattended, stream, attachment, audio_wav=audio_wav
+                    text,
+                    unattended,
+                    stream,
+                    attachment,
+                    audio_wav=audio_wav,
+                    image_png=image_png,
                 )
             finally:
                 if self._active_task is task:

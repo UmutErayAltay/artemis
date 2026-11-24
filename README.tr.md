@@ -1,0 +1,949 @@
+# Artemis
+
+[English (README.md)](README.md) | **Türkçe**
+
+Windows 11 için Türkçe kişisel masaüstü asistanı. Masaüstü paneli, sesli komut, pet,
+Telegram kanalı ve CLI; sağlayıcıdan bağımsız ajan döngüsünü, **tek güvenlik kapısını** ve
+araçları paylaşır. Silme ve kapatma gibi riskli adımlar ile dış içerik okunduktan sonraki her
+yan etki ekranda tam argümanlarla onay ister; varsayılan cevap hayırdır.
+
+> **Durum: teknik önizleme.** Çekirdek (güvenlik kapısı, araçlar, ajan döngüsü, UI, ses hattı)
+> testlidir (3.900+ test, Windows ve Ubuntu CI, 89 ADR, 23 eklentide 71 araç). Windows'ta gerçek cihaz kabulü kısmendir; neyin
+> doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Windows kurucusu
+> [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasından indirilir ya da kaynaktan
+> derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)). Lisans: [Apache-2.0](LICENSE); kurucudaki üçüncü
+> taraf bileşenler (GPL-3.0 Piper dahil) için [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Neler var:
+
+- **Sohbet ve araçlar:** dosya, uygulama, web, pano, hafıza, vault, kod ajanı, MCP, pencere ve sistem
+  kontrolü; her biri aynı `SafetyGate` üzerinden geçer.
+- **Bilgisayar kullanımı:** ekranı görüp fare ve klavyeyle iş yapar, Esc her an durdurur
+  ([ADR 0039](docs/adr/0039-computer-use.md); [aşağıda](#bilgisayar-kullanımı-ve-otomatik-onay)).
+  Varsayılan gözlem UI Automation'dır (`computer_use.observation: uia`): pencerenin düğme ve
+  alanlarını adlarıyla okur, görsel olmayan modeller de çalışır
+  ([ADR 0073](docs/adr/0073-computer-use-uia-gozlem.md)). `hybrid` (Karma) kipi öğe listesi boş
+  kaldığında ekran görüntüsü de ekler; pencere 5'ten az etkileşimli öğe verirse yerel Windows OCR
+  metinleri `VisualText` öğesi olarak listeye girer. Hedefte istenmeyen yıkıcı öğeye (Sil, Çıkış,
+  Sıfırla, Öde, Biçimlendir…) tıklama, odaktaki böyle bir öğede Enter/Space ve Delete tuşu kodla
+  engellenir, `auto` kipte de; yalnız ekran kipinde ve adı olmayan ikon düğmelerde çalışmaz
+  ([ADR 0078](docs/adr/0078-yikici-oge-kapisi-ve-siki-kurallar.md)).
+  Medya tuşları ve kaydırıcı/video çubuğunda orana göre tıklama (`click_element` + `ratio`) vardır.
+- **Ses:** "artemis" uyandırma sözcüğü, yerel Türkçe STT (faster-whisper), isteğe bağlı bulut/karma
+  tanıma (Groq, xAI), Piper/Edge/EMA TTS, gürültü engelleme. **Bulut konuşma sesi:** OpenRouter'daki
+  konuşma modelleri (ör. HeyGen, ElevenLabs) ve Gemini TTS; destekleyen modellerde `[laugh]` gibi
+  duygu etiketleri ([ADR 0074](docs/adr/0074-bulut-konusma-sesi.md)). Oyun modu tam ekranda büyük
+  STT modelini bırakır, hafif yerel model (Small) devralır; bulut hedefinde Small CPU'da yalnız
+  uyandırmayı dinler, komut buluta gider (`voice.game_mode_target`,
+  [ADR 0072](docs/adr/0072-oyun-modu.md)).
+- **Telegram:** panelden bağlanır, uzaktan komut alır, onaylar düğmeyle sorulur
+  ([aşağıda](#telegram-ve-bildirimler)); ses, fotoğraf ve dosya girdisi ayrı bayraklarla açılır
+  ([ADR 0064](docs/adr/0064-telegram-ses-foto-dosya.md)).
+- **İsteğe bağlı (varsayılan kapalı) özellikler:** dikte kipi ([ADR 0057](docs/adr/0057-dikte-kipi.md)),
+  rutinler ([ADR 0058](docs/adr/0058-rutinler.md)), takvim ve e-posta okuma
+  ([ADR 0059](docs/adr/0059-takvim-ve-eposta.md)), kullanıcı becerileri
+  ([ADR 0060](docs/adr/0060-kullanici-becerileri.md)), dosya tetikleyicileri
+  ([ADR 0061](docs/adr/0061-tetikleyiciler.md)), seçili metin eylemleri
+  ([ADR 0062](docs/adr/0062-secili-metin-eylemleri.md)), arka plan web araştırması
+  ([ADR 0063](docs/adr/0063-arastirma-isi.md)), yerel dosya araması
+  ([ADR 0065](docs/adr/0065-yerel-dosya-aramasi.md)) ve gün sonu özeti
+  ([ADR 0066](docs/adr/0066-gun-sonu-ozeti.md)). Ayarlar > Model'deki model testi seçili modelleri
+  aynı senaryolarla karşılaştırır, paralel çalıştırma sayısı (2/3/4/6/8) seçilir
+  ([ADR 0055](docs/adr/0055-model-kademesi-onbellek-model-testi.md)).
+- **Sağlayıcılar:** OpenRouter, Anthropic, Ollama, OpenAI uyumlu uçlar (Groq, xAI Grok, LM Studio…),
+  Claude abonelik CLI'si; sağlayıcı ve model Ayarlar'dan eklenir.
+- **Bağlamsal çalışma profilleri (`ADR 0083`):** Üst çubuktan tek tıkla **Çalışma**, **Oyun**, **Gizli** (yalnız yerel Ollama/Whisper/Piper; bulut önizleme, bilgisayar yakalama ve Telegram tamamen kapalı) ve **Toplantı** geçişi.
+- **Onaylı iki yönlü takvim ve posta (`ADR 0084`):** Salt okunur IMAP/ICS yanında yalnız `CONFIRM_REQUIRED` CalDAV etkinlik ekleme ve SMTP gönderimi.
+- **Proaktif otomasyon, makro ve radyal seçim (`ADR 0062`, `0086`, `0087`, `0089`):** Dosya/uygulama/toplantı/uyanma olay tetikleyicileri, öneri zincirleri, parola alanlarını maskeleyen öğretilebilir makro kaydedici, radyal fare seçim menüsü, grafik MCP Merkezi, Bas-Konuş (`PTT`) + 3 adımlı Mikrofon Sihirbazı, Ses+Görüntü çok modlu akış (`ADR 0085`), Ses Model Sağlık Yöneticisi (`ADR 0088`), 9 sayfalık Ayarlar (4 ses alt sekmesi + canlı bütçe çipi) ve hibrit bilgisayar stratejisti + `hover` (`ADR 0089`).
+- **Gizlilik:** sırlar yalnız ortam değişkeninde ya da Windows Kimlik Bilgisi Yöneticisi'nde;
+  ham ses saklanmaz; ekran görüntüsü diske yazılmaz; konuşma hafızası isteğe bağlı olarak Windows
+  DPAPI ile şifrelenir (yeni kurulumlarda açık, [ADR 0076](docs/adr/0076-hafiza-sifreleme.md)).
+
+Konuşma bağlamı `CommandRunner`'da tutulur (ADR 0012). Artemis'in kendi kalıcı hafızası
+(geçmiş, öz notlar, konuşma araması) varsayılan açıktır ve `state_dir/memory.sqlite3`'te
+durur ([ADR 0025](docs/adr/0025-persistent-self-memory.md)); kullanıcının Obsidian vault'u
+bundan ayrıdır ve isteğe bağlı vault araçlarıyla okunur.
+
+Mimari [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), kararların gerekçeleri
+[docs/adr/](docs/adr/), geliştirme kuralları [CLAUDE.md](CLAUDE.md) içindedir.
+Son sağlamlık doğrulaması [F2 raporunda](docs/F2_REPORT.md) bulunur.
+Ses katmanı doğrulaması ve bekleyen Windows kabulü [F3 raporunda](docs/F3_REPORT.md)
+açıklanır.
+
+## Tanıtım videoları
+
+Videolar demo arayüzünün gerçek ekran görüntüleriyle hazırlandı (Remotion), seslendirme Türkçedir.
+İngilizce seslendirmeli sürümler [README.md](README.md#demo-videos) içindedir.
+
+**Tanıtım (≈100 sn)**
+
+https://github.com/user-attachments/assets/0a565160-bc9e-42b3-8a23-72dca6e57c52
+
+**Kurulum rehberi (≈35 sn)**
+
+https://github.com/user-attachments/assets/128ab8b5-8de0-44db-a152-582a5348aa72
+
+## Masaüstü arayüzleri
+
+Tek uygulamada sohbet paneli, işlem adımları, hızlı komut penceresi ve sistem
+tepsisi bulunur. Onay penceresi araç adını, tam doğrulanmış argümanları ve dış
+içerik uyarısını gösterir; varsayılan seçim **Hayır**'dır.
+
+Görüntüler Linux'ta gerçek Qt pencerelerinden **demo modunda** alınmıştır.
+Demo, sahte sağlayıcı ve geçici bellek verisi kullanır; ağ çağrısı yapmaz,
+kullanıcının dosyalarına veya uygulamalarına erişmez. Aşağıdaki görüntüleri
+`python scripts/capture_screenshots.py` (Qt offscreen, demo penceresi) yeniden üretir.
+
+### Sohbet ve işlem adımları
+
+![Artemis sohbet paneli ve gerçek demo işlem adımları](docs/assets/desktop/panel.png)
+
+[Karşılama ekranını da görüntüleyin.](docs/assets/desktop/welcome.png)
+
+### İşlem onayı
+
+![Araç adı, argümanlar ve dış içerik uyarısıyla işlem onayı](docs/assets/desktop/approval.png)
+
+### Ayarlar: karma tanıma ve Telegram
+
+![Ayarlar > Ses: karma tanıma sunucusu, protokol, API anahtarı ve model listesi](docs/assets/desktop/settings-ses.png)
+
+![Ayarlar > Telegram: token, eşleştirme ve masaüstü içinde komut alma](docs/assets/desktop/settings-telegram.png)
+
+### Otomatik onay uyarısı
+
+![Otomatik onay açılırken çıkan risk uyarısı; varsayılan seçim Vazgeç](docs/assets/desktop/auto-warning.png)
+
+### Hızlı komut penceresi
+
+![Ana panelle aynı çalışma katmanını kullanan hızlı komut penceresi](docs/assets/desktop/overlay.png)
+
+### Masaüstü pet
+
+![Masaüstü petinin hazır, dinliyor, düşünüyor, onay bekliyor durumları ve yanıt balonu](docs/assets/desktop/pet.png)
+
+Pet ekranın köşesinde durur ve Artemis'in o an ne yaptığını gösterir: hazır, dinliyor,
+düşünüyor ya da onayını bekliyor. Yanıtlar ve iş bitişleri kısa bir balonla görünür
+([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)).
+
+#### Pet seçimi
+
+Varsayılan görünüm depodaki çizilmiş küredir. **Petler** sekmesinden Codex uyumlu
+sprite pet'ler de seçilir ([ADR 0048](docs/adr/0048-sprite-pets-quick-box-and-pet-creator.md)):
+klasörde `pet.json` (`id`, `displayName`, `description`, `spritesheetPath`) ve
+`spritesheet.webp` ya da `.png` (1536×1872 ya da 1536×2288, 8×9 hücre) bulunur. Pet'ler
+`state_dir/pets/<id>/` (Artemis'in) ve varsa `~/.codex/pets/` (`CODEX_HOME` ile değişir, salt
+okunur) altından listelenir. **Pet yükle…** bir klasörü ya da `.zip` dosyasını `state_dir/pets/`
+içine kurar; yalnız `pet.json` + tek görsel kabul edilir, boyut ve yol sınırları denetlenir.
+Silme yalnız Artemis'e yüklenen pet'lerde çalışır. Windows'ta "animasyon efektleri" kapalıysa
+ya da `ARTEMIS_REDUCE_MOTION=1` ise pet ilk kareyi gösterir.
+
+**Pet üret:** Petler sekmesindeki sohbette bir model seçip "turuncu bir kedi" gibi yazarsın; ücretsiz bir metin modeli tek bir SVG karakter çizer, SVG beyaz listeyle temizlenir (script, href, style, olay öznitelikleri atılır), Artemis 9 durumluk Codex spritesheet'ini kendisi animasyonlar ve önizlemeyi gösterir. "daha mavi yap" gibi düzeltmelerden sonra **Kaydet ve seç** pet'i `state_dir/pets/` içine kurar. Çağrı `ProviderRouter` üzerinden gider; ücretli model seçersen uyarı çıkar, `allow_paid` ve bütçe geçerlidir. Resim modeli seçilirse temel görsel ve her animasyon satırı ayrı çağrıyla üretilir (birkaç dakika sürer); başarısız satır prosedürel animatörle tamamlanır.
+
+**Lisans:** Depoya hiçbir topluluk pet'i konmaz. İndirdiğin pet'lerin (galeri siteleri dahil)
+lisansı ve içeriği, bazıları marka karakteridir, senin sorumluluğundadır.
+
+Python 3.12 ortamında arayüzü kurup ücretsiz, ağsız demoyu açın:
+
+```powershell
+python -m pip install -e ".[desktop,voice]"
+python -m artemis desktop --demo
+```
+
+Ubuntu'da PySide6 için gereken Qt grafik kitaplıklarını önce kurun:
+
+```bash
+sudo apt-get update
+sudo apt-get install -y libegl1 libopengl0
+```
+
+Demoda `örnek akış` yazıp Gönder'e basınca onay sürecini deneyebilirsiniz.
+Gerçek kullanım için aşağıdaki kurulum ve sağlayıcı ayarlarını tamamlayın:
+
+```powershell
+python -m artemis desktop --config config/config.yaml
+```
+
+Tepsi varsa pencereyi kapatmak paneli gizler; tepsi menüsünden **Çıkış** tüm
+uygulamayı kapatır. Tepsi yoksa pencere kapanışı temiz çıkış başlatır. Ses panelin
+içindedir: başlıktaki **Ses** düğmesi mikrofonu açar, `--ses` ile panel ses açık
+başlar (aşağıdaki ses modu bölümü).
+**Ayarlar** sekmesinde model, mikrofon ve izinli uygulama listesi bulunur. Uygulama
+eklemek için `.exe` dosyasını seçip **Uygula**'ya basın. Model başlığında gerçek
+model adı gösterilir. Mikrofonun farklı sürücü kopyaları tek seçenek altında
+toplanır; sanal girişler ayrıca açılabilir. Uygula yeni sohbet başlatır.
+Not Defteri'ne metin yazma, çalışma klasöründe metin dosyası oluşturup Not Defteri
+ile açma yoluyla yapılır. Açma başarısı görünür pencereyle doğrulanır.
+Uygulama seçmek istemiyorsanız **Bütün kurulu uygulamalara erişim** seçeneği
+Windows Başlat menüsündeki kayıtları otomatik kullanır. Normal işlemler tekrar
+onay istemez; silme, kaldırma ve belge/kod kaybı yaratabilecek kapatmalar onaylıdır.
+Tek başına **Artemis** dediğinizde yerel **Dinliyorum** yanıtı ve komut bekleme
+durumu gelir. Ayarlar'daki mikrofon seviyesi ve **Son duyulan** göstergesi, sesin
+girdiğini ve nasıl tanındığını gösterir; ayrı ses kaydı tutulmaz.
+Tepsi menüsündeki **Peti göster/gizle** köşede duran animasyonlu masaüstü petini açar;
+pete bir kez tıklamak altında hızlı yazma kutusu açar, iki tık sesi açıp kapatır, üç tık menüyü açar, kod ajanı bitince pet balonu ve bildirim gösterilir
+([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). Pet kendi komut veya onay
+yolu taşımaz.
+Windows tepsi, odak ve DPI kontrolleri henüz elle doğrulanmadı.
+Testler ve bilinçli sınırlar [masaüstü raporunda](docs/F5_REPORT.md) bulunur.
+
+## Artemis ses modu
+
+Uyandırma sözcüğü **artemis**. Ses kurulumu isteğe bağlıdır; varsayılan testler
+mikrofonu veya hoparlörü açmaz. Yerel Türkçe STT ve Piper modelleri önceden
+hazırlanır. RTX 4050 için CUDA/float16 başlangıç profili ve CPU alternatifi
+[Windows ses rehberinde](docs/VOICE_SETUP.md) açıklanır.
+
+```powershell
+python -m pip install -e ".[dev,desktop,voice]"
+python -m artemis desktop --ses --config config/config.yaml
+# kısayol: python -m artemis voice --config config/config.yaml (aynı komut)
+```
+
+Önce model dosyalarını, beyin modelini ve ses aygıtını rehbere göre hazırlayın.
+Ham mikrofon kaydı tutulmaz. Edge TTS yalnız ayrı gizlilik ayarıyla açılır;
+varsayılan yerel sestir. Ses masaüstü uygulamasının içinde çalışır; mikrofonu
+yalnız **Ses** düğmesi ya da `--ses` açar. Onaylar tam tool/argümanlarla ekrandaki
+pencereden alınır ([ADR 0014](docs/adr/0014-voice-in-desktop.md)); sesli “evet”
+onay sayılmaz. İlk Windows denemesini kulaklıkla yapın.
+
+**Kesintisiz sohbet** (varsayılan kapalı): ayarlardaki onay kutusu veya `voice.continuous_mode` ile
+"artemis" demeden konuşabilirsiniz; “kesintisiz moda geç” / “normal moda geç” diyerek de değiştirilir.
+Asistan konuşurken herhangi bir söz (“dur”, “bir saniye”) onu susturur; bu söz komut
+olarak çalıştırılmaz, ardından söylenen cümle uyandırmasız takip komutu olur
+(`voice.barge_in_without_wake`, [ADR 0042](docs/adr/0042-wake-free-barge-in.md)). Konuşurken
+doğrudan komut vermek yine “artemis” ister (`voice.require_wake_during_output`,
+[ADR 0022](docs/adr/0022-repetition-and-spoken-echo-guard.md),
+[ADR 0024](docs/adr/0024-continuous-voice-mode.md)). Asistanın kendi sesinin yankısı ve
+tekrar eden STT parçaları komut sayılmaz.
+Yanıt, model yazarken cümle cümle seslendirilir (`voice.streaming`,
+[ADR 0043](docs/adr/0043-streaming-voice-response.md)); araç çağrısı başlayan adımın
+metni ve araç sonucu görülmeden söylenen “kapattım/gönderdim” gibi cümleler
+seslendirilmez. Ollama, OpenRouter/OpenAI uyumlu, Anthropic ve `claude_cli` akar; akmayan
+sağlayıcıda (ve demo kipinde) yanıt tamamı gelince söylenir.
+Gürültü veya yalnız VAD etkinliği seslendirmeyi kesmez; söz kesme cümle sonu
+sessizliği ve nihai STT doğrulamasını bekler
+([ADR 0040](docs/adr/0040-validated-playback-interruption.md)).
+**Gürültü engelleme** (varsayılan kapalı): ayarlardaki "Gürültü engelleme" onay kutusu veya
+`voice.noise_suppression` mikrofonu DeepFilterNet3 ile işlemcide temizler, ekran kartı gerekmez;
+yankı gidermez, model pakete dahildir (indirme yok) ve yaklaşık 34 ms gecikme ekler ([ADR 0037](docs/adr/0037-noise-suppression.md),
+kurulum: [ses rehberi](docs/VOICE_SETUP.md)).
+İsteğe bağlı **yankı engelleme**, Artemis'in hoparlörden çalan kendi sesinin mikrofon
+yolunda oluşturduğu yankıyı azaltır; işlem yereldir ve varsayılan kapalıdır
+([ADR 0038](docs/adr/0038-echo-cancellation.md)).
+**Bulut ve karma tanıma** (isteğe bağlı, `voice.stt_mode: hybrid`): yerel tanıyıcı yalnız
+uyandırmaya karar verir, komut sesi seçtiğiniz buluta gider. Sunucu **Ayarlar > Ses > Karma
+tanıma** bölümünden seçilir: sunucu adresi, protokol (`openai`: Whisper uyumlu
+`/audio/transcriptions`, örn. Groq; `xai`: xAI `/v1/stt`), model ve API anahtarı (Kimlik
+Bilgisi Yöneticisi'ne yazılır, YAML'a girmez). "Modelleri getir" sunucudan model listesini çeker.
+Komut sesi buluta gider, gizlilik denetimine yazılır ([ADR 0079](docs/adr/0079-stt-precision-and-hybrid-cloud.md),
+[ADR 0050](docs/adr/0050-xai-grok-ve-stt-protokolu.md)). xAI ucu Türkçe ile denenmedi.
+
+Uygulama adlarını `voice.stt_hotwords` listesine eklemek doğru hedef bulmayı artırabilir ama genel
+hata oranını etkileyebilir; liste uyandırmaya duyarlıdır, değiştirince yeniden ölçün
+([ADR 0045](docs/adr/0045-evaluation-corpora.md)).
+
+### Canlı yazı (isteğe bağlı) — Powered by mihu
+
+Varsayılan kapalı. `voice.live_transcript: true` ya da panelde "Canlı yazı (konuşurken)" ile
+konuşurken pet balonunda metin kelime kelime akar. **Yalnız gösterimdir**: komut hâlâ
+large-v3 sonucundan çıkar, canlı metin uyandırma/yankı/söz kesme kararına girmez
+([ADR 0047](docs/adr/0047-live-transcript.md)). Yerelde, işlemcide çalışır; ses makineden çıkmaz.
+Kurulum: `pip install -e ".[stream]"` ve config'te `live_transcript_model` /
+`live_transcript_revision` (örnek: `config/config.example.yaml`).
+
+Model [mihu turkish-stt-66m-v2](https://huggingface.co/mihuai/turkish-stt-66m-v2) olup
+**mihu Community License v1.0** ile lisanslıdır; **Powered by mihu**. Ağırlıklar bu depoda yoktur,
+özelliği açınca sabit revision'dan indirilir; lisans şartları (ticari kullanımda gelir sınırı, rakip
+model eğitimi yasağı) açan kişiye aittir. Ayrıntı: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Sahte gecikme sonucu, medyan < 1.5 sn hedefinin gerçekleştiğini göstermez.
+
+Ortak ses ölçümünün ilk adımı ([ADR 0041](docs/adr/0041-common-voice-telemetry.md)):
+`python -m bench.voice_latency --sahte --iterations 30 --rapor reports/voice-fake.json`
+sahte adaptörlerle rapor şemasını sınar. Kullanıcının açıkça başlattığı
+`python -m bench.voice_latency --canli --config config/config.yaml --duration 60 --rapor reports/voice-live.json`
+uygulamayla aynı runtime/factory'yi (EMA/Edge/Piper, AEC/DFN ayarları dahil) kullanır.
+Canlı kip mikrofon/hoparlör kullanır; `allow_paid: true` reddedilir. Ücretsiz sağlayıcı
+kotası ve Edge metin aktarımı mevcut ayarlara tabidir. Onaylar aynı SafetyGate ve
+terminal üzerinden alınır; durum/onay istemleri stderr'e, JSON stdout'a yazılır.
+
+Rapor içerik saklamadan yerel utterance/generation kimlikleriyle reddedilen, iptal,
+hatalı, sessiz ve yarım sözleri sayar. Wake bildirimi görev yanıtı metriklerine girmez.
+Aşama p50/p90 değerlerinin kendi geçerli örnek sayısı ve dışlama paydası vardır;
+`model_complete` tüm CommandRunner süresidir. `completed` ses oynatma sonucudur,
+araç başarısı değildir. İlk PCM, player yazım callback'idir; fiziksel duyulabilirlik
+ölçülmez. Model istek/yanıt ve araç başlangıç/bitiş zamanları `RunResult` üzerinden
+gelir; turlar sohbet (`chat`) ve araçlı (`tool`) olarak, ilk görev turu `cold`, sonrakiler
+`warm` olarak ayrı raporlanır. Söz kesme stop çifti (stop isteği ve kullanıcı sesinin
+başından sink yazımının bitmesine) yalnız hoparlöre yazım sürerken üretilir. Hedefler
+(sohbet p50 < 1.5 sn, p90 < 3 sn, stop p90 < 300 ms) en az 30 geçerli örnek olmadan ve
+sahte kipte hiç değerlendirilmez (`met: null`). Canlı kip PortAudio'nun bildirdiği çıkış
+gecikmesini, süreç bellek tepe değerini ve varsa `nvidia-smi` ile aygıt geneli VRAM'i
+yazar. Streaming açık ve sağlayıcı metin akıtıyorsa ilk token ölçülür; akışsız
+kipte null kalır. Masaüstünde
+`voice.telemetry_report: true` iken ses kapanınca aynı rapor
+`state_dir/voice-telemetry/` altına yazılır. Donanım profilindeki `requested_*` ayardır;
+bilinmeyen fiilî değerler null kalır. `collection_complete` yalnız olay tamponunun taşmadığını
+belirtir; başarısızlıklar ve yarım/geçersiz sözler ayrıca raporlanır. Model hazırlığı
+iptal edilince çalışan native yükleme thread'i durdurulmuş sayılmaz.
+
+`voice.stt_language` `tr` (kod varsayılanı), `tr_en` (örnek config) veya `auto` olabilir;
+Türkçe öncelikli dil seçimi ve Kiril çıktısının reddi
+[ADR 0019](docs/adr/0019-multilingual-stt-and-validated-interruption.md) ve
+[ADR 0021](docs/adr/0021-turkish-first-language-selection.md)'de açıklanır.
+Tanıma hedefi farklı kullanıcıların günlük Türkçe–İngilizce karışık konuşmasıdır;
+birkaç uygulama adına bağlı komut kalıpları kullanılmaz. Özel kelimeler isteğe
+bağlı ipucudur. Gerçek ses kaydıyla kelime/karakter ve uygulama adı hatalarını
+ölçme adımları [ses rehberinde](docs/VOICE_SETUP.md) bulunur. Konuşmayı doğru
+yazıya çevirmek, niyeti ve doğru araç hedefini anlamakla aynı ölçüm değildir.
+Genel konuşma doğruluğu gerçek, farklı konuşmacı kayıtlarıyla henüz doğrulanmadı.
+Son değişiklik ve doğrulamalar [konuşma raporunda](docs/SPEECH_ACCURACY_REPORT.md).
+
+## Windows paketi ve ilk açılış
+
+Hazır kurucu [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasındadır
+(`Artemis-Setup-<sürüm>.exe`; kurulumsuz denemek için `Artemis-<sürüm>-windows.zip`, yani
+`dist\Artemis` klasörünün sıkıştırılmış hâli). Kendin
+derlemek için (PyInstaller + Inno Setup, [ADR 0075](docs/adr/0075-urunlestirme-plani.md),
+ayrıntı [docs/PACKAGING.md](docs/PACKAGING.md)):
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
+# çıktı: dist\Artemis\Artemis.exe; Inno Setup (ISCC.exe) kuruluysa dist\installer\Artemis-Setup-<sürüm>.exe
+```
+
+Kurucu yönetici izni istemez (`%LOCALAPPDATA%\Programs\Artemis`). Ayarlar ve hafıza kullanıcı
+başına `%APPDATA%\Artemis` altında durur; ilk açılışta örnek ayar kopyalanır, kaldırma kullanıcı
+verisine dokunmaz. Kurucu henüz imzasız olduğu için Windows SmartScreen uyarısı görülebilir.
+
+İlk açılışta **"Artemis'i bir beyne bağla"** sihirbazı dört kart sunar: OpenRouter ile
+anahtar görmeden giriş (OAuth PKCE; kota ve ücret kullanıcının kendi hesabında), Google hesabıyla
+Gemini (AI Studio anahtar sayfası açılır, kopyalanan anahtar algılanıp doğrulanır), Claude aboneliği
+(`claude` CLI) ve API anahtarı, yerel model ya da proxy (Ollama, LM Studio, Groq). Sihirbaz bu
+bilgisayarda çalışan OpenAI uyumlu servisleri (Ollama, LM Studio, LiteLLM, CLIProxyAPI gibi yerel
+proxy'ler) yalnız `127.0.0.1` üzerinde arar ve tek tıkla bağlatır; Artemis proxy kurmaz ya da
+çalıştırmaz, kullanıcının açtığı servise bağlanır. Anahtarlar yalnız Windows
+Kimlik Bilgisi Yöneticisi'ne yazılır. Başka uygulamaların kimliğiyle giriş (ör. Gemini CLI) bilinçli
+olarak yoktur. Ayarlar > Hakkında'dan elle güncelleme denetimi yapılır (yalnız sürüm sorgusu).
+
+Depodan çalışırken `config/config.yaml` varsa eskisi gibi o kullanılır.
+
+## Kurulum
+
+Python 3.12 kullanın. Windows PowerShell:
+
+```powershell
+$env:PYTHONUTF8 = '1'
+py -3.12 -m venv .venv
+.venv\Scripts\Activate.ps1
+python -m pip install -e ".[dev]"
+Copy-Item config/config.example.yaml config/config.yaml
+New-Item -ItemType Directory -Force desktop
+```
+
+`PYTHONUTF8=1`, Windows'ın bölgesel kod sayfası yerine UTF-8 kullanır. Sahte
+kabul raporları Türkçe JSON yazdığından bu ayar, yönlendirilmiş çıktının Windows'ta
+UnicodeEncodeError ile yarıda kesilmesini önler.
+
+Linux:
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -e '.[dev]'
+cp config/config.example.yaml config/config.yaml
+mkdir -p desktop
+```
+
+YAML içindeki göreli yollar config dosyasının dizinine göre çözülür. Örnek
+`workspace: ../desktop` değerini dosya araçlarının erişebileceği köke ayarlayın.
+Gerçek Windows Masaüstü klasörü kendiliğinden seçilmez.
+
+## Sağlayıcı ve sırlar
+
+Örnek config bilerek model içermez: model kimlikleri ve fiyatlar değişir.
+[Resmi kaynaklardan](docs/PROVIDERS.md) güncel kimlik, araç desteği, bağlam sınırı ve
+girdi/çıktı fiyatını doğrulayın. `models` içine bir takma ad altında şu alanları
+ekleyip `primary_model` değerini bu takma ada ayarlayın:
+
+| Alan | Değer |
+| --- | --- |
+| `provider` | `openrouter`, `anthropic`, `ollama` veya `openai_compatible` (ayrıca `endpoint`) |
+| `model` | Sağlayıcının güncel model kimliği |
+| `input_per_million` | Milyon girdi token'ı başına USD; ondalık YAML metni |
+| `output_per_million` | Milyon çıktı token'ı başına USD; ondalık YAML metni |
+| `context_window` | Modelin doğrulanmış bağlam sınırı |
+
+Ücretsizliği doğrulanan modelin iki fiyat alanı `'0'` olabilir; bilinmeyen fiyatı
+sıfır yazarak geçmeyin. `allow_paid: false` varsayılanını koruyun. Ücretli model
+kullanımı ayrıca açık kullanıcı izni ve `allow_paid: true` gerektirir.
+
+| Ortam değişkeni | Ne zaman gerekli? |
+| --- | --- |
+| `OPENROUTER_API_KEY` | OpenRouter çağrısı |
+| `ANTHROPIC_API_KEY` | Anthropic çağrısı |
+
+Kendi OpenAI uyumlu ucunuz (LM Studio, vLLM, OpenAI, CPA vb.) için config'te `endpoints:` altında
+`base_url` ve isteğe bağlı `api_key: false` tanımlayıp modelde `provider: openai_compatible` ile
+`endpoint: <id>` verin (örnek: `config/config.example.yaml`). Anahtar ortamda
+`ARTEMIS_<ID>_API_KEY` (id büyük harf, `-` yerine `_`) ya da Kimlik Bilgisi Yöneticisi'nde
+`Artemis/<id>` olarak aranır (ADR 0033).
+
+Terminalsiz yol: masaüstünde **Ayarlar > Model** sayfasındaki **Bağlantılar** bölümünden şablon seçip adresi
+ve API anahtarını girin, **Bağlantıyı test et** ile doğrulayın, modeli ekleyip **Beyin modeli
+yap** kutusunu işaretleyin. Anahtar yalnız Kimlik Bilgisi Yöneticisi'ne yazılır, YAML'a girmez. Çalışan bir
+sağlayıcı yoksa Artemis açılışta Ayarlar'ı bu bölümde açar (ADR 0034).
+
+Groq ve xAI Grok için şablon hazırdır: **Ayarlar > Model** > Bağlantılar'da şablon seçin, anahtarı
+girin, "Modelleri getir" ile listeyi çekin. Model eklerken **Tür** olarak *Sohbet* ya da *Resim*
+(pet üretimi için) seçilir; resim modeli birincil model olamaz ([ADR 0050](docs/adr/0050-xai-grok-ve-stt-protokolu.md)).
+
+Claude Pro/Max aboneliğiniz varsa API anahtarı olmadan kullanabilirsiniz: Claude Code CLI'yi
+kurup `claude` ile giriş yapın, sonra ilk açılış sihirbazında **Aboneliğimle bağlan** ya da Ayarlar > Model'de **Claude aboneliği**
+bağlantısıyla modeli (`haiku`, `sonnet`, `opus`) ekleyin; ya da config'te
+`provider: claude_cli`, `model: sonnet` ve iki fiyat için `0` verin. Artemis giriş belirteci görmez; CLI araçları
+kapalı, yalnız metin üretici olarak çalıştırılır (ADR 0035). Her istek yeni süreçtir, API'den
+yavaştır.
+
+Anahtarları yalnız çalıştırma ortamından sağlayın. YAML, komut satırı argümanları,
+test fixture'ları veya depoya anahtar yazmayın. Proje `.env` dosyasını otomatik
+yüklemez. Sağlayıcı anahtarları log ve nesne gösterimlerinden temizlenir; uygulama
+alt süreçlerine ortamın yalnız izin verilen kısmı aktarılır.
+
+Yerel yedek için Ollama'yı ayrıca kurup araç çağırmayı destekleyen bir modeli
+indirin. `models` içinde `provider: ollama` kaydı oluşturup `fallback_model` alanına
+bu kaydın takma adını yazın. Varsayılan adres `http://127.0.0.1:11434`'tür. Bulut
+bağlantısı veya sunucusu başarısız olduğunda yönlendirici `fallback_seconds` boyunca
+yerele geçer ve olayı kaydeder. Yerel yedek basit, en fazla bir araçlı işler içindir.
+Kimlik doğrulama ve geçersiz istek hataları bağlantı kesintisi diye gizlenmez.
+
+`openrouter_base_url` yerel, OpenAI uyumlu bir proxy'ye (ör. CPA) çevrilebilir; şifresiz
+`http` yalnız localhost'a izinlidir. Windows'ta yerel kurulum ve `start-artemis.ps1`
+başlatıcısı [CPA yerel test belgesinde](docs/CPA_LOCAL_TEST.md) anlatılır.
+
+## İlk çalıştırma
+
+```bash
+python -m artemis chat --config config/config.yaml
+```
+
+Çıkmak için `/çık`, `/cik` veya `/exit` yazın. `/yeni` yeni sohbet başlatır
+(panelde "Yeni sohbet"); modele son `context_turns` tur verilir ([ADR 0012](docs/adr/0012-conversation-context.md)).
+Kalıcı hafıza açıksa `/yeni` geçmişi silmez, sıfırlama işareti yazar: eski turlar
+modele verilmez ama `conversation_search` ile aranabilir kalır.
+
+Yanıt `max_output_tokens` (varsayılan 1024) sınırına takılırsa sessizce kesilmez;
+sona “yanıt uzunluk sınırında kesildi; devam için "devam et" de” notu eklenir.
+
+İşlem sürerken Ctrl+C aktif turu iptal eder; sohbet sonraki komut için açık kalır.
+Onay sorusundaki Ctrl+C hem onayı reddeder hem turu iptal eder. Önceki görevin
+temizliği tamamlanmadıysa yeni komut yürütülmez; bu durum açıkça bildirilir.
+
+Örnek komutlar: “Masaüstündeki dosyaları listele”, “Saat kaç?” ve
+“not.txt dosyasının ilk satırını söyle”. Ajan sonuçları görüp sonraki araca karar
+verir. Eksik hedef içeren isteklerde açıklama istemesi beklenir. “Dosyalarım” veya
+“projelerim” türü istekler, açıksa vault ve kod ajanı araçlarına yönlendirilir.
+
+Onay sorusu araç adını ve doğrulanmış argümanları gösterir; boş cevap hayırdır.
+Silme ve uygulama kapatma onay ister. Dosya, web veya pano gibi dış içerik
+okunduktan sonra o turdaki her yan etki de onay ister. Bu durumda onayda
+“Bu adım dış bir içerik okunduktan sonra istendi” uyarısı gösterilir.
+
+## Gizlilik ve bütçe
+
+`allow_cloud_file_content` ve `allow_cloud_clipboard` varsayılan olarak kapalıdır.
+Kapalıyken bu araçların başarılı sonuç içeriği bulut sağlayıcısına maskelenerek
+gönderilir; bu durumda bulut modelinden gerçek dosya/pano özeti beklenmez. Hata
+mesajları (“bulunamadı”, “kapalı” gibi) içerik taşımadığından maskelenmez. Yerel sağlayıcı bu
+içeriği işleyebilir. Bilgisayar kullanımı ekran görüntüsünü (görüntü kipinde) seçilen modele gönderir; diske yazmaz.
+Ekran okuma (`screen_read`) yalnız yerel OCR metni döndürür.
+
+Gizlilik kökeni lekeden ayrı izlenir ([ADR 0056](docs/adr/0056-gizlilik-koken-ve-hedef-pencere.md)).
+Yerel (Ollama) model gizli geçmişi maskesiz gördüyse ürettiği yanıt ve araç argümanları da
+gizli sayılır; bu, modelin ana, yedek ya da zor işler modeli olmasından bağımsızdır. Gizli
+bir turda kendi hafıza dosyalarına (Kimlik/Isler/SonOturum) ya da öz notlara yazılan metin
+sonraki turlarda ayrı, maskelenen bir mesajla gider: yerel hafızaya yazma onayı buluta
+paylaşım izni değildir. Gizlilik yapışkandır; temizlemenin yolu değişikliği geri almaktır.
+Eski hafıza kayıtları için: lekeli eski companion kaydı gizli sayılır, eski öz notların
+kökeni bilinmediği için gizli sayılmaz (şüpheli notu `memory_forget` ile silin).
+
+Komutunuzun metni, araç şemaları ve izin verilen sonuçlar seçilen sağlayıcıya
+gider. Buluta gönderim kararları denetlenir. `audit_path` UTF-8 JSONL denetim
+kaydını, `state_dir` günlük bütçe durumunu ve kalıcı hafıza deposunu
+(`memory.sqlite3`) belirler. Denetim logu sırlar temizlense de kişisel komutlar ve
+yerel içerik barındırabilir; yerelde tutun. Hafıza deposu gizli turların ham araç
+çıktısını da içerir; `memory.encrypt_at_rest` açıkken (örnek config'te açık) Windows DPAPI ile
+şifrelenir, kapalıysa düz SQLite'tır; istemiyorsanız `persist_memory: false` yazın.
+Bu yollar ve yerel config `.gitignore` kapsamındadır.
+
+Her model çağrısında token ve USD maliyeti kaydedilir. `daily_budget_usd` UTC gününe
+göre SQLite'ta tutulur. Çağrıdan önce bağlam ve çıktı sınırları üzerinden üst
+maliyet ayrılır; gerçekleşen kullanım ile hesap kapatılır. Bu temkinli sınır,
+kalan bütçe gerçek kısa çağrıya yetse bile isteği reddedebilir. Fiyatlar config'den
+gelir; sağlayıcı tarifeleri değiştiğinde güncellemek gerekir.
+
+`provider_timeout_seconds` her sağlayıcı denemesini sınırlar (varsayılan 15 sn).
+Bulut yanıt vermezse toplam tur süresinin kalan kısmında yerel yedek denenir.
+Kullanıcı iptali, kimlik doğrulama hatası ve bütçe reddi yedeği tetiklemez.
+Bozuk/kilitli bütçe kaydı çağrıyı engeller; belirsiz tüketim rezervasyonu korunur.
+
+## Araçlar ve platform sınırları
+
+| Alan | Araçlar |
+| --- | --- |
+| Dosyalar | `list_files`, `read_file`, `create_file`, `move_file`, `rename_file`, `delete_file`, `create_directory` |
+| Uygulamalar | `open_application`, `close_application` |
+| Web | `web_search`, `open_url` |
+| Pano | `read_clipboard`, `write_clipboard` |
+| Sistem | `system_info`, `current_time` |
+| Geri alma kaydı | `list_undo_records` |
+| Kendi hafızası | `memory_remember`, `memory_forget`, `memory_list`, `conversation_search` |
+| Vault (isteğe bağlı) | `vault_search`, `vault_read_note`, `vault_append` |
+| Bildirim | `notify_desktop`, `notify_telegram` (isteğe bağlı) |
+| Kod ajanı (isteğe bağlı) | `code_agent_start`, `code_agent_status`, `code_agent_cancel`, `code_agent_prepare`, `code_agent_answer`, `code_agent_release`, `code_agent_discard`, `code_agent_clear_finished`, `code_agent_project_context` |
+| Pencere ve sistem | `window_list`, `window_control`, `volume_set`, `brightness_set`, `power` |
+| Ekran | `computer_use`, `screen_read` |
+| Hatırlatma ve rutin | `reminder_create`, `reminder_list`, `reminder_cancel`, `reminder_retry`, `routine_save`, `routine_list`, `routine_run`, `routine_delete` |
+| Araştırma ve arama | `research_start`, `research_status`, `research_result`, `research_cancel`, `file_search` |
+| Takvim ve posta | `calendar_events`, `mail_unread` |
+| Hafıza dosyaları | `memory_session_update`, `memory_open_work`, `memory_rule_add`, `memory_rule_remove`, `memory_job_receipt`, `memory_changes`, `memory_change_undo`, `conversation_history`, `daily_summary_read` |
+| Diğer | `skill_read`, `voice_continuous`, `app_alias_remember`, `app_alias_forget` |
+
+Tam ve güncel liste `artemis/tools/plugins/` altındaki `@register_tool` sınıflarıdır.
+
+Dosya yolları çalışma kökü içinde kalmalıdır. Mutlak yollar, `..`, `.` ve kökün
+dışına çıkan sembolik bağlantılar reddedilir. Kökü listelemek için `list_files`
+argümansız çağrılır. Silme geri dönüşüm kutusunu kullanır; geri dönüşüm desteği
+başarısızsa kalıcı silmeye geçilmez. Var olan dosyanın üstüne sessizce yazılmaz.
+
+Uygulamalar `applications` içindeki izinli takma adlarla açılır/kapatılır
+(`allow_all_applications: true` ise Başlat menüsü kataloğu da kullanılır,
+[ADR 0018](docs/adr/0018-installed-apps-and-wake-feedback.md)); serbest
+shell komutu aracı yoktur. Kapatma, izinli `.exe` adına uyan bütün süreçlere normal
+kapatma isteği gönderir; kaydedilmemiş işler kaybolabilir. Windows'a bağlı uygulama
+ve pano işlevleri Linux'ta desteklenmediğini bildirir.
+Söylenen ad tam eşleşmezse okunuşa göre en yakın izinli uygulama açılır ("breyv" →
+Brave); iki aday yakınsa Artemis sorar, kapatma ve dış içerik okunan tur tahminle
+çalışmaz. "Hayır, Brave'i kastettim" gibi düzeltmeler `state_dir/app_aliases.json`'a
+takma ad olarak yazılır ([ADR 0044](docs/adr/0044-spoken-application-names.md)).
+Windows'ta yapılacak bütün elle doğrulamalar [docs/WINDOWS_CHECKLIST.md](docs/WINDOWS_CHECKLIST.md)
+içinde toplanır. Linux üzerinde çekirdek,
+dosyalar ve sahte platform adaptörleri test edilir.
+
+Günlük kullanımda seçili uygulamalar için tekrar kapatma onayını kaldırabilirsiniz:
+`close_without_confirmation: [brave]`. İsim `applications` içinde tanımlanmış
+olmalıdır. Varsayılan liste boştur; dış içerik okunan turda onay yine istenir
+([ADR 0017](docs/adr/0017-application-close-confirmation.md)).
+
+Uygulama/tarayıcı başlatma isteğinin gönderilmesi, ekranda
+açıldığının kanıtı sayılmaz. Windows'ta elle doğrulama ayrı bir teslimat kontrolüdür.
+Varsayılan masaüstü işlemleri ayrı Python işçisinde çalışır. İptal ve zaman aşımı
+işçiyi sonlandırıp çıkışını bekler; stdin/stdout iletişimi boyutla sınırlandırılır.
+OS'ye daha önce gönderilmiş bir isteğin geri alındığı iddia edilmez. Enjekte edilen
+senkron adaptörler ve kısa dosya işlemleri kesilemeyen bölgelerdir.
+
+Silmeden önce `state_dir/undo.sqlite3` günlüğüne kayıt yazılır; kayıt yazılamıyorsa
+silme başlamaz. `list_undo_records` hazırlık, tamamlandı, başarısız ve belirsiz
+durumları gösterir. Geri yükleme OS Geri Dönüşüm Kutusu üzerinden elle yapılır.
+Kayıt, dosyanın kutuda hâlâ bulunduğunun garantisi değildir; içerik yedeği tutulmaz.
+
+Web araması DuckDuckGo'nun HTML sonuçlarından başlık ve URL okur. Bu resmi bir
+arama API'si değildir; sayfa biçimi değişirse veya erişim engellenirse araç hata
+verir. Bu sürüm sonuç sayfalarının içeriğini ayrıca açıp indiren bir araç içermez.
+Arama sorgusu dış servise gönderildiğinden araç yan etkili sayılır: temiz turda
+onaysız çalışır, dış içerik okunduktan sonraki turda kullanıcı onayı ister.
+
+## Bilgisayar kullanımı ve otomatik onay
+
+`computer_use.enabled: true` iken `computer_use` aracı tek onayla bir oturum başlatır: her adımda
+model ekranın gözlemini alır, fare/klavye eylemi döner, bitişte sonuç ekrandan doğrulanır.
+Gözlem `computer_use.observation` ile seçilir: `uia` (varsayılan) yalnız pencerenin öğe listesini
+metin olarak verir, görsel olmayan model de çalışır; `screen` ekran görüntüsü, `both` ikisini,
+`hybrid` öğe listesini ve gerektiğinde (boş liste, OCR yedeği, engellenen adım) görüntüyü verir;
+görüntü kipleri görüntü kabul eden model ister. Öğe listesi de görüntü de buluta yalnız
+`perception.allow_cloud_screen: true` iken gider; kapalıyken yalnız Ollama modeli kullanılır. Terminal, Artemis'in kendisi ve parola yöneticisi
+engelli uygulamalardır; **Esc** her an oturumu durdurur.
+
+**Otomatik onay** (üst çubuktaki düğme ya da Ayarlar > Uygulamalar > "Otomatik bilgisayar
+kullanımı"): bilgisayar kullanımı adımları sormadan çalışır. Açarken risk uyarısı çıkar,
+varsayılan seçim *Vazgeç*'tir. Bunu açmak, yanlış anlaşılan bir komutun ya da ekrandaki zararlı
+bir metnin istemediğiniz bir işlemi tetikleyebileceği riskini kabul etmek demektir. Bilinen
+sınır: otomatik kipte Ctrl+W onaysızdır, hedef dışı tarayıcı sekmeleri de kapanabilir
+([ADR 0039](docs/adr/0039-computer-use.md)).
+
+Hassas adımın onayı, onayda gösterilen pencereye bağlıdır
+([ADR 0056](docs/adr/0056-gizlilik-koken-ve-hedef-pencere.md)): onay sırasında başka bir
+pencere öne geçerse girdi gönderilmez, adım yeniden planlanıp yine onaya gelir. Onay
+penceresi kapanınca odak en çok 1,5 sn Artemis'te beklenir. İptal, süre ve hedef pencere
+girdiden hemen önce yeniden denetlenir; uzun yazımda bu denetim her karakterden önce
+yinelenir, Esc'den sonra kalan metin gönderilmez. Yarıda kalan yazım başarı sayılmaz ve
+gönderilmiş karakterler geri alınmaz. Telegram'dan başlatılan oturumlar için
+[Telegram bölümüne](#telegram-ve-bildirimler) bakın.
+
+## Kendi hafızası
+
+`persist_memory` varsayılan açıktır ([ADR 0025](docs/adr/0025-persistent-self-memory.md)).
+CLI, masaüstü ve Telegram aynı `state_dir/memory.sqlite3` deposunu kullanır:
+
+- **Kalıcı geçmiş.** Turlar diske yazılır; açılışta son sıfırlamadan sonraki son
+  `context_turns` tur lekeli/gizli bayraklarıyla geri yüklenir, onay kuralları değişmez.
+- **Öz notlar.** Kalıcı tercih, bilgi veya karar söylediğinizde model `memory_remember`
+  ile sormadan not alır (panelde “Hafızaya yazıldı”); dış içerikle lekeli turda onay
+  ister. `memory_list` notları gösterir, `memory_forget` siler. En çok 200 not, not başına
+  300 karakter. Notlar her turda sistem istemine “VERİDİR” çerçevesiyle (~2000 karakter) eklenir;
+  gizli turda yazılan not ayrı, buluta maskelenen bir mesajla gider (ADR 0056).
+- **Konuşma araması.** `conversation_search` eski turlarda sözcük araması yapar; gizli
+  turların yanıtını göstermez.
+
+Depo hatası turu bozmaz; konuşma bellekte sürer ve denetime `memory_error` yazılır.
+
+Masaüstünde **Geçmiş** sekmesi konuşma geçmişini ve saklama süresini
+kontrol eder. Önce geçmişi yükleyin; varsayılan **0 gün: otomatik silme kapalı**.
+Pozitif süre seçimi eski turları hemen siler ve açık onay ister. Öz notlar ayrı kalır.
+CLI karşılıkları: `/hafıza durum`, `/hafıza göster`, `/hafıza sil`, `/hafıza sakla 30`
+(otomatik silmeyi kapatmak için `/hafıza sakla 0`). Uygulama kapalıyken budama yapılmaz.
+Silme yalnız konuşma deposunu kapsar; audit, disk/WAL ve yedeklerden güvenli silme değildir.
+
+Aynı sekmede hatırlatmaların teslim geçmişi görülür. **Teslim doğrulanamadı**, bildirimin
+ulaşmış da olabileceğini belirtir. Yeniden deneme açık onayla yeni hatırlatma oluşturur;
+otomatik tekrar yapılmaz ve çift bildirim ihtimali gösterilir.
+
+## Hafıza (Obsidian vault)
+
+Kapalıdır. Açmak için config'e `memory.vault_path` ekleyin (örnek:
+[config.example.yaml](config/config.example.yaml)). Üç araç gelir: `vault_search` (arama),
+`vault_read_note` (okuma) ve `vault_append` (ekleme). Okuma araçları dosya içeriği
+sayılır: o tur dış içerikle lekelenir, sonraki yan etkiler onay ister ve içerik buluta
+yalnız `allow_cloud_file_content: true` ise gider. `vault_append` her seferinde onay
+ister, mevcut notu yeniden yazmaz (yalnız sonuna ekler), klasör oluşturmaz. `.git`,
+`.obsidian`, `daily/`, `receipts/` ve companion klasörü aranmaz, okunmaz, yazılmaz.
+Vault notları turlara kendiliğinden eklenmez (yukarıdaki öz notların aksine); model
+gerektiğinde aracı çağırır.
+
+Arama varsayılan olarak yerleşik sözcük aramasıdır. Anlamsal arama için
+`python -m pip install -e ".[memory]"` kurun ve `memory.embedding_model` verin; ilk
+aramada model indirilir, indeks vault dışında `state_dir/embedding` altında tutulur.
+Paket veya model yoksa sözcük aramasına dönülür ve sonuçta bu yazılır. Karar:
+[ADR 0015](docs/adr/0015-vault-memory.md).
+
+## Telegram ve bildirimler
+
+Varsayılan kapalıdır; config'te `telegram.chat_id` verilmedikçe hiçbir şey açılmaz.
+Gerekçe [ADR 0016](docs/adr/0016-telegram-and-notifications.md) içindedir.
+
+**Panelden bağlama (önerilen):** **Ayarlar > Telegram** sayfasında @BotFather'dan aldığınız token'ı
+girip "Kaydet ve doğrula"ya basın (önce `getMe` ile doğrulanır, token Windows Kimlik Bilgisi
+Yöneticisi'ne yazılır), sonra "Eşleştir" ile ekrandaki 6 haneli kodu bota yazın. Beş yanlış kodda
+eşleştirme kilitlenir. "Test mesajı" ve "Bağlantıyı kes" aynı sayfadadır ([ADR 0051](docs/adr/0051-telegram-baglama-paneli.md)).
+**Kanalı masaüstü içinde çalıştırmak** için aynı sayfadaki kutuyu (`telegram.run_in_desktop`,
+varsayılan kapalı) işaretleyin; Artemis açıkken Telegram'dan komut alırsınız ([ADR 0052](docs/adr/0052-telegram-kanali-masaustunde.md)).
+
+Elle kurulum (terminal):
+
+1. Telegram'da **@BotFather**'a `/newbot` yazın ve size verilen token'ı alın.
+2. Token'ı kullanıcı ortam değişkenine yazın, sonra terminali kapatıp yeniden açın (değer
+   yalnız yeni açılan terminallerde görünür). Token'ı komutun içine yazmayın: komut satırı
+   PowerShell geçmiş dosyasına kaydedilir. `Read-Host` ile sorulan değer kaydedilmez:
+
+   ```powershell
+   $t = Read-Host "Telegram bot token"
+   [Environment]::SetEnvironmentVariable("ARTEMIS_TELEGRAM_BOT_TOKEN", $t, "User")
+   Remove-Variable t
+   ```
+
+   Token'ı config dosyasına, komut satırına veya belgeye yazmayın. Ortam değişkeni adı
+   `telegram.token_env` ile değiştirilebilir, ama `_TOKEN` ile bitmek zorundadır.
+3. Bota kendi hesabınızdan bir mesaj yazın ve chat id'nizi öğrenin. En kolayı
+   **@userinfobot**'tur. `getUpdates` çıktısındaki `message.chat.id` de kullanılabilir; ancak
+   o adres token içerir, çıktıyı paylaşmayın ve tarayıcı geçmişinde bırakmayın.
+4. `config/config.yaml` dosyasına ekleyin (diğer alanların varsayılanları örnek dosyadadır):
+
+   ```yaml
+   telegram:
+     chat_id: 123456789
+   ```
+
+5. Kanalı başlatın:
+
+   ```powershell
+   python -m artemis telegram --config config/config.yaml
+   ```
+
+   Açılınca bota "Artemis Telegram kanalı açık" mesajı gider. Kanal kapalıyken birikmiş
+   mesajlar açılışta çalıştırılmaz. Durdurmak için Ctrl+C.
+
+Davranış:
+
+- Yalnız sizin özel sohbetinizden gelen düz metin mesajlar çalıştırılır (ses, fotoğraf ve dosya
+  ayrı bayraklarla açılır, [ADR 0064](docs/adr/0064-telegram-ses-foto-dosya.md)); başkalarının
+  mesajları yanıtlanmaz. İletilmiş, açılmamış türde veya `max_message_age_seconds` (varsayılan 120
+  sn) değerinden eski mesajlar çalıştırılmaz; sohbetinizde kısa bir uyarı çıkar.
+- Yan etkili bir işlem onay ister. Telegram'da araç adı ve tüm argümanlar görünür; **Onayla**
+  veya **Reddet** düğmesine basın. Cevap verilmezse süre dolunca reddedilir ve mesaj kalan
+  süreyi yazar. Onay beklerken gelen yeni komutlar çalıştırılmaz.
+- Turda ya da konuşma geçmişinde dosya veya pano içeriği varsa onay Telegram'a gönderilmez;
+  işlemi masaüstünden onaylayın ya da `/yeni` ile yeni sohbet başlatın. Bu turların yanıtı da
+  Telegram'a gelmez.
+- `/yeni` yeni sohbet başlatır; `/yardım` kısa komut özetini gösterir.
+- Bilgisayar kullanımı (`computer_use.enabled`) yalnız masaüstü içinde çalışan kanalda
+  (`run_in_desktop`) Telegram'dan da çalışır (ADR 0053); `artemis telegram` sürecinde çalışmaz.
+  Onay masaüstü kipini izler: `auto` iken adımlar sorulmaz, `accept` iken düğmeyle sorulur.
+  `/dur` çalışan oturumu durdurur (masaüstünde Esc de çalışır). Masaüstü ve Telegram oturumu aynı
+  anda çalışmaz. `telegram.send_computer_screenshot: true` oturum bitince son ekran karesini
+  sohbete yollar; gizli turda ya da `perception.allow_cloud_screen` kapalıyken hiç gönderilmez.
+  Kullanıcı başında değilken ekranın uzaktan sürülebileceğini unutmayın.
+- Kalıcı hafıza açıkken Telegram, masaüstü ve CLI aynı geçmiş deposunu kullanır: açılışta
+  diğer kanalların son turları da geri yüklenir ve Telegram'daki `/yeni` hepsi için
+  sıfırlama işareti koyar. `persist_memory: false` ile her kanalın geçmişi süreç içinde kalır.
+
+Windows bildirimleri (`notify_desktop`):
+
+- Toast, Windows PowerShell 5.1 (`powershell.exe`) ile gösterilir; PowerShell 7 ile çalışmaz.
+- Ayarlar > Sistem > Bildirimler altında bildirimler açık olmalı ve "Windows PowerShell"e
+  bildirim izni verilmelidir. Kapalıysa araç bunu söyler ve başarılı saymaz.
+- Windows dışında araç "yalnız Windows'ta çalışır" hatası döner.
+
+Kanal sahte Telegram sunucusuyla test edilmiştir; gerçek botla uçtan uca deneme ve Windows
+toast kabulü sınırlıdır ([Güvenilirlik durumu](docs/RELIABILITY_STATUS.md)).
+
+## Kod ajanı ve GitHub
+
+Kapalıdır; `code_agent.projects` boşsa ve GitHub bağlanmamışsa araç çalışmaz
+([ADR 0023](docs/adr/0023-code-agent-and-desktop-pet.md)). `code_agent_start` her seferinde
+proje ve görev metnini göstererek onay ister, görevi arka planda seçilen ajanla çalıştırır
+(varsayılan headless `claude -p`; yerleşik `codex` ve kullanıcı tanımlı `generic` arka uçlar da
+vardır, [ADR 0049](docs/adr/0049-code-agent-backends-and-workdir.md)) ve hemen `status="sent"`
+döner. Ajanın yalnız yerel commit atması istenir; push ve web araçları istemde yasaktır.
+Çalışma ağacı kirliyse görev başlamaz, böylece değişiklikler taban commit'e geri sarılabilir.
+Ayarlar: `projects` (takma ad → yol), `command`, `max_minutes`, `model`.
+
+Bir işin sonucu üç ayrı olgudur ve birbirinin yerine geçmez:
+
+- **Süreç bitti** (`status`): ajan süreci çıkış kodu 0 ile bitti (Claude'da ayrıca kendi
+  `completed` beyanı). Bu ajanın kendi beyanıdır, doğrulama değildir.
+- **Değişiklik** (`changes`): Artemis'in git'ten okuduğu olgu: `commits` (yeni commit var),
+  `uncommitted` (yalnız commitlenmemiş değişiklik; Codex `workspace-write` altında commit
+  atamayabilir) veya `none`.
+- **Bağımsız kontrol** (`verification`): `projects.<ad>.checks` altında tanımlı komutları
+  (argv listesi, kabuk yok; ör. `[["pytest", "-q"]]`) iş bittikten sonra Artemis kendisi
+  çalıştırır. Hepsi geçerse `accepted`, biri başarısızsa `failed` (iş yine `done` kalır),
+  kontrol tanımlı değilse ya da çalışamadıysa `unverified`. Panel "Doğrulandı" yalnız
+  `accepted` iken yazar. Kontrol zaman aşımı `code_agent.check_timeout_seconds` (varsayılan 600).
+  Sınır: kontroller ajanın değiştirdiği depoda çalışır; ajan testleri, `conftest`'i veya
+  betikleri de değiştirmiş olabilir. `accepted` "ajanın beyanı" değildir ama bağımsız bir
+  sandbox kanıtı da değildir; test dosyalarındaki değişikliği diff'te ayrıca gözden geçirin.
+
+Ajanın Bash'i kısıtsızdır ve OS sandbox'ı değildir: Claude'daki `Bash(git push:*)` reddi bir
+ön ek kuralıdır ve aşılabilir (örn. `git -C . push` veya bir betik içinden). Repo içeriğindeki
+bir enjeksiyon sizin yetkinizle komut çalıştırabilir. Yalnız güvendiğiniz kendi projelerinizi
+açın.
+
+### Aşamalı proje işleri (Faz 5)
+
+Masaüstündeki **Projeler** sekmesi, izinli proje için görev, kapsam ve kabul
+ölçütlerini içeren bir taslak hazırlar. Taslak çalıştırma başlatmaz; tam metni
+inceleyip SafetyGate onayını verdikten sonra kodlama işi arka planda başlar.
+Claude Code'un `question` çıktısı işi beklemeye alır; Projeler sekmesinde soruyu
+yanıtlayıp ayrıca onaylayarak aynı CLI oturumunu sürdürebilirsiniz. İptal, durum,
+sonuç ve doğrulanan yerel commit'ler aynı sekmede görünür. `artemis desktop`
+gereklidir; demo kipinde bu eylemler kapalıdır.
+
+Yönetici, kodlayıcı ve mekanik/test alt ajanı için model profilleri isteğe bağlı
+`code_agent.manager_model`, `code_agent.coder_model` ve
+`code_agent.tester_model` ayarlarıyla seçilir. Örnek Claude Code rol dağılımı:
+
+```yaml
+code_agent:
+  manager_model: opus
+  coder_model: sonnet
+  tester_model: haiku
+```
+
+Bu yalnızca örnektir; takma adlar Claude CLI kurulumunuzun güncel resmi model
+kimlikleriyle eşleşmelidir. Bunlar Artemis'in model kimliği veya fiyat listesi
+değildir. Claude Code oturum açma ve
+abonelik erişimini kullanıcı kendi CLI kurulumu üzerinden sağlar; Artemis anahtar
+okumaz veya kopyalamaz. Profil, gerçek alt ajan kullanımını ya da toplam harcamayı
+zorlamaz. Tekrar bakın: [ADR 0026](docs/adr/0026-background-project-workflow.md).
+
+İş metaverisi `state_dir/code_agent.sqlite3` içinde tutulur; uygulama yeniden
+başlatıldığında yarım kalan işler kesinti olarak gösterilir ve kendiliğinden
+yeniden çalıştırılmaz. Bu depo yerel kullanıcının yetkileriyle çalışır; Claude
+Code'un Bash ve alt ajan araçları Artemis SafetyGate tarafından tek tek
+denetlenmez, OS sandbox'ı yoktur. Aynı veritabanını kullanan ikinci runtime proje
+eylemlerini sahiplik kilidi nedeniyle kapalı tutar. Sınırda süreç temizliği
+doğrulanamazsa iş başarıya çevrilmez ve kilit korunur; uygulama kapanışında
+temizliğin tamamlanması gerekir. Daha fazla bilgi:
+[Faz 5 planı](docs/F5_PLAN.md), [mimari](docs/ARCHITECTURE.md) ve
+[yol haritası](docs/ROADMAP.md). Otomatik kontrol sonuçları:
+[Faz 5 doğrulama raporu](docs/F5_WORKFLOW_REPORT.md) ·
+[HTML raporu](docs/F5_WORKFLOW_REPORT.html).
+
+![Projeler sekmesinin sentetik örnek sunumu](docs/assets/desktop/projects.png)
+
+Ekran görüntüsü, Qt paneline sentetik bir taslak ve sahte durum kaydı verilerek
+yerel/offscreen üretildi; bu, gerçek Claude Code işinin veya Windows kabulünün
+kanıtı değildir.
+
+### Hatırlatma ve sabah brifingi (Faz 6a)
+
+Varsayılan kapalıdır; config'te `proactive.enabled: true` ile açılır (örnek:
+`config/config.example.yaml`). Açıkken "yarın 09:30'da annemi aramayı hatırlat" gibi bir
+istek `reminder_create` ile yerel bir kayıt kurar; zamanı gelince metin model çağrılmadan
+panelde, Windows bildiriminde ve yapılandırılmışsa kendi Telegram sohbetinizde görünür.
+`reminder_list` ve `reminder_cancel` bekleyenleri gösterir ve iptal eder.
+
+Brifingler yalnız config'te tanımlanır; Artemis bir brifing istemini kendisi kuramaz veya
+değiştiremez. Brifing turu gözetimsizdir: yalnız okuma araçları çalışır, dosya oluşturma
+veya mesaj gönderme gibi her yan etki sorulmadan reddedilir ve denetime yazılır. Gizli
+içerik (dosya/pano) kullanan brifing Telegram'a gönderilmez.
+
+Zamanlayıcı yalnız `artemis desktop` veya `artemis telegram` açıkken çalışır; ikisi birlikte
+açık olsa da her olay bir kez teslim edilir. Kapalıyken kaçan hatırlatmalar açılışta
+gecikmeli ya da tek bir özet olarak bildirilir. Gerekçe:
+[ADR 0027](docs/adr/0027-proactive-events.md).
+
+### MCP sunucuları (Faz 6b)
+
+Varsayılan kapalıdır; `mcp.servers` altına stdio sunucusu eklenince araçları
+`mcp_<sunucu>_<araç>` adıyla modele görünür (örnek: `config/config.example.yaml`). Artemis
+kendi küçük istemcisini kullanır, ayrıca `mcp` paketi gerekmez. Her çağrıda sunucu kısa
+ömürlü bir süreç olarak başlatılır ve süreç ağacı iş bitince kapatılır.
+
+Güvenlik varsayılanları: her MCP aracı yan etkili ve dışarı giden sayılır; sonucu dış
+içeriktir ve turu lekeler. Sunucunun "salt okunur" beyanı riski düşürmez; bunu yalnız
+siz `read_only_tools` ile yaparsınız, `destructiveHint` bildiren araç ise onay ister.
+`read_only_tools`/`confirm_tools` sunucunun ham araç adlarını alır (`mcp_<sunucu>_` öneki
+olmadan). Okuma-yalnız saydığınız aracın argümanları onay sorulmadan sunucuya gider.
+Kişisel veri döndüren sunucuda `content: file` seçin; o sonuçlar buluta ve Telegram'a
+gitmez. Sunucu süreci yalnız işletim sistemi değişkenlerini ve sizin `env_passthrough`
+ile adlandırdıklarınızı görür. MCP sunucusunun kendi yaptıkları SafetyGate'in dışındadır.
+Gerekçe: [ADR 0028](docs/adr/0028-mcp-client.md).
+
+### Ekran okuma (Faz 6c)
+
+Varsayılan kapalıdır; `perception.screen_enabled: true` ile açılır. "Ekrandaki hatayı oku"
+gibi bir istekte `screen_read` etkin pencerenin metnini Windows'un yerleşik OCR'ıyla okur;
+tüm ekran ancak açıkça istenirse okunur. Her okuma ekranda onay ister, sesli "evet" yetmez;
+zamanlanmış brifing ekranı okuyamaz. Görüntü diske yazılmaz ve gönderilmez, yalnız metin
+döner. Ekran metni dış içerik sayılır (sonraki yan etki onay ister) ve
+`allow_cloud_screen` kapalıyken bulut modele ve Telegram'a verilmez. Türkçe metin için
+Windows'ta Türkçe dil paketi gerekir. Gerekçe: [ADR 0029](docs/adr/0029-screen-perception.md).
+
+### Windows açılışında başlama (Faz 7a)
+
+`artemis autostart ac` (ya da tepsi menüsünde **Windows açılışında başlat**) Artemis'i Windows
+oturumu açılınca paneli göstermeden tepside başlatır; hatırlatma ve brifingler böylece
+kaçmaz. Kayıt yalnız sizin kullanıcınızın `Run` anahtarına yazılır, yönetici izni
+gerekmez; `artemis autostart durum` kaydın bu kurulumla eşleşip eşleşmediğini, `kapat`
+kaldırmayı gösterir. Mikrofon açılışta kendiliğinden açılmaz. Artemis'i ikinci kez
+başlatmak yeni pencere açmaz, çalışan panel öne gelir. Model bu ayarı değiştiremez.
+Gerekçe: [ADR 0030](docs/adr/0030-autostart-single-instance.md).
+
+### Pencere ve sistem kontrolü (Faz 7b)
+
+"Açık pencereleri listele", "Chrome'u sol yarıya al", "sesi 30 yap", "parlaklığı düşür",
+"bilgisayarı kilitle" gibi istekler `window_list`, `window_control`, `volume_set`,
+`brightness_set` ve `power` araçlarıyla yapılır. Pencere başlıkları ekran içeriği sayılır:
+bulut modele gitmez (`perception.allow_cloud_screen` kapalıyken tur yerel modelle sürer).
+Uyku, kapatma ve yeniden başlatma her seferinde onay ister. Kapatma ve yeniden başlatma
+`system_control.shutdown_delay_seconds` (varsayılan 60) sonra olur; bu sürede "kapatmayı
+iptal et" demek yeter. Ses ve parlaklık ayarlandıktan sonra geri okunur; parlaklık yalnız
+dizüstü dahili ekranda çalışır. Gerekçe: [ADR 0031](docs/adr/0031-window-and-system-control.md).
+
+### Tarayıcı otomasyonu (Faz 7c)
+
+Artemis'in kendi MCP sunucusu bir sayfayı görünmez Chromium'da açar, düğmeye tıklar, forma
+yazar ve metin okur (`browse` aracı, MCP adıyla `mcp_browser_browse`). Kurulum bir kez:
+
+```powershell
+pip install -e ".[browser]"
+python -m playwright install chromium
+```
+
+Sonra config'e `mcp.servers` altında `browser` girdisini ekleyin (örnek
+`config/config.example.yaml`'da). Yalnız `http`/`https` ve genel internet adresleri açılır;
+yerel ağ, `localhost` ve `file://` reddedilir, yönlendirme ve sayfanın kendi istekleri de
+aynı kuraldan geçer. Her çağrı çerezsiz yeni bir profil kullanır: girişli hesaplarınızı
+görmez. Sonuç dış içeriktir; ardından gelen her yan etki onay ister. Gerekçe:
+[ADR 0032](docs/adr/0032-browser-automation-mcp.md).
+
+Ayarlar'daki **GitHub** bölümünde kullanıcı adı ve repo klasörü verip **Bağla ve repoları
+çek**'e basınca kendi repolarınız (fork ve arşivler hariç) `gh` ile klonlanır; var olan
+repolara yalnız `git fetch --prune` yapılır. **Otomatik eşitle** (`code_agent.auto_sync`,
+varsayılan açık) bunu her açılışta tekrarlar. Klasördeki depolar kod ajanına otomatik
+eklenir. Kimlik doğrulama `gh auth login` ile yapılır; Artemis token okumaz. Config anahtarları:
+`code_agent.github_owner`, `code_agent.repos_dir`, `code_agent.auto_sync`.
+
+## Doğrulama ve ölçüm
+
+```bash
+pytest -q
+ruff check .
+mypy
+python -m bench.run --sahte
+```
+
+Testler ağ servisi kullanmaz; sağlayıcı protokolleri yalnız loopback üzerindeki
+sahte HTTP sunucusuyla denenir. Dosya testleri geçici masaüstünde gerçek dosya
+işlemleri yapar. `disruptive` işaretli testler varsayılan olarak atlanır; bunları
+yalnız elle hazırlanmış bir makinede `pytest -m disruptive` ile seçin.
+
+Kabul senaryoları [bench/senaryolar.yaml](bench/senaryolar.yaml) içinde; senaryo
+başına bitiş durumu, onaylar, tehlikeli hatalar, adım, süre, token ve maliyet ölçülür.
+Sahte kip güvenlik ve orkestrasyon sözleşmesini ölçer. Sahte cevaplarla alınan skor
+gerçek modelin Türkçe anlama veya planlama başarısına kanıt değildir.
+
+Canlı ölçüm, ortam anahtarı sağlandıktan sonra yalnız güncel katalogda ücretsiz
+olduğu doğrulanan OpenRouter modeliyle elle çalıştırılır:
+
+```bash
+python -m bench.run --canli --model MODEL_KIMLIGI
+```
+
+`--tekrar 3` her senaryoyu üç kez ölçer; medyan/p90 için tek örnekten daha anlamlıdır.
+`--rapor reports/sonuc.json` JSON raporunu dosyaya yazar. `--senaryolar DOSYA` özel
+senaryo seti seçer. Canlı kipte `--config config/config.yaml --model TAKMA_AD`
+yazılabilir; takma adın OpenRouter kimliği yine güncel katalogla doğrulanır.
+
+Canlı senaryolar da geçici masaüstü ve sahte platform servisleri kullanır; gerçek
+model senaryolardaki sentetik içeriği görür. Aynı senaryo setini en az iki modelle
+çalıştırın; yalnız toplam başarıya göre seçim yapmayın, tehlikeli hata sayısını
+ayrı değerlendirin. API kotası ve ücretsiz model erişilebilirliği değişebilir.
+
+GitHub Actions ([ci.yml](.github/workflows/ci.yml)) Ubuntu ve Windows üzerinde iki iş
+koşar. `checks` yalnız `[dev]` ekiyle pytest → `bench.run --sahte` →
+`bench.voice_latency --sahte` → ruff → mypy çalıştırır; PySide6 olmadığından Qt
+testleri burada atlanır. `desktop-ui` `[dev,desktop]` ile offscreen Qt testlerini ve
+masaüstü mypy kontrolünü çalıştırır. Yerel Linux sonucu Windows CI sonucunun yerine
+geçmez; CI de gerçek Windows ses/masaüstü kabulünün yerine geçmez.
+
+## Geliştirme
+
+Yeni araç tek bir `artemis/tools/plugins/` dosyasına argüman modeli ve
+`@register_tool` sınıfı ekleyerek keşfedilir. Şema ve sağlayıcı biçimleri otomatik
+üretilir. Onay mantığını araca eklemeyin; örnek ve kurallar
+[CLAUDE.md](CLAUDE.md) içindedir. Yeni davranış için izole test ve kabul senaryosu
+ekleyin.
+
+
+## Kabul durumu
+
+Güncel kod ve Windows kabul durumu tek tabloda: [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md).
+Streaming mevcuttur; gerçek cihazda geçilmeyen senaryolar bu tabloda açık kalır.
+
+**Henüz gerçek cihazda doğrulanmayanlar:** xAI Grok STT'nin Türkçesi; gerçek bot ile Telegram'dan
+bilgisayar kullanımı; Windows oturum kapatma/açma, tepsi menüsü ve çoklu ölçekli monitör
+kabulü; temiz bir Windows'ta ilk kurulum deneyimi.
+Ses tanıma beklerken yakalama devam eder; iki bekleyen segment sınırı aşılırsa uyarı verilir.
+Ses raporu STT kuyruk/çözüm sürelerini ve mikrofon düşmelerini gösterir; sınırsız yükte
+kayıpsız ses veya çalışan native STT'yi anında kesme garantisi yoktur.
+
+## Lisans
+
+Telif hakkı 2026 Umut Eray Altay. Artemis'in kaynak kodu [Apache License 2.0](LICENSE) ile
+lisanslıdır. Windows kurucusu kendi lisanslarıyla gelen üçüncü taraf bileşenler de içerir (Piper
+TTS: GPL-3.0-or-later; PySide6 ve edge-tts: LGPL-3.0; certifi: MPL-2.0); bu yüzden ikili paketin
+bütünü GPL-3.0 şartlarıyla dağıtılır. Ayrıntı ve kaynak bağlantıları:
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

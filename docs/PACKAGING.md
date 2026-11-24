@@ -16,9 +16,8 @@ Betik sürümü `pyproject.toml` dosyasından okur, `.venv` içine `pyinstaller=
 
 ## Paket içeriği ve hariç tutulanlar
 
-- **Dahil edilenler:** `artemis` alt modülleri ve veri dosyaları (ikon, SVG'ler, gömülü ses modelleri), `config\config.example.yaml` ve kurulu olan ses/runtime paketlerinin (`faster_whisper`, `piper`, `onnxruntime`, `_sounddevice_data`, `webrtcvad`, `livekit`, `edge_tts`) veri dosyaları. `bench` paketinden yalnız `bench.model_testi`, `bench.run` ve `bench.bilgisayar_testi` modülleri ile `model_testi.yaml` ve `senaryolar.yaml` girer (Ayarlar > Model testi).
-- **Hariç tutulanlar:** Ağır isteğe bağlı bileşenler (`torch`, `torchaudio`, `ema_lightning`, `playwright`, `pyarrow`, `fastembed`, `sherpa_onnx`, `huggingface_hub`) ile test/geliştirme araçları (`tests`, `pytest`, `mypy`, `ruff`).
-- **Bilinen sorun:** `huggingface_hub` dışlanmışken `faster_whisper` paketi (`utils.py` en üstte `import huggingface_hub` yapar) paketli sürümde içe aktarılamaz; yerel STT çalışmayabilir. Bu beklenen davranıştır, derleyip doğrulanmadı; düzeltme `packaging/artemis.spec` içindeki `excludes` listesinde bekliyor.
+- **Dahil edilenler:** `artemis` alt modülleri ve veri dosyaları (ikon, SVG'ler, gömülü ses modelleri), `config\config.example.yaml` ve kurulu olan ses/runtime paketlerinin (`faster_whisper`, `ctranslate2`, `tokenizers`, `huggingface_hub`, `piper`, `onnxruntime`, `_sounddevice_data`, `webrtcvad`, `livekit`, `edge_tts`) veri dosyaları. `bench` paketinden yalnız `bench.model_testi`, `bench.run` ve `bench.bilgisayar_testi` modülleri ile `model_testi.yaml` ve `senaryolar.yaml` girer (Ayarlar > Model testi).
+- **Hariç tutulanlar:** Ağır isteğe bağlı bileşenler (`torch`, `torchaudio`, `ema_lightning`, `playwright`, `pyarrow`, `fastembed`, `sherpa_onnx`) ile test/geliştirme araçları (`tests`, `pytest`, `mypy`, `ruff`). (`packaging\artemis.spec` kuruluysa `faster_whisper`, `ctranslate2`, `tokenizers` ve `huggingface_hub` dosyalarını `collect_all` ile toplar.)
 
 ## Kullanıcı verileri ve kaldırma
 

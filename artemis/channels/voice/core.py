@@ -11,13 +11,9 @@ from functools import partial
 from time import monotonic
 
 from artemis.brain.agent_loop import RunResult
-from artemis.brain.emotion import emotion_tags_active, strip_emotion_tags
 from artemis.channels.runner import CommandRunner
 from artemis.channels.voice.audio_routing import (
     MAX_DIRECT_AUDIO_BYTES as MAX_DIRECT_AUDIO_BYTES,
-)
-from artemis.channels.voice.audio_routing import (
-    PRIVATE_REMOTE_TTS_NOTICE as _PRIVATE_REMOTE_TTS_NOTICE,
 )
 from artemis.channels.voice.audio_routing import (
     accepts_kwarg,
@@ -30,8 +26,10 @@ from artemis.channels.voice.audio_routing import (
     is_remote_synthesizer,
     is_spoken_echo,
     play_speech_stream,
+    ptt_command,
     speech_words,
     strip_spoken_prefix,
+    synth_text_chunks,
     transcribe_cloud_command,
 )
 from artemis.channels.voice.audio_routing import (
@@ -75,6 +73,7 @@ from artemis.channels.voice.contracts import (
 from artemis.channels.voice.contracts import (
     WakeSpotterLike as WakeSpotterLike,
 )
+from artemis.channels.voice.multimodal import maybe_capture_voice_screen
 from artemis.channels.voice.speculative import SpeculativeStt
 from artemis.channels.voice.streaming import SpeechStream
 from artemis.channels.voice.telemetry import (
@@ -135,6 +134,7 @@ class VoiceController:
         audit: AuditLog | None = None,
         muted: bool = False,
         profile_getter: Callable[[], str] | None = None,
+        capture_screen: Callable[[], bytes | None] | None = None,
     ) -> None:
         self.runner = runner
         # ADR 0069: eşleşme tek başına uyandırmaz/çalıştırmaz; yalnız eşleşmesiz bölütler STT'ye
@@ -178,6 +178,7 @@ class VoiceController:
         # geçirir; varsayılan runner.run CLI/bench davranışını değiştirmez.
         self.run_command = run_command if run_command is not None else runner.run
         self._run_accepts_audio = accepts_kwarg(self.run_command, "audio_wav")
+        self._run_accepts_image = accepts_kwarg(self.run_command, "image_png")
         # ADR 0043: True ise run_command ``stream=`` kabul etmelidir (runner.run ve masaüstü
         # köprüsü eder); sağlayıcı akmıyorsa yanıt yine tamamı gelince söylenir.
         self.stream_responses = stream_responses
@@ -215,6 +216,7 @@ class VoiceController:
         self._ptt_uids: set[int] = set()
         self._muted = muted
         self._profile_getter = profile_getter
+        self._capture_screen = capture_screen
 
     async def run(self) -> None:
         """Mikrofon yalnız bu açıkça çağrılan döngü süresince tüketilir."""
@@ -615,8 +617,16 @@ class VoiceController:
             self._active = asyncio.create_task(self._acknowledge_wake(uid=uid, gid=gid))
         else:
             self._barge_cancelled = False
+            image_png = maybe_capture_voice_screen(
+                self.config,
+                is_private=self._is_private_profile(),
+                has_audio=audio_wav is not None,
+                capture_screen=self._capture_screen,
+            )
             self._active = asyncio.create_task(
-                self._run_and_speak(command, uid=uid, gid=gid, audio_wav=audio_wav)
+                self._run_and_speak(
+                    command, uid=uid, gid=gid, audio_wav=audio_wav, image_png=image_png
+                )
             )
 
     async def _cloud_command(self, uid: int, segment: AudioSegment, local_command: str) -> str:
@@ -763,11 +773,7 @@ class VoiceController:
 
     def _ptt_command(self, transcript: str) -> str:
         """Bas-konuş bölütü için uyandırma adını isteğe bağlı ayıklar; continuous'u değiştirmez."""
-        span = find_wake_word(transcript, self.config.wake_word)
-        if span is None:
-            return transcript
-        tail = transcript[span[1] :].lstrip(" \t,.;:!?-")
-        return tail if tail.strip(" \t,.;:!?-") else ""
+        return ptt_command(transcript, self.config.wake_word)
 
     def _wake_command(self, transcript: str) -> str | None:
         """None: wake word yok/expired; boş dize: wake word tek başına."""
@@ -922,29 +928,22 @@ class VoiceController:
     def _emit_private_tts_blocked(self) -> None:
         emit_private_tts_blocked(self._audit, self.synthesizer, self.config)
 
-    async def _synth_stream(
+    def _synth_stream(
         self, text: str, cancelled: asyncio.Event, *, private: bool = False,
         record_block: bool = True,
     ) -> AsyncGenerator[PCMChunk]:
         """Gizli yanıtları bulut/Edge TTS'ten kesen tek ses kapısı."""
-        synth = self.synthesizer
-        if private and self._is_remote_synthesizer():
-            if record_block:
-                self._emit_private_tts_blocked()
-            if self._local_synthesizer is None:
-                if record_block:
-                    self.on_transcript(t(_PRIVATE_REMOTE_TTS_NOTICE))
-                return
-            synth = self._local_synthesizer
-            text = strip_emotion_tags(text, emotion_tags_active(self.config))
-        stream = synth.stream(text, cancelled)
-        try:
-            async for chunk in stream:
-                yield chunk
-        finally:
-            closer = getattr(stream, "aclose", None)
-            if closer is not None:
-                await closer()
+        return synth_text_chunks(
+            text,
+            cancelled,
+            self.synthesizer,
+            self._local_synthesizer,
+            self.config,
+            private=private,
+            record_block=record_block,
+            audit=self._audit,
+            on_transcript=self.on_transcript,
+        )
 
     async def _timed_chunks(
         self,
@@ -1040,6 +1039,7 @@ class VoiceController:
         *,
         stream: SpeechStream | None = None,
         audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> Awaitable[RunResult]:
         return call_run_command(
             self.run_command,
@@ -1047,10 +1047,18 @@ class VoiceController:
             stream=stream,
             audio_wav=audio_wav,
             accepts_audio=self._run_accepts_audio,
+            image_png=image_png,
+            accepts_image=self._run_accepts_image,
         )
 
     async def _run_and_speak_streamed(
-        self, command: str, uid: int, gid: int | None, *, audio_wav: bytes | None = None
+        self,
+        command: str,
+        uid: int,
+        gid: int | None,
+        *,
+        audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> None:
         """ADR 0043: model yazarken cümleler söylenir; tek ``generation`` olayı hepsini durdurur."""
         generation = asyncio.Event()
@@ -1095,7 +1103,10 @@ class VoiceController:
                 )
                 self._playback = playback
             result = await self._call_run_command(
-                command, stream=None if muted else speech, audio_wav=audio_wav
+                command,
+                stream=None if muted else speech,
+                audio_wav=audio_wav,
+                image_png=image_png,
             )
             self._record_result(uid, gid, result)
             turn_private = self._is_private_result(result) or self._is_private_profile()
@@ -1143,9 +1154,12 @@ class VoiceController:
         uid: int = 0,
         gid: int | None = None,
         audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
     ) -> None:
         if self.stream_responses:
-            await self._run_and_speak_streamed(command, uid, gid, audio_wav=audio_wav)
+            await self._run_and_speak_streamed(
+                command, uid, gid, audio_wav=audio_wav, image_png=image_png
+            )
             return
         generation = asyncio.Event()
         played = False
@@ -1154,7 +1168,9 @@ class VoiceController:
             self._emit_state("thinking")
             self._task_turns += 1
             self._event(uid, "command_start", generation_id=gid, warm=self._task_turns > 1)
-            result = await self._call_run_command(command, audio_wav=audio_wav)
+            result = await self._call_run_command(
+                command, audio_wav=audio_wav, image_png=image_png
+            )
             self._record_result(uid, gid, result)
             private = self._is_private_result(result) or self._is_private_profile()
             if result.text.strip() and not generation.is_set() and not self._is_muted():

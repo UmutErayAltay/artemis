@@ -86,3 +86,8 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0082 — İngilizce ses](0082-ingilizce-ses.md)
 - [0083 — Bağlamsal çalışma profilleri](0083-baglamsal-calisma-profilleri.md)
 - [0084 — Onaylı iki yönlü takvim ve e-posta](0084-iki-yonlu-takvim-ve-eposta.md)
+- [0085 — Ses ve görüntü çok kipli akışı](0085-ses-ve-goruntu-cok-kipli-akis.md)
+- [0086 — Olay tetikleyicileri ve koşullu rutin öneri zincirleri](0086-olay-tetikleyicileri-ve-rutin-zincirleri.md)
+- [0087 — Öğretilebilir makro rutin kaydedici](0087-ogretilebilir-makro-rutin-kaydedici.md)
+- [0088 — Ses modeli sağlık yöneticisi ve Windows dağıtım hattı](0088-ses-modeli-saglik-yoneticisi-ve-windows-dagitim-hatti.md)
+- [0089 — Bilgisayar kullanımında hibrit arka plan düşünme katmanı](0089-computer-use-dusunme-katmani.md)

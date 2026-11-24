@@ -12,8 +12,9 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import os
+import sys
 import time
-from collections.abc import Awaitable, Callable
+from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 from uuid import uuid4
@@ -26,6 +27,8 @@ from artemis.channels.desktop.dictation import (
     foreground_target,
     type_into_target,
 )
+from artemis.channels.desktop.selection_uia import read_uia_selection
+from artemis.computer.actions import process_block_reason
 from artemis.config.settings import Settings
 from artemis.config.work_profile import is_local_only_profile
 from artemis.i18n import t
@@ -33,6 +36,46 @@ from artemis.i18n import t
 MAX_CHARS = 6000
 ACTIONS = ("translate", "fix", "summarize", "explain")
 ACTION_LABELS = {"translate": "Çevir", "fix": "Düzelt", "summarize": "Özetle", "explain": "Açıkla"}
+
+_BINARY_CLIPBOARD_FORMATS = frozenset({2, 3, 6, 8, 9, 11, 12, 14, 15, 17})
+_BINARY_CLIPBOARD_NAMES = frozenset({
+    "png",
+    "jfif",
+    "gif",
+    "dib",
+    "bitmap",
+    "image/png",
+    "image/jpeg",
+    "image/bmp",
+    "image/gif",
+    "image/webp",
+    "filename",
+    "filenamew",
+    "shell idlist array",
+    "filegroupdescriptor",
+    "filegroupdescriptorw",
+    "filecontents",
+})
+_TEXT_CLIPBOARD_FORMATS = frozenset({1, 7, 13})  # CF_TEXT, CF_OEMTEXT, CF_UNICODETEXT
+
+
+def has_nontext_clipboard_formats(formats: Sequence[tuple[int, str]]) -> bool:
+    """Panoda ikili resim/dosya/ses içeriği olup olmadığını döndürür.
+
+    Tarayıcı ve düzenleyicilerin düz metnin yanına eklediği `HTML Format`,
+    `Chromium internal source ...`, `Rich Text Format` veya `CF_LOCALE` gibi yan
+    biçimler metin içeriğini geçersiz kılmaz; asıl kayıp riski ikili biçimlerdedir.
+    """
+    if not formats:
+        return False
+    has_text = False
+    for fmt_id, raw_name in formats:
+        norm = raw_name.strip().casefold()
+        if fmt_id in _BINARY_CLIPBOARD_FORMATS or norm in _BINARY_CLIPBOARD_NAMES:
+            return True
+        if fmt_id in _TEXT_CLIPBOARD_FORMATS:
+            has_text = True
+    return not has_text
 
 # Sabit şablonlar: kullanıcı ya da model değiştiremez (v1).
 _TASKS = {
@@ -56,10 +99,9 @@ _PRIVACY = (
 _BUSY = "Seçili metin eylemi sürüyor; bitmesini bekleyin."
 _DICTATION_ON = "Dikte sürerken seçili metin eylemi kullanılamaz."
 _NOT_RESTORED = "Pano eski haline getirilemedi; önceki metin kaybolmuş olabilir."
-_NONTEXT_CLIPBOARD = (
-    "Panoda metin dışı içerik (resim, dosya veya biçimli veri) var; veri kaybını "
-    "önlemek için seçili metin alınmadı."
-)
+_GDI_CLIPBOARD_FORMATS = frozenset({2, 3, 9, 14, 0x0082, 0x0083, 0x008E})
+_MAX_BACKUP_BYTES = 16 * 1024 * 1024
+_GMEM_MOVEABLE = 0x0002
 
 
 class _Audit(Protocol):
@@ -77,6 +119,160 @@ class SelectionBackend:
     modifiers_down: Callable[[], bool]
     focus_window: Callable[[int], bool]
     has_nontext_clipboard: Callable[[], bool] = lambda: False
+    read_selection: Callable[[], tuple[str | None, bool]] | None = None
+    backup_clipboard: Callable[[], object] | None = None
+    restore_clipboard: Callable[[object], bool] | None = None
+    foreground_process: Callable[[], tuple[str, int]] | None = None
+
+
+def _win_clipboard_apis() -> tuple[Any, Any] | None:
+    import ctypes
+    from ctypes import wintypes
+
+    # sys.platform (platform.system() değil): mypy Linux'ta Windows'a özel ctypes'ı atlar.
+    if sys.platform != "win32":
+        return None
+    loader_name = "WinDLL"
+    win_dll: Any = getattr(ctypes, loader_name)
+    user32 = win_dll("user32", use_last_error=True)
+    kernel32 = win_dll("kernel32", use_last_error=True)
+    user32.OpenClipboard.argtypes = [wintypes.HWND]
+    user32.OpenClipboard.restype = wintypes.BOOL
+    user32.CloseClipboard.restype = wintypes.BOOL
+    user32.EmptyClipboard.restype = wintypes.BOOL
+    user32.EnumClipboardFormats.argtypes = [wintypes.UINT]
+    user32.EnumClipboardFormats.restype = wintypes.UINT
+    user32.GetClipboardFormatNameW.argtypes = [
+        wintypes.UINT,
+        wintypes.LPWSTR,
+        ctypes.c_int,
+    ]
+    user32.GetClipboardFormatNameW.restype = ctypes.c_int
+    user32.GetClipboardData.argtypes = [wintypes.UINT]
+    user32.GetClipboardData.restype = wintypes.HANDLE
+    user32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    user32.SetClipboardData.restype = wintypes.HANDLE
+    user32.CreateWindowExW.argtypes = [
+        wintypes.DWORD,
+        wintypes.LPCWSTR,
+        wintypes.LPCWSTR,
+        wintypes.DWORD,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        ctypes.c_int,
+        wintypes.HWND,
+        wintypes.HMENU,
+        wintypes.HINSTANCE,
+        ctypes.c_void_p,
+    ]
+    user32.CreateWindowExW.restype = wintypes.HWND
+    user32.DestroyWindow.argtypes = [wintypes.HWND]
+    user32.DestroyWindow.restype = wintypes.BOOL
+    kernel32.GlobalSize.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalSize.restype = ctypes.c_size_t
+    kernel32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
+    kernel32.GlobalAlloc.restype = wintypes.HGLOBAL
+    kernel32.GlobalLock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalLock.restype = ctypes.c_void_p
+    kernel32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalUnlock.restype = wintypes.BOOL
+    kernel32.GlobalFree.argtypes = [wintypes.HGLOBAL]
+    kernel32.GlobalFree.restype = wintypes.HGLOBAL
+    return user32, kernel32
+
+
+def _backup_clipboard_formats(
+    max_total_bytes: int = _MAX_BACKUP_BYTES,
+) -> list[tuple[int, bytes]]:
+    """Panodaki HGLOBAL tabanlı ikili/zengin biçimleri bellek sınırı içinde yedekler."""
+    import ctypes
+
+    if sys.platform != "win32":
+        return []
+    apis = _win_clipboard_apis()
+    if apis is None:
+        return []
+    user32, kernel32 = apis
+    if not user32.OpenClipboard(None):
+        raise OSError("Pano başka bir uygulama tarafından kullanılıyor.")
+    entries: list[tuple[int, bytes]] = []
+    total = 0
+    try:
+        fmt = 0
+        while True:
+            ctypes.set_last_error(0)
+            fmt = int(user32.EnumClipboardFormats(fmt))
+            if fmt == 0:
+                if ctypes.get_last_error() != 0:
+                    raise OSError("Pano biçimleri okunamadı.")
+                return entries
+            if fmt in _GDI_CLIPBOARD_FORMATS:
+                continue
+            handle = user32.GetClipboardData(fmt)
+            if not handle:
+                continue
+            size = int(kernel32.GlobalSize(handle))
+            if size <= 0 or size > max_total_bytes or total + size > max_total_bytes:
+                continue
+            pointer = kernel32.GlobalLock(handle)
+            if not pointer:
+                continue
+            try:
+                entries.append((fmt, ctypes.string_at(pointer, size)))
+                total += size
+            finally:
+                kernel32.GlobalUnlock(handle)
+    finally:
+        user32.CloseClipboard()
+
+
+def _restore_clipboard_formats(snapshot: object) -> bool:
+    """Önceden yedeklenen HGLOBAL pano biçimlerini Windows panosuna geri yükler."""
+    import ctypes
+
+    if not isinstance(snapshot, list) or not snapshot:
+        return False
+    apis = _win_clipboard_apis()
+    if apis is None:
+        return False
+    user32, kernel32 = apis
+    window = user32.CreateWindowExW(
+        0, "STATIC", "Artemis Clipboard", 0, 0, 0, 0, 0, -3, None, None, None
+    )
+    if not window:
+        raise OSError("Pano sahipliği için pencere oluşturulamadı.")
+    allocated = 0
+    try:
+        if not user32.OpenClipboard(window):
+            raise OSError("Pano başka bir uygulama tarafından kullanılıyor.")
+        try:
+            if not user32.EmptyClipboard():
+                raise OSError("Pano geri yüklemeye hazırlanamadı.")
+            for fmt, payload in snapshot:
+                if not isinstance(fmt, int) or not isinstance(payload, bytes) or not payload:
+                    continue
+                handle = kernel32.GlobalAlloc(_GMEM_MOVEABLE, len(payload))
+                if not handle:
+                    continue
+                transferred = False
+                try:
+                    pointer = kernel32.GlobalLock(handle)
+                    if not pointer:
+                        continue
+                    ctypes.memmove(pointer, payload, len(payload))
+                    kernel32.GlobalUnlock(handle)
+                    if user32.SetClipboardData(fmt, handle):
+                        transferred = True
+                        allocated += 1
+                finally:
+                    if not transferred:
+                        kernel32.GlobalFree(handle)
+        finally:
+            user32.CloseClipboard()
+    finally:
+        user32.DestroyWindow(window)
+    return allocated > 0
 
 
 def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
@@ -107,39 +303,53 @@ def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
 
     def has_nontext() -> bool:
         import ctypes
-        import sys
-        from ctypes import wintypes
 
-        # sys.platform (platform.system() değil): mypy Linux'ta Windows'a özel ctypes'ı atlar.
         if sys.platform != "win32":
             return False
-        # Pano geri yazımı yalnız düz metni korur; resim/dosya/RTF varsa kullanıcı verisi ezilmez.
-        loader_name = "WinDLL"
-        win_dll: Any = getattr(ctypes, loader_name)
-        user32 = win_dll("user32", use_last_error=True)
-        user32.OpenClipboard.argtypes = [wintypes.HWND]
-        user32.OpenClipboard.restype = wintypes.BOOL
-        user32.EnumClipboardFormats.argtypes = [wintypes.UINT]
-        user32.EnumClipboardFormats.restype = wintypes.UINT
-        user32.CloseClipboard.restype = wintypes.BOOL
+        apis = _win_clipboard_apis()
+        if apis is None:
+            return False
+        user32, _kernel32 = apis
         if not user32.OpenClipboard(None):
             raise OSError("Pano başka bir uygulama tarafından kullanılıyor.")
         try:
-            text_formats = {1, 7, 13, 16}  # CF_TEXT, CF_OEMTEXT, CF_UNICODETEXT, CF_LOCALE
+            formats: list[tuple[int, str]] = []
             fmt = 0
+            buf = ctypes.create_unicode_buffer(256)
             while True:
                 ctypes.set_last_error(0)
                 fmt = user32.EnumClipboardFormats(fmt)
                 if fmt == 0:
                     if ctypes.get_last_error() != 0:
                         raise OSError("Pano biçimleri okunamadı.")
-                    return False
-                if fmt not in text_formats:
-                    return True
+                    return has_nontext_clipboard_formats(formats)
+                name = ""
+                if fmt >= 0xC000:
+                    buf[0] = "\x00"
+                    if user32.GetClipboardFormatNameW(fmt, buf, 256) > 0:
+                        name = buf.value
+                formats.append((fmt, name))
         finally:
             user32.CloseClipboard()
 
-    return SelectionBackend(window, read, write, copy, down, focus, has_nontext)
+    def fg_process() -> tuple[str, int]:
+        from artemis.computer import windows
+
+        return windows.foreground_process()
+
+    return SelectionBackend(
+        window,
+        read,
+        write,
+        copy,
+        down,
+        focus,
+        has_nontext,
+        lambda: read_uia_selection(MAX_CHARS + 1),
+        backup_clipboard=_backup_clipboard_formats,
+        restore_clipboard=_restore_clipboard_formats,
+        foreground_process=fg_process,
+    )
 
 
 def local_chat_alias(settings: Settings) -> str | None:
@@ -239,13 +449,49 @@ class SelectionActions:
             return t(_PRIVACY)
         return ""
 
-    def start_capture(self) -> None:
+    def _is_target_blocked(self) -> bool:
+        probe = self._backend.foreground_process
+        if probe is None:
+            return False
+        try:
+            exe_path, pid = probe()
+        except (OSError, RuntimeError):
+            return True
+        if pid == self._own_pid or not exe_path.strip():
+            return True
+        return process_block_reason(exe_path, pid, self._own_pid) is not None
+
+    def start_capture(self, *, skip_key_wait: bool = False) -> None:
         problem = self._problem()
         if problem:
             self._emit("message", problem)  # tuşa basmadan, panoya dokunmadan reddedilir
             return
         if self._begin("capturing"):
-            self._task = asyncio.create_task(self._capture())
+            self._task = asyncio.create_task(self._capture(skip_key_wait=skip_key_wait))
+
+    def accept_selection(self, target: int, text: str) -> None:
+        """Fare seçimi sırasında UIA'dan doğrudan okunan metni panosuz hazır duruma alır."""
+        problem = self._problem()
+        if problem:
+            self._emit("message", problem)
+            return
+        if self._is_target_blocked():
+            self._audit_safe("selection_capture", outcome="blocked", chars=0)
+            self._emit("message", t("Korumalı veya engelli pencerede seçili metin alınmaz."))
+            return
+        if not self._begin("capturing"):
+            return
+        outcome, chars, message = "no_selection", 0, t(_NO_SELECTION)
+        keep_ready = False
+        try:
+            self._text, self._result, self._truncated, self._target = "", "", False, None
+            if text.strip():
+                chars, message = self._store_captured(target, text)
+                outcome, keep_ready = "captured_uia", True
+        finally:
+            self._phase = "ready" if keep_ready else "idle"
+            self._audit_safe("selection_capture", outcome=outcome, chars=chars)
+            self._emit("ready" if keep_ready else "message", message)
 
     def start_run(self, action: str) -> None:
         if action not in ACTIONS:
@@ -266,9 +512,22 @@ class SelectionActions:
         with contextlib.suppress(OSError):
             self._audit.emit(event, **fields)
 
+    def _store_captured(self, target: int, raw_text: str) -> tuple[int, str]:
+        self._truncated = len(raw_text) > MAX_CHARS
+        self._text = raw_text[:MAX_CHARS]
+        self._target = target
+        chars = len(self._text)
+        note = (
+            t(" (ilk {max_chars} karakter alındı)").format(max_chars=MAX_CHARS)
+            if self._truncated
+            else ""
+        )
+        message = t("{chars} karakter seçildi{note}.").format(chars=chars, note=note)
+        return chars, message
+
     # --- Yakalama ----------------------------------------------------------------------------
 
-    async def _capture(self) -> None:
+    async def _capture(self, *, skip_key_wait: bool = False) -> None:
         outcome, chars, message = "error", 0, t("Seçili metin alınamadı; pano kullanılamıyor.")
         keep_ready = False
         try:
@@ -277,12 +536,26 @@ class SelectionActions:
             if target is None:
                 outcome, message = "no_target", t("Seçili metin için hedef pencere yok.")
                 return
-            if not await self._keys_released():
+            if await asyncio.to_thread(self._is_target_blocked):
+                outcome, message = "blocked", t(
+                    "Korumalı veya engelli pencerede seçili metin alınmaz."
+                )
+                return
+            if not skip_key_wait and not await self._keys_released():
                 outcome, message = "keys_down", t("Kısayol tuşlarını bırakıp yeniden deneyin.")
                 return
-            if await asyncio.to_thread(self._backend.has_nontext_clipboard):
-                outcome, message = "nontext_clipboard", t(_NONTEXT_CLIPBOARD)
-                return
+            if self._backend.read_selection is not None:
+                uia_text, is_password = await asyncio.to_thread(self._backend.read_selection)
+                if is_password:
+                    outcome, message = (
+                        "password_field",
+                        t("Parola alanından seçili metin alınamaz."),
+                    )
+                    return
+                if uia_text is not None and uia_text.strip():
+                    chars, message = self._store_captured(target, uia_text)
+                    outcome, keep_ready = "captured_uia", True
+                    return
             text = await self._copy_selection(target)
             if text is None:
                 outcome, message = "no_target", t("Pencere değişti; seçili metin alınmadı.")
@@ -290,17 +563,8 @@ class SelectionActions:
             if not text.strip():
                 outcome, message = "no_selection", t(_NO_SELECTION)
                 return
-            self._truncated = len(text) > MAX_CHARS
-            self._text = text[:MAX_CHARS]
-            self._target = target
-            chars = len(self._text)
+            chars, message = self._store_captured(target, text)
             outcome, keep_ready = "captured", True
-            note = (
-                t(" (ilk {max_chars} karakter alındı)").format(max_chars=MAX_CHARS)
-                if self._truncated
-                else ""
-            )
-            message = t("{chars} karakter seçildi{note}.").format(chars=chars, note=note)
         except asyncio.CancelledError:
             outcome = "cancelled"
             raise
@@ -321,12 +585,18 @@ class SelectionActions:
 
     async def _copy_selection(self, target: int) -> str | None:
         """Panoyu yedekler, benzersiz bir işaret yazar, Ctrl+C gönderir, işaret değişince okur.
-        Her yolda önceki pano metni geri yazılır (try/finally)."""
+        Önce ikili/zengin pano biçimleri en iyi çaba yedeklenir ve her yolda geri konur."""
         backend = self._backend
+        snapshot: object = None
+        if backend.backup_clipboard is not None:
+            with contextlib.suppress(OSError, ValueError, RuntimeError):
+                snapshot = await asyncio.to_thread(backend.backup_clipboard)
+        previous: str | None = None
         try:
             previous = await asyncio.to_thread(backend.read_clipboard)
         except OSError as error:
-            raise OSError("Pano yedeği okunamadı.") from error
+            if not snapshot:
+                raise OSError("Pano yedeği okunamadı.") from error
         sentinel = f"artemis-secim-{uuid4().hex}"
         text = ""
         try:
@@ -344,8 +614,12 @@ class SelectionActions:
                 await asyncio.sleep(self._poll)
         finally:
             restored = False
-            with contextlib.suppress(OSError, ValueError):
-                restored = await asyncio.to_thread(backend.write_clipboard, previous)
+            if snapshot and backend.restore_clipboard is not None:
+                with contextlib.suppress(OSError, ValueError, RuntimeError):
+                    restored = await asyncio.to_thread(backend.restore_clipboard, snapshot)
+            if not restored and previous is not None:
+                with contextlib.suppress(OSError, ValueError):
+                    restored = await asyncio.to_thread(backend.write_clipboard, previous)
             if not restored:
                 self._emit("message", t(_NOT_RESTORED))
         if foreground_target(backend.window, self._own_pid) != target:

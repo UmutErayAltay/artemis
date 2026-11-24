@@ -5,6 +5,7 @@ from typing import cast
 from pydantic import BaseModel, ConfigDict, Field
 
 from artemis.channels.telegram.api import TelegramClient, TelegramError, build_telegram_client
+from artemis.config.work_profile import is_local_only_profile
 from artemis.i18n import t
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult, run_blocking
 from artemis.tools.registry import register_tool
@@ -39,6 +40,11 @@ class NotifyTelegram(BaseTool):
     # Metin makine dışına çıkar: dış içerik bağlamda kalmışsa yeni turda da onay sorulur.
     outbound = True
     external = False
+
+    def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
+        if is_local_only_profile(context.settings.work_profile):
+            return t("Gizli profilde Telegram bildirimleri kapalı.")
+        return None
 
     async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
         args = cast(TelegramArguments, arguments)

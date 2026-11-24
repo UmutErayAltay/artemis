@@ -33,6 +33,7 @@ from artemis.computer.session import (
     SessionResult,
 )
 from artemis.config.settings import Settings
+from artemis.config.work_profile import is_local_only_profile
 from artemis.i18n import t
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import register_tool
@@ -106,11 +107,19 @@ class ComputerUse(BaseTool):
                 )
             )
         names = vision_models(settings)
-        # Görüntüyü yakalamadan ÖNCE reddedilir: ekran buluta yalnız açık izinle gider. Yedek
-        # modeller de sayılır; yoksa ilk model yerel olunca bulut yedeği izinsiz görüntü alırdı.
-        if not settings.perception.allow_cloud_screen:
+        # Görüntüyü yakalamadan ÖNCE reddedilir: gizli profilde ve izinsiz bulut kullanımında
+        # yalnız yerel (ollama) model kalır.
+        local_only = is_local_only_profile(settings.work_profile)
+        if not settings.perception.allow_cloud_screen or local_only:
             names = tuple(name for name in names if settings.models[name].provider == "ollama")
         if not names:
+            if local_only:
+                return ToolResult(
+                    message=t(
+                        "Gizli profilde bilgisayar kullanımı yalnızca yerel (ollama) "
+                        "modelle çalışır."
+                    )
+                )
             return ToolResult(
                 message=t(
                     "Ekran görüntüsü bulut modele gönderilemez: yerel (ollama) model seçin "
@@ -119,17 +128,14 @@ class ComputerUse(BaseTool):
             )
         provider = context.services.get("computer_provider")
         if provider is None:
-            provider = _ModelChain(
-                [
-                    ProviderRouter(
-                        settings.model_copy(
-                            update={"primary_model": name, "fallback_model": None}
-                        ),
-                        context.audit,
-                    )
-                    for name in names
-                ]
-            )
+            provider = _build_chain(names, settings, context.audit)
+        planner = context.services.get("computer_planner")
+        if planner is None and "computer_provider" not in context.services:
+            p_names = planner_models(settings)
+            if p_names == names:
+                planner = provider
+            elif p_names:
+                planner = _build_chain(p_names, settings, context.audit)
         backend = context.services.get("computer_backend")
         if backend is None:
             from artemis.computer import windows  # yalnız Windows'ta işe yarar; geç yüklenir
@@ -174,6 +180,7 @@ class ComputerUse(BaseTool):
                 # Telegram kanalı son kareyi (yalnız RAM) isteğe bağlı iletmek için kaydeder.
                 on_frame=frame_sink,
                 strict=any(strict_rules_on(settings.models.get(name)) for name in names),
+                planner=cast(Provider | None, planner),
             )
             # İptal asyncio.Event'tir, durdurma threading.Event: küçük bir görev köprüler.
             watcher = asyncio.create_task(_relay_cancel(context.cancelled, stop))
@@ -194,9 +201,49 @@ def vision_models(settings: Settings) -> tuple[str, ...]:
     """Bilgisayar kullanımının deneyeceği model adları, sırasıyla.
 
     Boş `computer_use.model` "ana beyni kullan" demektir: o an seçili ana model görüntüyü alır.
+    Görüntü gönderen kiplerde `claude_cli` (görsel eki soyulduğu için) dışarıda tutulur.
     """
     config = settings.computer_use
-    return tuple(dict.fromkeys((config.model or settings.primary_model, *config.fallback_models)))
+    raw = tuple(dict.fromkeys((config.model or settings.primary_model, *config.fallback_models)))
+    if config.observation == "uia":
+        return raw
+    return tuple(
+        name
+        for name in raw
+        if name not in settings.models or settings.models[name].provider != "claude_cli"
+    )
+
+
+def planner_models(settings: Settings) -> tuple[str, ...]:
+    """Düşünme katmanı (stratejist) için güçlü model adaylarını sırasıyla döndürür."""
+    config = settings.computer_use
+    candidates = tuple(
+        name
+        for name in dict.fromkeys(
+            (
+                config.planner_model,
+                settings.hard_model or "",
+                settings.primary_model,
+                *vision_models(settings),
+            )
+        )
+        if name and name in settings.models
+    )
+    if not settings.perception.allow_cloud_screen or is_local_only_profile(settings.work_profile):
+        return tuple(name for name in candidates if settings.models[name].provider == "ollama")
+    return tuple(name for name in candidates if settings.models[name].provider != "claude_cli")
+
+
+def _build_chain(names: tuple[str, ...], settings: Settings, audit: Any) -> _ModelChain:
+    return _ModelChain(
+        [
+            ProviderRouter(
+                settings.model_copy(update={"primary_model": name, "fallback_model": None}),
+                audit,
+            )
+            for name in names
+        ]
+    )
 
 
 class _ModelChain:

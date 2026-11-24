@@ -134,6 +134,11 @@ _MONITOR_PROC: Any = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(
     ctypes.POINTER(wintypes.RECT),
     wintypes.LPARAM,
 )
+_ENUM_WINDOWS_PROC: Any = getattr(ctypes, "WINFUNCTYPE", ctypes.CFUNCTYPE)(
+    wintypes.BOOL,
+    ctypes.c_void_p,  # HWND
+    wintypes.LPARAM,
+)
 
 
 # --- Saf yardımcılar (platformdan bağımsız, testli) ---------------------------------
@@ -228,6 +233,16 @@ def _libs() -> tuple[Any, Any, Any]:
     user32.GetAncestor.restype = vp
     user32.GetWindowThreadProcessId.argtypes = [vp, ctypes.POINTER(wintypes.DWORD)]
     user32.GetWindowThreadProcessId.restype = wintypes.DWORD
+    user32.EnumWindows.argtypes = [_ENUM_WINDOWS_PROC, wintypes.LPARAM]
+    user32.EnumWindows.restype = wintypes.BOOL
+    user32.IsWindowVisible.argtypes = [vp]
+    user32.IsWindowVisible.restype = wintypes.BOOL
+    user32.IsIconic.argtypes = [vp]
+    user32.IsIconic.restype = wintypes.BOOL
+    user32.GetWindowTextLengthW.argtypes = [vp]
+    user32.GetWindowTextLengthW.restype = ctypes.c_int
+    user32.GetWindowTextW.argtypes = [vp, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetWindowTextW.restype = ctypes.c_int
     user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int]
     user32.SendInput.restype = wintypes.UINT
     gdi32.CreateCompatibleDC.argtypes = [vp]
@@ -487,6 +502,12 @@ def click(x: int, y: int, button: str = "left", double: bool = False) -> None:
     _send(events)
 
 
+def hover(x: int, y: int) -> None:
+    """Fare imlecini tıklamadan belirtilen piksele taşır (otomatik gizlenen kontroller için)."""
+    _require_windows()
+    _send([_move_event(x, y)])
+
+
 def scroll(x: int, y: int, notches: int) -> None:
     """Pozitif = aşağı (tekerlek deltası negatif), WHEEL_DELTA = 120."""
     _require_windows()
@@ -683,6 +704,79 @@ def focused_name(
 
 
 @dataclass(frozen=True)
+class WindowInfo:
+    """Görünür üst düzey pencerenin kimliği, başlığı, süreci ve sanal masaüstü konumu."""
+
+    hwnd: int
+    title: str
+    exe: str
+    pid: int
+    rect: tuple[int, int, int, int]  # (left, top, right, bottom)
+
+
+def _sanitize_text(text: str, limit: int) -> str:
+    """Kontrol karakterlerini boşluğa çevirip boşlukları tekler ve uzunluğu sınırlar."""
+    clean = "".join(c if c.isprintable() else " " for c in text)
+    return " ".join(clean.split())[:limit]
+
+
+def visible_windows(max_items: int = 12) -> list[WindowInfo]:
+    """Görünür, simge durumuna küçültülmemiş üst düzey pencereleri döndürür; hatada `[]`."""
+    if sys.platform != "win32" or max_items <= 0:
+        return []
+    try:
+        set_dpi_aware()
+        user32 = _libs()[0]
+    except (OSError, RuntimeError):
+        return []
+    windows: list[WindowInfo] = []
+
+    def collect(hwnd: Any, _lparam: Any) -> bool:
+        if len(windows) >= max_items or not hwnd:
+            return True
+        try:
+            if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+                return True
+            length = int(user32.GetWindowTextLengthW(hwnd))
+            if length <= 0:
+                return True
+            buf = ctypes.create_unicode_buffer(length + 2)
+            if int(user32.GetWindowTextW(hwnd, buf, length + 2)) <= 0:
+                return True
+            title = _sanitize_text(buf.value, 80)
+            if not title:
+                return True
+            rect = wintypes.RECT()
+            if not user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+                return True
+            left, top, right, bottom = (
+                int(rect.left), int(rect.top), int(rect.right), int(rect.bottom)
+            )
+            if right - left < 40 or bottom - top < 40:
+                return True
+            exe, pid = _window_process(hwnd)
+            windows.append(
+                WindowInfo(
+                    hwnd=int(hwnd),
+                    title=title,
+                    exe=exe,
+                    pid=pid,
+                    rect=(left, top, right, bottom),
+                )
+            )
+        except (OSError, RuntimeError, ValueError):
+            return True
+        return True
+
+    try:
+        callback = _ENUM_WINDOWS_PROC(collect)
+        user32.EnumWindows(callback, 0)
+    except (OSError, RuntimeError, ValueError):
+        return windows
+    return windows
+
+
+@dataclass(frozen=True)
 class UiElement:
     """Ön plan penceresinin tek bir UI Automation denetimi (ADR 0073)."""
 
@@ -845,10 +939,8 @@ def ui_elements(
             continue
         # Ekrandan gelen metin kontrol karakterleri taşıyamaz: her tüketicide (istem, onay
         # penceresi, günlük) satır bölme/biçim kaçamağı olmasın diye burada sıyırılır.
-        clean_name = "".join(c for c in name if c.isprintable())
-        clean_name = " ".join(clean_name.split())[:80]
-        kind = "".join(c for c in kind if c.isprintable())
-        kind = " ".join(kind.split())[:40]
+        clean_name = _sanitize_text(name, 80)
+        kind = _sanitize_text(kind, 40)
         if not kind:
             continue
         result.append(

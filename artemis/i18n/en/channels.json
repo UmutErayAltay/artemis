@@ -52,6 +52,7 @@
   "Kayıt defteri okunamadı.": "Could not read registry.",
   "Kayıt defterinden silinemedi.": "Could not delete from registry.",
   "Kayıt defterine yazılamadı.": "Could not write to registry.",
+  "Korumalı veya engelli pencerede seçili metin alınmaz.": "Selected text cannot be captured from a protected or blocked window.",
   "Masaüstü bileşeni kurulu değil. `pip install 'artemis-tr[desktop]'` komutuyla isteğe bağlı GUI paketini kurun. Ses de masaüstü içinde çalışır.": "Desktop component is not installed. Install the optional GUI package with `pip install 'artemis-tr[desktop]'`. Voice also runs inside desktop.",
   "Mikrofon yoğun: {dropped} ses karesi kayboldu.": "Microphone busy: {dropped} audio frames dropped.",
   "Net konuşma algılanmadı; bu ses komut olarak kullanılmadı.": "No clear speech detected; audio was not used as a command.",

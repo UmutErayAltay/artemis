@@ -25,6 +25,7 @@ from artemis.channels.telegram.channel import (
     serve_telegram,
 )
 from artemis.config.settings import TelegramConfig
+from artemis.config.work_profile import is_local_only_profile
 from artemis.i18n import t
 
 JOIN_SECONDS = 10.0
@@ -33,15 +34,17 @@ MISSING_TEXT = "Önce token kaydet ve sohbeti eşleştir."
 STOPPING_TEXT = "Kanal kapanıyor (sürmekte olan tur bitince); birkaç saniye sonra yeniden aç."
 
 
-def channel_blocker(config: TelegramConfig) -> str | None:
-    """Kanalın başlayamama nedeni (token ya da sohbet yok); None = başlayabilir."""
+def channel_blocker(config: TelegramConfig, *, work_profile: str = "work") -> str | None:
+    """Kanalın başlayamama nedeni (gizli profil, token ya da sohbet yok); None = başlayabilir."""
+    if is_local_only_profile(work_profile):
+        return t("Gizli profilde Telegram kanalı kapalı.")
     if config.chat_id is None or resolve_telegram_token(config) is None:
         return t(MISSING_TEXT)
     return None
 
 
-def should_run(config: TelegramConfig) -> bool:
-    return config.run_in_desktop and channel_blocker(config) is None
+def should_run(config: TelegramConfig, *, work_profile: str = "work") -> bool:
+    return config.run_in_desktop and channel_blocker(config, work_profile=work_profile) is None
 
 
 class TelegramService:
