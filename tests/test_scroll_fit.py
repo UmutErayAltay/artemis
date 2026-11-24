@@ -45,15 +45,20 @@ def _check_sections(panel: SettingsPanel, app: QApplication) -> None:
     assert max(ranges) > 0 and min(ranges) < max(ranges)  # kısa sayfa uzun kadar kaymaz
     # Alt çubuk yok: sayfa alt dolgusu da yok.
     assert panel.stack.widget(0).layout().contentsMargins().bottom() == 0
-    panel.show_section(0)
+    scrollable = max(range(len(ranges)), key=ranges.__getitem__)
+    other = (scrollable + 1) % len(ranges)
+    panel.show_section(scrollable)
     _settle(app)
     bar.setValue(bar.maximum())
     assert bar.value() > 0
-    panel.show_section(1)
+    panel.show_section(other)
     _settle(app)
     assert bar.value() == 0
+    panel.show_section(scrollable)
+    _settle(app)
     bar.setValue(bar.maximum())
-    panel.sections.setCurrentRow(2)  # kullanıcı yolu da sıfırlar
+    assert bar.value() > 0
+    panel.sections.setCurrentRow((scrollable + 2) % len(ranges))  # kullanıcı yolu da sıfırlar
     _settle(app)
     assert bar.value() == 0
 

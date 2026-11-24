@@ -87,8 +87,33 @@ jobs:
         run: |
           & "$env:ISCC_PATH" "/DMyAppVersion=$env:APP_VERSION" "packaging\artemis.iss"
 
+      - name: Resolve signing mode
+        id: signing
+        shell: pwsh
+        env:
+          SIGNPATH_API_TOKEN: ${{ secrets.SIGNPATH_API_TOKEN }}
+          SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
+          SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
+          SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
+          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
+          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
+        run: |
+          $signpath = (
+            -not [string]::IsNullOrEmpty($env:SIGNPATH_API_TOKEN) -and
+            -not [string]::IsNullOrEmpty($env:SIGNPATH_ORGANIZATION_ID) -and
+            -not [string]::IsNullOrEmpty($env:SIGNPATH_PROJECT_SLUG) -and
+            -not [string]::IsNullOrEmpty($env:SIGNPATH_SIGNING_POLICY_SLUG)
+          )
+          $authenticode = (
+            -not $signpath -and
+            -not [string]::IsNullOrEmpty($env:WINDOWS_CERT_PFX_BASE64) -and
+            -not [string]::IsNullOrEmpty($env:WINDOWS_CERT_PASSWORD)
+          )
+          "signpath=$($signpath.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "authenticode=$($authenticode.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Sign installer via SignPath
-        if: ${{ secrets.SIGNPATH_API_TOKEN != '' && secrets.SIGNPATH_ORGANIZATION_ID != '' && secrets.SIGNPATH_PROJECT_SLUG != '' && secrets.SIGNPATH_SIGNING_POLICY_SLUG != '' }}
+        if: ${{ steps.signing.outputs.signpath == 'true' }}
         uses: signpath/github-action-submit-signing-request@v1
         with:
           api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
@@ -101,7 +126,7 @@ jobs:
           wait-for-completion: true
 
       - name: Sign installer via Authenticode certificate
-        if: ${{ (secrets.SIGNPATH_API_TOKEN == '' || secrets.SIGNPATH_ORGANIZATION_ID == '' || secrets.SIGNPATH_PROJECT_SLUG == '' || secrets.SIGNPATH_SIGNING_POLICY_SLUG == '') && secrets.WINDOWS_CERT_PFX_BASE64 != '' && secrets.WINDOWS_CERT_PASSWORD != '' }}
+        if: ${{ steps.signing.outputs.authenticode == 'true' }}
         shell: pwsh
         env:
           PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
@@ -126,7 +151,7 @@ jobs:
           }
 
       - name: Unsigned build fallback notice
-        if: ${{ (secrets.SIGNPATH_API_TOKEN == '' || secrets.SIGNPATH_ORGANIZATION_ID == '' || secrets.SIGNPATH_PROJECT_SLUG == '' || secrets.SIGNPATH_SIGNING_POLICY_SLUG == '') && (secrets.WINDOWS_CERT_PFX_BASE64 == '' || secrets.WINDOWS_CERT_PASSWORD == '') }}
+        if: ${{ steps.signing.outputs.signpath != 'true' && steps.signing.outputs.authenticode != 'true' }}
         shell: pwsh
         run: |
           $msg = "SignPath or Authenticode secrets are not configured; continuing with unsigned build and SHA256SUMS.txt manifest."

@@ -559,6 +559,46 @@ def test_topbar_computer_use_status_unclipped_and_restores_on_resize(
             QFontDatabase.removeApplicationFont(font_id)
 
 
+def test_topbar_computer_use_status_wide_font_elides_cleanly(
+    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cfg = config(tmp_path)
+
+    def factory(config_path: Path, approve: Any, **kwargs: Any) -> Any:
+        return create_runtime(
+            config_path,
+            approve,
+            settings=load_settings(config_path),
+            provider=ScriptedProvider([]),
+            **kwargs,
+        )
+
+    monkeypatch.setattr(bridge_module, "create_runtime", factory)
+    monkeypatch.setattr(SettingsPanel, "_refresh_devices", lambda *_: None)
+
+    prev_font = qt_app.font()
+    qt_app.setFont(QFont("Arial", 13))
+    window = build_window(cfg, demo=False, app=qt_app)
+    long_status = "Bilgisayarı kullanıyorum · düğmeye tıkla · durdurmak için Esc"
+    try:
+        window.show()
+        _wait(qt_app, lambda: window._worker_ready)
+        window._set_status(long_status, "running")
+        window.resize(720, 720)
+        qt_app.processEvents()
+        _assert_topbar_geometry_clean(window)
+        if window.status_label.text() != long_status:
+            assert window.status_pill.toolTip() == long_status
+
+        window.resize(1280, 720)
+        qt_app.processEvents()
+        _assert_topbar_geometry_clean(window)
+        assert window.status_label.text() == long_status
+    finally:
+        _close_cleanly(qt_app, window)
+        qt_app.setFont(prev_font)
+
+
 def test_voice_preview_saved_speech_pricing_and_unsaved_ui_switching(
     tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch
 ) -> None:

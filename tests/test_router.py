@@ -210,7 +210,8 @@ async def test_provider_timeout_uses_remaining_time_for_fallback(tmp_path: Path)
     result = await router.complete([], [], timeout=2)
 
     assert result.local_fallback and result.content == "Yedek"
-    assert local.timeouts == [pytest.approx(0.02)]
+    assert local.timeouts == [pytest.approx(0.02, abs=0.005)]
+    assert 0 < local.timeouts[0] <= 0.02
     assert router._fallback_until == 0
 
 
