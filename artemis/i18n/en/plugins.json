@@ -139,7 +139,7 @@
   "Rutin sil": "Delete routine",
   "Rutin silindi": "Routine deleted",
   "Rutinler listelendi": "Routines listed",
-  "Adlandırılmış bir rutin kaydeder: sabit, sırayla çalışacak araç çağrıları. Zaman ayarlayamaz, rutin içinden rutin çağıramaz. Normal kipte onay penceresiyle tüm adımları gösterir; otomatik onay kipinde onay sormadan kaydeder. Kullanıcı istediğinde metinle ek onay sorma, aracı doğrudan çağır.": "Saves a named routine: fixed tool calls to run in sequence. Cannot set schedules or call another routine from inside a routine. In normal mode, shows all steps in an approval dialog; in auto-approval mode, saves without prompting. When the user asks for it, call the tool directly without asking for extra text confirmation.",
+  "Adlandırılmış bir rutin kaydeder: sabit, sırayla çalışacak araç çağrıları. Zaman ayarlayamaz, rutin içinden rutin çağıramaz. Normal kipte onay penceresiyle tüm adımları gösterir; otomatik onay kipinde temiz turda onay sormadan kaydeder. Kullanıcı istediğinde metinle ek onay sorma, aracı doğrudan çağır.": "Saves a named routine: fixed tool calls to run in sequence. Cannot set schedules or call another routine from inside a routine. In normal mode, shows all steps in an approval dialog; in auto-approval mode, saves without prompting in a clean turn. When the user asks for it, call the tool directly without asking for extra text confirmation.",
   "Saat alındı": "Time retrieved",
   "Saat sorgusu": "Time query",
   "Ses ayarlandı": "Volume set",

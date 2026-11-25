@@ -670,7 +670,8 @@ def test_f6_to_f8_and_adj2_preserved(tmp_path: Path) -> None:
     assert wf.index("Resolve signing mode") < wf.index("Build Inno Setup installer")
     assert "/DSignToolCmd=signtool" in wf
 
-    # Adj-2 preserved (Umut 2026-11-21 decision)
+    # Adj-2 narrowed by ADR 0090 (#37, Umut 2026-11-26): tainted auto turn now asks;
+    # the rejecting approver below must deny the save.
     r_settings = Settings(
         workspace=tmp_path,
         state_dir=tmp_path / "r_state",
@@ -697,4 +698,4 @@ def test_f6_to_f8_and_adj2_preserved(tmp_path: Path) -> None:
             lambda _n, _a: False,
         )
     )
-    assert res.status == "ok"
+    assert res.status == "denied"

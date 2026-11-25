@@ -91,3 +91,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0087 — Öğretilebilir makro rutin kaydedici](0087-ogretilebilir-makro-rutin-kaydedici.md)
 - [0088 — Ses modeli sağlık yöneticisi ve Windows dağıtım hattı](0088-ses-modeli-saglik-yoneticisi-ve-windows-dagitim-hatti.md)
 - [0089 — Bilgisayar kullanımında hibrit arka plan düşünme katmanı](0089-computer-use-dusunme-katmani.md)
+- [0090 — Otomatik onay kapsamı ve lekeli turda rutin kaydı](0090-oto-onay-kapsami-ve-lekeli-rutin-kaydi.md)

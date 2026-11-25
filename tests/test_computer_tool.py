@@ -168,17 +168,32 @@ async def test_auto_mode_skips_volume_close_app_and_clean_routine_save(tmp_path:
         ("volume_set", {"level": 35}, TurnState(tainted=True)),
         ("close_application", {"name": "Visual Studio Code"}, TurnState(tainted=True)),
         ("routine_save", {"name": "sabah", "steps": vol_step}, TurnState()),
-        ("routine_save", {"name": "aksam", "steps": vol_step}, TurnState(tainted=True)),
-        ("routine_save", {"name": "gece", "steps": vol_step}, TurnState(history_external=True)),
     ):
         call_item = ToolCall(id="x", name=name, arguments=arguments)
         res = await gate.dispatch(call_item, context, state, never)
         assert res.success, (name, res.message)
+    # ADR 0090 (#37): dış içerik bağlamdayken rutin kaydı auto kipte de onay sorar.
+    asked: list[str] = []
+
+    def deny(tool: str, _arguments: object) -> bool:
+        asked.append(tool)
+        return False
+
+    for name, state in (
+        ("aksam", TurnState(tainted=True)),
+        ("gece", TurnState(history_external=True)),
+    ):
+        call_item = ToolCall(
+            id="x", name="routine_save", arguments={"name": name, "steps": vol_step}
+        )
+        res = await gate.dispatch(call_item, context, state, deny)
+        assert res.status == "denied", (name, res.message)
+    assert asked == ["routine_save", "routine_save"]
 
     events = [
         line for line in (tmp_path / "audit.jsonl").read_text(encoding="utf-8").splitlines()
     ]
-    assert sum('"event": "approval_skipped"' in line for line in events) == 5
+    assert sum('"event": "approval_skipped"' in line for line in events) == 3
 
 
 @pytest.mark.parametrize("goal", ["", "x" * 501])

@@ -16,8 +16,9 @@ yap) tek adla, sesle/yazıyla/panelden ve istenirse günün bir saatinde çalı�
    sessizce sıfırlanmaz, kaydet/sil de reddedilir. Kod: `artemis/proactive/routines.py`.
 3. **Araçlar** (tek plugin, `artemis/tools/plugins/routines.py`): `routine_list` READ_ONLY;
    `routine_run` SIDE_EFFECT; `routine_save` ve `routine_delete` HER ZAMAN CONFIRM_REQUIRED
-   (onayda tüm adımlar görünür). `routine_save` bu turda dış içerik okunduysa onay HİÇ sorulmadan
-   reddedilir (`memory_rule_add` ile aynı kural, ADR 0054). Kayıt zaman ayarlayamaz, `routine_*`
+   (onayda tüm adımlar görünür). ~~`routine_save` bu turda dış içerik okunduysa onay HİÇ sorulmadan
+   reddedilir.~~ ADR 0090 ile değişti: reddedilmez; otomatik onay kipinde yalnız temiz turda
+   onaysız kaydeder, dış içerik bağlamdayken her kipte onay sorar. Kayıt zaman ayarlayamaz, `routine_*`
    adımı içeremez (özyineleme yok), olmayan aracı içeremez. Var olan rutin yeniden kaydedilirse
    kullanıcının kurduğu zaman korunur.
 4. **Çalıştırma kapıdan geçer.** `routine_run` her adımı `context.gate_handle.dispatch` ile
@@ -30,7 +31,7 @@ yap) tek adla, sesle/yazıyla/panelden ve istenirse günün bir saatinde çalı�
    durum yoktur.
 5. **Yeni kapı yeteneği:** `BaseTool.refuse(arguments, context)` doluysa kapı onay penceresi
    açmadan çağrıyı reddeder. Yalnız reddedebilir; hiçbir onayı gevşetmez. Rutin araçları kapalı
-   bayrakta ve `routine_save` lekeli turda bunu kullanır.
+   bayrakta bunu kullanır (`routine_save`'in lekeli tur reddi ADR 0090 ile onaya döndü).
 6. **Zaman yalnız Ayarlar > Rutinler'den kurulur** (hiçbir araç kuramaz). Zamanı gelince Artemis
    rutini ÇALIŞTIRMAZ: proaktif katman LLM'siz "<ad> rutininin zamanı. Çalıştırılsın mı?" bildirimi
    verir, panelde "Çalıştır" düğmesi çıkar; tıklama normal, onaylı bir `routine_run` turu başlatır.
