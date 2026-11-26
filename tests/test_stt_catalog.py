@@ -71,7 +71,7 @@ def test_choice_for_path_recognizes_hugging_face_cache_folders() -> None:
 
 
 def test_download_maps_hub_entry_not_found_to_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
-    from huggingface_hub.errors import EntryNotFoundError
+    EntryNotFoundError = pytest.importorskip("huggingface_hub.errors").EntryNotFoundError
 
     def boom(_name: str) -> str:
         raise EntryNotFoundError("model.bin yok")
