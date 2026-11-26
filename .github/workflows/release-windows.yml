@@ -62,6 +62,16 @@ jobs:
         run: |
           python -m PyInstaller packaging/artemis.spec --noconfirm --clean --distpath dist --workpath build/pyinstaller
 
+      - name: Smoke test packaged desktop imports
+        # v0.2.5 paketinde numpy alt modülü eksikti ve masaüstü hiç açılmıyordu; testler kaynaktan
+        # koştuğu için yakalamadı. Paketli exe masaüstü ve ses zincirini içe aktaramazsa yayın durur.
+        shell: pwsh
+        run: |
+          foreach ($module in @("artemis.channels.desktop.app", "artemis.channels.voice.core", "artemis.channels.voice.stt_catalog")) {
+            & "dist/Artemis/artemis-cli.exe" -m $module
+            if ($LASTEXITCODE -ne 0) { throw "Paketli exe $module modulunu yukleyemedi (cikis $LASTEXITCODE)" }
+          }
+
       - name: Locate or install Inno Setup 6
         shell: pwsh
         run: |
@@ -93,8 +103,6 @@ jobs:
           SIGNPATH_ORGANIZATION_ID: ${{ secrets.SIGNPATH_ORGANIZATION_ID }}
           SIGNPATH_PROJECT_SLUG: ${{ secrets.SIGNPATH_PROJECT_SLUG }}
           SIGNPATH_SIGNING_POLICY_SLUG: ${{ secrets.SIGNPATH_SIGNING_POLICY_SLUG }}
-          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
         run: |
           $signpath = (
             -not [string]::IsNullOrEmpty($env:SIGNPATH_API_TOKEN) -and
@@ -102,51 +110,9 @@ jobs:
             -not [string]::IsNullOrEmpty($env:SIGNPATH_PROJECT_SLUG) -and
             -not [string]::IsNullOrEmpty($env:SIGNPATH_SIGNING_POLICY_SLUG)
           )
-          $authenticode = (
-            -not $signpath -and
-            -not [string]::IsNullOrEmpty($env:WINDOWS_CERT_PFX_BASE64) -and
-            -not [string]::IsNullOrEmpty($env:WINDOWS_CERT_PASSWORD)
-          )
           "signpath=$($signpath.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-          "authenticode=$($authenticode.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Build and sign installer via Authenticode certificate
-        if: ${{ steps.signing.outputs.authenticode == 'true' }}
-        shell: pwsh
-        env:
-          WINDOWS_CERT_PFX_BASE64: ${{ secrets.WINDOWS_CERT_PFX_BASE64 }}
-          WINDOWS_CERT_PASSWORD: ${{ secrets.WINDOWS_CERT_PASSWORD }}
-        run: |
-          $pfxPath = Join-Path $env:RUNNER_TEMP "artemis-signing.pfx"
-          $signHelper = Join-Path $env:RUNNER_TEMP "artemis-signtool.ps1"
-          try {
-            [IO.File]::WriteAllBytes($pfxPath, [Convert]::FromBase64String($env:WINDOWS_CERT_PFX_BASE64))
-            $signtool = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin" -Filter "signtool.exe" -Recurse |
-              Where-Object { $_.FullName -match "\\x64\\" } |
-              Select-Object -First 1 -ExpandProperty FullName
-            if (-not $signtool) {
-              throw "signtool.exe bulunamadı."
-            }
-            $env:SIGNTOOL_PATH = $signtool
-            $env:PFX_PATH = $pfxPath
-            $helperLines = @(
-              '$ErrorActionPreference = "Stop"'
-              '& $env:SIGNTOOL_PATH sign /fd SHA256 /tr http://timestamp.digicert.com /td SHA256 /f $env:PFX_PATH /p $env:WINDOWS_CERT_PASSWORD $args[0]'
-              'if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }'
-            )
-            [IO.File]::WriteAllText($signHelper, ($helperLines -join "`n"), [Text.UTF8Encoding]::new($false))
-            & "$env:ISCC_PATH" "/Ssigntool=pwsh -NoProfile -File `"$signHelper`" `$f" "/DSignToolCmd=signtool" "/DMyAppVersion=$env:APP_VERSION" "packaging\artemis.iss"
-            if ($LASTEXITCODE -ne 0) {
-              throw "Authenticode imzalı kurucu derlemesi başarısız oldu."
-            }
-          } finally {
-            Remove-Item Env:SIGNTOOL_PATH, Env:PFX_PATH -ErrorAction SilentlyContinue
-            Remove-Item -Path $pfxPath -Force -ErrorAction SilentlyContinue
-            Remove-Item -Path $signHelper -Force -ErrorAction SilentlyContinue
-          }
 
       - name: Build Inno Setup installer
-        if: ${{ steps.signing.outputs.authenticode != 'true' }}
         shell: pwsh
         run: |
           & "$env:ISCC_PATH" "/DMyAppVersion=$env:APP_VERSION" "packaging\artemis.iss"
@@ -176,10 +142,10 @@ jobs:
           wait-for-completion: true
 
       - name: Unsigned build fallback notice
-        if: ${{ steps.signing.outputs.signpath != 'true' && steps.signing.outputs.authenticode != 'true' }}
+        if: ${{ steps.signing.outputs.signpath != 'true' }}
         shell: pwsh
         run: |
-          $msg = "SignPath or Authenticode secrets are not configured; continuing with unsigned build and SHA256SUMS.txt manifest."
+          $msg = "SignPath secrets are not configured; continuing with unsigned build and SHA256SUMS.txt manifest."
           Write-Host $msg
           Add-Content -Path $env:GITHUB_STEP_SUMMARY -Value "### Signing Status`n- $msg"
 
@@ -228,5 +194,10 @@ jobs:
             release-assets/SHA256SUMS.txt
           generate_release_notes: true
           body: |
-            - [Code signing policy](https://github.com/UmutErayAltay/artemis/blob/main/docs/CODE_SIGNING_POLICY.md)
-            - [Privacy policy](https://github.com/UmutErayAltay/artemis/blob/main/docs/PRIVACY.md)
+            Kurucu henüz imzasızdır (SignPath başvurusu beklemede; SmartScreen uyarabilir).
+
+            Doğrulama (PowerShell): `Get-FileHash .\Artemis-Setup-${{ needs.build.outputs.version }}.exe -Algorithm SHA256` çıktısını `SHA256SUMS.txt` ile karşılaştırın.
+
+            - [Değişiklik günlüğü](https://github.com/UmutErayAltay/artemis/blob/v${{ needs.build.outputs.version }}/CHANGELOG.md)
+            - [Code signing policy](https://github.com/UmutErayAltay/artemis/blob/v${{ needs.build.outputs.version }}/docs/CODE_SIGNING_POLICY.md)
+            - [Privacy policy](https://github.com/UmutErayAltay/artemis/blob/v${{ needs.build.outputs.version }}/docs/PRIVACY.md)

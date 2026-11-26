@@ -9,6 +9,8 @@ import yaml
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from _wait import wait_qt
+
 from artemis.brain import providers
 from artemis.channels.desktop import provider_section as section_module
 from artemis.channels.desktop.settings_io import microphone_choices
@@ -1091,13 +1093,7 @@ def test_last_section_is_remembered_and_falls_back(tmp_path: Path, qt_app) -> No
 
 
 def _wait(predicate, timeout_ms: int = 3000) -> bool:  # type: ignore[no-untyped-def]
-    from PySide6.QtTest import QTest
-
-    waited = 0
-    while not predicate() and waited < timeout_ms:
-        QTest.qWait(20)
-        waited += 20
-    return bool(predicate())
+    return wait_qt(predicate, timeout_ms / 1000)
 
 
 def _wire(panel, path: Path, writes: list[bool]) -> None:  # type: ignore[no-untyped-def]

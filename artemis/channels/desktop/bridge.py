@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import queue
 import threading
 from collections.abc import Awaitable, Callable
@@ -139,6 +140,9 @@ async def _complete_selection(
     if isinstance(provider, ProviderRouter):
         return await provider.complete(messages, [], timeout=timeout, model=model)
     raise RuntimeError("Seçili yerel model yönlendirilemiyor.")
+
+
+logger = logging.getLogger(__name__)
 
 
 class DesktopBridge:
@@ -993,6 +997,9 @@ class DesktopBridge:
         try:
             await controller.run()
         except (OSError, RuntimeError, ValueError, ImportError):
+            self._voice_failed()
+        except Exception as error:  # noqa: BLE001 - Ses görevi sınırı: beklenmeyen tür de kullanıcıya hata olarak görünür, arayüz sessizce "kapalı"ya düşmez.
+            logger.warning("Ses oturumu beklenmeyen hatayla bitti (%s).", type(error).__name__)
             self._voice_failed()
         finally:
             with self._lock:

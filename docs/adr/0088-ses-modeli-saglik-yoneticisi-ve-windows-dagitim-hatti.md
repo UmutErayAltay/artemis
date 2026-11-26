@@ -21,7 +21,9 @@
 
 3. **Windows sürüm CI ve kurucu hizalaması (`.github/workflows/release-windows.yml`, `packaging/artemis.iss`):**
    - `windows-latest` ve Python `3.12` üzerinde `workflow_dispatch` ile `v*` etiketlerinde çalışan yayın akışı PyInstaller paketini (`packaging/artemis.spec`) ve Inno Setup kurucusunu (`packaging/artemis.iss /DMyAppVersion=...`) derler.
-   - SignPath (`SIGNPATH_*`) veya Authenticode (`WINDOWS_CERT_PFX_BASE64`) gizli anahtarları tanımlıysa imzalama adımını çalıştırır; anahtarlar yoksa açık bir özet bildirimiyle imzasız derlemeye devam edip `SHA256SUMS.txt` özet manifesti ve sürüm varlıklarını üretir.
+   - SignPath (`SIGNPATH_*`) gizli anahtarları tanımlıysa imzalama adımını çalıştırır (başvuru henüz yapılmadığından bugün sürümler imzasızdır); anahtarlar yoksa açık bir özet bildirimiyle imzasız derlemeye devam edip `SHA256SUMS.txt` özet manifesti ve sürüm varlıklarını üretir.
    - `packaging/artemis.iss` yayın/sürüm URL'leri, `VersionInfo*` alanları, 64-bit mimari meta verisi ve isteğe bağlı `#ifdef SignToolCmd` kancasıyla hizalanır; `DisableDirPage=yes`, `PrivilegesRequired=lowest` ve `{userappdata}` dokunmayan `[UninstallDelete]` değişmezleri korunur.
+
+   - Karne 7 notu: önceki PFX/Authenticode (`WINDOWS_CERT_PFX_BASE64`) adımı kaldırıldı; tek imzalama yolu SignPath'tir (`docs/CODE_SIGNING_POLICY.md` ile tutarlı).
 
 **Sonuç:** Kullanıcılar tüm ses modellerinin sağlık, boyut ve SHA-256 durumunu ve ses gecikme özetini *Ayarlar > Ses > Modeller ve ölçüm* alt sekmesinden tek yerde güvenle yönetebilir; Windows kurucuları da imzalama gizli anahtarları olsun veya olmasın tekrarlanabilir bir CI hattıyla `SHA256SUMS.txt` eşliğinde üretilir.

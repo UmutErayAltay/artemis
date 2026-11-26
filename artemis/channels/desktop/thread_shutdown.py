@@ -45,3 +45,27 @@ def shutdown_thread(
     if thread.isFinished() and thread in DETACHED:
         DETACHED.remove(thread)
     return True
+
+
+_UNPARENTED: set[QThread] = set()
+
+
+def start_unparented(thread: QThread) -> None:
+    """İş parçacığını ebeveynsiz başlatır; bitene dek modül düzeyinde canlı tutar.
+
+    Neden: panel `close` olmadan silinirse (ör. ebeveyn pencere yıkılır) ebeveyni panel olan
+    çalışan QThread "Destroyed while thread is still running" ile süreci çökertir (Karne 7:
+    Ayarlar açılışında arka plan model taraması). Ebeveynsiz iş parçacığı panelle yıkılmaz;
+    bitince kendini siler. Alıcı panel silinmişse Qt bağlantıyı kendisi koparır.
+    """
+    thread.setParent(None)
+    _UNPARENTED.add(thread)
+    thread.finished.connect(functools.partial(_release_unparented, weakref.ref(thread)))
+    thread.start()
+
+
+def _release_unparented(ref: weakref.ref[QThread]) -> None:
+    thread = ref()
+    if thread is not None:
+        _UNPARENTED.discard(thread)
+        thread.deleteLater()

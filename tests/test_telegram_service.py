@@ -15,6 +15,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
+import _wait
 import pytest
 import yaml
 from telegram_fake import (
@@ -93,12 +94,7 @@ def runtime_factory(provider: Any, registry: Any) -> Callable[..., Runtime]:
 
 
 def wait_until(predicate: Callable[[], bool], seconds: float = 15.0) -> bool:
-    deadline = time.monotonic() + seconds
-    while time.monotonic() < deadline:
-        if predicate():
-            return True
-        time.sleep(0.02)
-    return predicate()
+    return _wait.wait_until(predicate, timeout=seconds)
 
 
 def service_threads() -> list[threading.Thread]:

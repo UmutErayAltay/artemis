@@ -7,7 +7,7 @@ dağıtılır. Lisans metinleri [`LICENSES/`](LICENSES) klasöründedir ve kuruc
 
 ## Windows kurucusuna dahil copyleft bileşenler
 
-Kurucu (`Artemis-Setup-*.exe`) ve taşınabilir zip aşağıdaki bileşenleri değiştirilmemiş hâlleriyle,
+Kurucu (`Artemis-Setup-*.exe`) aşağıdaki bileşenleri değiştirilmemiş hâlleriyle,
 `_internal\` altında ayrı dosyalar olarak içerir. Kaynak kodlarına bağlantılar aşağıdadır; Artemis'in
 kendi kaynağı <https://github.com/UmutErayAltay/artemis> adresindedir.
 

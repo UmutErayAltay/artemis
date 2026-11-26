@@ -72,3 +72,28 @@ def test_background_flag_starts_desktop_in_tray_without_voice(monkeypatch, deskt
     assert _run_cli(monkeypatch, "desktop", "--arka-plan") == 0
     assert desktop_calls[0]["background"] is True
     assert desktop_calls[0]["voice"] is False
+
+
+def test_desktop_import_message_names_real_missing_module() -> None:
+    # v0.2.5: paketli exe'de numpy alt modülü eksikti, ileti "kurulu değil" diye yanıltıyordu.
+    numpy_gap = ImportError("x", name="numpy._core._exceptions")
+    assert "numpy._core._exceptions" in cli.desktop_import_message(numpy_gap)
+    assert "kurulu değil" in cli.desktop_import_message(ImportError("x", name="PySide6.QtCore"))
+
+
+def test_windowed_exe_shows_startup_error_instead_of_silent_exit(monkeypatch) -> None:
+    import io
+
+    monkeypatch.setattr(cli.sys, "platform", "linux")
+    monkeypatch.setattr(cli.sys, "stdout", None)
+    cli._report_startup_error("hata")  # konsol yok, win32 değil: çökmez
+    console = io.StringIO()
+    monkeypatch.setattr(cli.sys, "stdout", console)
+    cli._report_startup_error("konsol")
+    assert console.getvalue().strip() == "konsol"
+
+
+def test_broken_desktop_import_exits_with_real_module_name(monkeypatch, capsys) -> None:
+    monkeypatch.setitem(sys.modules, "artemis.channels.desktop.app", None)
+    assert _run_cli(monkeypatch, "desktop") == 2
+    assert "artemis.channels.desktop.app" in capsys.readouterr().out

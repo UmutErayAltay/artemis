@@ -14,6 +14,7 @@ from artemis.channels.desktop import provider_section, voice_preview
 from artemis.channels.desktop.provider_section import store_endpoint_key
 from artemis.channels.desktop.provider_workers import ConnectionTest
 from artemis.channels.desktop.settings_io import refresh_device_combo
+from artemis.channels.desktop.thread_shutdown import start_unparented
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import EndpointConfig, Settings, load_settings
 from artemis.i18n import t
@@ -43,21 +44,25 @@ class SttDownload(QThread):
 
 
 class GpuProbe(QThread):
-    """nvidia-smi (en çok 5 sn) GUI iş parçacığını bekletmesin diye ayrı çalışır."""
+    """nvidia-smi (en çok 5 sn) ve kurulu Whisper taraması GUI iş parçacığını bekletmesin."""
 
     done = Signal(object)
+    scanned = Signal(object)
 
     def run(self) -> None:
+        # faster_whisper içe aktarımı ve önbellek taraması da GUI'de değil burada yapılır.
+        self.scanned.emit({c.name: stt_catalog.installed_path(c.name) for c in stt_catalog.CATALOG})
         self.done.emit(stt_catalog.gpu_memory_mb())
 
 
 def start_gpu_probe(panel: SettingsPanel) -> None:
     """Panel varsayılan öneriyle açılır; GPU belleği gelince öneri güncellenir."""
-    probe = GpuProbe(panel)
+    probe = GpuProbe()
     probe.done.connect(panel._gpu_probe_done)
-    probe.finished.connect(probe.deleteLater)
+    probe.scanned.connect(panel._stt_scan_done)
     panel.gpu_probe = probe
-    probe.start()
+    # Panel kapanmadan silinirse çalışan sorgu süreci çökertmesin (thread_shutdown).
+    start_unparented(probe)
 
 
 def gpu_probe_done(panel: SettingsPanel, gpu_mb: object) -> None:
@@ -71,12 +76,35 @@ def gpu_probe_done(panel: SettingsPanel, gpu_mb: object) -> None:
     populate_stt_choices(panel, selected if isinstance(selected, str) else None)
 
 
-def _installed(panel: SettingsPanel, name: str) -> Path | None:
-    """Kurulu model yolunu yenileme başına bir kez çözer (arayüz iş parçacığında dosya araması)."""
+def stt_scan_done(panel: SettingsPanel, installed: object) -> None:
+    """Arka plan taraması bitti: kurulu modeller listeye ve düğmeye yansır."""
+    if not isinstance(installed, dict):
+        return
+    panel._stt_installed = installed
+    selected = panel.stt_combo.currentData()
+    if selected is None:
+        selected = selected_stt_name(panel, _saved_stt_path(panel))
+    populate_stt_choices(panel, selected if isinstance(selected, str) else None)
+
+
+def _saved_stt_path(panel: SettingsPanel) -> Path | None:
+    try:
+        return load_settings(panel.config_path).voice.stt_model
+    except (OSError, ValueError):
+        return None
+
+
+def selected_stt_name(panel: SettingsPanel, path: Path | None) -> str | None:
+    """Model yolunun katalog adı; kurulu modelleri yalnız hazır taramadan okur."""
+    return stt_catalog.choice_for_path(path, panel._stt_installed.get)
+
+
+def _installed(panel: SettingsPanel, name: str, *, lookup: bool = True) -> Path | None:
+    """Kurulu model yolu. `lookup=False` iken yalnız tarama sonucuna bakılır (GUI'de dosya yok)."""
     cache = panel._stt_installed
-    if name not in cache:
+    if name not in cache and lookup:
         cache[name] = stt_catalog.installed_path(name)
-    return cache[name]
+    return cache.get(name)
 
 
 def update_cloud_hint(panel: SettingsPanel) -> None:
@@ -270,7 +298,6 @@ def stt_size_text(choice: stt_catalog.WhisperChoice) -> str:
 
 
 def populate_stt_choices(panel: SettingsPanel, selected_name: str | None) -> None:
-    panel._stt_installed = {}  # her yenilemede önbellek tazelenir
     was_blocked = panel.stt_combo.blockSignals(True)
     try:
         panel.stt_combo.clear()
@@ -280,7 +307,7 @@ def populate_stt_choices(panel: SettingsPanel, selected_name: str | None) -> Non
             text = f"{t(choice.label)} · {stt_size_text(choice)}"
             if choice.name == panel._recommended_stt:
                 text += t(" · önerilen")
-            if _installed(panel, choice.name) is not None:
+            if _installed(panel, choice.name, lookup=False) is not None:
                 text += t(" · kurulu")
             panel.stt_combo.addItem(text, choice.name)
             index = panel.stt_combo.count() - 1
@@ -329,7 +356,8 @@ def update_stt_download_button(panel: SettingsPanel) -> None:
         not panel._demo
         and choice is not None
         and not running
-        and _installed(panel, choice.name) is None
+        and choice.name in panel._stt_installed  # tarama bitene dek düğme kapalı
+        and panel._stt_installed[choice.name] is None
     )
 
 
@@ -367,6 +395,8 @@ def download_stt(panel: SettingsPanel) -> None:
 
 def stt_download_done(panel: SettingsPanel, _path: Path) -> None:
     choice = selected_stt_choice(panel)
+    if choice is not None:
+        panel._stt_installed[choice.name] = _path  # indirme bitti: yeniden tarama gerekmez
     populate_stt_choices(panel, choice.name if choice is not None else None)
     panel.stt_status.setText(t("İndirildi; Kaydet ile kaydedilir."))
     panel._mark_dirty()
@@ -402,7 +432,7 @@ def toggle_device_detail(panel: SettingsPanel) -> None:
         return
     was_dirty = panel._dirty
     try:
-        panel._refresh_devices(load_settings(panel.config_path))
+        refresh_device_combo(panel, load_settings(panel.config_path), reuse=True)
     except (OSError, ValueError):
         panel.notice.setText(t("Mikrofon ayarı okunamadı."))
     # Listeyi yeniden kurmak kullanıcı değişikliği değildir.

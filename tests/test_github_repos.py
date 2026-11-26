@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import time
 from pathlib import Path
@@ -25,6 +26,8 @@ from artemis.tools.github_repos import (
 
 
 def make_repo(path: Path, origin: str | None) -> None:
+    if shutil.which("git") is None:
+        pytest.skip("git ikili dosyası yok")
     path.mkdir(parents=True)
     subprocess.run(["git", "init", "-q", str(path)], check=True)
     if origin:

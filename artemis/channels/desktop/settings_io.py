@@ -521,7 +521,7 @@ def microphone_choices(
     return result
 
 
-def refresh_device_combo(panel: Any, settings: Settings) -> None:
+def refresh_device_combo(panel: Any, settings: Settings, *, reuse: bool = False) -> None:
     """Mikrofon açılır listesini doldurur (SettingsPanel'den taşındı: dosya boyutu sınırı)."""
     panel.device_combo.clear()
     panel.device_combo.setEnabled(not panel._demo)
@@ -530,15 +530,22 @@ def refresh_device_combo(panel: Any, settings: Settings) -> None:
     try:
         sd = importlib.import_module("sounddevice")
         audio_errors = (*audio_errors, sd.PortAudioError)
-        devices = sd.query_devices()
-        hosts = sd.query_hostapis()
-        active: Any = settings.voice.input_device
-        if active is None:
-            # Sistem varsayılan girişi yokken sounddevice (None, None) dönebilir.
+        snapshot = getattr(panel, "_device_snapshot", None)
+        if snapshot is None or not reuse:
+            # PortAudio sorgusu yavaş olabilir: yalnız yenilemede sorulur, "ayrıntı"
+            # anahtarı aynı anlık görüntüyü yeniden kullanır.
             default_device = getattr(sd.default, "device", None)
-            default_in = default_device[0] if default_device else None
-            if default_in is not None:
-                active = int(default_in)
+            snapshot = (
+                sd.query_devices(),
+                sd.query_hostapis(),
+                default_device[0] if default_device else None,
+            )
+            panel._device_snapshot = snapshot
+        devices, hosts, default_in = snapshot
+        active: Any = settings.voice.input_device
+        if active is None and default_in is not None:
+            # Sistem varsayılan girişi yokken sounddevice (None, None) dönebilir.
+            active = int(default_in)
         active_name = "" if active is None else str(active)
         choices = microphone_choices(
             list(devices), list(hosts), active,

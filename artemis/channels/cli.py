@@ -164,6 +164,36 @@ async def chat(config_path: Path) -> None:
         runtime.shutdown()
 
 
+def desktop_import_message(error: ImportError) -> str:
+    """Masaüstü içe aktarma hatasını dürüst iletiye çevirir.
+
+    Yalnız PySide6 eksikse "kurulu değil" denir; başka bir modül eksikse (ör. paketlenmiş
+    exe'de unutulmuş `numpy._core._exceptions`, v0.2.5) gerçek modül adı söylenir.
+    """
+    missing = error.name or ""
+    if missing.split(".")[0] == "PySide6":
+        return t(
+            "Masaüstü bileşeni kurulu değil. `pip install 'artemis-tr[desktop]'` "
+            "komutuyla isteğe bağlı GUI paketini kurun. Ses de masaüstü içinde çalışır."
+        )
+    return t(
+        "Masaüstü açılamadı: `{module}` modülü yüklenemedi. Kurulum eksik ya da bozuk; "
+        "Artemis'i son sürümle yeniden kurun."
+    ).format(module=missing or type(error).__name__)
+
+
+def _report_startup_error(message: str) -> None:
+    """Konsol varsa yazar; pencereli paketli exe'de (stdout yok) Windows ileti kutusu gösterir."""
+    if sys.stdout is not None:
+        print(message)
+        return
+    if sys.platform == "win32":
+        import ctypes
+
+        # 0x10 = MB_ICONERROR. Konsolsuz Artemis.exe aksi halde hiçbir şey göstermeden kapanırdı.
+        ctypes.windll.user32.MessageBoxW(None, message, "Artemis", 0x10)
+
+
 def autostart(config_path: Path, action: str) -> int:
     """Kayıt yalnız bu komutla veya tepsi menüsüyle değişir; model araçla değiştiremez."""
     settings = load_settings(config_path)
@@ -231,13 +261,8 @@ def main() -> None:
         if args.command in {"voice", "desktop"}:
             try:
                 from artemis.channels.desktop.app import run_desktop
-            except ImportError:
-                print(
-                    t(
-                        "Masaüstü bileşeni kurulu değil. `pip install 'artemis-tr[desktop]'` "
-                        "komutuyla isteğe bağlı GUI paketini kurun. Ses de masaüstü içinde çalışır."
-                    )
-                )
+            except ImportError as error:
+                _report_startup_error(desktop_import_message(error))
                 raise SystemExit(2) from None
             # Ses artık ayrı terminal döngüsü değil; onay yalnız ekrandaki pencereden gelir
             # (ADR 0014). `artemis voice`, `artemis desktop --ses` ile aynı yoldur.

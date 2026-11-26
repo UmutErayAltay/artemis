@@ -167,110 +167,6 @@ def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> b
     return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
-_SECTION_ROUTES: dict[str, tuple[str, int | None]] = {
-    _fold(key): value
-    for key, value in {
-        "ses": ("Ses", None),
-        "voice": ("Ses", None),
-        "dinleme": ("Ses", 0),
-        "listening": ("Ses", 0),
-        "dinleme (giriş)": ("Ses", 0),
-        "listening (input)": ("Ses", 0),
-        "mikrofon": ("Ses", 0),
-        "microphone": ("Ses", 0),
-        "tanıma": ("Ses", 1),
-        "recognition": ("Ses", 1),
-        "ses tanıma": ("Ses", 1),
-        "speech recognition": ("Ses", 1),
-        "yanıt": ("Ses", 2),
-        "response": ("Ses", 2),
-        "yanıt (çıkış)": ("Ses", 2),
-        "response (output)": ("Ses", 2),
-        "ses modelleri": ("Ses", 3),
-        "voice models": ("Ses", 3),
-        "modeller ve ölçüm": ("Ses", 3),
-        "models & metrics": ("Ses", 3),
-        "models and metrics": ("Ses", 3),
-        "ses ölçümü": ("Ses", 3),
-        "voice telemetry": ("Ses", 3),
-        "bas-konuş": ("Dikte ve Kısayollar", None),
-        "push-to-talk": ("Dikte ve Kısayollar", None),
-        "dikte": ("Dikte ve Kısayollar", None),
-        "dictation": ("Dikte ve Kısayollar", None),
-        "kısayollar": ("Dikte ve Kısayollar", None),
-        "shortcuts": ("Dikte ve Kısayollar", None),
-        "hızlı açılış": ("Dikte ve Kısayollar", None),
-        "quick launch": ("Dikte ve Kısayollar", None),
-        "dikte ve kısayollar": ("Dikte ve Kısayollar", None),
-        "dictation & shortcuts": ("Dikte ve Kısayollar", None),
-        "model": ("Model ve Bağlantılar", None),
-        "model ve bağlantılar": ("Model ve Bağlantılar", None),
-        "models & connections": ("Model ve Bağlantılar", None),
-        "modeller": ("Model ve Bağlantılar", 0),
-        "models": ("Model ve Bağlantılar", 0),
-        "modeller ve roller": ("Model ve Bağlantılar", 0),
-        "models & roles": ("Model ve Bağlantılar", 0),
-        "model ekle ve bağlantılar": ("Model ve Bağlantılar", 1),
-        "add model & connections": ("Model ve Bağlantılar", 1),
-        "görünüm": ("Görünüm", None),
-        "appearance": ("Görünüm", None),
-        "otomasyon": ("Otomasyon Kuralları", None),
-        "automation": ("Otomasyon Kuralları", None),
-        "otomasyon ve rutinler": ("Otomasyon Kuralları", None),
-        "automation & routines": ("Otomasyon Kuralları", None),
-        "automation and routines": ("Otomasyon Kuralları", None),
-        "otomasyon kuralları": ("Otomasyon Kuralları", None),
-        "automation rules": ("Otomasyon Kuralları", None),
-        "rutinler": ("Otomasyon Kuralları", 0),
-        "routines": ("Otomasyon Kuralları", 0),
-        "tetikleyiciler": ("Otomasyon Kuralları", 1),
-        "triggers": ("Otomasyon Kuralları", 1),
-        "gün özeti": ("Otomasyon Kuralları", 2),
-        "daily summary": ("Otomasyon Kuralları", 2),
-        "araştırma": ("Otomasyon Kuralları", 3),
-        "research": ("Otomasyon Kuralları", 3),
-        "bilgi ve beceriler": ("Bilgi ve Beceriler", None),
-        "knowledge & skills": ("Bilgi ve Beceriler", None),
-        "beceriler": ("Bilgi ve Beceriler", 0),
-        "skills": ("Bilgi ve Beceriler", 0),
-        "dosya araması": ("Bilgi ve Beceriler", 1),
-        "file search": ("Bilgi ve Beceriler", 1),
-        "bağlantılar": ("Bağlantılar", None),
-        "connections": ("Bağlantılar", None),
-        "telegram": ("Bağlantılar", 0),
-        "takvim": ("Bağlantılar", 1),
-        "calendar": ("Bağlantılar", 1),
-        "posta": ("Bağlantılar", 1),
-        "mail": ("Bağlantılar", 1),
-        "takvim ve posta": ("Bağlantılar", 1),
-        "calendar & mail": ("Bağlantılar", 1),
-        "calendar and mail": ("Bağlantılar", 1),
-        "github": ("Bağlantılar", 2),
-        "github ve kod ajanları": ("Bağlantılar", 2),
-        "github & code agents": ("Bağlantılar", 2),
-        "mcp": ("Bağlantılar", 3),
-        "mcp sunucuları": ("Bağlantılar", 3),
-        "mcp servers": ("Bağlantılar", 3),
-        "uygulamalar": ("Uygulamalar ve Güvenlik", None),
-        "applications": ("Uygulamalar ve Güvenlik", None),
-        "güvenlik": ("Uygulamalar ve Güvenlik", None),
-        "security": ("Uygulamalar ve Güvenlik", None),
-        "gizlilik ve güvenlik": ("Uygulamalar ve Güvenlik", None),
-        "privacy & security": ("Uygulamalar ve Güvenlik", None),
-        "uygulamalar ve güvenlik": ("Uygulamalar ve Güvenlik", None),
-        "applications & security": ("Uygulamalar ve Güvenlik", None),
-        "hakkında": ("Hakkında ve Güncelleme", None),
-        "about": ("Hakkında ve Güncelleme", None),
-        "güncelleme": ("Hakkında ve Güncelleme", None),
-        "updates": ("Hakkında ve Güncelleme", None),
-        "hakkında ve güncelleme": ("Hakkında ve Güncelleme", None),
-        "about & updates": ("Hakkında ve Güncelleme", None),
-    }.items()
-}
-
-
-
-
 class SettingsPanel(QWidget):
     theme_changed = Signal(str)
     # Kayıt isteği (Kaydet ya da çıkış onayı): mikrofon aygıtı; model seçimi
@@ -599,7 +495,8 @@ class SettingsPanel(QWidget):
         if name in names:
             self.show_section(names.index(name))
             return True
-        route = _SECTION_ROUTES.get(_fold(name)) or _SECTION_ROUTES.get(_fold(direct))
+        routes = settings_nav.SECTION_ROUTES
+        route = routes.get(_fold(name)) or routes.get(_fold(direct))
         if route is None:
             return False
         page_tr, subtab = route
@@ -928,6 +825,9 @@ class SettingsPanel(QWidget):
     def _gpu_probe_done(self, gpu_mb: object) -> None:
         voice_settings_section.gpu_probe_done(self, gpu_mb)
 
+    def _stt_scan_done(self, installed: object) -> None:
+        voice_settings_section.stt_scan_done(self, installed)
+
     def _download_stt(self, *_args: object) -> None:
         voice_settings_section.download_stt(self)
 
@@ -948,7 +848,7 @@ class SettingsPanel(QWidget):
             self._load_cloud_servers()
             self._refresh_devices(settings)
             self._populate_stt_choices(
-                stt_catalog.choice_for_path(settings.voice.stt_model)
+                voice_settings_section.selected_stt_name(self, settings.voice.stt_model)
             )
             self.applications = dict(settings.applications)
             self._refresh_applications()
@@ -966,7 +866,7 @@ class SettingsPanel(QWidget):
                 self.tts_cloud_box.reload_servers()
             self._sync_voice_output_controls()
             self.voice_telemetry_card.refresh()
-            self.voice_model_manager.refresh()
+            self.voice_model_manager.trigger_refresh(quiet=True)
             self.routines.refresh()
             self.skills.refresh()
             self.triggers.refresh()
@@ -1248,7 +1148,9 @@ class SettingsPanel(QWidget):
             ("finished", self._stt_download_finished),
         ):
             self.stt_download_thread = None
-        if _shutdown_thread(self.gpu_probe, ("done", self._gpu_probe_done)):
+        if _shutdown_thread(
+            self.gpu_probe, ("done", self._gpu_probe_done), ("scanned", self._stt_scan_done)
+        ):
             self.gpu_probe = None
         if voice_preview._shutdown_thread(
             self.tts_preview_thread,

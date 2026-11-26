@@ -235,7 +235,7 @@ def build_voice_page(panel: SettingsPanel) -> None:
 
     models_layout = _voice_subtab(tabs, t("Modeller ve ölçüm"))
     panel.voice_model_manager = VoiceModelManagerWidget(
-        panel.config_path, parent=panel, demo=panel._demo
+        panel.config_path, parent=panel, demo=panel._demo, defer_load=True
     )
     models_layout.addWidget(panel.voice_model_manager)
     panel.voice_telemetry_card = VoiceTelemetryCard(panel.config_path)

@@ -16,6 +16,7 @@ All SignPath signing roles for the `UmutErayAltay/artemis` repository are held b
 ## Scope and approval
 
 - Only Windows installer binaries built directly by the [`.github/workflows/release-windows.yml`](../.github/workflows/release-windows.yml) GitHub Actions workflow in the `UmutErayAltay/artemis` repository are submitted for signing.
+- Scope note: only the installer is covered by this policy. The bundled `Artemis.exe` and `artemis-cli.exe` are planned to be signed through the same SignPath project (deep signing) once the application is approved; until then they are unsigned too.
 - Unsigned installer artifacts are uploaded as short-lived workflow artifacts (`retention-days: 1`) from the build job and submitted to SignPath via `signpath/github-action-submit-signing-request`.
 - Every release signing request is manually reviewed and approved by the Approver before a signed binary is issued and published to GitHub Releases.
 - Published release assets include a `SHA256SUMS.txt` checksum manifest computed from the final installer binary.

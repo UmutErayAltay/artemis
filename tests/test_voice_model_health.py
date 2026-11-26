@@ -471,7 +471,7 @@ def test_widget_finish_detaches_running_thread(
         assert widget.trigger_verify("silero:vad")
         assert entered.wait(3)
         thread = widget._thread
-        assert thread is not None and thread.isRunning() and thread.parent() is widget
+        assert thread is not None and thread.isRunning() and thread.parent() is None
 
         widget.finish()
         assert thread.parent() is None
