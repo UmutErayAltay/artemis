@@ -21,7 +21,7 @@ MAX_LISTED_FILES = 3
 TEMP_SUFFIXES = (".crdownload", ".part", ".tmp", ".partial", ".download", ".opdownload")
 # Dış kaynaklı (takvim/klasör) yer tutucular: öneri şablonunda kullanıldığında "Yaz" ile
 # başlatılan tur dış içerikle lekeli sayılır.
-EXTERNAL_SUGGEST_PLACEHOLDERS = ("{title}", "{location}", "{file}", "{path}")
+EXTERNAL_SUGGEST_PLACEHOLDERS = ("{title}", "{location}", "{file}", "{path}", "{app}")
 # Denetim, yön (bidi) ve görünmez karakterler: dosya adı bildirimi başka bir şey gibi
 # gösteremesin. Kaçışla yazılır ki kaynakta görünmez karakter kalmasın.
 _CONTROL = re.compile(

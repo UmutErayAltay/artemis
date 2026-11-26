@@ -771,7 +771,7 @@ async def test_suggest_uses_external_and_tainted_delivery_for_calendar_and_folde
     assert suggest_uses_external(None) is False
     assert suggest_uses_external("") is False
     assert suggest_uses_external("Hazırlık notlarını getir ({minutes} dk)") is False
-    assert suggest_uses_external("{app} açıldı") is False
+    assert suggest_uses_external("{app} açıldı") is True  # exe adı saldırgan seçimi olabilir
     assert suggest_uses_external("{title} notlarını getir") is True
     assert suggest_uses_external("{location} yol tarifini aç") is True
     assert suggest_uses_external("Özetle: {file}") is True

@@ -6,10 +6,12 @@ Ekran görüntüsü yalnız bellekte PNG baytları olarak üretilir; diske asla 
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from collections.abc import Callable
 from typing import Protocol
 
+from artemis.computer.actions import process_block_reason
 from artemis.computer.png import screenshot_png
 from artemis.config.settings import Settings, VoiceConfig
 from artemis.config.work_profile import effective_settings_for_profile, is_local_only_profile
@@ -94,11 +96,18 @@ def capture_active_screen_png(
         fg_getter = getattr(active_backend, "foreground_window", None)
         if callable(fg_getter):
             try:
-                _hwnd, raw_rect = fg_getter()
+                hwnd, raw_rect = fg_getter()
+                # Engelli süreç (parola yöneticisi vb.) ön plandaysa hiç yakalama yapma.
+                proc_getter = getattr(active_backend, "window_process", None)
+                if callable(proc_getter):
+                    exe, pid = proc_getter(hwnd)
+                    if process_block_reason(exe, pid, os.getpid()) is not None:
+                        return None
                 if isinstance(raw_rect, tuple) and len(raw_rect) == 4:
                     window_rect = raw_rect
             except (OSError, RuntimeError, ValueError, TypeError):
-                window_rect = None
+                # Ön plan süreci doğrulanamadı: gizlilik için yakalama yapılmaz.
+                return None
         left, top, width, height = _select_active_monitor(monitor_list, window_rect)
         if width <= 0 or height <= 0:
             return None
