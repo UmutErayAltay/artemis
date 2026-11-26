@@ -1,0 +1,43 @@
+ARTEMIS PRIVACY SUMMARY
+
+Artemis is a local-first personal desktop assistant. Your data, settings,
+conversation history, and voice processing stay on your computer unless you
+explicitly configure or trigger an external service.
+
+1. Zero Remote Telemetry
+- Artemis does not collect or send any remote telemetry, analytics, or crash
+  reports.
+- Local voice latency reports (voice.telemetry_report, enabled by default)
+  write content-free timing JSON files only to <state_dir>/voice-telemetry/
+  on your disk and never leave your machine.
+
+2. Cloud Services Are Opt-In (Disabled by Default)
+- Cloud LLM providers are contacted only if you configure a provider and supply
+  your own API key via environment variables or Windows Credential Manager.
+  Paid models are blocked by default (allow_paid: false).
+- Telegram integration is disabled by default (telegram.chat_id: null).
+- Screen capture, computer use, selection actions, dictation, calendar, mail,
+  background research, and MCP servers are all disabled or empty by default.
+- File contents, clipboard contents, and screen text are not sent to cloud
+  models by default (allow_cloud_file_content, allow_cloud_clipboard, and
+  perception.allow_cloud_screen are all false).
+
+3. Local Voice Pipeline by Default
+- Speech-to-Text defaults to local Faster-Whisper (voice.stt_mode: local).
+- Text-to-Speech defaults to local Piper TTS (voice.tts_backend: piper;
+  voice.allow_cloud_tts_text: false).
+- Voice models are downloaded only when you explicitly click Download in the
+  Model Health Manager. Raw audio and screenshots are never saved to disk.
+
+4. Explicit Network Actions Only
+- Web search queries DuckDuckGo only when the web_search tool is invoked.
+- Update checks query the GitHub Releases API only when you manually click
+  Check for Updates, and installer downloads are SHA-256 verified.
+
+5. Running 100% Locally
+- Select the "private" work profile (work_profile: private) to block all
+  outbound cloud LLM, screen, clipboard, file, remote TTS, and Telegram
+  traffic, and use a local Ollama or 127.0.0.1 OpenAI-compatible model.
+
+For the full Privacy Policy, see docs/PRIVACY.md in the Artemis repository:
+https://github.com/UmutErayAltay/artemis/blob/main/docs/PRIVACY.md

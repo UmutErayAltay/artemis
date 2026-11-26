@@ -26,6 +26,7 @@ DisableProgramGroupPage=yes
 ; [UninstallDelete] {app} dizinini tamamen sildiği için Belgeler gibi seçilen bir klasör silinebilirdi.
 DisableDirPage=yes
 SetupIconFile=..\artemis\channels\desktop\artemis.ico
+InfoBeforeFile=PRIVACY.txt
 UninstallDisplayIcon={app}\Artemis.exe
 OutputDir=..\dist\installer
 OutputBaseFilename=Artemis-Setup-{#MyAppVersion}
