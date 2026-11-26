@@ -99,9 +99,26 @@ _PRIVACY = (
 _BUSY = "Seçili metin eylemi sürüyor; bitmesini bekleyin."
 _DICTATION_ON = "Dikte sürerken seçili metin eylemi kullanılamaz."
 _NOT_RESTORED = "Pano eski haline getirilemedi; önceki metin kaybolmuş olabilir."
+_NONTEXT_CLIPBOARD = (
+    "Panoda metin dışı içerik (resim, dosya veya biçimli veri) var; "
+    "veri kaybını önlemek için seçili metin alınmadı."
+)
 _GDI_CLIPBOARD_FORMATS = frozenset({2, 3, 9, 14, 0x0082, 0x0083, 0x008E})
 _MAX_BACKUP_BYTES = 16 * 1024 * 1024
 _GMEM_MOVEABLE = 0x0002
+
+
+class _NontextClipboardBlocked(Exception):
+    """Panoda yedeklenemeyen metin dışı içerik varken Ctrl+C yolunu durdurur."""
+
+
+@dataclass(frozen=True)
+class ClipboardSnapshot:
+    """Panodaki yedeklenen ikili/zengin biçimler ve atlanan biçim durumu."""
+
+    entries: tuple[tuple[int, bytes], ...]
+    skipped_formats: int = 0
+    complete: bool = True
 
 
 class _Audit(Protocol):
@@ -184,20 +201,21 @@ def _win_clipboard_apis() -> tuple[Any, Any] | None:
 
 def _backup_clipboard_formats(
     max_total_bytes: int = _MAX_BACKUP_BYTES,
-) -> list[tuple[int, bytes]]:
+) -> ClipboardSnapshot:
     """Panodaki HGLOBAL tabanlı ikili/zengin biçimleri bellek sınırı içinde yedekler."""
     import ctypes
 
     if sys.platform != "win32":
-        return []
+        return ClipboardSnapshot(entries=(), skipped_formats=0, complete=True)
     apis = _win_clipboard_apis()
     if apis is None:
-        return []
+        return ClipboardSnapshot(entries=(), skipped_formats=0, complete=True)
     user32, kernel32 = apis
     if not user32.OpenClipboard(None):
         raise OSError("Pano başka bir uygulama tarafından kullanılıyor.")
     entries: list[tuple[int, bytes]] = []
     total = 0
+    skipped = 0
     try:
         fmt = 0
         while True:
@@ -206,17 +224,25 @@ def _backup_clipboard_formats(
             if fmt == 0:
                 if ctypes.get_last_error() != 0:
                     raise OSError("Pano biçimleri okunamadı.")
-                return entries
+                return ClipboardSnapshot(
+                    entries=tuple(entries),
+                    skipped_formats=skipped,
+                    complete=(skipped == 0),
+                )
             if fmt in _GDI_CLIPBOARD_FORMATS:
+                skipped += 1
                 continue
             handle = user32.GetClipboardData(fmt)
             if not handle:
+                skipped += 1
                 continue
             size = int(kernel32.GlobalSize(handle))
             if size <= 0 or size > max_total_bytes or total + size > max_total_bytes:
+                skipped += 1
                 continue
             pointer = kernel32.GlobalLock(handle)
             if not pointer:
+                skipped += 1
                 continue
             try:
                 entries.append((fmt, ctypes.string_at(pointer, size)))
@@ -231,7 +257,15 @@ def _restore_clipboard_formats(snapshot: object) -> bool:
     """Önceden yedeklenen HGLOBAL pano biçimlerini Windows panosuna geri yükler."""
     import ctypes
 
-    if not isinstance(snapshot, list) or not snapshot:
+    if isinstance(snapshot, ClipboardSnapshot):
+        entries: Sequence[tuple[int, bytes]] = snapshot.entries
+        expected_complete = snapshot.complete
+    elif isinstance(snapshot, list):
+        entries = snapshot
+        expected_complete = True
+    else:
+        return False
+    if not entries:
         return False
     apis = _win_clipboard_apis()
     if apis is None:
@@ -249,7 +283,7 @@ def _restore_clipboard_formats(snapshot: object) -> bool:
         try:
             if not user32.EmptyClipboard():
                 raise OSError("Pano geri yüklemeye hazırlanamadı.")
-            for fmt, payload in snapshot:
+            for fmt, payload in entries:
                 if not isinstance(fmt, int) or not isinstance(payload, bytes) or not payload:
                     continue
                 handle = kernel32.GlobalAlloc(_GMEM_MOVEABLE, len(payload))
@@ -272,7 +306,9 @@ def _restore_clipboard_formats(snapshot: object) -> bool:
             user32.CloseClipboard()
     finally:
         user32.DestroyWindow(window)
-    return allocated > 0
+    # Atlanan biçim varsa veya tüm yedeklenen biçimler yazılamadıysa kısmi geri yükleme
+    # tam sayılmaz (kural 5).
+    return bool(expected_complete and allocated > 0 and allocated == len(entries))
 
 
 def windows_selection_backend(window: DictationBackend) -> SelectionBackend:
@@ -568,6 +604,9 @@ class SelectionActions:
         except asyncio.CancelledError:
             outcome = "cancelled"
             raise
+        except _NontextClipboardBlocked:
+            outcome, message = "nontext_clipboard", t(_NONTEXT_CLIPBOARD)
+            return
         except (OSError, RuntimeError, ValueError):
             pass  # sabit ileti; istisna metni yol/sır taşıyabilir
         finally:
@@ -587,15 +626,28 @@ class SelectionActions:
         """Panoyu yedekler, benzersiz bir işaret yazar, Ctrl+C gönderir, işaret değişince okur.
         Önce ikili/zengin pano biçimleri en iyi çaba yedeklenir ve her yolda geri konur."""
         backend = self._backend
+        has_nontext = False
+        with contextlib.suppress(OSError, RuntimeError, ValueError):
+            has_nontext = bool(await asyncio.to_thread(backend.has_nontext_clipboard))
         snapshot: object = None
         if backend.backup_clipboard is not None:
             with contextlib.suppress(OSError, ValueError, RuntimeError):
                 snapshot = await asyncio.to_thread(backend.backup_clipboard)
+        if isinstance(snapshot, ClipboardSnapshot):
+            snapshot_has_data = bool(snapshot.entries)
+            snapshot_complete = snapshot.complete and snapshot_has_data
+        else:
+            snapshot_has_data = bool(snapshot)
+            snapshot_complete = snapshot_has_data
+        # Panoda metin dışı veri (ör. GDI bitmap veya >16 MB DIB) tam yedeklenemediyse
+        # Ctrl+C yoluna girip panoyu silme; kullanıcıyı veri kaybı olmadan uyar.
+        if has_nontext and not snapshot_complete:
+            raise _NontextClipboardBlocked()
         previous: str | None = None
         try:
             previous = await asyncio.to_thread(backend.read_clipboard)
         except OSError as error:
-            if not snapshot:
+            if not snapshot_has_data:
                 raise OSError("Pano yedeği okunamadı.") from error
         sentinel = f"artemis-secim-{uuid4().hex}"
         text = ""
@@ -614,12 +666,20 @@ class SelectionActions:
                 await asyncio.sleep(self._poll)
         finally:
             restored = False
-            if snapshot and backend.restore_clipboard is not None:
+            if snapshot_has_data and backend.restore_clipboard is not None:
                 with contextlib.suppress(OSError, ValueError, RuntimeError):
-                    restored = await asyncio.to_thread(backend.restore_clipboard, snapshot)
+                    restored = bool(await asyncio.to_thread(backend.restore_clipboard, snapshot))
             if not restored and previous is not None:
-                with contextlib.suppress(OSError, ValueError):
-                    restored = await asyncio.to_thread(backend.write_clipboard, previous)
+                if not has_nontext and (
+                    not isinstance(snapshot, ClipboardSnapshot) or snapshot.complete
+                ):
+                    with contextlib.suppress(OSError, ValueError):
+                        restored = await asyncio.to_thread(backend.write_clipboard, previous)
+                elif previous:
+                    # Eksik veya metin dışı biçimler geri konamadı: metni best-effort yaz
+                    # ama restored=False bırak ki uyarı gösterilsin.
+                    with contextlib.suppress(OSError, ValueError):
+                        await asyncio.to_thread(backend.write_clipboard, previous)
             if not restored:
                 self._emit("message", t(_NOT_RESTORED))
         if foreground_target(backend.window, self._own_pid) != target:
