@@ -224,9 +224,9 @@ bekleniyor ("Windows kabulü bekliyor").
 
 Bu maddeler yalnız sahte saat/ön plan getiricisiyle test edildi; geçti denmez.
 
-## Sürüm durumu — v0.2.5 (2026-11-26)
+## Sürüm durumu
 
-Güncel sürüm ve varlıklar için [GitHub Releases](https://github.com/UmutErayAltay/artemis/releases) ve [CHANGELOG](../CHANGELOG.md). `v0.2.5` 2026-11-26'da CI ile yayımlandı: kurucu `Artemis-Setup-0.2.5.exe` ve `SHA256SUMS.txt`. Geçmiş: `v0.2.4` (2026-11-26) aynı hatla yayımlandı.
+Güncel sürüm ve varlıklar için [GitHub Releases](https://github.com/UmutErayAltay/artemis/releases) ve [CHANGELOG](../CHANGELOG.md). `v0.2.4`'ten beri her sürüm `v*` etiketiyle CI'da derlenip yayımlanır: kurucu `Artemis-Setup-<sürüm>.exe` ve `SHA256SUMS.txt` (SignPath onayına dek imzasız).
 Kurucu imzasızdır; SignPath Foundation başvurusu onaylanana dek imzasız yayımlanır
 ([kod imzalama politikası](CODE_SIGNING_POLICY.md)). Windows insan kabulü sürüyor.
 

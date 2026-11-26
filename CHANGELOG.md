@@ -4,6 +4,13 @@ Kullanıcıya dönük özet. Kurucular henüz imzasızdır (SignPath başvurusu 
 her sürümün `SHA256SUMS.txt` dosyasıyla doğrulayın. Ayrıntılı kayıtlar
 [GitHub Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasındadır.
 
+## 0.2.6 (2026-11-26)
+
+- Güvenlik: uygulama açıldı tetikleyicisi ve öneri zincirlerinde `{app}` (ön plandaki program adı) içeren öneri dış içerik sayılıyor; o turda yan etkiler onay istiyor.
+- Ses: Ayarlar açılırken model taraması ve doğrulama arka planda; panel donmuyor.
+- Ses: mikrofon sinyali 2 sn kesilirse "Mikrofon sinyali kesildi" hatası; beklenmeyen hatada ses sessizce kapanmıyor, hata gösteriliyor; model indirme "İndiriliyor…"da takılı kalmıyor.
+- Yayın: imza yalnız SignPath üzerinden (eski sertifika yolu kaldırıldı); release notunda imzasız uyarısı ve `Get-FileHash` doğrulaması; SECURITY.md eklendi.
+
 ## 0.2.5 (2026-11-26)
 
 - Ses: ekran bağlamı ve Whisper indirme hataları daha dürüst bildiriliyor; kurulu model bilgisi önbelleğe alınıyor.
