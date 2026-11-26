@@ -145,8 +145,14 @@ class CachedCalendarProvider:
             tz = ZoneInfo(settings.proactive.timezone)
             events, _warnings = parse_events(data, tz, window_start, fetch_end)
         except (SourceError, OSError, ValueError):
-            # Çevrimdışı veya geçici ağ hatasında zamanlayıcı düşmez; mevcut önbellek korunur.
+            # Çevrimdışı veya geçici ağ hatasında zamanlayıcı düşmez; mevcut önbellek korunur
+            # ve ilk hatada bile TTL süresince yeniden ağ isteği atılmaz.
             self._fetched_at = now_mono
+            self._cached_until = (
+                max(self._cached_until, fetch_end)
+                if self._cached_until is not None
+                else fetch_end
+            )
             return list(self._cached_events)
         self._fetched_at = now_mono
         self._cached_until = fetch_end

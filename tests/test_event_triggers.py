@@ -997,3 +997,38 @@ async def test_failed_trigger_and_chain_delivery_retries_are_bounded_with_backof
     assert await rec_sched.tick() == 1
     assert await rec_sched.tick() == 0  # mark_fired çalıştı, tekrarlamaz
 
+
+def test_cached_calendar_provider_honors_ttl_on_initial_fetch_error(
+    tmp_path: Path,
+) -> None:
+    runtime = _make_runtime(tmp_path, calendar_enabled=True)
+    mono = FakeMono(start=100.0)
+    calls: list[str] = []
+
+    def failing_fetch(url: str) -> bytes:
+        calls.append(url)
+        raise SourceError("çevrimdışı")
+
+    provider = CachedCalendarProvider(
+        runtime,
+        secret_resolver=lambda _env, _target: "https://cal.example/feed.ics",
+        fetcher=failing_fetch,
+        monotonic_clock=mono,
+    )
+
+    # Soğuk önbellekte ilk hata: 1 ağ isteği atılır ve TTL boyunca tekrarlanmaz.
+    assert provider(NOW, NOW + timedelta(minutes=15)) == []
+    assert len(calls) == 1
+
+    # Zaman penceresi 30 sn ilerlese bile TTL içinde ikinci istek atılmamalı.
+    mono.value += 30.0
+    assert provider(NOW + timedelta(seconds=30), NOW + timedelta(minutes=15, seconds=30)) == []
+    mono.value += 200.0
+    assert provider(NOW + timedelta(minutes=4), NOW + timedelta(minutes=19)) == []
+    assert len(calls) == 1
+
+    # TTL dolduktan sonra yeni deneme yapılır.
+    mono.value += 100.0  # toplam +330s >= 300s
+    assert provider(NOW + timedelta(minutes=5), NOW + timedelta(minutes=20)) == []
+    assert len(calls) == 2
+
