@@ -94,5 +94,6 @@
   "Önce bekleyen onayı yanıtlayın; bu mesaj çalıştırılmadı.": "Please answer the pending approval first; this message was not executed.",
   "İlk açılış: ayarlar {config} konumunda oluşturuldu; modeli Ayarlar > Model > Bağlantılar'dan ekleyin.": "First launch: settings created at {config}; add a model from Settings > Models > Connections.",
   "İletilen mesajlar komut olarak çalıştırılmaz.": "Forwarded messages are not executed as commands.",
-  "Şunu duydum: {transcript}": "I heard: {transcript}"
+  "Şunu duydum: {transcript}": "I heard: {transcript}",
+  "Masaüstü açılamadı: `{module}` modülü yüklenemedi. Kurulum eksik ya da bozuk; Artemis'i son sürümle yeniden kurun.": "Desktop could not start: module `{module}` failed to load. The installation is incomplete or broken; reinstall the latest Artemis."
 }

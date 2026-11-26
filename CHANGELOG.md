@@ -6,6 +6,7 @@ her sürümün `SHA256SUMS.txt` dosyasıyla doğrulayın. Ayrıntılı kayıtlar
 
 ## 0.2.6 (2026-11-26)
 
+- Düzeltme: 0.2.5 kurucusunda Artemis açılmıyordu (pakete NumPy alt modülü girmemişti). Paket artık yayından önce CI'da açılış denemesinden geçiyor; eksik modül olursa pencere sessizce kapanmak yerine hangi modülün yüklenemediğini söylüyor.
 - Güvenlik: uygulama açıldı tetikleyicisi ve öneri zincirlerinde `{app}` (ön plandaki program adı) içeren öneri dış içerik sayılıyor; o turda yan etkiler onay istiyor.
 - Ses: Ayarlar açılırken model taraması ve doğrulama arka planda; panel donmuyor.
 - Ses: mikrofon sinyali 2 sn kesilirse "Mikrofon sinyali kesildi" hatası; beklenmeyen hatada ses sessizce kapanmıyor, hata gösteriliyor; model indirme "İndiriliyor…"da takılı kalmıyor.

@@ -169,3 +169,11 @@ def test_iss_metadata_alignment_and_invariants() -> None:
     ):
         assert expected in setup_section, expected
     assert "{userappdata}" not in uninstall_section.casefold()
+
+
+def test_release_smoke_tests_packaged_desktop_imports() -> None:
+    # v0.2.5 açılmama hatası: paketli exe derlendikten sonra, kurucudan önce içe aktarma denenir.
+    wf = (ROOT / ".github/workflows/release-windows.yml").read_text(encoding="utf-8")
+    smoke = wf.index("Smoke test packaged desktop imports")
+    assert wf.index("Build PyInstaller bundle") < smoke < wf.index("Build Inno Setup installer")
+    assert "artemis-cli.exe" in wf[smoke:] and "artemis.channels.desktop.app" in wf[smoke:]
