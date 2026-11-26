@@ -311,7 +311,8 @@ async def test_deadline_is_passed_to_the_client(tmp_path: Path) -> None:
     state = TurnState(deadline=monotonic() + 7)
     await gate.dispatch(ToolCall(id="c", name=name, arguments={"text": "x"}), context, state, never)
     timeout = client.calls[0][2]
-    assert timeout is not None and 0 < timeout <= 7
+    # Windows monotonic çözünürlüğü kalan süreyi 7.000000000000057 gibi okuyabilir: küçük pay.
+    assert timeout is not None and 0 < timeout <= 7 + 1e-6
 
 
 def test_environment_contains_only_os_and_named_variables(
