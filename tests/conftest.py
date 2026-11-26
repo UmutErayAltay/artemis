@@ -164,3 +164,16 @@ def close_store_ownerships(monkeypatch):
     yield
     for ownership in opened:
         ownership.close()
+
+
+@pytest.fixture(autouse=True)
+def no_real_toast(request, monkeypatch):
+    # Testler gerçek makineye dokunmaz: varsayılan `show_toast` (gerçek DesktopBridge,
+    # proaktif teslim) PowerShell bildirimi açmasın. Yalnız `-m disruptive` testi gerçeğini ister.
+    if request.node.get_closest_marker("disruptive") is not None:
+        return
+    from artemis.tools import toast
+
+    defaults = toast.show_toast.__kwdefaults__
+    assert defaults is not None
+    monkeypatch.setitem(defaults, "platform", "test")
