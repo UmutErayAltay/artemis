@@ -227,6 +227,7 @@ class EventTriggerTracker:
             enable_gap_check=enable_gap,
         )
         self._app_baseline: dict[str, bool] = {}
+        self._app_edge_key: dict[str, str] = {}
         self._last_fired: dict[str, datetime] = {}
         self._calendar_seen: set[tuple[str, str]] = set()
         self._chain_last_fired: dict[str, datetime] = {}
@@ -266,6 +267,7 @@ class EventTriggerTracker:
         self._last_fired[trigger.name] = now
         if trigger.kind == "app_opened":
             self._app_baseline[trigger.name] = True
+            self._app_edge_key.pop(trigger.name, None)
         elif trigger.kind == "calendar_before":
             self._calendar_seen.add((trigger.name, match.event_key))
 
@@ -292,11 +294,13 @@ class EventTriggerTracker:
         prev = self._app_baseline[trigger.name]
         if not matches:
             self._app_baseline[trigger.name] = False
+            self._app_edge_key.pop(trigger.name, None)
             return None
         if prev:
             return None
         if self._cooldown_active(trigger, now, store):
             self._app_baseline[trigger.name] = True
+            self._app_edge_key.pop(trigger.name, None)
             return None
         app_display = (
             PureWindowsPath(active.strip().replace("/", "\\")).name
@@ -310,8 +314,12 @@ class EventTriggerTracker:
             if trigger.suggest
             else ""
         )
+        event_key = self._app_edge_key.setdefault(
+            trigger.name,
+            f"app:{target}:{now.astimezone(UTC).isoformat(timespec='seconds')}",
+        )
         return TriggerMatch(
-            event_key=f"app:{target}:{now.astimezone(UTC).isoformat(timespec='seconds')}",
+            event_key=event_key,
             title=f"Tetikleyici · {trigger.name}",
             body=body,
             suggest=suggest,

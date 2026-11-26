@@ -437,6 +437,28 @@ class ProactiveStore:
         except OSError as e:
             raise ProactiveStoreError(f"occurrence_state failed: {e}") from e
 
+    def occurrence_info(
+        self, event_id: str, scheduled_for: datetime
+    ) -> tuple[str, datetime | None] | None:
+        """Occurrence durumunu ve bitiş zamanını (UTC) döndürür; yoksa None."""
+        _require_aware(scheduled_for, "scheduled_for")
+        scheduled_iso = _to_utc_iso(scheduled_for)
+        try:
+            with self._connect() as db:
+                row = db.execute(
+                    "SELECT state, finished_at FROM occurrences "
+                    "WHERE event_id = ? AND scheduled_for = ?",
+                    (event_id, scheduled_iso),
+                ).fetchone()
+                if row is None:
+                    return None
+                finished = _from_utc_iso(row["finished_at"]) if row["finished_at"] else None
+                return row["state"], finished
+        except sqlite3.Error as e:
+            raise ProactiveStoreError(f"occurrence_info failed: {e}") from e
+        except OSError as e:
+            raise ProactiveStoreError(f"occurrence_info failed: {e}") from e
+
     def mark_stale_claims(self, older_than: datetime, now: datetime) -> int:
         """`claimed` durumunda olup `claimed_at < older_than` olanları `uncertain` yapar."""
         _require_aware(older_than, "older_than")

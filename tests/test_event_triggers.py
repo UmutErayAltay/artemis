@@ -858,3 +858,142 @@ async def test_suggest_uses_external_and_tainted_delivery_for_calendar_and_folde
     assert by_title["Tetikleyici · folder-tainted-path"][5] is True
     assert by_title["Tetikleyici · folder-clean"][5] is False
 
+
+async def test_failed_trigger_and_chain_delivery_retries_are_bounded_with_backoff(
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    from artemis.proactive.event_triggers import ChainMatch
+    from artemis.proactive.schedule import local_day_bounds
+    from artemis.proactive.scheduler import (
+        TRIGGER_MAX_ATTEMPTS,
+        TRIGGER_RETRY_BACKOFF_SECONDS,
+    )
+
+    assert TRIGGER_MAX_ATTEMPTS == 3
+    assert TRIGGER_RETRY_BACKOFF_SECONDS == (60.0, 300.0)
+
+    clock = FakeClock()
+    dl = tmp_path / "dl"
+    dl.mkdir()
+    active_app = ["other.exe"]
+    triggers = (
+        TriggerConfig(name="dl", kind="folder", folder=str(dl), suggest="Özetle"),
+        TriggerConfig(
+            name="cal",
+            kind="calendar_before",
+            minutes_before=15,
+            suggest="Hazırlan",
+        ),
+        TriggerConfig(name="app", kind="app_opened", app="code.exe", suggest="Başla"),
+    )
+    events = [Event("Sync", NOW + timedelta(minutes=15), NOW + timedelta(minutes=45))]
+    runtime = _make_runtime(tmp_path, items=triggers)
+    store = runtime.context.services["proactive_store"]
+
+    panel_should_fail = True
+    deliveries: list[str] = []
+
+    def maybe_panel(
+        title: str, _body: str, _routine: str, _suggest: str, _day: str = ""
+    ) -> bool:
+        deliveries.append(title)
+        return not panel_should_fail
+
+    deliverer = Deliverer(
+        runtime.settings,
+        runtime.audit,
+        routine_panel=maybe_panel,
+        toast=None,
+    )
+    scheduler = ProactiveScheduler(
+        runtime,
+        store,
+        deliverer,
+        clock=clock,
+        active_app_getter=lambda: active_app[0],
+        calendar_fetcher=lambda _s, _e: events,
+    )
+
+    # İlk tarama: klasör & app baseline kurulur; yalnız calendar dener (deneme 1 -> failed).
+    assert await scheduler.tick() == 0
+    (dl / "yeni.pdf").write_bytes(b"pdf")
+    active_app[0] = "code.exe"
+
+    # 30 sn sonra: klasör stabil değil, cal backoff (60 sn) içinde, app deneme 1 -> failed.
+    clock.advance(seconds=30)
+    assert await scheduler.tick() == 0
+
+    # +30 sn (toplam 60 sn): klasör hazır (deneme 1 -> failed), cal deneme 2 -> failed,
+    # app henüz 30 sn geçtiği için backoff içinde.
+    clock.advance(seconds=30)
+    assert await scheduler.tick() == 0
+
+    def _occ_rows() -> list[tuple[str, str]]:
+        with sqlite3.connect(store.path) as db:
+            return db.execute(
+                "SELECT event_id, state FROM occurrences ORDER BY event_id"
+            ).fetchall()
+
+    rows_after_60s = _occ_rows()
+    cal_rows = [r for r in rows_after_60s if r[0].startswith("trigger:cal:")]
+    assert len(cal_rows) == 2
+
+    # 20 ek tarama ile tüm tetikleyiciler backoff'ları aşsa bile en fazla 3 satır oluşmalı.
+    for _ in range(20):
+        clock.advance(seconds=120)
+        await scheduler.tick()
+
+    rows = _occ_rows()
+    for prefix in ("trigger:dl:", "trigger:cal:", "trigger:app:"):
+        matching = [r for r in rows if r[0].startswith(prefix)]
+        assert len(matching) == TRIGGER_MAX_ATTEMPTS, (prefix, matching)
+        assert all(state == "failed" for _, state in matching)
+
+    # Zincir teslimi de başarısız olunca aynı şekilde en çok 3 satırla sınırlanır.
+    chain_match = ChainMatch(
+        chain_name="zincir",
+        event_key="chain:zincir:src:2026-11-23T09:00",
+        title="Öneri · zincir",
+        body="Gövde",
+        suggest="Devam",
+        routine="",
+    )
+    day_start, _ = local_day_bounds(clock(), scheduler.tz)
+    for _ in range(10):
+        clock.advance(seconds=400)
+        assert await scheduler._fire_chain(chain_match, day_start, clock()) == 0
+    chain_rows = [r for r in _occ_rows() if r[0].startswith("chain:zincir:")]
+    assert len(chain_rows) == TRIGGER_MAX_ATTEMPTS
+    assert all(state == "failed" for _, state in chain_rows)
+
+    # Kurtarma: ikinci denemede backoff dolduktan sonra teslim başarılı olursa işaretlenir.
+    rec_clock = FakeClock()
+    rec_runtime = _make_runtime(
+        tmp_path / "rec",
+        items=(TriggerConfig(name="cal2", kind="calendar_before", minutes_before=15, suggest="S"),),
+    )
+    rec_store = rec_runtime.context.services["proactive_store"]
+    rec_fail = [True]
+    rec_deliverer = Deliverer(
+        rec_runtime.settings,
+        rec_runtime.audit,
+        routine_panel=lambda *_args: not rec_fail[0],
+        toast=None,
+    )
+    rec_sched = ProactiveScheduler(
+        rec_runtime,
+        rec_store,
+        rec_deliverer,
+        clock=rec_clock,
+        calendar_fetcher=lambda _s, _e: [Event("Sync", NOW + timedelta(minutes=5), NOW + timedelta(minutes=35))],
+    )
+    assert await rec_sched.tick() == 0
+    rec_fail[0] = False
+    rec_clock.advance(seconds=30)  # backoff 60 sn dolmadı -> yeniden denemez
+    assert await rec_sched.tick() == 0
+    rec_clock.advance(seconds=35)  # toplam 65 sn -> deneme 2 başarılı!
+    assert await rec_sched.tick() == 1
+    assert await rec_sched.tick() == 0  # mark_fired çalıştı, tekrarlamaz
+
