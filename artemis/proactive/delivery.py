@@ -87,7 +87,11 @@ class Deliverer:
             )
             targets["panel"] = "ok" if sent else "error"
         elif (routine or suggest or summary_day) and self.routine_panel is not None:
-            sent = self.routine_panel(title, body, routine, suggest, summary_day)
+            # Eski yol leke bayrağı taşıyamaz: dış alanlı öneri bu yoldan lekesiz tura
+            # dönüşmesin diye düşürülür (yalnız başlık/gövde gösterilir).
+            sent = self.routine_panel(
+                title, body, routine, "" if suggest_tainted else suggest, summary_day
+            )
             targets["panel"] = "ok" if sent else "error"
         elif self.panel is not None:
             targets["panel"] = "ok" if self.panel(title, body) else "error"

@@ -286,11 +286,20 @@ async def test_calendar_before_filters_sanitizes_and_deduplicates(tmp_path: Path
         suggest="{title} notlarını hazırla",
     )
     runtime = _make_runtime(tmp_path, items=(trig,))
+    tainted_flags: list[bool] = []
+
+    def panel_ex(
+        title: str, body: str, routine: str, suggest: str, day: str, tainted: bool
+    ) -> bool:
+        tainted_flags.append(tainted)
+        return panel(title, body, routine, suggest, day)
+
     deliverer = Deliverer(
         runtime.settings,
         runtime.audit,
         panel=lambda title, body: panel(title, body, "", ""),
         routine_panel=panel,
+        routine_panel_ex=panel_ex,
         toast=None,
     )
     scheduler = ProactiveScheduler(
@@ -309,6 +318,8 @@ async def test_calendar_before_filters_sanitizes_and_deduplicates(tmp_path: Path
     assert body == "Yaklaşan: Haftalık[31m Sync (8 dk) @ Oda 1"
     assert routine == ""
     assert suggest == "Haftalık[31m Sync notlarını hazırla"
+    # {title} dış alandır: öneri leke bayrağıyla teslim edilir (#39).
+    assert tainted_flags == [True]
 
     # Sonraki taramada veya yeniden başlatmada aynı toplantı tekrar bildirilmez.
     clock.advance(seconds=60)
@@ -1052,3 +1063,27 @@ def test_resume_detector_uses_unbiased_clock_and_detects_sleep_gap() -> None:
     fake_unbiased[0] += 2.0
     assert detector.poll(NOW + timedelta(seconds=630)) is True
 
+
+
+async def test_legacy_routine_panel_drops_tainted_suggest(tmp_path: Path) -> None:
+    """Leke taşıyamayan eski panel yolu dış alanlı öneriyi göstermez (doğrulayıcı notu, #39)."""
+    seen: list[tuple[str, str, str, str, str]] = []
+
+    def legacy(title: str, body: str, routine: str, suggest: str, day: str) -> bool:
+        seen.append((title, body, routine, suggest, day))
+        return True
+
+    runtime = _make_runtime(tmp_path)
+    deliverer = Deliverer(runtime.settings, runtime.audit, routine_panel=legacy, toast=None)
+    common = {
+        "event_id": "e",
+        "scheduled_for": datetime(2026, 11, 26, 9, 0, tzinfo=UTC),
+        "kind": "trigger",
+        "title": "Toplantı",
+        "body": "10 dk kaldı",
+        "private": True,
+        "local_only": True,
+    }
+    await deliverer.deliver(**common, suggest="X için hazırlık", suggest_tainted=True)
+    await deliverer.deliver(**common, suggest="temiz öneri", suggest_tainted=False)
+    assert [item[3] for item in seen] == ["", "temiz öneri"]
