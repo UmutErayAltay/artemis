@@ -8,7 +8,7 @@ araçları paylaşır. Silme ve kapatma gibi riskli adımlar ile dış içerik o
 yan etki ekranda tam argümanlarla onay ister; varsayılan cevap hayırdır.
 
 > **Durum: teknik önizleme.** Çekirdek (güvenlik kapısı, araçlar, ajan döngüsü, UI, ses hattı)
-> testlidir (3.900+ test, Windows ve Ubuntu CI, 89 ADR, 23 eklentide 71 araç). Windows'ta gerçek cihaz kabulü kısmendir; neyin
+> testlidir (3.900+ test, Windows ve Ubuntu CI, ADR ile belgelenmiş tasarım, 23 eklentide 71 araç). Windows'ta gerçek cihaz kabulü kısmendir; neyin
 > doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Windows kurucusu
 > [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasından indirilir ya da kaynaktan
 > derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)). Lisans: [Apache-2.0](LICENSE); kurucudaki üçüncü

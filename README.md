@@ -13,7 +13,7 @@ one **SafetyGate**, and 71 tools across 23 plugins. Risky actions and every side
 external content require explicit on-screen approval with full validated arguments; the default answer is **No**.
 
 > **Status: Technical Preview.** Core logic (safety gate, tools, agent loop, UI, voice pipeline) is backed by
-> 3,900+ automated tests on Windows and Ubuntu CI, strict `mypy` (246 files), 89 ADRs, and a 57-scenario fake safety
+> 3,900+ automated tests on Windows and Ubuntu CI, strict `mypy`, ADR-documented design, and a 57-scenario fake safety
 > benchmark. Live physical-device Windows acceptance is tracked in [docs/RELIABILITY_STATUS.md](docs/RELIABILITY_STATUS.md).
 > Pre-built Windows installers are published on [Releases](https://github.com/UmutErayAltay/artemis/releases)
 > (Apache-2.0 core; bundled GPL-3.0 Piper components noted in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)).
