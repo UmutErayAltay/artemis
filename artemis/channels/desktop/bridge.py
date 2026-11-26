@@ -847,7 +847,7 @@ class DesktopBridge:
             runtime.audit,
             panel=self._proactive_panel,
             routine_panel=self._proactive_routine_panel,
-            routine_panel_ex=self._proactive_routine_panel_ex,
+            routine_panel_ex=self._proactive_routine_panel,
             telegram=self._proactive_telegram,
             profile_getter=lambda: runtime.context.settings.work_profile,
         )
@@ -898,21 +898,8 @@ class DesktopBridge:
         return True
 
     def _proactive_routine_panel(
-        self, title: str, body: str, routine: str, suggest: str, summary_day: str
-    ) -> bool:
-        if self._shutdown:
-            return False
-        self._events.put(Proactive(title, body, routine, suggest, summary_day))
-        return True
-
-    def _proactive_routine_panel_ex(
-        self,
-        title: str,
-        body: str,
-        routine: str,
-        suggest: str,
-        summary_day: str,
-        suggest_tainted: bool,
+        self, title: str, body: str, routine: str, suggest: str, summary_day: str,
+        suggest_tainted: bool = False,
     ) -> bool:
         if self._shutdown:
             return False
@@ -920,6 +907,8 @@ class DesktopBridge:
             Proactive(title, body, routine, suggest, summary_day, suggest_tainted)
         )
         return True
+
+    _proactive_routine_panel_ex = _proactive_routine_panel
 
     def _stop_proactive(self) -> None:
         self._proactive_scheduler = None
@@ -972,15 +961,12 @@ class DesktopBridge:
             return None
         result: RunResult | None = None
         try:
-            kwargs: dict[str, Any] = {}
-            if stream is not None:
-                kwargs["stream"] = stream
-            if audio_wav is not None:
-                kwargs["audio_wav"] = audio_wav
-            if image_png is not None:
-                kwargs["image_png"] = image_png
-            if tainted:
-                kwargs["tainted"] = True
+            kwargs: dict[str, Any] = {
+                k: v for k, v in (
+                    ("stream", stream), ("audio_wav", audio_wav),
+                    ("image_png", image_png), ("tainted", tainted or None),
+                ) if v is not None
+            }
             result = await runtime.runner.run(text, **kwargs)
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id
@@ -1245,26 +1231,7 @@ class DesktopBridge:
         dolayısıyla değişiklik config'e yazılana kadar da geçerlidir. Kabul edilen değerler
         `ComputerUseConfig.mode` ile aynıdır (accept | auto); başka değer reddedilir.
         """
-        if mode not in {"accept", "auto"}:
-            return False
-        loop = self._loop
-        if loop is None or self._runtime is None:
-            return False
-        try:
-            loop.call_soon_threadsafe(self._set_computer_mode_on_worker, mode)
-        except RuntimeError:
-            return False
-        return True
-
-    def _set_computer_mode_on_worker(self, mode: str) -> None:
-        runtime = self._runtime
-        if runtime is None:
-            return
-        # Tek gerçek kaynak araç bağlamıdır: araçlar ayarı oradan okur (kural 10).
-        computer_use = runtime.context.settings.computer_use.model_copy(update={"mode": mode})
-        runtime.context.settings = runtime.context.settings.model_copy(
-            update={"computer_use": computer_use}
-        )
+        return profile_bridge.set_computer_mode(self, mode)
 
     def set_work_profile(self, profile: str) -> bool:
         """Çalışma profilini çalışan runtime'da günceller; Uygula beklemez."""

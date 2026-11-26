@@ -617,27 +617,21 @@ class VoiceController:
             self._active = asyncio.create_task(self._acknowledge_wake(uid=uid, gid=gid))
         else:
             self._barge_cancelled = False
+            capture = self._capture_screen
             image_png: bytes | None = None
             if (
-                audio_wav is not None
-                and self._capture_screen is not None
-                and not self._is_private_profile()
-                and self.config.multimodal_screen_context
-                and self.config.direct_audio_input
+                audio_wav is not None and capture is not None and not self._is_private_profile()
+                and self.config.multimodal_screen_context and self.config.direct_audio_input
             ):
                 # Ekran yakalama GDI/BitBlt içerdiğinden asyncio olay döngüsünü bloklamaz.
                 image_png = await asyncio.to_thread(
-                    maybe_capture_voice_screen,
-                    self.config,
-                    is_private=False,
-                    has_audio=True,
-                    capture_screen=self._capture_screen,
+                    maybe_capture_voice_screen, self.config,
+                    is_private=False, has_audio=True, capture_screen=capture,
                 )
-            self._active = asyncio.create_task(
-                self._run_and_speak(
-                    command, uid=uid, gid=gid, audio_wav=audio_wav, image_png=image_png
-                )
+            coro = self._run_and_speak(
+                command, uid=uid, gid=gid, audio_wav=audio_wav, image_png=image_png
             )
+            self._active = asyncio.create_task(coro)
 
     async def _cloud_command(self, uid: int, segment: AudioSegment, local_command: str) -> str:
         """Komut metnini bulut tanıyıcıdan alır."""
@@ -1243,28 +1237,23 @@ class VoiceController:
         self._active = None
         self._barge_cancelled = False
 
-    def discard_during_approval(self) -> None:
-        """Senkron terminal onayı dönüşünde eski ses kuyruğunu ve segmenti sıfırlar."""
+    def _reset_for_approval(self, *, pause_mic: bool = False) -> None:
         self._invalidate_segments()
-        self.microphone.discard_pending()
+        (self.microphone.pause if pause_mic else self.microphone.discard_pending)()
         self._discard_capture("approval")
         self.segmenter.reset()
         self._live_reset()
+
+    def discard_during_approval(self) -> None:
+        """Senkron terminal onayı dönüşünde eski ses kuyruğunu ve segmenti sıfırlar."""
+        self._reset_for_approval()
 
     def pause_for_approval(self) -> None:
         self._ptt_active = False
-        self._invalidate_segments()
-        self.microphone.pause()
-        self._discard_capture("approval")
-        self.segmenter.reset()
-        self._live_reset()
+        self._reset_for_approval(pause_mic=True)
 
     def resume_after_approval(self) -> None:
-        self._invalidate_segments()
-        self.microphone.discard_pending()
-        self._discard_capture("approval")
-        self.segmenter.reset()
-        self._live_reset()
+        self._reset_for_approval()
         self.microphone.resume()
 
     async def close(self) -> None:

@@ -17,6 +17,7 @@ from PySide6.QtWidgets import QApplication, QLabel, QMessageBox, QSystemTrayIcon
 from artemis.brain.providers import provider_problem
 from artemis.channels.desktop.budget_bar import refresh_budget
 from artemis.channels.desktop.hotkey_manager import validate_hotkeys
+from artemis.channels.desktop.profile_bar import refresh_profile_button
 from artemis.channels.desktop.retranslate import retranslate_widgets
 from artemis.channels.desktop.settings_io import save_choices
 from artemis.config.settings import load_settings
@@ -328,3 +329,29 @@ def finish_exit(window: DesktopWindow) -> None:
     window._allow_close = True
     window.close()
     window._app.quit()
+
+
+def finish_settings_restart(window: DesktopWindow, bridge_cls: type[Any]) -> None:
+    """Ayarlar uygulandıktan sonra köprüyü ve sohbet oturumunu yeniden başlatır."""
+    window._restart_settings = False
+    window._busy = False
+    window._active_request = None
+    window._prompt_tainted = False
+    window._routine_suggest_tainted = False
+    window._turn_steps.clear()
+    window._reset_cards()
+    window.chat.clear()
+    window._append_chat("Sistem", t("Ayarlar uygulandı; yeni sohbet başladı."))
+    window._show_voice_state("off")
+    window.pet.set_busy(False)
+    # Demo kipi yeniden kurulumda da demo fabrikasını korur; gerçek runtime açılmaz.
+    window.bridge = bridge_cls(window._config_path, window._runtime_factory)
+    if not window._demo:
+        window._refresh_welcome()
+        window._reload_hotkeys()
+        with contextlib.suppress(OSError, ValueError, ValidationError, yaml.YAMLError):
+            refresh_profile_button(window, load_settings(window._config_path).work_profile)
+    window.settings_panel.refresh()
+    window.settings_panel.notice.setText(
+        t("Ayarlar uygulandı; seçilen model ve mikrofon kullanılıyor.")
+    )

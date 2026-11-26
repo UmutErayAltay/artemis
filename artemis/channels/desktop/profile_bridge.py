@@ -39,3 +39,28 @@ def _apply_work_profile_on_worker(bridge: DesktopBridge, profile: str) -> None:
         dictation.shutdown()
         bridge._dictation = None
         bridge._dictation_signature = None
+
+
+def set_computer_mode(bridge: DesktopBridge, mode: str) -> bool:
+    """Bilgisayar kullanımı kipini çalışan runtime'da günceller."""
+    if mode not in {"accept", "auto"}:
+        return False
+    loop = bridge._loop
+    if loop is None or bridge._runtime is None:
+        return False
+    try:
+        loop.call_soon_threadsafe(_apply_computer_mode_on_worker, bridge, mode)
+    except RuntimeError:
+        return False
+    return True
+
+
+def _apply_computer_mode_on_worker(bridge: DesktopBridge, mode: str) -> None:
+    runtime = bridge._runtime
+    if runtime is None:
+        return
+    # Tek gerçek kaynak araç bağlamıdır: araçlar ayarı oradan okur (kural 10).
+    computer_use = runtime.context.settings.computer_use.model_copy(update={"mode": mode})
+    runtime.context.settings = runtime.context.settings.model_copy(
+        update={"computer_use": computer_use}
+    )
