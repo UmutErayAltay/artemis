@@ -466,8 +466,10 @@ class SettingsPanel(QWidget):
         self._dirty_rows: set[int] = set()
         self.config_path = config_path
         self._demo = demo
-        self._gpu_mb = stt_catalog.gpu_memory_mb()
-        self._recommended_stt = stt_catalog.recommended(self._gpu_mb)
+        self._gpu_mb: int | None = None  # nvidia-smi arka planda sorulur (V1)
+        self._recommended_stt = stt_catalog.recommended(None)
+        self._stt_installed: dict[str, Path | None] = {}
+        self.gpu_probe: voice_settings_section.GpuProbe | None = None
         self.github: GitHubSync | None = None
         self.stt_download_thread: SttDownload | None = None
         self._github_sync = github_sync
@@ -536,6 +538,7 @@ class SettingsPanel(QWidget):
             self._sync_voice_output_controls()
         else:
             self.refresh()
+            voice_settings_section.start_gpu_probe(self)
         # Açılır listeler en uzun öğeye göre genişlemesin: dar pencerede yatay kaydırma çıkarıyordu.
         for combo in self.findChildren(QComboBox):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -922,6 +925,9 @@ class SettingsPanel(QWidget):
         """Seçili katalog modelinin kullanılabilir yerel yolunu döndürür."""
         return voice_settings_section.stt_model_path(self)
 
+    def _gpu_probe_done(self, gpu_mb: object) -> None:
+        voice_settings_section.gpu_probe_done(self, gpu_mb)
+
     def _download_stt(self, *_args: object) -> None:
         voice_settings_section.download_stt(self)
 
@@ -1242,6 +1248,8 @@ class SettingsPanel(QWidget):
             ("finished", self._stt_download_finished),
         ):
             self.stt_download_thread = None
+        if _shutdown_thread(self.gpu_probe, ("done", self._gpu_probe_done)):
+            self.gpu_probe = None
         if voice_preview._shutdown_thread(
             self.tts_preview_thread,
             ("done", self._voice_preview_done),

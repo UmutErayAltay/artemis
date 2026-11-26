@@ -7,14 +7,14 @@ tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.
 ## Karne 5 güvenlik ve kararlılık turu — 2026-11-24 (dal `feat/vizyon-ozellikler`)
 
 Karne 5 incelemesinde kanıtlanan 12 bulgu ve `main` CI zamanlama kırılganlığı
-([ADR 0083](adr/0083-baglamsal-calisma-profilleri.md)–[0089](adr/0089-bilgisayar-kullaniminda-hibrit-dusunme-katmani.md))
+([ADR 0083](adr/0083-baglamsal-calisma-profilleri.md)–[0089](adr/0089-computer-use-dusunme-katmani.md))
 kalıcı regresyon testleriyle (`tests/test_karne5_regressions.py`) kapatıldı; otomatik
 testler sahte arka uçla geçmiştir, fiziksel Windows kabulü henüz yapılmamıştır.
 
 | Bulgu / Düzeltme | Kodlandı | Otomatik test | Gerçek cihaz |
 |---|---|---|---|
 | `tests/test_f2_integration.py` dar `1.0s` zaman bütçesi flake'i (`5.0s` bütçe) | `04c5065` / `facb942` | geçti (5x Windows CI/yerel) | — |
-| `private` profil Telegram (`should_run`, canlı geçiş, medya/turn, `notify_telegram`), `voice_preview.py` ve `ComputerUse.execute` yakalama öncesi kilidi (`R2-4a`, `R2-4b`, `F2`) | `5871a99` | geçti (`tests/test_karne5_regressions.py`) | bekliyor |
+| `private` profil Telegram (`should_run`, canlı geçiş, medya/turn, `notify_telegram`), `voice_preview.py` ve `ComputerUse.execute` yakalama öncesi kilidi (`R2-4a`, `R2-4b`, `F2`) | `5871a99` | geçti (`tests/test_karne5_regressions.py`) | `R2-4a` kodda düzeltildi (`voice_preview.py`: `private` profilde ön izleme/yakalama kilidi), Windows kabulü bekliyor; diğerleri bekliyor |
 | `SelectionMouseWatcher` & `SelectionActions` boş `exe_path` fail-closed kilidi, `_CalDavRedirectHandler` çapraz-origin reddi, `PIPER_VOICE_CATALOG` SHA-256 + HTTPS redirect kilidi (`F3`, `R2-1`, `F7`) | `5871a99` | geçti (`tests/test_karne5_regressions.py`, `tests/test_voice_model_health.py`) | bekliyor |
 | `SuggestionChainConfig` XOR doğrulaması, `MacroRecorder` basılı LMB koruması, `ComputerSession._loop`/`_verify` `hybrid` TOCTOU senkronu, `claude_cli` elemesi, kısmi SMTP raporu ve `ISCC.exe` imza sırası (`F1`, `F4`, `F5`, `F6`, `R2-5`, `F8`) | `5871a99` / `e75918a` | geçti (`tests/test_karne5_regressions.py`, `tests/test_macro_dialog.py`, `tests/test_computer_tool.py`, `tests/test_release_workflow.py`) | bekliyor |
 
@@ -212,7 +212,22 @@ değişiklikleri) için ilk ekran kontrolleri (`scripts/kabul_masaustu.py`, 2026
 [kabul oturumlarında](KABUL_OTURUMLARI.md) kayıtlıdır; tam insan kabulü için gerçek cihaz testi
 bekleniyor ("Windows kabulü bekliyor").
 
-## Güncel yerel doğrulama — v0.2.3 / Faz 0 (2026-11-22, dal `main`)
+### Windows elle kabul listesi (kodda var, gerçek cihazda doğrulanmadı, #48)
+
+| # | Madde | Kod yeri | Durum |
+|---|---|---|---|
+| 1 | Uykudan uyanma sonrası `QueryUnbiasedInterruptTime` ile uyku boşluğu algısı gerçek davranışı | `artemis/proactive/event_triggers.py` (`ResumeDetector.poll`) | Windows kabulü bekliyor |
+| 2 | Rutin zinciri tetiklenirken ön planda Artemis penceresi varken `active_app` eşleşmesi | `artemis/proactive/event_triggers.py` (`evaluate_chains`) | Windows kabulü bekliyor |
+
+Her iki madde yalnız sahte saat/ön plan getiricisiyle test edildi; geçti denmez.
+
+## Sürüm durumu — v0.2.4 (2026-11-26)
+
+`v0.2.4` 2026-11-26'da CI ile yayımlandı: kurucu `Artemis-Setup-0.2.4.exe` ve `SHA256SUMS.txt`.
+Kurucu imzasızdır; SignPath Foundation başvurusu onaylanana dek imzasız yayımlanır
+([kod imzalama politikası](CODE_SIGNING_POLICY.md)). Windows insan kabulü sürüyor.
+
+## Güncel yerel doğrulama — v0.2.3 / Faz 0 (2026-11-22, dal `main`; geçmiş kayıt)
 
 Windows 11, Python 3.12.9 (`.venv`), `QT_QPA_PLATFORM=offscreen` (gerçek ses/cihaz yan etkisi çalıştırılmadı):
 

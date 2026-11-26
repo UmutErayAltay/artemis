@@ -654,6 +654,31 @@ def test_default_url_fetch_maps_httpx_errors_to_oserror(
             mh._default_url_fetch("https://example.invalid/model.onnx")
 
 
+def test_default_url_fetch_rejects_oversized_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx
+
+    from artemis.channels.voice import model_health as mh
+
+    monkeypatch.setattr(mh, "MAX_DOWNLOAD_BYTES", 10)
+    real_client = httpx.Client
+
+    def make(payload: bytes) -> None:
+        transport = httpx.MockTransport(lambda r: httpx.Response(200, content=payload, request=r))
+        monkeypatch.setattr(
+            mh.httpx,
+            "Client",
+            lambda *a, **k: real_client(
+                *a, transport=transport, **{x: y for x, y in k.items() if x != "transport"}
+            ),
+        )
+
+    make(b"x" * 11)
+    with pytest.raises(OSError, match="boyut sınırını"):
+        mh._default_url_fetch("https://example.invalid/model.onnx")
+    make(b"x" * 10)
+    assert mh._default_url_fetch("https://example.invalid/model.onnx") == b"x" * 10
+
+
 def test_model_op_thread_and_widget_emit_failed_on_httpx_error(
     tmp_path: Path,
 ) -> None:

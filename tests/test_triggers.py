@@ -46,7 +46,8 @@ class Panel:
         self.items: list[tuple[str, str, str, str]] = []
 
     def __call__(
-        self, title: str, body: str, routine: str, suggest: str, day: str = ""
+        self, title: str, body: str, routine: str, suggest: str, day: str = "",
+        _tainted: bool = False,
     ) -> bool:
         self.items.append((title, body, routine, suggest))
         return True
@@ -89,10 +90,9 @@ def make_scheduler(
         runtime.settings,
         runtime.audit,
         panel=lambda title, body: panel(title, body, "", ""),
-        routine_panel=panel,
         # Leke bayrağını taşıyan yol (masaüstü köprüsünün kullandığı); eski yol dış alanlı
         # öneriyi düşürür (#39).
-        routine_panel_ex=lambda t, b, r, s, d, _tainted: panel(t, b, r, s, d),
+        routine_panel=lambda t, b, r, s, d, _tainted: panel(t, b, r, s, d),
         toast=None,
         telegram=telegram,
     )

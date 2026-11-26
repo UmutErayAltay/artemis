@@ -85,10 +85,12 @@ def window(tmp_path: Path) -> Any:
 def test_toggle_writes_config_first_then_applies_runtime(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import artemis.channels.desktop.app as app_module
+    import artemis.channels.desktop.window_status as window_status_module
 
     order: list[str] = []
-    monkeypatch.setattr(app_module, "save_computer_mode", lambda path, mode: order.append("save"))
+    monkeypatch.setattr(
+        window_status_module, "save_computer_mode", lambda path, mode: order.append("save")
+    )
     window.bridge = SimpleNamespace(
         set_computer_mode=lambda mode: order.append("runtime") or True
     )
@@ -103,12 +105,12 @@ def test_toggle_writes_config_first_then_applies_runtime(
 def test_failed_save_leaves_runtime_untouched_and_restores_both_controls(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import artemis.channels.desktop.app as app_module
+    import artemis.channels.desktop.window_status as window_status_module
 
     def broken(path: Path, mode: str) -> None:
         raise OSError("disk dolu")
 
-    monkeypatch.setattr(app_module, "save_computer_mode", broken)
+    monkeypatch.setattr(window_status_module, "save_computer_mode", broken)
 
     window.auto_button.setChecked(True)
 
@@ -121,9 +123,9 @@ def test_failed_save_leaves_runtime_untouched_and_restores_both_controls(
 def test_settings_checkbox_keeps_header_button_in_sync(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import artemis.channels.desktop.app as app_module
+    import artemis.channels.desktop.window_status as window_status_module
 
-    monkeypatch.setattr(app_module, "save_computer_mode", lambda path, mode: None)
+    monkeypatch.setattr(window_status_module, "save_computer_mode", lambda path, mode: None)
 
     window.settings_panel.computer_auto.setChecked(True)  # ayar kutusundan
 
@@ -135,9 +137,12 @@ def test_auto_mode_warning_decline_keeps_mode_off(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     import artemis.channels.desktop.app as app_module
+    import artemis.channels.desktop.window_status as window_status_module
 
     saved: list[str] = []
-    monkeypatch.setattr(app_module, "save_computer_mode", lambda path, mode: saved.append(mode))
+    monkeypatch.setattr(
+        window_status_module, "save_computer_mode", lambda path, mode: saved.append(mode)
+    )
     monkeypatch.setattr(app_module.DesktopWindow, "_confirm_auto_mode", lambda self: False)
     window.bridge = SimpleNamespace(set_computer_mode=lambda mode: saved.append("runtime") or True)
 
@@ -152,13 +157,13 @@ def test_auto_mode_warning_decline_keeps_mode_off(
 def test_turning_off_auto_mode_sets_runtime_accept_even_if_save_fails(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import artemis.channels.desktop.app as app_module
+    import artemis.channels.desktop.window_status as window_status_module
 
     def broken(path: Path, mode: str) -> None:
         raise OSError("disk dolu")
 
     window._sync_auto_controls(True)
-    monkeypatch.setattr(app_module, "save_computer_mode", broken)
+    monkeypatch.setattr(window_status_module, "save_computer_mode", broken)
 
     window.auto_button.setChecked(False)
 
@@ -171,10 +176,12 @@ def test_turning_off_auto_mode_sets_runtime_accept_even_if_save_fails(
 def test_runtime_failure_keeps_ui_consistent_and_reports_error(
     window: Any, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import artemis.channels.desktop.app as app_module
+    import artemis.channels.desktop.window_status as window_status_module
 
     saved: list[str] = []
-    monkeypatch.setattr(app_module, "save_computer_mode", lambda path, mode: saved.append(mode))
+    monkeypatch.setattr(
+        window_status_module, "save_computer_mode", lambda path, mode: saved.append(mode)
+    )
     window.bridge = SimpleNamespace(set_computer_mode=lambda mode: False)
 
     window.auto_button.setChecked(True)

@@ -206,8 +206,8 @@ class ResumeDetector:
             resumed = True
         if self._resume_probe is not None and self._resume_probe():
             resumed = True
-        # TODO(windows-verify #48): Windows uykusu sonrası QueryUnbiasedInterruptTime
-        # davranışını gerçek cihazda doğrula.
+        # Windows uykusu sonrası QueryUnbiasedInterruptTime davranışı gerçek cihazda henüz
+        # doğrulanmadı; bekleyen madde docs/RELIABILITY_STATUS.md "Windows elle kabul listesi".
         current_mono = self._mono()
         if self._enable_gap_check and self._last_wall is not None and self._last_mono is not None:
             wall_delta = (now - self._last_wall).total_seconds()
@@ -443,8 +443,9 @@ class EventTriggerTracker:
             return []
         if event_kind == "routine_completed" and not routine_success:
             return []
-        # TODO(windows-verify #48): rutin zinciri tetiklendiğinde ön planda Artemis penceresi
-        # olabileceğinden active_app eşleşmesini Windows'ta doğrula.
+        # Rutin zinciri tetiklendiğinde ön planda Artemis penceresi olabilir; active_app
+        # eşleşmesi Windows'ta henüz doğrulanmadı (docs/RELIABILITY_STATUS.md "Windows elle
+        # kabul listesi").
         active_app = self._active_app_getter() if self._tick_active_app is _UNSET else (
             self._tick_active_app if isinstance(self._tick_active_app, str) else None
         )

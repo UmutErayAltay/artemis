@@ -1,6 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 """Artemis Windows onedir PyInstaller reçetesi (ADR 0075)."""
 
+import tomllib
 from pathlib import Path
 
 from PyInstaller.utils.hooks import (
@@ -12,6 +13,44 @@ from PyInstaller.utils.hooks import (
 
 # SPECPATH `packaging/` klasörünü gösterir; depo kökü bir üst dizindir.
 ROOT = Path(SPECPATH).resolve().parent
+
+# Sürüm kaynağı tek yerdedir: pyproject.toml. Exe sürüm kaynağı (Dosya özellikleri) buradan üretilir.
+APP_VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+
+
+def _version_info(original_name):
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo,
+        StringFileInfo,
+        StringStruct,
+        StringTable,
+        VarFileInfo,
+        VarStruct,
+        VSVersionInfo,
+    )
+
+    numbers = tuple((int(p) for p in APP_VERSION.split(".")[:3])) + (0,)
+    text = APP_VERSION
+    return VSVersionInfo(
+        ffi=FixedFileInfo(filevers=numbers, prodvers=numbers),
+        kids=[
+            StringFileInfo(
+                [
+                    StringTable(
+                        "040904B0",
+                        [
+                            StringStruct("ProductName", "Artemis"),
+                            StringStruct("FileDescription", "Artemis"),
+                            StringStruct("FileVersion", text),
+                            StringStruct("ProductVersion", text),
+                            StringStruct("OriginalFilename", original_name),
+                        ],
+                    )
+                ]
+            ),
+            VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+        ],
+    )
 
 # Paket içi varlıklar (ikon, SVG'ler, gömülü ses modelleri) ve örnek ayar dosyası.
 datas = collect_data_files("artemis") + [
@@ -110,6 +149,7 @@ exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(ROOT / "artemis" / "channels" / "desktop" / "artemis.ico"),
+    version=_version_info("Artemis.exe"),
 )
 
 # Pencereli exe'de sys.stdout yok; stdio ile JSON konuşan alt süreçler (masaüstü işçisi, MCP,
@@ -130,6 +170,7 @@ cli_exe = EXE(
     codesign_identity=None,
     entitlements_file=None,
     icon=str(ROOT / "artemis" / "channels" / "desktop" / "artemis.ico"),
+    version=_version_info("artemis-cli.exe"),
 )
 
 coll = COLLECT(

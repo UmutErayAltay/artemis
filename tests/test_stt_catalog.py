@@ -68,3 +68,22 @@ def test_choice_for_path_recognizes_hugging_face_cache_folders() -> None:
     assert stt_catalog.choice_for_path(turbo) == "large-v3-turbo"
     assert stt_catalog.choice_for_path(small) == "small"
     assert stt_catalog.choice_for_path(None) is None
+
+
+def test_download_maps_hub_entry_not_found_to_oserror(monkeypatch: pytest.MonkeyPatch) -> None:
+    EntryNotFoundError = pytest.importorskip("huggingface_hub.errors").EntryNotFoundError
+
+    def boom(_name: str) -> str:
+        raise EntryNotFoundError("model.bin yok")
+
+    monkeypatch.setattr(
+        stt_catalog.importlib,
+        "import_module",
+        lambda mod: (
+            type("U", (), {"download_model": staticmethod(boom)})
+            if mod == "faster_whisper.utils"
+            else __import__(mod, fromlist=["x"])
+        ),
+    )
+    with pytest.raises(OSError, match="EntryNotFoundError"):
+        stt_catalog.download("small")

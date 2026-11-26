@@ -112,7 +112,8 @@ def installed_path(name: str) -> Path | None:
         return None
     except ImportError:
         return None
-    except Exception:
+    except (OSError, ValueError):
+        # Önbellekte yok (LocalEntryNotFoundError bir OSError'dır) ya da bozuk: kurulu sayılmaz.
         return None
 
 
@@ -121,7 +122,13 @@ def download(name: str) -> Path:
     if name not in _CATALOG_NAMES:
         raise ValueError(f"Katalogda olmayan Whisper modeli: {name}")
     utils = importlib.import_module("faster_whisper.utils")
-    return Path(utils.download_model(name))
+    hub_errors = importlib.import_module("huggingface_hub.errors")
+    try:
+        return Path(utils.download_model(name))
+    except hub_errors.EntryNotFoundError as error:
+        # Bu tür OSError değildir; çağıranlar (model yöneticisi iş parçacığı) yalnız OSError
+        # ailesini bekler, yoksa iş parçacığı sessizce ölür ve arayüz "İndiriliyor…" kalır.
+        raise OSError(f"Whisper modeli indirilemedi: {type(error).__name__}") from error
 
 
 def choice_for_path(path: Path | None) -> str | None:

@@ -277,6 +277,23 @@ def test_capture_active_screen_png_in_memory_zero_disk_writes(
     assert capture_active_screen_png(max_width=4, backend=failing) is None
 
 
+def test_capture_active_screen_png_skips_blocked_foreground_process() -> None:
+    class _FgBackend(_FakeCaptureBackend):
+        exe = "C:/Program Files/KeePass/KeePass.exe"
+
+        def foreground_window(self) -> tuple[int, tuple[int, int, int, int]]:
+            return 7, (0, 0, 8, 4)
+
+        def window_process(self, hwnd: int) -> tuple[str, int]:
+            return self.exe, 4242
+
+    backend = _FgBackend(width=8, height=4)
+    assert capture_active_screen_png(max_width=4, backend=backend) is None
+    assert backend.calls == []
+    backend.exe = "C:/Windows/notepad.exe"
+    assert capture_active_screen_png(max_width=4, backend=backend) is not None
+
+
 async def test_voice_controller_captures_screen_only_when_gated_and_legacy_safe() -> None:
     calls: list[tuple[str, bytes | None, bytes | None]] = []
     captures = 0

@@ -84,7 +84,7 @@ from artemis.channels.desktop.profile_bar import switch_work_profile
 from artemis.channels.desktop.projects_panel import ProjectsPanel
 from artemis.channels.desktop.selection_mouse import SelectionCandidate, SelectionMouseWatcher
 from artemis.channels.desktop.selection_popup import SelectionBadge, SelectionPopup
-from artemis.channels.desktop.settings_io import _same, save_computer_mode
+from artemis.channels.desktop.settings_io import _same
 from artemis.channels.desktop.settings_panel import SettingsPanel
 from artemis.channels.desktop.telegram_service import TelegramService, should_run
 from artemis.channels.desktop.widgets import PetFace
@@ -127,11 +127,20 @@ from artemis.channels.desktop.window_restart import (
     stay_in_settings,
     telegram_changed,
 )
+from artemis.channels.desktop.window_status import (
+    auto_mode_box,
+    composer_voice_clicked,
+    confirm_auto_mode,
+    describe_voice,
+    set_status,
+    show_auto_state,
+    show_continuous,
+    show_voice_state,
+    sync_auto_controls,
+    toggle_auto_mode,
+)
 from artemis.channels.desktop.window_theme import (
-    STATUS_TONES,
     apply_theme,
-    dot_style,
-    refresh_tones,
     theme_placeholders,
 )
 from artemis.channels.runtime import Runtime, create_runtime
@@ -153,6 +162,7 @@ _COMPACT_NAV_WINDOW = 900  # bunun altında yan gezinme yalnız ikon (UX-01)
 
 
 class DesktopWindow(QMainWindow):
+    _status_full: str  # set_status (window_status.py) yazar
     # Kısayol kendi iş parçacığından yayar; Qt bunu ana iş parçacığına sıraya alır.
     _hotkey_pressed = Signal()
     _dictation_pressed = Signal()
@@ -982,147 +992,43 @@ class DesktopWindow(QMainWindow):
             self.voice_button.setChecked(False)
 
     def _sync_auto_controls(self, on: bool) -> None:
-        # İki denetim de sinyalsiz eşitlenir: düğme ve ayar kutusu aynı kipi göstermeli.
-        for control in (self.settings_panel.computer_auto, self.auto_button):
-            control.blockSignals(True)
-            control.setChecked(on)
-            control.blockSignals(False)
-        self._show_auto_state(on)
-
-    def _on_profile_action(self, action: QAction) -> None:
-        profile = action.data()
-        if isinstance(profile, str):
-            switch_work_profile(self, profile)
+        sync_auto_controls(self, on)
 
     def _toggle_auto_mode(self, checked: bool) -> None:
-        """Üst çubuktaki düğme: kip anında değişir ve config'e yazılır."""
-        mode = "auto" if checked else "accept"
-        if checked and not self._demo and not self._confirm_auto_mode():
-            self._sync_auto_controls(False)
-            return
-        shown = checked
-        if not self._demo:
-            saved, applied = True, False
-            try:
-                save_computer_mode(self._config_path, mode)
-            except (OSError, ValueError):
-                saved = False
-            # Kapatma güvenli kip (accept) içindir; disk yazılmasa bile runtime kapanır.
-            if saved or not checked:
-                applied = self.bridge.set_computer_mode(mode)
-            if checked and (not saved or not applied):
-                if saved and not applied:
-                    # Uygulanamayan auto diskte kalmasın; geri yazılamazsa durum yine hata gösterir.
-                    with contextlib.suppress(OSError, ValueError):
-                        save_computer_mode(self._config_path, "accept")
-                msg = t("Kip kaydedilemedi") if not saved else t("Otomatik onay uygulanamadı")
-                self._set_status(msg, "error")
-                shown = False
-            elif not checked:
-                if not saved or not applied:
-                    msg = (
-                        t("Kip kapatıldı ama kaydedilemedi") if applied
-                        else t("Kip çalışma zamanına uygulanamadı")
-                    )
-                    self._set_status(msg, "error")
-                shown = not applied
-            if saved and applied:
-                self._append_chat(
-                    "Sistem", t("Bilgisayar kullanımı kipi: {mode}.").format(mode=mode)
-                )
-        self._sync_auto_controls(shown)
+        toggle_auto_mode(self, checked)
 
     def _auto_mode_box(self) -> tuple[QMessageBox, QPushButton]:
-        """Uyarı kutusu ve "aç" düğmesi; ayrı kurulur ki README görüntüsü bloklamadan alınsın."""
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Warning)
-        box.setWindowTitle(t("Otomatik onayı aç?"))
-        box.setText(t(
-            "Otomatik onayda Artemis ekranı okur, tıklar ve yazar; hassas adımları da "
-            "sana sormadan yapar. Esc her an durdurur."
-        ))
-        box.setInformativeText(t(
-            "Yanlış anlaşılan bir komut ya da ekrandaki zararlı bir metin, istemediğin bir "
-            "işlemi tetikleyebilir; web okuduktan sonra bağlantılar da sorulmadan açılır. "
-            "Terminal, Artemis ve parola yöneticisi yine engelli."
-        ))
-        yes = box.addButton(t("Riski anlıyorum, aç"), QMessageBox.ButtonRole.AcceptRole)
-        no = box.addButton(t("Vazgeç"), QMessageBox.ButtonRole.RejectRole)
-        box.setDefaultButton(no)
-        box.setEscapeButton(no)
-        return box, yes
+        return auto_mode_box(self)
 
     def _confirm_auto_mode(self) -> bool:
-        """Otomatik kip bilinçli açılır: varsayılan cevap hayır (kural 2'nin ruhu)."""
-        box, yes = self._auto_mode_box()
-        box.exec()
-        return box.clickedButton() is yes
+        return confirm_auto_mode(self)
 
     def _show_auto_state(self, on: bool) -> None:
-        """Simge anahtarı metin taşımaz; durum erişilebilir açıklamada ve ipucunda okunur."""
-        self.auto_button.setAccessibleDescription(
-            t("Oto onay açık") if on else t("Oto onay kapalı")
-        )
-        mode = t("otomatik") if on else t("her işlemde sor")
-        self.auto_button.setToolTip(t(
-            "Onay: {mode}. Oto onay açıkken bilgisayar kullanımı adımları sormadan çalışır; "
-            "Esc yine durdurur. Değişiklik hemen geçerli, Uygula gerekmez."
-        ).format(mode=mode))
+        show_auto_state(self, on)
+
+    def _show_continuous(self, on: bool) -> None:
+        show_continuous(self, on)
+
+    def _set_status(self, text: str, tone: str) -> None:
+        set_status(self, text, tone)
+
+    def _show_voice_state(self, state: str) -> None:
+        show_voice_state(self, state)
+
+    def _describe_voice(self, text: str, on: bool) -> None:
+        describe_voice(self, text, on)
+
+    def _composer_voice_clicked(self) -> None:
+        composer_voice_clicked(self)
 
     def _live_continuous(self, checked: bool) -> None:
         # Kayıt Uygula ile olur; ses açıksa kip hemen uygulanır.
         self.bridge.set_continuous(checked)
 
-    def _show_continuous(self, on: bool) -> None:
-        self._continuous = on
-        box = self.settings_panel.continuous_mode
-        box.blockSignals(True)
-        box.setChecked(on)
-        box.blockSignals(False)
-        self._show_voice_state(self._voice_state)
-
-    def _set_status(self, text: str, tone: str) -> None:
-        # Durum düz metindir; ton yalnız yanındaki noktanın rengini belirler.
-        self._status_full = text
-        self.status_label.setText(text)
-        self._status_tone = tone
-        self.status_dot.setStyleSheet(dot_style(self._token(STATUS_TONES[tone])))
-        self.status_pill.adjustSize()
-        fit_topbar(self)
-
-    def _show_voice_state(self, state: str) -> None:
-        self._voice_state = state
-        if state == "off":
-            self._continuous = False
-        text = t(_VOICE_LABELS.get(state, _VOICE_LABELS["off"]))
-        if self._continuous:
-            text += " · " + t("Kesintisiz")
-        self.voice_state.setText(text)
-        self.overlay.voice_state.setText(text)
-        on = state in {"preparing", "listening", "awaiting_command", "thinking", "speaking"}
-        self._describe_voice(text, on)
-        refresh_tones(self)
-        self.pet.set_voice(state)
-        if state == "off":
-            self.settings_panel.input_level.setValue(0)
-
-    def _describe_voice(self, text: str, on: bool) -> None:
-        """Üst çubuk ve yazma alanındaki ses anahtarı aynı durumu ve açıklamayı taşır."""
-        if self._demo:
-            tip = t("Demo modunda ses yok")
-        elif on:
-            tip = t("{text} · kapatmak için tıkla").format(text=text)
-        else:
-            tip = t("{text} · açmak için tıkla; mikrofonu yalnız sen açarsın").format(text=text)
-        for button in (self.voice_button, self.composer_voice):
-            button.setChecked(on)
-            button.setAccessibleDescription(text)
-            button.setToolTip(tip)
-
-    def _composer_voice_clicked(self) -> None:
-        # Yazma alanındaki simge üst çubuktakiyle aynı işleyiciyi çalıştırır.
-        self.voice_button.click()
-        self.composer_voice.setChecked(self.voice_button.isChecked())
+    def _on_profile_action(self, action: QAction) -> None:
+        profile = action.data()
+        if isinstance(profile, str):
+            switch_work_profile(self, profile)
 
     def _set_controls(self) -> None:
         enabled = self._worker_ready and not self._busy and not self._exiting

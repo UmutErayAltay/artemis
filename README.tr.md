@@ -8,7 +8,7 @@ araçları paylaşır. Silme ve kapatma gibi riskli adımlar ile dış içerik o
 yan etki ekranda tam argümanlarla onay ister; varsayılan cevap hayırdır.
 
 > **Durum: teknik önizleme.** Çekirdek (güvenlik kapısı, araçlar, ajan döngüsü, UI, ses hattı)
-> testlidir (3.900+ test, Windows ve Ubuntu CI, 89 ADR, 23 eklentide 71 araç). Windows'ta gerçek cihaz kabulü kısmendir; neyin
+> testlidir (3.900+ test, Windows ve Ubuntu CI, ADR ile belgelenmiş tasarım, 23 eklentide 71 araç). Windows'ta gerçek cihaz kabulü kısmendir; neyin
 > doğrulandığı [Güvenilirlik durumu](docs/RELIABILITY_STATUS.md) tablosundadır. Windows kurucusu
 > [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasından indirilir ya da kaynaktan
 > derlenir ([Windows paketi](#windows-paketi-ve-ilk-açılış)). Lisans: [Apache-2.0](LICENSE); kurucudaki üçüncü
@@ -303,8 +303,7 @@ Son değişiklik ve doğrulamalar [konuşma raporunda](docs/SPEECH_ACCURACY_REPO
 ## Windows paketi ve ilk açılış
 
 Hazır kurucu [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasındadır
-(`Artemis-Setup-<sürüm>.exe`; kurulumsuz denemek için `Artemis-<sürüm>-windows.zip`, yani
-`dist\Artemis` klasörünün sıkıştırılmış hâli). Kendin
+(`Artemis-Setup-<sürüm>.exe` ve sağlama toplamı için `SHA256SUMS.txt`). Kendin
 derlemek için (PyInstaller + Inno Setup, [ADR 0075](docs/adr/0075-urunlestirme-plani.md),
 ayrıntı [docs/PACKAGING.md](docs/PACKAGING.md)):
 
@@ -315,7 +314,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 
 Kurucu yönetici izni istemez (`%LOCALAPPDATA%\Programs\Artemis`). Ayarlar ve hafıza kullanıcı
 başına `%APPDATA%\Artemis` altında durur; ilk açılışta örnek ayar kopyalanır, kaldırma kullanıcı
-verisine dokunmaz. Kurucu henüz imzasız olduğu için Windows SmartScreen uyarısı görülebilir.
+verisine dokunmaz. Kurucu henüz imzasız olduğu için Windows SmartScreen uyarısı görülebilir
+(SignPath başvurusu beklemede).
+
+[Kod imzalama politikası](docs/CODE_SIGNING_POLICY.md) · [Gizlilik politikası](docs/PRIVACY.md)
 
 İlk açılışta **"Artemis'i bir beyne bağla"** sihirbazı dört kart sunar: OpenRouter ile
 anahtar görmeden giriş (OAuth PKCE; kota ve ücret kullanıcının kendi hesabında), Google hesabıyla

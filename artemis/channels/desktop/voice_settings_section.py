@@ -35,11 +35,48 @@ class SttDownload(QThread):
     def run(self) -> None:
         try:
             path = stt_catalog.download(self.name)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - iş parçacığı sınırı: yutulmaz, panele bildirilir
             # Hata iletisi yol veya belirteç taşıyabilir; yalnız sınıf adı gösterilir.
             self.failed.emit(type(error).__name__)
         else:
             self.done.emit(path)
+
+
+class GpuProbe(QThread):
+    """nvidia-smi (en çok 5 sn) GUI iş parçacığını bekletmesin diye ayrı çalışır."""
+
+    done = Signal(object)
+
+    def run(self) -> None:
+        self.done.emit(stt_catalog.gpu_memory_mb())
+
+
+def start_gpu_probe(panel: SettingsPanel) -> None:
+    """Panel varsayılan öneriyle açılır; GPU belleği gelince öneri güncellenir."""
+    probe = GpuProbe(panel)
+    probe.done.connect(panel._gpu_probe_done)
+    probe.finished.connect(probe.deleteLater)
+    panel.gpu_probe = probe
+    probe.start()
+
+
+def gpu_probe_done(panel: SettingsPanel, gpu_mb: object) -> None:
+    panel.gpu_probe = None
+    panel._gpu_mb = gpu_mb if isinstance(gpu_mb, int) else None
+    recommended = stt_catalog.recommended(panel._gpu_mb)
+    if recommended == panel._recommended_stt:
+        return
+    panel._recommended_stt = recommended
+    selected = panel.stt_combo.currentData()
+    populate_stt_choices(panel, selected if isinstance(selected, str) else None)
+
+
+def _installed(panel: SettingsPanel, name: str) -> Path | None:
+    """Kurulu model yolunu yenileme başına bir kez çözer (arayüz iş parçacığında dosya araması)."""
+    cache = panel._stt_installed
+    if name not in cache:
+        cache[name] = stt_catalog.installed_path(name)
+    return cache[name]
 
 
 def update_cloud_hint(panel: SettingsPanel) -> None:
@@ -233,6 +270,7 @@ def stt_size_text(choice: stt_catalog.WhisperChoice) -> str:
 
 
 def populate_stt_choices(panel: SettingsPanel, selected_name: str | None) -> None:
+    panel._stt_installed = {}  # her yenilemede önbellek tazelenir
     was_blocked = panel.stt_combo.blockSignals(True)
     try:
         panel.stt_combo.clear()
@@ -242,7 +280,7 @@ def populate_stt_choices(panel: SettingsPanel, selected_name: str | None) -> Non
             text = f"{t(choice.label)} · {stt_size_text(choice)}"
             if choice.name == panel._recommended_stt:
                 text += t(" · önerilen")
-            if stt_catalog.installed_path(choice.name) is not None:
+            if _installed(panel, choice.name) is not None:
                 text += t(" · kurulu")
             panel.stt_combo.addItem(text, choice.name)
             index = panel.stt_combo.count() - 1
@@ -291,7 +329,7 @@ def update_stt_download_button(panel: SettingsPanel) -> None:
         not panel._demo
         and choice is not None
         and not running
-        and stt_catalog.installed_path(choice.name) is None
+        and _installed(panel, choice.name) is None
     )
 
 
@@ -300,7 +338,7 @@ def stt_model_path(panel: SettingsPanel) -> Path | None:
     choice = selected_stt_choice(panel)
     if choice is None:
         return None
-    return stt_catalog.installed_path(choice.name)
+    return _installed(panel, choice.name)
 
 
 def download_stt(panel: SettingsPanel) -> None:
@@ -309,7 +347,7 @@ def download_stt(panel: SettingsPanel) -> None:
     choice = selected_stt_choice(panel)
     if choice is None:
         return
-    if stt_catalog.installed_path(choice.name) is not None:
+    if _installed(panel, choice.name) is not None:
         stt_selection_changed(panel)
         return
 

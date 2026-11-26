@@ -54,6 +54,16 @@ def isolated_qsettings(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def no_real_gpu_probe(monkeypatch):
+    # Ayar paneli açılışı gerçek nvidia-smi çalıştırmaz (kural 8); GpuProbe testte doğrudan denenir.
+    try:
+        from artemis.channels.desktop import voice_settings_section
+    except ImportError:
+        return
+    monkeypatch.setattr(voice_settings_section, "start_gpu_probe", lambda panel: None)
+
+
+@pytest.fixture(autouse=True)
 def no_real_codex_lookup(monkeypatch):
     # code_agent_status artık yerleşik codex'i arar (PowerShell'e kadar gidebilir); testler gerçek
     # makinede Appx sorgusu çalıştırmaz ve süreç geneli önbelleği kirletmez (kural 8).
@@ -133,3 +143,37 @@ def _no_modal_unsaved_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     except ImportError:
         return
     monkeypatch.setattr(window_restart, "_ask_unsaved", lambda _window: "save")
+
+
+@pytest.fixture(autouse=True)
+def close_store_ownerships(monkeypatch):
+    # Bekleyen temizlik nedeniyle shutdown'ın bilerek açık bıraktığı iş deposu kilidi
+    # (code_agent.lock) test bitince kapanır: sızan dosya tutacağı ResourceWarning üretir ve
+    # Windows'ta geçici klasör silinirken PermissionError verir.
+    from artemis.tools import code_agent_jobs
+
+    opened: list[code_agent_jobs.StoreOwnership] = []
+    original = code_agent_jobs.StoreOwnership
+
+    def tracking(path):
+        ownership = original(path)
+        opened.append(ownership)
+        return ownership
+
+    monkeypatch.setattr(code_agent_jobs, "StoreOwnership", tracking)
+    yield
+    for ownership in opened:
+        ownership.close()
+
+
+@pytest.fixture(autouse=True)
+def no_real_toast(request, monkeypatch):
+    # Testler gerçek makineye dokunmaz: varsayılan `show_toast` (gerçek DesktopBridge,
+    # proaktif teslim) PowerShell bildirimi açmasın. Yalnız `-m disruptive` testi gerçeğini ister.
+    if request.node.get_closest_marker("disruptive") is not None:
+        return
+    from artemis.tools import toast
+
+    defaults = toast.show_toast.__kwdefaults__
+    assert defaults is not None
+    monkeypatch.setitem(defaults, "platform", "test")

@@ -1116,12 +1116,12 @@ def test_voice_abandoned_close_error_still_clears_voice_active(tmp_path):
 
 
 def test_remember_site_oserror_does_not_break_approval(tmp_path, monkeypatch):
-    from artemis.channels.desktop import bridge as bridge_module
+    from artemis.channels.desktop import bridge_events as bridge_events_module
 
     def fail_remember(*_args: Any, **_kwargs: Any) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(bridge_module, "remember_site", fail_remember)
+    monkeypatch.setattr(bridge_events_module, "remember_site", fail_remember)
     bridge = _fixture(tmp_path, [])
     approved_result: list[bool] = []
     thread: threading.Thread | None = None
@@ -1275,7 +1275,7 @@ def test_submit_tainted_requires_approval_for_side_effect_without_external_read(
         assert (tmp_path / "clean.txt").read_text(encoding="utf-8") == "yazıldı"
 
         # Genişletilmiş panel geri çağrısı suggest_tainted bayrağını Proactive olayına taşır.
-        assert bridge._proactive_routine_panel_ex(
+        assert bridge._proactive_routine_panel(
             "Tetikleyici · t", "Gövde", "", "Özetle", "", True
         )
         proactive = _wait_for(bridge, Proactive, timeout=2.0)
