@@ -230,6 +230,7 @@ def test_stt_paths_never_scan_on_gui_thread(
 def test_shared_budget_bounds_total_wait_for_stuck_threads() -> None:
     import time
 
+    pytest.importorskip("PySide6")
     from artemis.channels.desktop import thread_shutdown as ts
 
     class Stuck:
