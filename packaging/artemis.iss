@@ -1,7 +1,7 @@
 ; Artemis Windows kurucu betiği (Inno Setup 6).
 ; Derleme betiği /DMyAppVersion=... parametresiyle sürümü geçer.
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.4"
+  #define MyAppVersion "0.2.5"
 #endif
 
 [Setup]
