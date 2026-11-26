@@ -478,17 +478,134 @@ def test_windows_macro_observer_and_focused_control_info_with_mocked_runner(
 
     # WindowsMacroObserver sahte ön plan + imleç ile çalışır, engelli süreçte UIA okumaz.
     import artemis.proactive.macro_recorder as mr
+    from artemis.proactive.macro_recorder import ClickSample
+
+    class _FakeTracker:
+        def __init__(self) -> None:
+            self.started = False
+            self.stopped = False
+            self.samples: list[ClickSample] = []
+
+        def start(self) -> None:
+            self.started = True
+
+        def stop(self) -> None:
+            self.stopped = True
+
+        def drain_clicks(self) -> list[ClickSample]:
+            items = list(self.samples)
+            self.samples.clear()
+            return items
 
     uia_calls: list[int] = []
-    monkeypatch.setattr(mr, "foreground_process", lambda: (r"C:\Windows\cmd.exe", 500))
+    fg_state = {"hwnd": 100, "exe": r"C:\Windows\cmd.exe", "pid": 500}
+    monkeypatch.setattr(mr, "foreground_window", lambda: (fg_state["hwnd"], (0, 0, 800, 600)))
+    monkeypatch.setattr(mr, "window_process", lambda _hwnd: (fg_state["exe"], fg_state["pid"]))
     monkeypatch.setattr(mr, "_cursor_and_lbutton", lambda: ((15, 25), True))
     monkeypatch.setattr(mr, "ui_elements", lambda hwnd, **kw: uia_calls.append(hwnd) or [])
 
-    obs = WindowsMacroObserver(own_pid=9999, runner=fake_runner)
+    obs = WindowsMacroObserver(own_pid=9999, runner=fake_runner, click_tracker=_FakeTracker())
     blocked_snap = obs.snapshot()
     assert blocked_snap.exe_path.endswith("cmd.exe")
     assert blocked_snap.focused is None
     assert uia_calls == []
+
+
+def test_short_click_edge_tracker_via_services_and_hwnd_toctou_binding(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import artemis.proactive.macro_recorder as mr
+    from artemis.proactive.macro_recorder import ClickSample
+
+    monkeypatch.setattr(sys, "platform", "win32")
+
+    class _FakeClickTracker:
+        def __init__(self) -> None:
+            self.started = 0
+            self.stopped = 0
+            self.samples: list[ClickSample] = []
+
+        def start(self) -> None:
+            self.started += 1
+
+        def stop(self) -> None:
+            self.stopped += 1
+
+        def drain_clicks(self) -> list[ClickSample]:
+            items = list(self.samples)
+            self.samples.clear()
+            return items
+
+    tracker = _FakeClickTracker()
+    fg_sequence = [101, 101]
+    monkeypatch.setattr(
+        mr,
+        "foreground_window",
+        lambda: (fg_sequence.pop(0) if fg_sequence else 101, (0, 0, 1000, 800)),
+    )
+    monkeypatch.setattr(
+        mr, "window_process", lambda hwnd: (r"C:\Apps\notepad.exe", 701) if hwnd == 101 else ("", 0)
+    )
+    # Örnekleme anında sol düğme bırakılmış (left_down=False) ama tracker kısa tık yakalamış.
+    monkeypatch.setattr(mr, "_cursor_and_lbutton", lambda: ((0, 0), False))
+    monkeypatch.setattr(
+        mr,
+        "ui_elements",
+        lambda hwnd, **kw: [
+            UiElement(
+                id=1,
+                kind="Button",
+                name="Hızlı Tık",
+                rect=(110, 210, 40, 25),
+                interactive=True,
+                focused=False,
+            )
+        ],
+    )
+
+    def matching_runner(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps({"k": "Button", "n": "Hızlı Tık", "a": "", "p": False, "pid": 701, "hwnd": 101}),
+            stderr="",
+        )
+
+    rec = MacroRecorder(
+        own_pid=9999,
+        services={"macro_click_tracker": tracker},
+    )
+    assert isinstance(rec._backend, WindowsMacroObserver)
+    rec._backend._runner = matching_runner
+    rec.start()
+    assert tracker.started == 1
+    tracker.samples.append(ClickSample(x=120, y=220, hwnd=101))
+    ev = rec.poll_once()
+    assert ev is not None
+    assert ev.kind == "click"
+    assert ev.label == "Hızlı Tık"
+    assert (ev.x, ev.y) == (120, 220)
+    rec.stop()
+    assert tracker.stopped == 1
+
+    # TOCTOU: UIA okuması sırasında ön plan başka pencereye geçerse anlık görüntü atılır.
+    fg_sequence[:] = [101, 202]
+    tracker.samples.append(ClickSample(x=120, y=220, hwnd=101))
+    snap_toctou = rec._backend.snapshot()
+    assert snap_toctou.exe_path == ""
+    assert snap_toctou.focused is None
+    assert snap_toctou.elements == ()
+
+    # PID / HWND uyuşmayan UIA sonucu focused_control_info tarafından reddedilir.
+    def mismatched_runner(*_args: Any, **_kwargs: Any) -> subprocess.CompletedProcess[str]:
+        return subprocess.CompletedProcess(
+            args=[],
+            returncode=0,
+            stdout=json.dumps({"k": "Edit", "n": "Yanlış Pencere", "a": "", "p": False, "pid": 888, "hwnd": 202}),
+            stderr="",
+        )
+
+    assert focused_control_info(runner=mismatched_runner, expected_hwnd=101, expected_pid=701) is None
 
 
 async def test_macro_save_and_playback_dispatch_every_step_through_safety_gate(

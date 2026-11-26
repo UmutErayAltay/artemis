@@ -17,8 +17,11 @@ import os
 import re
 import subprocess
 import sys
-from collections.abc import Callable
+import threading
+from collections import deque
+from collections.abc import Callable, Mapping
 from ctypes import wintypes
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
@@ -28,9 +31,9 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from artemis.computer.actions import mask_screen_secrets, process_block_reason
 from artemis.computer.windows import (
     UiElement,
-    foreground_process,
     foreground_window,
     ui_elements,
+    window_process,
 )
 from artemis.config.settings import Settings
 from artemis.i18n import t
@@ -86,6 +89,19 @@ _FOCUSED_META_SCRIPT = "\n".join(
         "  $e = [System.Windows.Automation.AutomationElement]::FocusedElement",
         "  if ($null -eq $e) { '{}'; exit 0 }",
         "  $c = $e.Current",
+        "  $procId = [int]$c.ProcessId",
+        "  if ($env:ARTEMIS_EXPECTED_PID -and $procId -ne [int]$env:ARTEMIS_EXPECTED_PID) { '{}'; exit 0 }",
+        "  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker",
+        "  $rootHwnd = [int]$c.NativeWindowHandle",
+        "  $cur = $e",
+        "  for ($i = 0; $i -lt 32 -and $null -ne $cur; $i++) {",
+        "    $h = [int]$cur.Current.NativeWindowHandle",
+        "    if ($h -gt 0) { $rootHwnd = $h }",
+        "    $parent = $walker.GetParent($cur)",
+        "    if ($null -eq $parent -or [int]$parent.Current.ProcessId -ne $procId) { break }",
+        "    $cur = $parent",
+        "  }",
+        "  if ($env:ARTEMIS_EXPECTED_HWND -and $rootHwnd -gt 0 -and $rootHwnd -ne [int]$env:ARTEMIS_EXPECTED_HWND) { '{}'; exit 0 }",
         "  $isPwd = [bool]$c.IsPassword",
         "  $kind = ($c.ControlType.ProgrammaticName -replace '^ControlType\\.', '')",
         "  $aid = [string]$c.AutomationId",
@@ -98,8 +114,8 @@ _FOCUSED_META_SCRIPT = "\n".join(
         "-or [double]::IsInfinity($r.Height)) { $null } "
         "else { @([int][math]::Round($r.Left), [int][math]::Round($r.Top), "
         "[int][math]::Round($r.Width), [int][math]::Round($r.Height)) }",
-        "  [pscustomobject]@{ k = $kind; n = $name; a = $aid; p = $isPwd; r = $rect } | "
-        "ConvertTo-Json -Compress -Depth 3",
+        "  [pscustomobject]@{ k = $kind; n = $name; a = $aid; p = $isPwd; r = $rect; "
+        "pid = $procId; hwnd = $rootHwnd } | ConvertTo-Json -Compress -Depth 3",
         "} catch { '{}' }",
     ]
 )
@@ -160,8 +176,26 @@ class ObserverSnapshot(BaseModel):
     hwnd: int = 0
     cursor_pos: tuple[int, int] = (0, 0)
     left_down: bool = False
+    click_edges: tuple[tuple[int, int], ...] = ()
     focused: FocusedControlInfo | None = None
     elements: tuple[UiElement, ...] = ()
+
+
+@dataclass(frozen=True)
+class ClickSample:
+    """Kısa tıklamaları kaçırmamak için kenar algılayıcı tarafından yakalanan örnek."""
+
+    x: int
+    y: int
+    hwnd: int = 0
+
+
+class ClickTracker(Protocol):
+    """Kısa fare tıklaması kenarlarını biriktiren arka plan/sahte izleyici sözleşmesi."""
+
+    def start(self) -> None: ...
+    def stop(self) -> None: ...
+    def drain_clicks(self) -> list[ClickSample]: ...
 
 
 class MacroObserverBackend(Protocol):
@@ -240,6 +274,9 @@ def is_sensitive_control(
 def focused_control_info(
     timeout: float = 1.5,
     runner: Callable[..., Any] | None = None,
+    *,
+    expected_hwnd: int | None = None,
+    expected_pid: int | None = None,
 ) -> FocusedControlInfo | None:
     """Windows'ta odaktaki UIA denetiminin güvenli üst verisini okur; hatada None."""
     if sys.platform != "win32":
@@ -256,10 +293,15 @@ def focused_control_info(
         "-EncodedCommand",
         encoded,
     ]
+    env = child_environment()
+    if expected_hwnd is not None and expected_hwnd > 0:
+        env["ARTEMIS_EXPECTED_HWND"] = str(expected_hwnd)
+    if expected_pid is not None and expected_pid > 0:
+        env["ARTEMIS_EXPECTED_PID"] = str(expected_pid)
     try:
         completed = (runner or subprocess.run)(
             command,
-            env=child_environment(),
+            env=env,
             capture_output=True,
             text=True,
             encoding="utf-8",
@@ -280,6 +322,25 @@ def focused_control_info(
     except json.JSONDecodeError:
         return None
     if not isinstance(payload, dict) or not payload:
+        return None
+    # Ön plan değişimi (TOCTOU) koruması: UIA öğesi beklenen pencere/sürece ait değilse at.
+    raw_pid = payload.get("pid")
+    if (
+        expected_pid is not None
+        and isinstance(raw_pid, int)
+        and not isinstance(raw_pid, bool)
+        and raw_pid > 0
+        and raw_pid != expected_pid
+    ):
+        return None
+    raw_hwnd = payload.get("hwnd")
+    if (
+        expected_hwnd is not None
+        and isinstance(raw_hwnd, int)
+        and not isinstance(raw_hwnd, bool)
+        and raw_hwnd > 0
+        and raw_hwnd != expected_hwnd
+    ):
         return None
     is_pwd = bool(payload.get("p", False))
     kind = str(payload.get("k") or "")[:40]
@@ -313,6 +374,61 @@ def _cursor_and_lbutton() -> tuple[tuple[int, int], bool]:
     return pos, down
 
 
+class WindowsClickEdgeTracker:
+    """Kısa sol tıklamaları kaçırmamak için kenar/mandal örnekleyen arka plan izleyicisi."""
+
+    def __init__(self, *, poll_interval: float = 0.01) -> None:
+        self._poll_interval = max(0.005, float(poll_interval))
+        self._lock = threading.Lock()
+        self._pending: deque[ClickSample] = deque(maxlen=64)
+        self._stop_event = threading.Event()
+        self._thread: threading.Thread | None = None
+        self._prev_down = False
+
+    def start(self) -> None:
+        if sys.platform != "win32":
+            return
+        if self._thread is not None and self._thread.is_alive():
+            return
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        # Eski basım mandalını (bit 0) temizleyip ilk durumu oku.
+        state = int(user32.GetAsyncKeyState(_VK_LBUTTON))
+        self._prev_down = bool(state & 0x8000)
+        self._stop_event.clear()
+        self._thread = threading.Thread(
+            target=self._run, name="artemis-macro-clicks", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        if self._thread is not None:
+            self._thread.join(1.0)
+            self._thread = None
+        with self._lock:
+            self._pending.clear()
+
+    def drain_clicks(self) -> list[ClickSample]:
+        with self._lock:
+            items = list(self._pending)
+            self._pending.clear()
+            return items
+
+    def _run(self) -> None:
+        user32 = ctypes.WinDLL("user32", use_last_error=True)
+        point = wintypes.POINT()
+        while not self._stop_event.wait(self._poll_interval):
+            state = int(user32.GetAsyncKeyState(_VK_LBUTTON))
+            down = bool(state & 0x8000)
+            latched = bool(state & 0x0001)
+            if (down and not self._prev_down) or (not down and not self._prev_down and latched):
+                pos = (int(point.x), int(point.y)) if user32.GetCursorPos(ctypes.byref(point)) else (0, 0)
+                hwnd = int(user32.GetForegroundWindow() or 0)
+                with self._lock:
+                    self._pending.append(ClickSample(x=pos[0], y=pos[1], hwnd=hwnd))
+            self._prev_down = down
+
+
 class WindowsMacroObserver:
     """Windows varsayılan gözlemcisi: `artemis.computer.windows` + UIA + fare durumu."""
 
@@ -322,44 +438,86 @@ class WindowsMacroObserver:
         own_pid: int | None = None,
         uia_timeout: float = 1.5,
         runner: Callable[..., Any] | None = None,
+        click_tracker: ClickTracker | None = None,
+        services: Mapping[str, Any] | None = None,
     ) -> None:
         self._own_pid = own_pid if own_pid is not None else os.getpid()
         self._uia_timeout = uia_timeout
         self._runner = runner
         self._prev_down = False
+        resolved_tracker = (
+            click_tracker
+            if click_tracker is not None
+            else (services.get("macro_click_tracker") if services is not None else None)
+        )
+        self._click_tracker: ClickTracker = (
+            resolved_tracker if resolved_tracker is not None else WindowsClickEdgeTracker()
+        )
+
+    def start(self) -> None:
+        self._click_tracker.start()
+
+    def stop(self) -> None:
+        self._click_tracker.stop()
 
     def snapshot(self) -> ObserverSnapshot:
         if sys.platform != "win32":
             return ObserverSnapshot()
         try:
-            exe_path, pid = foreground_process()
+            hwnd, _rect = foreground_window()
+        except OSError:
+            return ObserverSnapshot()
+        if hwnd <= 0:
+            return ObserverSnapshot()
+        try:
+            exe_path, pid = window_process(hwnd)
         except OSError:
             return ObserverSnapshot()
         if not exe_path and pid == 0:
             return ObserverSnapshot()
         pos, left_down = _cursor_and_lbutton()
-        clicked_edge = left_down and not self._prev_down
+        raw_clicks = self._click_tracker.drain_clicks()
+        clicks = [c for c in raw_clicks if c.hwnd in (0, hwnd)]
+        click_edges = tuple((c.x, c.y) for c in clicks)
+        clicked_edge = bool(click_edges) or (left_down and not self._prev_down)
         self._prev_down = left_down
+        if click_edges:
+            pos = click_edges[-1]
         if process_block_reason(exe_path, pid, self._own_pid) is not None or not exe_path.strip():
             # Engelli süreçlerde pencere öğeleri veya odak bilgisi dahi okunmaz.
-            return ObserverSnapshot(exe_path=exe_path, pid=pid, cursor_pos=pos, left_down=left_down)
-        hwnd = 0
-        try:
-            hwnd, _rect = foreground_window()
-        except OSError:
-            hwnd = 0
-        focused = focused_control_info(timeout=self._uia_timeout, runner=self._runner)
+            return ObserverSnapshot(
+                exe_path=exe_path,
+                pid=pid,
+                hwnd=hwnd,
+                cursor_pos=pos,
+                left_down=left_down,
+                click_edges=click_edges,
+            )
+        focused = focused_control_info(
+            timeout=self._uia_timeout,
+            runner=self._runner,
+            expected_hwnd=hwnd,
+            expected_pid=pid,
+        )
         elements: tuple[UiElement, ...] = ()
-        if clicked_edge and hwnd > 0 and (focused is None or not focused.is_password):
+        if clicked_edge and (focused is None or not focused.is_password):
             elements = tuple(
                 ui_elements(hwnd, timeout=self._uia_timeout, runner=self._runner, max_items=120)
             )
+        # TOCTOU koruması: UIA okuması sürerken ön plan penceresi değiştiyse veriyi at.
+        try:
+            after_hwnd, _after_rect = foreground_window()
+        except OSError:
+            after_hwnd = 0
+        if after_hwnd != hwnd:
+            return ObserverSnapshot()
         return ObserverSnapshot(
             exe_path=exe_path,
             pid=pid,
             hwnd=hwnd,
             cursor_pos=pos,
             left_down=left_down,
+            click_edges=click_edges,
             focused=focused,
             elements=elements,
         )
@@ -394,11 +552,16 @@ class MacroRecorder:
         backend: MacroObserverBackend | None = None,
         *,
         own_pid: int | None = None,
+        click_tracker: ClickTracker | None = None,
+        services: Mapping[str, Any] | None = None,
     ) -> None:
         self._own_pid = own_pid if own_pid is not None else os.getpid()
         self._backend: MacroObserverBackend = backend or WindowsMacroObserver(
-            own_pid=self._own_pid
+            own_pid=self._own_pid,
+            click_tracker=click_tracker,
+            services=services,
         )
+        self._lock = threading.RLock()
         self.recording = False
         self.events: list[ObservedEvent] = []
         self.nl_notes: list[str] = []
@@ -410,22 +573,31 @@ class MacroRecorder:
         self._prev_left_down = False
 
     def start(self) -> None:
-        self.recording = True
-        self._prev_left_down = False
+        with self._lock:
+            self.recording = True
+            self._prev_left_down = False
+        start_fn = getattr(self._backend, "start", None)
+        if callable(start_fn):
+            start_fn()
 
     def stop(self) -> None:
-        self.recording = False
-        self._prev_left_down = False
+        stop_fn = getattr(self._backend, "stop", None)
+        if callable(stop_fn):
+            stop_fn()
+        with self._lock:
+            self.recording = False
+            self._prev_left_down = False
 
     def clear(self) -> None:
-        self.events.clear()
-        self.nl_notes.clear()
-        self.warnings.clear()
-        self.masked_count = 0
-        self.skipped_blocked_count = 0
-        self._last_app = ""
-        self._last_blocked_key = None
-        self._prev_left_down = False
+        with self._lock:
+            self.events.clear()
+            self.nl_notes.clear()
+            self.warnings.clear()
+            self.masked_count = 0
+            self.skipped_blocked_count = 0
+            self._last_app = ""
+            self._last_blocked_key = None
+            self._prev_left_down = False
 
     def _is_blocked(self, snap: ObserverSnapshot) -> bool:
         if snap.pid == 0 and not snap.exe_path:
@@ -440,66 +612,81 @@ class MacroRecorder:
 
     def poll_once(self) -> ObservedEvent | None:
         """Arka uçtan tek anlık görüntü alır; engelli ve hassas girdileri eler."""
-        if not self.recording:
-            return None
+        with self._lock:
+            if not self.recording:
+                return None
+        # Arka uç yoklaması (PowerShell/UIA dahil) kilit dışında yapılır ki GUI önizleme
+        # kilidi beklerken donmasın.
         snap = self._backend.snapshot()
-        left_edge = snap.left_down and not self._prev_left_down
-        self._prev_left_down = snap.left_down
+        with self._lock:
+            if not self.recording:
+                return None
+            edge_points = list(snap.click_edges)
+            left_edge = (snap.left_down and not self._prev_left_down) or bool(edge_points)
+            self._prev_left_down = snap.left_down
 
-        if snap.pid == 0 and not snap.exe_path:
-            return None
+            if snap.pid == 0 and not snap.exe_path:
+                return None
 
-        if self._is_blocked(snap):
-            blocked_key = (_normalize_exe_name(snap.exe_path), snap.pid)
-            if blocked_key != self._last_blocked_key or left_edge:
-                self.skipped_blocked_count += 1
-                self._last_blocked_key = blocked_key
-                self._add_warning(
-                    t("Engelli veya korumalı penceredeki işlemler gizlilik için atlandı.")
-                )
-            return None
+            if self._is_blocked(snap):
+                blocked_key = (_normalize_exe_name(snap.exe_path), snap.pid)
+                if blocked_key != self._last_blocked_key or left_edge:
+                    self.skipped_blocked_count += 1
+                    self._last_blocked_key = blocked_key
+                    self._add_warning(
+                        t("Engelli veya korumalı penceredeki işlemler gizlilik için atlandı.")
+                    )
+                return None
 
-        self._last_blocked_key = None
-        app = _normalize_exe_name(snap.exe_path)
-        emitted: ObservedEvent | None = None
+            self._last_blocked_key = None
+            app = _normalize_exe_name(snap.exe_path)
+            emitted: ObservedEvent | None = None
 
-        if app and app != self._last_app:
-            self._last_app = app
-            emitted = ObservedEvent(kind="app_focus", app=app)
-            self.events.append(emitted)
+            if app and app != self._last_app:
+                self._last_app = app
+                emitted = ObservedEvent(kind="app_focus", app=app)
+                self.events.append(emitted)
 
-        if left_edge:
-            elem = _element_at_cursor(snap.elements, snap.cursor_pos)
-            raw_kind = (
-                elem.kind if elem is not None else (snap.focused.kind if snap.focused else "")
-            )
-            raw_name = (
-                elem.name if elem is not None else (snap.focused.name if snap.focused else "")
-            )
-            if is_sensitive_control(
-                snap.focused, element_kind=raw_kind, element_name=raw_name
-            ):
-                self.masked_count += 1
-                self._add_warning(
-                    t("Parola veya hassas alandaki etkileşim kaydedilmedi (gizlendi).")
-                )
-                return emitted
-            clean_label, was_masked = sanitize_macro_text(raw_name)
-            if was_masked:
-                self.masked_count += 1
-            click_event = ObservedEvent(
-                kind="click",
-                app=app,
-                element_kind=raw_kind[:40],
-                label=clean_label[:_MAX_LABEL_LEN],
-                x=snap.cursor_pos[0],
-                y=snap.cursor_pos[1],
-                masked=was_masked,
-            )
-            self.events.append(click_event)
-            return click_event
+            if left_edge:
+                points = edge_points or [snap.cursor_pos]
+                last_click: ObservedEvent | None = None
+                for click_pos in points:
+                    elem = _element_at_cursor(snap.elements, click_pos)
+                    raw_kind = (
+                        elem.kind
+                        if elem is not None
+                        else (snap.focused.kind if snap.focused else "")
+                    )
+                    raw_name = (
+                        elem.name
+                        if elem is not None
+                        else (snap.focused.name if snap.focused else "")
+                    )
+                    if is_sensitive_control(
+                        snap.focused, element_kind=raw_kind, element_name=raw_name
+                    ):
+                        self.masked_count += 1
+                        self._add_warning(
+                            t("Parola veya hassas alandaki etkileşim kaydedilmedi (gizlendi).")
+                        )
+                        continue
+                    clean_label, was_masked = sanitize_macro_text(raw_name)
+                    if was_masked:
+                        self.masked_count += 1
+                    click_event = ObservedEvent(
+                        kind="click",
+                        app=app,
+                        element_kind=raw_kind[:40],
+                        label=clean_label[:_MAX_LABEL_LEN],
+                        x=click_pos[0],
+                        y=click_pos[1],
+                        masked=was_masked,
+                    )
+                    self.events.append(click_event)
+                    last_click = click_event
+                return last_click if last_click is not None else emitted
 
-        return emitted
+            return emitted
 
     def record_text(
         self,
@@ -511,42 +698,43 @@ class MacroRecorder:
         pid: int = 0,
     ) -> ObservedEvent | None:
         """Metin girdisini kaydeder; parola/hassas alanlarda ham metni asla saklamaz."""
-        if (exe_path or pid) and (
-            (pid != 0 and not exe_path.strip())
-            or process_block_reason(exe_path, pid, self._own_pid) is not None
-        ):
-            self.skipped_blocked_count += 1
-            self._add_warning(
-                t("Engelli veya korumalı penceredeki işlemler gizlilik için atlandı.")
-            )
-            return None
-        if is_sensitive_control(target_info):
-            self.masked_count += 1
-            self._add_warning(
-                t("Parola veya hassas alandaki etkileşim kaydedilmedi (gizlendi).")
-            )
-            return None
-        cleaned, was_masked = sanitize_macro_text(text)
-        if was_masked:
-            self.masked_count += 1
-        if not cleaned or cleaned == _REDACTED:
-            if was_masked:
+        with self._lock:
+            if (exe_path or pid) and (
+                (pid != 0 and not exe_path.strip())
+                or process_block_reason(exe_path, pid, self._own_pid) is not None
+            ):
+                self.skipped_blocked_count += 1
+                self._add_warning(
+                    t("Engelli veya korumalı penceredeki işlemler gizlilik için atlandı.")
+                )
+                return None
+            if is_sensitive_control(target_info):
+                self.masked_count += 1
                 self._add_warning(
                     t("Parola veya hassas alandaki etkileşim kaydedilmedi (gizlendi).")
                 )
-            return None
-        label = target_info.name if target_info is not None else ""
-        kind = target_info.kind if target_info is not None else ""
-        event = ObservedEvent(
-            kind="text",
-            app=_normalize_exe_name(app or exe_path),
-            element_kind=kind[:40],
-            label=label[:_MAX_LABEL_LEN],
-            value=cleaned[:_MAX_VALUE_LEN],
-            masked=was_masked,
-        )
-        self.events.append(event)
-        return event
+                return None
+            cleaned, was_masked = sanitize_macro_text(text)
+            if was_masked:
+                self.masked_count += 1
+            if not cleaned or cleaned == _REDACTED:
+                if was_masked:
+                    self._add_warning(
+                        t("Parola veya hassas alandaki etkileşim kaydedilmedi (gizlendi).")
+                    )
+                return None
+            label = target_info.name if target_info is not None else ""
+            kind = target_info.kind if target_info is not None else ""
+            event = ObservedEvent(
+                kind="text",
+                app=_normalize_exe_name(app or exe_path),
+                element_kind=kind[:40],
+                label=label[:_MAX_LABEL_LEN],
+                value=cleaned[:_MAX_VALUE_LEN],
+                masked=was_masked,
+            )
+            self.events.append(event)
+            return event
 
     def set_nl_notes(self, text: str) -> tuple[list[str], int]:
         """Doğal dil adımlarını satır satır temizler; dönen sayaç maskelenen satırlardır."""
@@ -561,7 +749,8 @@ class MacroRecorder:
                 masked += 1
             if cleaned:
                 lines.append(cleaned)
-        self.nl_notes = lines
+        with self._lock:
+            self.nl_notes = lines
         return lines, masked
 
     def compile_draft(
@@ -573,19 +762,22 @@ class MacroRecorder:
         nl_text: str | None = None,
     ) -> MacroDraft:
         """Gözlenen olayları ve doğal dil notlarını doğrulanmış `MacroDraft`'a derler."""
-        extra_masked = 0
-        if nl_text is not None:
-            notes, extra_masked = self.set_nl_notes(nl_text)
-        else:
-            notes = list(self.nl_notes)
-        total_masked = self.masked_count + extra_masked
-        warnings = list(self.warnings)
+        with self._lock:
+            extra_masked = 0
+            if nl_text is not None:
+                notes, extra_masked = self.set_nl_notes(nl_text)
+            else:
+                notes = list(self.nl_notes)
+            total_masked = self.masked_count + extra_masked
+            warnings = list(self.warnings)
+            events_copy = list(self.events)
+            skipped = self.skipped_blocked_count
         error = ""
         steps: list[RoutineStep] = []
         truncated = False
         try:
             steps, compile_warnings, truncated, compile_masked = compile_macro_steps(
-                self.events,
+                events_copy,
                 notes,
                 registry,
                 settings=settings,
@@ -599,10 +791,10 @@ class MacroRecorder:
         return MacroDraft(
             name=" ".join(name.split()),
             steps=tuple(steps),
-            events=tuple(self.events),
+            events=tuple(events_copy),
             nl_notes=tuple(notes),
             masked_count=total_masked,
-            skipped_blocked_count=self.skipped_blocked_count,
+            skipped_blocked_count=skipped,
             truncated=truncated,
             warnings=tuple(warnings),
             error=error,

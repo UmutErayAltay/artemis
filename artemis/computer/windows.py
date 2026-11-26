@@ -382,6 +382,12 @@ def foreground_process() -> tuple[str, int]:
     return _window_process(_libs()[0].GetForegroundWindow())
 
 
+def window_process(hwnd: int) -> tuple[str, int]:
+    """Verilen pencere kimliğinin (exe tam yolu, pid) bilgisini döndürür."""
+    _require_windows()
+    return _window_process(hwnd)
+
+
 def foreground_window() -> tuple[int, tuple[int, int, int, int]]:
     """Ön plandaki pencerenin (hwnd, (sol, üst, sağ, alt)); yakalama ile girdi arasında
     pencerenin değişip değişmediğini anlamak için (session._stale_reason)."""
