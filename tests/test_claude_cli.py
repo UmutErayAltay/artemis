@@ -30,10 +30,12 @@ class FakeProc:
         self.hang = hang
         self.pid = 4242
         self.stdin_data = b""
+        self.hanging = asyncio.Event()
 
     async def communicate(self, data: bytes) -> tuple[bytes, bytes]:
         self.stdin_data = data
         if self.hang:
+            self.hanging.set()
             await asyncio.sleep(60)
         return self.out, STDOUT_SECRET.encode()
 
@@ -237,7 +239,7 @@ async def test_cancellation_kills_and_waits(tmp_path: Path, cli: dict[str, Any])
     task = asyncio.create_task(
         provider(tmp_path).complete([Message(role="user", content="a")], [], timeout=30)
     )
-    await asyncio.sleep(0.1)
+    await asyncio.wait_for(cli["proc"].hanging.wait(), 5)
     task.cancel()
     with pytest.raises(asyncio.CancelledError):
         await task

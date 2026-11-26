@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import sqlite3
 import subprocess
 import sys
@@ -15,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _wait import wait_until
 from pydantic import ValidationError
 
 from artemis.brain.fake import ScriptedProvider
@@ -41,6 +43,8 @@ TERMINAL = {"done", "error", "cancelled", "timeout", "cleanup_pending", "interru
 
 
 def git(path: Path, *args: str) -> str:
+    if shutil.which("git") is None:
+        pytest.skip("git ikili dosyası yok")
     result = subprocess.run(
         ["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
         cwd=path,
@@ -128,12 +132,11 @@ def make_jobs(
 
 
 def wait_job(jobs: CodeAgentJobs, job_id: str, statuses: set[str] = TERMINAL) -> dict[str, Any]:
-    deadline = time.monotonic() + 5
-    while time.monotonic() < deadline:
-        job = next(job for job in jobs.status() if job["job_id"] == job_id)
-        if job["status"] in statuses:
-            return job
-        time.sleep(0.01)
+    def current() -> dict[str, Any]:
+        return next(job for job in jobs.status() if job["job_id"] == job_id)
+
+    if wait_until(lambda: current()["status"] in statuses, 5, 0.01):
+        return current()
     raise AssertionError(f"İş bitmedi: {jobs.status()}")
 
 
@@ -341,8 +344,10 @@ def test_monotonic_total_deadline_survives_wall_clock_rollback(
     # Duvar saati geri sarılsa da sınır yalnız monotonik saatle ölçülür: bekleme sürer...
     monkeypatch.setattr("artemis.tools.code_agent_jobs.time.time", lambda: 0)
     clock.now += 30
-    time.sleep(0.2)  # İzleyici iş parçacığına yanlış timeout verme şansı tanır.
-    assert next(j for j in jobs.status() if j["job_id"] == job_id)["status"] == "waiting"
+    # İzleyici iş parçacığına yanlış timeout verme şansı tanır: 0,3 sn boyunca "waiting" kalmalı.
+    assert not wait_until(
+        lambda: next(j for j in jobs.status() if j["job_id"] == job_id)["status"] != "waiting", 0.3
+    )
     # ...ve monotonik süre dolunca duvar saatinden bağımsız timeout olur.
     clock.now += 31
     assert wait_job(jobs, job_id)["status"] == "timeout"
@@ -391,14 +396,14 @@ def test_cancel_before_and_during_spawn(tmp_path: Path, repo: Path) -> None:
 
 @pytest.mark.skipif(os.name == "nt", reason="POSIX grup/DEVNULL regresyonu")
 def test_normal_exit_cleans_child_with_closed_stdio(tmp_path: Path, repo: Path) -> None:
-    child = "import time,pathlib; time.sleep(.6); pathlib.Path('escaped.txt').write_text('bad')"
+    child = "import time,pathlib; time.sleep(.5); pathlib.Path('escaped.txt').write_text('bad')"
     before = (
         f"subprocess.Popen([sys.executable,'-c',{child!r}], stdin=subprocess.DEVNULL, "
         "stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n"
     )
     jobs, _ = make_jobs(tmp_path, reply(before=before))
     assert run_job(jobs, repo)["status"] == "done"
-    time.sleep(0.75)
+    time.sleep(1.5)  # kaçan çocuk 0,5 sn'de yazardı; 1 sn pay
     assert not (repo / "escaped.txt").exists()
     jobs.shutdown()
 

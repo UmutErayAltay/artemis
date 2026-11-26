@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+from _wait import wait_until
 
 from artemis.channels.voice import stt_catalog
 from artemis.channels.voice.adapters import FasterWhisperRecognizer
@@ -62,12 +63,7 @@ class ScriptedDetector:
 
 
 def wait_for(condition: Callable[[], bool], timeout: float = 2.0) -> bool:
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        if condition():
-            return True
-        time.sleep(0.005)
-    return condition()
+    return wait_until(condition, timeout)
 
 
 def make_game(

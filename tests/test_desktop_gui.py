@@ -16,6 +16,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from _wait import wait_qt
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtTest import QTest
 from PySide6.QtWidgets import QApplication, QFrame, QLabel, QWidget
@@ -46,13 +47,8 @@ def app() -> QApplication:
 
 
 def _wait(app: QApplication, condition: Any, timeout: float = 3.0) -> None:
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        app.processEvents()
-        if condition():
-            return
-        time.sleep(0.005)
-    raise AssertionError("GUI durumu zamanında oluşmadı")
+    if not wait_qt(condition, timeout):
+        raise AssertionError("GUI durumu zamanında oluşmadı")
 
 
 def _window(app: QApplication, tmp_path: Path) -> DesktopWindow:

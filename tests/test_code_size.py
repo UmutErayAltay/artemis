@@ -1,4 +1,4 @@
-"""Kod düzeni ratchet'i: dosya <= 1300 satır, fonksiyon <= 200 satır.
+"""Kod düzeni ratchet'i: dosya <= 1300 satır, fonksiyon <= 200 satır, test dosyası <= 2000.
 
 Büyük dosya/fonksiyonlar gözden geçirmeyi ve bölmeyi zorlaştırır. Sınırı aşan
 mevcut yerler ALLOW içinde kayıtlıdır; kayıtlar yalnız küçülebilir (liste
@@ -12,6 +12,7 @@ from pathlib import Path
 
 MAX_FILE = 1300
 MAX_FUNC = 200
+MAX_TEST_FILE = 2000
 
 ROOT = Path(__file__).parents[1]
 
@@ -39,11 +40,16 @@ def _sizes() -> dict[str, int]:
         text = path.read_text(encoding="utf-8")
         out[rel] = len(text.splitlines())
         _walk(ast.parse(text), (), rel, out)
+    for path in sorted((ROOT / "tests").rglob("*.py")):
+        rel = path.relative_to(ROOT).as_posix()
+        out[rel] = len(path.read_text(encoding="utf-8").splitlines())
     return out
 
 
 def _limit(key: str) -> int:
-    return MAX_FILE if "::" not in key else MAX_FUNC
+    if "::" in key:
+        return MAX_FUNC
+    return MAX_TEST_FILE if key.startswith("tests/") else MAX_FILE
 
 
 def test_limits() -> None:

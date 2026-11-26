@@ -17,6 +17,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from _wait import wait_qt
 from PySide6.QtCore import QCoreApplication, QEvent, QTimer, qInstallMessageHandler
 from PySide6.QtGui import QFont, QFontDatabase
 from PySide6.QtTest import QTest
@@ -57,11 +58,7 @@ def _restore_tr_language() -> Any:
 
 
 def _wait(predicate: Any, timeout_ms: int = 5000) -> bool:
-    waited = 0
-    while not predicate() and waited < timeout_ms:
-        QTest.qWait(20)
-        waited += 20
-    return bool(predicate())
+    return wait_qt(predicate, timeout_ms / 1000)
 
 
 def _sample_server(name: str = "notlar", **overrides: Any) -> MCPServerConfig:

@@ -21,6 +21,7 @@ from pydantic import ValidationError
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
+from _wait import wait_until
 from PySide6.QtWidgets import QApplication, QDialog
 
 from artemis.brain.fake import ScriptedProvider
@@ -697,16 +698,7 @@ def test_ui_dialogs_and_triggers_section_roundtrip(
 
 def _wait_until(predicate: Any, timeout: float = 5.0) -> bool:
     """Koşul sağlanana dek bekler; sabit uyku yok, koşul olunca hemen döner."""
-    import threading
-    import time
-
-    gate = threading.Event()
-    deadline = time.monotonic() + timeout
-    while not predicate():
-        if time.monotonic() >= deadline:
-            return False
-        gate.wait(0.01)
-    return True
+    return wait_until(predicate, timeout)
 
 
 def test_bridge_forwards_system_resume_and_routine_completion_chains(tmp_path: Path) -> None:

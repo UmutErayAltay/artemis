@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from _wait import wait_until
 from pydantic import BaseModel, ConfigDict
 
 from artemis.brain.fake import ScriptedProvider
@@ -92,17 +93,22 @@ _event_cache: dict[DesktopBridge, list[Any]] = {}
 
 
 def _wait_for(bridge: DesktopBridge, kind: type[Any], timeout: float = 2.0) -> Any:
-    deadline = time.monotonic() + timeout
     cached = _event_cache.setdefault(bridge, [])
     for index, event in enumerate(cached):
         if isinstance(event, kind):
             return cached.pop(index)
-    while time.monotonic() < deadline:
+    found: list[Any] = []
+
+    def poll() -> bool:
         for event in bridge.poll_events():
             if isinstance(event, kind):
-                return event
+                found.append(event)
+                return True
             cached.append(event)
-        time.sleep(0.005)
+        return False
+
+    if wait_until(poll, timeout):
+        return found[0]
     raise AssertionError(f"{kind.__name__} olayı gelmedi")
 
 

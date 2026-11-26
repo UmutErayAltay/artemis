@@ -13,6 +13,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from _wait import wait_qt
 from PySide6.QtCore import QEvent, QPoint, QPointF, QRect, QSettings, Qt
 from PySide6.QtGui import QImage, QMouseEvent
 from PySide6.QtTest import QTest
@@ -75,13 +76,8 @@ def made(app: QApplication, tmp_path: Path) -> Any:
 
 
 def _wait(app: QApplication, condition: Callable[[], bool], timeout: float = 2.0) -> None:
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        app.processEvents()
-        if condition():
-            return
-        time.sleep(0.005)
-    raise AssertionError("zamanında oluşmadı")
+    if not wait_qt(condition, timeout):
+        raise AssertionError("zamanında oluşmadı")
 
 
 def _settle(pet: PetWidget, seconds: float = 1.5) -> None:
