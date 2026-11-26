@@ -6,6 +6,7 @@ her sürümün `SHA256SUMS.txt` dosyasıyla doğrulayın. Ayrıntılı kayıtlar
 
 ## 0.2.7 (2026-11-26)
 
+- Düzeltme: eski sürümün üzerine kurulumda Hakkında/Güncelleme kurulu sürümü 0.1.0 gösteriyordu (eski paket dosyaları birikiyordu); kurucu artık önce eski uygulama dosyalarını siliyor.
 - Kararlılık: Ayarlar veya takvim/posta denetimi sürerken panel kapanırsa uygulama çökmüyor; kapanış en çok ~2 sn bekliyor.
 - Ses: Ayarlar açılışında mikrofon listesi ve Whisper taraması arka planda; ses başlatılamazsa hata gösteriliyor, sessizce kapanmıyor.
 - Güvenlik: öneri şablonunda kullanıcının vermediği her yer tutucu dış içerik sayılıyor (yeni tetikleyici türleri unutulmaz).

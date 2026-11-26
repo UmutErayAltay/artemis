@@ -42,6 +42,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
+[InstallDelete]
+; Güncellemede eski sürümün _internal dosyaları kalırsa birden çok artemis_tr-*.dist-info birikir ve
+; Hakkında eski sürümü (0.1.0) gösterir, eski modüller yeni kodun yanında durur (2026-11-26). Klasör
+; yalnız uygulamanındır (DisableDirPage=yes, {app} sabit); kullanıcı verisi %APPDATA%\Artemis'tedir.
+Type: filesandordirs; Name: "{app}\_internal"
+
 [Files]
 Source: "..\dist\Artemis\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 

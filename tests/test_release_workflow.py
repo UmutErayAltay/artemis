@@ -185,3 +185,11 @@ def test_installer_has_no_second_signing_hook_and_body_follows_signpath() -> Non
     wf = (ROOT / ".github/workflows/release-windows.yml").read_text(encoding="utf-8")
     assert "signed: ${{ steps.signing.outputs.signpath }}" in wf
     assert "needs.build.outputs.signed == 'true'" in wf
+
+
+def test_installer_removes_stale_internal_files_before_install() -> None:
+    # 0.2.6 üstüne kurulumda eski dist-info'lar kaldığı için Hakkında 0.1.0 gösteriyordu.
+    iss = (ROOT / "packaging/artemis.iss").read_text(encoding="utf-8")
+    section = iss[iss.index("[InstallDelete]") : iss.index("[Files]")]
+    assert 'Type: filesandordirs; Name: "{app}\_internal"' in section
+    assert "DisableDirPage=yes" in iss  # {app} kullanıcı seçimi değil; silme güvenli
