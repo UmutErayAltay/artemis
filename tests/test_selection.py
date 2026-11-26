@@ -752,8 +752,9 @@ def test_backup_and_restore_clipboard_formats_detect_skipped_and_partial(
             return 0
 
     monkeypatch.setattr(sel.sys, "platform", "win32")
-    monkeypatch.setattr(ctypes, "set_last_error", lambda _err: None)
-    monkeypatch.setattr(ctypes, "get_last_error", lambda: 0)
+    # Linux'ta bu ctypes işlevleri yok: raising=False ile eklenir.
+    monkeypatch.setattr(ctypes, "set_last_error", lambda _err: None, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 0, raising=False)
     monkeypatch.setattr(ctypes, "string_at", lambda ptr, size: b"x" * min(size, 4))
     monkeypatch.setattr(ctypes, "memmove", lambda *_args: None)
 

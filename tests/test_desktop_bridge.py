@@ -906,7 +906,12 @@ def test_live_states_become_their_own_events(tmp_path):
         bridge._on_voice_state(state)
     # Kurucu işçiyi başlatır; config yoksa Failed olayı araya girebilir (yarış). Test yalnız
     # ses durumlarının kendi olayına dönüştüğünü ölçer.
-    events = [(e.state, e.message) for e in bridge.poll_events() if isinstance(e, State)]
+    # İşçinin kendi `stopped`/`error` durumu da araya girebilir; yalnız ses durumları sayılır.
+    events = [
+        (e.state, e.message)
+        for e in bridge.poll_events()
+        if isinstance(e, State) and e.state.startswith("voice_")
+    ]
     assert events == [
         ("voice_live", "merhaba dünya"),
         ("voice_live_unavailable", "deps:eksik"),

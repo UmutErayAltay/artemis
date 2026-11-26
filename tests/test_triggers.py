@@ -90,6 +90,9 @@ def make_scheduler(
         runtime.audit,
         panel=lambda title, body: panel(title, body, "", ""),
         routine_panel=panel,
+        # Leke bayrağını taşıyan yol (masaüstü köprüsünün kullandığı); eski yol dış alanlı
+        # öneriyi düşürür (#39).
+        routine_panel_ex=lambda t, b, r, s, d, _tainted: panel(t, b, r, s, d),
         toast=None,
         telegram=telegram,
     )

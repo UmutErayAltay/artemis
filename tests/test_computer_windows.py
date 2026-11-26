@@ -233,6 +233,7 @@ def test_visible_windows_filters_minimized_tiny_and_sanitizes(
     monkeypatch.setattr(w, "_libs", lambda: (_FakeUser32(), None, None))
     monkeypatch.setattr(w, "_window_process", lambda hwnd: win_defs[int(hwnd)][4])
     monkeypatch.setattr(w, "_ENUM_WINDOWS_PROC", lambda fn: fn)
+    monkeypatch.setattr(w, "_dwmapi", lambda: None)  # Linux CI'da ctypes.WinDLL yok
     listed = w.visible_windows()
     assert len(listed) == 1
     assert listed[0] == w.WindowInfo(
