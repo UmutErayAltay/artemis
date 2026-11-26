@@ -847,7 +847,6 @@ class DesktopBridge:
             runtime.audit,
             panel=self._proactive_panel,
             routine_panel=self._proactive_routine_panel,
-            routine_panel_ex=self._proactive_routine_panel,
             telegram=self._proactive_telegram,
             profile_getter=lambda: runtime.context.settings.work_profile,
         )
@@ -907,8 +906,6 @@ class DesktopBridge:
             Proactive(title, body, routine, suggest, summary_day, suggest_tainted)
         )
         return True
-
-    _proactive_routine_panel_ex = _proactive_routine_panel
 
     def _stop_proactive(self) -> None:
         self._proactive_scheduler = None

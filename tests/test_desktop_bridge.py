@@ -1275,7 +1275,7 @@ def test_submit_tainted_requires_approval_for_side_effect_without_external_read(
         assert (tmp_path / "clean.txt").read_text(encoding="utf-8") == "yazıldı"
 
         # Genişletilmiş panel geri çağrısı suggest_tainted bayrağını Proactive olayına taşır.
-        assert bridge._proactive_routine_panel_ex(
+        assert bridge._proactive_routine_panel(
             "Tetikleyici · t", "Gövde", "", "Özetle", "", True
         )
         proactive = _wait_for(bridge, Proactive, timeout=2.0)

@@ -78,7 +78,8 @@ class FakePanel:
         self.items: list[tuple[str, str, str, str]] = []
 
     def __call__(
-        self, title: str, body: str, routine: str, suggest: str, day: str = ""
+        self, title: str, body: str, routine: str, suggest: str, day: str = "",
+        _tainted: bool = False,
     ) -> bool:
         self.items.append((title, body, routine, suggest))
         return True
@@ -298,8 +299,7 @@ async def test_calendar_before_filters_sanitizes_and_deduplicates(tmp_path: Path
         runtime.settings,
         runtime.audit,
         panel=lambda title, body: panel(title, body, "", ""),
-        routine_panel=panel,
-        routine_panel_ex=panel_ex,
+        routine_panel=panel_ex,
         toast=None,
     )
     scheduler = ProactiveScheduler(
@@ -695,8 +695,21 @@ def test_ui_dialogs_and_triggers_section_roundtrip(
     section.deleteLater()
 
 
-def test_bridge_forwards_system_resume_and_routine_completion_chains(tmp_path: Path) -> None:
+def _wait_until(predicate: Any, timeout: float = 5.0) -> bool:
+    """Koşul sağlanana dek bekler; sabit uyku yok, koşul olunca hemen döner."""
+    import threading
     import time
+
+    gate = threading.Event()
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() >= deadline:
+            return False
+        gate.wait(0.01)
+    return True
+
+
+def test_bridge_forwards_system_resume_and_routine_completion_chains(tmp_path: Path) -> None:
 
     from artemis.channels.desktop.bridge import DesktopBridge, Proactive
 
@@ -731,13 +744,10 @@ def test_bridge_forwards_system_resume_and_routine_completion_chains(tmp_path: P
     bridge = DesktopBridge(tmp_path / "unused.yaml", runtime_factory=factory)
     try:
         assert bridge._ready.wait(timeout=5.0)
-        deadline = time.monotonic() + 5.0
-        while bridge._proactive_scheduler is None and time.monotonic() < deadline:
-            time.sleep(0.02)
-        assert bridge._proactive_scheduler is not None
+        assert _wait_until(lambda: bridge._proactive_scheduler is not None)
 
+        # call_soon_threadsafe sırası korunur: sinyal, sonraki rutin tamamlanmasından önce işlenir.
         bridge.notify_system_resume()
-        time.sleep(0.05)
 
         RoutineStore(tmp_path / "state" / "routines.json").save(
             [Routine(name="selam", steps=[RoutineStep(tool="system_info", arguments={})])]
@@ -745,14 +755,14 @@ def test_bridge_forwards_system_resume_and_routine_completion_chains(tmp_path: P
         req = bridge.submit_tool("routine_run", RoutineNameArguments(name="selam"))
         assert req is not None
         seen_proactive: list[Proactive] = []
-        end = time.monotonic() + 5.0
-        while time.monotonic() < end:
-            for ev in bridge.poll_events(64):
-                if isinstance(ev, Proactive):
-                    seen_proactive.append(ev)
-            if seen_proactive:
-                break
-            time.sleep(0.02)
+
+        def _drain() -> bool:
+            seen_proactive.extend(
+                ev for ev in bridge.poll_events(64) if isinstance(ev, Proactive)
+            )
+            return bool(seen_proactive)
+
+        assert _wait_until(_drain)
         assert len(seen_proactive) == 1
         assert seen_proactive[0].title == "Öneri · rutin-sonrasi"
         assert seen_proactive[0].body == "Rutin bitti: selam"
@@ -842,7 +852,7 @@ async def test_suggest_uses_external_and_tainted_delivery_for_calendar_and_folde
     deliverer = Deliverer(
         runtime.settings,
         runtime.audit,
-        routine_panel_ex=panel_ex,
+        routine_panel=panel_ex,
         toast=None,
     )
     scheduler = ProactiveScheduler(
@@ -909,7 +919,8 @@ async def test_failed_trigger_and_chain_delivery_retries_are_bounded_with_backof
     deliveries: list[str] = []
 
     def maybe_panel(
-        title: str, _body: str, _routine: str, _suggest: str, _day: str = ""
+        title: str, _body: str, _routine: str, _suggest: str, _day: str = "",
+        _tainted: bool = False,
     ) -> bool:
         deliveries.append(title)
         return not panel_should_fail
@@ -1065,16 +1076,18 @@ def test_resume_detector_uses_unbiased_clock_and_detects_sleep_gap() -> None:
 
 
 
-async def test_legacy_routine_panel_drops_tainted_suggest(tmp_path: Path) -> None:
-    """Leke taşıyamayan eski panel yolu dış alanlı öneriyi göstermez (doğrulayıcı notu, #39)."""
-    seen: list[tuple[str, str, str, str, str]] = []
+async def test_routine_panel_carries_suggest_tainted_flag(tmp_path: Path) -> None:
+    """Tek panel sink'i dış alanlı önerinin leke bayrağını paneline aynen taşır (#39)."""
+    seen: list[tuple[str, bool]] = []
 
-    def legacy(title: str, body: str, routine: str, suggest: str, day: str) -> bool:
-        seen.append((title, body, routine, suggest, day))
+    def sink(
+        _title: str, _body: str, _routine: str, suggest: str, _day: str, tainted: bool
+    ) -> bool:
+        seen.append((suggest, tainted))
         return True
 
     runtime = _make_runtime(tmp_path)
-    deliverer = Deliverer(runtime.settings, runtime.audit, routine_panel=legacy, toast=None)
+    deliverer = Deliverer(runtime.settings, runtime.audit, routine_panel=sink, toast=None)
     common = {
         "event_id": "e",
         "scheduled_for": datetime(2026, 11, 26, 9, 0, tzinfo=UTC),
@@ -1086,4 +1099,4 @@ async def test_legacy_routine_panel_drops_tainted_suggest(tmp_path: Path) -> Non
     }
     await deliverer.deliver(**common, suggest="X için hazırlık", suggest_tainted=True)
     await deliverer.deliver(**common, suggest="temiz öneri", suggest_tainted=False)
-    assert [item[3] for item in seen] == ["", "temiz öneri"]
+    assert seen == [("X için hazırlık", True), ("temiz öneri", False)]
