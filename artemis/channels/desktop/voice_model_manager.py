@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 
 from artemis.channels.desktop.form_kit import button_row, meta_label
 from artemis.channels.desktop.page_kit import PathHint
-from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
+from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread, start_unparented
 from artemis.channels.voice.model_health import (
     VoiceModelEntry,
     clean_voice_model,
@@ -358,15 +358,14 @@ class VoiceModelManagerWidget(QFrame):
             return False
         self._generation += 1
         gen = self._generation
-        thread = _ModelOpThread(gen, op, work, self)
+        thread = _ModelOpThread(gen, op, work)
         thread.completed.connect(self._on_task_done)
         thread.failed.connect(self._on_task_failed)
         thread.finished.connect(self._on_task_finished)
-        thread.finished.connect(thread.deleteLater)
         self._thread = thread
         self.status_label.setText(busy_message)
         self._sync_buttons()
-        thread.start()
+        start_unparented(thread)
         return True
 
     def trigger_refresh(self, *, quiet: bool = False) -> bool:

@@ -209,3 +209,41 @@ def test_device_toggle_reuses_query_snapshot(
         assert queries == ["d"]
     finally:
         panel.finish_inventory()
+
+
+# --- Karne 7 CI: panel kapanmadan silinirse çalışan model işi süreci çökertmez ----------
+
+
+def test_deleting_widget_with_running_model_thread_does_not_abort(tmp_path: Path) -> None:
+    pytest.importorskip("PySide6")
+    import threading
+
+    from PySide6.QtCore import QCoreApplication, QEvent
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop.voice_model_manager import VoiceModelManagerWidget
+
+    app = QApplication.instance() or QApplication([])
+    release = threading.Event()
+
+    def slow_inventory(_path: Path) -> list[object]:
+        release.wait(5)
+        return []
+
+    widget = VoiceModelManagerWidget(
+        tmp_path / "config.yaml",
+        inventory_fn=slow_inventory,  # type: ignore[arg-type]
+        verify_fn=lambda *_a: None,  # type: ignore[arg-type]
+        download_fn=lambda *_a: None,  # type: ignore[arg-type]
+        clean_fn=lambda *_a: None,  # type: ignore[arg-type]
+    )
+    assert widget.trigger_refresh(quiet=True)
+    thread = widget._thread
+    assert thread is not None and thread.isRunning()
+    # Panel close olmadan yıkılır (ebeveyn pencere silinmesi gibi); eskiden burada
+    # "QThread: Destroyed while thread is still running" ile süreç düşüyordu.
+    widget.deleteLater()
+    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    release.set()
+    assert thread.wait(3000)
+    app.processEvents()

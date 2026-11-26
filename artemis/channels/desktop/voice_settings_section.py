@@ -14,6 +14,7 @@ from artemis.channels.desktop import provider_section, voice_preview
 from artemis.channels.desktop.provider_section import store_endpoint_key
 from artemis.channels.desktop.provider_workers import ConnectionTest
 from artemis.channels.desktop.settings_io import refresh_device_combo
+from artemis.channels.desktop.thread_shutdown import start_unparented
 from artemis.channels.voice import stt_catalog
 from artemis.config.settings import EndpointConfig, Settings, load_settings
 from artemis.i18n import t
@@ -56,12 +57,12 @@ class GpuProbe(QThread):
 
 def start_gpu_probe(panel: SettingsPanel) -> None:
     """Panel varsayılan öneriyle açılır; GPU belleği gelince öneri güncellenir."""
-    probe = GpuProbe(panel)
+    probe = GpuProbe()
     probe.done.connect(panel._gpu_probe_done)
     probe.scanned.connect(panel._stt_scan_done)
-    probe.finished.connect(probe.deleteLater)
     panel.gpu_probe = probe
-    probe.start()
+    # Panel kapanmadan silinirse çalışan sorgu süreci çökertmesin (thread_shutdown).
+    start_unparented(probe)
 
 
 def gpu_probe_done(panel: SettingsPanel, gpu_mb: object) -> None:
