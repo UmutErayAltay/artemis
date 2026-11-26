@@ -34,10 +34,6 @@ OutputBaseFilename=Artemis-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-#ifdef SignToolCmd
-SignTool={#SignToolCmd}
-SignedUninstaller=yes
-#endif
 
 [Languages]
 Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"

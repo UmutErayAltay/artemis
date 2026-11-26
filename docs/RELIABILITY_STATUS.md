@@ -4,7 +4,15 @@ Bu dosya güncel durumun kanonik kaynağıdır. Her satır üç durumu ayırır:
 **Otomatik test** (sahte arka uçla; gerçek cihaz değildir) ve **Gerçek cihaz** (Windows,
 tarih + commit + kanıt yoluyla). Çalıştırma yolları: [TESTING.md](TESTING.md).
 
-## Karne 5 güvenlik ve kararlılık turu — 2026-11-24 (dal `feat/vizyon-ozellikler`)
+## Güncel tur — Karne 6–8 (2026-11-26)
+
+Karne 6, 7 ve 8 incelemelerinin bulguları `main`'de kapatıldı (PR #51, #52 ve Karne 8 turu); sürüm
+geçmişi [CHANGELOG](../CHANGELOG.md). Otomatik testler sahte arka uçla geçmiştir; gerçek Windows
+kabulü bekleyen maddeler aşağıdaki "Windows elle kabul listesi" tablosundadır. v0.2.5 kurucusu
+açılmıyordu (paketlenmemiş NumPy alt modülü); v0.2.6'dan beri release iş akışı paketli exe ile
+içe aktarma denemesi yapar.
+
+## Karne 5 güvenlik ve kararlılık turu — 2026-11-24 (geçmiş kayıt; dal `feat/vizyon-ozellikler`)
 
 Karne 5 incelemesinde kanıtlanan 12 bulgu ve `main` CI zamanlama kırılganlığı
 ([ADR 0083](adr/0083-baglamsal-calisma-profilleri.md)–[0089](adr/0089-computer-use-dusunme-katmani.md))

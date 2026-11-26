@@ -27,7 +27,9 @@ explicitly configure or trigger an external service.
 - Text-to-Speech defaults to local Piper TTS (voice.tts_backend: piper;
   voice.allow_cloud_tts_text: false).
 - Voice models are downloaded only when you explicitly click Download in the
-  Model Health Manager. Raw audio and screenshots are never saved to disk.
+  Model Health Manager. Exception: if you turn on live transcript or the KWS
+  wake word, their model is downloaded automatically from Hugging Face at a
+  pinned revision. Raw audio and screenshots are never saved to disk.
 
 4. Explicit Network Actions Only
 - Web search queries DuckDuckGo only when the web_search tool is invoked.
