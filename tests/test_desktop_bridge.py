@@ -1116,12 +1116,12 @@ def test_voice_abandoned_close_error_still_clears_voice_active(tmp_path):
 
 
 def test_remember_site_oserror_does_not_break_approval(tmp_path, monkeypatch):
-    from artemis.channels.desktop import bridge as bridge_module
+    from artemis.channels.desktop import bridge_events as bridge_events_module
 
     def fail_remember(*_args: Any, **_kwargs: Any) -> None:
         raise OSError("disk full")
 
-    monkeypatch.setattr(bridge_module, "remember_site", fail_remember)
+    monkeypatch.setattr(bridge_events_module, "remember_site", fail_remember)
     bridge = _fixture(tmp_path, [])
     approved_result: list[bool] = []
     thread: threading.Thread | None = None
