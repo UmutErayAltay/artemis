@@ -143,3 +143,24 @@ def _no_modal_unsaved_prompt(monkeypatch: pytest.MonkeyPatch) -> None:
     except ImportError:
         return
     monkeypatch.setattr(window_restart, "_ask_unsaved", lambda _window: "save")
+
+
+@pytest.fixture(autouse=True)
+def close_store_ownerships(monkeypatch):
+    # Bekleyen temizlik nedeniyle shutdown'ın bilerek açık bıraktığı iş deposu kilidi
+    # (code_agent.lock) test bitince kapanır: sızan dosya tutacağı ResourceWarning üretir ve
+    # Windows'ta geçici klasör silinirken PermissionError verir.
+    from artemis.tools import code_agent_jobs
+
+    opened: list[code_agent_jobs.StoreOwnership] = []
+    original = code_agent_jobs.StoreOwnership
+
+    def tracking(path):
+        ownership = original(path)
+        opened.append(ownership)
+        return ownership
+
+    monkeypatch.setattr(code_agent_jobs, "StoreOwnership", tracking)
+    yield
+    for ownership in opened:
+        ownership.close()
