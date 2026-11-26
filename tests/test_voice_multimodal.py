@@ -721,3 +721,68 @@ def test_settings_panel_multimodal_screen_context_round_trip(
     finally:
         panel.deleteLater()
         app.processEvents()
+
+
+def test_capture_active_screen_png_picks_foreground_monitor_and_runs_off_loop() -> None:
+    class _MultiMonitorBackend:
+        def __init__(self) -> None:
+            self.calls: list[tuple[int, int, int, int]] = []
+
+        def monitors(self) -> list[tuple[int, int, int, int]]:
+            return [(0, 0, 1920, 1080), (1920, 0, 1280, 720)]
+
+        def foreground_window(self) -> tuple[int, tuple[int, int, int, int]]:
+            return (55, (2000, 100, 2800, 600))
+
+        def capture(self, left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
+            self.calls.append((left, top, width, height))
+            return bytes(8 * 4 * 4), 8, 4
+
+    backend = _MultiMonitorBackend()
+    png_bytes = capture_active_screen_png(max_width=8, backend=backend)
+    assert png_bytes is not None and png_bytes.startswith(b"\x89PNG\r\n\x1a\n")
+    assert backend.calls == [(1920, 0, 1280, 720)]
+
+
+async def test_voice_controller_captures_screen_off_event_loop_thread() -> None:
+    import threading
+
+    main_tid = threading.get_ident()
+    seen_tids: list[int] = []
+    calls: list[tuple[str, bytes | None, bytes | None]] = []
+
+    def probe_capture() -> bytes | None:
+        seen_tids.append(threading.get_ident())
+        return PNG
+
+    async def run_cmd(
+        text: str,
+        *,
+        audio_wav: bytes | None = None,
+        image_png: bytes | None = None,
+        **_kw: Any,
+    ) -> RunResult:
+        calls.append((text, audio_wav, image_png))
+        return RunResult(text="oldu", stop_reason="completed", turn_id="t_off")
+
+    ctrl = VoiceController(
+        types.SimpleNamespace(run=run_cmd, cancel_current=lambda: True),  # type: ignore[arg-type]
+        VoiceConfig(direct_audio_input=True, multimodal_screen_context=True),
+        _FakeMic(),
+        _FakeVAD(),
+        _FakeRecognizer(["Artemis ekrana bak"]),
+        _FakeTTS(),
+        _FakeSink(),
+        run_command=run_cmd,
+        profile_getter=lambda: "work",
+        capture_screen=probe_capture,
+    )
+    try:
+        await ctrl._handle_utterance(AudioSegment(PCM, 0.0, 1.0))
+        await ctrl._settle_active()
+        assert len(calls) == 1
+        assert calls[0][2] == PNG
+        assert len(seen_tids) == 1
+        assert seen_tids[0] != main_tid
+    finally:
+        await ctrl.close()

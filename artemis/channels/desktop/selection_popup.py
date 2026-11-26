@@ -11,6 +11,7 @@ from __future__ import annotations
 import contextlib
 import ctypes
 import sys
+import threading
 from collections.abc import Callable
 from ctypes import wintypes
 from pathlib import Path
@@ -109,6 +110,8 @@ class SelectionBadge(QWidget):
         self._pixmap = QIcon(str(_ICON)).pixmap(18, 18)
         self._hovered = False
         self._candidate: SelectionCandidate | None = None
+        self._bounds_lock = threading.Lock()
+        self._global_rect: tuple[int, int, int, int] | None = None
         self._hide_timer = QTimer(self)
         self._hide_timer.setSingleShot(True)
         self._hide_timer.setInterval(_BADGE_HIDE_MS)
@@ -126,12 +129,45 @@ class SelectionBadge(QWidget):
         self.raise_()
         self._hide_timer.start()
 
+    def _sync_global_rect(self) -> None:
+        if self.isVisible():
+            rect = self.frameGeometry()
+            bounds: tuple[int, int, int, int] | None = (
+                rect.x(),
+                rect.y(),
+                rect.width(),
+                rect.height(),
+            )
+        else:
+            bounds = None
+        with self._bounds_lock:
+            self._global_rect = bounds
+
     def contains_global(self, x: int, y: int) -> bool:
-        return self.isVisible() and self.frameGeometry().contains(x, y)
+        # Fare izleyici iş parçacığından çağrılır; Qt widget'ına doğrudan erişmez.
+        with self._bounds_lock:
+            rect = self._global_rect
+        if rect is None:
+            return False
+        rx, ry, rw, rh = rect
+        return rx <= x < rx + rw and ry <= y < ry + rh
 
     def showEvent(self, event: Any) -> None:
         super().showEvent(event)
         _apply_win32_noactivate(self)
+        self._sync_global_rect()
+
+    def hideEvent(self, event: Any) -> None:
+        super().hideEvent(event)
+        self._sync_global_rect()
+
+    def moveEvent(self, event: Any) -> None:
+        super().moveEvent(event)
+        self._sync_global_rect()
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._sync_global_rect()
 
     def enterEvent(self, event: Any) -> None:
         self._hovered = True
@@ -192,6 +228,8 @@ class SelectionPopup(QWidget):
         self._palette = themes.THEMES[themes.DEFAULT_THEME]
         self._mode: Literal["radial", "card"] = "card"
         self._anchor: QPoint | None = None
+        self._bounds_lock = threading.Lock()
+        self._global_rect: tuple[int, int, int, int] | None = None
         self.setAccessibleName(t("Artemis seçili metin eylemleri"))
 
         self.header_icon = QLabel(self)
@@ -391,8 +429,44 @@ class SelectionPopup(QWidget):
         )
         self.update()
 
+    def _sync_global_rect(self) -> None:
+        if self.isVisible():
+            rect = self.frameGeometry()
+            bounds: tuple[int, int, int, int] | None = (
+                rect.x(),
+                rect.y(),
+                rect.width(),
+                rect.height(),
+            )
+        else:
+            bounds = None
+        with self._bounds_lock:
+            self._global_rect = bounds
+
     def contains_global(self, x: int, y: int) -> bool:
-        return self.isVisible() and self.frameGeometry().contains(x, y)
+        # Fare izleyici iş parçacığından çağrılır; Qt widget'ına doğrudan erişmez.
+        with self._bounds_lock:
+            rect = self._global_rect
+        if rect is None:
+            return False
+        rx, ry, rw, rh = rect
+        return rx <= x < rx + rw and ry <= y < ry + rh
+
+    def showEvent(self, event: Any) -> None:
+        super().showEvent(event)
+        self._sync_global_rect()
+
+    def hideEvent(self, event: Any) -> None:
+        super().hideEvent(event)
+        self._sync_global_rect()
+
+    def moveEvent(self, event: Any) -> None:
+        super().moveEvent(event)
+        self._sync_global_rect()
+
+    def resizeEvent(self, event: Any) -> None:
+        super().resizeEvent(event)
+        self._sync_global_rect()
 
     def _copy(self) -> None:
         QGuiApplication.clipboard().setText(self.result.toPlainText())

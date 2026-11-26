@@ -46,6 +46,21 @@ SLEEP_GAP_SECONDS = 120.0
 _UNSET = object()
 
 
+def _unbiased_monotonic() -> float:
+    """Uyku süresini dışlayan monotonik saniye sayacı (Windows QueryUnbiasedInterruptTime)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            unbiased = ctypes.c_uint64(0)
+            if kernel32.QueryUnbiasedInterruptTime(ctypes.byref(unbiased)):
+                return float(unbiased.value) / 10_000_000.0
+        except (OSError, AttributeError, ctypes.ArgumentError):
+            pass
+    return time.monotonic()
+
+
 @dataclass(frozen=True)
 class TriggerMatch:
     """Eşleşen olay tetikleyicisi bildirimi."""
@@ -173,7 +188,7 @@ class ResumeDetector:
     ) -> None:
         self._signal = threading.Event()
         self._resume_probe = resume_probe
-        self._mono = monotonic_clock or time.monotonic
+        self._mono = monotonic_clock or _unbiased_monotonic
         self._enable_gap_check = enable_gap_check
         self._sleep_gap = sleep_gap_seconds
         self._last_wall: datetime | None = None
@@ -191,6 +206,8 @@ class ResumeDetector:
             resumed = True
         if self._resume_probe is not None and self._resume_probe():
             resumed = True
+        # TODO(windows-verify #48): Windows uykusu sonrası QueryUnbiasedInterruptTime
+        # davranışını gerçek cihazda doğrula.
         current_mono = self._mono()
         if self._enable_gap_check and self._last_wall is not None and self._last_mono is not None:
             wall_delta = (now - self._last_wall).total_seconds()
@@ -426,6 +443,8 @@ class EventTriggerTracker:
             return []
         if event_kind == "routine_completed" and not routine_success:
             return []
+        # TODO(windows-verify #48): rutin zinciri tetiklendiğinde ön planda Artemis penceresi
+        # olabileceğinden active_app eşleşmesini Windows'ta doğrula.
         active_app = self._active_app_getter() if self._tick_active_app is _UNSET else (
             self._tick_active_app if isinstance(self._tick_active_app, str) else None
         )

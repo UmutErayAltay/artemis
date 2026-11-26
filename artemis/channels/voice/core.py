@@ -617,12 +617,22 @@ class VoiceController:
             self._active = asyncio.create_task(self._acknowledge_wake(uid=uid, gid=gid))
         else:
             self._barge_cancelled = False
-            image_png = maybe_capture_voice_screen(
-                self.config,
-                is_private=self._is_private_profile(),
-                has_audio=audio_wav is not None,
-                capture_screen=self._capture_screen,
-            )
+            image_png: bytes | None = None
+            if (
+                audio_wav is not None
+                and self._capture_screen is not None
+                and not self._is_private_profile()
+                and self.config.multimodal_screen_context
+                and self.config.direct_audio_input
+            ):
+                # Ekran yakalama GDI/BitBlt içerdiğinden asyncio olay döngüsünü bloklamaz.
+                image_png = await asyncio.to_thread(
+                    maybe_capture_voice_screen,
+                    self.config,
+                    is_private=False,
+                    has_audio=True,
+                    capture_screen=self._capture_screen,
+                )
             self._active = asyncio.create_task(
                 self._run_and_speak(
                     command, uid=uid, gid=gid, audio_wav=audio_wav, image_png=image_png

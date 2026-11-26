@@ -701,3 +701,10 @@ async def test_macro_save_and_playback_dispatch_every_step_through_safety_gate(
         "computer_use",
         "open_url",
     ]
+
+
+def test_removed_window_action_event_kind_is_rejected() -> None:
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        ObservedEvent(kind="window_action", value="focus")  # type: ignore[arg-type]

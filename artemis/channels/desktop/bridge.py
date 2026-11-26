@@ -53,7 +53,7 @@ from artemis.config.settings import DictationConfig
 from artemis.i18n import t
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.scheduler import ProactiveScheduler
-from artemis.proactive.store import ProactiveStore
+from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 from artemis.safety.gate import remember_site, trusted_sites_path
 from artemis.tools.base import ToolResult
 from artemis.tools.code_agent_jobs import ACTIVE, CodeAgentJobs
@@ -370,6 +370,7 @@ class DesktopBridge:
         self._proactive_task: asyncio.Task[None] | None = None
         self._proactive_telegram: TelegramClient | None = None
         self._proactive_scheduler: ProactiveScheduler | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._ready = threading.Event()
         self._stopped = threading.Event()
         self._thread = threading.Thread(
@@ -864,10 +865,31 @@ class DesktopBridge:
             with suppress(RuntimeError):
                 loop.call_soon_threadsafe(scheduler.notify_system_resume)
 
+    async def _run_routine_chain(
+        self, scheduler: ProactiveScheduler, routine_name: str, completed: bool
+    ) -> None:
+        try:
+            await scheduler.notify_routine_completed(routine_name, completed)
+        except asyncio.CancelledError:
+            raise
+        except (OSError, RuntimeError, ValueError, ProactiveStoreError) as error:
+            if self._runtime is not None:
+                with suppress(OSError):
+                    self._runtime.audit.emit(
+                        "proactive_chain_error",
+                        routine=routine_name,
+                        error_type=type(error).__name__,
+                    )
+
     def _notify_routine_chain(self, routine_name: str, completed: bool) -> None:
         scheduler = self._proactive_scheduler
         if scheduler is not None and not self._shutdown:
-            asyncio.create_task(scheduler.notify_routine_completed(routine_name, completed))
+            # Görev referansını sakla ki çöp toplayıcı bitmeden toplamasın.
+            task = asyncio.create_task(
+                self._run_routine_chain(scheduler, routine_name, completed)
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
     def _proactive_panel(self, title: str, body: str) -> bool:
         if self._shutdown:
@@ -907,6 +929,9 @@ class DesktopBridge:
         if task is not None and not task.done():
             # Yürüyen brifing iptal edilir; talep edilmiş oluşum sonradan belirsiz raporlanır.
             task.cancel()
+        for bg_task in list(self._background_tasks):
+            if not bg_task.done():
+                bg_task.cancel()
 
     def _close_proactive_client(self) -> None:
         client, self._proactive_telegram = self._proactive_telegram, None

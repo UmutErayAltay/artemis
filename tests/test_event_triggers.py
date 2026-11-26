@@ -1032,3 +1032,19 @@ def test_cached_calendar_provider_honors_ttl_on_initial_fetch_error(
     assert provider(NOW + timedelta(minutes=5), NOW + timedelta(minutes=20)) == []
     assert len(calls) == 2
 
+
+def test_resume_detector_uses_unbiased_clock_and_detects_sleep_gap() -> None:
+    from artemis.proactive.event_triggers import ResumeDetector
+
+    fake_unbiased = [100.0]
+    detector = ResumeDetector(monotonic_clock=lambda: fake_unbiased[0], sleep_gap_seconds=120.0)
+    assert detector.poll(NOW) is False
+
+    # Normal çalışma: duvar saati +30s, kesintisiz sayaç +30s -> uyku yok.
+    fake_unbiased[0] += 30.0
+    assert detector.poll(NOW + timedelta(seconds=30)) is False
+
+    # Uyku: duvar saati +600s, uyku hariç sayaç +2s -> 598s fark >= 120s -> uyandı.
+    fake_unbiased[0] += 2.0
+    assert detector.poll(NOW + timedelta(seconds=630)) is True
+

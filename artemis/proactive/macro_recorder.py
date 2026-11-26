@@ -46,7 +46,7 @@ from artemis.proactive.routines import (
 from artemis.tools.app_resolver import resolve_application
 from artemis.tools.registry import ToolRegistry
 
-MacroEventKind = Literal["app_focus", "click", "text", "url", "window_action"]
+MacroEventKind = Literal["app_focus", "click", "text", "url"]
 
 _REDACTED = "[GİZLENDİ]"
 _VK_LBUTTON = 0x01
@@ -893,14 +893,6 @@ def _step_for_event(
         else:
             goal = f"{app_part}şu metni yaz: {event.value}"
         return RoutineStep(tool="computer_use", arguments={"goal": goal[:_MAX_GOAL_LEN]})
-
-    if event.kind == "window_action":
-        if registry.get("window_control") is None:
-            return None
-        return RoutineStep(
-            tool="window_control",
-            arguments={"window_id": 1, "action": event.value or "focus"},
-        )
     return None
 
 

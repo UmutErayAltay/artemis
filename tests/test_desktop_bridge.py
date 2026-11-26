@@ -1279,3 +1279,33 @@ def test_submit_tainted_requires_approval_for_side_effect_without_external_read(
         bridge.shutdown()
         assert bridge._stopped.wait(2)
 
+
+def test_notify_routine_chain_tracks_background_task_reference(tmp_path: Path) -> None:
+    import asyncio
+    import threading
+
+    bridge = _fixture(tmp_path, [])
+    try:
+        entered = threading.Event()
+        release = threading.Event()
+
+        class _FakeScheduler:
+            async def notify_routine_completed(self, name: str, completed: bool) -> None:
+                assert name == "sabah" and completed is True
+                entered.set()
+                while not release.is_set():
+                    await asyncio.sleep(0.005)
+
+        bridge._proactive_scheduler = _FakeScheduler()  # type: ignore[assignment]
+        assert bridge._post(bridge._notify_routine_chain, "sabah", True)
+        assert entered.wait(2.0)
+        assert len(bridge._background_tasks) == 1
+        release.set()
+        deadline = time.monotonic() + 2.0
+        while bridge._background_tasks and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert bridge._background_tasks == set()
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+

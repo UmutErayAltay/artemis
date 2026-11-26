@@ -452,6 +452,8 @@ class ComputerSession:
                         reason_text=outcome, limit=limit, memory=memory,
                         elements_block=elements_block,
                     )
+                    if verdict is not None and verdict.decision == "ask_user" and verdict.question:
+                        return self._result("ask_user", mask_screen_secrets(verdict.question))
                     if (
                         verdict is not None
                         and verdict.decision == "try"
@@ -467,6 +469,8 @@ class ComputerSession:
                     reason_text=action.observed or "Son adımlarda ekran ilerlemedi.",
                     limit=limit, memory=memory, elements_block=elements_block,
                 )
+                if verdict is not None and verdict.decision == "ask_user" and verdict.question:
+                    return self._result("ask_user", mask_screen_secrets(verdict.question))
                 if verdict is not None and verdict.decision == "try" and observation == "hybrid":
                     fallback_image = True
             await self._sleep(self._config.step_delay_seconds)
@@ -502,10 +506,10 @@ class ComputerSession:
             or self._clock() >= limit
         ):
             return None
-        self._strategist_calls += 1
         captured = await self._capture(limit, with_images=True, emit_frame=False)
         if isinstance(captured, SessionResult):
             return None
+        self._strategist_calls += 1
         screens_context = await self._read_window_context()
         verdict = await consult_strategist_decision(
             goal=goal,
@@ -1059,6 +1063,9 @@ class ComputerSession:
             return self._result("error", f"Eylem uygulanamadı: {error}")
         issue_key = _signature(action, point) or (action.type,)
         if outcome != "sent":
+            if outcome == "unsupported":
+                self._os_issues[issue_key] = f"{action.type} eylemi arka uçta desteklenmiyor"
+                return "Bu arka uç hover eylemini desteklemiyor; farklı bir eylem dene."
             self._os_issues[issue_key] = (
                 f"{action.type} girdisi gönderilemedi ({outcome})"
                 + (f", {typed} karakter yazıldı" if typed else "")
@@ -1260,8 +1267,9 @@ class ComputerSession:
                 backend.click(point[0], point[1], action.button, action.double)
             elif action.type == "hover" and point:
                 hover_fn = getattr(backend, "hover", None)
-                if callable(hover_fn):
-                    hover_fn(point[0], point[1])
+                if not callable(hover_fn):
+                    return "unsupported", 0
+                hover_fn(point[0], point[1])
             elif action.type == "scroll" and point:
                 backend.scroll(point[0], point[1], action.dy or 0)
             elif action.type == "type":

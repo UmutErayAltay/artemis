@@ -167,3 +167,62 @@ def test_radial_popup_has_transparent_background_and_no_close_focus_with_global_
         app.setStyleSheet(prev_sheet)
 
 
+def test_contains_global_is_thread_safe_without_touching_qt_widgets(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import threading
+
+    pytest.importorskip("PySide6")
+    from PySide6.QtCore import QPoint
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop.selection_mouse import SelectionCandidate
+    from artemis.channels.desktop.selection_popup import SelectionBadge, SelectionPopup
+
+    app = QApplication.instance() or QApplication([])
+    badge = SelectionBadge(None, on_activate=lambda _c: None)
+    popup = SelectionPopup(None, on_action=lambda _a: None, on_write=lambda: None)
+    try:
+        badge.show_for(SelectionCandidate(x=320, y=240, hwnd=77, pre_text="Selam"))
+        popup.show_ready("4 karakter seçildi.", anchor=QPoint(400, 300))
+        app.processEvents()
+
+        b_center = badge.frameGeometry().center()
+        p_center = popup.frameGeometry().center()
+
+        # Arka plan iş parçacığından contains_global çağrılınca isVisible/frameGeometry
+        # çağrılmamalı (çağrılırsa AssertionError ile patlat).
+        def forbid_qt(*_a: Any, **_k: Any) -> Any:
+            raise AssertionError("Qt widget yöntemi başka iş parçacığından çağrıldı")
+
+        monkeypatch.setattr(badge, "isVisible", forbid_qt)
+        monkeypatch.setattr(badge, "frameGeometry", forbid_qt)
+        monkeypatch.setattr(popup, "isVisible", forbid_qt)
+        monkeypatch.setattr(popup, "frameGeometry", forbid_qt)
+
+        results: list[bool] = []
+        errors: list[BaseException] = []
+
+        def worker() -> None:
+            try:
+                results.append(badge.contains_global(b_center.x(), b_center.y()))
+                results.append(badge.contains_global(-9999, -9999))
+                results.append(popup.contains_global(p_center.x(), p_center.y()))
+                results.append(popup.contains_global(-9999, -9999))
+            except BaseException as exc:
+                errors.append(exc)
+
+        thread = threading.Thread(target=worker)
+        thread.start()
+        thread.join(2.0)
+        assert not errors
+        assert results == [True, False, True, False]
+    finally:
+        monkeypatch.undo()
+        badge.close()
+        badge.deleteLater()
+        popup.close()
+        popup.deleteLater()
+        app.processEvents()
+
+

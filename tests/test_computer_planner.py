@@ -341,3 +341,174 @@ async def test_hover_blocks_forbidden_processes_but_not_false_destructive() -> N
     ).run("cmd bak", "t5", deadline=None)
     assert res_blocked.reason == "blocked"
     assert not blocked_backend.calls
+
+
+async def test_unsupported_hover_is_not_reported_as_sent() -> None:
+    class _NoHoverBackend:
+        def monitors(self) -> list[tuple[int, int, int, int]]:
+            return [(0, 0, 1280, 720)]
+
+        def capture(self, left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
+            return bytes(max(width, 1) * max(height, 1) * 4), width, height
+
+        def foreground_process(self) -> tuple[str, int]:
+            return (r"C:\Apps\app.exe", 500)
+
+        def foreground_window(self) -> tuple[int, tuple[int, int, int, int]]:
+            return (77, (0, 0, 1280, 720))
+
+        def window_rect(self, hwnd: int) -> tuple[int, int, int, int]:
+            return (0, 0, 1280, 720)
+
+        def process_at(self, x: int, y: int) -> tuple[str, int]:
+            return (r"C:\Apps\app.exe", 500)
+
+        def window_at(self, x: int, y: int) -> int:
+            return 77
+
+        def click(self, x: int, y: int, button: str = "left", double: bool = False) -> None:
+            pass
+
+        def scroll(self, x: int, y: int, notches: int) -> None:
+            pass
+
+        def type_text(self, text: str, should_continue: Callable[[], bool]) -> int:
+            return len(text)
+
+        def press_keys(self, keys: tuple[str, ...]) -> None:
+            pass
+
+        def focused_value_contains(self, expected: str, timeout: float) -> bool | None:
+            return None
+
+        def focused_name(self, timeout: float) -> str | None:
+            return None
+
+        def ui_elements(self, hwnd: int) -> list[UiElement]:
+            return []
+
+    audit = Audit()
+    clock = Clock()
+    res = await ComputerSession(
+        provider=_ScriptedModel(
+            act(type="hover", x=50, y=50, reason="Üzerine gel"),
+            act(type="hover", x=50, y=50, reason="Üzerine gel"),
+            act(type="hover", x=50, y=50, reason="Üzerine gel"),
+        ),
+        backend=_NoHoverBackend(),  # type: ignore[arg-type]
+        approve=lambda *_: True,
+        audit=audit,
+        config=ComputerUseConfig(observation="screen", enabled=True, step_delay_seconds=0),
+        own_pid=OWN_PID,
+        stop=threading.Event(),
+        on_step=lambda *_: None,
+        provider_timeout=10.0,
+        clock=clock,
+        sleep=clock.sleep,
+    ).run("menüyü aç", "t_nohover", deadline=None)
+    assert res.reason == "blocked"
+    assert res.steps == 0
+    assert audit.named("computer_step") == []
+    assert any("hover" in str(ev.get("reason", "")) for ev in audit.named("computer_blocked"))
+
+
+async def test_strategist_ask_user_honored_in_blocked_repeat_stalled_and_capture_fail() -> None:
+    from artemis.computer.session import SessionMemory, SessionResult
+    # 1) Engelli pencerede stratejist ask_user kararı oturumu hemen ask_user ile bitirir.
+    blocked_backend = _PlannerBackend(monitor_rects=[(0, 0, 1280, 720)])
+    blocked_backend.at = (r"C:\Windows\System32\cmd.exe", 999)
+    clock = Clock()
+    res_blocked = await ComputerSession(
+        provider=_ScriptedModel(act(type="click", x=50, y=50, reason="tıkla")),
+        planner=_ScriptedModel(
+            json.dumps(
+                {
+                    "decision": "ask_user",
+                    "hypothesis": "Terminal korumalı",
+                    "question": "Korumalı pencere yerine başka yer açayım mı?",
+                }
+            )
+        ),
+        backend=blocked_backend,
+        approve=lambda *_: True,
+        audit=Audit(),
+        config=ComputerUseConfig(observation="screen", enabled=True, step_delay_seconds=0),
+        own_pid=OWN_PID,
+        stop=threading.Event(),
+        on_step=lambda *_: None,
+        provider_timeout=10.0,
+        clock=clock,
+        sleep=clock.sleep,
+    ).run("işlem yap", "t_sb", deadline=None)
+    assert res_blocked.reason == "ask_user"
+    assert "Korumalı pencere yerine başka yer açayım mı?" in res_blocked.summary
+
+    # 2) Durgun (stalled) adımda stratejist ask_user kararı doğrudan döner.
+    ok_backend = _PlannerBackend(monitor_rects=[(0, 0, 1280, 720)])
+    res_stalled = await ComputerSession(
+        provider=_ScriptedModel(
+            act(type="wait", seconds=0.5, observed="ekran değişmedi", reason="bekle"),
+            act(type="wait", seconds=0.5, observed="ekran değişmedi", reason="tekrar bekle"),
+        ),
+        planner=_ScriptedModel(
+            json.dumps(
+                {
+                    "decision": "ask_user",
+                    "hypothesis": "Sayfa yüklenmedi",
+                    "question": "Bağlantıyı kontrol eder misin?",
+                }
+            )
+        ),
+        backend=ok_backend,
+        approve=lambda *_: True,
+        audit=Audit(),
+        config=ComputerUseConfig(observation="screen", enabled=True, step_delay_seconds=0),
+        own_pid=OWN_PID,
+        stop=threading.Event(),
+        on_step=lambda *_: None,
+        provider_timeout=10.0,
+        clock=clock,
+        sleep=clock.sleep,
+    ).run("ilerle", "t_ss", deadline=None)
+    assert res_stalled.reason == "ask_user"
+    assert "Bağlantıyı kontrol eder misin?" in res_stalled.summary
+
+    # 3) _consult_strategist içinde ekran yakalama başarısız olursa stratejist hakkı harcanmaz.
+    class _FailOnSecondCaptureBackend(_PlannerBackend):
+        def __init__(self) -> None:
+            super().__init__(monitor_rects=[(0, 0, 1280, 720)])
+            self.cap_count = 0
+
+        def capture(self, left: int, top: int, width: int, height: int) -> tuple[bytes, int, int]:
+            self.cap_count += 1
+            if self.cap_count >= 2:
+                raise OSError("ekran yok")
+            return super().capture(left, top, width, height)
+
+    sess = ComputerSession(
+        provider=_ScriptedModel(),
+        planner=_ScriptedModel(),
+        backend=_FailOnSecondCaptureBackend(),
+        approve=lambda *_: True,
+        audit=Audit(),
+        config=ComputerUseConfig(observation="screen", enabled=True, step_delay_seconds=0),
+        own_pid=OWN_PID,
+        stop=threading.Event(),
+        on_step=lambda *_: None,
+        provider_timeout=10.0,
+        clock=clock,
+        sleep=clock.sleep,
+    )
+    first_cap = await sess._capture(1000.0, with_images=True)
+    assert not isinstance(first_cap, SessionResult)
+    verdict = await sess._consult_strategist(
+        goal="x",
+        turn_id="t_cap",
+        trigger="stalled",
+        reason_text="takıldı",
+        limit=1000.0,
+        memory=SessionMemory(),
+        elements_block="",
+    )
+    assert verdict is None
+    assert sess._strategist_calls == 0
