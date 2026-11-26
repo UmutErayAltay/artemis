@@ -46,6 +46,7 @@
   "Kısayolda en az bir değiştirici olmalı: {text}": "Hotkey must include at least one modifier: {text}",
   "Mevcut giriş ({active})": "Current input ({active})",
   "Mikrofon — ": "Microphone — ",
+  "Mikrofonlar taranıyor…": "Scanning microphones…",
   "Onay bekleme": "Waiting for approval",
   "SVG boş çizildi: görünür bir şey yok.": "SVG rendered empty: nothing visible.",
   "SVG çizilemedi (geçersiz).": "Could not render SVG (invalid).",
