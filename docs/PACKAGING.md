@@ -26,7 +26,7 @@ Betik sürümü `pyproject.toml` dosyasından okur, `.venv` içine `pyinstaller=
 
 ## İmzasız kurucu uyarısı
 
-Kurucu şu aşamada kod imzalama sertifikasıyla imzalanmamıştır. Windows SmartScreen "Bilinmeyen yayıncı" uyarısı gösterebilir.
+Kurucu şu aşamada kod imzalama sertifikasıyla imzalanmamıştır (bkz. [kod imzalama politikası](CODE_SIGNING_POLICY.md)). Windows SmartScreen "Bilinmeyen yayıncı" uyarısı gösterebilir.
 
 ## `-m` öykünmesi neden var?
 

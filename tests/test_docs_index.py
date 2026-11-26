@@ -57,3 +57,14 @@ def test_relative_links_resolve():
             if not (ROOT / target).exists():
                 missing.append(f"{name} -> {target}")
     assert not missing, f"Relative links to missing files: {missing}"
+
+
+def test_markdown_relative_links_resolve():
+    files = [*ROOT.glob("README*.md"), *(ROOT / "docs").glob("*.md")]
+    broken = []
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        for target in relative_link_targets(text):
+            if not (path.parent / target).exists():
+                broken.append(f"{path.relative_to(ROOT)} -> {target}")
+    assert not broken, f"Broken relative markdown links: {broken}"

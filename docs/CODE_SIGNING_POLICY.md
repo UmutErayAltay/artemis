@@ -23,3 +23,7 @@ All SignPath signing roles for the `UmutErayAltay/artemis` repository are held b
 ## Privacy
 
 Artemis is a local-first desktop assistant and does not send telemetry or user data unless explicitly configured. For full details on network connections, optional cloud integrations, and running completely offline, see the [Privacy Policy](PRIVACY.md).
+
+## Multi-factor authentication
+
+All team members use multi-factor authentication (MFA) for their GitHub and SignPath accounts.

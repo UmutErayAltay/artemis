@@ -303,8 +303,7 @@ Son değişiklik ve doğrulamalar [konuşma raporunda](docs/SPEECH_ACCURACY_REPO
 ## Windows paketi ve ilk açılış
 
 Hazır kurucu [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasındadır
-(`Artemis-Setup-<sürüm>.exe`; kurulumsuz denemek için `Artemis-<sürüm>-windows.zip`, yani
-`dist\Artemis` klasörünün sıkıştırılmış hâli). Kendin
+(`Artemis-Setup-<sürüm>.exe` ve sağlama toplamı için `SHA256SUMS.txt`). Kendin
 derlemek için (PyInstaller + Inno Setup, [ADR 0075](docs/adr/0075-urunlestirme-plani.md),
 ayrıntı [docs/PACKAGING.md](docs/PACKAGING.md)):
 
@@ -315,7 +314,10 @@ powershell -ExecutionPolicy Bypass -File scripts\build_windows.ps1
 
 Kurucu yönetici izni istemez (`%LOCALAPPDATA%\Programs\Artemis`). Ayarlar ve hafıza kullanıcı
 başına `%APPDATA%\Artemis` altında durur; ilk açılışta örnek ayar kopyalanır, kaldırma kullanıcı
-verisine dokunmaz. Kurucu henüz imzasız olduğu için Windows SmartScreen uyarısı görülebilir.
+verisine dokunmaz. Kurucu henüz imzasız olduğu için Windows SmartScreen uyarısı görülebilir
+(SignPath başvurusu beklemede).
+
+[Kod imzalama politikası](docs/CODE_SIGNING_POLICY.md) · [Gizlilik politikası](docs/PRIVACY.md)
 
 İlk açılışta **"Artemis'i bir beyne bağla"** sihirbazı dört kart sunar: OpenRouter ile
 anahtar görmeden giriş (OAuth PKCE; kota ve ücret kullanıcının kendi hesabında), Google hesabıyla
