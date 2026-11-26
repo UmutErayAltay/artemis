@@ -417,6 +417,9 @@ class WindowsClickEdgeTracker:
             return items
 
     def _run(self) -> None:
+        # Doğrudan platform denetimi: mypy Linux'ta `ctypes.WinDLL`'i yalnız böyle kabul eder.
+        if sys.platform != "win32":
+            return
         user32 = ctypes.WinDLL("user32", use_last_error=True)
         point = wintypes.POINT()
         while not self._stop_event.wait(self._poll_interval):
