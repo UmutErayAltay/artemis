@@ -72,65 +72,26 @@ from artemis.computer.planner import (
     StepRecord as StepRecord,
 )
 from artemis.computer.session_types import (
-    _DEADLINE_MARGIN as _DEADLINE_MARGIN,
+    _DEADLINE_MARGIN,
+    _MAX_BLOCKS,
+    _MIN_INTERACTIVE_UIA,
+    _NO_COORDS_IN_UIA,
+    _POINTER_ACTIONS,
+    _REFOCUS_POLL_SECONDS,
+    _REFOCUS_SECONDS,
+    _REPEAT_BLOCK,
+    _RETRY_PROMPT,
+    ComputerBackend,
+    Reason,
+    _Audit,
+    _Layout,
+    _Screen,
+    _signature,
+    _Stale,
 )
-from artemis.computer.session_types import (
-    _MAX_BLOCKS as _MAX_BLOCKS,
-)
-from artemis.computer.session_types import (
-    _MIN_INTERACTIVE_UIA as _MIN_INTERACTIVE_UIA,
-)
-from artemis.computer.session_types import (
-    _NO_COORDS_IN_UIA as _NO_COORDS_IN_UIA,
-)
-from artemis.computer.session_types import (
-    _POINTER_ACTIONS as _POINTER_ACTIONS,
-)
-from artemis.computer.session_types import (
-    _REFOCUS_POLL_SECONDS as _REFOCUS_POLL_SECONDS,
-)
-from artemis.computer.session_types import (
-    _REFOCUS_SECONDS as _REFOCUS_SECONDS,
-)
-from artemis.computer.session_types import (
-    _REPEAT_BLOCK as _REPEAT_BLOCK,
-)
-from artemis.computer.session_types import (
-    _REPEATABLE_KEYS as _REPEATABLE_KEYS,
-)
-from artemis.computer.session_types import (
-    _RETRY_PROMPT as _RETRY_PROMPT,
-)
-from artemis.computer.session_types import (
-    SCREEN_LOCK as SCREEN_LOCK,
-)
-from artemis.computer.session_types import (
-    ComputerBackend as ComputerBackend,
-)
-from artemis.computer.session_types import (
-    Reason as Reason,
-)
-from artemis.computer.session_types import (
-    ScreenBusyError as ScreenBusyError,
-)
-from artemis.computer.session_types import (
-    SessionResult as SessionResult,
-)
-from artemis.computer.session_types import (
-    _Audit as _Audit,
-)
-from artemis.computer.session_types import (
-    _Layout as _Layout,
-)
-from artemis.computer.session_types import (
-    _Screen as _Screen,
-)
-from artemis.computer.session_types import (
-    _signature as _signature,
-)
-from artemis.computer.session_types import (
-    _Stale as _Stale,
-)
+from artemis.computer.session_types import SCREEN_LOCK as SCREEN_LOCK
+from artemis.computer.session_types import ScreenBusyError as ScreenBusyError
+from artemis.computer.session_types import SessionResult as SessionResult
 from artemis.config.settings import ComputerUseConfig
 from artemis.tools.base import run_blocking
 
