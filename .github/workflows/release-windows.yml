@@ -17,6 +17,7 @@ jobs:
       PYTHONUTF8: '1'
     outputs:
       version: ${{ steps.version.outputs.version }}
+      signed: ${{ steps.signing.outputs.signpath }}
     steps:
       - uses: actions/checkout@v4
 
@@ -194,7 +195,7 @@ jobs:
             release-assets/SHA256SUMS.txt
           generate_release_notes: true
           body: |
-            Kurucu henüz imzasızdır (SignPath başvurusu beklemede; SmartScreen uyarabilir).
+            ${{ needs.build.outputs.signed == 'true' && 'Kurucu SignPath ile imzalanmıştır (certificate by SignPath Foundation).' || 'Kurucu henüz imzasızdır (SignPath başvurusu beklemede; SmartScreen uyarabilir).' }}
 
             Doğrulama (PowerShell): `Get-FileHash .\Artemis-Setup-${{ needs.build.outputs.version }}.exe -Algorithm SHA256` çıktısını `SHA256SUMS.txt` ile karşılaştırın.
 

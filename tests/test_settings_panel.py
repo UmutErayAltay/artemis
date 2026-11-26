@@ -1366,7 +1366,7 @@ def test_finish_inventory_stops_and_detaches_running_stt_download(
     panel.finish_inventory()
     assert not cooperative.isRunning()
 
-    monkeypatch.setattr(module, "_SHUTDOWN_WAIT_MS", 50)
+    monkeypatch.setattr("artemis.channels.desktop.thread_shutdown.DEFAULT_WAIT_MS", 50)
     stuck = _StuckStt(panel)
     stuck.finished.connect(panel._stt_download_finished)
     panel.stt_download_thread = stuck  # type: ignore[assignment]

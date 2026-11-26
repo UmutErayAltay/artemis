@@ -19,9 +19,11 @@ MAX_FILE_NAME_CHARS = 120
 MAX_LISTED_FILES = 3
 # Yarım inen dosyaların geçici uzantıları: bitmeden bildirilmez.
 TEMP_SUFFIXES = (".crdownload", ".part", ".tmp", ".partial", ".download", ".opdownload")
-# Dış kaynaklı (takvim/klasör) yer tutucular: öneri şablonunda kullanıldığında "Yaz" ile
-# başlatılan tur dış içerikle lekeli sayılır.
-EXTERNAL_SUGGEST_PLACEHOLDERS = ("{title}", "{location}", "{file}", "{path}", "{app}")
+# Öneri şablonunda yalnız bu yer tutucular temizdir (kullanıcının koyduğu ad/kaynak, hesaplanan
+# dakika). Başka her `{...}` (title, location, file, path, app ve gelecekte eklenecekler) dış
+# içerik sayılır ve "Yaz" ile başlatılan turu lekeler: el yazımı kara liste unutulabilir.
+CLEAN_SUGGEST_PLACEHOLDERS = frozenset({"{name}", "{source}", "{minutes}"})
+_PLACEHOLDER = re.compile(r"\{[^{}]*\}")
 # Denetim, yön (bidi) ve görünmez karakterler: dosya adı bildirimi başka bir şey gibi
 # gösteremesin. Kaçışla yazılır ki kaynakta görünmez karakter kalmasın.
 _CONTROL = re.compile(
@@ -70,7 +72,9 @@ def fill(template: str, **values: str) -> str:
 
 def suggest_uses_external(template: str | None) -> bool:
     """Öneri şablonu dış kaynaklı yer tutucu içeriyorsa True döner."""
-    return bool(template and any(p in template for p in EXTERNAL_SUGGEST_PLACEHOLDERS))
+    return bool(template) and any(
+        p not in CLEAN_SUGGEST_PLACEHOLDERS for p in _PLACEHOLDER.findall(template or "")
+    )
 
 
 def build_notice(

@@ -237,13 +237,16 @@ def test_deleting_widget_with_running_model_thread_does_not_abort(tmp_path: Path
         download_fn=lambda *_a: None,  # type: ignore[arg-type]
         clean_fn=lambda *_a: None,  # type: ignore[arg-type]
     )
-    assert widget.trigger_refresh(quiet=True)
-    thread = widget._thread
-    assert thread is not None and thread.isRunning()
-    # Panel close olmadan yıkılır (ebeveyn pencere silinmesi gibi); eskiden burada
-    # "QThread: Destroyed while thread is still running" ile süreç düşüyordu.
-    widget.deleteLater()
-    QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
-    release.set()
-    assert thread.wait(3000)
+    thread = None
+    try:
+        assert widget.trigger_refresh(quiet=True)
+        thread = widget._thread
+        assert thread is not None and thread.isRunning()
+        # Panel close olmadan yıkılır (ebeveyn pencere silinmesi gibi); eskiden burada
+        # "QThread: Destroyed while thread is still running" ile süreç düşüyordu.
+        widget.deleteLater()
+        QCoreApplication.sendPostedEvents(None, QEvent.Type.DeferredDelete)
+    finally:
+        release.set()
+    assert thread is not None and thread.wait(3000)
     app.processEvents()

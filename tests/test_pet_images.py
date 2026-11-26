@@ -16,6 +16,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from _wait import wait_qt
 from pydantic import ValidationError
 from PySide6.QtCore import QBuffer, QIODevice, Qt
 from PySide6.QtGui import QColor, QImage, QPainter
@@ -570,12 +571,8 @@ def section(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 
 
 def wait_image(creator: panel_mod.CreatorPanel, qapp: QApplication) -> None:
-    for _ in range(1500):
-        qapp.processEvents()
-        if creator._image_call is None:
-            return
-        creator._image_call.wait(20)
-    raise AssertionError("resim işi bitmedi")
+    if not wait_qt(lambda: creator._image_call is None, 30.0):
+        raise AssertionError("resim işi bitmedi")
 
 
 def test_ui_image_flow(section: tuple[PetSection, UiFake, Settings], qapp: QApplication) -> None:

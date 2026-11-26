@@ -214,7 +214,7 @@ def test_voice_preview_finish_inventory_detaches_running_thread(
         async def close(self) -> None:
             pass
 
-    monkeypatch.setattr(voice_preview, "_SHUTDOWN_WAIT_MS", 50)
+    monkeypatch.setattr("artemis.channels.desktop.thread_shutdown.DEFAULT_WAIT_MS", 50)
     panel = SettingsPanel(config(tmp_path))
     req = VoicePreviewRequest(
         backend="edge",

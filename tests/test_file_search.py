@@ -590,7 +590,7 @@ def test_file_search_section_close_detaches_running_clear_job(
 
     entered = threading.Event()
     release = threading.Event()
-    monkeypatch.setattr(mod, "_SHUTDOWN_WAIT_MS", 50)
+    monkeypatch.setattr("artemis.channels.desktop.thread_shutdown.DEFAULT_WAIT_MS", 50)
 
     section = FileSearchSection(cfg)
     assert section._index is not None

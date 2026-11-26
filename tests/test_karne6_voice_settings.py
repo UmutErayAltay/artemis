@@ -64,6 +64,7 @@ def test_gpu_probe_thread_emits_value(
     scanned: list[object] = []
     probe.done.connect(got.append)
     probe.scanned.connect(scanned.append)
+    monkeypatch.setattr(vss, "query_device_snapshot", lambda: None)  # gerçek PortAudio yok
     probe.run()  # iş parçacığı başlatmadan gövdeyi doğrudan dener
     assert got == [4096]
     assert scanned == [{c.name: None for c in stt_catalog.CATALOG}]

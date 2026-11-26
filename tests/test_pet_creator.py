@@ -12,6 +12,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 pytest.importorskip("PySide6")
 
+from _wait import wait_qt
 from PySide6.QtGui import QImage
 from PySide6.QtWidgets import QApplication
 
@@ -196,12 +197,8 @@ def section(qapp: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 
 
 def wait_reply(creator: panel_mod.CreatorPanel, qapp: QApplication) -> None:
-    for _ in range(500):
-        qapp.processEvents()
-        if creator._call is None:
-            return
-        creator._call.wait(20)
-    raise AssertionError("yanıt gelmedi")
+    if not wait_qt(lambda: creator._call is None, 10.0):
+        raise AssertionError("yanıt gelmedi")
 
 
 def test_ui_flow_send_preview_save(section: PetSection, qapp: QApplication,

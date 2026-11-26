@@ -156,7 +156,7 @@ def test_update_section_close_detaches_running_thread(
         release.wait(5)
         return UpdateResult(status="current", latest="", url="", message="Güncel.")
 
-    monkeypatch.setattr(mod, "_SHUTDOWN_WAIT_MS", 50)
+    monkeypatch.setattr("artemis.channels.desktop.thread_shutdown.DEFAULT_WAIT_MS", 50)
     section = UpdateSection(check=slow_check)
     section.check_button.click()
     assert entered.wait(3)

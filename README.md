@@ -38,7 +38,7 @@ Screenshots are captured from real Qt windows in **demo mode** using synthetic d
 - **Proactive Automation & Teachable Macros (`ADR 0058`, `0061`, `0086`, `0087`):** Scheduled routines, file/app/calendar/power-resume event triggers, conditional suggestion chains, and a UIA + natural-language macro recorder that masks password/secret fields.
 - **Graphical MCP Center & Code Agents (`ADR 0028`, `0032`, `0049`):** Manage stdio MCP servers, tool permissions, and health checks from Settings; includes Artemis's URL-validated browser MCP server and async code-agent job runner.
 - **9-Page Settings & Live Budget Chip:** Consolidated Settings UI (`Appearance`, `Voice` with 4 subtabs, `Dictation & Shortcuts`, `Models & Connections`, `Automation Rules`, `Knowledge & Skills`, `Connections`, `Applications & Security`, `About & Updates`), live topbar `daily_budget_usd` counter, radial mouse selection menu (`ADR 0062`), and SHA-256 verified in-app updates (`ADR 0081`).
-- **Privacy by Default:** Secrets live only in environment variables or Windows Credential Manager; raw audio and screenshots are never persisted to disk; SQLite self-memory supports Windows DPAPI encryption at rest (`ADR 0076`).
+- **Privacy by Default:** Secrets live only in environment variables or Windows Credential Manager; raw audio and screenshots are never persisted to disk; SQLite self-memory supports optional Windows DPAPI encryption at rest (`ADR 0076`; off in code defaults, on in the example config and the packaged install).
 
 ## Demo Videos
 
@@ -82,6 +82,8 @@ cp config/config.example.yaml config/config.yaml
 mkdir -p desktop
 python -m artemis desktop --config config/config.yaml
 ```
+
+Optional live transcript (word-by-word text while you speak, display only; [ADR 0047](docs/adr/0047-live-transcript.md)): `python -m pip install -e ".[stream]"` and enable `voice.live_transcript`.
 
 First launch opens the **Connect Brain** wizard (OpenRouter OAuth PKCE, Google AI Studio Gemini, Claude CLI, or local Ollama/LM Studio on `127.0.0.1`) to configure `primary_model` / `models` (`[desktop,voice]` includes `numpy` required by desktop startup as well as local STT/TTS); `config/config.example.yaml` already defaults `workspace: ../desktop` and `allow_paid: false` unless explicitly permitting paid models.
 

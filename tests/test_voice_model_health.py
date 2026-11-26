@@ -463,7 +463,7 @@ def test_widget_finish_detaches_running_thread(
             hf_cache_roots=(),
         )
 
-    monkeypatch.setattr(mod, "_SHUTDOWN_WAIT_MS", 50)
+    monkeypatch.setattr("artemis.channels.desktop.thread_shutdown.DEFAULT_WAIT_MS", 50)
     widget = mod.VoiceModelManagerWidget(
         cfg, inventory_fn=base_inventory, verify_fn=slow_verify
     )

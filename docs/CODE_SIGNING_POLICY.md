@@ -23,7 +23,7 @@ All SignPath signing roles for the `UmutErayAltay/artemis` repository are held b
 
 ## Privacy
 
-Artemis is a local-first desktop assistant and does not send telemetry or user data unless explicitly configured. For full details on network connections, optional cloud integrations, and running completely offline, see the [Privacy Policy](PRIVACY.md).
+This program will not transfer any information to other networked systems unless specifically requested by the user or the person installing or operating it. Artemis is a local-first desktop assistant and does not send telemetry or user data unless explicitly configured. For full details on network connections, optional cloud integrations, and running completely offline, see the [Privacy Policy](PRIVACY.md).
 
 ## Multi-factor authentication
 

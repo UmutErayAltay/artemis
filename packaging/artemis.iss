@@ -2,7 +2,7 @@
 ; Derleme betiği /DMyAppVersion=... parametresiyle sürümü geçer (CI release-windows.yml bunu pyproject.toml'dan geçirir).
 ; Aşağıdaki varsayılan yalnız elle derleme içindir; tests/test_release_workflow.py pyproject sürümüyle hizalı tutar.
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.6"
+  #define MyAppVersion "0.2.7"
 #endif
 
 [Setup]
@@ -34,10 +34,6 @@ OutputBaseFilename=Artemis-Setup-{#MyAppVersion}
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
-#ifdef SignToolCmd
-SignTool={#SignToolCmd}
-SignedUninstaller=yes
-#endif
 
 [Languages]
 Name: "turkish"; MessagesFile: "compiler:Languages\Turkish.isl"
@@ -45,6 +41,12 @@ Name: "english"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[InstallDelete]
+; Güncellemede eski sürümün _internal dosyaları kalırsa birden çok artemis_tr-*.dist-info birikir ve
+; Hakkında eski sürümü (0.1.0) gösterir, eski modüller yeni kodun yanında durur (2026-11-26). Klasör
+; yalnız uygulamanındır (DisableDirPage=yes, {app} sabit); kullanıcı verisi %APPDATA%\Artemis'tedir.
+Type: filesandordirs; Name: "{app}\_internal"
 
 [Files]
 Source: "..\dist\Artemis\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs

@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from artemis.channels.desktop.form_kit import _HeightForWidthBox, field, meta_label
-from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
+from artemis.channels.desktop.thread_shutdown import DETACHED
 from artemis.channels.voice.adapters import (
     EdgeTTSynthesizer,
     EmaSynthesizer,
@@ -61,12 +61,7 @@ CURATED_PIPER_VOICES: tuple[str, ...] = (
 PREVIEW_SAMPLE_TR = "Merhaba, ben Artemis. Ses önizlemesi hazır."
 PREVIEW_SAMPLE_EN = "Hello, I am Artemis. Voice preview is ready."
 
-_SHUTDOWN_WAIT_MS = 6000
 _DETACHED = DETACHED
-
-
-def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
-    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 def discover_piper_voices(config_path: Path, configured_model: Path | None = None) -> list[str]:
