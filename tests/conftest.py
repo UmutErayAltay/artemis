@@ -54,6 +54,16 @@ def isolated_qsettings(tmp_path_factory):
 
 
 @pytest.fixture(autouse=True)
+def no_real_gpu_probe(monkeypatch):
+    # Ayar paneli açılışı gerçek nvidia-smi çalıştırmaz (kural 8); GpuProbe testte doğrudan denenir.
+    try:
+        from artemis.channels.desktop import voice_settings_section
+    except ImportError:
+        return
+    monkeypatch.setattr(voice_settings_section, "start_gpu_probe", lambda panel: None)
+
+
+@pytest.fixture(autouse=True)
 def no_real_codex_lookup(monkeypatch):
     # code_agent_status artık yerleşik codex'i arar (PowerShell'e kadar gidebilir); testler gerçek
     # makinede Appx sorgusu çalıştırmaz ve süreç geneli önbelleği kirletmez (kural 8).

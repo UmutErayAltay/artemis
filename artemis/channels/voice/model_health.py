@@ -904,6 +904,10 @@ def _require_https_request(request: httpx.Request) -> None:
         raise ValueError("Yalnız HTTPS adresleri indirilebilir (yönlendirme reddedildi).")
 
 
+# Tek dosya için üst sınır: sahte/bozuk sunucu belleği şişirmesin (en büyük model ~100 MB).
+MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
+
+
 def _default_url_fetch(url: str) -> bytes:
     if not url.startswith("https://"):
         raise ValueError("Yalnız HTTPS adresleri indirilebilir.")
@@ -912,10 +916,14 @@ def _default_url_fetch(url: str) -> bytes:
             follow_redirects=True,
             timeout=60.0,
             event_hooks={"request": [_require_https_request]},
-        ) as client:
-            response = client.get(url)
+        ) as client, client.stream("GET", url) as response:
             response.raise_for_status()
-            return response.content
+            body = bytearray()
+            for chunk in response.iter_bytes():
+                body.extend(chunk)
+                if len(body) > MAX_DOWNLOAD_BYTES:
+                    raise OSError("Model indirilemedi: dosya boyut sınırını aştı.")
+            return bytes(body)
     except httpx.HTTPError as exc:
         # İş parçacığı ve çağıranlar tüm indirme hatalarını OSError/ValueError altında bekler.
         raise OSError(f"Model indirilemedi (ağ hatası): {type(exc).__name__}") from exc
