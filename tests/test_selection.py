@@ -693,6 +693,7 @@ def test_backup_and_restore_clipboard_formats_detect_skipped_and_partial(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import ctypes
+
     from artemis.channels.desktop import selection as sel
 
     class _FakeUser32:
@@ -768,10 +769,16 @@ def test_backup_and_restore_clipboard_formats_detect_skipped_and_partial(
     assert _restore_clipboard_formats(snap) is False
 
     # Tam yedekte 2 biçimden 1'i SetClipboardData'da kalırsa False döner; ikisi de yazarsa True.
-    complete_snap = ClipboardSnapshot(entries=((13, b"aa"), (49400, b"bb")), skipped_formats=0, complete=True)
-    monkeypatch.setattr(sel, "_win_clipboard_apis", lambda: (_FakeUser32([], fail_set_fmt=49400), fake_k))
+    complete_snap = ClipboardSnapshot(
+        entries=((13, b"aa"), (49400, b"bb")), skipped_formats=0, complete=True
+    )
+    monkeypatch.setattr(
+        sel, "_win_clipboard_apis", lambda: (_FakeUser32([], fail_set_fmt=49400), fake_k)
+    )
     assert _restore_clipboard_formats(complete_snap) is False
-    monkeypatch.setattr(sel, "_win_clipboard_apis", lambda: (_FakeUser32([], fail_set_fmt=None), fake_k))
+    monkeypatch.setattr(
+        sel, "_win_clipboard_apis", lambda: (_FakeUser32([], fail_set_fmt=None), fake_k)
+    )
     assert _restore_clipboard_formats(complete_snap) is True
 
 

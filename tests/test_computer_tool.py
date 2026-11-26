@@ -797,7 +797,9 @@ async def test_computer_use_fails_without_blind_click_or_unimaged_verify_on_imag
     gate, context, _host, backend, _ = env(tmp_path / "s1")
     reject_1 = _RejectingProvider(
         [
-            MediaRejectedError("Sağlayıcı medya girdisini kabul etmedi (HTTP 400).", media_kind="image"),
+            MediaRejectedError(
+                "Sağlayıcı medya girdisini kabul etmedi (HTTP 400).", media_kind="image"
+            ),
             Completion(content=click()),
         ]
     )
@@ -820,7 +822,9 @@ async def test_computer_use_fails_without_blind_click_or_unimaged_verify_on_imag
         [
             Completion(content=click()),
             Completion(content=DONE),
-            MediaRejectedError("Sağlayıcı medya girdisini kabul etmedi (HTTP 400).", media_kind="image"),
+            MediaRejectedError(
+                "Sağlayıcı medya girdisini kabul etmedi (HTTP 400).", media_kind="image"
+            ),
             Completion(content=YES),
         ]
     )
@@ -850,4 +854,4 @@ def test_build_chain_wires_allow_image_fallback_false(tmp_path: Path) -> None:
     chain = _build_chain(("vision",), settings, AuditLog(tmp_path / "audit.jsonl"))
     routers = chain._providers
     assert len(routers) == 1
-    assert getattr(routers[0], "_allow_image_fallback") is False
+    assert routers[0]._allow_image_fallback is False

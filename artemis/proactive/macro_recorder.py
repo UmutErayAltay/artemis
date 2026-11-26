@@ -90,7 +90,8 @@ _FOCUSED_META_SCRIPT = "\n".join(
         "  if ($null -eq $e) { '{}'; exit 0 }",
         "  $c = $e.Current",
         "  $procId = [int]$c.ProcessId",
-        "  if ($env:ARTEMIS_EXPECTED_PID -and $procId -ne [int]$env:ARTEMIS_EXPECTED_PID) { '{}'; exit 0 }",
+        "  if ($env:ARTEMIS_EXPECTED_PID -and "
+        "$procId -ne [int]$env:ARTEMIS_EXPECTED_PID) { '{}'; exit 0 }",
         "  $walker = [System.Windows.Automation.TreeWalker]::ControlViewWalker",
         "  $rootHwnd = [int]$c.NativeWindowHandle",
         "  $cur = $e",
@@ -101,7 +102,8 @@ _FOCUSED_META_SCRIPT = "\n".join(
         "    if ($null -eq $parent -or [int]$parent.Current.ProcessId -ne $procId) { break }",
         "    $cur = $parent",
         "  }",
-        "  if ($env:ARTEMIS_EXPECTED_HWND -and $rootHwnd -gt 0 -and $rootHwnd -ne [int]$env:ARTEMIS_EXPECTED_HWND) { '{}'; exit 0 }",
+        "  if ($env:ARTEMIS_EXPECTED_HWND -and $rootHwnd -gt 0 -and "
+        "$rootHwnd -ne [int]$env:ARTEMIS_EXPECTED_HWND) { '{}'; exit 0 }",
         "  $isPwd = [bool]$c.IsPassword",
         "  $kind = ($c.ControlType.ProgrammaticName -replace '^ControlType\\.', '')",
         "  $aid = [string]$c.AutomationId",
@@ -422,7 +424,8 @@ class WindowsClickEdgeTracker:
             down = bool(state & 0x8000)
             latched = bool(state & 0x0001)
             if (down and not self._prev_down) or (not down and not self._prev_down and latched):
-                pos = (int(point.x), int(point.y)) if user32.GetCursorPos(ctypes.byref(point)) else (0, 0)
+                has_pos = user32.GetCursorPos(ctypes.byref(point))
+                pos = (int(point.x), int(point.y)) if has_pos else (0, 0)
                 hwnd = int(user32.GetForegroundWindow() or 0)
                 with self._lock:
                     self._pending.append(ClickSample(x=pos[0], y=pos[1], hwnd=hwnd))

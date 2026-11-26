@@ -824,7 +824,9 @@ async def test_suggest_uses_external_and_tainted_delivery_for_calendar_and_folde
             suggest="Klasörü kontrol et",
         ),
     )
-    events = [Event("Sync", NOW + timedelta(minutes=5), NOW + timedelta(minutes=35), location="Oda 2")]
+    events = [
+        Event("Sync", NOW + timedelta(minutes=5), NOW + timedelta(minutes=35), location="Oda 2")
+    ]
     runtime = _make_runtime(tmp_path, items=triggers)
     deliverer = Deliverer(
         runtime.settings,
@@ -987,7 +989,9 @@ async def test_failed_trigger_and_chain_delivery_retries_are_bounded_with_backof
         rec_store,
         rec_deliverer,
         clock=rec_clock,
-        calendar_fetcher=lambda _s, _e: [Event("Sync", NOW + timedelta(minutes=5), NOW + timedelta(minutes=35))],
+        calendar_fetcher=lambda _s, _e: [
+            Event("Sync", NOW + timedelta(minutes=5), NOW + timedelta(minutes=35))
+        ],
     )
     assert await rec_sched.tick() == 0
     rec_fail[0] = False

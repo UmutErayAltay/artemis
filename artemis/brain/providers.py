@@ -23,9 +23,13 @@ from artemis.brain.errors import (
     BudgetExceeded as BudgetExceeded,
 )
 from artemis.brain.errors import (
+    MediaRejectedError,
+    RateLimitedError,
+    RetryableProviderError,
+)
+from artemis.brain.errors import (
     ProviderError as ProviderError,
 )
-from artemis.brain.errors import MediaRejectedError, RateLimitedError, RetryableProviderError
 from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.streaming import TextStream
 from artemis.config.settings import ModelConfig, Settings

@@ -567,7 +567,9 @@ def test_short_click_edge_tracker_via_services_and_hwnd_toctou_binding(
         return subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout=json.dumps({"k": "Button", "n": "Hızlı Tık", "a": "", "p": False, "pid": 701, "hwnd": 101}),
+            stdout=json.dumps(
+                {"k": "Button", "n": "Hızlı Tık", "a": "", "p": False, "pid": 701, "hwnd": 101}
+            ),
             stderr="",
         )
 
@@ -601,11 +603,16 @@ def test_short_click_edge_tracker_via_services_and_hwnd_toctou_binding(
         return subprocess.CompletedProcess(
             args=[],
             returncode=0,
-            stdout=json.dumps({"k": "Edit", "n": "Yanlış Pencere", "a": "", "p": False, "pid": 888, "hwnd": 202}),
+            stdout=json.dumps(
+                {"k": "Edit", "n": "Yanlış Pencere", "a": "", "p": False, "pid": 888, "hwnd": 202}
+            ),
             stderr="",
         )
 
-    assert focused_control_info(runner=mismatched_runner, expected_hwnd=101, expected_pid=701) is None
+    assert (
+        focused_control_info(runner=mismatched_runner, expected_hwnd=101, expected_pid=701)
+        is None
+    )
 
 
 async def test_macro_save_and_playback_dispatch_every_step_through_safety_gate(

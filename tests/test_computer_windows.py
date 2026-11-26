@@ -249,10 +249,34 @@ def test_visible_windows_excludes_progman_workerw_and_dwm_cloaked(
 
     # (cls, title, rect, cloaked, proc)
     win_defs = {
-        1: ("Progman", "Program Manager", (0, 0, 1920, 1080), 0, (r"C:\Windows\explorer.exe", 10)),
-        2: ("WorkerW", "Masaüstü Katmanı", (0, 0, 1920, 1080), 0, (r"C:\Windows\explorer.exe", 10)),
-        3: ("ApplicationFrameWindow", "Ayarlar (Cloaked)", (0, 0, 1200, 800), 2, (r"C:\Windows\ImmersiveControlPanel\SystemSettings.exe", 20)),
-        4: ("Notepad", "not.txt - Not Defteri", (100, 100, 900, 700), 0, (r"C:\Windows\notepad.exe", 30)),
+        1: (
+            "Progman",
+            "Program Manager",
+            (0, 0, 1920, 1080),
+            0,
+            (r"C:\Windows\explorer.exe", 10),
+        ),
+        2: (
+            "WorkerW",
+            "Masaüstü Katmanı",
+            (0, 0, 1920, 1080),
+            0,
+            (r"C:\Windows\explorer.exe", 10),
+        ),
+        3: (
+            "ApplicationFrameWindow",
+            "Ayarlar (Cloaked)",
+            (0, 0, 1200, 800),
+            2,
+            (r"C:\Windows\ImmersiveControlPanel\SystemSettings.exe", 20),
+        ),
+        4: (
+            "Notepad",
+            "not.txt - Not Defteri",
+            (100, 100, 900, 700),
+            0,
+            (r"C:\Windows\notepad.exe", 30),
+        ),
     }
 
     class _FakeUser32:

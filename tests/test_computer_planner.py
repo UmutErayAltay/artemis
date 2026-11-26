@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from typing import Any
 
 from artemis.brain.models import Completion, Message
