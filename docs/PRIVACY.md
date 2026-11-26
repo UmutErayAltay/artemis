@@ -20,7 +20,7 @@ Out of the box, optional cloud and external integrations are **disabled**:
 
 ### 1. LLM Providers and Work Profiles
 
-- **Cloud LLM providers (`openrouter`, `anthropic`, `openai_compatible`, `claude_cli`):** Contacted only when you configure a model/provider and supply your own API key or credential. API keys are never stored in YAML configuration files; they are read only from environment variables or Windows Credential Manager.
+- **Cloud LLM providers (`openrouter`, `anthropic`, `openai_compatible`, `claude_cli`; the `openai_compatible` presets in the UI include OpenAI, Google Gemini, DeepSeek, Z.ai GLM, Groq, xAI, and Mistral):** Contacted only when you configure a model/provider and supply your own API key or credential. API keys are never stored in YAML configuration files; they are read only from environment variables or Windows Credential Manager.
 - **Local models:** Local Ollama (`http://127.0.0.1:11434` by default) and local `openai_compatible` servers on `127.0.0.1`, `localhost`, or `::1` run entirely on your machine. Plain HTTP is rejected for non-loopback hosts.
 - **Paid usage guard:** `allow_paid` defaults to `false`, blocking models with non-zero token/image pricing unless explicitly enabled. `daily_budget_usd` defaults to `1`.
 - **`"private"` work profile:** Setting `work_profile: "private"` enforces strict local-only operation. It blocks all cloud LLM requests (falling back to a configured local `ollama` model or refusing the request if none is available), and blocks cloud screen, clipboard, and file sharing, remote TTS, multimodal screen context, and Telegram notifications/channels.
@@ -36,13 +36,13 @@ Out of the box, optional cloud and external integrations are **disabled**:
 - **STT (`voice.stt_mode: "local"`):** Uses local `faster-whisper`. Cache lookups check local files only (`local_files_only=True`). Hybrid cloud STT (`voice.stt_mode: "hybrid"`) is opt-in and sends command speech audio only to the user-configured `voice.stt_cloud_endpoint`.
 - **TTS (`voice.tts_backend: "piper"`):** Uses local Piper TTS by default. Using Edge TTS (`edge`) or a cloud speech endpoint (`cloud`) requires explicitly setting `voice.allow_cloud_tts_text: true` (default `false`); paid cloud speech models additionally require `voice.tts_cloud_allow_paid: true` (default `false`).
 - **Multimodal voice options:** `voice.direct_audio_input` (default `false`) and `voice.multimodal_screen_context` (default `false`) are opt-in. Multimodal screen context is further gated by `perception.screen_enabled`, `perception.allow_cloud_screen`, and is blocked in the `"private"` profile.
-- **Model downloads:** Speech/noise models are downloaded only when you explicitly click download in the in-app Model Health Manager.
+- **Model downloads:** Speech/noise models are downloaded only when you explicitly click download in the in-app Model Health Manager. Exception: when you enable live transcript (`voice.live_transcript`) or the keyword-spotting gate (KWS wake model), their pinned-revision model files are downloaded automatically from Hugging Face on first start (no audio is sent).
 
 ### 4. Screen, Clipboard, Files, and Local Storage
 
 - `allow_cloud_file_content` (`false`), `allow_cloud_clipboard` (`false`), `perception.screen_enabled` (`false`), `perception.allow_cloud_screen` (`false`), `computer_use.enabled` (`false`), `selection_actions.enabled` (`false`), and `dictation.enabled` (`false`) are all disabled by default.
 - Raw microphone audio and screenshots are kept in memory only and are not persisted to disk.
-- Local state (`state_dir`, `audit.jsonl`, `memory.sqlite3`) is stored on your device. On Windows, optional SQLite conversation memory encryption at rest is available via Windows DPAPI (`memory.encrypt_at_rest: true`, default `false`). Setting `persist_memory: false` disables writing conversation memory to disk.
+- Local state (`state_dir`, `audit.jsonl`, `memory.sqlite3`) is stored on your device. On Windows, optional SQLite conversation memory encryption at rest is available via Windows DPAPI (`memory.encrypt_at_rest`: the code default is `false`; `config/config.example.yaml` and the packaged install set it to `true`). Setting `persist_memory: false` disables writing conversation memory to disk.
 
 ### 5. Calendar, Mail, Research, MCP, Web Search, and Updates
 

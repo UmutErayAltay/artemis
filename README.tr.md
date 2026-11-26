@@ -65,7 +65,7 @@ durur ([ADR 0025](docs/adr/0025-persistent-self-memory.md)); kullanıcının Obs
 bundan ayrıdır ve isteğe bağlı vault araçlarıyla okunur.
 
 Mimari [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), kararların gerekçeleri
-[docs/adr/](docs/adr/), geliştirme kuralları [CLAUDE.md](CLAUDE.md) içindedir.
+[docs/adr/](docs/adr/), geliştirme kuralları (ajan talimatları) [CLAUDE.md](CLAUDE.md) ve [CONTRIBUTING.md](CONTRIBUTING.md) içindedir.
 Son sağlamlık doğrulaması [F2 raporunda](docs/F2_REPORT.md) bulunur.
 Ses katmanı doğrulaması ve bekleyen Windows kabulü [F3 raporunda](docs/F3_REPORT.md)
 açıklanır.
@@ -303,7 +303,7 @@ Son değişiklik ve doğrulamalar [konuşma raporunda](docs/SPEECH_ACCURACY_REPO
 ## Windows paketi ve ilk açılış
 
 Hazır kurucu [Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasındadır
-(`Artemis-Setup-<sürüm>.exe` ve sağlama toplamı için `SHA256SUMS.txt`). Kendin
+(`Artemis-Setup-<sürüm>.exe` ve sağlama toplamı için `SHA256SUMS.txt`; doğrulama: `Get-FileHash .\Artemis-Setup-<sürüm>.exe -Algorithm SHA256` çıktısını dosyadakiyle karşılaştırın, ayrıca [CHANGELOG](CHANGELOG.md)). Kurucu henüz imzasızdır (SignPath başvurusu beklemede). Kendin
 derlemek için (PyInstaller + Inno Setup, [ADR 0075](docs/adr/0075-urunlestirme-plani.md),
 ayrıntı [docs/PACKAGING.md](docs/PACKAGING.md)):
 
@@ -339,7 +339,7 @@ Python 3.12 kullanın. Windows PowerShell:
 $env:PYTHONUTF8 = '1'
 py -3.12 -m venv .venv
 .venv\Scripts\Activate.ps1
-python -m pip install -e ".[dev]"
+python -m pip install -e ".[dev,desktop,voice,eval]"
 Copy-Item config/config.example.yaml config/config.yaml
 New-Item -ItemType Directory -Force desktop
 ```

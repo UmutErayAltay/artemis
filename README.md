@@ -56,7 +56,7 @@ https://github.com/user-attachments/assets/d5ebb21b-0178-4df0-acb5-9b4f231e83d5
 ## Quick Start
 
 ### Option A: Windows Installer (No Admin Required)
-Download `Artemis-Setup-<version>.exe` from [Releases](https://github.com/UmutErayAltay/artemis/releases) and verify its checksum against `SHA256SUMS.txt`.
+Download `Artemis-Setup-<version>.exe` from [Releases](https://github.com/UmutErayAltay/artemis/releases) and verify its checksum against `SHA256SUMS.txt` (PowerShell: `Get-FileHash .\Artemis-Setup-<version>.exe -Algorithm SHA256`). See also the [CHANGELOG](CHANGELOG.md).
 *(Code signing through SignPath Foundation is being set up — see the [Code signing policy](docs/CODE_SIGNING_POLICY.md). Until a release is signed, Windows SmartScreen may warn.)*
 
 ### Option B: Run from Source (Windows / Linux, Python 3.12)

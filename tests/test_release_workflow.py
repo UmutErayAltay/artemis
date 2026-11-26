@@ -54,7 +54,7 @@ def test_release_windows_workflow_structure_and_signing_fallback() -> None:
     assert "${{ github.ref_name }}" not in version_run
     assert "$env:GITHUB_REF_NAME" in version_run
 
-    # SignPath + Authenticode kancası (`Resolve signing mode` çıktıları; `secrets.` yok)
+    # SignPath kancası (`Resolve signing mode` çıktıları; `secrets.` yok)
     signing_steps = [s for s in steps if s.get("id") == "signing"]
     assert signing_steps
     signing_env = signing_steps[0].get("env", {})
@@ -65,12 +65,13 @@ def test_release_windows_workflow_structure_and_signing_fallback() -> None:
         "SIGNPATH_ORGANIZATION_ID",
         "SIGNPATH_PROJECT_SLUG",
         "SIGNPATH_SIGNING_POLICY_SLUG",
-        "WINDOWS_CERT_PFX_BASE64",
-        "WINDOWS_CERT_PASSWORD",
     ):
         assert secret_name in signing_env
     assert "GITHUB_OUTPUT" in signing_run
-    assert "signpath" in signing_run and "authenticode" in signing_run
+    assert "signpath" in signing_run
+    # ADR 0088: tek imza yolu SignPath; PFX/Authenticode yolu kaldırıldı
+    assert "WINDOWS_CERT_PFX" not in raw
+    assert "authenticode" not in raw.casefold()
 
     # SignPath imzalama: imzasız kurucu yükleme adımı SignPath adımından önce gelmeli
     upload_unsigned_idx = next(
@@ -100,17 +101,6 @@ def test_release_windows_workflow_structure_and_signing_fallback() -> None:
     assert signpath_with["wait-for-completion"] is True
     assert "input-artifact-directory" not in signpath_with
 
-    # Authenticode parolası /Ssigntool= argümanına değil geçici betik ortamına verilmeli
-    auth_steps = [s for s in steps if "Authenticode" in s.get("name", "")]
-    assert auth_steps
-    auth_if = str(auth_steps[0].get("if", ""))
-    assert "steps.signing.outputs.authenticode == 'true'" in auth_if
-    auth_run = str(auth_steps[0].get("run", ""))
-    assert "/DSignToolCmd=" in auth_run
-    signtool_lines = [line for line in auth_run.splitlines() if "/Ssigntool=" in line]
-    assert signtool_lines
-    assert all("WINDOWS_CERT_PASSWORD" not in line for line in signtool_lines)
-    assert "finally" in auth_run
     signing_idx = next(i for i, s in enumerate(steps) if s.get("id") == "signing")
     iscc_indices = [
         i for i, s in enumerate(steps) if "packaging\\artemis.iss" in str(s.get("run", ""))
@@ -121,7 +111,6 @@ def test_release_windows_workflow_structure_and_signing_fallback() -> None:
     assert fallback_steps
     fallback_if = str(fallback_steps[0].get("if", ""))
     assert "steps.signing.outputs.signpath != 'true'" in fallback_if
-    assert "steps.signing.outputs.authenticode != 'true'" in fallback_if
 
     for job in jobs.values():
         for step in job.get("steps", []):
@@ -145,6 +134,9 @@ def test_release_windows_workflow_structure_and_signing_fallback() -> None:
     release_body = str(gh_release_steps[0]["with"].get("body", ""))
     assert "docs/CODE_SIGNING_POLICY.md" in release_body
     assert "docs/PRIVACY.md" in release_body
+    assert "CHANGELOG.md" in release_body
+    assert "blob/v${{ needs.build.outputs.version }}/" in release_body
+    assert "imzasız" in release_body and "Get-FileHash" in release_body
 
 
 def test_iss_metadata_alignment_and_invariants() -> None:

@@ -123,7 +123,7 @@ Açık sınırlar ve sonradan kısmen kapananlar:
   Dosya sisteminden "tamamlandı" çıkarılmaz; günlük hâlâ içerik yedeği değildir. Testler:
   `tests/test_undo.py`, `tests/test_runtime_lifecycle.py`.
 - Hafıza varsayılan açık, geçmiş saklama varsayılan sınırsız (0 gün); README'de yazılı.
-  Hafıza varsayılan şifresiz; `memory.encrypt_at_rest` (varsayılan false) açılırsa geçmiş ve notlar
+  Hafıza kod varsayılanında şifresizdir; `memory.encrypt_at_rest` kod varsayılanı false, örnek config'te ve paketli kurulumda true; açıkken geçmiş ve notlar
   Windows'ta DPAPI ile sütun düzeyinde şifrelenir (ADR 0076). `memory.sqlite3` `PRAGMA user_version = 2`,
   `degisiklikler.sqlite3` ise `PRAGMA user_version = 1` taşır. `memory.sqlite3`'ün 1->2 geçişi
   eksikse `notes.private` sütununu ekler (ADR 0056) ve sürüm 2 sütun düzeyinde şifreleme desteğini
@@ -218,16 +218,19 @@ bekleniyor ("Windows kabulü bekliyor").
 |---|---|---|---|
 | 1 | Uykudan uyanma sonrası `QueryUnbiasedInterruptTime` ile uyku boşluğu algısı gerçek davranışı | `artemis/proactive/event_triggers.py` (`ResumeDetector.poll`) | Windows kabulü bekliyor |
 | 2 | Rutin zinciri tetiklenirken ön planda Artemis penceresi varken `active_app` eşleşmesi | `artemis/proactive/event_triggers.py` (`evaluate_chains`) | Windows kabulü bekliyor |
+| 3 | Mikrofon çıkarılınca (USB) 2 sn izleyici: "Mikrofon sinyali kesildi" hatası, oturum "dinliyor"da takılmaz (867b2c8) | `artemis/channels/voice/adapters.py` (mikrofon kuyruğu) | Windows kabulü bekliyor |
+| 4 | Ayarlar > Ses model listesi ve Whisper "kurulu" etiketleri panel açıldıktan sonra eşzamansız yükleniyor (867b2c8) | `artemis/channels/desktop/voice_settings_section.py`, `voice_model_manager.py` | Windows kabulü bekliyor |
+| 5 | Ses oturumunda beklenmeyen hata artık sessizce kapanmak yerine hata gösteriyor (867b2c8) | `artemis/channels/desktop/bridge.py` (`_run_voice`) | Windows kabulü bekliyor |
 
-Her iki madde yalnız sahte saat/ön plan getiricisiyle test edildi; geçti denmez.
+Bu maddeler yalnız sahte saat/ön plan getiricisiyle test edildi; geçti denmez.
 
-## Sürüm durumu — v0.2.4 (2026-11-26)
+## Sürüm durumu — v0.2.5 (2026-11-26)
 
-`v0.2.4` 2026-11-26'da CI ile yayımlandı: kurucu `Artemis-Setup-0.2.4.exe` ve `SHA256SUMS.txt`.
+Güncel sürüm ve varlıklar için [GitHub Releases](https://github.com/UmutErayAltay/artemis/releases) ve [CHANGELOG](../CHANGELOG.md). `v0.2.5` 2026-11-26'da CI ile yayımlandı: kurucu `Artemis-Setup-0.2.5.exe` ve `SHA256SUMS.txt`. Geçmiş: `v0.2.4` (2026-11-26) aynı hatla yayımlandı.
 Kurucu imzasızdır; SignPath Foundation başvurusu onaylanana dek imzasız yayımlanır
 ([kod imzalama politikası](CODE_SIGNING_POLICY.md)). Windows insan kabulü sürüyor.
 
-## Güncel yerel doğrulama — v0.2.3 / Faz 0 (2026-11-22, dal `main`; geçmiş kayıt)
+## Yerel doğrulama — v0.2.3 / Faz 0 (2026-11-22, dal `main`; geçmiş kayıt)
 
 Windows 11, Python 3.12.9 (`.venv`), `QT_QPA_PLATFORM=offscreen` (gerçek ses/cihaz yan etkisi çalıştırılmadı):
 

@@ -197,13 +197,13 @@ sonraki sürümlerde eklendi; gözetimsiz onay kanalı kapsam dışı kalır.
 - Tarayıcı otomasyonu yerel/özel adreslere ve `file:`/`data:`/`javascript:` şemalarına gitmez.
 - Her kalemin Windows kabulü kullanıcı tarafından yapılır.
 
-### Faz 7 sonrası ve v0.2.4 (ADR 0033–0090)
+### Faz 7 sonrası ve v0.2.5 (ADR 0033–0090)
 
-Durum: `v0.2.4` 2026-11-26'da CI ile yayımlandı (kurucu + `SHA256SUMS.txt`, SignPath onayına dek imzasız); otomatik testler ve `scripts/kabul_masaustu.py` ilk ekran kontrolleri geçti, tam Windows insan kabulü sürüyor ([RELIABILITY_STATUS.md](RELIABILITY_STATUS.md), [YENI_OZELLIKLER_KABUL.md](YENI_OZELLIKLER_KABUL.md), [KABUL_OTURUMLARI.md](KABUL_OTURUMLARI.md), [adr/README.md](adr/README.md)).
+Durum: güncel sürüm `v0.2.5` (2026-11-26; bkz. [CHANGELOG](../CHANGELOG.md), [Releases](https://github.com/UmutErayAltay/artemis/releases)); `v0.2.4` geçmiş sürümdür; ikisi de CI ile yayımlandı (kurucu + `SHA256SUMS.txt`, SignPath onayına dek imzasız); otomatik testler ve `scripts/kabul_masaustu.py` ilk ekran kontrolleri geçti, tam Windows insan kabulü sürüyor ([RELIABILITY_STATUS.md](RELIABILITY_STATUS.md), [YENI_OZELLIKLER_KABUL.md](YENI_OZELLIKLER_KABUL.md), [KABUL_OTURUMLARI.md](KABUL_OTURUMLARI.md), [adr/README.md](adr/README.md)).
 
 - **Sağlayıcı arayüzü ve Claude CLI:** `ADR 0033–0035`.
 - **Ses hattı (DFN3, AEC3, Silero VAD, Smart Turn, oyun modu, bulut TTS, karma tanıma, İngilizce ses):** `ADR 0037–0044`, `0047`, `0050`, `0067–0069`, `0071–0072`, `0074`, `0079–0080`, `0082`.
 - **Bilgisayar kullanımı, UIA, OCR yedeği ve yıkıcı kapı:** `ADR 0039`, `0070`, `0073`, `0077–0078`.
 - **Companion hafıza ve DPAPI şifreleme:** `ADR 0054`, `0056`, `0076`.
 - **Masaüstü yetenekleri (sprite pet, kod ajanı, dikte, rutin, takvim/posta, beceri, tetikleyici, seçili metin, araştırma, Telegram medya, dosya arama, gün özeti):** `ADR 0048–0049`, `0051–0053`, `0057–0066`.
-- **Ürünleştirme ve uygulama içi güncelleme (`v0.2.3`, `v0.2.4`):** `ADR 0075`, `0081`.
+- **Ürünleştirme ve uygulama içi güncelleme (`v0.2.3`, `v0.2.4`, `v0.2.5`):** `ADR 0075`, `0081`.
