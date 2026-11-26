@@ -190,6 +190,8 @@ class DesktopWindow(QMainWindow):
     chat: ChatTranscript
     _routine_name: str
     _routine_suggest: str
+    _routine_suggest_tainted: bool
+    _prompt_tainted: bool
     _summary_day: str
     routine_bar: QFrame
     routine_label: QLabel
@@ -279,8 +281,11 @@ class DesktopWindow(QMainWindow):
         if not demo:
             with contextlib.suppress(OSError, ValueError, ValidationError, yaml.YAMLError):
                 self._work_profile = load_settings(self._config_path).work_profile
+        self._routine_suggest_tainted = False
+        self._prompt_tainted = False
         self._build_pet()
         self._build_ui()
+        self.prompt.textChanged.connect(self._on_prompt_changed)
         self._build_overlay()
         self._build_tray()
         self._hotkey: GlobalHotkey | None = None
@@ -816,12 +821,18 @@ class DesktopWindow(QMainWindow):
         self.model_value.setFixedWidth(max(60, metrics.horizontalAdvance(shown) + 24))
         fit_topbar(self)
 
+    def _on_prompt_changed(self) -> None:
+        if not self.prompt.toPlainText().strip():
+            self._prompt_tainted = False
+
     def _submit_main(self) -> None:
         text = self.prompt.toPlainText().strip()
-        if text and self._submit_text(text):
+        if text and self._submit_text(text, tainted=self._prompt_tainted):
+            self._prompt_tainted = False
             self.prompt.clear()
 
     def _set_suggestion(self, text: str) -> None:
+        self._prompt_tainted = False
         self.prompt.setPlainText(text)
         self.prompt.setFocus()
         cursor = self.prompt.textCursor()
@@ -860,8 +871,12 @@ class DesktopWindow(QMainWindow):
         if text and self._submit_text(text):
             self.overlay.input.clear()
 
-    def _submit_text(self, text: str) -> bool:
-        request_id = self.bridge.submit(text)
+    def _submit_text(self, text: str, *, tainted: bool = False) -> bool:
+        request_id = (
+            self.bridge.submit(text, tainted=True)
+            if tainted
+            else self.bridge.submit(text)
+        )
         if request_id is None:
             self._set_status(t("Hazır değil veya önceki işlem temizleniyor."), "running")
             return False
@@ -953,6 +968,7 @@ class DesktopWindow(QMainWindow):
         # Ekran, işçi sıfırlamayı doğruladığında (context_reset olayı) temizlenir;
         # işçi reddederse görünen sohbet ile modelin bağlamı ayrışmaz.
         if self.bridge.reset_conversation():
+            self._prompt_tainted = False
             self.new_chat_button.setEnabled(False)
 
     def _cancel_active(self) -> None:
@@ -1142,6 +1158,8 @@ class DesktopWindow(QMainWindow):
                 self._restart_settings = False
                 self._busy = False
                 self._active_request = None
+                self._prompt_tainted = False
+                self._routine_suggest_tainted = False
                 self._turn_steps.clear()
                 self._reset_cards()
                 self.chat.clear()

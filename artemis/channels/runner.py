@@ -49,6 +49,7 @@ class CommandRunner:
         attachment: ToolResult | None = None,
         audio_wav: bytes | None = None,
         image_png: bytes | None = None,
+        tainted: bool = False,
     ) -> RunResult:
         window = self.conversation.render()
         kwargs: dict[str, Any] = {}
@@ -60,6 +61,8 @@ class CommandRunner:
             kwargs["audio_wav"] = audio_wav
         if image_png is not None:
             kwargs["image_png"] = image_png
+        if tainted:
+            kwargs["tainted"] = True
         result = await self.loop.run(text, window, unattended=unattended, **kwargs)
         tags = emotion_tags_active(self.loop.context.settings.voice)
         if tags:
@@ -81,6 +84,7 @@ class CommandRunner:
         attachment: ToolResult | None = None,
         audio_wav: bytes | None = None,
         image_png: bytes | None = None,
+        tainted: bool = False,
     ) -> RunResult:
         async with self._lock:
             if not self.loop.cleanup_pending:
@@ -94,6 +98,7 @@ class CommandRunner:
                     attachment,
                     audio_wav=audio_wav,
                     image_png=image_png,
+                    tainted=tainted,
                 )
             self._active_task = task
             try:
@@ -104,6 +109,7 @@ class CommandRunner:
                     attachment,
                     audio_wav=audio_wav,
                     image_png=image_png,
+                    tainted=tainted,
                 )
             finally:
                 if self._active_task is task:

@@ -184,6 +184,8 @@ class Proactive:
     suggest: str = ""
     # Doluysa düğmeler "Aç" ve (vault açıksa) "Vault'a ekle" olur (ADR 0066); değer `YYYY-MM-DD`.
     summary_day: str = ""
+    # Dış kaynaklı yer tutucu (dosya adı/yolu, takvim başlığı/konumu) taşıyan öneri.
+    suggest_tainted: bool = False
 
 
 BridgeEvent = (
@@ -558,7 +560,7 @@ class DesktopBridge:
             return False
         return True
 
-    def submit(self, text: str) -> str | None:
+    def submit(self, text: str, *, tainted: bool = False) -> str | None:
         request_id = str(uuid4())
         with self._lock:
             if (
@@ -572,7 +574,7 @@ class DesktopBridge:
                 return None
             self._active_request = request_id
             self._broker.begin_request(request_id)
-        if not self._post(self._start_turn, request_id, text):
+        if not self._post(self._start_turn, request_id, text, tainted):
             with self._lock:
                 if self._active_request == request_id:
                     self._active_request = None
@@ -844,6 +846,7 @@ class DesktopBridge:
             runtime.audit,
             panel=self._proactive_panel,
             routine_panel=self._proactive_routine_panel,
+            routine_panel_ex=self._proactive_routine_panel_ex,
             telegram=self._proactive_telegram,
             profile_getter=lambda: runtime.context.settings.work_profile,
         )
@@ -880,6 +883,22 @@ class DesktopBridge:
         self._events.put(Proactive(title, body, routine, suggest, summary_day))
         return True
 
+    def _proactive_routine_panel_ex(
+        self,
+        title: str,
+        body: str,
+        routine: str,
+        suggest: str,
+        summary_day: str,
+        suggest_tainted: bool,
+    ) -> bool:
+        if self._shutdown:
+            return False
+        self._events.put(
+            Proactive(title, body, routine, suggest, summary_day, suggest_tainted)
+        )
+        return True
+
     def _stop_proactive(self) -> None:
         self._proactive_scheduler = None
         if self._proactive_stop is not None:
@@ -894,7 +913,7 @@ class DesktopBridge:
         if client is not None:
             client.close()
 
-    def _start_turn(self, request_id: str, text: str) -> None:
+    def _start_turn(self, request_id: str, text: str, tainted: bool = False) -> None:
         if self._shutdown or self._runtime is None or self._runtime.agent.cleanup_pending:
             self._events.put(Failed(request_id, "CleanupPending", t("Önceki işlem temizleniyor.")))
             self._finish_request(request_id)
@@ -904,17 +923,19 @@ class DesktopBridge:
             self._finish_request(request_id)
             return
         self._events.put(State("running", t("İstek çalışıyor."), request_id))
-        self._active_task = asyncio.create_task(self._run_turn(request_id, text))
+        self._active_task = asyncio.create_task(self._run_turn(request_id, text, tainted=tainted))
 
-    async def _run_turn(self, request_id: str, text: str) -> None:
+    async def _run_turn(self, request_id: str, text: str, *, tainted: bool = False) -> None:
         # Yazılı yolda iptal, görev bitişi sayılır; ses yolu ise iptali yukarı taşır.
         with suppress(asyncio.CancelledError):
-            await self._execute_request(request_id, text)
+            await self._execute_request(request_id, text, tainted=tainted)
 
     async def _execute_request(
         self, request_id: str, text: str, stream: ResponseStream | None = None,
         audio_wav: bytes | None = None,
         image_png: bytes | None = None,
+        *,
+        tainted: bool = False,
     ) -> RunResult | None:
         """Yazılı ve sesli isteğin ortak turu: aynı olaylar, aynı temizlik, aynı bitiş."""
         runtime = self._runtime
@@ -933,6 +954,8 @@ class DesktopBridge:
                 kwargs["audio_wav"] = audio_wav
             if image_png is not None:
                 kwargs["image_png"] = image_png
+            if tainted:
+                kwargs["tainted"] = True
             result = await runtime.runner.run(text, **kwargs)
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id

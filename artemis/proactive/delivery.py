@@ -25,6 +25,8 @@ PanelSink = Callable[[str, str], bool]
 # Aynısı, ek olarak düğme için rutin adı (ADR 0058), sohbet kutusuna yazılacak istem (ADR 0061)
 # ya da gün özeti tarihi (ADR 0066); üçünden en çok biri doludur.
 RoutinePanelSink = Callable[[str, str, str, str, str], bool]
+# Genişletilmiş imza: sondaki bool, önerinin dış içerikli yer tutucu taşıyıp taşımadığını bildirir.
+RoutinePanelSinkEx = Callable[[str, str, str, str, str, bool], bool]
 ToastFunction = Callable[[str, str], ToastOutcome]
 
 PRIVATE_WITHHELD = (
@@ -48,6 +50,7 @@ class Deliverer:
         *,
         panel: PanelSink | None = None,
         routine_panel: RoutinePanelSink | None = None,
+        routine_panel_ex: RoutinePanelSinkEx | None = None,
         toast: ToastFunction | None = show_toast,
         telegram: TelegramClient | None = None,
         profile_getter: Callable[[], str] | None = None,
@@ -56,6 +59,7 @@ class Deliverer:
         self.audit = audit
         self.panel = panel
         self.routine_panel = routine_panel
+        self.routine_panel_ex = routine_panel_ex
         self.toast = toast
         self.telegram = telegram
         self._profile_getter = profile_getter
@@ -73,10 +77,16 @@ class Deliverer:
         suggest: str = "",
         summary_day: str = "",
         local_only: bool = False,
+        suggest_tainted: bool = False,
     ) -> DeliveryOutcome:
         """`local_only`: dosya adı gibi kişisel metin; Telegram'a hiç gitmez (ADR 0061)."""
         targets: dict[str, str] = {}
-        if (routine or suggest or summary_day) and self.routine_panel is not None:
+        if (routine or suggest or summary_day) and self.routine_panel_ex is not None:
+            sent = self.routine_panel_ex(
+                title, body, routine, suggest, summary_day, suggest_tainted
+            )
+            targets["panel"] = "ok" if sent else "error"
+        elif (routine or suggest or summary_day) and self.routine_panel is not None:
             sent = self.routine_panel(title, body, routine, suggest, summary_day)
             targets["panel"] = "ok" if sent else "error"
         elif self.panel is not None:

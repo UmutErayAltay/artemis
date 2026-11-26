@@ -49,7 +49,7 @@ from artemis.proactive.store import (
     Reminder,
     reminder_event_id,
 )
-from artemis.proactive.triggers import build_notice, scan_folder
+from artemis.proactive.triggers import build_notice, scan_folder, suggest_uses_external
 from artemis.safety.gate import SafetyGate
 from artemis.tools.base import ToolContext
 
@@ -385,6 +385,7 @@ class ProactiveScheduler:
             routine=routine or "",
             suggest=suggest,
             local_only=True,
+            suggest_tainted=suggest_uses_external(trigger.suggest),
         )
         self._finish(event_id, day_start, outcome, "completed")
         return int(outcome.delivered)
@@ -485,6 +486,7 @@ class ProactiveScheduler:
             routine=routine,
             suggest=match.suggest,
             local_only=True,
+            suggest_tainted=match.suggest_tainted,
         )
         self._finish(event_id, day_start, outcome, "completed")
         return int(outcome.delivered)
@@ -512,6 +514,7 @@ class ProactiveScheduler:
             routine=routine,
             suggest=match.suggest,
             local_only=True,
+            suggest_tainted=match.suggest_tainted,
         )
         self._finish(event_id, day_start, outcome, "completed")
         return int(outcome.delivered)

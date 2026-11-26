@@ -749,3 +749,112 @@ def test_bridge_forwards_system_resume_and_routine_completion_chains(tmp_path: P
     finally:
         bridge.shutdown()
         assert bridge._stopped.wait(timeout=20.0)
+
+
+async def test_suggest_uses_external_and_tainted_delivery_for_calendar_and_folder(
+    tmp_path: Path,
+) -> None:
+    from artemis.channels.desktop.trigger_dialog import DEFAULT_SUGGEST_BY_KIND
+    from artemis.proactive.triggers import suggest_uses_external
+
+    assert suggest_uses_external(None) is False
+    assert suggest_uses_external("") is False
+    assert suggest_uses_external("Hazırlık notlarını getir ({minutes} dk)") is False
+    assert suggest_uses_external("{app} açıldı") is False
+    assert suggest_uses_external("{title} notlarını getir") is True
+    assert suggest_uses_external("{location} yol tarifini aç") is True
+    assert suggest_uses_external("Özetle: {file}") is True
+    assert suggest_uses_external("Özetle: {path}") is True
+
+    default_cal = DEFAULT_SUGGEST_BY_KIND["calendar_before"]
+    assert "{title}" not in default_cal and "{location}" not in default_cal
+    assert suggest_uses_external(default_cal) is False
+
+    seen: list[tuple[str, str, str, str, str, bool]] = []
+
+    def panel_ex(
+        title: str,
+        body: str,
+        routine: str,
+        suggest: str,
+        day: str,
+        suggest_tainted: bool,
+    ) -> bool:
+        seen.append((title, body, routine, suggest, day, suggest_tainted))
+        return True
+
+    clock = FakeClock()
+    dl = tmp_path / "downloads"
+    dl.mkdir()
+    triggers = (
+        TriggerConfig(
+            name="cal-tainted-title",
+            kind="calendar_before",
+            minutes_before=15,
+            suggest="{title} notlarını hazırla",
+        ),
+        TriggerConfig(
+            name="cal-tainted-loc",
+            kind="calendar_before",
+            minutes_before=15,
+            suggest="{location} adresini aç",
+        ),
+        TriggerConfig(
+            name="cal-clean",
+            kind="calendar_before",
+            minutes_before=15,
+            suggest=default_cal,
+        ),
+        TriggerConfig(
+            name="folder-tainted-file",
+            kind="folder",
+            folder=str(dl),
+            suggest="Özetle: {file}",
+        ),
+        TriggerConfig(
+            name="folder-tainted-path",
+            kind="folder",
+            folder=str(dl),
+            suggest="Özetle: {path}",
+        ),
+        TriggerConfig(
+            name="folder-clean",
+            kind="folder",
+            folder=str(dl),
+            suggest="Klasörü kontrol et",
+        ),
+    )
+    events = [Event("Sync", NOW + timedelta(minutes=5), NOW + timedelta(minutes=35), location="Oda 2")]
+    runtime = _make_runtime(tmp_path, items=triggers)
+    deliverer = Deliverer(
+        runtime.settings,
+        runtime.audit,
+        routine_panel_ex=panel_ex,
+        toast=None,
+    )
+    scheduler = ProactiveScheduler(
+        runtime,
+        runtime.context.services["proactive_store"],
+        deliverer,
+        clock=clock,
+        calendar_fetcher=lambda _s, _e: events,
+    )
+
+    # İlk tarama klasörler için taban çizgisi kurar, takvimleri bildirir.
+    assert await scheduler.tick() == 3
+    by_title = {item[0]: item for item in seen}
+    assert by_title["Tetikleyici · cal-tainted-title"][5] is True
+    assert by_title["Tetikleyici · cal-tainted-loc"][5] is True
+    assert by_title["Tetikleyici · cal-clean"][5] is False
+
+    seen.clear()
+    (dl / "rapor.pdf").write_bytes(b"pdf")
+    clock.advance(seconds=30)
+    assert await scheduler.tick() == 0
+    clock.advance(seconds=30)
+    assert await scheduler.tick() == 3
+    by_title = {item[0]: item for item in seen}
+    assert by_title["Tetikleyici · folder-tainted-file"][5] is True
+    assert by_title["Tetikleyici · folder-tainted-path"][5] is True
+    assert by_title["Tetikleyici · folder-clean"][5] is False
+

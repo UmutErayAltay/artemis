@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 from artemis.config.triggers import SuggestionChainConfig, TriggerConfig
-from artemis.proactive.triggers import fill, sanitize_name
+from artemis.proactive.triggers import fill, sanitize_name, suggest_uses_external
 from artemis.tools.calendar_mail import (
     ICS_ENV,
     ICS_TARGET,
@@ -55,6 +55,7 @@ class TriggerMatch:
     body: str
     suggest: str
     routine: str
+    suggest_tainted: bool = False
 
 
 @dataclass(frozen=True)
@@ -67,6 +68,7 @@ class ChainMatch:
     body: str
     suggest: str
     routine: str
+    suggest_tainted: bool = False
 
 
 def normalize_app_name(value: str) -> str:
@@ -367,6 +369,7 @@ class EventTriggerTracker:
                 body=body,
                 suggest=suggest,
                 routine=trigger.routine or "",
+                suggest_tainted=suggest_uses_external(trigger.suggest),
             )
         return None
 
