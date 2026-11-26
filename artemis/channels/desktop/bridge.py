@@ -145,6 +145,15 @@ async def _complete_selection(
 logger = logging.getLogger(__name__)
 
 
+def _log_voice_start_failure(future: Any) -> None:
+    """Başlatma korutininden sızan hata sessizce kaybolmasın (yalnız tür adı loglanır)."""
+    if future.cancelled():
+        return
+    error = future.exception()
+    if error is not None:
+        logger.warning("Ses başlatma görevi hatayla bitti (%s).", type(error).__name__)
+
+
 class DesktopBridge:
     """Tek işçi loop'u yönetir; GUI thread'i hiçbir asyncio nesnesine dokunmaz."""
 
@@ -255,7 +264,8 @@ class DesktopBridge:
         try:
             if loop is None:
                 raise RuntimeError("İşçi döngüsü yok.")
-            asyncio.run_coroutine_threadsafe(self._start_voice_on_worker(), loop)
+            future = asyncio.run_coroutine_threadsafe(self._start_voice_on_worker(), loop)
+            future.add_done_callback(_log_voice_start_failure)
         except RuntimeError:
             # Döngü kapanmışsa ses başlamaz; bayrak takılı kalıp yeni denemeyi engellemesin.
             with self._lock:
@@ -955,6 +965,12 @@ class DesktopBridge:
                 self._voice_failed(str(error))
                 return
             except (OSError, RuntimeError, ImportError):
+                self._voice_failed()
+                return
+            except Exception as error:  # noqa: BLE001 - Ses başlatma işçi sınırı: beklenmeyen tür de kullanıcıya hata olarak görünür, arayüz sessizce "kapalı"ya düşmez.
+                logger.warning(
+                    "Ses hazırlığı beklenmeyen hatayla bitti (%s).", type(error).__name__
+                )
                 self._voice_failed()
                 return
             # Ölçüm isteğe bağlıdır; factory imzası değişmesin diye toplayıcı sonradan bağlanır.

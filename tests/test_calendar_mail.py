@@ -422,19 +422,15 @@ def _calendar_mail_section(tmp_path: Path) -> Any:
 
 def test_section_invalid_timezone_reports_error_without_crash(tmp_path: Path) -> None:
     pytest.importorskip("PySide6")
-    from PySide6.QtWidgets import QWidget
-
     from artemis.channels.desktop.calendar_mail_section import _Job, check_calendar
 
     _app, section = _calendar_mail_section(tmp_path)
-    parent = QWidget()
     message = check_calendar("https://example.invalid/a.ics", "Bilinmeyen/Bolge")
     assert message is not None
-    job = _Job(lambda: check_calendar("https://example.invalid/a.ics", "Bilinmeyen/Bolge"), parent)
+    job = _Job(lambda: check_calendar("https://example.invalid/a.ics", "Bilinmeyen/Bolge"))
     job.run()
     assert job.error is not None and not job.verified
     section.deleteLater()
-    parent.deleteLater()
 
 
 def test_section_source_error_in_job_sets_error_and_never_saves(
@@ -451,11 +447,12 @@ def test_section_source_error_in_job_sets_error_and_never_saves(
         raise core.SourceError("sunucu hatası")
 
     section._start(boom, "gizli-deger", core.ICS_TARGET, "Takvim")
-    assert section._job is not None
-    assert section._job.wait(3000)
+    job = section._job
+    assert job is not None
+    assert job.wait(3000)
     app.processEvents()
-    assert section._job.error == "sunucu hatası"
-    assert not section._job.verified
+    assert job.error == "sunucu hatası"
+    assert not job.verified
     assert saved == []
     assert "Kaydedilmedi" in section.message.text()
     section.deleteLater()
@@ -474,10 +471,11 @@ def test_section_missing_result_never_saves(
     monkeypatch.setattr(mod._Job, "run", lambda self: None)
 
     section._start(lambda: None, "gizli-deger", core.ICS_TARGET, "Takvim")
-    assert section._job is not None
-    assert section._job.wait(3000)
+    job = section._job
+    assert job is not None
+    assert job.wait(3000)
     app.processEvents()
-    assert section._job.error is None and not section._job.verified
+    assert job.error is None and not job.verified
     assert saved == []
     assert "Kaydedilmedi" in section.message.text()
     section.deleteLater()

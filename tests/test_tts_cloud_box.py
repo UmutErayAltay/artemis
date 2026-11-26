@@ -209,7 +209,7 @@ def test_tts_cloud_box_close_detaches_running_fetch_thread(
         return "Bağlantı tamam, 0 ses modeli bulundu.", []
 
     monkeypatch.setattr(mod, "fetch_tts_models", slow_fetch)
-    monkeypatch.setattr(mod, "_SHUTDOWN_WAIT_MS", 50)
+    monkeypatch.setattr("artemis.channels.desktop.thread_shutdown.DEFAULT_WAIT_MS", 50)
 
     panel = SettingsPanel(config(tmp_path, cloud=True))
     panel.tts_combo.setCurrentIndex(panel.tts_combo.findData("cloud"))

@@ -9,12 +9,49 @@ from __future__ import annotations
 
 import contextlib
 import functools
+import time
 import weakref
+from collections.abc import Iterator
 from typing import Any
 
 from PySide6.QtCore import QThread
 
 DETACHED: list[QThread] = []
+
+# Tek iş parçacığı için varsayılan bekleme; kapanışta `shared_budget` bunu toplam süreyle sınırlar.
+DEFAULT_WAIT_MS = 6000
+CLOSE_BUDGET_MS = 2000
+_budget_end: float | None = None
+
+
+@contextlib.contextmanager
+def shared_budget(total_ms: int | None = None) -> Iterator[None]:
+    """İçerideki tüm `shutdown_thread` çağrıları tek toplam süreyi paylaşır.
+
+    Neden: kapanışta her iş parçacığı sırayla 6 sn beklerse GUI dakikalarca donabilir; süre
+    bitince kalanlar beklemeden ayrılır (`DETACHED`). Yalnız GUI iş parçacığından kullanılır."""
+    global _budget_end
+    previous = _budget_end
+    ms = CLOSE_BUDGET_MS if total_ms is None else total_ms
+    _budget_end = time.monotonic() + ms / 1000
+    try:
+        yield
+    finally:
+        _budget_end = previous
+
+
+def interrupt_threads(*threads: QThread | None) -> None:
+    """Kapanıştan önce hepsine aynı anda kesme ister; böylece birlikte sonlanırlar."""
+    for thread in threads:
+        if thread is not None and thread.isRunning():
+            thread.requestInterruption()
+
+
+def _wait_ms(wait_ms: int | None) -> int:
+    ms = DEFAULT_WAIT_MS if wait_ms is None else wait_ms
+    if _budget_end is None:
+        return ms
+    return max(0, min(ms, int((_budget_end - time.monotonic()) * 1000)))
 
 
 def _drop_detached(ref: weakref.ref[QThread]) -> None:
@@ -24,7 +61,7 @@ def _drop_detached(ref: weakref.ref[QThread]) -> None:
 
 
 def shutdown_thread(
-    thread: QThread | None, *connections: tuple[str, Any], wait_ms: int
+    thread: QThread | None, *connections: tuple[str, Any], wait_ms: int | None = None
 ) -> bool:
     """Çalışan iş parçacığını durdurur; süre dolarsa panelle yıkılmaması için ayırır.
 
@@ -32,7 +69,7 @@ def shutdown_thread(
     if thread is None or not thread.isRunning():
         return False
     thread.requestInterruption()
-    if thread.wait(wait_ms):
+    if thread.wait(_wait_ms(wait_ms)):
         return False
     for signal_name, slot in connections:
         signal = getattr(thread, signal_name, None)

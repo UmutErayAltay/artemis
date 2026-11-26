@@ -9,7 +9,6 @@ QThread'de çalışır (arayüz donmaz).
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QCloseEvent
@@ -23,14 +22,8 @@ from artemis.i18n import t
 from artemis.safety.audit import AuditLog
 from artemis.tools.file_index import FileIndex, usable_roots
 
-_SHUTDOWN_WAIT_MS = 6000
 # Süresi dolunca ayrılan iş parçacığı bitene dek GC tarafından toplanmasın diye tutulur.
 _DETACHED = DETACHED
-
-
-def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
-    # Bekleme süresi modülde kalır (testler kısaltır); gövde ortak modülde.
-    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 class _ClearJob(QThread):
@@ -194,7 +187,7 @@ class FileSearchSection(QWidget):
 
     def finish(self) -> None:
         self._timer.stop()
-        if _shutdown_thread(self._clearing, ("done", self._cleared)):
+        if shutdown_thread(self._clearing, ("done", self._cleared)):
             self._clearing = None
 
     def closeEvent(self, event: QCloseEvent) -> None:

@@ -20,6 +20,7 @@ from PySide6.QtCore import QThread
 from PySide6.QtWidgets import QLineEdit, QPushButton, QVBoxLayout, QWidget
 
 from artemis.channels.desktop.form_kit import button_row, field, meta_label
+from artemis.channels.desktop.thread_shutdown import start_unparented
 from artemis.config.settings import load_settings
 from artemis.i18n import t
 from artemis.tools import calendar_mail as core
@@ -77,8 +78,8 @@ def check_caldav(url: str, username: str, password: str) -> str | None:
 
 
 class _Job(QThread):
-    def __init__(self, job: Callable[[], str | None], parent: QWidget) -> None:
-        super().__init__(parent)
+    def __init__(self, job: Callable[[], str | None]) -> None:
+        super().__init__()
         self._job = job
         self.error: str | None = None
         # Doğrulama gerçekten None ile tamamlanmadıkça sır kaydedilmemelidir.
@@ -120,6 +121,7 @@ class CalendarMailSection(QWidget):
         super().__init__()
         self.config_path = config_path
         self._job: _Job | None = None
+        self._pending = ("", "", "")
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(24)
@@ -200,25 +202,33 @@ class CalendarMailSection(QWidget):
         if self._busy():
             return
         self.message.setText(t("Deneniyor…"))
-        thread = _Job(job, self)
-
-        def done() -> None:
-            if thread.error is not None or not thread.verified:
-                detail = thread.error or t("Deneme sonucu alınamadı.")
-                self.message.setText(t("{detail} Kaydedilmedi.").format(detail=detail))
-                return
-            try:
-                write_secret(secret, target)
-            except OSError:
-                self.message.setText(t("Saklanamadı; ilgili ortam değişkenini tanımlayın."))
-                return
-            self.message.setText(
-                t("{label} çalışıyor ve kimlik kasasına kaydedildi.").format(label=label)
-            )
-
-        thread.finished.connect(done)
+        thread = _Job(job)
+        # Ebeveynsiz başlatılır: panel iş sürerken silinirse süreç çökmesin (Karne 8). Alıcı
+        # bu bölümün yuvasıdır; bölüm ölünce Qt bağlantıyı kendisi koparır.
+        self._pending = (secret, target, label)
+        thread.finished.connect(self._on_job_done)
         self._job = thread
-        thread.start()
+        start_unparented(thread)
+
+    def _on_job_done(self) -> None:
+        thread = self._job
+        self._job = None  # start_unparented bitince deleteLater çağırır; eski sarmalayıcı kalmasın
+        secret, target, label = self._pending
+        self._pending = ("", "", "")
+        if thread is None:
+            return
+        if thread.error is not None or not thread.verified:
+            detail = thread.error or t("Deneme sonucu alınamadı.")
+            self.message.setText(t("{detail} Kaydedilmedi.").format(detail=detail))
+            return
+        try:
+            write_secret(secret, target)
+        except OSError:
+            self.message.setText(t("Saklanamadı; ilgili ortam değişkenini tanımlayın."))
+            return
+        self.message.setText(
+            t("{label} çalışıyor ve kimlik kasasına kaydedildi.").format(label=label)
+        )
 
     def _save_calendar(self) -> None:
         url = self.calendar_url.text().strip()

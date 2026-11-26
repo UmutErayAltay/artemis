@@ -12,7 +12,6 @@ import sys
 import threading
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any
 
 from PySide6.QtCore import Qt, QThread, QUrl, Signal
 from PySide6.QtGui import QCloseEvent, QDesktopServices
@@ -34,14 +33,8 @@ from artemis.update_check import (
     download_installer,
 )
 
-_SHUTDOWN_WAIT_MS = 6000
 # Süresi dolunca ayrılan iş parçacığı bitene dek GC tarafından toplanmasın diye tutulur.
 _DETACHED = DETACHED
-
-
-def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
-    # Bekleme süresi modülde kalır (testler kısaltır); gövde ortak modülde.
-    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 class UpdateCheckThread(QThread):
@@ -270,7 +263,7 @@ class UpdateSection(QWidget):
     def finish(self) -> None:
         if self._cancel_event is not None:
             self._cancel_event.set()
-        if _shutdown_thread(
+        if shutdown_thread(
             self._download_thread,
             ("progress", self._on_download_progress),
             ("done", self._on_download_done),
@@ -278,7 +271,7 @@ class UpdateSection(QWidget):
             ("finished", self._on_download_finished),
         ):
             self._download_thread = None
-        if _shutdown_thread(
+        if shutdown_thread(
             self._thread,
             ("done", self._on_done),
             ("finished", self._on_thread_finished),

@@ -102,7 +102,12 @@ from artemis.channels.desktop.settings_widgets import (
 from artemis.channels.desktop.skills_section import SkillsSection
 from artemis.channels.desktop.telegram_section import TelegramSection
 from artemis.channels.desktop.themes import DEFAULT_THEME, THEMES
-from artemis.channels.desktop.thread_shutdown import DETACHED, shutdown_thread
+from artemis.channels.desktop.thread_shutdown import (
+    DETACHED,
+    interrupt_threads,
+    shared_budget,
+    shutdown_thread,
+)
 from artemis.channels.desktop.triggers_section import TriggersSection
 from artemis.channels.desktop.tts_cloud_box import TtsCloudBox
 from artemis.channels.desktop.update_section import UpdateSection
@@ -157,14 +162,8 @@ class GitHubSync(QThread):
 
 
 _LAST_SECTION_KEY = "settings/section"
-_SHUTDOWN_WAIT_MS = 6000
 # Süresi dolunca ayrılan iş parçacıkları bitene dek GC tarafından toplanmasın diye tutulur.
 _DETACHED = DETACHED
-
-
-def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
-    # Bekleme süresi modülde kalır (testler kısaltır); gövde ortak modülde.
-    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 class SettingsPanel(QWidget):
@@ -366,6 +365,7 @@ class SettingsPanel(QWidget):
         self._recommended_stt = stt_catalog.recommended(None)
         self._stt_installed: dict[str, Path | None] = {}
         self.gpu_probe: voice_settings_section.GpuProbe | None = None
+        self._device_snapshot: tuple[Any, Any, Any] | None = None
         self.github: GitHubSync | None = None
         self.stt_download_thread: SttDownload | None = None
         self._github_sync = github_sync
@@ -433,8 +433,9 @@ class SettingsPanel(QWidget):
                 widget.setEnabled(False)
             self._sync_voice_output_controls()
         else:
-            self.refresh()
+            # Önce işçi başlar: refresh() PortAudio'yu GUI'de değil, işçinin sonucuyla doldurur.
             voice_settings_section.start_gpu_probe(self)
+            self.refresh()
         # Açılır listeler en uzun öğeye göre genişlemesin: dar pencerede yatay kaydırma çıkarıyordu.
         for combo in self.findChildren(QComboBox):
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
@@ -825,6 +826,9 @@ class SettingsPanel(QWidget):
     def _gpu_probe_done(self, gpu_mb: object) -> None:
         voice_settings_section.gpu_probe_done(self, gpu_mb)
 
+    def _device_scan_done(self, snapshot: object) -> None:
+        voice_settings_section.device_scan_done(self, snapshot)
+
     def _stt_scan_done(self, installed: object) -> None:
         voice_settings_section.stt_scan_done(self, installed)
 
@@ -1131,41 +1135,48 @@ class SettingsPanel(QWidget):
         voice_settings_section.sync_voice_models_from_manager(self)
 
     def finish_inventory(self) -> None:
-        if _shutdown_thread(
-            self.github,
-            ("done", self._github_done),
-            ("failed", self._github_failed),
-            ("finished", self._github_finished),
-        ):
-            self.github = None
-        # Model listesi isteği (en çok 5 sn zaman aşımı) çalışırken panel yıkılmasın.
-        if _shutdown_thread(self._cloud_fetch, ("done", self._cloud_models_done)):
-            self._cloud_fetch = None
-        if _shutdown_thread(
-            self.stt_download_thread,
-            ("done", self._stt_download_done),
-            ("failed", self._stt_download_failed),
-            ("finished", self._stt_download_finished),
-        ):
-            self.stt_download_thread = None
-        if _shutdown_thread(
-            self.gpu_probe, ("done", self._gpu_probe_done), ("scanned", self._stt_scan_done)
-        ):
-            self.gpu_probe = None
-        if voice_preview._shutdown_thread(
+        # Önce hepsine kesme istenir, sonra tek toplam bütçeyle beklenir (kapanış GUI'yi dondurmaz).
+        interrupt_threads(
+            self.github, self._cloud_fetch, self.stt_download_thread, self.gpu_probe,
             self.tts_preview_thread,
-            ("done", self._voice_preview_done),
-            ("failed", self._voice_preview_failed),
-            ("finished", self._voice_preview_finished),
-        ):
-            self.tts_preview_thread = None
-        self.telegram.finish()
-        self.update_section.finish()
-        self.voice_model_manager.finish()
-        if isinstance(self.tts_cloud_box, TtsCloudBox):
-            self.tts_cloud_box.finish()
-        self.file_search.finish()
-        self.mcp.finish()
+        )
+        with shared_budget():
+            if shutdown_thread(
+                self.github,
+                ("done", self._github_done),
+                ("failed", self._github_failed),
+                ("finished", self._github_finished),
+            ):
+                self.github = None
+            # Model listesi isteği (en çok 5 sn zaman aşımı) çalışırken panel yıkılmasın.
+            if shutdown_thread(self._cloud_fetch, ("done", self._cloud_models_done)):
+                self._cloud_fetch = None
+            if shutdown_thread(
+                self.stt_download_thread,
+                ("done", self._stt_download_done),
+                ("failed", self._stt_download_failed),
+                ("finished", self._stt_download_finished),
+            ):
+                self.stt_download_thread = None
+            if shutdown_thread(
+                self.gpu_probe, ("done", self._gpu_probe_done), ("scanned", self._stt_scan_done),
+                ("devices", self._device_scan_done),
+            ):
+                self.gpu_probe = None
+            if shutdown_thread(
+                self.tts_preview_thread,
+                ("done", self._voice_preview_done),
+                ("failed", self._voice_preview_failed),
+                ("finished", self._voice_preview_finished),
+            ):
+                self.tts_preview_thread = None
+            self.telegram.finish()
+            self.update_section.finish()
+            self.voice_model_manager.finish()
+            if isinstance(self.tts_cloud_box, TtsCloudBox):
+                self.tts_cloud_box.finish()
+            self.file_search.finish()
+            self.mcp.finish()
 
     def closeEvent(self, event: QCloseEvent) -> None:
         self.finish_inventory()

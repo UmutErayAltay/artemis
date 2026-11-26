@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import contextlib
+import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Any
 
 import httpx
 from PySide6.QtCore import QSize, Qt, QThread, Signal
@@ -34,15 +34,10 @@ from artemis.channels.voice.model_health import (
 )
 from artemis.i18n import t
 
-_SHUTDOWN_WAIT_MS = 6000
 _DETACHED = DETACHED
 
 InventoryFn = Callable[[Path], list[VoiceModelEntry]]
 EntryOpFn = Callable[[str, Path], VoiceModelEntry]
-
-
-def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
-    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 def _status_badge(status: str) -> str:
@@ -84,20 +79,29 @@ class _ModelOpThread(QThread):
         self._work = work
 
     def run(self) -> None:
+        # BaseException dahil her yolda GUI bir sonuç almalı (durum etiketi takılı kalmasın).
+        reported = False
         try:
             entries, message = self._work()
+            if not self.isInterruptionRequested():
+                self.completed.emit(self.generation, self.op, entries, message)
+            reported = True
         except (OSError, ValueError, RuntimeError, ImportError, httpx.HTTPError) as error:
+            reported = True
             self.failed.emit(
                 self.generation, self.op, str(error) or type(error).__name__
             )
-            return
         except Exception as error:  # noqa: BLE001 - İşçi iş parçacığı sınırı: beklenmeyen tür de failed sinyaliyle GUI'ye bildirilir, durum etiketi takılı kalmaz.
+            reported = True
             self.failed.emit(
                 self.generation, self.op, str(error) or type(error).__name__
             )
-            return
-        if not self.isInterruptionRequested():
-            self.completed.emit(self.generation, self.op, entries, message)
+        finally:
+            if not reported:
+                exc_type = sys.exc_info()[0]
+                self.failed.emit(
+                    self.generation, self.op, exc_type.__name__ if exc_type else "Interrupted"
+                )
 
 
 class VoiceModelManagerWidget(QFrame):
@@ -474,6 +478,10 @@ class VoiceModelManagerWidget(QFrame):
         )
 
     def _on_task_finished(self) -> None:
+        # Eski iş parçacığının geç gelen finished'ı yeni çalışan işi silmesin.
+        sender = self.sender()
+        if sender is not None and sender is not self._thread:
+            return
         self._thread = None
         self._sync_buttons()
 
@@ -483,7 +491,7 @@ class VoiceModelManagerWidget(QFrame):
         self._thread = None
         if thread is not None:
             with contextlib.suppress(RuntimeError):
-                if _shutdown_thread(
+                if shutdown_thread(
                     thread,
                     ("completed", self._on_task_done),
                     ("failed", self._on_task_failed),

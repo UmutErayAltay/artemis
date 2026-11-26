@@ -521,6 +521,17 @@ def microphone_choices(
     return result
 
 
+def query_device_snapshot() -> tuple[Any, Any, Any]:
+    """PortAudio aygıt, ana makine API ve varsayılan giriş sorgusu (yavaş olabilir; GUI dışında)."""
+    sd = importlib.import_module("sounddevice")
+    default_device = getattr(sd.default, "device", None)
+    return (
+        sd.query_devices(),
+        sd.query_hostapis(),
+        default_device[0] if default_device else None,
+    )
+
+
 def refresh_device_combo(panel: Any, settings: Settings, *, reuse: bool = False) -> None:
     """Mikrofon açılır listesini doldurur (SettingsPanel'den taşındı: dosya boyutu sınırı)."""
     panel.device_combo.clear()
@@ -531,15 +542,16 @@ def refresh_device_combo(panel: Any, settings: Settings, *, reuse: bool = False)
         sd = importlib.import_module("sounddevice")
         audio_errors = (*audio_errors, sd.PortAudioError)
         snapshot = getattr(panel, "_device_snapshot", None)
+        if snapshot is None and not reuse and getattr(panel, "gpu_probe", None) is not None:
+            # Panel açılışında PortAudio sorgusu arka plan işçisinde (GpuProbe); GUI beklemez,
+            # sonuç gelince liste dolar (Karne 8).
+            panel.device_combo.setEnabled(False)
+            panel.current_device.setText(t("Mikrofonlar taranıyor…"))
+            return
         if snapshot is None or not reuse:
             # PortAudio sorgusu yavaş olabilir: yalnız yenilemede sorulur, "ayrıntı"
             # anahtarı aynı anlık görüntüyü yeniden kullanır.
-            default_device = getattr(sd.default, "device", None)
-            snapshot = (
-                sd.query_devices(),
-                sd.query_hostapis(),
-                default_device[0] if default_device else None,
-            )
+            snapshot = query_device_snapshot()
             panel._device_snapshot = snapshot
         devices, hosts, default_in = snapshot
         active: Any = settings.voice.input_device

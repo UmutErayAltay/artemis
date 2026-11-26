@@ -29,14 +29,8 @@ from artemis.i18n import t
 if TYPE_CHECKING:
     from artemis.channels.desktop.settings_panel import SettingsPanel
 
-_SHUTDOWN_WAIT_MS = 6000
 # Süresi dolunca ayrılan iş parçacığı bitene dek GC tarafından toplanmasın diye tutulur.
 _DETACHED = DETACHED
-
-
-def _shutdown_thread(thread: QThread | None, *connections: tuple[str, Any]) -> bool:
-    # Bekleme süresi modülde kalır (testler kısaltır); gövde ortak modülde.
-    return shutdown_thread(thread, *connections, wait_ms=_SHUTDOWN_WAIT_MS)
 
 
 GEMINI_TTS_VOICES: tuple[str, ...] = (
@@ -549,7 +543,7 @@ class TtsCloudBox(_HeightForWidthBox):
                 panel.tts_cloud_saved.blockSignals(blocked)
 
     def finish(self) -> None:
-        if _shutdown_thread(self._fetch, ("done", self._fetch_done)):
+        if shutdown_thread(self._fetch, ("done", self._fetch_done)):
             self._fetch = None
 
     def closeEvent(self, event: QCloseEvent) -> None:

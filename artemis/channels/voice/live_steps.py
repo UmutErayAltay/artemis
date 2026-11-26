@@ -7,6 +7,7 @@ karışım sınıfı olarak ayrıldı, davranış ve durum denetleyicide kalır.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import Callable
 from functools import partial
@@ -102,6 +103,9 @@ class LiveStepsMixin:
                     "Uyandırma ön-kapısı durdu, transkript uyandırmasına dönüldü (%s).",
                     type(error).__name__,
                 )
+                # Anahtar sözcük geçici dosyası close() ile silinir; yalnız None'lamak sızdırırdı.
+                with contextlib.suppress(OSError):
+                    self._wake_spotter.close()
                 self._wake_spotter = None
                 self._wake_buffer.clear()
                 self.on_state("wake:unavailable:runtime")
@@ -132,6 +136,8 @@ class LiveStepsMixin:
                 logger.warning(
                     "Canlı yazı durdu, bu oturumda kapatıldı (%s).", type(error).__name__
                 )
+                with contextlib.suppress(OSError):
+                    live.close()
                 self._live = None
                 self._live_buffer.clear()
                 self.on_state("live:unavailable:runtime")
