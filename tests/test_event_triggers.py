@@ -1100,3 +1100,55 @@ async def test_routine_panel_carries_suggest_tainted_flag(tmp_path: Path) -> Non
     await deliverer.deliver(**common, suggest="X için hazırlık", suggest_tainted=True)
     await deliverer.deliver(**common, suggest="temiz öneri", suggest_tainted=False)
     assert seen == [("X için hazırlık", True), ("temiz öneri", False)]
+
+
+def test_app_placeholder_taints_app_opened_and_chain_suggestions() -> None:
+    # Karne 7 Y1: {app} (ön plandaki exe adı) içeren öneri lekeli sayılır; {source} temizdir.
+    def chain(name: str, suggest: str) -> SuggestionChainConfig:
+        return SuggestionChainConfig(
+            name=name, after_routine="kod-ac", message="m", suggest=suggest
+        )
+
+    matches = evaluate_chains(
+        [chain("app-li", "{app} için özetle"), chain("kaynakli", "{source} sonrası özetle")],
+        event_kind="routine_completed",
+        source_name="kod-ac",
+        now=datetime(2026, 11, 23, 10, 0, tzinfo=UTC),
+        tz=ZoneInfo("UTC"),
+        work_profile="work",
+        active_app="evil.exe",
+        routines_enabled=True,
+        last_fired={},
+    )
+    tainted = {m.chain_name: m.suggest_tainted for m in matches}
+    assert tainted == {"app-li": True, "kaynakli": False}
+
+
+async def test_app_opened_suggest_with_app_placeholder_is_tainted(tmp_path: Path) -> None:
+    current_app: list[str | None] = ["chrome.exe"]
+    clock = FakeClock()
+    seen: list[bool] = []
+
+    def panel(
+        _t: str, _b: str, _r: str, _s: str, _d: str = "", tainted: bool = False
+    ) -> bool:
+        seen.append(tainted)
+        return True
+
+    trig = TriggerConfig(
+        name="kod-acildi", kind="app_opened", app="code.exe", suggest="{app} için özetle"
+    )
+    runtime = _make_runtime(tmp_path, items=(trig,))
+    deliverer = Deliverer(runtime.settings, runtime.audit, routine_panel=panel, toast=None)
+    scheduler = ProactiveScheduler(
+        runtime,
+        runtime.context.services["proactive_store"],
+        deliverer,
+        clock=clock,
+        active_app_getter=lambda: current_app[0],
+    )
+    assert await scheduler.tick() == 0
+    clock.advance(seconds=30)
+    current_app[0] = "code.exe"
+    assert await scheduler.tick() == 1
+    assert seen == [True]

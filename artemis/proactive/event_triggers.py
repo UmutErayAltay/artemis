@@ -347,6 +347,8 @@ class EventTriggerTracker:
             body=body,
             suggest=suggest,
             routine=trigger.routine or "",
+            # {app} ön plandaki exe adıdır (dış kaynak): öneriyle açılan tur lekeli sayılır.
+            suggest_tainted=suggest_uses_external(trigger.suggest),
         )
 
     async def _poll_calendar_before(
@@ -547,6 +549,8 @@ def evaluate_chains(
                 body=body,
                 suggest=suggest,
                 routine=routine,
+                # {source} kullanıcının adlandırdığı tetikleyici/rutindir; {app} dış kaynaktır.
+                suggest_tainted=suggest_uses_external(chain.suggest),
             )
         )
     return matches
