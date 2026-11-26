@@ -579,11 +579,13 @@ async def test_cloud_fallback_is_dropped_from_chain_without_permission(
     gate, context, host, _ = _chain_env(
         tmp_path, {"local": "ollama", "cloud": "openrouter"}, allow_cloud=False
     )
-    built: list[str] = []
+    built: list[tuple[str, bool]] = []
 
     class Recording:
-        def __init__(self, settings: Settings, audit: Any) -> None:
-            built.append(settings.primary_model)
+        def __init__(
+            self, settings: Settings, audit: Any, *, allow_image_fallback: bool = True
+        ) -> None:
+            built.append((settings.primary_model, allow_image_fallback))
 
         async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Any:
             from artemis.brain.models import Completion
@@ -594,7 +596,7 @@ async def test_cloud_fallback_is_dropped_from_chain_without_permission(
     tool = gate.registry.get("computer_use")
     assert tool is not None
     result = await tool.execute(tool.args_model(goal="x"), context)
-    assert built == ["local"]  # bulut model zincire hiç girmedi
+    assert built == [("local", False)]  # bulut model zincire hiç girmedi ve image fallback kapalı
     assert host.sessions == 1 and result.data["reason"] == "done"
 
 
@@ -769,3 +771,83 @@ def test_planner_model_setting_validation(tmp_path: Path) -> None:
             primary_model="main",
             computer_use=ComputerUseConfig(planner_model="tts"),
         )
+
+
+async def test_computer_use_fails_without_blind_click_or_unimaged_verify_on_image_rejection(
+    tmp_path: Path,
+) -> None:
+    from artemis.brain.errors import MediaRejectedError
+    from artemis.brain.models import Completion
+    from artemis.brain.router import ProviderRouter
+    from artemis.tools.plugins.computer import _ModelChain
+
+    class _RejectingProvider:
+        def __init__(self, responses: list[Completion | MediaRejectedError]) -> None:
+            self.responses = list(responses)
+            self.seen_images: list[bool] = []
+
+        async def complete(self, messages: Any, tools: Any, *, timeout: float) -> Completion:
+            self.seen_images.append(any(m.image_png is not None for m in messages))
+            item = self.responses.pop(0)
+            if isinstance(item, MediaRejectedError):
+                raise item
+            return item
+
+    # 1) İlk adımda görüntü reddedilirse kör tıklama yapılmaz, oturum success=False ile biter.
+    gate, context, _host, backend, _ = env(tmp_path / "s1")
+    reject_1 = _RejectingProvider(
+        [
+            MediaRejectedError("Sağlayıcı medya girdisini kabul etmedi (HTTP 400).", media_kind="image"),
+            Completion(content=click()),
+        ]
+    )
+    router_1 = ProviderRouter(
+        context.settings.model_copy(update={"primary_model": "vision"}),
+        context.audit,
+        providers={"vision": reject_1},
+        allow_image_fallback=False,
+    )
+    context.services["computer_provider"] = _ModelChain([router_1])
+    res_1 = await gate.dispatch(CALL, context, TurnState(), lambda *_: True)
+    assert res_1.success is False
+    assert res_1.data["reason"] == "error"
+    assert backend.calls == []
+    assert reject_1.seen_images == [True]
+
+    # 2) Eylem sonrası doğrulamada görüntü reddedilirse görüntüsüz doğrulama yapılmaz.
+    gate_2, context_2, _host_2, backend_2, _ = env(tmp_path / "s2")
+    reject_2 = _RejectingProvider(
+        [
+            Completion(content=click()),
+            Completion(content=DONE),
+            MediaRejectedError("Sağlayıcı medya girdisini kabul etmedi (HTTP 400).", media_kind="image"),
+            Completion(content=YES),
+        ]
+    )
+    router_2 = ProviderRouter(
+        context_2.settings.model_copy(update={"primary_model": "vision"}),
+        context_2.audit,
+        providers={"vision": reject_2},
+        allow_image_fallback=False,
+    )
+    context_2.services["computer_provider"] = _ModelChain([router_2])
+    res_2 = await gate_2.dispatch(CALL, context_2, TurnState(), lambda *_: True)
+    assert res_2.success is False
+    assert res_2.status == "sent"
+    assert res_2.data == {"reason": "done", "steps": 1, "verified": False}
+    assert len(backend_2.calls) == 1
+    assert reject_2.seen_images == [True, True, True]
+
+
+def test_build_chain_wires_allow_image_fallback_false(tmp_path: Path) -> None:
+    from artemis.tools.plugins.computer import _build_chain
+
+    settings = Settings(
+        workspace=tmp_path,
+        models={"vision": model("ollama")},
+        primary_model="vision",
+    )
+    chain = _build_chain(("vision",), settings, AuditLog(tmp_path / "audit.jsonl"))
+    routers = chain._providers
+    assert len(routers) == 1
+    assert getattr(routers[0], "_allow_image_fallback") is False

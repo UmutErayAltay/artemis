@@ -240,6 +240,7 @@ def _build_chain(names: tuple[str, ...], settings: Settings, audit: Any) -> _Mod
             ProviderRouter(
                 settings.model_copy(update={"primary_model": name, "fallback_model": None}),
                 audit,
+                allow_image_fallback=False,
             )
             for name in names
         ]

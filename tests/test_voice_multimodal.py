@@ -15,7 +15,7 @@ import pytest
 from pydantic import BaseModel
 
 from artemis.brain.agent_loop import AgentLoop, RunResult
-from artemis.brain.errors import ProviderError
+from artemis.brain.errors import MediaRejectedError, ProviderError
 from artemis.brain.models import Completion, Message, ToolCall
 from artemis.brain.router import ProviderRouter
 from artemis.brain.streaming import TextStream
@@ -623,7 +623,9 @@ async def test_router_audits_has_image_and_falls_back_on_claude_cli_or_rejection
     settings = _settings(tmp_path / "r1")
     fake = _CaptureProvider(
         [
-            ProviderError("Sağlayıcı isteği kabul etmedi (HTTP 400)."),
+            MediaRejectedError(
+                "Sağlayıcı medya girdisini kabul etmedi (HTTP 400).", media_kind="image"
+            ),
             Completion(content="Görüntüsüz devam edildi", provider="openai_compatible", model="m"),
         ]
     )
