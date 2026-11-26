@@ -96,7 +96,7 @@ class LiveStepsMixin:
             return
         try:
             hit = task.result()
-        except (OSError, RuntimeError, ValueError) as error:
+        except Exception as error:  # noqa: BLE001 - İş parçacığı görev sınırı: türü ne olursa olsun ön-kapı kapatılır, sessizce etkin kalmaz.
             if self._wake_spotter is not None:
                 logger.warning(
                     "Uyandırma ön-kapısı durdu, transkript uyandırmasına dönüldü (%s).",
@@ -127,7 +127,7 @@ class LiveStepsMixin:
         live = self._live
         try:
             text = task.result()
-        except (OSError, RuntimeError, ValueError) as error:
+        except Exception as error:  # noqa: BLE001 - İş parçacığı görev sınırı: türü ne olursa olsun ön-kapı kapatılır, sessizce etkin kalmaz.
             if live is not None:
                 logger.warning(
                     "Canlı yazı durdu, bu oturumda kapatıldı (%s).", type(error).__name__

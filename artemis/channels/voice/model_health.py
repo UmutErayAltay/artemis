@@ -525,6 +525,10 @@ def _check_piper_pair(
     if not isinstance(parsed, dict):
         return "corrupt", "corrupt", ".onnx.json nesne biçiminde değil.", total_size
 
+    if not (expected_onnx_sha256 or expected_json_sha256):
+        # Sabit özet yoksa karşılaştıracak bir şey de yok; Ayarlar açılışında GUI
+        # iş parçacığında yüzlerce MB'ı boşuna okumamak için özet hesaplanmaz.
+        return "ok", "ok", "ONNX + JSON hazır (özet sabitlenmemiş).", total_size
     try:
         actual_onnx = _sha256_file(onnx_path)
         actual_json = _sha256_file(json_path)
@@ -545,14 +549,12 @@ def _check_piper_pair(
             f"JSON SHA-256 uyuşmuyor ({actual_json[:12]}…).",
             total_size,
         )
-    if expected_onnx_sha256 or expected_json_sha256:
-        return (
-            "ok",
-            "sha256_ok",
-            f"SHA-256 doğrulandı ({actual_onnx[:12]}…).",
-            total_size,
-        )
-    return "ok", "ok", f"ONNX + JSON hazır (SHA-256: {actual_onnx[:12]}…).", total_size
+    return (
+        "ok",
+        "sha256_ok",
+        f"SHA-256 doğrulandı ({actual_onnx[:12]}…).",
+        total_size,
+    )
 
 
 def _piper_entries(
@@ -905,6 +907,8 @@ def _require_https_request(request: httpx.Request) -> None:
 
 
 # Tek dosya için üst sınır: sahte/bozuk sunucu belleği şişirmesin (en büyük model ~100 MB).
+# Kapsam yalnız Piper indirmeleridir (belleğe okunur). Whisper indirmeleri HF üzerinden
+# `stt_catalog.download` ile diske iner (çok GB olabilir) ve bu sınıra tabi değildir.
 MAX_DOWNLOAD_BYTES = 200 * 1024 * 1024
 
 

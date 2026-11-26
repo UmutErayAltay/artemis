@@ -91,6 +91,11 @@ class _ModelOpThread(QThread):
                 self.generation, self.op, str(error) or type(error).__name__
             )
             return
+        except Exception as error:  # noqa: BLE001 - İşçi iş parçacığı sınırı: beklenmeyen tür de failed sinyaliyle GUI'ye bildirilir, durum etiketi takılı kalmaz.
+            self.failed.emit(
+                self.generation, self.op, str(error) or type(error).__name__
+            )
+            return
         if not self.isInterruptionRequested():
             self.completed.emit(self.generation, self.op, entries, message)
 
@@ -106,6 +111,7 @@ class VoiceModelManagerWidget(QFrame):
         parent: QWidget | None = None,
         *,
         demo: bool = False,
+        defer_load: bool = False,
         inventory_fn: InventoryFn | None = None,
         verify_fn: EntryOpFn | None = None,
         download_fn: EntryOpFn | None = None,
@@ -190,7 +196,11 @@ class VoiceModelManagerWidget(QFrame):
         self.status_label.setAccessibleName(t("Ses modeli işlem durumu"))
         layout.addWidget(self.status_label)
 
-        self.refresh()
+        if defer_load:
+            # Envanter Piper özetleri/Whisper önbelleği için dosya okur: GUI'yi bekletmesin.
+            self.trigger_refresh(quiet=True)
+        else:
+            self.refresh()
 
     def heightForWidth(self, width: int) -> int:
         hfw = super().heightForWidth(width)
@@ -359,12 +369,15 @@ class VoiceModelManagerWidget(QFrame):
         thread.start()
         return True
 
-    def trigger_refresh(self) -> bool:
+    def trigger_refresh(self, *, quiet: bool = False) -> bool:
+        """`quiet`: açılış/yenileme yüklemesi; modeller değişmediği için sinyal yaymaz."""
+
         def _work() -> tuple[list[VoiceModelEntry], str]:
             entries = self._inventory_fn(self._config_path)
-            return entries, t("Ses modeli listesi güncellendi.")
+            return entries, "" if quiet else t("Ses modeli listesi güncellendi.")
 
-        return self._start_task("refresh", t("Ses modelleri taranıyor…"), _work)
+        op = "load" if quiet else "refresh"
+        return self._start_task(op, t("Ses modelleri taranıyor…"), _work)
 
     def trigger_verify_all(self) -> bool:
         snapshot = list(self._entries)
@@ -446,12 +459,13 @@ class VoiceModelManagerWidget(QFrame):
         return self._start_task("clean", t("Model temizleniyor…"), _work)
 
     def _on_task_done(
-        self, generation: int, _op: str, entries: object, message: str
+        self, generation: int, op: str, entries: object, message: str
     ) -> None:
         if generation != self._generation or not isinstance(entries, list):
             return
         self.apply_entries(entries, status_text=message)
-        self.models_changed.emit(entries)
+        if op != "load":
+            self.models_changed.emit(entries)
 
     def _on_task_failed(self, generation: int, _op: str, error_msg: str) -> None:
         if generation != self._generation:

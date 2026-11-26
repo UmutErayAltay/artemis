@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import importlib
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -131,8 +132,15 @@ def download(name: str) -> Path:
         raise OSError(f"Whisper modeli indirilemedi: {type(error).__name__}") from error
 
 
-def choice_for_path(path: Path | None) -> str | None:
-    """Yerel model yolundan katalogdaki model adını bulur."""
+def choice_for_path(
+    path: Path | None,
+    installed: Callable[[str], Path | None] = installed_path,
+) -> str | None:
+    """Yerel model yolundan katalogdaki model adını bulur.
+
+    `installed` önbellek aramasını değiştirmeye yarar: arayüz iş parçacığı faster_whisper'ı
+    içe aktarmasın diye panel hazır sonuçları verir.
+    """
     if path is None:
         return None
 
@@ -147,7 +155,7 @@ def choice_for_path(path: Path | None) -> str | None:
 
     resolved_path = path.resolve()
     for choice in CATALOG:
-        installed = installed_path(choice.name)
-        if installed is not None and installed.resolve() == resolved_path:
+        found = installed(choice.name)
+        if found is not None and found.resolve() == resolved_path:
             return choice.name
     return None

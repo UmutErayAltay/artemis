@@ -58,25 +58,35 @@ def test_gpu_probe_thread_emits_value(
     monkeypatch: pytest.MonkeyPatch, qapp: QApplication
 ) -> None:
     monkeypatch.setattr(stt_catalog, "gpu_memory_mb", lambda: 4096)
+    monkeypatch.setattr(stt_catalog, "installed_path", lambda _name: None)
     probe = vss.GpuProbe()
     got: list[object] = []
+    scanned: list[object] = []
     probe.done.connect(got.append)
+    probe.scanned.connect(scanned.append)
     probe.run()  # iş parçacığı başlatmadan gövdeyi doğrudan dener
     assert got == [4096]
+    assert scanned == [{c.name: None for c in stt_catalog.CATALOG}]
 
 
-def test_installed_lookup_runs_once_per_refresh(
+def test_gui_thread_never_looks_up_installed_models_until_scan_arrives(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, qapp: QApplication
 ) -> None:
+    """Karne 7 G2: açılış/populate dosya araması yapmaz; tarama sonucu listeyi günceller."""
     calls: list[str] = []
     panel = _panel(tmp_path, monkeypatch, calls)
     try:
-        calls.clear()
         panel._populate_stt_choices("small")
-        per_refresh = len(calls)
-        assert per_refresh == len(stt_catalog.CATALOG)
         panel._update_stt_download_button()
-        panel.stt_model_path()
-        assert len(calls) == per_refresh
+        assert calls == []
+        assert not panel.stt_download.isEnabled()  # tarama bitmeden düğme kapalı
+        small = panel.stt_combo.findData("small")
+        assert "kurulu" not in panel.stt_combo.itemText(small)
+        vss.stt_scan_done(panel, {c.name: None for c in stt_catalog.CATALOG} | {"small": tmp_path})
+        assert calls == []
+        assert "kurulu" in panel.stt_combo.itemText(panel.stt_combo.findData("small"))
+        assert panel.stt_combo.currentData() == "small"
+        assert panel.stt_model_path() == tmp_path
+        assert calls == []
     finally:
         panel.finish_inventory()

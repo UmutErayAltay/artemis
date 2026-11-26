@@ -37,6 +37,10 @@ from artemis.tools.platform import child_environment
 logger = logging.getLogger(__name__)
 
 
+_STALL_POLL_SECONDS = 0.5  # kuyruk beklemesi iptal/kapanışta bu kadar sürede serbest kalır
+_STALL_SECONDS = 2.0  # bu kadar süre mikrofon geri çağrısı gelmezse akış kesilmiş sayılır
+
+
 class EchoReferenceSink(Protocol):
     """Yankı referansına yazılan ses örneğini alır."""
 
@@ -128,6 +132,7 @@ class SoundDeviceMicrophone:
         self._queue_lock = threading.Lock()
         self._audio_errors: tuple[type[Exception], ...] = ()
         self.dropped_frames = 0
+        self._last_callback = monotonic()
 
     def _offer(self, pcm: bytes) -> None:
         with self._queue_lock:
@@ -141,6 +146,7 @@ class SoundDeviceMicrophone:
                 self._queue.put_nowait(AudioFrame(pcm, monotonic(), self._rate))
 
     def _callback(self, data: bytes, _frames: int, _time_info: Any, status: Any) -> None:
+        self._last_callback = monotonic()
         if status:
             logger.warning("Mikrofon akış durumu: %s", status)
         self._offer(bytes(data))
@@ -167,8 +173,16 @@ class SoundDeviceMicrophone:
                 self._open(sounddevice, self.capture_rate)
             except self._audio_errors as retry_error:
                 raise RuntimeError("Mikrofon aygıtı açılamadı.") from retry_error
+        self._last_callback = monotonic()
         while True:
-            frame = await asyncio.to_thread(self._queue.get)
+            try:
+                frame = await asyncio.to_thread(self._queue.get, True, _STALL_POLL_SECONDS)
+            except queue.Empty:
+                # Duraklatılmışken de geri çağrı gelir (kareler atılır); gelmiyorsa aygıt
+                # kopmuştur (USB mikrofon çekildi) ve arayüz sonsuza dek "dinliyor" kalırdı.
+                if monotonic() - self._last_callback > _STALL_SECONDS:
+                    raise OSError("Mikrofon sinyali kesildi.") from None
+                continue
             if frame is None:
                 return
             if frame.timestamp < self._discard_before:
