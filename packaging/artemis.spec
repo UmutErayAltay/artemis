@@ -87,9 +87,11 @@ datas += [
 ]
 # Yerel STT: faster_whisper açılışta huggingface_hub'ı içe aktarır ve ctranslate2'nin DLL'lerine
 # ihtiyaç duyar; analiz bunları tembel içe aktarımdan bulamadığı için v0.2.0 paketinde yerel tanıma
-# kırıktı (2026-11-18 derin tarama). Kuruluysa ikili dosyaları ve verileriyle birlikte toplanır.
+# kırıktı (2026-11-18 derin tarama). NumPy 2.5.x'te ise `numpy._core._exceptions` PyInstaller
+# 6.11.1'in yerleşik kancasında eksik kaldığı için v0.2.5 masaüstü açılışını kırıyordu (2026-11-26).
+# Kuruluysa ikili dosyaları ve verileriyle birlikte toplanır.
 binaries = []
-for _pkg in ("ctranslate2", "tokenizers", "huggingface_hub", "faster_whisper"):
+for _pkg in ("numpy", "ctranslate2", "tokenizers", "huggingface_hub", "faster_whisper"):
     try:
         _datas, _binaries, _hidden = collect_all(_pkg)
     except ImportError:
