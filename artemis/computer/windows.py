@@ -39,6 +39,8 @@ _DIB_RGB_COLORS = 0
 _PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
 _GA_ROOT = 2
 _MONITORINFOF_PRIMARY = 1
+_DWMWA_CLOAKED = 14
+_DESKTOP_SHELL_CLASSES = frozenset({"Progman", "WorkerW"})
 
 _INPUT_MOUSE = 0
 _INPUT_KEYBOARD = 1
@@ -243,6 +245,8 @@ def _libs() -> tuple[Any, Any, Any]:
     user32.GetWindowTextLengthW.restype = ctypes.c_int
     user32.GetWindowTextW.argtypes = [vp, wintypes.LPWSTR, ctypes.c_int]
     user32.GetWindowTextW.restype = ctypes.c_int
+    user32.GetClassNameW.argtypes = [vp, wintypes.LPWSTR, ctypes.c_int]
+    user32.GetClassNameW.restype = ctypes.c_int
     user32.SendInput.argtypes = [wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int]
     user32.SendInput.restype = wintypes.UINT
     gdi32.CreateCompatibleDC.argtypes = [vp]
@@ -267,6 +271,21 @@ def _libs() -> tuple[Any, Any, Any]:
     ]  # fmt: skip
     kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
     return user32, gdi32, kernel32
+
+
+@functools.lru_cache(maxsize=1)
+def _dwmapi() -> Any | None:
+    """DWM pencere gizliliği (cloaked) sorgusu için dwmapi; Windows dışında None."""
+    if sys.platform != "win32":
+        return None
+    try:
+        dwmapi = ctypes.WinDLL("dwmapi", use_last_error=True)
+    except OSError:
+        return None
+    vp = ctypes.c_void_p
+    dwmapi.DwmGetWindowAttribute.argtypes = [vp, wintypes.DWORD, vp, wintypes.DWORD]
+    dwmapi.DwmGetWindowAttribute.restype = ctypes.HRESULT
+    return dwmapi
 
 
 def set_dpi_aware() -> None:
@@ -726,6 +745,30 @@ def _sanitize_text(text: str, limit: int) -> str:
     return " ".join(clean.split())[:limit]
 
 
+def _window_class_name(user32: Any, hwnd: Any) -> str:
+    getter = getattr(user32, "GetClassNameW", None)
+    if getter is None:
+        return ""
+    buf = ctypes.create_unicode_buffer(128)
+    copied = int(getter(hwnd, buf, 128))
+    return buf.value if copied > 0 else ""
+
+
+def _is_cloaked(hwnd: Any, dwmapi: Any | None) -> bool:
+    if dwmapi is None:
+        return False
+    cloaked = wintypes.DWORD(0)
+    try:
+        hr = int(
+            dwmapi.DwmGetWindowAttribute(
+                hwnd, _DWMWA_CLOAKED, ctypes.byref(cloaked), ctypes.sizeof(cloaked)
+            )
+        )
+    except (OSError, AttributeError, ctypes.ArgumentError):
+        return False
+    return hr == 0 and bool(cloaked.value)
+
+
 def visible_windows(max_items: int = 12) -> list[WindowInfo]:
     """Görünür, simge durumuna küçültülmemiş üst düzey pencereleri döndürür; hatada `[]`."""
     if sys.platform != "win32" or max_items <= 0:
@@ -735,6 +778,7 @@ def visible_windows(max_items: int = 12) -> list[WindowInfo]:
         user32 = _libs()[0]
     except (OSError, RuntimeError):
         return []
+    dwmapi = _dwmapi()
     windows: list[WindowInfo] = []
 
     def collect(hwnd: Any, _lparam: Any) -> bool:
@@ -742,6 +786,10 @@ def visible_windows(max_items: int = 12) -> list[WindowInfo]:
             return True
         try:
             if not user32.IsWindowVisible(hwnd) or user32.IsIconic(hwnd):
+                return True
+            if _window_class_name(user32, hwnd) in _DESKTOP_SHELL_CLASSES:
+                return True
+            if _is_cloaked(hwnd, dwmapi):
                 return True
             length = int(user32.GetWindowTextLengthW(hwnd))
             if length <= 0:

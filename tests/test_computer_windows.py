@@ -240,3 +240,72 @@ def test_visible_windows_filters_minimized_tiny_and_sanitizes(
     )
     monkeypatch.setattr(w.sys, "platform", "linux")
     assert w.visible_windows() == []
+
+
+def test_visible_windows_excludes_progman_workerw_and_dwm_cloaked(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from ctypes import wintypes
+
+    # (cls, title, rect, cloaked, proc)
+    win_defs = {
+        1: ("Progman", "Program Manager", (0, 0, 1920, 1080), 0, (r"C:\Windows\explorer.exe", 10)),
+        2: ("WorkerW", "Masaüstü Katmanı", (0, 0, 1920, 1080), 0, (r"C:\Windows\explorer.exe", 10)),
+        3: ("ApplicationFrameWindow", "Ayarlar (Cloaked)", (0, 0, 1200, 800), 2, (r"C:\Windows\ImmersiveControlPanel\SystemSettings.exe", 20)),
+        4: ("Notepad", "not.txt - Not Defteri", (100, 100, 900, 700), 0, (r"C:\Windows\notepad.exe", 30)),
+    }
+
+    class _FakeUser32:
+        def EnumWindows(self, callback: Any, _lparam: int) -> int:
+            for hwnd in win_defs:
+                callback(hwnd, 0)
+            return 1
+
+        def IsWindowVisible(self, _hwnd: int) -> int:
+            return 1
+
+        def IsIconic(self, _hwnd: int) -> int:
+            return 0
+
+        def GetClassNameW(self, hwnd: int, buf: Any, size: int) -> int:
+            cls = win_defs[hwnd][0][: size - 1]
+            buf.value = cls
+            return len(cls)
+
+        def GetWindowTextLengthW(self, hwnd: int) -> int:
+            return len(win_defs[hwnd][1])
+
+        def GetWindowTextW(self, hwnd: int, buf: Any, size: int) -> int:
+            text = win_defs[hwnd][1][: size - 1]
+            buf.value = text
+            return len(text)
+
+        def GetWindowRect(self, hwnd: int, rect_ptr: Any) -> int:
+            rect = ctypes.cast(rect_ptr, ctypes.POINTER(wintypes.RECT)).contents
+            left, top, right, bottom = win_defs[hwnd][2]
+            rect.left, rect.top, rect.right, rect.bottom = left, top, right, bottom
+            return 1
+
+    class _FakeDwmapi:
+        def DwmGetWindowAttribute(
+            self, hwnd: int, attr: int, out_ptr: Any, _size: int
+        ) -> int:
+            assert attr == w._DWMWA_CLOAKED
+            out = ctypes.cast(out_ptr, ctypes.POINTER(wintypes.DWORD)).contents
+            out.value = win_defs[int(hwnd)][3]
+            return 0
+
+    monkeypatch.setattr(w.sys, "platform", "win32")
+    monkeypatch.setattr(w, "set_dpi_aware", lambda: None)
+    monkeypatch.setattr(w, "_libs", lambda: (_FakeUser32(), None, None))
+    monkeypatch.setattr(w, "_dwmapi", lambda: _FakeDwmapi())
+    monkeypatch.setattr(w, "_window_process", lambda hwnd: win_defs[int(hwnd)][4])
+    monkeypatch.setattr(w, "_ENUM_WINDOWS_PROC", lambda fn: fn)
+
+    listed = w.visible_windows()
+    assert len(listed) == 1
+    assert listed[0].hwnd == 4
+    assert listed[0].title == "not.txt - Not Defteri"
+
+    monkeypatch.setattr(w.sys, "platform", "linux")
+    assert w.visible_windows() == []
