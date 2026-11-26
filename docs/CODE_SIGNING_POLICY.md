@@ -2,6 +2,9 @@
 
 Free code signing provided by SignPath.io, certificate by SignPath Foundation.
 
+> **Status:** the SignPath Foundation application is pending. Until it is approved, release
+> installers are published unsigned together with a `SHA256SUMS.txt` manifest.
+
 ## Team roles
 
 All SignPath signing roles for the `UmutErayAltay/artemis` repository are held by the repository owner:
