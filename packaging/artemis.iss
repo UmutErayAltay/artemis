@@ -2,7 +2,7 @@
 ; Derleme betiği /DMyAppVersion=... parametresiyle sürümü geçer (CI release-windows.yml bunu pyproject.toml'dan geçirir).
 ; Aşağıdaki varsayılan yalnız elle derleme içindir; tests/test_release_workflow.py pyproject sürümüyle hizalı tutar.
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.6"
+  #define MyAppVersion "0.2.7"
 #endif
 
 [Setup]

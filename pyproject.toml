@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "artemis-tr"
-version = "0.2.6"
+version = "0.2.7"
 description = "Local-first Windows personal desktop assistant with a unified safety gate, taint tracking, voice pipeline, and UIA computer use"
 requires-python = ">=3.12"
 license = "Apache-2.0"

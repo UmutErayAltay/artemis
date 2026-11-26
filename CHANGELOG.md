@@ -4,6 +4,13 @@ Kullanıcıya dönük özet. Kurucular henüz imzasızdır (SignPath başvurusu 
 her sürümün `SHA256SUMS.txt` dosyasıyla doğrulayın. Ayrıntılı kayıtlar
 [GitHub Releases](https://github.com/UmutErayAltay/artemis/releases) sayfasındadır.
 
+## 0.2.7 (2026-11-26)
+
+- Kararlılık: Ayarlar veya takvim/posta denetimi sürerken panel kapanırsa uygulama çökmüyor; kapanış en çok ~2 sn bekliyor.
+- Ses: Ayarlar açılışında mikrofon listesi ve Whisper taraması arka planda; ses başlatılamazsa hata gösteriliyor, sessizce kapanmıyor.
+- Güvenlik: öneri şablonunda kullanıcının vermediği her yer tutucu dış içerik sayılıyor (yeni tetikleyici türleri unutulmaz).
+- Yayın: release notu imza durumuna göre yazılıyor; kurucudaki gizlilik metni otomatik model indirme istisnasını söylüyor; güvenlik açığı bildirimi GitHub üzerinden açık.
+
 ## 0.2.6 (2026-11-26)
 
 - Düzeltme: 0.2.5 kurucusunda Artemis açılmıyordu (pakete NumPy alt modülü girmemişti). Paket artık yayından önce CI'da açılış denemesinden geçiyor; eksik modül olursa pencere sessizce kapanmak yerine hangi modülün yüklenemediğini söylüyor.
