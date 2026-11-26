@@ -212,6 +212,15 @@ değişiklikleri) için ilk ekran kontrolleri (`scripts/kabul_masaustu.py`, 2026
 [kabul oturumlarında](KABUL_OTURUMLARI.md) kayıtlıdır; tam insan kabulü için gerçek cihaz testi
 bekleniyor ("Windows kabulü bekliyor").
 
+### Windows elle kabul listesi (kodda var, gerçek cihazda doğrulanmadı, #48)
+
+| # | Madde | Kod yeri | Durum |
+|---|---|---|---|
+| 1 | Uykudan uyanma sonrası `QueryUnbiasedInterruptTime` ile uyku boşluğu algısı gerçek davranışı | `artemis/proactive/event_triggers.py` (`ResumeDetector.poll`) | Windows kabulü bekliyor |
+| 2 | Rutin zinciri tetiklenirken ön planda Artemis penceresi varken `active_app` eşleşmesi | `artemis/proactive/event_triggers.py` (`evaluate_chains`) | Windows kabulü bekliyor |
+
+Her iki madde yalnız sahte saat/ön plan getiricisiyle test edildi; geçti denmez.
+
 ## Sürüm durumu — v0.2.4 (2026-11-26)
 
 `v0.2.4` 2026-11-26'da CI ile yayımlandı: kurucu `Artemis-Setup-0.2.4.exe` ve `SHA256SUMS.txt`.
