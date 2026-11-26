@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import json
 import os
-import time
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
 import pytest
+from _wait import wait_qt, wait_until
 from test_code_agent import SESSION, make_jobs, payload, reply, wait_job
 from test_code_agent import repo as _repo_fixture
 
@@ -27,12 +27,14 @@ from artemis.tools.project_spec import ProjectSpec
 repo = _repo_fixture
 
 def wait_event(bridge: DesktopBridge, kind: type[Any]) -> Any:
-    deadline = time.monotonic() + 3
-    while time.monotonic() < deadline:
-        for event in bridge.poll_events():
-            if isinstance(event, kind):
-                return event
-        time.sleep(0.005)
+    found: list[Any] = []
+
+    def poll() -> bool:
+        found.extend(e for e in bridge.poll_events() if isinstance(e, kind))
+        return bool(found)
+
+    if wait_until(poll, 3.0):
+        return found[0]
     raise AssertionError(f"{kind.__name__} olayı gelmedi")
 
 
@@ -86,9 +88,7 @@ def test_typed_bridge_full_snapshot_gate_busy_and_no_llm(tmp_path: Path, repo: P
         assert status.result.data["jobs"][0]["status"] == "done"
     finally:
         bridge.shutdown()
-        deadline = time.monotonic() + 3
-        while not bridge.stopped and time.monotonic() < deadline:
-            time.sleep(0.01)
+        wait_until(lambda: bridge.stopped, 3.0, 0.01)
         assert bridge.stopped
 
 
@@ -301,7 +301,7 @@ def test_projects_buttons_approve_gate_and_qt_heartbeat(tmp_path: Path, repo: Pa
 
     from artemis.channels.desktop.projects_panel import ProjectsPanel
 
-    application = QApplication.instance() or QApplication([])
+    QApplication.instance() or QApplication([])
     jobs, cli = make_jobs(tmp_path, reply(payload("question")))
     provider = ScriptedProvider([])
     settings = Settings(
@@ -355,10 +355,7 @@ def test_projects_buttons_approve_gate_and_qt_heartbeat(tmp_path: Path, repo: Pa
         assert approval.arguments["spec"]["task"] == "<img src='fake'> görevi"
         # Worker onayı beklerken Qt event loop'u canlı kalır.
         # Yavaş CI'da 60 ms sabit pencere 1 tıka düşebiliyordu: 3 tıka kadar bekle (üst sınır 2 sn).
-        end = time.monotonic() + 2.0
-        while len(ticks) < 3 and time.monotonic() < end:
-            application.processEvents()
-            time.sleep(0.005)
+        wait_qt(lambda: len(ticks) >= 3, 2.0)
         assert len(ticks) >= 3 and cli.calls == []
         bridge.decide(approval.request_id, approval.turn_id, approval.approval_id, True)
         sent = wait_event(bridge, ToolFinished)
@@ -381,9 +378,6 @@ def test_projects_buttons_approve_gate_and_qt_heartbeat(tmp_path: Path, repo: Pa
     finally:
         timer.stop()
         bridge.shutdown()
-        end = time.monotonic() + 3
-        while not bridge.stopped and time.monotonic() < end:
-            application.processEvents()
-            time.sleep(0.005)
+        wait_qt(lambda: bridge.stopped, 3.0)
         assert bridge.stopped
         panel.close()

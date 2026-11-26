@@ -7,12 +7,12 @@ Windows kasasına ne okuma ne yazma yapılır). Gerçek bot token'ı yoktur.
 from __future__ import annotations
 
 import os
-import time
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 import yaml
+from _wait import wait_qt
 from telegram_fake import CHAT_ID, FAKE_TOKEN, FakeTelegram, make_message, method_bodies
 
 from artemis.channels.telegram import api
@@ -82,20 +82,12 @@ def section(path: Path, *, demo: bool = False) -> TelegramSection:
 
 
 def settle(panel: TelegramSection) -> None:
-    deadline = time.monotonic() + 15
-    while time.monotonic() < deadline:
-        QApplication.processEvents()
-        if panel._job is None or panel._job.isFinished():
-            break
-        time.sleep(0.01)
+    wait_qt(lambda: panel._job is None or panel._job.isFinished(), 15.0, 0.01)
     QApplication.processEvents()
 
 
 def wait_for_text(panel: TelegramSection, needle: str) -> None:
-    deadline = time.monotonic() + 10
-    while needle not in panel.message.text() and time.monotonic() < deadline:
-        QApplication.processEvents()
-        time.sleep(0.01)
+    wait_qt(lambda: needle in panel.message.text(), 10.0, 0.01)
 
 
 def client(fake: FakeTelegram, tmp_path: Path, token: str = FAKE_TOKEN) -> TelegramClient:
