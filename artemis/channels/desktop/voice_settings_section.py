@@ -35,7 +35,7 @@ class SttDownload(QThread):
     def run(self) -> None:
         try:
             path = stt_catalog.download(self.name)
-        except Exception as error:
+        except Exception as error:  # noqa: BLE001 - iş parçacığı sınırı: yutulmaz, panele bildirilir
             # Hata iletisi yol veya belirteç taşıyabilir; yalnız sınıf adı gösterilir.
             self.failed.emit(type(error).__name__)
         else:

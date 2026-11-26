@@ -182,7 +182,7 @@ async def _cancel_and_wait(
         await task
     except asyncio.CancelledError:
         pass
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - iptal edilen alt görevin rastgele hatası turu bozmaz
         _logger.warning("İptal edilen alt görev hata ile sonlandı (%s).", type(error).__name__)
     return True
 

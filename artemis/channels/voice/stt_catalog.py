@@ -112,7 +112,8 @@ def installed_path(name: str) -> Path | None:
         return None
     except ImportError:
         return None
-    except Exception:
+    except (OSError, ValueError):
+        # Önbellekte yok (LocalEntryNotFoundError bir OSError'dır) ya da bozuk: kurulu sayılmaz.
         return None
 
 

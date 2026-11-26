@@ -310,7 +310,7 @@ class FileIndex:
             else:
                 for statement in SCHEMA:
                     db.execute(statement)
-        except Exception:
+        except sqlite3.Error:
             db.close()
             raise
         return db

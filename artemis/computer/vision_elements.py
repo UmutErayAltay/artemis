@@ -193,7 +193,8 @@ class _OcrWorker:
                 if not line:
                     break
                 self.lines.put(line)
-        except Exception:
+        except (OSError, ValueError):
+            # İşçi süreci öldü ya da pipe kapandı: okuma biter, finally sonlandırıcıyı koyar.
             pass
         finally:
             self.lines.put(None)
@@ -333,7 +334,7 @@ def _request_ocr_line(
                 raise OSError("OCR işçisi stdin kapalı.")
             worker.proc.stdin.write(payload)
             worker.proc.stdin.flush()
-        except Exception as exc:
+        except (OSError, ValueError) as exc:
             logger.warning("Görsel OCR işçisine yazılamadı: %s", exc)
             _kill_locked_worker()
             return None

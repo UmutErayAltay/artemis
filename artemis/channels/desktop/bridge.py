@@ -798,7 +798,7 @@ class DesktopBridge:
                 lambda text: self._events.put(State("computer", text)),
                 on_escape=self.cancel_active,
             )
-        except Exception as error:  # İşçi sınırında traceback/sır sızdırmadan arızayı GUI'ye taşır.
+        except Exception as error:  # noqa: BLE001 - İşçi sınırında traceback/sır sızdırmadan arızayı GUI'ye taşır.
             self._events.put(
                 Failed(
                     "",
@@ -968,7 +968,7 @@ class DesktopBridge:
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id
             self._events.put(Finished(request_id, result))
-        except Exception as error:  # İşçi sınırı: sır/traceback sızdırmadan GUI'ye bildirilir.
+        except Exception as error:  # noqa: BLE001 - İşçi sınırı: sır/traceback sızdırmadan GUI'ye bildirilir.
             self._events.put(Failed(request_id, type(error).__name__, t("İstek tamamlanamadı.")))
         except asyncio.CancelledError as error:
             self._events.put(Failed(request_id, type(error).__name__, t("İstek tamamlanamadı.")))
