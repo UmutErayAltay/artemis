@@ -625,3 +625,96 @@ def test_piper_atomic_rollback_preserves_existing_and_resolves_relative_paths(
     )
     assert found_onnx == existing_onnx
     assert found_cfg == custom_cfg
+
+
+def test_default_url_fetch_maps_httpx_errors_to_oserror(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import httpx
+
+    from artemis.channels.voice import model_health as mh
+
+    def fail_connect(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("ağ yok", request=request)
+
+    def fail_404(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(404, request=request)
+
+    real_client = httpx.Client
+    for handler in (fail_connect, fail_404):
+        transport = httpx.MockTransport(handler)
+        monkeypatch.setattr(
+            mh.httpx,
+            "Client",
+            lambda *args, _t=transport, **kwargs: real_client(
+                *args, transport=_t, **{k: v for k, v in kwargs.items() if k != "transport"}
+            ),
+        )
+        with pytest.raises(OSError, match="Model indirilemedi"):
+            mh._default_url_fetch("https://example.invalid/model.onnx")
+
+
+def test_model_op_thread_and_widget_emit_failed_on_httpx_error(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("PySide6")
+    import httpx
+    from PySide6.QtWidgets import QApplication
+
+    from artemis.channels.desktop.voice_model_manager import (
+        VoiceModelManagerWidget,
+        _ModelOpThread,
+    )
+
+    app = QApplication.instance() or QApplication([])
+    failed_events: list[tuple[int, str, str]] = []
+    completed_events: list[tuple[int, str, object, str]] = []
+
+    def failing_work() -> tuple[list[VoiceModelEntry], str]:
+        raise httpx.ConnectError("ağ yok")
+
+    thread = _ModelOpThread(1, "download", failing_work)
+    thread.failed.connect(lambda g, op, msg: failed_events.append((g, op, msg)))
+    thread.completed.connect(lambda g, op, e, msg: completed_events.append((g, op, e, msg)))
+    thread.start()
+    assert thread.wait(3000)
+    app.processEvents()
+    assert len(failed_events) == 1
+    assert failed_events[0][0] == 1 and failed_events[0][1] == "download"
+    assert "ağ yok" in failed_events[0][2]
+    assert completed_events == []
+
+    cfg = _write_config(tmp_path)
+    piper_dir = tmp_path / "models"
+    silero_dir, dfn3_dir = _copy_bundled_silero_and_dfn3(tmp_path)
+    common = {
+        "whisper_installed": lambda _n: None,
+        "piper_models_dir": piper_dir,
+        "silero_dir": silero_dir,
+        "dfn3_dir": dfn3_dir,
+        "hf_cache_roots": (),
+    }
+
+    def raise_connect(_url: str) -> bytes:
+        raise httpx.ConnectError("ağ yok")
+
+    widget = VoiceModelManagerWidget(
+        cfg,
+        inventory_fn=lambda p: inventory_voice_models(p, **common),
+        verify_fn=lambda eid, p: verify_voice_model(eid, p, **common),
+        download_fn=lambda eid, p: download_voice_model(
+            eid, p, url_fetcher=raise_connect, **common
+        ),
+        clean_fn=lambda eid, p: clean_voice_model(eid, p, **common),
+    )
+    try:
+        assert widget.select_entry("piper:tr_TR-dfki-medium")
+        assert widget.trigger_download("piper:tr_TR-dfki-medium")
+        assert widget._thread is not None and widget._thread.wait(3000)
+        app.processEvents()
+        assert "İndiriliyor" not in widget.status_label.text()
+        assert "ağ yok" in widget.status_label.text()
+    finally:
+        widget.finish()
+        widget.deleteLater()
+        app.processEvents()

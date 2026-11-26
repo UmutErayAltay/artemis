@@ -42,7 +42,7 @@ DEFAULT_SUGGEST = "Şu dosyayı özetle: {path}"
 DEFAULT_SUGGEST_BY_KIND: dict[TriggerKind, str] = {
     "folder": "Şu dosyayı özetle: {path}",
     "app_opened": "{app} açıldı; çalışma bağlamını hazırla",
-    "calendar_before": "{title} toplantısı için hazırlık notlarını getir",
+    "calendar_before": "Yaklaşan toplantı için hazırlık notlarını getir",
     "system_resume": "Bekleyen özet ve hatırlatmaları göster",
 }
 _MESSAGE_HINTS: dict[TriggerKind, str] = {
@@ -52,9 +52,15 @@ _MESSAGE_HINTS: dict[TriggerKind, str] = {
     "system_resume": "{name} tetikleyici adıdır.",
 }
 _SUGGEST_HINTS: dict[TriggerKind, str] = {
-    "folder": "{path} dosyanın tam yoludur. Sohbet kutusuna yazılır, gönderilmez.",
+    "folder": (
+        "{path} dosyanın tam yoludur. Sohbet kutusuna yazılır, gönderilmez "
+        "({file}/{path} içeren öneri turu dış içerikle işaretler)."
+    ),
     "app_opened": "Sohbet kutusuna yazılır, gönderilmez ({app} kullanılabilir).",
-    "calendar_before": "Sohbet kutusuna yazılır, gönderilmez ({title}, {minutes} kullanılabilir).",
+    "calendar_before": (
+        "Sohbet kutusuna yazılır, gönderilmez ({title}, {minutes}, {location} "
+        "kullanılabilir; {title}/{location} içeren öneri turu dış içerikle işaretler)."
+    ),
     "system_resume": "Sohbet kutusuna yazılır, gönderilmez.",
 }
 # Tarayıcı tek bir fnmatch deseni kullanır (`;` ile çoklu desen yok); yalnız o sunulur.

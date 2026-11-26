@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from zoneinfo import ZoneInfo
 
 from artemis.config.triggers import SuggestionChainConfig, TriggerConfig
-from artemis.proactive.triggers import fill, sanitize_name
+from artemis.proactive.triggers import fill, sanitize_name, suggest_uses_external
 from artemis.tools.calendar_mail import (
     ICS_ENV,
     ICS_TARGET,
@@ -46,6 +46,21 @@ SLEEP_GAP_SECONDS = 120.0
 _UNSET = object()
 
 
+def _unbiased_monotonic() -> float:
+    """Uyku süresini dışlayan monotonik saniye sayacı (Windows QueryUnbiasedInterruptTime)."""
+    if sys.platform == "win32":
+        import ctypes
+
+        try:
+            kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+            unbiased = ctypes.c_uint64(0)
+            if kernel32.QueryUnbiasedInterruptTime(ctypes.byref(unbiased)):
+                return float(unbiased.value) / 10_000_000.0
+        except (OSError, AttributeError, ctypes.ArgumentError):
+            pass
+    return time.monotonic()
+
+
 @dataclass(frozen=True)
 class TriggerMatch:
     """Eşleşen olay tetikleyicisi bildirimi."""
@@ -55,6 +70,7 @@ class TriggerMatch:
     body: str
     suggest: str
     routine: str
+    suggest_tainted: bool = False
 
 
 @dataclass(frozen=True)
@@ -67,6 +83,7 @@ class ChainMatch:
     body: str
     suggest: str
     routine: str
+    suggest_tainted: bool = False
 
 
 def normalize_app_name(value: str) -> str:
@@ -143,8 +160,14 @@ class CachedCalendarProvider:
             tz = ZoneInfo(settings.proactive.timezone)
             events, _warnings = parse_events(data, tz, window_start, fetch_end)
         except (SourceError, OSError, ValueError):
-            # Çevrimdışı veya geçici ağ hatasında zamanlayıcı düşmez; mevcut önbellek korunur.
+            # Çevrimdışı veya geçici ağ hatasında zamanlayıcı düşmez; mevcut önbellek korunur
+            # ve ilk hatada bile TTL süresince yeniden ağ isteği atılmaz.
             self._fetched_at = now_mono
+            self._cached_until = (
+                max(self._cached_until, fetch_end)
+                if self._cached_until is not None
+                else fetch_end
+            )
             return list(self._cached_events)
         self._fetched_at = now_mono
         self._cached_until = fetch_end
@@ -165,7 +188,7 @@ class ResumeDetector:
     ) -> None:
         self._signal = threading.Event()
         self._resume_probe = resume_probe
-        self._mono = monotonic_clock or time.monotonic
+        self._mono = monotonic_clock or _unbiased_monotonic
         self._enable_gap_check = enable_gap_check
         self._sleep_gap = sleep_gap_seconds
         self._last_wall: datetime | None = None
@@ -183,6 +206,8 @@ class ResumeDetector:
             resumed = True
         if self._resume_probe is not None and self._resume_probe():
             resumed = True
+        # TODO(windows-verify #48): Windows uykusu sonrası QueryUnbiasedInterruptTime
+        # davranışını gerçek cihazda doğrula.
         current_mono = self._mono()
         if self._enable_gap_check and self._last_wall is not None and self._last_mono is not None:
             wall_delta = (now - self._last_wall).total_seconds()
@@ -225,6 +250,7 @@ class EventTriggerTracker:
             enable_gap_check=enable_gap,
         )
         self._app_baseline: dict[str, bool] = {}
+        self._app_edge_key: dict[str, str] = {}
         self._last_fired: dict[str, datetime] = {}
         self._calendar_seen: set[tuple[str, str]] = set()
         self._chain_last_fired: dict[str, datetime] = {}
@@ -264,6 +290,7 @@ class EventTriggerTracker:
         self._last_fired[trigger.name] = now
         if trigger.kind == "app_opened":
             self._app_baseline[trigger.name] = True
+            self._app_edge_key.pop(trigger.name, None)
         elif trigger.kind == "calendar_before":
             self._calendar_seen.add((trigger.name, match.event_key))
 
@@ -290,11 +317,13 @@ class EventTriggerTracker:
         prev = self._app_baseline[trigger.name]
         if not matches:
             self._app_baseline[trigger.name] = False
+            self._app_edge_key.pop(trigger.name, None)
             return None
         if prev:
             return None
         if self._cooldown_active(trigger, now, store):
             self._app_baseline[trigger.name] = True
+            self._app_edge_key.pop(trigger.name, None)
             return None
         app_display = (
             PureWindowsPath(active.strip().replace("/", "\\")).name
@@ -308,8 +337,12 @@ class EventTriggerTracker:
             if trigger.suggest
             else ""
         )
+        event_key = self._app_edge_key.setdefault(
+            trigger.name,
+            f"app:{target}:{now.astimezone(UTC).isoformat(timespec='seconds')}",
+        )
         return TriggerMatch(
-            event_key=f"app:{target}:{now.astimezone(UTC).isoformat(timespec='seconds')}",
+            event_key=event_key,
             title=f"Tetikleyici · {trigger.name}",
             body=body,
             suggest=suggest,
@@ -367,6 +400,7 @@ class EventTriggerTracker:
                 body=body,
                 suggest=suggest,
                 routine=trigger.routine or "",
+                suggest_tainted=suggest_uses_external(trigger.suggest),
             )
         return None
 
@@ -409,6 +443,8 @@ class EventTriggerTracker:
             return []
         if event_kind == "routine_completed" and not routine_success:
             return []
+        # TODO(windows-verify #48): rutin zinciri tetiklendiğinde ön planda Artemis penceresi
+        # olabileceğinden active_app eşleşmesini Windows'ta doğrula.
         active_app = self._active_app_getter() if self._tick_active_app is _UNSET else (
             self._tick_active_app if isinstance(self._tick_active_app, str) else None
         )

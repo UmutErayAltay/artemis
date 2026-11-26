@@ -4,18 +4,21 @@ import asyncio
 import json
 from decimal import Decimal
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
+import httpx
 import pytest
 
 from artemis.brain.errors import (
     BudgetExceeded,
+    MediaRejectedError,
     ProviderError,
     RateLimitedError,
     RetryableProviderError,
 )
 from artemis.brain.models import Completion, Message, Usage
-from artemis.brain.providers import build_provider
+from artemis.brain.providers import _check_status, _post_lines, build_provider
 from artemis.brain.router import ProviderRouter
 from artemis.config.settings import ModelConfig, Settings
 from artemis.safety.audit import AuditLog
@@ -359,3 +362,157 @@ async def test_private_messages_on_local_model_do_not_tier_fallback_to_cloud(
     events = [json.loads(line)["event"] for line in settings.audit_path.read_text().splitlines()]
     assert "model_tier_fallback" not in events
     assert "cloud_transfer" not in events
+
+
+class _CaptureMediaProvider:
+    def __init__(self, *responses: Completion | ProviderError) -> None:
+        self.responses = list(responses)
+        self.seen_messages: list[list[Message]] = []
+
+    async def complete(
+        self, messages: list[Message], tools: list[ToolDefinition], *, timeout: float
+    ) -> Completion:
+        self.seen_messages.append(list(messages))
+        response = self.responses.pop(0)
+        if isinstance(response, ProviderError):
+            raise response
+        return response
+
+
+async def test_non_media_400_context_length_does_not_strip_images_or_fallback(
+    tmp_path: Path,
+) -> None:
+    response = httpx.Response(
+        400,
+        json={
+            "error": {
+                "type": "invalid_request_error",
+                "code": "context_length_exceeded",
+                "message": "This model's maximum context length is 8192 tokens.",
+            }
+        },
+    )
+    with pytest.raises(ProviderError) as exc_info:
+        _check_status(response)
+    assert not isinstance(exc_info.value, MediaRejectedError)
+
+    settings = settings_for(tmp_path)
+    cloud = _CaptureMediaProvider(exc_info.value, Completion(content="olmamalı"))
+    local = _CaptureMediaProvider(Completion(content="yerel olmamalı"))
+    router = ProviderRouter(
+        settings,
+        AuditLog(settings.audit_path),
+        providers={"cloud": cloud, "local": local},
+    )
+    msg = Message(role="user", content="ekrana bak", image_png=b"\x89PNG\r\n\x1a\n")
+    with pytest.raises(ProviderError) as router_exc:
+        await router.complete([msg], [], timeout=10)
+    assert not isinstance(router_exc.value, MediaRejectedError)
+    assert len(cloud.seen_messages) == 1
+    assert cloud.seen_messages[0][0].image_png is not None
+    assert local.seen_messages == []
+    events = [json.loads(line)["event"] for line in settings.audit_path.read_text().splitlines()]
+    assert "image_input_fallback" not in events
+    assert "audio_input_fallback" not in events
+
+
+async def test_media_400_image_rejection_classifies_hides_body_and_respects_flag(
+    tmp_path: Path,
+) -> None:
+    secret_body = "model does not support image_url secret-token-xyz"
+    response = httpx.Response(
+        400,
+        json={"error": {"message": secret_body, "type": "invalid_request_error"}},
+    )
+    with pytest.raises(MediaRejectedError) as exc_info:
+        _check_status(response)
+    assert exc_info.value.media_kind == "image"
+    assert "secret-token-xyz" not in str(exc_info.value)
+    assert "image_url" not in str(exc_info.value)
+
+    msg = Message(role="user", content="ekranda ne var", image_png=b"\x89PNG\r\n\x1a\n")
+
+    # allow_image_fallback=True (varsayılan): görüntüyü düşürüp bir kez yeniden dener.
+    settings = settings_for(tmp_path / "allow")
+    cloud_allow = _CaptureMediaProvider(exc_info.value, Completion(content="metinle devam"))
+    router_allow = ProviderRouter(
+        settings, AuditLog(settings.audit_path), providers={"cloud": cloud_allow}
+    )
+    comp = await router_allow.complete([msg], [], timeout=10)
+    assert comp.content == "metinle devam"
+    assert len(cloud_allow.seen_messages) == 2
+    assert cloud_allow.seen_messages[0][0].image_png is not None
+    assert cloud_allow.seen_messages[1][0].image_png is None
+    events = [json.loads(line)["event"] for line in settings.audit_path.read_text().splitlines()]
+    assert "image_input_fallback" in events
+
+    # allow_image_fallback=False: görüntüyü düşürmeden başarısız olur.
+    deny_settings = settings_for(tmp_path / "deny")
+    cloud_deny = _CaptureMediaProvider(exc_info.value, Completion(content="olmamalı"))
+    router_deny = ProviderRouter(
+        deny_settings,
+        AuditLog(deny_settings.audit_path),
+        providers={"cloud": cloud_deny},
+        allow_image_fallback=False,
+    )
+    with pytest.raises(MediaRejectedError) as deny_exc:
+        await router_deny.complete([msg], [], timeout=10)
+    assert deny_exc.value.media_kind == "image"
+    assert len(cloud_deny.seen_messages) == 1
+    deny_events = [
+        json.loads(line)["event"] for line in deny_settings.audit_path.read_text().splitlines()
+    ]
+    assert "image_input_fallback" not in deny_events
+
+
+async def test_streaming_post_lines_reads_400_body_to_classify_media_rejection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            422,
+            json={"detail": "This model does not support input_audio payloads."},
+        )
+
+    transport = httpx.MockTransport(handler)
+    real_async_client = httpx.AsyncClient
+
+    def client_factory(*args: Any, **kwargs: Any) -> httpx.AsyncClient:
+        kwargs["transport"] = transport
+        return real_async_client(*args, **kwargs)
+
+    monkeypatch.setattr("artemis.brain.providers.httpx.AsyncClient", client_factory)
+    with pytest.raises(MediaRejectedError) as exc_info:
+        await _post_lines("https://example.invalid/v1/chat/completions", {}, {}, timeout=5,
+                          on_line=lambda _line: None)
+    assert exc_info.value.media_kind == "audio"
+    assert "input_audio" not in str(exc_info.value)
+
+
+async def test_disallow_image_fallback_rejects_claude_cli_before_call(tmp_path: Path) -> None:
+    settings = Settings(
+        workspace=tmp_path / "desktop",
+        state_dir=tmp_path / "state",
+        audit_path=tmp_path / "audit.jsonl",
+        primary_model="cli",
+        models={
+            "cli": ModelConfig(
+                provider="claude_cli",
+                model="sonnet",
+                input_per_million=Decimal("0"),
+                output_per_million=Decimal("0"),
+            )
+        },
+    )
+    cli_provider = _CaptureMediaProvider(Completion(content="olmamalı"))
+    router = ProviderRouter(
+        settings,
+        AuditLog(settings.audit_path),
+        providers={"cli": cli_provider},
+        allow_image_fallback=False,
+    )
+    msg = Message(role="user", content="ekran", image_png=b"\x89PNG\r\n\x1a\n")
+    with pytest.raises(MediaRejectedError) as exc_info:
+        await router.complete([msg], [], timeout=10)
+    assert exc_info.value.media_kind == "image"
+    assert cli_provider.seen_messages == []

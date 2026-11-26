@@ -17,7 +17,7 @@ import pytest
 
 from artemis.brain.agent_loop import AgentLoop, RunResult
 from artemis.brain.conversation import ConversationContext, TurnRecord
-from artemis.brain.errors import ProviderError
+from artemis.brain.errors import MediaRejectedError, ProviderError
 from artemis.brain.models import Completion, Message
 from artemis.brain.providers import (
     AnthropicProvider,
@@ -297,7 +297,9 @@ async def test_router_retries_once_without_audio_on_http_400_and_skips_for_unsup
     settings = _settings(tmp_path)
     fake = _CaptureProvider(
         [
-            ProviderError("Sağlayıcı isteği kabul etmedi (HTTP 400)."),
+            MediaRejectedError(
+                "Sağlayıcı medya girdisini kabul etmedi (HTTP 400).", media_kind="audio"
+            ),
             Completion(content="Metinle devam edildi", provider="openai_compatible", model="m"),
         ]
     )

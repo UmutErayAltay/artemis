@@ -33,7 +33,10 @@ Kod tanımlayıcıları İngilizce; açıklamalar, docstring'ler ve belgeler Tü
    temiz turda sorulmaz, dış içerik varken her adreste sorar (yol/alt alan adı da veri taşır); `url` alan dış okuma (tarayıcı MCP) her zaman sorulur, kullanıcının
    "bir daha sorma" dediği host (`state_dir/trusted_sites.json`, `fill` adımı yoksa) sorulmaz.
    ADR 0039 istisnası: `computer_use.mode: auto` iken `auto_mode_ok` bildiren araçlar
-   (yalnız `computer_use`, `window_control`, `screen_read`, ADR 0077 ile `open_url` ve ADR 0039 ek karar 2026-11-18 ile `app_alias_remember`) lekeli turda da onay atlar; atlama
+   (yalnız `computer_use`, `window_control`, `screen_read`, ADR 0077 ile `open_url` ve ADR 0039 ek karar 2026-11-18 ile `app_alias_remember`) lekeli turda da onay atlar; ADR 0090
+   ile `volume_set`, `brightness_set`, `close_application`, `open_application` (kaldırıcı hariç),
+   `power` (`lock`/`sleep`/`cancel_shutdown`) ve `routine_save` da atlar, ama `routine_save`
+   yalnız temiz turda (dış içerik bağlamdayken onay sorar); atlama
    `approval_skipped` olarak denetime yazılır. `auto_mode_ok` başka bir araca ADR
    olmadan eklenmez.
 5. Alttaki işlemin başarısı doğrulanmadan `success=True` dönülmez. Yalnız komutun
@@ -162,8 +165,9 @@ sayılır. Betik sabittir, kapsam yalnız ortam değişkeniyle gider; testler Po
 
 Rutinler (ADR 0058) varsayılan kapalıdır (`routines.enabled`). `routine_run` her adımı
 `context.gate_handle.dispatch` ile aynı turun kapısından geçirir; adımı doğrudan `execute`
-etmeyin ve onayı/lekeyi/gözetimsiz kuralı rutin içinde yeniden yazmayın. `routine_save` ve
-`routine_delete` HER ZAMAN onaylıdır, `routine_save` dış içerik okunmuş turda onaysız reddedilir,
+etmeyin ve onayı/lekeyi/gözetimsiz kuralı rutin içinde yeniden yazmayın. `routine_delete`
+HER ZAMAN onaylıdır; `routine_save` onaylıdır, otomatik kipte yalnız temiz turda
+onay atlar, dış içerik bağlamdayken (`turn_tainted`) her kipte onay sorar (ADR 0090),
 rutin `routine_*` adımı içeremez. Zamanı yalnız Ayarlar paneli kurar (araç EKLEMEYİN); zamanı gelen
 rutin kendiliğinden çalışmaz, yalnız "Çalıştırılsın mı?" bildirimi verilir. Bu kuralları gevşetmeyin.
 

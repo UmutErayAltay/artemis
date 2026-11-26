@@ -745,3 +745,25 @@ def test_ctl_chars_reject_unicode_and_vertical_separators(sep: str) -> None:
             start="2026-11-23T10:00",
             end="2026-11-23T11:00",
         )
+
+
+def test_caldav_redirect_normalizes_default_https_port() -> None:
+    import urllib.request
+
+    handler = core_write._CalDavRedirectHandler()
+    req = urllib.request.Request("https://cal.example.com/dav/item.ics", method="GET")
+
+    same_port_redirect = handler.redirect_request(
+        req, None, 307, "Temporary Redirect", {}, "https://cal.example.com:443/dav/v2/item.ics"
+    )
+    assert same_port_redirect is not None
+    assert same_port_redirect.full_url == "https://cal.example.com:443/dav/v2/item.ics"
+
+    with pytest.raises(core_read.SourceError, match="farklı bir adrese"):
+        handler.redirect_request(
+            req, None, 307, "Temporary Redirect", {}, "https://cal.example.com:8443/dav/item.ics"
+        )
+    with pytest.raises(core_read.SourceError, match="farklı bir adrese"):
+        handler.redirect_request(
+            req, None, 307, "Temporary Redirect", {}, "https://other.example.com/dav/item.ics"
+        )

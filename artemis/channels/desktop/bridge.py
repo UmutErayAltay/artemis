@@ -53,7 +53,7 @@ from artemis.config.settings import DictationConfig
 from artemis.i18n import t
 from artemis.proactive.delivery import Deliverer
 from artemis.proactive.scheduler import ProactiveScheduler
-from artemis.proactive.store import ProactiveStore
+from artemis.proactive.store import ProactiveStore, ProactiveStoreError
 from artemis.safety.gate import remember_site, trusted_sites_path
 from artemis.tools.base import ToolResult
 from artemis.tools.code_agent_jobs import ACTIVE, CodeAgentJobs
@@ -184,6 +184,8 @@ class Proactive:
     suggest: str = ""
     # Doluysa düğmeler "Aç" ve (vault açıksa) "Vault'a ekle" olur (ADR 0066); değer `YYYY-MM-DD`.
     summary_day: str = ""
+    # Dış kaynaklı yer tutucu (dosya adı/yolu, takvim başlığı/konumu) taşıyan öneri.
+    suggest_tainted: bool = False
 
 
 BridgeEvent = (
@@ -368,6 +370,7 @@ class DesktopBridge:
         self._proactive_task: asyncio.Task[None] | None = None
         self._proactive_telegram: TelegramClient | None = None
         self._proactive_scheduler: ProactiveScheduler | None = None
+        self._background_tasks: set[asyncio.Task[Any]] = set()
         self._ready = threading.Event()
         self._stopped = threading.Event()
         self._thread = threading.Thread(
@@ -558,7 +561,7 @@ class DesktopBridge:
             return False
         return True
 
-    def submit(self, text: str) -> str | None:
+    def submit(self, text: str, *, tainted: bool = False) -> str | None:
         request_id = str(uuid4())
         with self._lock:
             if (
@@ -572,7 +575,7 @@ class DesktopBridge:
                 return None
             self._active_request = request_id
             self._broker.begin_request(request_id)
-        if not self._post(self._start_turn, request_id, text):
+        if not self._post(self._start_turn, request_id, text, tainted):
             with self._lock:
                 if self._active_request == request_id:
                     self._active_request = None
@@ -844,6 +847,7 @@ class DesktopBridge:
             runtime.audit,
             panel=self._proactive_panel,
             routine_panel=self._proactive_routine_panel,
+            routine_panel_ex=self._proactive_routine_panel,
             telegram=self._proactive_telegram,
             profile_getter=lambda: runtime.context.settings.work_profile,
         )
@@ -861,10 +865,31 @@ class DesktopBridge:
             with suppress(RuntimeError):
                 loop.call_soon_threadsafe(scheduler.notify_system_resume)
 
+    async def _run_routine_chain(
+        self, scheduler: ProactiveScheduler, routine_name: str, completed: bool
+    ) -> None:
+        try:
+            await scheduler.notify_routine_completed(routine_name, completed)
+        except asyncio.CancelledError:
+            raise
+        except (OSError, RuntimeError, ValueError, ProactiveStoreError) as error:
+            if self._runtime is not None:
+                with suppress(OSError):
+                    self._runtime.audit.emit(
+                        "proactive_chain_error",
+                        routine=routine_name,
+                        error_type=type(error).__name__,
+                    )
+
     def _notify_routine_chain(self, routine_name: str, completed: bool) -> None:
         scheduler = self._proactive_scheduler
         if scheduler is not None and not self._shutdown:
-            asyncio.create_task(scheduler.notify_routine_completed(routine_name, completed))
+            # Görev referansını sakla ki çöp toplayıcı bitmeden toplamasın.
+            task = asyncio.create_task(
+                self._run_routine_chain(scheduler, routine_name, completed)
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
 
     def _proactive_panel(self, title: str, body: str) -> bool:
         if self._shutdown:
@@ -873,12 +898,17 @@ class DesktopBridge:
         return True
 
     def _proactive_routine_panel(
-        self, title: str, body: str, routine: str, suggest: str, summary_day: str
+        self, title: str, body: str, routine: str, suggest: str, summary_day: str,
+        suggest_tainted: bool = False,
     ) -> bool:
         if self._shutdown:
             return False
-        self._events.put(Proactive(title, body, routine, suggest, summary_day))
+        self._events.put(
+            Proactive(title, body, routine, suggest, summary_day, suggest_tainted)
+        )
         return True
+
+    _proactive_routine_panel_ex = _proactive_routine_panel
 
     def _stop_proactive(self) -> None:
         self._proactive_scheduler = None
@@ -888,13 +918,16 @@ class DesktopBridge:
         if task is not None and not task.done():
             # Yürüyen brifing iptal edilir; talep edilmiş oluşum sonradan belirsiz raporlanır.
             task.cancel()
+        for bg_task in list(self._background_tasks):
+            if not bg_task.done():
+                bg_task.cancel()
 
     def _close_proactive_client(self) -> None:
         client, self._proactive_telegram = self._proactive_telegram, None
         if client is not None:
             client.close()
 
-    def _start_turn(self, request_id: str, text: str) -> None:
+    def _start_turn(self, request_id: str, text: str, tainted: bool = False) -> None:
         if self._shutdown or self._runtime is None or self._runtime.agent.cleanup_pending:
             self._events.put(Failed(request_id, "CleanupPending", t("Önceki işlem temizleniyor.")))
             self._finish_request(request_id)
@@ -904,17 +937,19 @@ class DesktopBridge:
             self._finish_request(request_id)
             return
         self._events.put(State("running", t("İstek çalışıyor."), request_id))
-        self._active_task = asyncio.create_task(self._run_turn(request_id, text))
+        self._active_task = asyncio.create_task(self._run_turn(request_id, text, tainted=tainted))
 
-    async def _run_turn(self, request_id: str, text: str) -> None:
+    async def _run_turn(self, request_id: str, text: str, *, tainted: bool = False) -> None:
         # Yazılı yolda iptal, görev bitişi sayılır; ses yolu ise iptali yukarı taşır.
         with suppress(asyncio.CancelledError):
-            await self._execute_request(request_id, text)
+            await self._execute_request(request_id, text, tainted=tainted)
 
     async def _execute_request(
         self, request_id: str, text: str, stream: ResponseStream | None = None,
         audio_wav: bytes | None = None,
         image_png: bytes | None = None,
+        *,
+        tainted: bool = False,
     ) -> RunResult | None:
         """Yazılı ve sesli isteğin ortak turu: aynı olaylar, aynı temizlik, aynı bitiş."""
         runtime = self._runtime
@@ -926,13 +961,12 @@ class DesktopBridge:
             return None
         result: RunResult | None = None
         try:
-            kwargs: dict[str, Any] = {}
-            if stream is not None:
-                kwargs["stream"] = stream
-            if audio_wav is not None:
-                kwargs["audio_wav"] = audio_wav
-            if image_png is not None:
-                kwargs["image_png"] = image_png
+            kwargs: dict[str, Any] = {
+                k: v for k, v in (
+                    ("stream", stream), ("audio_wav", audio_wav),
+                    ("image_png", image_png), ("tainted", tainted or None),
+                ) if v is not None
+            }
             result = await runtime.runner.run(text, **kwargs)
             with self._audit_lock:
                 self._turn_requests[result.turn_id] = request_id
@@ -1197,26 +1231,7 @@ class DesktopBridge:
         dolayısıyla değişiklik config'e yazılana kadar da geçerlidir. Kabul edilen değerler
         `ComputerUseConfig.mode` ile aynıdır (accept | auto); başka değer reddedilir.
         """
-        if mode not in {"accept", "auto"}:
-            return False
-        loop = self._loop
-        if loop is None or self._runtime is None:
-            return False
-        try:
-            loop.call_soon_threadsafe(self._set_computer_mode_on_worker, mode)
-        except RuntimeError:
-            return False
-        return True
-
-    def _set_computer_mode_on_worker(self, mode: str) -> None:
-        runtime = self._runtime
-        if runtime is None:
-            return
-        # Tek gerçek kaynak araç bağlamıdır: araçlar ayarı oradan okur (kural 10).
-        computer_use = runtime.context.settings.computer_use.model_copy(update={"mode": mode})
-        runtime.context.settings = runtime.context.settings.model_copy(
-            update={"computer_use": computer_use}
-        )
+        return profile_bridge.set_computer_mode(self, mode)
 
     def set_work_profile(self, profile: str) -> bool:
         """Çalışma profilini çalışan runtime'da günceller; Uygula beklemez."""

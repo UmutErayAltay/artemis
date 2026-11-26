@@ -49,7 +49,7 @@ from artemis.proactive.store import (
     Reminder,
     reminder_event_id,
 )
-from artemis.proactive.triggers import build_notice, scan_folder
+from artemis.proactive.triggers import build_notice, scan_folder, suggest_uses_external
 from artemis.safety.gate import SafetyGate
 from artemis.tools.base import ToolContext
 
@@ -59,6 +59,9 @@ STALE_MARGIN = timedelta(minutes=5)
 # Özet saatinden bu kadar sonra üretilirse "gecikmeli" diye işaretlenir (uygulama kapalıydı).
 SUMMARY_LATE_AFTER = timedelta(minutes=5)
 MISSED_LIST_LIMIT = 20
+# Başarısız tetikleyici teslimlerinde sınırsız deneme ve SQLite satırı birikmesini önler.
+TRIGGER_MAX_ATTEMPTS = 3
+TRIGGER_RETRY_BACKOFF_SECONDS = (60.0, 300.0)
 BRIEFING_PREFIX = (
     "[Gözetimsiz proaktif tur: kullanıcı şu an ekranda olmayabilir ve onay veremez. "
     "Yalnız okuma araçlarını kullan; yan etkili işlemler reddedilir. Kısa, Türkçe bir "
@@ -354,21 +357,37 @@ class ProactiveScheduler:
         if updates:
             self.store.save_trigger_files(trigger_name, updates, keep_missing=True)
 
+    def _claim_with_retry(
+        self, base_id: str, day_start: datetime, kind: str, now: datetime
+    ) -> str | None:
+        """Başarısız teslimi en fazla `TRIGGER_MAX_ATTEMPTS` kez ve geri çekilmeyle dener."""
+        for attempt in range(1, TRIGGER_MAX_ATTEMPTS + 1):
+            event_id = base_id if attempt == 1 else f"{base_id}:{attempt}"
+            if self.store.claim(event_id, day_start, kind, self.owner, now):
+                return event_id
+            info = self.store.occurrence_info(event_id, day_start)
+            if info is None or info[0] != "failed":
+                return None
+            if attempt >= TRIGGER_MAX_ATTEMPTS:
+                return None
+            delay = TRIGGER_RETRY_BACKOFF_SECONDS[
+                min(attempt - 1, len(TRIGGER_RETRY_BACKOFF_SECONDS) - 1)
+            ]
+            finished_at = info[1]
+            if finished_at is not None and (now - finished_at).total_seconds() < delay:
+                return None
+        return None
+
     async def _fire_trigger(
         self, trigger: TriggerConfig, ready: list[str], day_start: datetime, now: datetime
     ) -> int:
         digest = hashlib.sha1("|".join(sorted(ready)).encode("utf-8")).hexdigest()[:12]
         # Aynı dosya kümesi aynı yerel günde bir kez talep edilir: iki süreç çift bildirmez.
-        # Önceki deneme `failed` bittiyse yeniden denenebilsin diye sıradaki deneme kimliği
-        # açılır; `delivered`/`claimed`/`uncertain` durumunda talep yine reddedilir.
+        # Önceki deneme `failed` bittiyse sınırlı sayıda ve geri çekilmeyle yeniden denenir.
         base_id = f"trigger:{trigger.name}:{digest}"
-        event_id = base_id
-        attempt = 1
-        while not self.store.claim(event_id, day_start, "trigger", self.owner, now):
-            if self.store.occurrence_state(event_id, day_start) != "failed":
-                return 0
-            attempt += 1
-            event_id = f"{base_id}:{attempt}"
+        event_id = self._claim_with_retry(base_id, day_start, "trigger", now)
+        if event_id is None:
+            return 0
         routine = trigger.routine if self.runtime.settings.routines.enabled else None
         title, body, suggest = build_notice(
             trigger.name, trigger.folder, trigger.message, trigger.suggest, ready
@@ -385,6 +404,7 @@ class ProactiveScheduler:
             routine=routine or "",
             suggest=suggest,
             local_only=True,
+            suggest_tainted=suggest_uses_external(trigger.suggest),
         )
         self._finish(event_id, day_start, outcome, "completed")
         return int(outcome.delivered)
@@ -467,13 +487,9 @@ class ProactiveScheduler:
     ) -> int:
         digest = hashlib.sha1(match.event_key.encode("utf-8")).hexdigest()[:12]
         base_id = f"trigger:{trigger.name}:{digest}"
-        event_id = base_id
-        attempt = 1
-        while not self.store.claim(event_id, day_start, "trigger", self.owner, now):
-            if self.store.occurrence_state(event_id, day_start) != "failed":
-                return 0
-            attempt += 1
-            event_id = f"{base_id}:{attempt}"
+        event_id = self._claim_with_retry(base_id, day_start, "trigger", now)
+        if event_id is None:
+            return 0
         routine = match.routine if self.runtime.settings.routines.enabled else ""
         outcome = await self.deliverer.deliver(
             event_id=event_id,
@@ -485,6 +501,7 @@ class ProactiveScheduler:
             routine=routine,
             suggest=match.suggest,
             local_only=True,
+            suggest_tainted=match.suggest_tainted,
         )
         self._finish(event_id, day_start, outcome, "completed")
         return int(outcome.delivered)
@@ -494,13 +511,9 @@ class ProactiveScheduler:
     ) -> int:
         digest = hashlib.sha1(match.event_key.encode("utf-8")).hexdigest()[:12]
         base_id = f"chain:{match.chain_name}:{digest}"
-        event_id = base_id
-        attempt = 1
-        while not self.store.claim(event_id, day_start, "trigger_chain", self.owner, now):
-            if self.store.occurrence_state(event_id, day_start) != "failed":
-                return 0
-            attempt += 1
-            event_id = f"{base_id}:{attempt}"
+        event_id = self._claim_with_retry(base_id, day_start, "trigger_chain", now)
+        if event_id is None:
+            return 0
         routine = match.routine if self.runtime.settings.routines.enabled else ""
         outcome = await self.deliverer.deliver(
             event_id=event_id,
@@ -512,6 +525,7 @@ class ProactiveScheduler:
             routine=routine,
             suggest=match.suggest,
             local_only=True,
+            suggest_tainted=match.suggest_tainted,
         )
         self._finish(event_id, day_start, outcome, "completed")
         return int(outcome.delivered)

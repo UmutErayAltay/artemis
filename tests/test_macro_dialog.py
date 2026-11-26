@@ -242,3 +242,55 @@ def test_approval_dialog_shows_routine_save_preview_without_secrets(
         dialog.deleteLater()
         parent.deleteLater()
         set_language("tr")
+
+
+def test_macro_dialog_runs_observation_in_worker_thread_not_main_thread(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    import threading
+    import time
+
+    seen_threads: list[int] = []
+    polled_done = threading.Event()
+
+    class _ThreadProbeBackend:
+        def snapshot(self) -> ObserverSnapshot:
+            seen_threads.append(threading.get_ident())
+            polled_done.set()
+            return ObserverSnapshot(
+                exe_path=r"C:\Windows\System32\notepad.exe",
+                pid=321,
+                hwnd=77,
+                cursor_pos=(30, 30),
+                left_down=False,
+            )
+
+    settings = Settings(
+        workspace=tmp_path,
+        state_dir=tmp_path / "state",
+        routines=RoutinesConfig(enabled=True),
+        applications={"Not Defteri": "notepad.exe"},
+    )
+    dialog = MacroDialog(
+        [],
+        _registry(),
+        settings,
+        backend=_ThreadProbeBackend(),
+        poll_interval_ms=15,
+    )
+    try:
+        main_tid = threading.get_ident()
+        dialog.start_recording()
+        assert polled_done.wait(timeout=2.0)
+        deadline = time.monotonic() + 2.0
+        while time.monotonic() < deadline and not dialog.recorder.events:
+            qt_app.processEvents()
+            time.sleep(0.01)
+        dialog.stop_recording()
+        assert seen_threads
+        assert all(tid != main_tid for tid in seen_threads)
+        assert [e.app for e in dialog.recorder.events] == ["notepad.exe"]
+    finally:
+        dialog.close()
+        dialog.deleteLater()
+        qt_app.processEvents()

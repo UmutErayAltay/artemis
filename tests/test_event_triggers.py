@@ -286,11 +286,20 @@ async def test_calendar_before_filters_sanitizes_and_deduplicates(tmp_path: Path
         suggest="{title} notlarını hazırla",
     )
     runtime = _make_runtime(tmp_path, items=(trig,))
+    tainted_flags: list[bool] = []
+
+    def panel_ex(
+        title: str, body: str, routine: str, suggest: str, day: str, tainted: bool
+    ) -> bool:
+        tainted_flags.append(tainted)
+        return panel(title, body, routine, suggest, day)
+
     deliverer = Deliverer(
         runtime.settings,
         runtime.audit,
         panel=lambda title, body: panel(title, body, "", ""),
         routine_panel=panel,
+        routine_panel_ex=panel_ex,
         toast=None,
     )
     scheduler = ProactiveScheduler(
@@ -309,6 +318,8 @@ async def test_calendar_before_filters_sanitizes_and_deduplicates(tmp_path: Path
     assert body == "Yaklaşan: Haftalık[31m Sync (8 dk) @ Oda 1"
     assert routine == ""
     assert suggest == "Haftalık[31m Sync notlarını hazırla"
+    # {title} dış alandır: öneri leke bayrağıyla teslim edilir (#39).
+    assert tainted_flags == [True]
 
     # Sonraki taramada veya yeniden başlatmada aynı toplantı tekrar bildirilmez.
     clock.advance(seconds=60)
@@ -749,3 +760,330 @@ def test_bridge_forwards_system_resume_and_routine_completion_chains(tmp_path: P
     finally:
         bridge.shutdown()
         assert bridge._stopped.wait(timeout=20.0)
+
+
+async def test_suggest_uses_external_and_tainted_delivery_for_calendar_and_folder(
+    tmp_path: Path,
+) -> None:
+    from artemis.channels.desktop.trigger_dialog import DEFAULT_SUGGEST_BY_KIND
+    from artemis.proactive.triggers import suggest_uses_external
+
+    assert suggest_uses_external(None) is False
+    assert suggest_uses_external("") is False
+    assert suggest_uses_external("Hazırlık notlarını getir ({minutes} dk)") is False
+    assert suggest_uses_external("{app} açıldı") is False
+    assert suggest_uses_external("{title} notlarını getir") is True
+    assert suggest_uses_external("{location} yol tarifini aç") is True
+    assert suggest_uses_external("Özetle: {file}") is True
+    assert suggest_uses_external("Özetle: {path}") is True
+
+    default_cal = DEFAULT_SUGGEST_BY_KIND["calendar_before"]
+    assert "{title}" not in default_cal and "{location}" not in default_cal
+    assert suggest_uses_external(default_cal) is False
+
+    seen: list[tuple[str, str, str, str, str, bool]] = []
+
+    def panel_ex(
+        title: str,
+        body: str,
+        routine: str,
+        suggest: str,
+        day: str,
+        suggest_tainted: bool,
+    ) -> bool:
+        seen.append((title, body, routine, suggest, day, suggest_tainted))
+        return True
+
+    clock = FakeClock()
+    dl = tmp_path / "downloads"
+    dl.mkdir()
+    triggers = (
+        TriggerConfig(
+            name="cal-tainted-title",
+            kind="calendar_before",
+            minutes_before=15,
+            suggest="{title} notlarını hazırla",
+        ),
+        TriggerConfig(
+            name="cal-tainted-loc",
+            kind="calendar_before",
+            minutes_before=15,
+            suggest="{location} adresini aç",
+        ),
+        TriggerConfig(
+            name="cal-clean",
+            kind="calendar_before",
+            minutes_before=15,
+            suggest=default_cal,
+        ),
+        TriggerConfig(
+            name="folder-tainted-file",
+            kind="folder",
+            folder=str(dl),
+            suggest="Özetle: {file}",
+        ),
+        TriggerConfig(
+            name="folder-tainted-path",
+            kind="folder",
+            folder=str(dl),
+            suggest="Özetle: {path}",
+        ),
+        TriggerConfig(
+            name="folder-clean",
+            kind="folder",
+            folder=str(dl),
+            suggest="Klasörü kontrol et",
+        ),
+    )
+    events = [
+        Event("Sync", NOW + timedelta(minutes=5), NOW + timedelta(minutes=35), location="Oda 2")
+    ]
+    runtime = _make_runtime(tmp_path, items=triggers)
+    deliverer = Deliverer(
+        runtime.settings,
+        runtime.audit,
+        routine_panel_ex=panel_ex,
+        toast=None,
+    )
+    scheduler = ProactiveScheduler(
+        runtime,
+        runtime.context.services["proactive_store"],
+        deliverer,
+        clock=clock,
+        calendar_fetcher=lambda _s, _e: events,
+    )
+
+    # İlk tarama klasörler için taban çizgisi kurar, takvimleri bildirir.
+    assert await scheduler.tick() == 3
+    by_title = {item[0]: item for item in seen}
+    assert by_title["Tetikleyici · cal-tainted-title"][5] is True
+    assert by_title["Tetikleyici · cal-tainted-loc"][5] is True
+    assert by_title["Tetikleyici · cal-clean"][5] is False
+
+    seen.clear()
+    (dl / "rapor.pdf").write_bytes(b"pdf")
+    clock.advance(seconds=30)
+    assert await scheduler.tick() == 0
+    clock.advance(seconds=30)
+    assert await scheduler.tick() == 3
+    by_title = {item[0]: item for item in seen}
+    assert by_title["Tetikleyici · folder-tainted-file"][5] is True
+    assert by_title["Tetikleyici · folder-tainted-path"][5] is True
+    assert by_title["Tetikleyici · folder-clean"][5] is False
+
+
+async def test_failed_trigger_and_chain_delivery_retries_are_bounded_with_backoff(
+    tmp_path: Path,
+) -> None:
+    import sqlite3
+
+    from artemis.proactive.event_triggers import ChainMatch
+    from artemis.proactive.schedule import local_day_bounds
+    from artemis.proactive.scheduler import (
+        TRIGGER_MAX_ATTEMPTS,
+        TRIGGER_RETRY_BACKOFF_SECONDS,
+    )
+
+    assert TRIGGER_MAX_ATTEMPTS == 3
+    assert TRIGGER_RETRY_BACKOFF_SECONDS == (60.0, 300.0)
+
+    clock = FakeClock()
+    dl = tmp_path / "dl"
+    dl.mkdir()
+    active_app = ["other.exe"]
+    triggers = (
+        TriggerConfig(name="dl", kind="folder", folder=str(dl), suggest="Özetle"),
+        TriggerConfig(
+            name="cal",
+            kind="calendar_before",
+            minutes_before=15,
+            suggest="Hazırlan",
+        ),
+        TriggerConfig(name="app", kind="app_opened", app="code.exe", suggest="Başla"),
+    )
+    events = [Event("Sync", NOW + timedelta(minutes=15), NOW + timedelta(minutes=45))]
+    runtime = _make_runtime(tmp_path, items=triggers)
+    store = runtime.context.services["proactive_store"]
+
+    panel_should_fail = True
+    deliveries: list[str] = []
+
+    def maybe_panel(
+        title: str, _body: str, _routine: str, _suggest: str, _day: str = ""
+    ) -> bool:
+        deliveries.append(title)
+        return not panel_should_fail
+
+    deliverer = Deliverer(
+        runtime.settings,
+        runtime.audit,
+        routine_panel=maybe_panel,
+        toast=None,
+    )
+    scheduler = ProactiveScheduler(
+        runtime,
+        store,
+        deliverer,
+        clock=clock,
+        active_app_getter=lambda: active_app[0],
+        calendar_fetcher=lambda _s, _e: events,
+    )
+
+    # İlk tarama: klasör & app baseline kurulur; yalnız calendar dener (deneme 1 -> failed).
+    assert await scheduler.tick() == 0
+    (dl / "yeni.pdf").write_bytes(b"pdf")
+    active_app[0] = "code.exe"
+
+    # 30 sn sonra: klasör stabil değil, cal backoff (60 sn) içinde, app deneme 1 -> failed.
+    clock.advance(seconds=30)
+    assert await scheduler.tick() == 0
+
+    # +30 sn (toplam 60 sn): klasör hazır (deneme 1 -> failed), cal deneme 2 -> failed,
+    # app henüz 30 sn geçtiği için backoff içinde.
+    clock.advance(seconds=30)
+    assert await scheduler.tick() == 0
+
+    def _occ_rows() -> list[tuple[str, str]]:
+        with sqlite3.connect(store.path) as db:
+            return db.execute(
+                "SELECT event_id, state FROM occurrences ORDER BY event_id"
+            ).fetchall()
+
+    rows_after_60s = _occ_rows()
+    cal_rows = [r for r in rows_after_60s if r[0].startswith("trigger:cal:")]
+    assert len(cal_rows) == 2
+
+    # 20 ek tarama ile tüm tetikleyiciler backoff'ları aşsa bile en fazla 3 satır oluşmalı.
+    for _ in range(20):
+        clock.advance(seconds=120)
+        await scheduler.tick()
+
+    rows = _occ_rows()
+    for prefix in ("trigger:dl:", "trigger:cal:", "trigger:app:"):
+        matching = [r for r in rows if r[0].startswith(prefix)]
+        assert len(matching) == TRIGGER_MAX_ATTEMPTS, (prefix, matching)
+        assert all(state == "failed" for _, state in matching)
+
+    # Zincir teslimi de başarısız olunca aynı şekilde en çok 3 satırla sınırlanır.
+    chain_match = ChainMatch(
+        chain_name="zincir",
+        event_key="chain:zincir:src:2026-11-23T09:00",
+        title="Öneri · zincir",
+        body="Gövde",
+        suggest="Devam",
+        routine="",
+    )
+    day_start, _ = local_day_bounds(clock(), scheduler.tz)
+    for _ in range(10):
+        clock.advance(seconds=400)
+        assert await scheduler._fire_chain(chain_match, day_start, clock()) == 0
+    chain_rows = [r for r in _occ_rows() if r[0].startswith("chain:zincir:")]
+    assert len(chain_rows) == TRIGGER_MAX_ATTEMPTS
+    assert all(state == "failed" for _, state in chain_rows)
+
+    # Kurtarma: ikinci denemede backoff dolduktan sonra teslim başarılı olursa işaretlenir.
+    rec_clock = FakeClock()
+    rec_runtime = _make_runtime(
+        tmp_path / "rec",
+        items=(TriggerConfig(name="cal2", kind="calendar_before", minutes_before=15, suggest="S"),),
+    )
+    rec_store = rec_runtime.context.services["proactive_store"]
+    rec_fail = [True]
+    rec_deliverer = Deliverer(
+        rec_runtime.settings,
+        rec_runtime.audit,
+        routine_panel=lambda *_args: not rec_fail[0],
+        toast=None,
+    )
+    rec_sched = ProactiveScheduler(
+        rec_runtime,
+        rec_store,
+        rec_deliverer,
+        clock=rec_clock,
+        calendar_fetcher=lambda _s, _e: [
+            Event("Sync", NOW + timedelta(minutes=5), NOW + timedelta(minutes=35))
+        ],
+    )
+    assert await rec_sched.tick() == 0
+    rec_fail[0] = False
+    rec_clock.advance(seconds=30)  # backoff 60 sn dolmadı -> yeniden denemez
+    assert await rec_sched.tick() == 0
+    rec_clock.advance(seconds=35)  # toplam 65 sn -> deneme 2 başarılı!
+    assert await rec_sched.tick() == 1
+    assert await rec_sched.tick() == 0  # mark_fired çalıştı, tekrarlamaz
+
+
+def test_cached_calendar_provider_honors_ttl_on_initial_fetch_error(
+    tmp_path: Path,
+) -> None:
+    runtime = _make_runtime(tmp_path, calendar_enabled=True)
+    mono = FakeMono(start=100.0)
+    calls: list[str] = []
+
+    def failing_fetch(url: str) -> bytes:
+        calls.append(url)
+        raise SourceError("çevrimdışı")
+
+    provider = CachedCalendarProvider(
+        runtime,
+        secret_resolver=lambda _env, _target: "https://cal.example/feed.ics",
+        fetcher=failing_fetch,
+        monotonic_clock=mono,
+    )
+
+    # Soğuk önbellekte ilk hata: 1 ağ isteği atılır ve TTL boyunca tekrarlanmaz.
+    assert provider(NOW, NOW + timedelta(minutes=15)) == []
+    assert len(calls) == 1
+
+    # Zaman penceresi 30 sn ilerlese bile TTL içinde ikinci istek atılmamalı.
+    mono.value += 30.0
+    assert provider(NOW + timedelta(seconds=30), NOW + timedelta(minutes=15, seconds=30)) == []
+    mono.value += 200.0
+    assert provider(NOW + timedelta(minutes=4), NOW + timedelta(minutes=19)) == []
+    assert len(calls) == 1
+
+    # TTL dolduktan sonra yeni deneme yapılır.
+    mono.value += 100.0  # toplam +330s >= 300s
+    assert provider(NOW + timedelta(minutes=5), NOW + timedelta(minutes=20)) == []
+    assert len(calls) == 2
+
+
+def test_resume_detector_uses_unbiased_clock_and_detects_sleep_gap() -> None:
+    from artemis.proactive.event_triggers import ResumeDetector
+
+    fake_unbiased = [100.0]
+    detector = ResumeDetector(monotonic_clock=lambda: fake_unbiased[0], sleep_gap_seconds=120.0)
+    assert detector.poll(NOW) is False
+
+    # Normal çalışma: duvar saati +30s, kesintisiz sayaç +30s -> uyku yok.
+    fake_unbiased[0] += 30.0
+    assert detector.poll(NOW + timedelta(seconds=30)) is False
+
+    # Uyku: duvar saati +600s, uyku hariç sayaç +2s -> 598s fark >= 120s -> uyandı.
+    fake_unbiased[0] += 2.0
+    assert detector.poll(NOW + timedelta(seconds=630)) is True
+
+
+
+async def test_legacy_routine_panel_drops_tainted_suggest(tmp_path: Path) -> None:
+    """Leke taşıyamayan eski panel yolu dış alanlı öneriyi göstermez (doğrulayıcı notu, #39)."""
+    seen: list[tuple[str, str, str, str, str]] = []
+
+    def legacy(title: str, body: str, routine: str, suggest: str, day: str) -> bool:
+        seen.append((title, body, routine, suggest, day))
+        return True
+
+    runtime = _make_runtime(tmp_path)
+    deliverer = Deliverer(runtime.settings, runtime.audit, routine_panel=legacy, toast=None)
+    common = {
+        "event_id": "e",
+        "scheduled_for": datetime(2026, 11, 26, 9, 0, tzinfo=UTC),
+        "kind": "trigger",
+        "title": "Toplantı",
+        "body": "10 dk kaldı",
+        "private": True,
+        "local_only": True,
+    }
+    await deliverer.deliver(**common, suggest="X için hazırlık", suggest_tainted=True)
+    await deliverer.deliver(**common, suggest="temiz öneri", suggest_tainted=False)
+    assert [item[3] for item in seen] == ["", "temiz öneri"]

@@ -10,6 +10,7 @@ from decimal import Decimal
 from artemis.brain.budget import BudgetLedger
 from artemis.brain.errors import (
     BudgetExceeded,
+    MediaRejectedError,
     ProviderError,
     RateLimitedError,
     RetryableProviderError,
@@ -35,7 +36,6 @@ from artemis.tools.base import ToolDefinition
 
 _AUDIO_CAPABLE_PROVIDERS = frozenset({"openai_compatible", "openrouter"})
 _IMAGE_UNSUPPORTED_PROVIDERS = frozenset({"claude_cli"})
-_MEDIA_REJECT_CODES = ("HTTP 400", "HTTP 415", "HTTP 422")
 
 
 def _strip_audio(messages: list[Message]) -> list[Message]:
@@ -53,10 +53,7 @@ def _strip_image(messages: list[Message]) -> list[Message]:
 
 
 def _is_media_rejection(error: ProviderError) -> bool:
-    return not isinstance(error, RetryableProviderError) and (
-        any(code in str(error) for code in _MEDIA_REJECT_CODES)
-        or "ekran görüntüsü taşıyamaz" in str(error)
-    )
+    return isinstance(error, MediaRejectedError)
 
 
 def _reservation(model: ModelConfig, max_output_tokens: int) -> Decimal:
@@ -76,6 +73,7 @@ class ProviderRouter:
         providers: dict[str, Provider] | None = None,
         clock: Callable[[], float] = time.monotonic,
         profile_getter: Callable[[], str] | None = None,
+        allow_image_fallback: bool = True,
     ) -> None:
         if not settings.primary_model or settings.primary_model not in settings.models:
             raise ProviderError("Birincil model config içinde tanımlanmalı.")
@@ -84,6 +82,7 @@ class ProviderRouter:
         self.ledger = BudgetLedger(settings.state_dir / "budget.sqlite3", settings.daily_budget_usd)
         self._clock = clock
         self._profile_getter = profile_getter
+        self._allow_image_fallback = allow_image_fallback
         self._fallback_until = 0.0
         self._providers: dict[str, Provider]
         if providers is not None:
@@ -175,6 +174,10 @@ class ProviderRouter:
             )
             has_audio = False
         if has_image and model.provider in _IMAGE_UNSUPPORTED_PROVIDERS:
+            if not self._allow_image_fallback:
+                raise MediaRejectedError(
+                    "Seçili model görüntü girdisini desteklemiyor.", media_kind="image"
+                )
             messages = _strip_image(messages)
             self._emit_audit(
                 "image_input_fallback",
@@ -216,15 +219,17 @@ class ProviderRouter:
             remaining = timeout - (self._clock() - started)
             if remaining <= 0:
                 raise TimeoutError from None
-            if not audio_active and not image_active:
+            if not audio_active and not (image_active and self._allow_image_fallback):
                 return await _invoke(current, stream, remaining)
             guard = EmissionGuard(stream) if stream is not None else None
             try:
                 return await _invoke(current, guard, remaining)
             except ProviderError as error:
-                if (guard is not None and guard.emitted) or not _is_media_rejection(error):
+                if (guard is not None and guard.emitted) or not isinstance(
+                    error, MediaRejectedError
+                ):
                     raise
-                if audio_active and "ekran görüntüsü taşıyamaz" not in str(error):
+                if audio_active and error.media_kind in ("audio", "unknown"):
                     current = _strip_audio(current)
                     audio_active = False
                     self._emit_audit(
@@ -233,7 +238,11 @@ class ProviderRouter:
                         model=model.model,
                         reason="rejected_audio_input",
                     )
-                elif image_active:
+                elif (
+                    image_active
+                    and self._allow_image_fallback
+                    and error.media_kind in ("image", "unknown")
+                ):
                     current = _strip_image(current)
                     image_active = False
                     self._emit_audit(
@@ -279,10 +288,10 @@ class ProviderRouter:
             )
             raise
         started = self._clock()
-        messages, has_audio, has_image = self._prepare_media_messages(messages, model)
-        # Yerel uç dahil openai_compatible kaydı yazılır: uç adresi config'te değişebilir.
-        if model.provider != "ollama":
-            try:
+        try:
+            messages, has_audio, has_image = self._prepare_media_messages(messages, model)
+            # Yerel uç dahil openai_compatible kaydı yazılır: uç adresi config'te değişebilir.
+            if model.provider != "ollama":
                 self._emit_audit(
                     "cloud_transfer",
                     provider=model.provider,
@@ -294,11 +303,10 @@ class ProviderRouter:
                     **({"has_audio": True} if has_audio else {}),
                     **({"has_image": True} if has_image else {}),
                 )
-            except ProviderError:
-                # Kaydın yazılamadığı sırada istek henüz gönderilmedi; bu
-                # rezervasyon güvenle kaldırılabilir.
-                self.ledger.release(reservation)
-                raise
+        except ProviderError:
+            # İstek henüz gönderilmedi; bu rezervasyon güvenle kaldırılabilir.
+            self.ledger.release(reservation)
+            raise
 
         try:
             async with asyncio.timeout(timeout):

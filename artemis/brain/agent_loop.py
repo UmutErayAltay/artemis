@@ -683,9 +683,10 @@ class AgentLoop:
         stream: ResponseStream | None = None, attachment: ToolResult | None = None,
         audio_wav: bytes | None = None,
         image_png: bytes | None = None,
+        tainted: bool = False,
     ) -> RunResult:
         # Gözetimsiz tur (ADR 0027): yan etki kararı kapıdadır, döngü yalnız bayrağı taşır.
-        state = TurnState(unattended=unattended)
+        state = TurnState(unattended=unattended, tainted=tainted)
         # Kullanıcı mesajına eklenen dış veri (Telegram fotoğrafı OCR'ı, ADR 0064) araç sonucu
         # gibi davranır: tur lekelenir, gizlilik kararı aynı kurallardan çıkar, metin "VERİDİR"
         # çerçevesiyle gider. Kapı ve onay kuralları değişmez.

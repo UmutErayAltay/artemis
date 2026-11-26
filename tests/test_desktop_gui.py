@@ -1802,3 +1802,115 @@ def test_approval_decision_error_propagates_and_still_rejects_dialog(
     dialog.reject()
     assert calls == [True]
     assert dialog.result() == int(dialog.DialogCode.Rejected)
+
+
+def test_tainted_proactive_suggest_write_and_submit_triggers_taint_approval(
+    app: QApplication, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from decimal import Decimal
+
+    from pydantic import BaseModel, ConfigDict
+
+    from artemis.brain.fake import ScriptedProvider
+    from artemis.brain.models import Completion, ToolCall
+    from artemis.channels.runtime import create_runtime
+    from artemis.config.settings import ModelConfig, Settings
+    from artemis.safety.audit import AuditLog
+    from artemis.safety.gate import TAINT_NOTICE
+    from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
+    from artemis.tools.registry import ToolRegistry
+
+    class _WriteArgs(BaseModel):
+        model_config = ConfigDict(extra="forbid")
+        note: str
+
+    class _SideEffectTool(BaseTool):
+        name = "side_write"
+        description = "Test yan etkili araç."
+        args_model = _WriteArgs
+        risk = Risk.SIDE_EFFECT
+
+        async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+            args = _WriteArgs.model_validate(arguments)
+            return ToolResult(success=True, status="ok", message=f"yazıldı:{args.note}")
+
+    workspace = tmp_path / "ws"
+    workspace.mkdir()
+    settings = Settings(
+        workspace=workspace,
+        state_dir=tmp_path / "state",
+        audit_path=tmp_path / "audit.jsonl",
+        persist_memory=False,
+        primary_model="fake",
+        models={
+            "fake": ModelConfig(
+                provider="ollama",
+                model="fake",
+                input_per_million=Decimal(0),
+                output_per_million=Decimal(0),
+            )
+        },
+    )
+    registry = ToolRegistry()
+    registry.register(_SideEffectTool)
+    provider = ScriptedProvider(
+        [
+            Completion(
+                tool_calls=[
+                    ToolCall(id="t1", name="side_write", arguments={"note": "hazırlık"})
+                ]
+            ),
+            Completion(content="Bitti."),
+        ]
+    )
+
+    def factory(_path: Path, approve: Any, on_record: Any = None, **_kwargs: Any) -> Runtime:
+        return create_runtime(
+            _path,
+            approve,
+            settings=settings,
+            provider=provider,
+            registry=registry,
+            audit=AuditLog(settings.audit_path, on_record),
+        )
+
+    monkeypatch.setattr(bridge_module, "create_runtime", factory)
+    window = build_window(tmp_path / "config.yaml", app=app)
+    try:
+        _wait(app, lambda: window._worker_ready)
+        window._handle_event(
+            bridge_module.Proactive(
+                "Tetikleyici · takvim",
+                "Yaklaşan toplantı: Sync",
+                "",
+                "Sync için not hazırla",
+                "",
+                True,
+            )
+        )
+        assert window.routine_run_button.text() == "Yaz"
+        window.routine_run_button.click()
+        assert window.prompt.toPlainText() == "Sync için not hazırla"
+        assert window._prompt_tainted is True
+
+        # Kullanıcı kutuyu temizleyip tekrar yazarsa taint sıfırlanır.
+        window.prompt.clear()
+        assert window._prompt_tainted is False
+
+        # Yeniden tainted öneri yazdırıp gönder.
+        window.routine_run_button.click()
+        assert window._prompt_tainted is True
+        window.send_button.click()
+        assert window._prompt_tainted is False
+
+        _wait(app, lambda: isinstance(window._approval_dialog, ApprovalDialog))
+        dialog = window._approval_dialog
+        assert dialog is not None
+        assert dialog.item.tool_name == "side_write"
+        assert TAINT_NOTICE in dialog.item.notice
+        QTest.mouseClick(dialog.yes_button, Qt.MouseButton.LeftButton)
+        _wait(app, lambda: not window._busy)
+        assert "Bitti." in window.chat.toPlainText()
+    finally:
+        _close_cleanly(app, window)
+

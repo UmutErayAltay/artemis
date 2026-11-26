@@ -19,6 +19,9 @@ MAX_FILE_NAME_CHARS = 120
 MAX_LISTED_FILES = 3
 # Yarım inen dosyaların geçici uzantıları: bitmeden bildirilmez.
 TEMP_SUFFIXES = (".crdownload", ".part", ".tmp", ".partial", ".download", ".opdownload")
+# Dış kaynaklı (takvim/klasör) yer tutucular: öneri şablonunda kullanıldığında "Yaz" ile
+# başlatılan tur dış içerikle lekeli sayılır.
+EXTERNAL_SUGGEST_PLACEHOLDERS = ("{title}", "{location}", "{file}", "{path}")
 # Denetim, yön (bidi) ve görünmez karakterler: dosya adı bildirimi başka bir şey gibi
 # gösteremesin. Kaçışla yazılır ki kaynakta görünmez karakter kalmasın.
 _CONTROL = re.compile(
@@ -63,6 +66,11 @@ def fill(template: str, **values: str) -> str:
     for key, value in values.items():
         template = template.replace("{" + key + "}", value)
     return template
+
+
+def suggest_uses_external(template: str | None) -> bool:
+    """Öneri şablonu dış kaynaklı yer tutucu içeriyorsa True döner."""
+    return bool(template and any(p in template for p in EXTERNAL_SUGGEST_PLACEHOLDERS))
 
 
 def build_notice(

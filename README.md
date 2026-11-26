@@ -57,7 +57,7 @@ https://github.com/user-attachments/assets/d5ebb21b-0178-4df0-acb5-9b4f231e83d5
 
 ### Option A: Windows Installer (No Admin Required)
 Download `Artemis-Setup-<version>.exe` or `Artemis-<version>-windows.zip` from [Releases](https://github.com/UmutErayAltay/artemis/releases) and verify its checksum against `SHA256SUMS.txt`.
-*(Note: Until SignPath/Authenticode secrets are configured on releases, Windows SmartScreen may warn on unsigned binaries.)*
+*(Code signing through SignPath Foundation is being set up — see the [Code signing policy](docs/CODE_SIGNING_POLICY.md). Until a release is signed, Windows SmartScreen may warn.)*
 
 ### Option B: Run from Source (Windows / Linux, Python 3.12)
 
@@ -101,5 +101,6 @@ First launch opens the **Connect Brain** wizard (OpenRouter OAuth PKCE, Google A
 - [README.tr.md](README.tr.md) — Full Turkish user guide
 - [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) & [docs/adr/README.md](docs/adr/README.md) (89 Architecture Decision Records)
 - [docs/RELIABILITY_STATUS.md](docs/RELIABILITY_STATUS.md) · [docs/TESTING.md](docs/TESTING.md) · [CONTRIBUTING.md](CONTRIBUTING.md)
+- [Code signing policy](docs/CODE_SIGNING_POLICY.md) · [Privacy policy](docs/PRIVACY.md)
 
 Licensed under [Apache-2.0](LICENSE). Third-party binary notices: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

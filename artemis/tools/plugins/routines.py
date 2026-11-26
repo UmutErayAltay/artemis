@@ -3,8 +3,9 @@
 Rutin sabit araç adımlarıdır; çalışırken model yoktur. `routine_run` her adımı çağrıldığı
 turun kapısından (`context.gate_handle`) geçirir: leke, onay, gözetimsiz kuralı ve denetim
 tek tek uygulanır. Rutin kaydetmek onay atlatmanın yolu olmasın diye `routine_save` ve
-`routine_delete` her zaman onaylıdır, `routine_save` dış içerik okunmuş turda hiç sorulmadan
-reddedilir. Zamanlama bu araçlarda YOKTUR; yalnız Ayarlar panelinden kurulur.
+`routine_delete` onaylıdır; `routine_save` reddedilmez, otomatik onay kipinde yalnız temiz
+turda onaysız kaydeder, dış içerik bağlamdayken her kipte onay sorar (ADR 0090).
+Zamanlama bu araçlarda YOKTUR; yalnız Ayarlar panelinden kurulur.
 """
 
 from __future__ import annotations
@@ -244,12 +245,18 @@ class RoutineSave(BaseTool):
     description = (
         "Adlandırılmış bir rutin kaydeder: sabit, sırayla çalışacak araç çağrıları. Zaman "
         "ayarlayamaz, rutin içinden rutin çağıramaz. Normal kipte onay penceresiyle tüm "
-        "adımları gösterir; otomatik onay kipinde onay sormadan kaydeder. Kullanıcı "
+        "adımları gösterir; otomatik onay kipinde temiz turda onay sormadan kaydeder. Kullanıcı "
         "istediğinde metinle ek onay sorma, aracı doğrudan çağır."
     )
     args_model = RoutineSaveArguments
     risk = Risk.CONFIRM_REQUIRED
     auto_mode_ok = True
+
+    def auto_mode_allowed(self, arguments: BaseModel, context: ToolContext) -> bool:
+        # Dış içerik bağlamdayken (bu tur ya da geçmiş) otomatik kipte de onay sorulur:
+        # kayıtlı rutin sonra temiz turda onaysız çalışır; enjekte talimat kalıcılaşmasın
+        # (ADR 0090).
+        return not context.turn_tainted
 
     def refuse(self, arguments: BaseModel, context: ToolContext) -> str | None:
         return _disabled(context)

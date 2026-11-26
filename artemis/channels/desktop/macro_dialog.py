@@ -9,10 +9,12 @@ yalnız `RoutineSaveArguments` üretir ve `RoutinesSection.tool_requested` üzer
 from __future__ import annotations
 
 import json
+import threading
+from collections.abc import Mapping
 from typing import Any
 
 from pydantic import ValidationError
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
     QHBoxLayout,
@@ -26,6 +28,7 @@ from PySide6.QtWidgets import (
 
 from artemis.channels.desktop.dialog_shell import FormDialog
 from artemis.channels.desktop.form_kit import meta_label
+from artemis.channels.desktop.thread_shutdown import shutdown_thread
 from artemis.channels.desktop.tool_titles import tool_display
 from artemis.channels.desktop.widgets import with_help
 from artemis.config.settings import Settings
@@ -55,6 +58,35 @@ def _format_step_preview(number: int, step: RoutineStep) -> str:
     return t("{number}. {tool}").format(number=number, tool=tool_display(step.tool))
 
 
+class _MacroObserverThread(QThread):
+    """UIA/fare makro gözlemini Qt ana iş parçacığı dışında yürütür."""
+
+    polled = Signal(object)
+
+    def __init__(
+        self,
+        recorder: MacroRecorder,
+        interval_ms: int,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._recorder = recorder
+        self._interval_s = max(0.01, interval_ms / 1000.0)
+        self._stop_event = threading.Event()
+
+    def stop(self) -> None:
+        self._stop_event.set()
+        self.requestInterruption()
+
+    def run(self) -> None:
+        while not self._stop_event.wait(self._interval_s):
+            if self.isInterruptionRequested() or not self._recorder.recording:
+                break
+            event = self._recorder.poll_once()
+            if not self.isInterruptionRequested():
+                self.polled.emit(event)
+
+
 class MacroDialog(FormDialog):
     """Doğal dil + UIA gözlemiyle makro taslağı oluşturma ve onaylı kayıt penceresi."""
 
@@ -65,6 +97,8 @@ class MacroDialog(FormDialog):
         settings: Settings | None = None,
         *,
         backend: MacroObserverBackend | None = None,
+        services: Mapping[str, Any] | None = None,
+        poll_interval_ms: int = _POLL_INTERVAL_MS,
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(t("Makro kaydet"), 540, parent)
@@ -72,14 +106,12 @@ class MacroDialog(FormDialog):
         self._others = others
         self._registry = registry
         self._settings = settings
-        self._recorder = MacroRecorder(backend=backend)
+        self._recorder = MacroRecorder(backend=backend, services=services)
+        self._poll_interval_ms = poll_interval_ms
+        self._observer_thread: _MacroObserverThread | None = None
         self._latest_draft: MacroDraft | None = None
         self.result_args: RoutineSaveArguments | None = None
         self.result_draft: MacroDraft | None = None
-
-        self._poll_timer = QTimer(self)
-        self._poll_timer.setInterval(_POLL_INTERVAL_MS)
-        self._poll_timer.timeout.connect(self.poll_once)
 
         name_label = QLabel(t("Rutin adı"))
         name_label.setObjectName("fieldLabel")
@@ -179,16 +211,36 @@ class MacroDialog(FormDialog):
         else:
             self.start_recording()
 
+    def _stop_observer_thread(self) -> None:
+        thread = self._observer_thread
+        self._observer_thread = None
+        if thread is not None:
+            thread.stop()
+            shutdown_thread(thread, ("polled", self._on_polled), wait_ms=3000)
+
+    def _on_polled(self, _event: object) -> None:
+        if self._recorder.recording:
+            self.record_status.setText(
+                t("Gözleniyor… {count} olay yakalandı.").format(
+                    count=len(self._recorder.events)
+                )
+            )
+        self._refresh_preview()
+
     def start_recording(self) -> None:
+        self._stop_observer_thread()
         self._recorder.start()
-        self._poll_timer.start()
+        thread = _MacroObserverThread(self._recorder, self._poll_interval_ms, self)
+        thread.polled.connect(self._on_polled)
+        self._observer_thread = thread
+        thread.start()
         self.record_button.setText(t("Gözlemi durdur"))
         self.record_status.setText(
             t("Gözleniyor… Başka bir uygulamaya geçip tıklayın, bitince durdurun.")
         )
 
     def stop_recording(self) -> None:
-        self._poll_timer.stop()
+        self._stop_observer_thread()
         self._recorder.stop()
         self.record_button.setText(t("Gözlemi başlat"))
         self.record_status.setText(
@@ -198,13 +250,7 @@ class MacroDialog(FormDialog):
 
     def poll_once(self) -> ObservedEvent | None:
         event = self._recorder.poll_once()
-        if self._recorder.recording:
-            self.record_status.setText(
-                t("Gözleniyor… {count} olay yakalandı.").format(
-                    count=len(self._recorder.events)
-                )
-            )
-        self._refresh_preview()
+        self._on_polled(event)
         return event
 
     def _clear_all(self) -> None:
@@ -286,11 +332,11 @@ class MacroDialog(FormDialog):
         self.accept()
 
     def reject(self) -> None:
-        self._poll_timer.stop()
+        self._stop_observer_thread()
         self._recorder.stop()
         super().reject()
 
     def closeEvent(self, event: QCloseEvent) -> None:
-        self._poll_timer.stop()
+        self._stop_observer_thread()
         self._recorder.stop()
         super().closeEvent(event)

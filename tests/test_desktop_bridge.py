@@ -23,6 +23,7 @@ from artemis.channels.desktop.bridge import (
     DesktopBridge,
     Failed,
     Finished,
+    Proactive,
     State,
     VoiceCommand,
 )
@@ -30,6 +31,7 @@ from artemis.channels.runtime import AuditObserver, Runtime, create_runtime
 from artemis.channels.voice.telemetry import VoiceTimingEvent
 from artemis.config.settings import ModelConfig, Settings, VoiceConfig
 from artemis.safety.audit import AuditLog
+from artemis.safety.gate import TAINT_NOTICE
 from artemis.tools.base import BaseTool, Risk, ToolContext, ToolResult
 from artemis.tools.registry import ToolRegistry
 
@@ -904,7 +906,12 @@ def test_live_states_become_their_own_events(tmp_path):
         bridge._on_voice_state(state)
     # Kurucu işçiyi başlatır; config yoksa Failed olayı araya girebilir (yarış). Test yalnız
     # ses durumlarının kendi olayına dönüştüğünü ölçer.
-    events = [(e.state, e.message) for e in bridge.poll_events() if isinstance(e, State)]
+    # İşçinin kendi `stopped`/`error` durumu da araya girebilir; yalnız ses durumları sayılır.
+    events = [
+        (e.state, e.message)
+        for e in bridge.poll_events()
+        if isinstance(e, State) and e.state.startswith("voice_")
+    ]
     assert events == [
         ("voice_live", "merhaba dünya"),
         ("voice_live_unavailable", "deps:eksik"),
@@ -1223,3 +1230,87 @@ async def test_complete_selection_refuses_non_router_for_local_model() -> None:
     assert fake.calls == []
     result = await _complete_selection(fake, messages, None, 1.0)
     assert result.content == "ok" and len(fake.calls) == 1
+
+
+def test_submit_tainted_requires_approval_for_side_effect_without_external_read(tmp_path):
+    bridge = _fixture(
+        tmp_path,
+        [
+            Completion(
+                tool_calls=[
+                    ToolCall(id="c1", name="confirm_write", arguments={"path": "tainted.txt"})
+                ]
+            ),
+            Completion(content="Tamam."),
+            Completion(
+                tool_calls=[
+                    ToolCall(id="c2", name="confirm_write", arguments={"path": "clean.txt"})
+                ]
+            ),
+            Completion(content="Temiz."),
+        ],
+    )
+    try:
+        tainted_req = bridge.submit("dış öneri", tainted=True)
+        assert tainted_req is not None
+        approval = _wait_for(bridge, Approval, timeout=2.0)
+        assert approval.request_id == tainted_req
+        assert approval.tool_name == "confirm_write"
+        assert TAINT_NOTICE in approval.notice
+        assert bridge.decide(approval.request_id, approval.turn_id, approval.approval_id, True)
+        finished = _wait_for(bridge, Finished, timeout=2.0)
+        assert finished.request_id == tainted_req
+        assert (tmp_path / "tainted.txt").read_text(encoding="utf-8") == "yazıldı"
+
+        # Temiz turda SIDE_EFFECT araç onay istemeden yürür.
+        clean_req = bridge.submit("temiz istek")
+        assert clean_req is not None
+        events = _collect_until(
+            bridge,
+            lambda items: any(
+                isinstance(ev, Finished) and ev.request_id == clean_req for ev in items
+            ),
+        )
+        assert not any(isinstance(ev, Approval) for ev in events)
+        assert (tmp_path / "clean.txt").read_text(encoding="utf-8") == "yazıldı"
+
+        # Genişletilmiş panel geri çağrısı suggest_tainted bayrağını Proactive olayına taşır.
+        assert bridge._proactive_routine_panel_ex(
+            "Tetikleyici · t", "Gövde", "", "Özetle", "", True
+        )
+        proactive = _wait_for(bridge, Proactive, timeout=2.0)
+        assert proactive.suggest_tainted is True
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+
+
+def test_notify_routine_chain_tracks_background_task_reference(tmp_path: Path) -> None:
+    import asyncio
+    import threading
+
+    bridge = _fixture(tmp_path, [])
+    try:
+        entered = threading.Event()
+        release = threading.Event()
+
+        class _FakeScheduler:
+            async def notify_routine_completed(self, name: str, completed: bool) -> None:
+                assert name == "sabah" and completed is True
+                entered.set()
+                while not release.is_set():
+                    await asyncio.sleep(0.005)
+
+        bridge._proactive_scheduler = _FakeScheduler()  # type: ignore[assignment]
+        assert bridge._post(bridge._notify_routine_chain, "sabah", True)
+        assert entered.wait(2.0)
+        assert len(bridge._background_tasks) == 1
+        release.set()
+        deadline = time.monotonic() + 2.0
+        while bridge._background_tasks and time.monotonic() < deadline:
+            time.sleep(0.01)
+        assert bridge._background_tasks == set()
+    finally:
+        bridge.shutdown()
+        assert bridge._stopped.wait(2)
+

@@ -13,7 +13,7 @@ from collections.abc import Callable
 from contextlib import suppress
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import Any, Literal, Protocol, cast
 from uuid import uuid4
 
 import httpx
@@ -23,9 +23,13 @@ from artemis.brain.errors import (
     BudgetExceeded as BudgetExceeded,
 )
 from artemis.brain.errors import (
+    MediaRejectedError,
+    RateLimitedError,
+    RetryableProviderError,
+)
+from artemis.brain.errors import (
     ProviderError as ProviderError,
 )
-from artemis.brain.errors import RateLimitedError, RetryableProviderError
 from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.streaming import TextStream
 from artemis.config.settings import ModelConfig, Settings
@@ -270,6 +274,83 @@ async def _post(
     return _object(value)
 
 
+_MEDIA_REJECT_STATUS_CODES = frozenset({400, 415, 422})
+_IMAGE_REJECTION_PHRASES = (
+    "image_url",
+    "image input",
+    "images are not supported",
+    "does not support image",
+    "does not support vision",
+    "vision is not supported",
+    "unsupported image",
+    "invalid_image",
+    "invalid image",
+    "cannot read image",
+    "ekran görüntüsü taşıyamaz",
+)
+_AUDIO_REJECTION_PHRASES = (
+    "input_audio",
+    "audio input",
+    "audio is not supported",
+    "does not support audio",
+    "unsupported audio",
+    "invalid_audio",
+    "invalid audio",
+)
+_GENERIC_REJECTION_PHRASES = (
+    "unsupported media type",
+    "media_type",
+    "multimodal",
+    "modality",
+)
+_HTTP_415_MEDIA_KEYWORDS = ("image", "audio", "media", "content-type")
+
+
+def _classify_media_rejection(
+    response: httpx.Response,
+) -> Literal["audio", "image", "unknown"] | None:
+    """Ham HTTP gövdesini sızdırmadan yalnızca açık medya reddini sınıflandırır."""
+    if response.status_code not in _MEDIA_REJECT_STATUS_CODES:
+        return None
+    try:
+        raw_text = response.text[:4096]
+    except httpx.HTTPError:
+        return None
+    if not raw_text:
+        return None
+    fragments = [raw_text]
+    try:
+        parsed = json.loads(raw_text)
+    except (json.JSONDecodeError, ValueError):
+        parsed = None
+    if isinstance(parsed, dict):
+        error = parsed.get("error")
+        if isinstance(error, dict):
+            for key in ("message", "code", "type"):
+                val = error.get(key)
+                if isinstance(val, str):
+                    fragments.append(val[:4096])
+        elif isinstance(error, str):
+            fragments.append(error[:4096])
+        detail = parsed.get("detail")
+        if isinstance(detail, str):
+            fragments.append(detail[:4096])
+    haystack = "\n".join(fragments).lower()
+    has_image = any(phrase in haystack for phrase in _IMAGE_REJECTION_PHRASES)
+    has_audio = any(phrase in haystack for phrase in _AUDIO_REJECTION_PHRASES)
+    if has_image and has_audio:
+        return "unknown"
+    if has_image:
+        return "image"
+    if has_audio:
+        return "audio"
+    if any(phrase in haystack for phrase in _GENERIC_REJECTION_PHRASES):
+        return "unknown"
+    if response.status_code == 415 and any(kw in haystack for kw in _HTTP_415_MEDIA_KEYWORDS):
+        return "unknown"
+    return None
+
+
 async def _post_lines(
     url: str, payload: dict[str, Any], headers: dict[str, str], *, timeout: float,
     on_line: Callable[[str], None],
@@ -287,6 +368,10 @@ async def _post_lines(
             httpx.AsyncClient(follow_redirects=False, timeout=timeout) as client,
             client.stream("POST", url, json=payload, headers=headers) as response,
         ):
+            if response.status_code in _MEDIA_REJECT_STATUS_CODES:
+                # Akış yanıtında gövde okunmazsa response.text ResponseNotRead yükseltir.
+                with suppress(httpx.HTTPError):
+                    await response.aread()
             _check_status(response)
             async for line in response.aiter_lines():
                 if line:
@@ -315,6 +400,13 @@ def _check_status(response: httpx.Response) -> None:
         raise ProviderError(
             "Sağlayıcı adresi veya model bulunamadı (HTTP 404). Adresi ve model adını kontrol edin."
         )
+    if response.status_code in _MEDIA_REJECT_STATUS_CODES:
+        kind = _classify_media_rejection(response)
+        if kind is not None:
+            raise MediaRejectedError(
+                f"Sağlayıcı medya girdisini kabul etmedi (HTTP {response.status_code}).",
+                media_kind=kind,
+            )
     if response.status_code >= 300:
         raise ProviderError(f"Sağlayıcı isteği kabul etmedi (HTTP {response.status_code}).")
 
@@ -887,8 +979,9 @@ class ClaudeCliProvider:
     ) -> Completion:
         if any(m.image_png is not None for m in _cloud_messages(messages)):
             # Transkript düz metindir; görüntüyü sessizce düşürmek modeli kör bırakır.
-            raise ProviderError(
-                "Claude Code CLI ekran görüntüsü taşıyamaz; görüntü destekleyen bir model seçin."
+            raise MediaRejectedError(
+                "Claude Code CLI ekran görüntüsü taşıyamaz; görüntü destekleyen bir model seçin.",
+                media_kind="image",
             )
         executable = shutil.which("claude")
         if executable is None:

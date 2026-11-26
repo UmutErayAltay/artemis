@@ -118,8 +118,13 @@ def handle_event(window: DesktopWindow, event: BridgeEvent) -> None:
         window._append_chat("Artemis (kendiliğinden)", f"{event.title}\n{event.body}")
         window.pet.answer(event.body)
         if event.routine or event.suggest or event.summary_day:
-            show_routine_notice(window, 
-                event.routine, event.body, event.suggest, event.summary_day
+            show_routine_notice(
+                window,
+                event.routine,
+                event.body,
+                event.suggest,
+                event.summary_day,
+                event.suggest_tainted,
             )
         return
     if isinstance(event, ActivityGap):
@@ -326,6 +331,7 @@ def clear_chat_view(window: DesktopWindow) -> None:
     window._turn_steps.clear()
     window._reset_cards()
     window.chat.clear()
+    window._prompt_tainted = False
     if not window._busy:
         window._set_status(t("Hazır"), "ready")
     window._set_controls()
@@ -513,12 +519,18 @@ def add_step(window: DesktopWindow, block: StepBlock, activity: Activity) -> Non
 
 
 def show_routine_notice(
-    window: DesktopWindow, name: str, text: str, suggest: str = "", summary_day: str = ""
+    window: DesktopWindow,
+    name: str,
+    text: str,
+    suggest: str = "",
+    summary_day: str = "",
+    suggest_tainted: bool = False,
 ) -> None:
     """Ana düğme: rutin "Çalıştır", tetikleyici önerisi "Yaz" (ADR 0061), gün özeti "Aç";
     özet için vault açıksa ikinci düğme "Vault'a ekle" (ADR 0066)."""
     window._routine_name = name
     window._routine_suggest = suggest
+    window._routine_suggest_tainted = suggest_tainted
     window._summary_day = summary_day
     window.routine_run_button.setText(
         t("Aç") if summary_day else t("Yaz") if suggest else t("Çalıştır")
@@ -573,6 +585,7 @@ def run_routine_notice(window: DesktopWindow) -> None:
     elif window._routine_suggest:
         # Gönderilmez: metin yalnız sohbet kutusuna yazılır, kullanıcı okuyup kendisi yollar.
         window.prompt.setPlainText(window._routine_suggest)
+        window._prompt_tainted = bool(window._routine_suggest_tainted)
         window.prompt.setFocus()
     elif window._routine_name:
         window._submit_routine_tool("routine_run", RoutineNameArguments(name=window._routine_name))

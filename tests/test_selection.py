@@ -19,8 +19,11 @@ from artemis.channels.desktop.bridge import DesktopBridge, State
 from artemis.channels.desktop.dictation import DictationBackend
 from artemis.channels.desktop.selection import (
     MAX_CHARS,
+    ClipboardSnapshot,
     SelectionActions,
     SelectionBackend,
+    _backup_clipboard_formats,
+    _restore_clipboard_formats,
     has_nontext_clipboard_formats,
     local_chat_alias,
 )
@@ -616,16 +619,32 @@ def test_window_registers_selection_hotkey_only_when_enabled(
             time.sleep(0.01)
 
 
-async def test_nontext_clipboard_still_captures_selected_text_without_error() -> None:
+async def test_nontext_clipboard_blocks_copy_path_without_complete_backup() -> None:
     rig = Rig()
     rig.world.nontext = True
     rig.world.clip = ""
     await rig.capture()
-    assert rig.world.copy_calls == 1
-    assert rig.kinds("ready") == [f"{len(SECRET)} karakter seçildi."]
-    assert rig.kinds("message") == []
-    assert rig.audit.named("selection_capture") == [{"outcome": "captured", "chars": len(SECRET)}]
+    assert rig.world.copy_calls == 0
+    assert rig.world.clip_history == []
+    assert rig.kinds("ready") == []
+    assert "metin dışı" in rig.kinds("message")[-1]
+    assert rig.audit.named("selection_capture") == [{"outcome": "nontext_clipboard", "chars": 0}]
     assert not rig.actions.busy
+
+    incomplete = Rig()
+    incomplete.world.nontext = True
+    incomplete.world.clip = ""
+    incomplete.world.backup_data = ClipboardSnapshot(
+        entries=((13, b"x\x00"),), skipped_formats=1, complete=False
+    )
+    await incomplete.capture()
+    assert incomplete.world.copy_calls == 0
+    assert incomplete.world.clip_history == []
+    assert incomplete.kinds("ready") == []
+    assert "metin dışı" in incomplete.kinds("message")[-1]
+    assert incomplete.audit.named("selection_capture") == [
+        {"outcome": "nontext_clipboard", "chars": 0}
+    ]
 
 
 async def test_binary_clipboard_snapshot_is_backed_up_and_restored_across_copy() -> None:
@@ -648,8 +667,120 @@ async def test_binary_clipboard_snapshot_is_backed_up_and_restored_across_copy()
     fallback.world.restore_ok = False
     await fallback.capture()
     assert fallback.kinds("ready") == [f"{len(SECRET)} karakter seçildi."]
-    assert fallback.kinds("message") == []
+    assert fallback.kinds("message") == [
+        "Pano eski haline getirilemedi; önceki metin kaybolmuş olabilir."
+    ]
     assert fallback.world.clip == "ESKI METIN"
+
+
+async def test_incomplete_text_snapshot_emits_not_restored_warning() -> None:
+    rig = Rig()
+    rig.world.nontext = False
+    rig.world.clip = "ESKI METIN"
+    rig.world.backup_data = ClipboardSnapshot(
+        entries=((13, b"a\x00"),), skipped_formats=1, complete=False
+    )
+    rig.world.restore_ok = False
+    await rig.capture()
+    assert rig.kinds("ready") == [f"{len(SECRET)} karakter seçildi."]
+    assert rig.kinds("message") == [
+        "Pano eski haline getirilemedi; önceki metin kaybolmuş olabilir."
+    ]
+    assert rig.world.clip == "ESKI METIN"
+
+
+def test_backup_and_restore_clipboard_formats_detect_skipped_and_partial(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import ctypes
+
+    from artemis.channels.desktop import selection as sel
+
+    class _FakeUser32:
+        def __init__(self, formats: list[int], fail_set_fmt: int | None = None) -> None:
+            self.formats = formats
+            self.fail_set_fmt = fail_set_fmt
+            self.idx = 0
+
+        def OpenClipboard(self, _hwnd: Any) -> int:
+            return 1
+
+        def CloseClipboard(self) -> int:
+            return 1
+
+        def EmptyClipboard(self) -> int:
+            return 1
+
+        def EnumClipboardFormats(self, fmt: int) -> int:
+            if fmt == 0:
+                self.idx = 0
+            if self.idx >= len(self.formats):
+                return 0
+            val = self.formats[self.idx]
+            self.idx += 1
+            return val
+
+        def GetClipboardData(self, fmt: int) -> int:
+            return fmt * 100
+
+        def CreateWindowExW(self, *_args: Any) -> int:
+            return 777
+
+        def DestroyWindow(self, _hwnd: Any) -> int:
+            return 1
+
+        def SetClipboardData(self, fmt: int, _handle: Any) -> int:
+            return 0 if fmt == self.fail_set_fmt else 1
+
+    class _FakeKernel32:
+        def __init__(self, sizes: dict[int, int]) -> None:
+            self.sizes = sizes
+
+        def GlobalSize(self, handle: int) -> int:
+            return self.sizes.get(handle, 0)
+
+        def GlobalLock(self, handle: int) -> int:
+            return handle
+
+        def GlobalUnlock(self, _handle: int) -> int:
+            return 1
+
+        def GlobalAlloc(self, _flags: int, _size: int) -> int:
+            return 555
+
+        def GlobalFree(self, _handle: int) -> int:
+            return 0
+
+    monkeypatch.setattr(sel.sys, "platform", "win32")
+    # Linux'ta bu ctypes işlevleri yok: raising=False ile eklenir.
+    monkeypatch.setattr(ctypes, "set_last_error", lambda _err: None, raising=False)
+    monkeypatch.setattr(ctypes, "get_last_error", lambda: 0, raising=False)
+    monkeypatch.setattr(ctypes, "string_at", lambda ptr, size: b"x" * min(size, 4))
+    monkeypatch.setattr(ctypes, "memmove", lambda *_args: None)
+
+    # CF_BITMAP (2) GDI ve 20 MB CF_DIB (8) atlanır -> complete=False, skipped_formats=2.
+    fake_u = _FakeUser32([2, 8, 13])
+    fake_k = _FakeKernel32({800: 20 * 1024 * 1024, 1300: 4})
+    monkeypatch.setattr(sel, "_win_clipboard_apis", lambda: (fake_u, fake_k))
+    snap = _backup_clipboard_formats(max_total_bytes=16 * 1024 * 1024)
+    assert snap.skipped_formats == 2
+    assert snap.complete is False
+    assert snap.entries == ((13, b"xxxx"),)
+    # Eksik yedek geri yüklenince tam geri yükleme sayılmaz.
+    assert _restore_clipboard_formats(snap) is False
+
+    # Tam yedekte 2 biçimden 1'i SetClipboardData'da kalırsa False döner; ikisi de yazarsa True.
+    complete_snap = ClipboardSnapshot(
+        entries=((13, b"aa"), (49400, b"bb")), skipped_formats=0, complete=True
+    )
+    monkeypatch.setattr(
+        sel, "_win_clipboard_apis", lambda: (_FakeUser32([], fail_set_fmt=49400), fake_k)
+    )
+    assert _restore_clipboard_formats(complete_snap) is False
+    monkeypatch.setattr(
+        sel, "_win_clipboard_apis", lambda: (_FakeUser32([], fail_set_fmt=None), fake_k)
+    )
+    assert _restore_clipboard_formats(complete_snap) is True
 
 
 async def test_read_clipboard_oserror_refuses_without_crashing() -> None:

@@ -194,9 +194,11 @@ async def test_save_after_external_read_asks_confirmation_in_accept_mode(env: En
     assert [r.name for r in env.store.load()] == ["web-ozet"]
 
 
-async def test_save_after_prior_external_read_confirms_in_accept_and_skips_in_auto(
+async def test_save_after_prior_external_read_confirms_in_accept_and_auto(
     tmp_path: Path,
 ) -> None:
+    """ADR 0090 (#37): dış içerik bağlamdayken otomatik kip de onay sorar; kayıtlı rutin
+    sonra temiz turda onaysız çalışacağı için enjekte talimat kalıcılaşmamalı."""
     for mode in ("accept", "auto"):
         settings = make_settings(tmp_path).model_copy(
             update={"computer_use": ComputerUseConfig(mode=mode)}
@@ -211,11 +213,27 @@ async def test_save_after_prior_external_read_confirms_in_accept_and_skips_in_au
                 "routine_save", state, name=name, steps=[step("probe_read")]
             )
             assert result.success, result.message
+        assert local_env.approvals == ["routine_save", "routine_save"]
+        assert local_env.events("approval_skipped") == []
+
+
+async def test_save_in_clean_turn_skips_approval_only_in_auto(tmp_path: Path) -> None:
+    """Temiz turda 2026-11-21 kararı sürer: otomatik kipte onaysız, normal kipte onaylı."""
+    for mode in ("accept", "auto"):
+        settings = make_settings(tmp_path).model_copy(
+            update={"computer_use": ComputerUseConfig(mode=mode)}
+        )
+        local_env = Env(tmp_path / mode, settings=settings)
+        local_env.answer = True
+        result = await local_env.call(
+            "routine_save", TurnState(), name="temiz", steps=[step("probe_read")]
+        )
+        assert result.success, result.message
         if mode == "accept":
-            assert local_env.approvals == ["routine_save", "routine_save"]
+            assert local_env.approvals == ["routine_save"]
         else:
             assert local_env.approvals == []
-            assert len(local_env.events("approval_skipped")) == 2
+            assert len(local_env.events("approval_skipped")) == 1
 
 
 @pytest.mark.parametrize(

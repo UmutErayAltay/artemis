@@ -291,6 +291,17 @@ def _is_allowed_caldav_url(url: str) -> bool:
     return parsed.scheme == "http" and (parsed.hostname or "").lower() in _LOOPBACK_HOSTS
 
 
+def _effective_port(parsed: Any) -> int | None:
+    if parsed.port is not None:
+        return int(parsed.port)
+    scheme = (parsed.scheme or "").lower()
+    if scheme == "https":
+        return 443
+    if scheme == "http":
+        return 80
+    return None
+
+
 class _CalDavRedirectHandler(urllib.request.HTTPRedirectHandler):
     def redirect_request(  # type: ignore[no-untyped-def]
         self, req: Any, fp: Any, code: Any, msg: Any, headers: Any, newurl: Any
@@ -303,11 +314,11 @@ class _CalDavRedirectHandler(urllib.request.HTTPRedirectHandler):
         if (
             orig.scheme.lower(),
             (orig.hostname or "").lower(),
-            orig.port,
+            _effective_port(orig),
         ) != (
             dest.scheme.lower(),
             (dest.hostname or "").lower(),
-            dest.port,
+            _effective_port(dest),
         ):
             raise SourceError("CalDAV sunucusu farklı bir adrese yönlendirdi; reddedildi.")
         return super().redirect_request(req, fp, code, msg, headers, newurl)

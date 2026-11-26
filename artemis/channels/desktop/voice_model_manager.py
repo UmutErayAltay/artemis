@@ -7,6 +7,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+import httpx
 from PySide6.QtCore import QSize, Qt, QThread, Signal
 from PySide6.QtGui import QCloseEvent
 from PySide6.QtWidgets import (
@@ -85,7 +86,7 @@ class _ModelOpThread(QThread):
     def run(self) -> None:
         try:
             entries, message = self._work()
-        except (OSError, ValueError, RuntimeError, ImportError) as error:
+        except (OSError, ValueError, RuntimeError, ImportError, httpx.HTTPError) as error:
             self.failed.emit(
                 self.generation, self.op, str(error) or type(error).__name__
             )

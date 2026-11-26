@@ -907,14 +907,18 @@ def _require_https_request(request: httpx.Request) -> None:
 def _default_url_fetch(url: str) -> bytes:
     if not url.startswith("https://"):
         raise ValueError("Yalnız HTTPS adresleri indirilebilir.")
-    with httpx.Client(
-        follow_redirects=True,
-        timeout=60.0,
-        event_hooks={"request": [_require_https_request]},
-    ) as client:
-        response = client.get(url)
-        response.raise_for_status()
-        return response.content
+    try:
+        with httpx.Client(
+            follow_redirects=True,
+            timeout=60.0,
+            event_hooks={"request": [_require_https_request]},
+        ) as client:
+            response = client.get(url)
+            response.raise_for_status()
+            return response.content
+    except httpx.HTTPError as exc:
+        # İş parçacığı ve çağıranlar tüm indirme hatalarını OSError/ValueError altında bekler.
+        raise OSError(f"Model indirilemedi (ağ hatası): {type(exc).__name__}") from exc
 
 
 def _validate_downloaded_payload(

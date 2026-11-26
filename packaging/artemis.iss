@@ -1,7 +1,7 @@
 ; Artemis Windows kurucu betiği (Inno Setup 6).
 ; Derleme betiği /DMyAppVersion=... parametresiyle sürümü geçer.
 #ifndef MyAppVersion
-  #define MyAppVersion "0.2.3"
+  #define MyAppVersion "0.2.4"
 #endif
 
 [Setup]
@@ -26,6 +26,7 @@ DisableProgramGroupPage=yes
 ; [UninstallDelete] {app} dizinini tamamen sildiği için Belgeler gibi seçilen bir klasör silinebilirdi.
 DisableDirPage=yes
 SetupIconFile=..\artemis\channels\desktop\artemis.ico
+InfoBeforeFile=PRIVACY.txt
 UninstallDisplayIcon={app}\Artemis.exe
 OutputDir=..\dist\installer
 OutputBaseFilename=Artemis-Setup-{#MyAppVersion}
