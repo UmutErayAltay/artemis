@@ -38,6 +38,9 @@ models: {}
 #     model: <sağlayıcının model kimliği>
 #     input_per_million: '0'
 #     output_per_million: '0'
+#     # ADR 0092: hafif model kipi (dar araç seti, kısa istem). Boşsa otomatik: yerel/ollama ya da
+#     # ':free' modelde açık, diğerlerinde kapalı.  true/false açık değeri ezer.
+#     light_mode: true
 #   # Pet üretici için resim modeli (ADR 0048 eki): sohbet modeli olarak seçilemez.
 #   # Abonelik proxy'si ücretsiz sayılır; fiyatlı bir modelde allow_paid: true ve
 #   # image_cost_usd (çağrı başına ayrılan üst tutar) şarttır.

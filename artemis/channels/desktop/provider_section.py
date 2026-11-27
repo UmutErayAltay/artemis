@@ -814,6 +814,9 @@ class ProviderSection(QWidget):
 
     # Bağlı yöntemler: self'i yakalayan lambda Qt bağlantısında referans döngüsü kurar ve gc
     # paneli yanlış iş parçacığında toplayınca erişim ihlali çıkar (2026-10-31 bulgusu).
+    def _set_light_mode(self, *_args: object) -> None:
+        provider_staging.set_light_mode(self)
+
     def _toggle_hard_role(self) -> None:
         self._toggle_role("hard_model")
 
@@ -981,6 +984,9 @@ class ProviderSection(QWidget):
         fallback = bool(selected) and selected == self._fallback
         computer = bool(selected) and selected == self._computer
         self.detail_title.setText(selected or "")
+        self.light_combo.setCurrentIndex(
+            self.light_combo.findData(provider_staging.light_mode_of(self, selected))
+        )
         reason = t("Resim ve ses modelleri bu rolü üstlenemez.") if non_chat else (
             t("Bu model zaten beyin; bu rol için başka bir model seç.") if brain else ""
         )

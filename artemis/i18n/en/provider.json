@@ -104,5 +104,11 @@
   "Ücretsiz olarak eklendi.": "Added as free.",
   "şu anki düzen bu.": "this is the current layout.",
   "provider::Ses": "Speech",
-  "provider::Şablon": "Preset"
+  "provider::Şablon": "Preset",
+  "Hafif model kipi": "Light model mode",
+  "Otomatik": "Automatic",
+  "Açık": "On",
+  "Kapalı": "Off",
+  "Yerel ve ücretsiz modeller için: istek önce niyete göre yönlendirilir, modele yalnız ilgili araçlar ve kısa bir istem gider. Otomatik: yerel ya da :free model ise açık.": "For local and free models: the request is routed by intent first, and the model only receives the relevant tools and a short prompt. Automatic: on for local or :free models.",
+  "Hafif model kipi değişti · Kaydet ile uygulanır.": "Light model mode changed · Save to apply."
 }

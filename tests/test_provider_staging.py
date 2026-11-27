@@ -149,3 +149,20 @@ def test_fallback_then_primary_on_same_model_drops_fallback_after_commit(
     assert saved.fallback_model is None
     assert not panel.has_unsaved
     panel.deleteLater()
+
+
+def test_light_mode_combo_stages_and_commits(tmp_path: Path, qt_app: QApplication) -> None:
+    path = _two_models_config(tmp_path)
+    panel = SettingsPanel(path)
+    panel.providers.select_model("second")
+    assert panel.providers.light_combo.currentData() is None  # Otomatik
+
+    panel.providers.light_combo.setCurrentIndex(panel.providers.light_combo.findData(True))
+    panel.providers.light_combo.activated.emit(panel.providers.light_combo.currentIndex())
+
+    assert load_settings(path).models["second"].light_mode is None  # henüz yazılmadı
+    assert panel.providers.has_pending
+    assert panel.providers.light_combo.currentData() is True
+    panel.flush()
+    assert load_settings(path).models["second"].light_mode is True
+    panel.deleteLater()

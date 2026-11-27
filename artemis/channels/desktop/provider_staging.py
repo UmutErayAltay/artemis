@@ -161,3 +161,38 @@ def apply_layout(section: ProviderSection) -> None:
         + (t(", bilgisayar kullanımı: {pc}").format(pc=pc) if pc else "")
         + t(" · Kaydet ile uygulanır.")
     )
+
+
+def light_mode_of(section: ProviderSection, alias: str | None) -> bool | None:
+    """Modelin bekleyen (yoksa kayıtlı) `light_mode` değeri; okunamazsa None (Otomatik)."""
+    try:
+        models = section._raw().get("models")
+    except (OSError, yaml.YAMLError):
+        return None
+    entry = models.get(alias) if isinstance(models, dict) else None
+    value = entry.get("light_mode") if isinstance(entry, dict) else None
+    return value if isinstance(value, bool) else None
+
+
+def set_light_mode(section: ProviderSection) -> None:
+    """Seçili modelin hafif kip değerini (Otomatik/Açık/Kapalı) bekletir (ADR 0092)."""
+    alias = section._selected_alias()
+    if alias is None:
+        return
+    try:
+        raw = section._raw()
+    except (OSError, yaml.YAMLError):
+        section.status.setText(t("Ayarlar okunamadı."))
+        return
+    models = raw.get("models")
+    entry = models.get(alias) if isinstance(models, dict) else None
+    if not isinstance(entry, dict):
+        section.status.setText(t("Ayarlar okunamadı."))
+        return
+    value = section.light_combo.currentData()
+    if value is None:
+        entry.pop("light_mode", None)
+    else:
+        entry["light_mode"] = value
+    section._stage(raw)
+    section.status.setText(t("Hafif model kipi değişti · Kaydet ile uygulanır."))

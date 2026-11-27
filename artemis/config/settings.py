@@ -81,6 +81,9 @@ class ModelConfig(BaseModel):
     # ADR 0078: sıkı istem kuralları. None = otomatik (Claude dışı modellerde açık); model testi
     # zayıf modelin istemi atlayabildiğini gösterdi, açık değer bu tahmini ezer.
     strict_rules: bool | None = None
+    # ADR 0092: hafif model kipi (niyet yönlendirme, dar araç seti, kısa istem). None = otomatik
+    # (yerel/ücretsiz modelde açık); açık değer otomatiği ezer.
+    light_mode: bool | None = None
 
     @model_validator(mode="after")
     def validate_endpoint_use(self) -> Self:

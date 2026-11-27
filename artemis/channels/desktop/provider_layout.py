@@ -241,6 +241,16 @@ def build_models_box(section: ProviderSection, layout: QVBoxLayout) -> None:
         "turları bu model alır. Yedek: beyin kota, bağlantı ya da sunucu hatası verince tur "
         "bununla sürer. Bilgisayar: ekranı görüp tıklama bu modelle çalışır."
     ))
+    # ADR 0092: model başına hafif kip; seçim yalnız kullanıcı değiştirince (activated) bekletilir.
+    section.light_combo = QComboBox()
+    section.light_combo.setAccessibleName(t("Hafif model kipi"))
+    for label, value in ((t("Otomatik"), None), (t("Açık"), True), (t("Kapalı"), False)):
+        section.light_combo.addItem(label, value)
+    section.light_combo.activated.connect(section._set_light_mode)
+    field(chat_layout, t("Hafif model kipi"), section.light_combo, help=t(
+        "Yerel ve ücretsiz modeller için: istek önce niyete göre yönlendirilir, modele yalnız "
+        "ilgili araçlar ve kısa bir istem gider. Otomatik: yerel ya da :free model ise açık."
+    ))
     test_row = QHBoxLayout()
     test_row.setSpacing(12)
     test_row.addWidget(section.model_test_button)
