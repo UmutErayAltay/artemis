@@ -213,8 +213,8 @@ async def test_provider_timeout_uses_remaining_time_for_fallback(tmp_path: Path)
     result = await router.complete([], [], timeout=2)
 
     assert result.local_fallback and result.content == "Yedek"
-    assert local.timeouts == [pytest.approx(0.02, abs=0.005)]
-    assert 0 < local.timeouts[0] <= 0.02
+    # ADR 0092: yerel yedekte istek sınırı yok; kalan tur bütçesi (2 sn - 0.02 sn) verilir.
+    assert 1.5 < local.timeouts[0] <= 2
     assert router._fallback_until == 0
 
 

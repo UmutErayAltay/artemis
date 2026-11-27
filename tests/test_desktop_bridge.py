@@ -132,6 +132,7 @@ def _fixture(
                 model="fake",
                 input_per_million=Decimal(0),
                 output_per_million=Decimal(0),
+                light_mode=False,  # sahte araç kayıt dışı: tam set ölçülür (ADR 0092)
             )
         },
         max_seconds=max_seconds,

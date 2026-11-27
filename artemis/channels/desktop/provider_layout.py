@@ -128,7 +128,7 @@ def _build_light_row(section: ProviderSection, chat_layout: QVBoxLayout) -> None
     for label, value in ((t("Otomatik"), None), (t("Açık"), True), (t("Kapalı"), False)):
         section.light_combo.addItem(label, value)
     section.light_combo.activated.connect(section._set_light_mode)
-    field(chat_layout, t("Hafif model kipi"), section.light_combo, help=t(
+    field(chat_layout, t("Hafif model kipi"), section.light_combo, hint=t(
         "Yerel ve ücretsiz modeller için: istek önce niyete göre yönlendirilir, modele yalnız "
         "ilgili araçlar ve kısa bir istem gider. Otomatik: yerel ya da :free model ise açık."
     ))

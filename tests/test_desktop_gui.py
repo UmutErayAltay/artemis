@@ -1844,6 +1844,7 @@ def test_tainted_proactive_suggest_write_and_submit_triggers_taint_approval(
                 model="fake",
                 input_per_million=Decimal(0),
                 output_per_million=Decimal(0),
+                light_mode=False,  # sahte araç kayıt dışı: tam set ölçülür (ADR 0092)
             )
         },
     )

@@ -182,6 +182,7 @@ def _settings(
             provider="openai_compatible",
             endpoint="gem",
             model="gemini-3.1-flash-lite",
+            light_mode=False,  # bu test tam araç setini ölçer; hafif kip ayrı test edilir
             input_per_million=Decimal("0"),
             output_per_million=Decimal("0"),
         ),
@@ -194,6 +195,7 @@ def _settings(
         "local": ModelConfig(
             provider="ollama",
             model="qwen3:8b",
+            light_mode=False,
             input_per_million=Decimal("0"),
             output_per_million=Decimal("0"),
         ),
