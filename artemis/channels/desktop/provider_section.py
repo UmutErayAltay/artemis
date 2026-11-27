@@ -988,6 +988,11 @@ class ProviderSection(QWidget):
         self.light_combo.setCurrentIndex(
             self.light_combo.findData(provider_staging.light_mode_of(self, selected))
         )
+        # Otomatik'in bu modelde neye karşılık geldiği görünsün (ADR 0092).
+        auto = provider_staging.auto_light_of(self, selected)
+        self.light_combo.setItemText(0, t("Otomatik") if auto is None else (
+            t("Otomatik (açık)") if auto else t("Otomatik (kapalı)")
+        ))
         reason = t("Resim ve ses modelleri bu rolü üstlenemez.") if non_chat else (
             t("Bu model zaten beyin; bu rol için başka bir model seç.") if brain else ""
         )

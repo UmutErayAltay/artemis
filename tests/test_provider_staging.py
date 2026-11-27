@@ -156,6 +156,8 @@ def test_light_mode_combo_stages_and_commits(tmp_path: Path, qt_app: QApplicatio
     panel = SettingsPanel(path)
     panel.providers.select_model("second")
     assert panel.providers.light_combo.currentData() is None  # Otomatik
+    # Otomatik'in bu modeldeki karşılığı görünür: yerel uç noktadaki model -> açık.
+    assert panel.providers.light_combo.itemText(0) == "Otomatik (açık)"
 
     panel.providers.light_combo.setCurrentIndex(panel.providers.light_combo.findData(True))
     panel.providers.light_combo.activated.emit(panel.providers.light_combo.currentIndex())

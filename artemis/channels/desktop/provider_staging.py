@@ -6,9 +6,16 @@ import copy
 from typing import TYPE_CHECKING
 
 import yaml
+from pydantic import ValidationError
 
+from artemis.brain.light_mode import light_mode_on
 from artemis.channels.desktop.provider_layout import ROLE_TEXTS
-from artemis.config.settings import Settings, load_settings
+from artemis.config.settings import (
+    EndpointConfig,
+    ModelConfig,
+    Settings,
+    load_settings,
+)
 from artemis.i18n import t
 
 if TYPE_CHECKING:
@@ -172,6 +179,24 @@ def light_mode_of(section: ProviderSection, alias: str | None) -> bool | None:
     entry = models.get(alias) if isinstance(models, dict) else None
     value = entry.get("light_mode") if isinstance(entry, dict) else None
     return value if isinstance(value, bool) else None
+
+
+def auto_light_of(section: ProviderSection, alias: str | None) -> bool | None:
+    """Otomatik seçilirse kipin bu modelde açık olup olmayacağı; okunamazsa None."""
+    try:
+        raw = section._raw()
+    except (OSError, yaml.YAMLError):
+        return None
+    models, endpoints = raw.get("models"), raw.get("endpoints") or {}
+    entry = models.get(alias) if isinstance(models, dict) else None
+    if not isinstance(entry, dict) or not isinstance(endpoints, dict):
+        return None
+    try:
+        model = ModelConfig.model_validate({**entry, "light_mode": None})
+        parsed = {k: EndpointConfig.model_validate(v) for k, v in endpoints.items()}
+    except ValidationError:
+        return None
+    return light_mode_on(model, parsed)
 
 
 def set_light_mode(section: ProviderSection) -> None:

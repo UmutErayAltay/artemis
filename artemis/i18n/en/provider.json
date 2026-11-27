@@ -109,6 +109,8 @@
   "Otomatik": "Automatic",
   "Açık": "On",
   "Kapalı": "Off",
-  "Yerel ve ücretsiz modeller için: istek önce niyete göre yönlendirilir, modele yalnız ilgili araçlar ve kısa bir istem gider. Otomatik: yerel ya da :free model ise açık.": "For local and free models: the request is routed by intent first, and the model only receives the relevant tools and a short prompt. Automatic: on for local or :free models.",
-  "Hafif model kipi değişti · Kaydet ile uygulanır.": "Light model mode changed · Save to apply."
+  "Hafif model kipi değişti · Kaydet ile uygulanır.": "Light model mode changed · Save to apply.",
+  "Her modelde seçilebilir. Açıkken istek önce niyete göre yönlendirilir, modele yalnız ilgili araçlar ve kısa bir istem gider. Otomatik: yerel ve :free modellerde açık, diğerlerinde kapalı.": "Available for every model. When on, the request is routed by intent first and the model only receives the relevant tools and a short prompt. Automatic: on for local and :free models, off for others.",
+  "Otomatik (açık)": "Automatic (on)",
+  "Otomatik (kapalı)": "Automatic (off)"
 }
