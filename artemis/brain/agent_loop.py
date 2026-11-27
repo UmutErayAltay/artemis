@@ -533,6 +533,7 @@ class AgentLoop:
         audio_wav: bytes | None = None,
         image_png: bytes | None = None,
         light: LightState | None = None,
+        past_private: bool = False,
     ) -> tuple[list[Message], bool, str]:
         """Turun açılış mesajları, gizli geçmiş bayrağı ve başlangıç zamanı."""
         settings = self.context.settings
@@ -545,7 +546,11 @@ class AgentLoop:
         # sınırında maskeler, yerel model tam görür (ADR 0056). Gizli hafıza da "gizli geçmiş"
         # sayılır: yerel model onu yanıtına kopyalayabilir.
         private_memory = private_notes + private_companion
-        history_private = bool(private_memory) or any(message.private for message in past)
+        # `past_private`: hafif kipte kırpılmadan önceki tam geçmişin gizlilik bayrağı; kırpma yalnız
+        # modele giden metni kısaltır, gizli bir turun bayrağını düşüremez (fail-closed).
+        history_private = (
+            bool(private_memory) or past_private or any(message.private for message in past)
+        )
         # Önbellek: sistem istemi tur tur değişmez (saat ve tura özel ipucu burada değil);
         # kullanıcı mesajı geçmişte göründüğü biçimle ([tarih saat] öneki, aynı zaman) gider.
         # Böylece her istek bir öncekinin uzantısı olur ve sağlayıcı önbelleği tutar.
@@ -768,6 +773,7 @@ class AgentLoop:
         # Kademe ve hafif kip tur başında bir kez seçilir; istem ve araç tanımları ona göre kurulur.
         tier = choose_model(text, past, self.context.settings)
         light = None if isolated else start_light(text, settings, tier[0])
+        full_past_private = any(message.private for message in past)
         if light is not None:
             past = last_turns(past)
         messages, history_private, started_at = self._opening_messages(
@@ -779,6 +785,7 @@ class AgentLoop:
             audio_wav=audio_wav,
             image_png=attached_image,
             light=light,
+            past_private=full_past_private,
         )
         audit = self.context.audit
         route = self._emit_turn_start(

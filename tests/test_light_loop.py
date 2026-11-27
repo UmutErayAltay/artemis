@@ -271,3 +271,30 @@ async def test_no_nudge_when_light_mode_is_off(tmp_path: Path) -> None:
                              model=cloud_model())
     await loop.run("txt dosyalarını metin klasörüne taşı, yoksa oluştur")
     assert len(provider.requests) == 1
+
+
+async def test_trimming_history_never_clears_the_privacy_flag(tmp_path: Path) -> None:
+    from artemis.brain.conversation import ContextWindow
+
+    # En eski tur gizli (ör. dosya içeriği); kırpma sonrası modele gitmez ama bayrak düşmemeli.
+    past = [Message(role="user", content="eski"),
+            Message(role="assistant", content="gizli içerik", private=True)]
+    for i in range(2):
+        past += [Message(role="user", content=f"soru{i}"),
+                 Message(role="assistant", content=f"yanıt{i}")]
+    window = ContextWindow(messages=past, turns=3, shortened_outputs=0, dropped_turns=0,
+                           estimated_tokens=1)
+
+    async def turn_private(model: ModelConfig) -> tuple[bool, list[str]]:
+        loop, provider, _ = make(
+            tmp_path, [tool_call("current_time"), Completion(content="bitti")], model=model
+        )
+        await loop.run("notlar.txt dosyasını oku", window)
+        sent = [m.content for m in provider.requests[0][0]]
+        return loop.context.turn_private, sent
+
+    light_private, sent = await turn_private(local_model())
+    assert not any("gizli içerik" in c or c.startswith("eski") for c in sent)  # kırpıldı
+    assert light_private is True
+    off_private, _ = await turn_private(cloud_model())
+    assert off_private is True  # kip kapalıyken de aynı
