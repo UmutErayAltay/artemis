@@ -27,6 +27,7 @@ if __package__ in {None, ""}:
 
 from artemis.brain.agent_loop import AgentLoop
 from artemis.brain.fake import ScriptedProvider
+from artemis.brain.light_mode import LOCAL_MIN_SECONDS, is_local_model
 from artemis.brain.models import Completion
 from artemis.brain.providers import Provider, build_provider
 from artemis.channels.runner import CommandRunner
@@ -399,9 +400,24 @@ async def run_scenario(
     allow_paid: bool = False,
     budget_usd: Decimal = Decimal("0"),
     hard_model: ModelConfig | None = None,
+    provider_timeout_seconds: float | None = None,
+    max_seconds: float | None = None,
 ) -> ScenarioResult:
     """`live`: kullanıcının kendi modeliyle model testi (bench/model_testi.py); onay araç
-    adına göre verilir, web fixture sorgudan bağımsız döner. Makineye yine dokunulmaz."""
+    adına göre verilir, web fixture sorgudan bağımsız döner. Makineye yine dokunulmaz.
+
+    `provider_timeout_seconds` ve `max_seconds` kullanıcının config'inden gelir (ADR 0092):
+    yerel uç noktadaki modelde soğuk yükleme dakikalar sürebilir, tur bütçesi en az
+    `LOCAL_MIN_SECONDS` olur; aksi halde zayıf model değil süre sınırı ölçülür."""
+    timing: dict[str, float] = {}
+    if provider_timeout_seconds is not None:
+        timing["provider_timeout_seconds"] = provider_timeout_seconds
+    if model is not None and any(
+        is_local_model(item, endpoints or {}) for item in (model, hard_model) if item
+    ):
+        max_seconds = max(max_seconds or 0.0, LOCAL_MIN_SECONDS)
+    if max_seconds is not None:
+        timing["max_seconds"] = max_seconds
     with tempfile.TemporaryDirectory(prefix="artemis-bench-") as temporary:
         root = Path(temporary)
         desktop = root / "desktop"
@@ -444,7 +460,7 @@ async def run_scenario(
             endpoints=endpoints or {},
             allow_cloud_file_content=True, allow_paid=allow_paid, daily_budget_usd=budget_usd,
             memory=memory, telegram=telegram, applications=scenario.setup.applications,
-        )
+        ).model_copy(update=timing)
         audit = AuditLog(settings.audit_path)
         aliases = alias_store(settings.state_dir)
         if scenario.setup.aliases:

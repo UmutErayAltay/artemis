@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from artemis.brain.light_mode import LOCAL_MIN_SECONDS, is_local_model
 from artemis.brain.router import ProviderRouter
 from artemis.brain.strict_rules import strict_rules_on
 from artemis.computer.session import ComputerSession
@@ -615,19 +616,24 @@ async def run_computer_scenario(
             "state_dir": Path(folder), "audit_path": Path(folder) / "audit.jsonl",
         })
         audit = AuditLog(model_settings.audit_path)
+        # ADR 0092: süreler config'ten gelir; yerel modelde istek sınırı yok, bütçe >= 600 sn.
+        provider_timeout, max_minutes = settings.provider_timeout_seconds, 4.0
+        if is_local_model(settings.models[alias], settings.endpoints):
+            provider_timeout = max(provider_timeout, LOCAL_MIN_SECONDS)
+            max_minutes = LOCAL_MIN_SECONDS / 60
         session = ComputerSession(
             provider=ProviderRouter(model_settings, audit),
             backend=SimBackend(app),
             approve=lambda *_: True,
             audit=audit,
             config=ComputerUseConfig(
-                enabled=True, max_steps=max_steps, max_minutes=4, mode="auto",
+                enabled=True, max_steps=max_steps, max_minutes=max_minutes, mode="auto",
                 step_delay_seconds=0, observation=settings.computer_use.observation,
             ),
             own_pid=os.getpid(),
             stop=threading.Event(),
             on_step=lambda _line: None,
-            provider_timeout=settings.provider_timeout_seconds,
+            provider_timeout=provider_timeout,
             strict=strict_rules_on(settings.models.get(alias)),
         )
         started = time.monotonic()

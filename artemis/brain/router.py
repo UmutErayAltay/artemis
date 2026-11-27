@@ -15,6 +15,7 @@ from artemis.brain.errors import (
     RateLimitedError,
     RetryableProviderError,
 )
+from artemis.brain.light_mode import is_local_model
 from artemis.brain.models import Completion, Message
 from artemis.brain.providers import (
     AnthropicProvider,
@@ -100,6 +101,14 @@ class ProviderRouter:
                     self._providers[alias] = ClaudeCliProvider(settings, model)
                 else:
                     self._providers[alias] = OllamaProvider(settings, model)
+
+    def _attempt_cap(self, alias: str, timeout: float) -> float:
+        """Deneme başına süre sınırı. Bulutta `provider_timeout_seconds` asılı kalan sağlayıcıdan
+        yedeğe geçmek içindir; yerel uç noktada yavaşlık soğuk yükleme ve üretimdir, asılma
+        değil: sınır turun kalan bütçesidir (ADR 0092)."""
+        if is_local_model(self.settings.models[alias], self.settings.endpoints):
+            return timeout
+        return min(timeout, self.settings.provider_timeout_seconds)
 
     def _local(self, alias: str) -> bool:
         """Yerel yedek: tam (maskesiz) içeriği alır, tur tek araçla sınırlanır (ADR 0055).
@@ -409,7 +418,7 @@ class ProviderRouter:
                 target,
                 messages,
                 tools,
-                timeout=min(timeout, self.settings.provider_timeout_seconds),
+                timeout=self._attempt_cap(target, timeout),
                 local_fallback=False,
                 stream=guard,
             )
@@ -419,7 +428,7 @@ class ProviderRouter:
             try:
                 return await self._call(
                     model, messages, tools,
-                    timeout=min(timeout, self.settings.provider_timeout_seconds),
+                    timeout=self._attempt_cap(model, timeout),
                     local_fallback=False, stream=guard,
                 )
             except (BudgetExceeded, ProviderError) as error:
@@ -438,10 +447,9 @@ class ProviderRouter:
                 timeout -= self._clock() - started
                 started = self._clock()
         fallback = self.settings.fallback_model
-        attempt_timeout = min(timeout, self.settings.provider_timeout_seconds)
         if fallback and started < self._fallback_until:
             return await self._call(
-                fallback, messages, tools, timeout=attempt_timeout,
+                fallback, messages, tools, timeout=self._attempt_cap(fallback, timeout),
                 local_fallback=self._local(fallback),
                 stream=guard,
             )
@@ -450,7 +458,7 @@ class ProviderRouter:
                 self.settings.primary_model,
                 messages,
                 tools,
-                timeout=attempt_timeout,
+                timeout=self._attempt_cap(self.settings.primary_model, timeout),
                 local_fallback=False,
                 stream=guard,
             )
@@ -481,9 +489,7 @@ class ProviderRouter:
                     else "connection_timeout_or_server_error"
                 ),
             )
-            remaining = min(
-                timeout - (self._clock() - started), self.settings.provider_timeout_seconds
-            )
+            remaining = self._attempt_cap(fallback, timeout - (self._clock() - started))
             return await self._call(
                 fallback, messages, tools, timeout=remaining,
                 local_fallback=self._local(fallback), stream=guard,

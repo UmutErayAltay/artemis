@@ -546,7 +546,7 @@ class AgentLoop:
         # sınırında maskeler, yerel model tam görür (ADR 0056). Gizli hafıza da "gizli geçmiş"
         # sayılır: yerel model onu yanıtına kopyalayabilir.
         private_memory = private_notes + private_companion
-        # `past_private`: hafif kipte kırpılmadan önceki tam geçmişin gizlilik bayrağı; kırpma yalnız
+        # `past_private`: hafif kipte kırpmadan önceki tam geçmişin gizlilik bayrağı; kırpma yalnız
         # modele giden metni kısaltır, gizli bir turun bayrağını düşüremez (fail-closed).
         history_private = (
             bool(private_memory) or past_private or any(message.private for message in past)

@@ -294,6 +294,8 @@ def last_turns(past: list[Message], count: int = LIGHT_HISTORY_TURNS) -> list[Me
 
 
 MAX_REPAIRS = 2
+# Yerel modelde model testi tur bütçesi alt sınırı (soğuk yükleme dakikalar sürer; ADR 0092).
+LOCAL_MIN_SECONDS = 600.0
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
 # Modelin kendi biçimleri: {"name": X, "arguments": {...}} ve {"tool": X, "args": {...}}.
 _NAME_KEYS = (("name", "arguments"), ("tool", "args"))
