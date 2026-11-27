@@ -196,6 +196,7 @@ async def run_model_test(
                     allow_paid=allow_paid, budget_usd=budget_usd, hard_model=hard,
                     provider_timeout_seconds=settings.provider_timeout_seconds,
                     max_seconds=settings.max_seconds,
+                    max_output_tokens=settings.max_output_tokens,
                 ),
                 scenario,
             )

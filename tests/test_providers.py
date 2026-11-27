@@ -800,3 +800,36 @@ def test_gemini_thought_signature_round_trips_through_tool_calls() -> None:
     plain = _chat_calls([{"id": "c2", "function": {"name": "x", "arguments": "{}"}}])
     no_extra = _chat_messages([Message(role="assistant", content="", tool_calls=plain)])
     assert "extra_content" not in no_extra[0]["tool_calls"][0]
+
+
+@pytest.mark.parametrize(
+    ("configured", "local", "expected"),
+    [(1024, True, 8192), (1024, False, 1024), (16000, True, 16000)],
+)
+@pytest.mark.parametrize("kind", ("ollama", "openai_compatible"))
+async def test_local_model_output_cap_floor(
+    kind: str, configured: int, local: bool, expected: int,
+    http_server: HTTPState, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from artemis.brain.providers import OpenAICompatibleProvider  # noqa: PLC0415
+    from artemis.config.settings import EndpointConfig  # noqa: PLC0415
+
+    if kind == "ollama" and not local:
+        pytest.skip("ollama her zaman yerel")
+    http_server.body = response_for("ollama" if kind == "ollama" else "openrouter")
+    # "yerel" olmayan uç: 127.0.0.1 yerine aynı sunucuya başka ad (NO_PROXY ile) verilemez;
+    # bu yüzden yerellik is_local_model ile taklit edilir.
+    settings = settings_for(http_server, tmp_path).model_copy(update={
+        "max_output_tokens": configured,
+        "endpoints": {"e": EndpointConfig(base_url=http_server.url, api_key=False)},
+    })
+    model = ModelConfig(
+        provider="ollama" if kind == "ollama" else "openai_compatible", model="m",
+        endpoint=None if kind == "ollama" else "e",
+        input_per_million=Decimal(0), output_per_million=Decimal(0),
+    )
+    monkeypatch.setattr(providers_mod, "is_local_model", lambda *_: local)
+    cls = OllamaProvider if kind == "ollama" else OpenAICompatibleProvider
+    await cls(settings, model).complete([Message(role="user", content="x")], [], timeout=2)
+    body = http_server.requests[0][1]
+    assert (body["options"]["num_predict"] if kind == "ollama" else body["max_tokens"]) == expected

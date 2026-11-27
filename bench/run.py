@@ -402,14 +402,18 @@ async def run_scenario(
     hard_model: ModelConfig | None = None,
     provider_timeout_seconds: float | None = None,
     max_seconds: float | None = None,
+    max_output_tokens: int | None = None,
 ) -> ScenarioResult:
     """`live`: kullanıcının kendi modeliyle model testi (bench/model_testi.py); onay araç
     adına göre verilir, web fixture sorgudan bağımsız döner. Makineye yine dokunulmaz.
 
-    `provider_timeout_seconds` ve `max_seconds` kullanıcının config'inden gelir (ADR 0092):
+    `provider_timeout_seconds`, `max_seconds`, `max_output_tokens` kullanıcının config'inden gelir
+    (ADR 0092):
     yerel uç noktadaki modelde soğuk yükleme dakikalar sürebilir, tur bütçesi en az
     `LOCAL_MIN_SECONDS` olur; aksi halde zayıf model değil süre sınırı ölçülür."""
-    timing: dict[str, float] = {}
+    timing: dict[str, float] = {}  # int de olur (max_output_tokens); pydantic doğrular
+    if max_output_tokens is not None:
+        timing["max_output_tokens"] = max_output_tokens
     if provider_timeout_seconds is not None:
         timing["provider_timeout_seconds"] = provider_timeout_seconds
     if model is not None and any(

@@ -84,3 +84,19 @@ def test_scenario_settings_carry_config_timings_and_local_floor(
     local, cloud = captured
     assert local.max_seconds == 600.0 and local.provider_timeout_seconds == 7.0
     assert cloud.max_seconds == 33.0 and cloud.provider_timeout_seconds == 7.0
+
+
+def test_bench_carries_config_max_output_tokens(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured: list[Settings] = []
+
+    def fake_build(settings: Settings, audit: object) -> ScriptedProvider:
+        captured.append(settings)
+        return ScriptedProvider([Completion(content="tamam")])
+
+    monkeypatch.setattr(bench_run, "build_provider", fake_build)
+    scenario = Scenario(id="a", category="multi_step", text="merhaba", expected=Expected())
+    model = ModelConfig(provider="openrouter", model="x", input_per_million=Decimal(0),
+                        output_per_million=Decimal(0))
+    monkeypatch.setenv("OPENROUTER_API_KEY", "x" * 8)
+    asyncio.run(bench_run.run_scenario(scenario, model, live=True, max_output_tokens=4321))
+    assert captured[0].max_output_tokens == 4321

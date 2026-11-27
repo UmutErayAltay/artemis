@@ -30,6 +30,7 @@ from artemis.brain.errors import (
 from artemis.brain.errors import (
     ProviderError as ProviderError,
 )
+from artemis.brain.light_mode import LOCAL_MIN_OUTPUT_TOKENS, is_local_model
 from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.streaming import TextStream
 from artemis.config.settings import ModelConfig, Settings
@@ -556,6 +557,13 @@ def provider_problem(settings: Settings) -> str | None:
     return None
 
 
+def _max_tokens(settings: Settings, model: ModelConfig) -> int:
+    """Yerel modelde çıktı tavanı en az LOCAL_MIN_OUTPUT_TOKENS (düşünen model payı)."""
+    if is_local_model(model, settings.endpoints):
+        return max(settings.max_output_tokens, LOCAL_MIN_OUTPUT_TOKENS)
+    return settings.max_output_tokens
+
+
 def _check_paid(settings: Settings, model: ModelConfig) -> None:
     if not settings.allow_paid and (model.input_per_million or model.output_per_million):
         raise BudgetExceeded("Ücretli model çağrısı ayarlarda açıkça izinli değil.")
@@ -578,7 +586,7 @@ class OpenRouterProvider:
         payload: dict[str, Any] = {
             "model": self.model.model,
             "messages": _chat_messages(_cloud_messages(messages)),
-            "max_tokens": self.settings.max_output_tokens,
+            "max_tokens": _max_tokens(self.settings, self.model),
             "stream": stream is not None,
             "usage": {"include": True},
             "provider": {"max_price": _openrouter_max_price(self.model)},
@@ -652,7 +660,7 @@ class OpenAICompatibleProvider:
         payload: dict[str, Any] = {
             "model": self.model.model,
             "messages": _chat_messages(_cloud_messages(messages)),
-            "max_tokens": self.settings.max_output_tokens,
+            "max_tokens": _max_tokens(self.settings, self.model),
             "stream": stream is not None,
         }
         if stream is not None:
@@ -727,7 +735,7 @@ class AnthropicProvider:
             "model": self.model.model,
             "system": "\n".join(system),
             "messages": converted,
-            "max_tokens": self.settings.max_output_tokens,
+            "max_tokens": _max_tokens(self.settings, self.model),
             "stream": stream is not None,
         }
         if tools:
@@ -883,7 +891,7 @@ class OllamaProvider:
             "messages": _chat_messages(messages, native_arguments=True, ollama=True),
             "stream": stream is not None,
             "options": {
-                "num_predict": self.settings.max_output_tokens,
+                "num_predict": _max_tokens(self.settings, self.model),
                 "num_ctx": self.model.context_window,
             },
         }

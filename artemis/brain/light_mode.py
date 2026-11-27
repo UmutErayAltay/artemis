@@ -296,6 +296,9 @@ def last_turns(past: list[Message], count: int = LIGHT_HISTORY_TURNS) -> list[Me
 MAX_REPAIRS = 2
 # Yerel modelde model testi tur bütçesi alt sınırı (soğuk yükleme dakikalar sürer; ADR 0092).
 LOCAL_MIN_SECONDS = 600.0
+# Yerel token ücretsiz; düşünen modeller (qwen3 vb.) 1024'ü düşünmeye harcayıp boş yanıt verir.
+# Tur süre bütçesi yine sınırlar.
+LOCAL_MIN_OUTPUT_TOKENS = 8192
 _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
 # Modelin kendi biçimleri: {"name": X, "arguments": {...}} ve {"tool": X, "args": {...}}.
 _NAME_KEYS = (("name", "arguments"), ("tool", "args"))
