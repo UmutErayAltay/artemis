@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from artemis.brain.errors import ProviderError, RateLimitedError
+from artemis.brain.light_mode import light_mode_on
 from artemis.brain.model_report import (
     CHAT_SCENARIO_IDS,
     COMPUTER_SCENARIO_IDS,
@@ -57,6 +58,7 @@ def _check_catalog() -> None:
 RATE_LIMIT_BACKOFF = (2.0, 4.0, 8.0)  # 429'da en çok 3 yeniden deneme
 RETRY_AFTER_CAP = 30.0
 MAX_PARALLEL = 8
+LIGHT_CHOICES: dict[str, bool | None] = {"oto": None, "ac": True, "kapali": False}
 # Testlerde yama ile bekleme atlanır.
 _sleep = asyncio.sleep
 
@@ -158,6 +160,7 @@ async def run_model_test(
     config: Path, alias: str, *, allow_paid: bool = False, budget_usd: Decimal = Decimal("0"),
     scenarios: Sequence[Scenario] | None = None, hard_alias: str | None = None,
     computer: Sequence[ComputerScenario] | None = None, parallel: int = 1,
+    light: str = "oto",
 ) -> dict[str, Any]:
     settings = load_settings(config)
     picked = [settings.models.get(name) for name in (alias, hard_alias) if name]
@@ -169,6 +172,14 @@ async def run_model_test(
         raise ValueError("Ücretli model: test için açık onay (--ucretli-onay) gerekli.")
     model = settings.models[alias]
     hard = settings.models[hard_alias] if hard_alias else None
+    # ADR 0092: --hafif ac/kapali yalnız bu testin kopyasını değiştirir; config'e yazılmaz.
+    if light in LIGHT_CHOICES and LIGHT_CHOICES[light] is not None:
+        model = model.model_copy(update={"light_mode": LIGHT_CHOICES[light]})
+        hard = hard.model_copy(update={"light_mode": LIGHT_CHOICES[light]}) if hard else None
+    effective_light = {
+        name: light_mode_on(item, settings.endpoints)
+        for name, item in ((alias, model), (hard_alias, hard)) if name and item
+    }
     chosen = list(scenarios) if scenarios is not None else load_scenarios(SCENARIOS_PATH)
     pc_chosen = list(COMPUTER_SCENARIOS if computer is None else computer)
     total = len(chosen) + len(pc_chosen)
@@ -183,6 +194,8 @@ async def run_model_test(
                 lambda: run_scenario(
                     scenario, model, live=True, endpoints=dict(settings.endpoints),
                     allow_paid=allow_paid, budget_usd=budget_usd, hard_model=hard,
+                    provider_timeout_seconds=settings.provider_timeout_seconds,
+                    max_seconds=settings.max_seconds,
                 ),
                 scenario,
             )
@@ -208,10 +221,12 @@ async def run_model_test(
         pc_results.append(pc_result)
         mark = "tehlikeli" if pc_result.dangerous else "geçti" if pc_result.success else "kaldı"
         print(f"ilerleme {index}/{total} {item.id} {mark}", flush=True)
-    return build_report(
+    report = build_report(
         f"{alias} + {hard_alias}" if hard_alias else alias, chosen, results, pc_results, retries,
         observation=settings.computer_use.observation,
     )
+    report["light_mode"] = {"requested": light, "effective": effective_light}
+    return report
 
 
 def main(arguments: Sequence[str] | None = None) -> int:
@@ -225,6 +240,8 @@ def main(arguments: Sequence[str] | None = None) -> int:
     parser.add_argument("--zor-model", help="kademe ölçümü: zor işler modeli anahtarı")
     parser.add_argument("--paralel", type=int, default=1,
                         help="aynı anda çalışacak sohbet senaryosu (1-8)")
+    parser.add_argument("--hafif", choices=list(LIGHT_CHOICES), default="oto",
+                        help="hafif model kipi: oto (config/otomatik), ac, kapali (ADR 0092)")
     parser.add_argument("--bilgisayar-yok", action="store_true",
                         help="bilgisayar kullanımı senaryolarını atla")
     args = parser.parse_args(arguments)
@@ -237,7 +254,7 @@ def main(arguments: Sequence[str] | None = None) -> int:
         report = asyncio.run(run_model_test(
             args.config, args.model, allow_paid=args.ucretli_onay, budget_usd=args.butce,
             scenarios=chosen, hard_alias=args.zor_model, computer=pc_chosen,
-            parallel=max(1, min(args.paralel, MAX_PARALLEL)),
+            parallel=max(1, min(args.paralel, MAX_PARALLEL)), light=args.hafif,
         ))
     except (OSError, ValueError) as error:
         print(f"Model testi yapılamadı: {error}", file=sys.stderr)
