@@ -1,9 +1,8 @@
 """Çalışma köküyle sınırlı dosya işlemleri, sonuçları diskten doğrular."""
 
 import fnmatch
-import shutil
 from pathlib import Path
-from typing import Annotated, Any, Literal, Self, cast
+from typing import Annotated, Any, BinaryIO, Literal, Self, cast
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -88,6 +87,17 @@ PATH_HINT = (
     "list_files'ı yolsuz çağır; C:\\... gibi mutlak yol kullanma."
 )
 MAX_COPY_BYTES = 50 * 1024 * 1024
+
+
+def _copy_limited(origin: BinaryIO, target: BinaryIO, limit: int) -> int:
+    """En çok `limit` bayt kopyalar; kaynak daha uzunsa OSError (yarım kopya çağıranda silinir)."""
+    copied = 0
+    while chunk := origin.read(1024 * 1024):
+        copied += len(chunk)
+        if copied > limit:
+            raise OSError("Dosya kopyalanırken sınırı aştı.")
+        target.write(chunk)
+    return copied
 MAX_MOVE_FILES = 50
 
 
@@ -289,9 +299,21 @@ class CopyFile(BaseTool):
             size = source.stat().st_size
             if size > MAX_COPY_BYTES:
                 return ToolResult(message=t("Dosya kopyalamak için çok büyük (en çok 50 MiB)."))
-            shutil.copyfile(source, destination)
-            if not destination.is_file() or destination.stat().st_size != size:
-                raise OSError("Kopya doğrulanamadı.")
+            # "xb": hedef kontrolden sonra oluşmuşsa ezilmez (yarış yok); okuma sınırlı, kaynak
+            # boyut kontrolünden sonra büyüse de en çok MAX_COPY_BYTES+1 bayt okunur.
+            # Hedef başkası tarafından oluşturulmuşsa FileExistsError burada çıkar ve dosyaya
+            # dokunulmaz; aşağıdaki temizlik yalnız bizim oluşturduğumuz dosyayı siler.
+            target = destination.open("xb")
+            done = False
+            try:
+                with target, source.open("rb") as origin:
+                    copied = _copy_limited(origin, target, MAX_COPY_BYTES)
+                if copied != size or destination.stat().st_size != size:
+                    raise OSError("Kopya doğrulanamadı (kaynak kopyalanırken değişti).")
+                done = True
+            finally:
+                if not done:
+                    destination.unlink(missing_ok=True)  # yarım kopya bizim; bırakılmaz
             return ToolResult(success=True, status="ok", message=t("Dosya kopyalandı."))
         except (OSError, ValueError) as error:
             return failure(error)

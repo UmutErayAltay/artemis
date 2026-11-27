@@ -71,8 +71,9 @@ async def test_copy_file_fails_when_size_differs(
     ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (ctx.workspace / "a.txt").write_text("abc", encoding="utf-8")
-    monkeypatch.setattr(filesystem.shutil, "copyfile", lambda s, d: Path(d).write_text("a"))
+    monkeypatch.setattr(filesystem, "_copy_limited", lambda origin, target, limit: 1)
     assert not (await run(ctx, "copy_file", source="a.txt", destination="b.txt")).success
+    assert not (ctx.workspace / "b.txt").exists()  # doğrulanamayan kopya bırakılmaz
 
 
 # --- D2 move_files ---
@@ -251,3 +252,37 @@ async def test_move_files_pattern_over_cap_moves_nothing(ctx: ToolContext) -> No
     (root / "src" / "50.txt").unlink()
     ok = await run(ctx, "move_files", source_dir="src", destination_dir="dst", pattern="*.txt")
     assert ok.success and len(list((root / "dst").iterdir())) == 50
+
+
+async def test_copy_file_never_overwrites_file_created_after_check(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Yarış: hedef kontrolden sonra oluşursa "xb" ezmez, başkasının dosyası silinmez.
+    root = ctx.workspace
+    (root / "a.txt").write_text("yeni", encoding="utf-8")
+    (root / "b.txt").write_text("eski", encoding="utf-8")
+    real_exists = Path.exists
+    monkeypatch.setattr(
+        Path, "exists", lambda self: False if self.name == "b.txt" else real_exists(self)
+    )
+    result = await run(ctx, "copy_file", source="a.txt", destination="b.txt")
+    assert not result.success
+    assert (root / "b.txt").read_text(encoding="utf-8") == "eski"
+
+
+async def test_copy_file_source_growing_past_limit_leaves_no_partial(
+    ctx: ToolContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = ctx.workspace
+    (root / "a.txt").write_bytes(b"x" * 20)
+    (root / "yedek").mkdir()
+    monkeypatch.setattr(filesystem, "MAX_COPY_BYTES", 10)
+    real_stat = Path.stat
+    monkeypatch.setattr(  # boyut kontrolü küçük görür, okuma gerçek 20 baytı görür
+        Path, "stat",
+        lambda self, **kw: type("S", (), {"st_size": 5, "st_mode": real_stat(self).st_mode})()
+        if self.name == "a.txt" else real_stat(self, **kw),
+    )
+    result = await run(ctx, "copy_file", source="a.txt", destination="yedek/a.txt")
+    assert not result.success
+    assert not (root / "yedek/a.txt").exists()
