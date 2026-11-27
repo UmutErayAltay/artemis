@@ -134,5 +134,48 @@ async def test_light_mode_off_is_todays_request(tmp_path: Path, model: ModelConf
     messages, tools = provider.requests[0]
     assert len(tools) == len(discover_tools().definitions())
     assert "need_more_tools" not in {d.name for d in tools}
-    assert messages[0].content.startswith("Sen Artemis, Türkçe konuşan kişisel masaüstü")
+    assert "Kodlama işi için önce proje" in messages[0].content
+    assert "KURALLAR:" not in messages[0].content
     assert "light_mode" not in [e["event"] for e in audit_events(tmp_path)]
+
+
+async def test_light_prompt_is_short_and_apps_only_for_app_group(tmp_path: Path) -> None:
+    from artemis.brain.agent_loop import SYSTEM_PROMPT
+    from artemis.brain.light_mode import LIGHT_SYSTEM_PROMPT
+
+    loop, provider, _ = make(tmp_path, [Completion(content="a"), Completion(content="b"),
+                                        Completion(content="c")])
+    await loop.run("notlar.txt dosyasını oku")
+    await loop.run("Spotify'ı aç")
+    await loop.run("merhaba nasılsın")
+    files, apps, nothing = (req[0][0].content for req in provider.requests)
+    assert files.startswith(LIGHT_SYSTEM_PROMPT) or LIGHT_SYSTEM_PROMPT in files
+    assert "Kodlama işi için önce proje" not in files
+    assert len(files) < len(SYSTEM_PROMPT) // 2
+    assert "SIKI KURALLAR" not in files
+    assert "İzinli uygulama takma adları" not in files
+    assert "İzinli uygulama takma adları" in apps  # uygulama grubu seçildi
+    assert "İzinli uygulama takma adları" in nothing  # yönlendirme belirsiz: tam set
+    assert "need_more_tools çağır" in files  # daraltılmış turda yerleşik çağrı anlatılır
+    assert "need_more_tools" not in nothing
+    # Zaman cümlesi korunur.
+    assert "[tarih saat]" in files
+
+
+async def test_light_mode_keeps_only_two_past_turns(tmp_path: Path) -> None:
+    from artemis.brain.conversation import ContextWindow
+
+    past: list[Message] = []
+    for i in range(4):
+        past += [Message(role="user", content=f"soru{i}"),
+                 Message(role="assistant", content=f"yanıt{i}")]
+    window = ContextWindow(messages=past, turns=4, shortened_outputs=0, dropped_turns=0,
+                           estimated_tokens=1)
+    loop, provider, _ = make(tmp_path, [Completion(content="a"), Completion(content="b")])
+    await loop.run("notlar.txt dosyasını oku", window)
+    sent = [m.content for m in provider.requests[0][0] if m.role == "user"]
+    assert [c for c in sent if c.startswith("soru")] == ["soru2", "soru3"]
+
+    off, provider_off, _ = make(tmp_path, [Completion(content="a")], model=cloud_model())
+    await off.run("notlar.txt dosyasını oku", window)
+    assert len([m for m in provider_off.requests[0][0] if m.content.startswith("soru")]) == 4

@@ -23,7 +23,16 @@ from artemis.brain.conversation import (
 )
 from artemis.brain.emotion import emotion_tags_active
 from artemis.brain.errors import BudgetExceeded, ProviderError
-from artemis.brain.light_mode import LightState, intercept, narrowed_definitions, start_light
+from artemis.brain.light_mode import (
+    LightState,
+    intercept,
+    last_turns,
+    light_head,
+    narrowed_definitions,
+    start_light,
+    wants_apps,
+    wants_skills,
+)
 from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.providers import Provider
 from artemis.brain.router import ProviderRouter
@@ -518,6 +527,7 @@ class AgentLoop:
         private_seen: bool,
         audio_wav: bytes | None = None,
         image_png: bytes | None = None,
+        light: LightState | None = None,
     ) -> tuple[list[Message], bool, str]:
         """Turun açılış mesajları, gizli geçmiş bayrağı ve başlangıç zamanı."""
         settings = self.context.settings
@@ -564,12 +574,45 @@ class AgentLoop:
             if image_png is not None
             else ""
         )
-        messages = [
-            Message(
-                role="system",
-                content=self.system_prompt
-                if self.system_prompt is not None
-                else SYSTEM_PROMPT
+        time_note = (
+            "\nKullanıcı mesajlarının başındaki [tarih saat] o mesajın yerel zamanıdır; "
+            "son mesajınki şu anki zamandır. Eski bir işi şimdi sürüyor sanma."
+        )
+        apps_note = (
+            "\nİzinli uygulama takma adları (name argümanı): "
+            + json.dumps(list(settings.applications), ensure_ascii=False)
+            + (
+                # "Yalnız bu adlar" modeli aracı denemeden "listede yok, açamam" demeye
+                # itiyordu (2026-11-15 Deadlock, 2026-11-04 Opera → "Opera GX tarayıcı").
+                ". Bu liste kurulu uygulamaların tamamı. Ad tam eşleşmese de "
+                "open_application'ı dene, yakın adı kendisi bulur. Listede hiç yoksa (ör. "
+                "Steam oyunu) onu barındıran uygulamayı açıp computer_use ile başlat; "
+                "denemeden reddetme."
+                if settings.allow_all_applications
+                # İzin listesi computer_use ile (Başlat menüsünden) dolanılmaz (Umut,
+                # 2026-11-16); içerideki iş için yukarıdaki computer_use kuralı geçerli.
+                else ". Yalnız bu adları kullan; listede bulunan bir uygulamayı izinsiz sanma."
+                " Listede olmayan uygulamayı computer_use ile de açmaya çalışma; kullanıcıya"
+                " Ayarlar > Uygulamalar'dan eklemesini söyle."
+            )
+        )
+        if self.system_prompt is not None:
+            system_content = self.system_prompt
+        elif light is not None:
+            # ADR 0092: kısa istem; uygulama ve beceri listeleri yalnız ilgili grup seçildiyse.
+            system_content = (
+                light_head(light)
+                + time_note
+                + (apps_note if wants_apps(light) else "")
+                + emotion_instruction
+                + language_instruction
+                + public_notes
+                + public_companion
+                + (prompt_section(skills) if wants_skills(light) else "")
+            )
+        else:
+            system_content = (
+                SYSTEM_PROMPT
                 + (
                     "\n" + STRICT_CHAT_RULES
                     if any(
@@ -581,30 +624,16 @@ class AgentLoop:
                     )
                     else ""
                 )
-                + "\nKullanıcı mesajlarının başındaki [tarih saat] o mesajın yerel zamanıdır; "
-                "son mesajınki şu anki zamandır. Eski bir işi şimdi sürüyor sanma."
-                + "\nİzinli uygulama takma adları (name argümanı): "
-                + json.dumps(list(settings.applications), ensure_ascii=False)
-                + (
-                    # "Yalnız bu adlar" modeli aracı denemeden "listede yok, açamam" demeye
-                    # itiyordu (2026-11-15 Deadlock, 2026-11-04 Opera → "Opera GX tarayıcı").
-                    ". Bu liste kurulu uygulamaların tamamı. Ad tam eşleşmese de "
-                    "open_application'ı dene, yakın adı kendisi bulur. Listede hiç yoksa (ör. "
-                    "Steam oyunu) onu barındıran uygulamayı açıp computer_use ile başlat; "
-                    "denemeden reddetme."
-                    if settings.allow_all_applications
-                    # İzin listesi computer_use ile (Başlat menüsünden) dolanılmaz (Umut,
-                    # 2026-11-16); içerideki iş için yukarıdaki computer_use kuralı geçerli.
-                    else ". Yalnız bu adları kullan; listede bulunan bir uygulamayı izinsiz sanma."
-                    " Listede olmayan uygulamayı computer_use ile de açmaya çalışma; kullanıcıya"
-                    " Ayarlar > Uygulamalar'dan eklemesini söyle."
-                )
+                + time_note
+                + apps_note
                 + emotion_instruction
                 + language_instruction
                 + public_notes
                 + public_companion
-                + prompt_section(skills),
-            ),
+                + prompt_section(skills)
+            )
+        messages = [
+            Message(role="system", content=system_content),
             *(
                 [Message(role="system", content=private_memory.lstrip("\n"), private=True)]
                 if private_memory
@@ -734,6 +763,8 @@ class AgentLoop:
         # Kademe ve hafif kip tur başında bir kez seçilir; istem ve araç tanımları ona göre kurulur.
         tier = choose_model(text, past, self.context.settings)
         light = None if isolated else start_light(text, settings, tier[0])
+        if light is not None:
+            past = last_turns(past)
         messages, history_private, started_at = self._opening_messages(
             text,
             attachment,
@@ -742,6 +773,7 @@ class AgentLoop:
             private_seen,
             audio_wav=audio_wav,
             image_png=attached_image,
+            light=light,
         )
         audit = self.context.audit
         route = self._emit_turn_start(
