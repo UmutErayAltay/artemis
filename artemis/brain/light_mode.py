@@ -122,6 +122,18 @@ _KEYWORDS: dict[str, str] = {
 _COMPILED = {name: re.compile(r"(?<!\w)(?:" + pattern + ")", re.IGNORECASE)
              for name, pattern in _KEYWORDS.items()}
 
+# Yıkıcı araçlar: kullanıcı silme/temizleme istemediyse daraltılmış sette sunulmaz (enjekte
+# edilmiş "sil" talimatına karşı). Araç meta verisinde böyle bir bayrak yok; ad listesi test
+# ile kayıtlı araçlara karşı kilitlenir. Taşıma/yeniden adlandırma yıkıcı sayılmaz.
+DESTRUCTIVE_TOOLS = frozenset({
+    "delete_file", "memory_forget", "memory_rule_remove", "routine_delete", "app_alias_forget",
+})
+_DESTRUCTIVE_INTENT = re.compile(
+    r"(?<!\w)(?:sil\w*|kaldır\w*|yok et\w*|temizle\w*|temizlik|boşalt\w*|çöpe|unut\w*|"
+    r"delet\w*|remov\w*|eras\w*|wip\w*|clear\w*|trash|discard\w*|forget\w*|purg\w*)",
+    re.IGNORECASE,
+)
+
 MAX_NARROWED_TOOLS = 16
 ALWAYS_TOOLS = frozenset({"current_time"})
 NEED_MORE_TOOLS = "need_more_tools"
@@ -147,14 +159,20 @@ def route_tools(text: str) -> set[str] | None:
     """Daraltılmış araç adları; eşleşme yoksa ya da birleşim çok büyükse None (tam set).
 
     Yönlendirme yalnız daraltır; yanlış daraltma `need_more_tools` ile geri alınır."""
-    return names_for_groups(route_groups(text))
+    return names_for_groups(route_groups(text), text)
 
 
-def names_for_groups(groups: list[str]) -> set[str] | None:
+def _wants_destructive(text: str) -> bool:
+    return any(_DESTRUCTIVE_INTENT.search(v) for v in _texts(text))
+
+
+def names_for_groups(groups: list[str], text: str) -> set[str] | None:
     if not groups:
         return None
     names: set[str] = set().union(*(TOOL_GROUPS[g] for g in groups))
     names |= ALWAYS_TOOLS
+    if not _wants_destructive(text):
+        names -= DESTRUCTIVE_TOOLS
     return None if len(names) > MAX_NARROWED_TOOLS else names
 
 
@@ -178,7 +196,7 @@ def start_light(
     if not light_mode_on(model, settings.endpoints):
         return None
     groups = route_groups(text)
-    return LightState(groups=groups, names=names_for_groups(groups))
+    return LightState(groups=groups, names=names_for_groups(groups, text))
 
 
 def need_more_tools_definition() -> ToolDefinition:

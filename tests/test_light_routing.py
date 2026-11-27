@@ -6,6 +6,7 @@ import pytest
 
 from artemis.brain.light_mode import (
     ALWAYS_TOOLS,
+    DESTRUCTIVE_TOOLS,
     MAX_NARROWED_TOOLS,
     TOOL_GROUPS,
     route_groups,
@@ -55,7 +56,7 @@ def test_routing_examples(text: str, group: str) -> None:
 def test_routing_narrows_and_adds_current_time() -> None:
     names = route_tools("notlar.txt dosyasını oku")
     assert names is not None
-    assert names == TOOL_GROUPS["files"] | ALWAYS_TOOLS
+    assert names == (TOOL_GROUPS["files"] | ALWAYS_TOOLS) - DESTRUCTIVE_TOOLS
     assert len(names) <= MAX_NARROWED_TOOLS
 
 
@@ -68,3 +69,24 @@ def test_big_union_means_full_set() -> None:
     text = "dosyayı mail ile gönder, takvime ekle, kodu commit et, telegram'a bildir, sesi kıs"
     assert len(route_groups(text)) >= 4
     assert route_tools(text) is None
+
+
+@pytest.mark.parametrize("text", ["masaüstündeki plan.txt'yi özetle", "plan.txt'yi taşı"])
+def test_no_destructive_tool_without_intent(text: str) -> None:
+    names = route_tools(text)
+    assert names is not None and "delete_file" not in names
+    assert {"read_file", "move_file"} <= names
+
+
+@pytest.mark.parametrize(
+    "text", ["plan.txt'yi sil", "eski logları temizle", "dosyayı SİL", "delete plan.txt",
+             "klasörü boşalt", "dosyayı kaldır", "wipe the folder"],
+)
+def test_destructive_tool_offered_with_intent(text: str) -> None:
+    names = route_tools(text)
+    assert names is None or "delete_file" in names  # None: tam set
+
+
+def test_destructive_names_are_registered_tools() -> None:
+    registered = {d.name for d in discover_tools().definitions()}
+    assert registered >= DESTRUCTIVE_TOOLS
