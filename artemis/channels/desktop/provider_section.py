@@ -117,6 +117,7 @@ class ProviderSection(QWidget):
     _test_settings: QSettings
     sort_bar: QWidget
     model_filter: QComboBox
+    light_combo: QComboBox
     filter_label: QLabel
     model_sort: QComboBox
     sort_label: QLabel

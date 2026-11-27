@@ -23,6 +23,7 @@ from artemis.brain.conversation import (
 )
 from artemis.brain.emotion import emotion_tags_active
 from artemis.brain.errors import BudgetExceeded, ProviderError
+from artemis.brain.light_mode import LightState, intercept, narrowed_definitions, start_light
 from artemis.brain.models import Completion, Message, ToolCall, Usage
 from artemis.brain.providers import Provider
 from artemis.brain.router import ProviderRouter
@@ -468,6 +469,7 @@ class _Turn:
     denied: set[str] = field(default_factory=set)
     memory_saved: bool = False
     empty_retries: int = 0
+    light: LightState | None = None
 
     def remaining(self) -> float:
         return self.settings.max_seconds - (time.monotonic() - self.start)
@@ -635,6 +637,8 @@ class AgentLoop:
         state: TurnState,
         private_seen: bool,
         unattended: bool,
+        tier: tuple[str | None, str],
+        light: LightState | None,
         *,
         image_supplied: bool = False,
         screen_allowed: bool = False,
@@ -652,12 +656,19 @@ class AgentLoop:
             unattended=unattended,
         )
         # Model kademesi tur başında seçilir ve tur boyunca sabittir (önbellek, tutarlılık).
-        tier_model, tier_reason = choose_model(text, past, self.context.settings)
+        tier_model, tier_reason = tier
         route: dict[str, str] = {}
         if tier_model and isinstance(self.provider, ProviderRouter):
             route = {"model": tier_model}
             audit.emit(
                 "model_choice", turn_id=state.turn_id, model=tier_model, reason=tier_reason
+            )
+        if light is not None:
+            audit.emit(
+                "light_mode",
+                turn_id=state.turn_id,
+                groups=light.groups,
+                tool_count=len(light.names) if light.names is not None else None,
             )
 
         if attachment is not None:
@@ -720,6 +731,9 @@ class AgentLoop:
         if attachment is not None:
             private_seen = private_seen or self._result_private(attachment)
         past = history.messages if history is not None else []
+        # Kademe ve hafif kip tur başında bir kez seçilir; istem ve araç tanımları ona göre kurulur.
+        tier = choose_model(text, past, self.context.settings)
+        light = None if isolated else start_light(text, settings, tier[0])
         messages, history_private, started_at = self._opening_messages(
             text,
             attachment,
@@ -738,6 +752,8 @@ class AgentLoop:
             state,
             private_seen,
             unattended,
+            tier,
+            light,
             image_supplied=image_supplied,
             screen_allowed=screen_allowed,
         )
@@ -751,6 +767,7 @@ class AgentLoop:
             stream=stream,
             history_private=history_private,
             private_seen=private_seen,
+            light=light,
         )
 
         finished = False
@@ -847,7 +864,7 @@ class AgentLoop:
             return "timeout", TIMEOUT_MESSAGE
         turn.steps += 1
         turn.phases.append(PhaseTiming(stage="model_request", timestamp=time.monotonic()))
-        definitions = self.gate.registry.definitions()
+        definitions = narrowed_definitions(turn.light, self.gate.registry.definitions())
         step_stream = None
         if turn.stream is not None:
             # ADR 0043: akışa yalnız metin gider; araç çağrısı yine tam Completion'dan
@@ -939,6 +956,13 @@ class AgentLoop:
     ) -> tuple[str, str] | None:
         """Tek araç çağrısı: tekrar/red korumaları, kapı, sonuç kaydı."""
         state, audit = turn.state, self.context.audit
+        handled = intercept(turn.light, call)
+        if handled is not None:
+            result, event = handled
+            if event:
+                audit.emit(event, turn_id=state.turn_id, tool=call.name)
+            self._append_result(turn, call, result)
+            return None
         normalized_call = call
         tool = self.gate.registry.get(call.name)
         if tool is not None:
@@ -994,6 +1018,11 @@ class AgentLoop:
             content_kind=result.content_kind,
             cloud_allowed=not turn.private_seen,
         )
+        self._append_result(turn, call, result)
+        return None
+
+    def _append_result(self, turn: _Turn, call: ToolCall, result: ToolResult) -> None:
+        """Araç sonucunu hem modele giden mesajlara hem tur kaydına yazar."""
         turn.messages.append(
             Message(
                 role="tool",
@@ -1005,4 +1034,3 @@ class AgentLoop:
         turn.record_steps.append(
             ToolExchange(call_id=call.id, result=result, private=turn.private_seen)
         )
-        return None
