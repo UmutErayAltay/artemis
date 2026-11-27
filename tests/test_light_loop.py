@@ -179,3 +179,58 @@ async def test_light_mode_keeps_only_two_past_turns(tmp_path: Path) -> None:
     off, provider_off, _ = make(tmp_path, [Completion(content="a")], model=cloud_model())
     await off.run("notlar.txt dosyasını oku", window)
     assert len([m for m in provider_off.requests[0][0] if m.content.startswith("soru")]) == 4
+
+
+async def test_json_in_content_is_repaired_and_still_hits_the_gate(tmp_path: Path) -> None:
+    content = '```json\n{"name": "delete_file", "arguments": {"path": "x.txt"}}\n```'
+    loop, provider, approvals = make(tmp_path, [Completion(content=content),
+                                                Completion(content="reddedildi")])
+    (tmp_path / "x.txt").write_text("veri")
+    result = await loop.run("x.txt dosyasını sil")
+    # CONFIRM_REQUIRED araç yine onay ister; onay verilmedi, dosya yerinde.
+    assert approvals == [("delete_file", {"path": "x.txt"})]
+    assert (tmp_path / "x.txt").read_text() == "veri"
+    assert result.tool_calls == 1
+    assert "light_mode_repair" in [e["event"] for e in audit_events(tmp_path)]
+
+
+async def test_bare_arguments_json_matching_one_tool_is_repaired(tmp_path: Path) -> None:
+    loop, _provider, _ = make(tmp_path, [
+        Completion(content='{"path": "a.txt", "content": "merhaba"}'),
+        Completion(content="oluşturdum"),
+    ])
+    result = await loop.run("a.txt dosyası oluştur")
+    assert (tmp_path / "a.txt").read_text() == "merhaba"
+    assert result.text == "oluşturdum"
+
+
+@pytest.mark.parametrize("content", [
+    '{"path": "kayit"}',  # path alan adı birden çok araca uyar: belirsiz
+    'Tamam: {"path": "a.txt", "content": "x"}',  # yalnız JSON değil
+    '{"nonsense": 1}',
+    "[1, 2]",
+])
+async def test_ambiguous_or_non_json_content_is_not_repaired(
+    tmp_path: Path, content: str
+) -> None:
+    loop, _provider, _ = make(tmp_path, [Completion(content=content)])
+    result = await loop.run("a.txt dosyası oluştur")
+    assert result.text == content
+    assert result.tool_calls == 0
+
+
+async def test_repair_is_off_when_light_mode_is_off(tmp_path: Path) -> None:
+    content = '{"path": "a.txt", "content": "x"}'
+    loop, _provider, _ = make(tmp_path, [Completion(content=content)], model=cloud_model())
+    result = await loop.run("a.txt dosyası oluştur")
+    assert result.text == content and not (tmp_path / "a.txt").exists()
+
+
+async def test_validation_hint_lists_fields_at_most_twice(tmp_path: Path) -> None:
+    bad = [tool_call("read_file", f"c{i}", file=f"a{i}") for i in range(3)]
+    loop, provider, _ = make(tmp_path, [*bad, Completion(content="bitti")])
+    await loop.run("a.txt dosyasını oku")
+    tools = [m.content for m in provider.requests[-1][0] if m.role == "tool"]
+    assert len(tools) == 3
+    assert "path (string, zorunlu)" in tools[0] and "path (string, zorunlu)" in tools[1]
+    assert "Beklenen alanlar" not in tools[2]  # üçüncüde bugünkü kapı hatası

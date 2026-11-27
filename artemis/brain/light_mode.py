@@ -5,14 +5,19 @@ Kip yalnız modele giden istemi ve araç tanımlarını daraltır; yetki kararı
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from urllib.parse import urlsplit
+from uuid import uuid4
+
+from pydantic import ValidationError
 
 from artemis.brain.models import Message, ToolCall
 from artemis.config.settings import EndpointConfig, ModelConfig, Settings
-from artemis.tools.base import Risk, ToolDefinition, ToolResult
+from artemis.tools.base import BaseTool, Risk, ToolDefinition, ToolResult
+from artemis.tools.registry import ToolRegistry
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})  # noqa: S104 - karşılaştırma
 
@@ -285,3 +290,59 @@ def last_turns(past: list[Message], count: int = LIGHT_HISTORY_TURNS) -> list[Me
     """Geçmişin son `count` turu; tur sınırı `user` mesajıdır (tur asla bölünmez)."""
     starts = [i for i, message in enumerate(past) if message.role == "user"]
     return past[starts[-count]:] if len(starts) > count else past
+
+
+MAX_REPAIRS = 2
+_FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
+# Modelin kendi biçimleri: {"name": X, "arguments": {...}} ve {"tool": X, "args": {...}}.
+_NAME_KEYS = (("name", "arguments"), ("tool", "args"))
+
+
+def repair_tool_call(content: str, registry: ToolRegistry, names: set[str]) -> ToolCall | None:
+    """İçerik tek bir JSON nesnesiyse ve araç çağrısı olarak okunabiliyorsa ToolCall üretir.
+
+    Yalnız biçim düzeltir: dönen çağrı normal yoldan SafetyGate'e gider, yetki vermez.
+    (b) biçiminde (yalnız argümanlar) aday tam bir araçsa çağrı o araca kurulur; belirsizse
+    (birden çok araç uyarsa) çağrı kurulmaz."""
+    text = content.strip()
+    fenced = _FENCE.match(text)
+    if fenced:
+        text = fenced.group(1)
+    if not (text.startswith("{") and text.endswith("}")):
+        return None
+    try:
+        obj = json.loads(text)
+    except ValueError:
+        return None
+    if not isinstance(obj, dict) or not obj:
+        return None
+    call_id = f"repair-{uuid4().hex[:8]}"
+    for name_key, args_key in _NAME_KEYS:
+        name, args = obj.get(name_key), obj.get(args_key)
+        if isinstance(name, str) and isinstance(args, dict) and set(obj) == {name_key, args_key}:
+            return ToolCall(id=call_id, name=name, arguments=args)
+    matches = []
+    for name in sorted(names):
+        tool = registry.get(name)
+        if tool is None:
+            continue
+        try:
+            tool.args_model.model_validate(obj)
+        except ValidationError:
+            continue
+        matches.append(name)
+    return ToolCall(id=call_id, name=matches[0], arguments=obj) if len(matches) == 1 else None
+
+
+def validation_hint(tool: BaseTool) -> str:
+    """Geçersiz argümanda modele alan adları ve beklenen türler (küçük model şemayı yanlış okur)."""
+    schema = tool.args_model.model_json_schema()
+    required = set(schema.get("required", []))
+    fields = ", ".join(
+        f"{name} ({prop.get('type', 'any')}{', zorunlu' if name in required else ''})"
+        for name, prop in schema.get("properties", {}).items()
+    )
+    return (
+        f"{tool.name} argümanları geçersiz. Beklenen alanlar: {fields or 'yok'}. "
+        "Düzeltip tekrar çağır."
+    )

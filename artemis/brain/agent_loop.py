@@ -24,12 +24,15 @@ from artemis.brain.conversation import (
 from artemis.brain.emotion import emotion_tags_active
 from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.brain.light_mode import (
+    MAX_REPAIRS,
     LightState,
     intercept,
     last_turns,
     light_head,
     narrowed_definitions,
+    repair_tool_call,
     start_light,
+    validation_hint,
     wants_apps,
     wants_skills,
 )
@@ -44,7 +47,7 @@ from artemis.config.work_profile import effective_settings_for_profile, is_local
 from artemis.memory.companion import content_private, content_tainted, read_companion
 from artemis.safety.gate import SafetyGate, TurnState
 from artemis.skills import Catalog, explicit_hint, load_skills, prompt_section
-from artemis.tools.base import Risk, ToolContext, ToolResult
+from artemis.tools.base import Risk, ToolContext, ToolDefinition, ToolResult
 
 SYSTEM_PROMPT = """Sen Artemis, Türkçe konuşan kişisel masaüstü asistanısın.
 Kodlama işi için önce proje, görev, kapsam ve kabul ölçütlerini kullanıcıyla netleştir;
@@ -950,6 +953,7 @@ class AgentLoop:
         )
         if usage.cost_usd > settings.daily_budget_usd:
             return "budget", "Günlük maliyet tavanı aşıldı; yeni işlem yapılmadı."
+        completion = self._repair_completion(turn, completion, definitions)
         if not completion.tool_calls:
             if not completion.content.strip() and turn.empty_retries == 0:
                 turn.empty_retries += 1
@@ -983,6 +987,29 @@ class AgentLoop:
                 return stop
         return None
 
+    def _repair_completion(
+        self, turn: _Turn, completion: Completion, definitions: list[ToolDefinition]
+    ) -> Completion:
+        """Hafif kip: içerik tek bir araç çağrısı JSON'uysa ToolCall'a çevirir (ADR 0092).
+
+        Yalnız biçim düzelir; çağrı yine `_call_tool` ve SafetyGate'ten geçer. Tur başına en çok
+        `MAX_REPAIRS`. Akışa metin olarak gitmiş JSON geri alınamaz (ponytail: arayüzde bir an
+        görünür)."""
+        light = turn.light
+        if light is None or completion.tool_calls or light.repairs >= MAX_REPAIRS:
+            return completion
+        repaired = repair_tool_call(
+            completion.content, self.gate.registry, {d.name for d in definitions}
+        )
+        if repaired is None:
+            return completion
+        light.repairs += 1
+        self.context.audit.emit(
+            "light_mode_repair", turn_id=turn.state.turn_id, tool=repaired.name,
+            arguments=repaired.arguments,
+        )
+        return completion.model_copy(update={"content": "", "tool_calls": [repaired]})
+
     async def _call_tool(
         self, turn: _Turn, call: ToolCall, completion: Completion
     ) -> tuple[str, str] | None:
@@ -1004,8 +1031,14 @@ class AgentLoop:
                     update={"arguments": normalized.model_dump(mode="json")}
                 )
             except ValidationError:
+                light = turn.light
+                if light is not None and light.hints < MAX_REPAIRS:
+                    # ADR 0092: küçük modele alan adları ve türler gösterilir; tur başına en çok 2.
+                    light.hints += 1
+                    audit.emit("light_mode_hint", turn_id=state.turn_id, tool=call.name)
+                    self._append_result(turn, call, ToolResult(message=validation_hint(tool)))
+                    return None
                 # Hatalı argüman için kullanıcıya görünen tek hata kapıdan gelir.
-                pass
         fingerprint = call_fingerprint(normalized_call)
         if fingerprint in turn.denied:
             return "denied_repeat", "Reddedilen çağrı tekrar istendi; durduruldu."
