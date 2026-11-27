@@ -93,3 +93,4 @@ Bu dizin Artemis'in mimari kararlarını numaralı kayıtlar olarak tutar; aşa�
 - [0089 — Bilgisayar kullanımında hibrit arka plan düşünme katmanı](0089-computer-use-dusunme-katmani.md)
 - [0090 — Otomatik onay kapsamı ve lekeli turda rutin kaydı](0090-oto-onay-kapsami-ve-lekeli-rutin-kaydi.md)
 - [0092 — Hafif model kipi: niyet yönlendirme, dar araç seti, araç çağrısı onarımı](0092-hafif-model-kipi.md)
+- [0093 — Dosya işleri: kopyalama, toplu taşıma, yol kuralı ve tekrar uyarısı](0093-dosya-isleri-kopya-toplu-tasima.md)
