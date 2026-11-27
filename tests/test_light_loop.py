@@ -369,3 +369,69 @@ async def test_no_nudge_on_tainted_turn_or_external_history(tmp_path: Path) -> N
     loop, provider, _ = make(tmp_path, [Completion(content="Hangi klasör?")])
     await loop.run("rapor.txt dosyasını taşı", window)
     assert len(provider.requests) == 1
+
+
+# --- ADR 0093: tekrar uyarısı ---
+
+
+def _counting_loop(
+    tmp_path: Path, responses: list[Completion], model: ModelConfig
+) -> tuple[AgentLoop, Recorder, list[str]]:
+    """Gerçek makineye dokunmayan, çağrı sayan sahte okuma aracıyla döngü."""
+    from pydantic import BaseModel
+
+    from artemis.tools.base import BaseTool, Risk, ToolResult
+    from artemis.tools.registry import ToolRegistry
+
+    runs: list[str] = []
+
+    class Args(BaseModel):
+        x: str
+
+    class Counting(BaseTool):
+        name = "count_probe"
+        description = "Test aracı."
+        args_model = Args
+        risk = Risk.READ_ONLY
+
+        async def execute(self, arguments: BaseModel, context: ToolContext) -> ToolResult:
+            runs.append("x")
+            return ToolResult(success=True, status="ok", message="sayıldı")
+
+    registry = ToolRegistry()
+    registry.register(Counting)
+    settings = Settings(
+        workspace=tmp_path, state_dir=tmp_path / "state", audit_path=tmp_path / "audit.jsonl",
+        models={"m": model}, primary_model="m",
+    )
+    context = ToolContext(
+        workspace=tmp_path, settings=settings, audit=AuditLog(settings.audit_path)
+    )
+    provider = Recorder(responses)
+    return AgentLoop(provider, SafetyGate(registry), context, lambda *_: False), provider, runs
+
+
+async def test_light_first_repeat_gets_hint_and_does_not_execute(tmp_path: Path) -> None:
+    from artemis.brain.light_mode import REPEAT_HINT
+
+    same = [tool_call("count_probe", f"c{i}", x="1") for i in range(3)]
+    loop, provider, runs = _counting_loop(
+        tmp_path, [*same, Completion(content="bitti")], local_model()
+    )
+    result = await loop.run("merhaba")
+    assert len(runs) == 1  # ilk çağrı çalıştı, ilk tekrar çalışmadı
+    # İkinci tekrar bugünkü durma: dördüncü istek yapılmadı.
+    assert len(provider.requests) == 3
+    assert result.stop_reason == "repeated_call"
+    tools = [m.content for m in provider.requests[2][0] if m.role == "tool"]
+    assert len(tools) == 2 and REPEAT_HINT in tools[1]
+    assert [e["event"] for e in audit_events(tmp_path)].count("light_mode_repeat_hint") == 1
+
+
+async def test_light_off_stops_at_first_repeat(tmp_path: Path) -> None:
+    same = [tool_call("count_probe", f"c{i}", x="1") for i in range(2)]
+    loop, provider, runs = _counting_loop(tmp_path, [*same, Completion(content="b")], cloud_model())
+    result = await loop.run("merhaba")
+    assert len(runs) == 1 and result.stop_reason == "repeated_call"
+    assert len(provider.requests) == 2
+    assert "light_mode_repeat_hint" not in [e["event"] for e in audit_events(tmp_path)]

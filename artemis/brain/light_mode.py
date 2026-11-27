@@ -386,6 +386,7 @@ def validation_hint(tool: BaseTool) -> str:
     )
 
 
+REPEAT_HINT = "Bu çağrının sonucu zaten yukarıda; sıradaki adıma geç ya da kullanıcıya bitir."
 NUDGE_MESSAGE = (
     "Kullanıcı yeterli bilgi verdi; makul varsayımla aracı çağır, varsayımını sonda söyle."
 )

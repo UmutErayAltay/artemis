@@ -26,6 +26,7 @@ from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.brain.light_mode import (
     MAX_REPAIRS,
     NUDGE_MESSAGE,
+    REPEAT_HINT,
     LightState,
     intercept,
     last_turns,
@@ -481,6 +482,7 @@ class _Turn:
     local_calls: int = 0
     seen: set[str] = field(default_factory=set)
     denied: set[str] = field(default_factory=set)
+    repeat_hinted: set[str] = field(default_factory=set)
     memory_saved: bool = False
     empty_retries: int = 0
     light: LightState | None = None
@@ -1066,6 +1068,12 @@ class AgentLoop:
         if fingerprint in turn.denied:
             return "denied_repeat", "Reddedilen çağrı tekrar istendi; durduruldu."
         if fingerprint in turn.seen:
+            if turn.light is not None and fingerprint not in turn.repeat_hinted:
+                # ADR 0093: hafif kipte ilk tekrar çalışmaz, model uyarılır; ikinci durur.
+                turn.repeat_hinted.add(fingerprint)
+                audit.emit("light_mode_repeat_hint", turn_id=state.turn_id, tool=call.name)
+                self._append_result(turn, call, ToolResult(message=REPEAT_HINT))
+                return None
             return "repeated_call", "Aynı araç çağrısı tekrar istendi; durduruldu."
         if completion.local_fallback and turn.local_calls >= 1:
             return "local_limit", "Yerel yedekte tek araç sınırı doldu."
