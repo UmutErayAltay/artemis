@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import pytest
 
@@ -46,7 +46,7 @@ def test_hafif_flag_overrides_and_report_records_effective_value(
 ) -> None:
     seen: list[ModelConfig] = []
 
-    async def fake(scenario: Scenario, model: ModelConfig, **_k: Any):
+    async def fake(scenario: Scenario, model: ModelConfig, **_k: Any) -> Any:
         seen.append(model)
         return _fake_result(scenario)
 
@@ -72,9 +72,9 @@ def test_scenario_settings_carry_config_timings_and_local_floor(
     monkeypatch.setattr(bench_run, "build_provider", fake_build)
     scenario = Scenario(id="a", category="multi_step", text="merhaba", expected=Expected())
 
-    def model(provider: str) -> ModelConfig:
+    def model(provider: Literal["ollama", "openrouter"]) -> ModelConfig:
         return ModelConfig(provider=provider, model="x", input_per_million=Decimal(0),
-                           output_per_million=Decimal(0))  # type: ignore[arg-type]
+                           output_per_million=Decimal(0))
 
     for provider in ("ollama", "openrouter"):
         monkeypatch.setenv("OPENROUTER_API_KEY", "x" * 8)
