@@ -7,6 +7,7 @@ import asyncio
 import json
 import math
 import os
+import re
 import shutil
 import statistics
 import sys
@@ -239,6 +240,21 @@ def fixture_registry() -> ToolRegistry:
     return registry
 
 
+# Soru işareti olmadan yazılmış netleştirme isteği: hedefi belirtmeyi ister (ADR 0093 D5).
+_ASK_VERB_TR = re.compile(r"(?<!\w)(?:belirt|söyle|yaz|seç)\w*", re.IGNORECASE)
+_ASK_TARGET_TR = re.compile(r"hangi|(?<!\w)(?:adını|yolunu)(?!\w)", re.IGNORECASE)
+_ASK_EN = re.compile(r"(?<!\w)(?:specify|tell me|let me know)(?!\w)", re.IGNORECASE)
+
+
+def asks_clarification(answer: str) -> bool:
+    """Yanıt soru işareti taşıyor ya da hedefi belirtmeyi emir kipiyle istiyor mu."""
+    if "?" in answer:
+        return True
+    if _ASK_VERB_TR.search(answer) and _ASK_TARGET_TR.search(answer):
+        return True
+    return bool(_ASK_EN.search(answer))
+
+
 def snapshot(directory: Path) -> tuple[dict[str, str], list[str]]:
     files = {}
     directories = []
@@ -338,7 +354,7 @@ def evaluate(
     for text in expected.text_contains:
         if text.casefold() not in answer.casefold():
             errors.append(f"Yanıtta beklenen bilgi yok: {text}")
-    if expected.question and "?" not in answer:
+    if expected.question and not asks_clarification(answer):
         errors.append("Belirsizlik giderme sorusu sorulmadı.")
     if stop_reason not in expected.stop_reasons:
         errors.append(f"Beklenmeyen durma nedeni: {stop_reason}")

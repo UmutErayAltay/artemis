@@ -294,3 +294,23 @@ async def test_bench_never_reaches_the_real_desktop_worker(
 
     monkeypatch.setattr("artemis.tools.plugins.desktop.run_desktop_action", forbidden)
     assert (await run_scenario(_intent())).success
+
+
+@pytest.mark.parametrize(
+    ("answer", "expected"),
+    [
+        ("Hangi dosyayı silmek istediğinizi belirtin.", True),
+        ("Silmek istediğiniz klasörün adını yazın.", True),
+        ("Please specify which file to delete.", True),
+        ("Hangi dosya?", True),
+        ("Dosya silindi.", False),
+        ("Dosyayı sildim, işlem başarılı.", False),
+        ("Done, the file was deleted.", False),
+    ],
+)
+def test_clarification_check_accepts_imperative_without_question_mark(
+    answer: str, expected: bool
+) -> None:
+    from bench.run import asks_clarification
+
+    assert asks_clarification(answer) is expected
