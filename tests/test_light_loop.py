@@ -194,14 +194,62 @@ async def test_json_in_content_is_repaired_and_still_hits_the_gate(tmp_path: Pat
     assert "light_mode_repair" in [e["event"] for e in audit_events(tmp_path)]
 
 
-async def test_bare_arguments_json_matching_one_tool_is_repaired(tmp_path: Path) -> None:
+async def test_bare_arguments_json_repairs_only_a_unique_read_only_tool(tmp_path: Path) -> None:
     loop, _provider, _ = make(tmp_path, [
-        Completion(content='{"path": "a.txt", "content": "merhaba"}'),
-        Completion(content="oluşturdum"),
+        Completion(content='{"query": "rapor"}'),  # yalnız file_search (READ_ONLY) uyar
+        Completion(content="aradım"),
     ])
+    result = await loop.run("a.txt dosyasını bul")
+    assert result.tool_calls == 1
+    assert "light_mode_repair" in [e["event"] for e in audit_events(tmp_path)]
+
+
+async def test_side_effecting_tool_is_never_inferred_from_argument_shape(tmp_path: Path) -> None:
+    content = '{"path": "a.txt", "content": "merhaba"}'  # şekil yalnız create_file'a uyar
+    loop, _provider, _ = make(tmp_path, [Completion(content=content)])
     result = await loop.run("a.txt dosyası oluştur")
-    assert (tmp_path / "a.txt").read_text() == "merhaba"
-    assert result.text == "oluşturdum"
+    assert result.text == content and result.tool_calls == 0
+    assert not (tmp_path / "a.txt").exists()
+
+
+async def test_named_call_must_be_an_offered_tool(tmp_path: Path) -> None:
+    content = '{"name": "mail_send", "arguments": {"to": "a@b.co", "subject": "s", "body": "b"}}'
+    loop, _provider, approvals = make(tmp_path, [Completion(content=content)])
+    result = await loop.run("a.txt dosyasını oku")  # files grubu: mail_send sunulmadı
+    assert result.text == content and result.tool_calls == 0 and approvals == []
+
+
+async def test_no_repair_when_text_was_already_streamed(tmp_path: Path) -> None:
+    from artemis.brain.streaming import ResponseStream
+
+    class Sink(ResponseStream):
+        def __init__(self) -> None:
+            self.got: list[str] = []
+
+        def text(self, delta: str) -> None:
+            self.got.append(delta)
+
+        def tool_call(self) -> None:
+            pass
+
+        def step_start(self) -> None:
+            pass
+
+        def step_end(self, had_tool_calls: bool) -> None:
+            pass
+
+    class Streaming(Recorder):
+        async def complete(self, messages, tools, *, timeout, stream=None):  # type: ignore[no-untyped-def]
+            completion = await super().complete(messages, tools, timeout=timeout)
+            if stream is not None:
+                stream.text(completion.content)
+            return completion
+
+    content = '{"name": "delete_file", "arguments": {"path": "x.txt"}}'
+    loop, _p, approvals = make(tmp_path, [])
+    loop.provider = Streaming([Completion(content=content)])
+    result = await loop.run("x.txt dosyasını sil", stream=Sink())
+    assert result.tool_calls == 0 and approvals == []
 
 
 @pytest.mark.parametrize("content", [
@@ -252,7 +300,7 @@ async def test_nudge_fires_once_for_multi_step_question(tmp_path: Path) -> None:
 
 
 async def test_nudge_fires_for_concrete_target_with_single_action(tmp_path: Path) -> None:
-    loop, provider, _ = make(tmp_path, [Completion(content="Emin misin?"),
+    loop, provider, _ = make(tmp_path, [Completion(content="Hangi dosya?"),
                                         Completion(content="tamam")])
     await loop.run("rapor.txt dosyasını sil")
     assert len(provider.requests) == 2
@@ -298,3 +346,26 @@ async def test_trimming_history_never_clears_the_privacy_flag(tmp_path: Path) ->
     assert light_private is True
     off_private, _ = await turn_private(cloud_model())
     assert off_private is True  # kip kapalıyken de aynı
+
+
+@pytest.mark.parametrize("answer", [
+    "Silmek istediğine emin misin?", "Devam edeyim mi?", "Are you sure?",
+    "Onaylıyor musun, hangi dosya?",
+])
+async def test_consent_questions_are_never_nudged(tmp_path: Path, answer: str) -> None:
+    loop, provider, _ = make(tmp_path, [Completion(content=answer)])
+    await loop.run("rapor.txt dosyasını sil")
+    assert len(provider.requests) == 1
+
+
+async def test_no_nudge_on_tainted_turn_or_external_history(tmp_path: Path) -> None:
+    loop, provider, _ = make(tmp_path, [Completion(content="Hangi klasör?")])
+    await loop.run("rapor.txt dosyasını taşı", tainted=True)
+    assert len(provider.requests) == 1
+    from artemis.brain.conversation import ContextWindow
+
+    window = ContextWindow(messages=[], turns=1, shortened_outputs=0, dropped_turns=0,
+                           estimated_tokens=1, external=True)
+    loop, provider, _ = make(tmp_path, [Completion(content="Hangi klasör?")])
+    await loop.run("rapor.txt dosyasını taşı", window)
+    assert len(provider.requests) == 1

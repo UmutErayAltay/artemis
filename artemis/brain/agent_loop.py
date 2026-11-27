@@ -962,7 +962,8 @@ class AgentLoop:
         )
         if usage.cost_usd > settings.daily_budget_usd:
             return "budget", "Günlük maliyet tavanı aşıldı; yeni işlem yapılmadı."
-        completion = self._repair_completion(turn, completion, definitions)
+        streamed = step_stream is not None and not step_stream.first
+        completion = self._repair_completion(turn, completion, definitions, streamed)
         if not completion.tool_calls:
             if not completion.content.strip() and turn.empty_retries == 0:
                 turn.empty_retries += 1
@@ -977,7 +978,8 @@ class AgentLoop:
                 )
                 return None
             if turn.light is not None and needs_nudge(
-                turn.light, turn.text, completion.content, turn.calls
+                turn.light, turn.text, completion.content, turn.calls,
+                external=turn.state.tainted or turn.state.history_external,
             ):
                 # ADR 0092: zayıf model işi yapmak yerine soru sordu; bir kez devam etmesi istenir.
                 turn.light.nudged = True
@@ -1008,15 +1010,16 @@ class AgentLoop:
         return None
 
     def _repair_completion(
-        self, turn: _Turn, completion: Completion, definitions: list[ToolDefinition]
+        self, turn: _Turn, completion: Completion, definitions: list[ToolDefinition],
+        streamed: bool,
     ) -> Completion:
         """Hafif kip: içerik tek bir araç çağrısı JSON'uysa ToolCall'a çevirir (ADR 0092).
 
         Yalnız biçim düzelir; çağrı yine `_call_tool` ve SafetyGate'ten geçer. Tur başına en çok
-        `MAX_REPAIRS`. Akışa metin olarak gitmiş JSON geri alınamaz (ponytail: arayüzde bir an
-        görünür)."""
+        `MAX_REPAIRS`. Metin kullanıcıya akıtıldıysa onarılmaz: görünen yanıtla çalışan iş
+        ayrışmasın."""
         light = turn.light
-        if light is None or completion.tool_calls or light.repairs >= MAX_REPAIRS:
+        if light is None or completion.tool_calls or streamed or light.repairs >= MAX_REPAIRS:
             return completion
         repaired = repair_tool_call(
             completion.content, self.gate.registry, {d.name for d in definitions}

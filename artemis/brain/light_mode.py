@@ -17,7 +17,7 @@ from pydantic import ValidationError
 from artemis.brain.models import Message, ToolCall
 from artemis.brain.tiering import _ACTIONS  # çok adımlı istek eylem fiilleri (tek kaynak)
 from artemis.config.settings import EndpointConfig, ModelConfig, Settings
-from artemis.tools.base import BaseTool, Risk, ToolDefinition, ToolResult
+from artemis.tools.base import BaseTool, Risk, ToolDefinition, ToolResult, normalize_risk
 from artemis.tools.registry import ToolRegistry
 
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1", "0.0.0.0"})  # noqa: S104 - karşılaştırma
@@ -299,12 +299,13 @@ _FENCE = re.compile(r"^```(?:json)?\s*(.*?)\s*```$", re.DOTALL | re.IGNORECASE)
 _NAME_KEYS = (("name", "arguments"), ("tool", "args"))
 
 
-def repair_tool_call(content: str, registry: ToolRegistry, names: set[str]) -> ToolCall | None:
+def repair_tool_call(content: str, registry: ToolRegistry, offered: set[str]) -> ToolCall | None:
     """İçerik tek bir JSON nesnesiyse ve araç çağrısı olarak okunabiliyorsa ToolCall üretir.
 
     Yalnız biçim düzeltir: dönen çağrı normal yoldan SafetyGate'e gider, yetki vermez.
-    (b) biçiminde (yalnız argümanlar) aday tam bir araçsa çağrı o araca kurulur; belirsizse
-    (birden çok araç uyarsa) çağrı kurulmaz."""
+    (a) biçiminde ad bu adımda sunulan araçlardan olmalı. (b) biçiminde (yalnız argümanlar)
+    yalnız READ_ONLY araçlar aday olur ve tam biri uymalı: argüman şeklinden yan etkili araç
+    çıkarılmaz."""
     text = content.strip()
     fenced = _FENCE.match(text)
     if fenced:
@@ -321,11 +322,11 @@ def repair_tool_call(content: str, registry: ToolRegistry, names: set[str]) -> T
     for name_key, args_key in _NAME_KEYS:
         name, args = obj.get(name_key), obj.get(args_key)
         if isinstance(name, str) and isinstance(args, dict) and set(obj) == {name_key, args_key}:
-            return ToolCall(id=call_id, name=name, arguments=args)
+            return ToolCall(id=call_id, name=name, arguments=args) if name in offered else None
     matches = []
-    for name in sorted(names):
+    for name in sorted(offered):
         tool = registry.get(name)
-        if tool is None:
+        if tool is None or normalize_risk(tool.risk) is not Risk.READ_ONLY:
             continue
         try:
             tool.args_model.model_validate(obj)
@@ -352,8 +353,16 @@ def validation_hint(tool: BaseTool) -> str:
 NUDGE_MESSAGE = (
     "Kullanıcı yeterli bilgi verdi; makul varsayımla aracı çağır, varsayımını sonda söyle."
 )
-_ASKING = re.compile(
-    r"\?\s*$|netleştir|hangi|emin misin|onaylıyor musun|doğru mu|ister misin", re.IGNORECASE
+# Netleştirme sorusu dürtülür; onay/izin isteyen soru ASLA dürtülmez (kullanıcı onayı yerine
+# geçilmez): onay kalıbı varsa netleştirme kalıbı da olsa dürtü yok.
+_CLARIFY = re.compile(
+    r"\?\s*$|netleştir|hangi|(?<!\w)(?:ne|nereye|nerede|nereden|which|what|where|clarify)(?!\w)",
+    re.IGNORECASE,
+)
+_CONSENT = re.compile(
+    r"emin misin|onaylıyor musun|ister misin|izin|devam edeyim mi|doğru mu|are you sure|"
+    r"confirm|should i|do you want|shall i|proceed",
+    re.IGNORECASE,
 )
 # Somut hedef: dosya uzantısı, çift/tipografik tırnaklı ad ya da klasör sözcüğü.
 _TARGET = re.compile(
@@ -363,11 +372,16 @@ _TARGET = re.compile(
 )
 
 
-def needs_nudge(light: LightState | None, text: str, answer: str, calls: int) -> bool:
+def needs_nudge(
+    light: LightState | None, text: str, answer: str, calls: int, *, external: bool = False
+) -> bool:
     """Model işi yapmak yerine soru sordu ve istek çok adımlı ya da hedefi somutsa True (bir kez).
 
     Tek eylemli, hedefsiz istekte ("şunu sil") soru serbesttir: kural 2 ile uyumlu."""
-    if light is None or light.nudged or calls or not _ASKING.search(answer):
+    # Lekeli tur ya da dış içerik taşıyan geçmişte model soruyorsa onu zorlamayız.
+    if light is None or light.nudged or calls or external:
+        return False
+    if _CONSENT.search(answer) or not _CLARIFY.search(answer):
         return False
     actions = {m.group(1).casefold() for m in _ACTIONS.finditer(text)}
     return len(actions) >= 2 or bool(_TARGET.search(text))
