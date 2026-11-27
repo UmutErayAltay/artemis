@@ -32,6 +32,12 @@ def _model(provider: str = "openrouter", name: str = "x/y", **extra: object) -> 
         (_model("openrouter", "anthropic/claude-sonnet"), False),
         (_model("anthropic", "claude-x"), False),
         (_model("claude_cli", "sonnet"), False),
+        # Yerel proxy arkasındaki güçlü bulut modeli yerel sayılmaz.
+        (_model("openai_compatible", "claude-sonnet-5-5", endpoint="yerel"), False),
+        (_model("openai_compatible", "gemini-4-hydrogen", endpoint="yerel"), False),
+        (_model("openai_compatible", "gpt-6-luna", endpoint="yerel"), False),
+        (_model("openai_compatible", "gpt-oss:20b", endpoint="yerel"), True),
+        (_model("ollama", "gemini-local"), True),
         # Açık değer otomatiği ezer: iki yönde.
         (_model("ollama", "q", light_mode=False), False),
         (_model("anthropic", "claude-x", light_mode=True), True),

@@ -46,7 +46,16 @@ def light_mode_on(model: ModelConfig | None, endpoints: Mapping[str, EndpointCon
         return False
     if model.light_mode is not None:
         return model.light_mode
-    return is_local_model(model, endpoints) or model.model.lower().endswith(":free")
+    name = model.model.lower()
+    if model.provider != "ollama" and _STRONG_CLOUD.search(name):
+        # Yerel proxy (127.0.0.1) arkasındaki bulut modeli yerel değildir; güçlü modelde
+        # kip kapalı kalır (ADR 0092).
+        return False
+    return is_local_model(model, endpoints) or name.endswith(":free")
+
+
+# Yerel proxy üzerinden kullanılan güçlü bulut model aileleri; açık `light_mode: true` yine kazanır.
+_STRONG_CLOUD = re.compile(r"(^|/)(claude|gpt-\d|gemini|o\d)(\b|-)")
 
 
 # Her kayıtlı araç tam bir gruba aittir (test kilitler: yeni araç grupsuz kalamaz).
