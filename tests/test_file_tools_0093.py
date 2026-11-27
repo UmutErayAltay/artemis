@@ -237,3 +237,17 @@ def test_light_prompt_has_path_rule() -> None:
     from artemis.brain.light_mode import LIGHT_SYSTEM_PROMPT
 
     assert "mutlak" in LIGHT_SYSTEM_PROMPT and "boş" in LIGHT_SYSTEM_PROMPT
+
+
+async def test_move_files_pattern_over_cap_moves_nothing(ctx: ToolContext) -> None:
+    root = ctx.workspace
+    (root / "src").mkdir()
+    (root / "dst").mkdir()
+    for i in range(51):
+        (root / "src" / f"{i}.txt").write_text("x", encoding="utf-8")
+    result = await run(ctx, "move_files", source_dir="src", destination_dir="dst", pattern="*.txt")
+    assert not result.success and result.status == "error" and "names" in result.message
+    assert len(list((root / "src").iterdir())) == 51 and not any((root / "dst").iterdir())
+    (root / "src" / "50.txt").unlink()
+    ok = await run(ctx, "move_files", source_dir="src", destination_dir="dst", pattern="*.txt")
+    assert ok.success and len(list((root / "dst").iterdir())) == 50

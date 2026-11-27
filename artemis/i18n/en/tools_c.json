@@ -65,5 +65,6 @@
   "{count} dosya taşındı.": "{count} files moved.",
   "{moved}/{total} dosya taşındı; kalanlar için 'files' listesine bak.": "{moved}/{total} files moved; see the 'files' list for the rest.",
   "Hedefte aynı ad var; atlandı.": "A file with the same name exists at the destination; skipped.",
-  "Taşındı.": "Moved."
+  "Taşındı.": "Moved.",
+  "Kalıp {count} dosyaya eşleşti (en çok 50); hiçbir dosya taşınmadı. Kalıbı daralt ya da names ile ad listesi ver.": "The pattern matched {count} files (50 at most); nothing was moved. Narrow the pattern or give a names list."
 }

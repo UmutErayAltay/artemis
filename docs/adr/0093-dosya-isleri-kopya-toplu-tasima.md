@@ -18,7 +18,7 @@ senaryolarındaki kayıpların çoğu modelden değil araç setinden geliyordu:
    kaynakla eşitse döner. Kopyalama veri silmez; ADR 0092 yıkıcı listesine girmez.
 2. **`move_files` aracı** (SIDE_EFFECT, `move_file` ile aynı risk): tek çağrıda bir klasördeki birden çok
    dosyayı başka bir klasöre taşır. Seçim ya açık ad listesi (en çok 50) ya da yalnız ad üzerinde çalışan basit
-   bir kalıp (`*.txt`; yol ayırıcı ve `..` içeremez, alt klasöre inmez). Her dosya `move_file` ile aynı kurallarla
+   bir kalıp (`*.txt`; yol ayırıcı ve `..` içeremez, alt klasöre inmez; kalıp en çok 50 dosyaya eşleşebilir; fazlası hiçbir şey taşımadan reddedilir). Her dosya `move_file` ile aynı kurallarla
    taşınır, üzerine yazılmaz. Onay tek çağrıdır ve kullanıcı argümanları (klasör, kalıp ya da ad listesi, hedef)
    olduğu gibi görür; kapı değişmez. Sonuç dosya başına durum listesidir; hepsi doğrulanmadıkça `success=True`
    dönülmez, kısmi sonuç dürüstçe `partial` olarak bildirilir.

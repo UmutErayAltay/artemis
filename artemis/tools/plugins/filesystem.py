@@ -88,6 +88,7 @@ PATH_HINT = (
     "list_files'ı yolsuz çağır; C:\\... gibi mutlak yol kullanma."
 )
 MAX_COPY_BYTES = 50 * 1024 * 1024
+MAX_MOVE_FILES = 50
 
 
 def failure(error: OSError | ValueError | UnicodeError) -> ToolResult:
@@ -335,6 +336,13 @@ class MoveFiles(BaseTool):
             return failure(error)
         if not names:
             return ToolResult(message=t("Eşleşen dosya yok; hiçbir dosya taşınmadı."))
+        if len(names) > MAX_MOVE_FILES:
+            return ToolResult(
+                message=t(
+                    "Kalıp {count} dosyaya eşleşti (en çok 50); hiçbir dosya taşınmadı. "
+                    "Kalıbı daralt ya da names ile ad listesi ver."
+                ).format(count=len(names))
+            )
         rel_src = _rel(args.source_dir)
         rel_dst = _rel(args.destination_dir)
         rows: list[dict[str, Any]] = []
