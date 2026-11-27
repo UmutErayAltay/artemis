@@ -127,10 +127,13 @@ _COMPILED = {name: re.compile(r"(?<!\w)(?:" + pattern + ")", re.IGNORECASE)
 # ile kayıtlı araçlara karşı kilitlenir. Taşıma/yeniden adlandırma yıkıcı sayılmaz.
 DESTRUCTIVE_TOOLS = frozenset({
     "delete_file", "memory_forget", "memory_rule_remove", "routine_delete", "app_alias_forget",
+    "code_agent_discard", "code_agent_clear_finished", "reminder_cancel", "memory_change_undo",
 })
+# Bilerek dışarıda: close_application, code_agent_cancel, research_cancel işi durdurur, veri silmez.
 _DESTRUCTIVE_INTENT = re.compile(
     r"(?<!\w)(?:sil\w*|kaldır\w*|yok et\w*|temizle\w*|temizlik|boşalt\w*|çöpe|unut\w*|"
-    r"delet\w*|remov\w*|eras\w*|wip\w*|clear\w*|trash|discard\w*|forget\w*|purg\w*)",
+    r"delet\w*|remov\w*|eras\w*|wip\w*|clear\w*|trash|discard\w*|forget\w*|purg\w*|"
+    r"iptal\w*|vazgeç\w*|geri al\w*|cancel\w*|undo|revert\w*)",
     re.IGNORECASE,
 )
 

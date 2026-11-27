@@ -411,7 +411,7 @@ async def run_scenario(
     (ADR 0092):
     yerel uç noktadaki modelde soğuk yükleme dakikalar sürebilir, tur bütçesi en az
     `LOCAL_MIN_SECONDS` olur; aksi halde zayıf model değil süre sınırı ölçülür."""
-    timing: dict[str, float] = {}  # int de olur (max_output_tokens); pydantic doğrular
+    timing: dict[str, float | int] = {}
     if max_output_tokens is not None:
         timing["max_output_tokens"] = max_output_tokens
     if provider_timeout_seconds is not None:

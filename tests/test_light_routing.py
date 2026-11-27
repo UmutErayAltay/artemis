@@ -87,6 +87,32 @@ def test_destructive_tool_offered_with_intent(text: str) -> None:
     assert names is None or "delete_file" in names  # None: tam set
 
 
+# (araç, niyetli metin, niyetsiz metin): ikisi de aynı gruba yönlenir.
+_DESTRUCTIVE_CASES = [
+    ("delete_file", "plan.txt dosyasını sil", "plan.txt dosyasını oku"),
+    ("memory_forget", "notlarımdan bunu unut", "notlarımı ara"),
+    ("memory_rule_remove", "kuralı kaldır", "kuralı göster"),
+    ("routine_delete", "rutini sil", "rutini listele"),
+    ("app_alias_forget", "uygulama takma adını sil", "uygulama aç"),
+    ("code_agent_discard", "kod taslak discard et", "kod taslak göster"),
+    ("code_agent_clear_finished", "bitmiş ajanları temizle", "ajanları listele"),
+    ("reminder_cancel", "hatırlatmayı iptal et", "hatırlatmaları göster"),
+    ("reminder_cancel", "hatırlatmayı iptal etsene", "hatırlatmaları göster"),
+    ("reminder_cancel", "hatırlatmadan vazgeç", "hatırlatmaları göster"),
+    ("reminder_cancel", "cancel the reminder", "list the reminders"),
+    ("memory_change_undo", "bundan geri al", "bundan sonra kısa yanıt ver"),
+    ("memory_change_undo", "undo the rule", "show the rule"),
+]
+
+
+@pytest.mark.parametrize(("tool", "with_intent", "without"), _DESTRUCTIVE_CASES)
+def test_each_destructive_tool_gated_by_intent(tool: str, with_intent: str, without: str) -> None:
+    names = route_tools(with_intent)
+    assert names is not None and tool in names
+    names = route_tools(without)
+    assert names is None or tool not in names
+
+
 def test_destructive_names_are_registered_tools() -> None:
     registered = {d.name for d in discover_tools().definitions()}
     assert registered >= DESTRUCTIVE_TOOLS
