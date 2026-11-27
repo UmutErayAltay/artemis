@@ -234,3 +234,40 @@ async def test_validation_hint_lists_fields_at_most_twice(tmp_path: Path) -> Non
     assert len(tools) == 3
     assert "path (string, zorunlu)" in tools[0] and "path (string, zorunlu)" in tools[1]
     assert "Beklenen alanlar" not in tools[2]  # üçüncüde bugünkü kapı hatası
+
+
+async def test_nudge_fires_once_for_multi_step_question(tmp_path: Path) -> None:
+    from artemis.brain.light_mode import NUDGE_MESSAGE
+
+    loop, provider, _ = make(tmp_path, [
+        Completion(content="Hangi klasöre taşıyayım?"),
+        Completion(content="Yine soruyorum: emin misin?"),
+    ])
+    result = await loop.run("txt dosyalarını metin klasörüne taşı, yoksa oluştur")
+    assert len(provider.requests) == 2
+    last = provider.requests[1][0][-1]
+    assert (last.role, last.content) == ("user", NUDGE_MESSAGE)
+    assert result.text == "Yine soruyorum: emin misin?"  # ikinci kez dürtülmez
+    assert [e["event"] for e in audit_events(tmp_path)].count("light_mode_nudge") == 1
+
+
+async def test_nudge_fires_for_concrete_target_with_single_action(tmp_path: Path) -> None:
+    loop, provider, _ = make(tmp_path, [Completion(content="Emin misin?"),
+                                        Completion(content="tamam")])
+    await loop.run("rapor.txt dosyasını sil")
+    assert len(provider.requests) == 2
+
+
+@pytest.mark.parametrize("text", ["şunu sil", "bunu hallet"])
+async def test_no_nudge_for_single_action_without_target(tmp_path: Path, text: str) -> None:
+    loop, provider, _ = make(tmp_path, [Completion(content="Neyi silmemi istersin?")])
+    result = await loop.run(text)
+    assert len(provider.requests) == 1
+    assert result.text == "Neyi silmemi istersin?"
+
+
+async def test_no_nudge_when_light_mode_is_off(tmp_path: Path) -> None:
+    loop, provider, _ = make(tmp_path, [Completion(content="Hangi klasör?")],
+                             model=cloud_model())
+    await loop.run("txt dosyalarını metin klasörüne taşı, yoksa oluştur")
+    assert len(provider.requests) == 1

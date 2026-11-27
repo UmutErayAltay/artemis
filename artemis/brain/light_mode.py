@@ -15,6 +15,7 @@ from uuid import uuid4
 from pydantic import ValidationError
 
 from artemis.brain.models import Message, ToolCall
+from artemis.brain.tiering import _ACTIONS  # çok adımlı istek eylem fiilleri (tek kaynak)
 from artemis.config.settings import EndpointConfig, ModelConfig, Settings
 from artemis.tools.base import BaseTool, Risk, ToolDefinition, ToolResult
 from artemis.tools.registry import ToolRegistry
@@ -346,3 +347,27 @@ def validation_hint(tool: BaseTool) -> str:
         f"{tool.name} argümanları geçersiz. Beklenen alanlar: {fields or 'yok'}. "
         "Düzeltip tekrar çağır."
     )
+
+
+NUDGE_MESSAGE = (
+    "Kullanıcı yeterli bilgi verdi; makul varsayımla aracı çağır, varsayımını sonda söyle."
+)
+_ASKING = re.compile(
+    r"\?\s*$|netleştir|hangi|emin misin|onaylıyor musun|doğru mu|ister misin", re.IGNORECASE
+)
+# Somut hedef: dosya uzantısı, çift/tipografik tırnaklı ad ya da klasör sözcüğü.
+_TARGET = re.compile(
+    rf"{_EXT}|[\"“”`][^\"“”`]{{2,}}[\"“”`]|(?<!\w)(?:klasör|dizin|masaüstü|belgeler|"
+    r"indirilenler|folder|director|desktop|documents)",
+    re.IGNORECASE,
+)
+
+
+def needs_nudge(light: LightState | None, text: str, answer: str, calls: int) -> bool:
+    """Model işi yapmak yerine soru sordu ve istek çok adımlı ya da hedefi somutsa True (bir kez).
+
+    Tek eylemli, hedefsiz istekte ("şunu sil") soru serbesttir: kural 2 ile uyumlu."""
+    if light is None or light.nudged or calls or not _ASKING.search(answer):
+        return False
+    actions = {m.group(1).casefold() for m in _ACTIONS.finditer(text)}
+    return len(actions) >= 2 or bool(_TARGET.search(text))

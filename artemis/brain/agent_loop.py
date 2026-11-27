@@ -25,11 +25,13 @@ from artemis.brain.emotion import emotion_tags_active
 from artemis.brain.errors import BudgetExceeded, ProviderError
 from artemis.brain.light_mode import (
     MAX_REPAIRS,
+    NUDGE_MESSAGE,
     LightState,
     intercept,
     last_turns,
     light_head,
     narrowed_definitions,
+    needs_nudge,
     repair_tool_call,
     start_light,
     validation_hint,
@@ -966,6 +968,17 @@ class AgentLoop:
                         ),
                     )
                 )
+                return None
+            if turn.light is not None and needs_nudge(
+                turn.light, turn.text, completion.content, turn.calls
+            ):
+                # ADR 0092: zayıf model işi yapmak yerine soru sordu; bir kez devam etmesi istenir.
+                turn.light.nudged = True
+                audit.emit("light_mode_nudge", turn_id=state.turn_id)
+                turn.messages.append(
+                    Message(role="assistant", content=completion.content, private=turn.private_seen)
+                )
+                turn.messages.append(Message(role="user", content=NUDGE_MESSAGE))
                 return None
             answer = completion.content or "Model boş yanıt döndürdü."
             return "completed", honest_memory_claim(answer, turn.memory_saved, turn.text)
