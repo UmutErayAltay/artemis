@@ -65,7 +65,7 @@ class ToolResult(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     success: bool = False
-    status: Literal["ok", "error", "denied", "sent"] = "error"
+    status: Literal["ok", "error", "denied", "sent", "partial"] = "error"
     message: str
     data: dict[str, Any] = Field(default_factory=dict)
     external: bool = False

@@ -53,7 +53,8 @@ CATALOG_URL = "https://openrouter.ai/api/v1/models"
 # Canlı ölçüm gerçek masaüstü, tarayıcı, pano veya uygulamaya erişemez.
 FIXTURE_TOOLS = (
     "list_files", "read_file", "create_file", "move_file", "rename_file",
-    "delete_file", "create_directory", "web_search", "system_info", "current_time",
+    "delete_file", "create_directory", "copy_file", "move_files", "web_search", "system_info",
+    "current_time",
     "vault_search", "vault_read_note", "vault_append", "notify_telegram",
     # Uygulama araçları yalnız sahte masaüstü servisine ulaşır (ADR 0044).
     "open_application", "close_application", "app_alias_remember", "app_alias_forget",

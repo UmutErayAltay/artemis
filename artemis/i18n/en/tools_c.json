@@ -54,5 +54,16 @@
   "Telegram mesajı gönderilemedi (metin).": "Telegram message could not be sent (text).",
   "Telegram mesajı gönderildi.": "Telegram message sent.",
   "Ekran okuma kapalı: config içinde perception.screen_enabled: true gerekir.": "Screen reading disabled: perception.screen_enabled: true is required in config.",
-  "Ekran metni okundu.": "Screen text read."
+  "Ekran metni okundu.": "Screen text read.",
+  "Yol çalışma köküne göre göreli olmalı (örn. 'belgeler/not.txt'); kökü listelemek için list_files'ı yolsuz çağır; C:\\... gibi mutlak yol kullanma.": "The path must be relative to the workspace root (e.g. 'docs/note.txt'); call list_files without a path to list the root; never use absolute paths like C:\\...",
+  "Hedef klasör yok; önce create_directory ile oluştur, sonra tekrar kopyala.": "The destination folder does not exist; create it with create_directory first, then copy again.",
+  "Hedef klasör yok; önce create_directory ile oluştur, sonra tekrar dene.": "The destination folder does not exist; create it with create_directory first, then try again.",
+  "Hedef zaten var; üzerine yazılmadı.": "The destination already exists; not overwritten.",
+  "Dosya kopyalamak için çok büyük (en çok 50 MiB).": "File is too large to copy (50 MiB at most).",
+  "Dosya kopyalandı.": "File copied.",
+  "Eşleşen dosya yok; hiçbir dosya taşınmadı.": "No matching files; nothing was moved.",
+  "{count} dosya taşındı.": "{count} files moved.",
+  "{moved}/{total} dosya taşındı; kalanlar için 'files' listesine bak.": "{moved}/{total} files moved; see the 'files' list for the rest.",
+  "Hedefte aynı ad var; atlandı.": "A file with the same name exists at the destination; skipped.",
+  "Taşındı.": "Moved."
 }

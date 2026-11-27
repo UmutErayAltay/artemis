@@ -214,5 +214,13 @@
   "field::Başlangıç": "Start",
   "field::Bitiş": "End",
   "field::Durum": "State",
-  "field::Taslak": "Spec"
+  "field::Taslak": "Spec",
+  "Dosyayı kopyala": "Copy file",
+  "Çalışma alanında bir dosyayı başka yere kopyalar.": "Copies a file to another location in the workspace.",
+  "Dosyaları toplu taşı": "Move files in bulk",
+  "Bir klasördeki birden çok dosyayı başka klasöre taşır.": "Moves several files from one folder to another.",
+  "Kaynak klasör": "Source folder",
+  "Hedef klasör": "Destination folder",
+  "Dosya adları": "File names",
+  "Ad kalıbı": "Name pattern"
 }

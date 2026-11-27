@@ -62,7 +62,7 @@ _STRONG_CLOUD = re.compile(r"(^|/)(claude|gpt-\d|gemini|o\d)(\b|-)")
 TOOL_GROUPS: dict[str, frozenset[str]] = {
     "files": frozenset({
         "file_search", "list_files", "read_file", "create_file", "move_file", "rename_file",
-        "delete_file", "create_directory", "list_undo_records",
+        "delete_file", "create_directory", "list_undo_records", "copy_file", "move_files",
     }),
     "web": frozenset({"web_search", "open_url"}),
     "apps_windows": frozenset({
@@ -277,7 +277,8 @@ başarısızsa bunu söyle ve aynı çağrıyı tekrarlama.
 5. Yalnız istenen işi yap. "Açma", "kapatma" gibi olumsuz emirde işlem yapma.
 6. Kapatma, silme, yeniden başlatma gibi açık isteklerde metinle onay sorma; aracı çağır, \
 onay penceresini sistem açar.
-7. Yol olarak yalnız çalışma klasörüne göre göreli yollar kullan.
+7. Yollar çalışma köküne (masaüstü) göredir; kökü listelemek için yol boş bırak; C:\\... gibi \
+mutlak yol kullanma.
 Örnek: "belgelerdeki txt dosyalarını metin klasörüne taşı" -> metin klasörü yoksa \
 create_directory, sonra her dosya için move_file; sonda "metin klasörünü oluşturdum, 3 dosyayı \
 taşıdım" de."""
